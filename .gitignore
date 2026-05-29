@@ -1,0 +1,106 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Virtual envs ----
+.venv/
+venv/
+env/
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- Hearth runtime artifacts ----
+# Never commit a user's voice models, screenshots, logs, or memory.
+# These live in ~/Jarvis/ by default, but if anyone points JARVIS_WORKSPACE
+# at the project dir we still don't want this in git.
+voices/
+screenshots/
+logs/
+*.jsonl
+*.onnx
+*.bin
+
+# ---- Reference / scavenge repos (Ishant keeps these locally for inspiration) ----
+# NOT ours to redistribute — these must NEVER be committed/published.
+clawdbot-main/
+openhuman-main/
+hermes-agent-main/
+graphify-7/
+superpowers-main/
+oh-my-openagent-dev/
+openclaw-main/
+claude-code-main/
+skill-creator/
+awesome-openclaw-skills-main/
+# Catch-all for any other downloaded reference repo sitting beside Hearth.
+*-main/
+*-dev/
+
+# ---- Bundled Windows Terminal binaries (Microsoft's, not ours to redistribute) ----
+Windows Terminal/
+Terminal/
+
+# ---- Local user state ----
+.env
+.env.local
+*.local
+secrets.*
+# Personal cloud-launcher scripts contain a raw API key — never commit them.
+gemini.ps1
+grok.ps1
+*-secret.ps1
+
+# ---- Build / dist ----
+build/
+dist/
+*.egg
+
+# ---- Misc ----
+*.log
+.coverage
+htmlcov/
+.tox/
+
+# ---- Historical / superseded docs (kept locally, not shipped) ----
+# QUICKSTART duplicates README's install. Battleplans are Gemini's old wishlist
+# that's mostly already shipped or intentionally diverged from.
+QUICKSTART.md
+claude_battleplan_v1.md
+claude_battleplan_v2.md
+
+# ---- Private working notes (Ishant + Claude scratchpad) ----
+IDEAS.md
+dexter.txt
+run.txt
+run2.txt
+run3.txt
+run4.txt
+
+# Benchmark reports reference local machine paths — keep private
+bench/reports/
+# Benchmark scripts reference local model paths — internal tooling, keep private
+bench/
+
+# ---- Internal working / strategy docs (NOT part of the public product) ----
+# Personal context, launch strategy, influencer lists, scavenge notes, internal
+# QA prompts. These contain personal data and/or marketing strategy that should
+# never be public. The public docs are README / CONTRIBUTING / SECURITY / the
+# product docs under docs/ (ARCHITECTURE, USER_GUIDE, RUNBOOK, WAKE_WORD, SUPPORT).
+CLAUDE.md
+PUBLISH.md
+LAUNCH-DAY.md
+docs/MARKETING.md
+docs/LAUNCH_POSTS.md
+docs/SCAVENGE.md
+docs/DEMO_SCRIPT.md
+docs/TEST_PLAYBOOK*.md

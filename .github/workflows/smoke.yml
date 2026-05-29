@@ -1,0 +1,57 @@
+name: smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  import-test:
+    name: package imports + tool count
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install minimum runtime deps
+        # Just enough that `import hearth` succeeds. Voice/STT deps are
+        # optional and lazy-imported.
+        run: |
+          python -m pip install --upgrade pip
+          pip install openai psutil
+
+      - name: Import hearth package
+        run: |
+          python -c "import hearth; print('tools:', len(hearth.TOOL_DEFINITIONS)); print('prompt chars:', len(hearth.system_prompt()))"
+
+      - name: Smoke-test the dev_tools REPL listing
+        run: |
+          python -c "from hearth.dev_tools import cmd_list; cmd_list()"
+
+      - name: Verify all tool dispatchers exist
+        run: |
+          python -c "from hearth.tools import TOOL_DEFINITIONS, execute_tool; from hearth import tools as t; missing = [td['name'] for td in TOOL_DEFINITIONS if not hasattr(t, '_' + td['name'])]; assert not missing, f'tools missing _ prefix dispatcher: {missing}'; print('ok')"
+
+  persona-stable:
+    name: persona prompt renders cleanly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install openai psutil
+      - name: Render persona
+        run: |
+          python -c "from hearth.persona import system_prompt; p = system_prompt(); assert 4000 < len(p) < 30000, f'persona suspicious size: {len(p)}'; print('persona ok,', len(p), 'chars')"
