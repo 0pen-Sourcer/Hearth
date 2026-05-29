@@ -1,0 +1,4417 @@
+"""J.A.R.V.I.S. tool layer.
+
+Two trust zones:
+  - Reads can go anywhere on disk (Jarvis must KNOW your machine).
+  - Writes / deletes / moves are sandboxed to WORKSPACE (~/Jarvis by default).
+
+Override sandbox: set env JARVIS_WORKSPACE to any folder.
+Tighten reads too: set env JARVIS_LOCKDOWN=1 to confine reads to the workspace.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import json
+import glob as globmod
+import shlex
+import shutil
+import socket
+import fnmatch
+import platform
+import subprocess
+import urllib.request
+import urllib.parse
+from datetime import datetime
+from html.parser import HTMLParser
+from typing import Any, Dict, List, Optional, Tuple
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+WORKSPACE = os.path.abspath(
+    os.environ.get("JARVIS_WORKSPACE")
+    or os.path.join(os.path.expanduser("~"), "Jarvis")
+)
+SAFE_READ_ONLY = os.environ.get("JARVIS_LOCKDOWN", "").strip() in ("1", "true", "yes")
+
+# Extra writeable roots — paths the user has explicitly opted in to,
+# either via the JARVIS_EXTRA_WORKSPACES env var (semicolon- or
+# comma-separated) or via the /allow runtime command in the CLI.
+# Writes/edits/deletes/moves succeed when the resolved path is under any
+# of these in addition to the main WORKSPACE.
+EXTRA_WORKSPACES: List[str] = []
+
+
+def _parse_extra_env() -> List[str]:
+    raw = os.environ.get("JARVIS_EXTRA_WORKSPACES", "").strip()
+    if not raw:
+        return []
+    parts = [p.strip().strip('"').strip("'") for p in raw.replace(";", ",").split(",")]
+    return [os.path.abspath(os.path.expanduser(p)) for p in parts if p]
+
+
+EXTRA_WORKSPACES.extend(_parse_extra_env())
+
+
+def add_extra_workspace(path: str) -> str:
+    """Allow writes under an additional path. Returns confirmation."""
+    p = os.path.abspath(os.path.expanduser(path or "").strip())
+    if not p:
+        return "Error: empty path"
+    if not os.path.isdir(p):
+        return f"Error: not a directory: {p}"
+    if p not in EXTRA_WORKSPACES:
+        EXTRA_WORKSPACES.append(p)
+    return f"writes now allowed under: {p}"
+
+
+def remove_extra_workspace(path: str) -> str:
+    p = os.path.abspath(os.path.expanduser(path or "").strip())
+    if p in EXTRA_WORKSPACES:
+        EXTRA_WORKSPACES.remove(p)
+        return f"writes no longer allowed under: {p}"
+    return f"not in the allow-list: {p}"
+
+
+def list_extra_workspaces() -> List[str]:
+    return list(EXTRA_WORKSPACES)
+
+SHOTS_DIR = os.path.join(WORKSPACE, "screenshots")
+LOGS_DIR = os.path.join(WORKSPACE, "logs")
+MEMORY_DIR = os.path.join(WORKSPACE, "memory")
+
+# Legacy: keep NOTES_DIR around for users who already have ~/Jarvis/notes/
+NOTES_DIR = os.path.join(WORKSPACE, "notes")
+
+for d in (WORKSPACE, SHOTS_DIR, LOGS_DIR, MEMORY_DIR):
+    os.makedirs(d, exist_ok=True)
+
+# Per-tool result caps. Reads get more, write confirmations get less.
+RESULT_CAPS: Dict[str, int] = {
+    "read_file": 16000,
+    "list_archive": 8000,
+    "extract_archive_file": 1500,
+    "summarize_file": 6000,
+    "list_directory": 6000,
+    "grep_search": 8000,
+    "glob_files": 4000,
+    "web_search": 5000,
+    "web_fetch": 8000,
+    "run_command": 6000,
+    "list_processes": 5000,
+    "list_installed_apps": 6000,
+    "system_info": 3000,
+    "memory_recall": 8000,
+    "memory_list": 6000,
+    "disk_usage": 6000,
+    "locate_path": 4000,
+}
+DEFAULT_CAP = 4000
+
+EXCLUDE_DIRS = {".git", ".godot", "__pycache__", ".vs", "node_modules",
+                ".venv", "venv", "dist", "build", ".idea", ".import",
+                # Windows system-managed roots that show up at drive roots.
+                # No user content here; walking them wastes find_file budget.
+                "$RECYCLE.BIN", "System Volume Information", "$Recycle.Bin",
+                "Config.Msi", "Recovery", "$WinREAgent"}
+
+HOME = os.path.expanduser("~")
+
+# Suppress the brief cmd console flash on every subprocess we spawn under
+# the GUI/tray context. Without it, every nvidia-smi / tasklist / ripgrep
+# / lms call makes a black box flash on screen — looks like a virus.
+_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+
+# Common places users actually keep stuff — find_file walks these in order
+# before giving up. Order matters: workspace + Desktop tie-break first.
+COMMON_USER_DIRS = ["Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music"]
+COMMON_DEV_DIRS = ["Code", "Projects", "source", "repos", "dev", "src"]
+
+# kind hint → file extension whitelist (used by find_file)
+FIND_KIND_EXTENSIONS: Dict[str, set] = {
+    "image":       {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico", ".svg"},
+    "video":       {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv"},
+    "audio":       {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".opus"},
+    "doc":         {".pdf", ".docx", ".doc", ".txt", ".md", ".rtf", ".odt"},
+    "code":        {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java",
+                    ".kt", ".swift", ".c", ".cpp", ".h", ".hpp", ".rb", ".php",
+                    ".cs", ".sh", ".ps1", ".bat", ".html", ".css", ".scss"},
+    "archive":     {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"},
+    "spreadsheet": {".xlsx", ".xls", ".csv", ".ods"},
+}
+
+# Search-side budgets so the model can't accidentally walk a million files.
+MAX_FILES_TO_SCAN = 50000
+_DRIVE_ROOT_RE = re.compile(r"^[A-Za-z]:[\\/]?$|^/$")
+
+# Directory-name keywords by kind — used by find_file to prioritize walking
+# into folders likely to contain the requested media. So "find a video" walks
+# into `movies/`, `Videos/`, `shows/` BEFORE a `photos/` folder (which would
+# otherwise win alphabetically and eat the scan budget on image files that can
+# never match kind=video anyway).
+_KIND_DIR_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "video":       ("movie", "video", "film", "show", "tv", "media", "season", "episode"),
+    "audio":       ("music", "audio", "song", "podcast", "sound", "album"),
+    "image":       ("pic", "photo", "image", "art", "screenshot", "wallpaper", "icon"),
+    "code":        ("code", "src", "source", "project", "repo", "dev", "git", "scripts"),
+    "doc":         ("doc", "paper", "pdf", "note", "report", "book", "manual", "guide"),
+    "archive":     ("archive", "backup", "zip"),
+    "spreadsheet": ("data", "sheet", "spreadsheet", "report", "stat"),
+}
+
+
+def _enumerate_non_system_drives() -> List[str]:
+    """Return all fixed-drive roots that aren't the system drive. On Windows
+    we walk D:..Z: and check existence. On POSIX, there are no extra mounts
+    by default — caller falls back to HOME scanning only.
+
+    Used so find_file actually sees things like `D:\\Movies\\<film>.mkv` and
+    `E:\\Games` — most users keep media + games on non-system drives, and a
+    HOME-only walk misses every single one."""
+    if os.name != 'nt':
+        return []
+    roots: List[str] = []
+    # Skip C: (system drive — already covered via HOME)
+    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+        root = f"{letter}:\\"
+        try:
+            if os.path.isdir(root):
+                roots.append(root)
+        except OSError:
+            continue
+    return roots
+
+
+def _trunc(s: str, cap: int) -> str:
+    if len(s) <= cap:
+        return s
+    return s[:cap] + f"\n…[truncated {len(s) - cap} chars]"
+
+
+# ============================================================
+# PATH SAFETY
+# ============================================================
+
+def _resolve_read(p: str) -> str:
+    """Return absolute path for a read-style op."""
+    p = os.path.expanduser(p)
+    if not os.path.isabs(p):
+        p = os.path.join(WORKSPACE, p)
+    p = os.path.abspath(p)
+    if SAFE_READ_ONLY and not p.startswith(WORKSPACE):
+        raise PermissionError(f"Read locked to workspace: {WORKSPACE}")
+    return p
+
+
+def _resolve_write(p: str) -> str:
+    """Return absolute path for a write-style op. Must stay inside the main
+    WORKSPACE or one of the user-allowed EXTRA_WORKSPACES."""
+    p = os.path.expanduser(p)
+    if not os.path.isabs(p):
+        p = os.path.join(WORKSPACE, p)
+    p = os.path.abspath(p)
+
+    def _inside(root: str) -> bool:
+        return p == root or p.startswith(root + os.sep)
+
+    if _inside(WORKSPACE):
+        return p
+    for extra in EXTRA_WORKSPACES:
+        if _inside(extra):
+            return p
+    extras = "\n  ".join(EXTRA_WORKSPACES) if EXTRA_WORKSPACES else "(none)"
+    raise PermissionError(
+        f"Write blocked — '{p}' escapes workspace ({WORKSPACE}).\n"
+        f"Extra allowed paths:\n  {extras}\n"
+        f"To allow this path, run /allow <path> in the CLI or set "
+        f"JARVIS_EXTRA_WORKSPACES."
+    )
+
+
+# ============================================================
+# TOOL DEFINITIONS (provider-agnostic JSON schema)
+# ============================================================
+
+TOOL_DEFINITIONS: List[Dict[str, Any]] = [
+    # ---- FILES ----
+    {
+        "name": "read_file",
+        "description": (
+            "Smart file reader. Auto-detects format and extracts text from "
+            "PDF (pypdf), DOCX (python-docx), XLSX/XLSM (openpyxl), PPTX "
+            "(python-pptx), EPUB, IPYNB, CSV/TSV, JSON/JSONL, HTML/XML, RTF, "
+            "and single-stream .gz/.bz2/.xz. For plain text/code/logs, "
+            "returns line-numbered output. For archives (.zip/.tar/...) "
+            "returns a hint to use list_archive. For images, hints to use "
+            "view_image. Path can be absolute (anywhere readable) or "
+            "relative to workspace. start_line/end_line slice text files; "
+            "for PDFs they become start_page/end_page; for XLSX/CSV they "
+            "cap rows-per-sheet / row count."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path. Absolute or relative to workspace."},
+                "start_line": {"type": "integer", "description": "1-based start. Text: line. PDF: page. CSV: row. Optional."},
+                "end_line": {"type": "integer", "description": "1-based inclusive end (same meaning per type). Optional."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": (
+            "Create a NEW file inside the workspace. For MODIFYING an existing "
+            "file, ALWAYS use edit_file instead — this tool will REFUSE to "
+            "overwrite an existing file with >30 lines (forces use of "
+            "edit_file). Set overwrite=true only when the user explicitly "
+            "asked for a full rewrite."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+                "overwrite": {"type": "boolean", "description": "Set true to allow clobbering an existing >30-line file. Default false (use edit_file instead)."},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "edit_file",
+        "description": (
+            "Targeted string-replace edits — never rewrites the whole file. "
+            "Each edit replaces `old_text` with `new_text`. old_text must be "
+            "UNIQUE in the file (include surrounding context to make it so), "
+            "OR set `replace_all: true` on the edit for variable/symbol renames. "
+            "Falls back to whitespace-tolerant matching if exact fails. "
+            "ALWAYS call read_file first to see the exact text including "
+            "indentation. Multiple edits are applied in order."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "edits": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_text": {"type": "string", "description": "Exact text to find — must be unique unless replace_all is true."},
+                            "new_text": {"type": "string", "description": "What to replace it with."},
+                            "replace_all": {"type": "boolean", "description": "If true, replace every occurrence. Defaults to false."},
+                        },
+                        "required": ["old_text", "new_text"],
+                    },
+                },
+                "replace_all": {"type": "boolean", "description": "Default replace_all for every edit in this call. Per-edit setting wins."},
+            },
+            "required": ["path", "edits"],
+        },
+    },
+    {
+        "name": "list_directory",
+        "description": "List a directory. Set recursive=true and max_depth to walk subtrees. Read-only access anywhere on disk.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Directory path. Default = workspace."},
+                "recursive": {"type": "boolean"},
+                "max_depth": {"type": "integer", "description": "Default 2 when recursive."},
+            },
+        },
+    },
+    {
+        "name": "create_directory",
+        "description": "Create a directory inside the workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "delete_path",
+        "description": "Delete a file or directory inside the workspace. Refuses paths outside workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "move_path",
+        "description": "Move or rename inside the workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string"},
+                "destination": {"type": "string"},
+            },
+            "required": ["source", "destination"],
+        },
+    },
+    {
+        "name": "list_archive",
+        "description": (
+            "List contents of a .zip/.jar/.whl/.apk/.tar/.tar.gz/.tar.bz2/.tar.xz "
+            "archive WITHOUT extracting it. Returns path + size per entry. "
+            "Use this before extract_archive_file or before deciding whether to "
+            "ask the user to unpack. For .rar/.7z, hints to use 7-Zip via "
+            "run_command (stdlib can't read them). Read-only — works anywhere on disk."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to the archive."},
+                "limit": {"type": "integer", "description": "Max entries to return. Default 200."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "search_chats",
+        "description": (
+            "Search across ALL past chat conversations (full-text via SQLite "
+            "FTS5). Use this whenever the user says 'what did we talk about', "
+            "'remember when we discussed X', 'find that thing from last week', "
+            "or asks something that requires recall beyond the current chat. "
+            "Returns top matches with snippets — read them, then answer the "
+            "user's question without quoting the convo_ids."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Keywords or phrase."},
+                "limit": {"type": "integer", "description": "Max matches. Default 8."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "set_reminder",
+        "description": (
+            "Schedule a desktop notification at a future time. Accepts natural "
+            "time strings: 'in 25 minutes', 'tomorrow at 7am', '2026-05-27 09:00', "
+            "'9pm', 'next monday at 10am', 'in 2 hours'. Saved to "
+            "~/Jarvis/reminders.json; a background watcher fires the notification "
+            "when due. Use this whenever the user says 'remind me to X at Y' or "
+            "'in N minutes remind me to Z'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "when": {"type": "string", "description": "When to fire. Natural-language OK."},
+                "what": {"type": "string", "description": "The message to show the user."},
+            },
+            "required": ["when", "what"],
+        },
+    },
+    {
+        "name": "list_reminders",
+        "description": "List all upcoming (un-fired) reminders. Set include_fired=true to see history.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "include_fired": {"type": "boolean"},
+            },
+        },
+    },
+    {
+        "name": "cancel_reminder",
+        "description": "Cancel a scheduled reminder by id. Use list_reminders to get the id.",
+        "parameters": {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "summarize_file",
+        "description": (
+            "Read a file (any format read_file supports — PDF, DOCX, XLSX, "
+            "PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, plain text) and return "
+            "its content WRAPPED in a 'summarize this' directive, capped to "
+            "fit even small contexts. Use this when the user says 'summarize "
+            "X', 'tldr that file', 'what's the gist of'. After this returns, "
+            "produce the summary IN YOUR REPLY (3-5 bullets, ~50 words each). "
+            "Don't call read_file separately — summarize_file already read it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path. Absolute or relative to workspace."},
+                "max_chars": {"type": "integer", "description": "Cap content size after extraction. Default 6000."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "extract_archive_file",
+        "description": (
+            "Pull ONE file out of an archive into the workspace, without "
+            "unpacking the whole thing. archive_path can be anywhere on "
+            "disk; inner_path is the path inside the archive (use "
+            "list_archive first to see options). The extracted file lands "
+            "in the workspace under output_name (default = basename of "
+            "inner_path). Refuses '..' in inner_path. Supports zip/jar/whl/"
+            "apk + tar family."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "archive_path": {"type": "string", "description": "Path to the archive."},
+                "inner_path": {"type": "string", "description": "Path of the file INSIDE the archive (e.g. 'docs/readme.txt'). If unique, a suffix match like 'readme.txt' also works."},
+                "output_name": {"type": "string", "description": "Optional workspace-relative destination name. Default = basename(inner_path)."},
+            },
+            "required": ["archive_path", "inner_path"],
+        },
+    },
+
+    # ---- SEARCH ----
+    {
+        "name": "grep_search",
+        "description": "Regex search across files. Uses ripgrep if available, else Python. Returns matching lines with file:line.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Regex (Python flavor)."},
+                "path": {"type": "string", "description": "Directory to search. Default = workspace."},
+                "glob": {"type": "string", "description": "File glob filter, e.g. '*.py'."},
+                "case_insensitive": {"type": "boolean"},
+                "max_matches": {"type": "integer", "description": "Cap matches. Default 100."},
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "glob_files",
+        "description": "Find files by glob pattern. Returns paths sorted by mtime (newest first). For multiple patterns, separate with '|', ';' or ',' — e.g. '*.png|*.jpg'. A JSON array also works. Drive-root paths (C:\\, D:\\) are refused — use `find_file` instead.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "e.g. '**/*.py' or '~/Documents/**/*.pdf' or '*.png|*.jpg'."},
+                "path": {"type": "string", "description": "Base dir. Default = workspace. Cannot be a drive root."},
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "find_file",
+        "description": (
+            "Find files (or folders) by name across common locations — workspace, Desktop, "
+            "Documents, Downloads, Pictures, Videos, Music, ~/Code, ~/Projects, "
+            "the current working dir, AND every non-system drive (D:, E:, F:, G:...). "
+            "Use this whenever the user says 'find X' / 'where's Y' / 'do I have any Z' "
+            "instead of asking them for a path. Pass a name substring or a glob "
+            "(e.g. 'budget', '*.pdf', 'vacation_*'). For media/binary results, just "
+            "report the paths (don't read_file them). For text files, read top results. "
+            "If user says 'search C drive' / 'check G:\\\\SteamLibrary', pass that as "
+            "`path` to scope the scan AND get a 4x bigger budget."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Filename substring or glob pattern."},
+                "kind": {"type": "string", "description": "Optional category narrowing by extension: image, video, audio, doc, code, archive, spreadsheet, or 'any' (default)."},
+                "limit": {"type": "integer", "description": "Max results. Default 10."},
+                "deep": {"type": "boolean", "description": "Recurse deeper (max depth 4 vs 2 without path; 8 vs 5 with explicit path). Default false."},
+                "path": {"type": "string", "description": "Optional explicit search root, e.g. 'G:\\\\SteamLibrary' or 'C:\\\\Program Files'. Overrides the common-locations enumeration and grants a 4x larger scan budget. Use when the user has named a drive or folder."},
+            },
+            "required": ["name"],
+        },
+    },
+
+    # ---- WEB ----
+    {
+        "name": "web_search",
+        "description": "Free DuckDuckGo HTML search. Returns top result titles/snippets/URLs. INVISIBLE to the user — this is research for YOU, not something they can see. To OPEN a page for the user, use open_url / open_in_browser / browse.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "description": "Default 6."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "web_fetch",
+        "description": (
+            "Fetch a URL and return its readable text (HTML stripped) to YOU. "
+            "INVISIBLE to the user — they do NOT see a browser, just whatever you "
+            "tell them. Use this to READ a page yourself. If the user wants to "
+            "OPEN / WATCH / PLAY something (a video, a site), do NOT web_fetch it — "
+            "use open_url / open_in_browser (their own browser) or browse instead. "
+            "Never say 'I opened it' after a web_fetch — you didn't."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"],
+        },
+    },
+
+    # ---- SHELL ----
+    {
+        "name": "run_command",
+        "description": (
+            "Execute a shell command. On Windows defaults to PowerShell — both "
+            "classic commands (dir, where, tasklist, ipconfig) AND PowerShell "
+            "cmdlets (Get-ChildItem, Get-Process, Sort-Object) work. Default "
+            "120s timeout, max 300s. Use timeout=180+ for pip installs. "
+            "Set detached=true for things that DON'T exit on their own — "
+            "daemons, dev servers, UI launchers, game launchers, Forge's "
+            "run_neo.bat. Without detached they will hang the call until "
+            "timeout fires."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "cwd": {"type": "string", "description": "Working dir. Default = workspace."},
+                "timeout": {"type": "integer", "description": "Seconds. Default 120, max 300. Ignored when detached=true."},
+                "shell": {"type": "string", "description": "Optional. 'cmd' to force cmd.exe on Windows. Default = powershell."},
+                "detached": {"type": "boolean", "description": "If true, spawn in a new console and return immediately with the PID. Use for daemons / UI launchers / dev servers that don't self-terminate."},
+            },
+            "required": ["command"],
+        },
+    },
+
+    # ---- KNOW MY PC ----
+    {
+        "name": "system_info",
+        "description": "OS, CPU, RAM, disk, hostname, user, uptime — a snapshot of the machine.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_processes",
+        "description": "List running processes (top by memory). Optional name_filter.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name_filter": {"type": "string"},
+                "limit": {"type": "integer", "description": "Default 20."},
+            },
+        },
+    },
+    {
+        "name": "network_info",
+        "description": "Local IP, hostname, network adapters. No external probes.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_battery",
+        "description": "Battery percentage and AC status (if supported).",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "disk_usage",
+        "description": "Find the biggest folders and files under a path. Native Python — does NOT shell out to PowerShell, so no syntax issues. Use this instead of writing Get-ChildItem pipelines for 'biggest files / folders' questions. Returns top N entries sorted by size, with totals.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Drive or directory to scan, e.g. 'G:\\\\' or 'C:/Users/me/Downloads'."},
+                "top_n": {"type": "integer", "description": "How many top entries to return for each section. Default 15."},
+                "kind": {"type": "string", "enum": ["both", "folders", "files"], "description": "What to list. Default 'both'."},
+                "max_depth": {"type": "integer", "description": "How deep to walk for folder totals. Default 1 (only direct subfolders of path). Use 0 for whole-drive scan with full recursion (slow on big drives)."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "locate_path",
+        "description": "Smart locator: find a folder or app by name without globbing the whole disk. Checks top-level dirs of every drive, common parent dirs (Documents, Downloads, Desktop, Program Files, LocalAppData), Start Menu shortcuts, and the Windows installed-apps registry. Returns ranked matches. USE THIS instead of glob_files('**/*X*') for 'where is X on my PC' questions — it's fast and never crashes.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Substring of the folder / app / game name (case-insensitive). E.g. 'forge webui', 'battlefield', 'spotify'."},
+                "limit": {"type": "integer", "description": "Max results. Default 15."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "list_installed_apps",
+        "description": "Installed applications (Windows registry uninstall keys). Optional name_filter (substring, case-insensitive).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name_filter": {"type": "string"},
+                "limit": {"type": "integer", "description": "Default 50."},
+            },
+        },
+    },
+
+    # ---- APP CONTROL ----
+    {
+        "name": "open_app",
+        "description": "Launch / open with default association. Accepts: app names ('notepad', 'spotify', 'chrome'), full file paths (e.g. 'G:\\\\movie.mkv' opens in default player, '.rar' in archive tool), folder paths (opens in Explorer), or URLs. Resolution order: existing path → URL → PATH lookup → UWP URI → Start Menu shortcut. Use this whenever the user says 'open this', 'launch X', or references something they want to interact with.",
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "open_url",
+        "description": "Open a URL in the user's DEFAULT browser (their login, fullscreen). The user sees it, but YOU lose control of it afterward — you can't change the page, search again, or click. Use for a one-off handoff, AND when the user wants SEVERAL links opened as TABS to browse themselves — call open_url once per link (their browser handles multiple tabs; the browse tool can't — it's a single controlled tab). If you'll need to keep driving one page (change the video, navigate), use browse instead. Never web_fetch a thing you're meant to OPEN — fetch is invisible.",
+        "parameters": {
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "validate_url",
+        "description": "Probe a URL with a HEAD/GET request — confirms it's reachable and returns status code, content-type, redirect target, and response time. Use this BEFORE open_in_browser when you want to verify a URL from a search result actually works.",
+        "parameters": {
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "open_in_browser",
+        "description": "Open a URL in a SPECIFIC browser (and optional profile) — the user SEES it in their own browser, and it stays open. Like open_url but for a named browser. Use for 'open/watch/play X in Brave/Chrome'. Browsers detected from PATH + registry; if the user has a preferred browser in memory, use it, else ask once.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "browser": {
+                    "type": "string",
+                    "description": "Browser name: 'chrome', 'brave', 'edge', 'firefox', 'opera', 'vivaldi'. Omit to use the system default.",
+                },
+                "profile": {
+                    "type": "string",
+                    "description": "Optional profile directory (Chrome/Brave/Edge: e.g. 'Default', 'Profile 1') or profile name (Firefox: e.g. 'work').",
+                },
+            },
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "list_browsers",
+        "description": "List installed browsers detected on this machine. Use when the user asks 'which browsers do I have'.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "screenshot",
+        "description": "Capture the screen, save to workspace/screenshots/, return the path.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "view_image",
+        "description": "Load an image file from disk so you can SEE it. Use this when the user gives you a path to an image (e.g. 'see this image C:\\\\path.png') or asks about a screenshot you just took. Returns the image content for vision processing. Works with .png, .jpg, .jpeg, .gif, .webp, .bmp.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute path to an image file."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "clipboard_read",
+        "description": "Read current clipboard text.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "clipboard_write",
+        "description": "Write text to the clipboard.",
+        "parameters": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+    },
+
+    # ---- LONG-TERM MEMORY ----
+    # Per-fact files + always-loaded index. The MEMORY.md index is injected
+    # into every system prompt, so you ALREADY KNOW what facts exist — call
+    # memory_recall to load any body that looks relevant to the current turn.
+    {
+        "name": "memory_save",
+        "description": "Save a long-term memory. USE THIS whenever you learn a fact about the user, their setup, their preferences, or the projects they're working on that's worth remembering across conversations. The index updates automatically.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short title — becomes the slug. Re-using a title overwrites the existing memory."},
+                "type": {
+                    "type": "string",
+                    "enum": ["user", "feedback", "project", "reference"],
+                    "description": "user=who they are; feedback=how they want you to behave; project=ongoing work context; reference=pointers to external systems/links.",
+                },
+                "description": {"type": "string", "description": "One-line hook (~140 chars). This is what shows up in the always-loaded index, so make it specific."},
+                "body": {"type": "string", "description": "The actual memory content. Markdown OK. Include reasons / how-to-apply when relevant."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags."},
+            },
+            "required": ["title", "type", "description"],
+        },
+    },
+    {
+        "name": "memory_recall",
+        "description": "Search saved memories. Use this BEFORE assuming. Returns top matches with their bodies. Empty query returns the index.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "description": "Default 5."},
+            },
+        },
+    },
+    {
+        "name": "memory_list",
+        "description": "Show the full memory index (all titles and one-line hooks).",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "memory_forget",
+        "description": "Delete a memory by title. Use only when explicitly told to forget something OR when a memory is clearly outdated and you've already saved a corrected version.",
+        "parameters": {
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+        },
+    },
+
+    # ---- TIME ----
+    {
+        "name": "get_time",
+        "description": "Current local datetime, weekday, timezone offset.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "notify",
+        "description": (
+            "Pop a desktop notification (Windows toast) RIGHT NOW. Use for "
+            "'let me know when X is done', to flag a finished long task, or any "
+            "immediate heads-up. For a FUTURE/scheduled reminder use set_reminder "
+            "instead — this one fires instantly."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short bold title."},
+                "message": {"type": "string", "description": "The notification body."},
+            },
+            "required": ["message"],
+        },
+    },
+    {
+        "name": "whoami",
+        "description": (
+            "Introspect your own runtime config. Call this INSTEAD of guessing "
+            "or running shell commands when the user asks 'what model are you', "
+            "'what's your endpoint', 'are you local or cloud', 'what can you do', "
+            "'what's your context window', or 'who built you'. Returns the live "
+            "model id, API endpoint (local vs cloud), context window, tool count, "
+            "memory count, workspace path, persona name, and repo. Zero side effects."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_models",
+        "description": (
+            "List the LLM models available on the connected server (LM Studio / Ollama / "
+            "cloud) by querying its API. Use this to answer 'what models do I have' / "
+            "'which models are loaded' / 'what can I switch to'. Do NOT scan the disk for "
+            "model files — that's slow and wrong; this is instant and correct."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "learn_environment",
+        "description": (
+            "Re-scan this machine (GPU/VRAM, RAM, installed models, top-level drive map) "
+            "and refresh it into long-term memory. Call this when the user installs a new "
+            "model, adds a drive, or asks you to 'get to know my setup' / 'relearn my PC'. "
+            "Fast and non-recursive. It's how you stay grounded instead of disk-scanning."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+
+    # ---- IMAGE GENERATION (Forge / SD WebUI orchestration) ----
+    {
+        "name": "forge_generate",
+        "description": (
+            "Generate an image with the user's local Stable Diffusion install "
+            "(Forge WebUI). Orchestrates the full VRAM dance: (1) signal the "
+            "LLM server to release its model, (2) boot Forge in API mode if "
+            "it isn't already up, (3) POST to /sdapi/v1/txt2img, (4) save the "
+            "PNG to ~/Jarvis/screenshots/, (5) leave Forge running for follow-up "
+            "generations (use forge_shutdown to free VRAM back to the LLM). "
+            "Pony v6 XL is tag-based — write positive/negative as comma-separated "
+            "tags, not natural language. Use 'score_9, score_8_up, score_7_up' "
+            "as a quality prefix for Pony."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "positive": {"type": "string", "description": "Tag-style positive prompt. E.g. 'score_9, score_8_up, masterpiece, 1girl, cinematic lighting, dark room'."},
+                "negative": {"type": "string", "description": "Negative tags. Pony default starter: 'score_6, score_5, score_4, low quality, blurry, deformed'."},
+                "width": {"type": "integer", "description": "Default 1024."},
+                "height": {"type": "integer", "description": "Default 1024."},
+                "steps": {"type": "integer", "description": "Default 25."},
+                "cfg_scale": {"type": "number", "description": "Default 6."},
+                "sampler": {"type": "string", "description": "Default 'Euler a'."},
+                "seed": {"type": "integer", "description": "Default -1 (random)."},
+            },
+            "required": ["positive"],
+        },
+    },
+    {
+        "name": "forge_status",
+        "description": "Check if Forge WebUI is running and reachable. Returns url + status.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "forge_shutdown",
+        "description": "Kill the Forge process to free VRAM back to the LLM. Use after you're done generating images.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+
+    # ---- VOICE ----
+    {
+        "name": "set_voice",
+        "description": "Change the active TTS voice. Pass a Kokoro voice id like 'am_echo', 'am_michael', 'bm_george', 'bf_emma'. After setting, a short sample plays automatically so the user can hear it. Use this when the user asks for a different voice or wants to try options.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Voice id, e.g. 'am_echo'."},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "list_voices",
+        "description": "List available built-in Kokoro voice ids. Use when the user asks 'what voices are there'.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+
+    # ---- SESSION CONTROL ----
+    {
+        "name": "end_session",
+        "description": "Call this when the user is clearly wrapping up the conversation (says bye, goodbye, see you, thanks that's all, etc.). Send your farewell text in your reply FIRST, then call this tool with no args. The CLI will save history and exit cleanly. Don't call it for casual 'thanks' mid-task.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+]
+
+
+# --------------------------------------------------------------------------
+# Drop tools whose dependencies aren't installed / aren't applicable here.
+# Keeps the tool list clean so the LLM doesn't try things that won't work
+# (and so we don't waste system-prompt tokens advertising them).
+# --------------------------------------------------------------------------
+
+def _filter_unavailable_tools() -> None:
+    """Mutates TOOL_DEFINITIONS in place at import time."""
+    drop: set = set()
+
+    # psutil-dependent tools
+    try:
+        import psutil  # type: ignore
+        # has psutil — but only keep get_battery if a battery actually exists
+        try:
+            if psutil.sensors_battery() is None:
+                drop.add("get_battery")
+        except Exception:
+            drop.add("get_battery")
+    except ImportError:
+        # no psutil — drop the heavy ones; system_info/network_info have
+        # graceful fallbacks so they stay
+        drop.update({"list_processes", "get_battery"})
+
+    # Windows-only registry probe
+    if sys.platform != "win32":
+        drop.add("list_installed_apps")
+
+    # Forge / Stable-Diffusion image-gen tools are NICHE — they need a local
+    # Forge/SD WebUI install almost no one has, and their schemas cost ~600
+    # prompt tokens every turn. Off by default (cleaner toolset for normal
+    # users + less context pressure); opt in with HEARTH_ENABLE_FORGE=1.
+    # Nothing is deleted — the capability returns the moment the flag is set.
+    if os.environ.get("HEARTH_ENABLE_FORGE", "0") != "1":
+        drop.update({"forge_generate", "forge_status", "forge_shutdown"})
+
+    if drop:
+        TOOL_DEFINITIONS[:] = [t for t in TOOL_DEFINITIONS if t["name"] not in drop]
+
+
+_filter_unavailable_tools()
+
+
+# ============================================================
+# FILE OPS
+# ============================================================
+
+# Extensions that route to dedicated extractors. Anything not listed here
+# (or in the binary-skip set below) falls through to text-mode reading.
+_PDF_EXTS  = {".pdf"}
+_DOCX_EXTS = {".docx"}
+_XLSX_EXTS = {".xlsx", ".xlsm"}
+_PPTX_EXTS = {".pptx"}
+_EPUB_EXTS = {".epub"}
+_IPYNB_EXTS = {".ipynb"}
+_CSV_EXTS  = {".csv", ".tsv"}
+_JSON_EXTS = {".json", ".jsonl", ".ndjson"}
+_HTML_EXTS = {".html", ".htm", ".xhtml"}
+_XML_EXTS  = {".xml", ".rss", ".atom", ".svg"}
+_RTF_EXTS  = {".rtf"}
+
+_ARCHIVE_EXTS = {".zip", ".jar", ".whl", ".egg", ".apk",
+                 ".tar", ".tgz", ".tbz2", ".txz",
+                 ".rar", ".7z"}  # rar/7z need external tools — we just say so
+
+# Single-stream compressed files (NOT tar.gz — that goes through archive path)
+_SINGLE_COMPRESSED_EXTS = {".gz", ".bz2", ".xz"}
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico"}
+_AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".opus"}
+_VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv"}
+
+
+def _coerce_int(v, default):
+    if v is None or v == "":
+        return default
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _read_file(p: Dict) -> str:
+    """Smart reader. Routes by extension to a dedicated extractor for
+    PDF / DOCX / XLSX / PPTX / EPUB / IPYNB / CSV / JSON / HTML / RTF.
+    Plain text files (default) get line-numbered slicing via start_line/end_line.
+    Archives and media return a one-line hint pointing to the right tool."""
+    raw_path = p["path"]
+    path = _resolve_read(raw_path)
+    if not os.path.exists(path):
+        # Common mistake: path goes THROUGH an archive
+        # (e.g. "sample.zip/docs/readme.txt"). Detect and redirect.
+        norm = raw_path.replace("\\", "/")
+        for arc_ext in (".zip", ".jar", ".whl", ".apk", ".tar.gz", ".tar.bz2",
+                        ".tar.xz", ".tgz", ".tbz2", ".txz", ".tar"):
+            marker = arc_ext + "/"
+            idx = norm.lower().find(marker)
+            if idx != -1:
+                archive = norm[:idx + len(arc_ext)]
+                inner = norm[idx + len(marker):]
+                return (f"Error: can't read paths THROUGH an archive. "
+                        f"Run extract_archive_file(archive_path='{archive}', "
+                        f"inner_path='{inner}') first, then read_file the "
+                        f"extracted path.")
+        return f"Error: not found: {path}"
+    if os.path.isdir(path):
+        return f"Error: '{path}' is a directory. Use list_directory."
+
+    ext = os.path.splitext(path)[1].lower()
+    # Handle .tar.gz / .tar.bz2 / .tar.xz as archives, not single-stream gz
+    low = path.lower()
+    if low.endswith((".tar.gz", ".tar.bz2", ".tar.xz")):
+        ext = ".tgz"
+
+    try:
+        if ext in _PDF_EXTS:
+            return _extract_pdf(path, p)
+        if ext in _DOCX_EXTS:
+            return _extract_docx(path)
+        if ext in _XLSX_EXTS:
+            return _extract_xlsx(path, p)
+        if ext in _PPTX_EXTS:
+            return _extract_pptx(path)
+        if ext in _EPUB_EXTS:
+            return _extract_epub(path)
+        if ext in _IPYNB_EXTS:
+            return _extract_ipynb(path)
+        if ext in _CSV_EXTS:
+            return _extract_csv(path, p, sep=("\t" if ext == ".tsv" else ","))
+        if ext in _JSON_EXTS:
+            return _extract_json(path, jsonl=(ext in {".jsonl", ".ndjson"}))
+        if ext in _HTML_EXTS or ext in _XML_EXTS:
+            return _extract_html_like(path)
+        if ext in _RTF_EXTS:
+            return _extract_rtf(path)
+        if ext in _ARCHIVE_EXTS:
+            return (f"{path} is an archive ({ext}). Use list_archive(path=...) "
+                    f"to see contents, or extract_archive_file(archive_path=..., "
+                    f"inner_path=...) to pull one file out. Don't auto-unpack.")
+        if ext in _SINGLE_COMPRESSED_EXTS:
+            return _extract_compressed_stream(path, ext)
+        if ext in _IMAGE_EXTS:
+            return (f"{path} is an image. Use view_image(path=...) for vision "
+                    f"inspection. read_file would just return binary bytes.")
+        if ext in _AUDIO_EXTS or ext in _VIDEO_EXTS:
+            return (f"{path} is binary media ({ext}). Don't read_file it — "
+                    f"use open_app(name=path) to play, or describe metadata "
+                    f"with run_command('ffprobe ...').")
+    except Exception as e:
+        # Extractor crashed — fall through to text mode so user still gets bytes.
+        return (f"Error extracting {ext} from {path}: {type(e).__name__}: {e}\n"
+                f"Falling back to raw text — try a different reader if this "
+                f"looks garbled.")
+
+    return _read_file_text(path, p)
+
+
+def _read_file_text(path: str, p: Dict) -> str:
+    """Original plain-text reader. Line-numbered, sliceable."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError as e:
+        return f"Error: {e}"
+
+    total = len(lines)
+    s = max(0, _coerce_int(p.get("start_line"), 1) - 1)
+    e = min(total, _coerce_int(p.get("end_line"), total))
+    if e < s:
+        e = s
+
+    body = "\n".join(f"{i+1}\t{lines[i].rstrip()}" for i in range(s, e))
+    return f"{path} ({total} lines, showing {s+1}-{e})\n{body}"
+
+
+# ---------- Extractors -----------------------------------------------------
+
+def _extract_pdf(path: str, p: Dict) -> str:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except ImportError:
+        return ("Error: pypdf not installed. Run: "
+                "`pip install pypdf` (or re-run install.ps1).")
+    try:
+        reader = PdfReader(path)
+    except Exception as e:
+        return f"Error: pypdf couldn't open {path}: {type(e).__name__}: {e}"
+
+    n_pages = len(reader.pages)
+    start = max(1, _coerce_int(p.get("start_line"), 1))  # reuse start_line as start_page
+    end = min(n_pages, _coerce_int(p.get("end_line"), n_pages))
+    if end < start:
+        end = start
+
+    chunks: List[str] = [f"{path} (PDF, {n_pages} pages, extracting {start}-{end})"]
+    extracted = 0
+    for i in range(start - 1, end):
+        try:
+            txt = reader.pages[i].extract_text() or ""
+        except Exception as e:
+            txt = f"[page extract failed: {e}]"
+        txt = txt.strip()
+        if txt:
+            extracted += 1
+            chunks.append(f"\n--- Page {i+1} ---\n{txt}")
+    if extracted == 0:
+        chunks.append("\n[no extractable text — PDF is blank or scanned. "
+                      "ACCEPT THIS — don't run shell commands to brute-force "
+                      "raw bytes; PDFs aren't grep-able. If it's scanned, "
+                      "tell the user it needs OCR.]")
+    return "\n".join(chunks)
+
+
+def _extract_docx(path: str) -> str:
+    try:
+        import docx  # python-docx
+    except ImportError:
+        return ("Error: python-docx not installed. Run: "
+                "`pip install python-docx` (or re-run install.ps1).")
+    try:
+        doc = docx.Document(path)
+    except Exception as e:
+        return f"Error: python-docx couldn't open {path}: {type(e).__name__}: {e}"
+
+    parts: List[str] = [f"{path} (DOCX)"]
+    body_paras = [par.text for par in doc.paragraphs if par.text and par.text.strip()]
+    if body_paras:
+        parts.append("\n# Body")
+        parts.extend(body_paras)
+    for ti, tbl in enumerate(doc.tables, 1):
+        parts.append(f"\n# Table {ti}")
+        for row in tbl.rows:
+            cells = [c.text.strip().replace("\n", " ") for c in row.cells]
+            parts.append(" | ".join(cells))
+    if len(parts) == 1:
+        parts.append("[empty document]")
+    return "\n".join(parts)
+
+
+def _extract_xlsx(path: str, p: Dict) -> str:
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return ("Error: openpyxl not installed. Run: "
+                "`pip install openpyxl` (or re-run install.ps1).")
+    try:
+        wb = load_workbook(path, read_only=True, data_only=True)
+    except Exception as e:
+        return f"Error: openpyxl couldn't open {path}: {type(e).__name__}: {e}"
+
+    max_rows = _coerce_int(p.get("end_line"), 50)
+    parts: List[str] = [f"{path} (XLSX, {len(wb.sheetnames)} sheet(s): "
+                        f"{', '.join(wb.sheetnames)})"]
+    for name in wb.sheetnames:
+        ws = wb[name]
+        parts.append(f"\n# Sheet: {name} ({ws.max_row} rows × {ws.max_column} cols)")
+        rows_shown = 0
+        for row in ws.iter_rows(values_only=True):
+            cells = ["" if c is None else str(c) for c in row]
+            parts.append(" | ".join(cells))
+            rows_shown += 1
+            if rows_shown >= max_rows:
+                if ws.max_row > rows_shown:
+                    parts.append(f"…[+{ws.max_row - rows_shown} more rows in this sheet]")
+                break
+    wb.close()
+    return "\n".join(parts)
+
+
+def _extract_pptx(path: str) -> str:
+    try:
+        from pptx import Presentation  # python-pptx
+    except ImportError:
+        return ("Error: python-pptx not installed. Run: "
+                "`pip install python-pptx` (or re-run install.ps1).")
+    try:
+        prs = Presentation(path)
+    except Exception as e:
+        return f"Error: python-pptx couldn't open {path}: {type(e).__name__}: {e}"
+
+    parts: List[str] = [f"{path} (PPTX, {len(prs.slides)} slides)"]
+    for si, slide in enumerate(prs.slides, 1):
+        chunks: List[str] = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    t = "".join(run.text for run in para.runs).strip()
+                    if t:
+                        chunks.append(t)
+        if chunks:
+            parts.append(f"\n--- Slide {si} ---")
+            parts.extend(chunks)
+    return "\n".join(parts)
+
+
+def _extract_epub(path: str) -> str:
+    """EPUB = zip of XHTML. Stdlib only."""
+    import zipfile as _zf
+    parts: List[str] = [f"{path} (EPUB)"]
+    try:
+        with _zf.ZipFile(path) as zf:
+            xhtml_files = sorted(
+                n for n in zf.namelist()
+                if n.lower().endswith((".xhtml", ".html", ".htm"))
+            )
+            if not xhtml_files:
+                return f"{path} (EPUB) — no readable XHTML inside."
+            parts.append(f"({len(xhtml_files)} chapters/files)")
+            total_text = []
+            for name in xhtml_files:
+                try:
+                    with zf.open(name) as fh:
+                        raw = fh.read().decode("utf-8", errors="replace")
+                except Exception:
+                    continue
+                stripped = _strip_html(raw).strip()
+                if stripped:
+                    total_text.append(f"\n--- {name} ---\n{stripped}")
+            parts.append("".join(total_text) if total_text else "[no extractable text]")
+    except Exception as e:
+        return f"Error reading EPUB {path}: {type(e).__name__}: {e}"
+    return "\n".join(parts)
+
+
+def _extract_ipynb(path: str) -> str:
+    """Jupyter notebook = JSON. Render markdown + code + (text) outputs."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            nb = json.load(f)
+    except Exception as e:
+        return f"Error reading {path}: {type(e).__name__}: {e}"
+
+    cells = nb.get("cells", [])
+    parts: List[str] = [f"{path} (IPYNB, {len(cells)} cells)"]
+    for i, cell in enumerate(cells, 1):
+        ctype = cell.get("cell_type", "?")
+        src = cell.get("source", "")
+        if isinstance(src, list):
+            src = "".join(src)
+        src = src.rstrip()
+        if not src:
+            continue
+        if ctype == "markdown":
+            parts.append(f"\n--- Cell {i} [markdown] ---\n{src}")
+        elif ctype == "code":
+            parts.append(f"\n--- Cell {i} [code] ---\n{src}")
+            outs = cell.get("outputs", [])
+            text_outs: List[str] = []
+            for out in outs:
+                if "text" in out:
+                    t = out["text"]
+                    text_outs.append("".join(t) if isinstance(t, list) else str(t))
+                elif "data" in out and "text/plain" in out["data"]:
+                    t = out["data"]["text/plain"]
+                    text_outs.append("".join(t) if isinstance(t, list) else str(t))
+            if text_outs:
+                parts.append("[out]\n" + "".join(text_outs).rstrip())
+        else:
+            parts.append(f"\n--- Cell {i} [{ctype}] ---\n{src}")
+    return "\n".join(parts)
+
+
+def _extract_csv(path: str, p: Dict, sep: str = ",") -> str:
+    """First N rows + total count. Stdlib only (no pandas needed)."""
+    import csv as _csv
+    max_rows = _coerce_int(p.get("end_line"), 30)
+    start_row = max(1, _coerce_int(p.get("start_line"), 1))
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace", newline="") as f:
+            reader = _csv.reader(f, delimiter=sep)
+            rows = []
+            total = 0
+            for i, row in enumerate(reader, 1):
+                total += 1
+                if i >= start_row and len(rows) < max_rows:
+                    rows.append(row)
+    except OSError as e:
+        return f"Error: {e}"
+    if not rows:
+        return f"{path} (CSV) — empty."
+    parts: List[str] = [
+        f"{path} ({'TSV' if sep == chr(9) else 'CSV'}, {total} rows, "
+        f"{len(rows[0])} cols, showing rows {start_row}-{start_row + len(rows) - 1})"
+    ]
+    parts.extend(" | ".join(r) for r in rows)
+    if total > start_row + len(rows) - 1:
+        parts.append(f"…[+{total - (start_row + len(rows) - 1)} more rows]")
+    return "\n".join(parts)
+
+
+def _extract_json(path: str, jsonl: bool = False) -> str:
+    """JSON: structure-first summary (keys, types, sample values).
+    JSONL: first 20 records + count."""
+    if jsonl:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except OSError as e:
+            return f"Error: {e}"
+        parts = [f"{path} (JSONL, {len(lines)} records)"]
+        for i, line in enumerate(lines[:20], 1):
+            parts.append(f"{i}\t{line.rstrip()}")
+        if len(lines) > 20:
+            parts.append(f"…[+{len(lines) - 20} more records]")
+        return "\n".join(parts)
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            data = json.load(f)
+    except Exception as e:
+        return f"Error parsing JSON {path}: {type(e).__name__}: {e}"
+
+    def describe(obj, depth: int = 0, max_depth: int = 3) -> str:
+        ind = "  " * depth
+        if depth > max_depth:
+            return f"{ind}…"
+        if isinstance(obj, dict):
+            if not obj:
+                return f"{ind}{{}}"
+            out = []
+            for k, v in list(obj.items())[:25]:
+                if isinstance(v, (dict, list)):
+                    out.append(f"{ind}{k}: {type(v).__name__}"
+                               + (f"[{len(v)}]" if isinstance(v, list) else ""))
+                    out.append(describe(v, depth + 1, max_depth))
+                else:
+                    out.append(f"{ind}{k}: {type(v).__name__} = {repr(v)[:80]}")
+            if len(obj) > 25:
+                out.append(f"{ind}…[+{len(obj) - 25} more keys]")
+            return "\n".join(out)
+        if isinstance(obj, list):
+            if not obj:
+                return f"{ind}[]"
+            sample_n = min(3, len(obj))
+            out = [f"{ind}list[{len(obj)}], first {sample_n}:"]
+            for i, v in enumerate(obj[:sample_n]):
+                if isinstance(v, (dict, list)):
+                    out.append(f"{ind}[{i}] {type(v).__name__}"
+                               + (f"[{len(v)}]" if isinstance(v, list) else ""))
+                    out.append(describe(v, depth + 1, max_depth))
+                else:
+                    out.append(f"{ind}[{i}] {type(v).__name__} = {repr(v)[:80]}")
+            return "\n".join(out)
+        return f"{ind}{type(obj).__name__} = {repr(obj)[:120]}"
+
+    summary = describe(data)
+    # Also include raw head for small files
+    try:
+        raw = json.dumps(data, indent=2, ensure_ascii=False, default=str)
+    except Exception:
+        raw = repr(data)
+    if len(raw) <= 1500:
+        return f"{path} (JSON)\n# Structure\n{summary}\n\n# Raw\n{raw}"
+    return f"{path} (JSON)\n# Structure\n{summary}\n\n# Raw (truncated)\n{raw[:1500]}…"
+
+
+class _TextOnlyHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: List[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self._skip_depth > 0:
+            self._skip_depth -= 1
+        if tag in ("p", "br", "li", "div", "h1", "h2", "h3", "h4", "h5", "h6", "tr"):
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if self._skip_depth == 0:
+            self.parts.append(data)
+
+
+def _strip_html(s: str) -> str:
+    parser = _TextOnlyHTMLParser()
+    try:
+        parser.feed(s)
+    except Exception:
+        return s
+    text = "".join(parser.parts)
+    # Collapse 3+ newlines to 2, trim trailing spaces per line
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    out: List[str] = []
+    blank = 0
+    for ln in lines:
+        if not ln.strip():
+            blank += 1
+            if blank <= 1:
+                out.append("")
+        else:
+            blank = 0
+            out.append(ln)
+    return "\n".join(out).strip()
+
+
+def _extract_html_like(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            raw = f.read()
+    except OSError as e:
+        return f"Error: {e}"
+    text = _strip_html(raw)
+    return f"{path} (HTML/XML, {len(raw)} chars raw, {len(text)} chars text)\n{text}"
+
+
+def _extract_rtf(path: str) -> str:
+    """Crude RTF→text: strip control words and groups. Good enough for skimming."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            raw = f.read()
+    except OSError as e:
+        return f"Error: {e}"
+    # Drop control words like \rtf1, \par, \fonttbl{...}, etc.
+    no_groups = re.sub(r"\{\\\*?[^{}]*\}", "", raw)  # nested {\* ...} groups
+    no_groups = re.sub(r"\{\\[^{}]*\}", "", no_groups)
+    no_ctrl = re.sub(r"\\[a-zA-Z]+-?\d* ?", "", no_groups)
+    no_ctrl = re.sub(r"\\[^a-zA-Z]", "", no_ctrl)
+    no_braces = no_ctrl.replace("{", "").replace("}", "")
+    text = re.sub(r"\n{3,}", "\n\n", no_braces).strip()
+    return f"{path} (RTF, {len(raw)} chars raw, {len(text)} chars text)\n{text}"
+
+
+def _extract_compressed_stream(path: str, ext: str) -> str:
+    """Single-stream .gz/.bz2/.xz — decompress and read first chunk."""
+    try:
+        if ext == ".gz":
+            import gzip as _z
+            opener = _z.open
+        elif ext == ".bz2":
+            import bz2 as _z
+            opener = _z.open
+        elif ext == ".xz":
+            import lzma as _z
+            opener = _z.open
+        else:
+            return f"Error: unsupported compression {ext}"
+        with opener(path, "rt", encoding="utf-8", errors="replace") as f:
+            chunk = f.read(8000)
+        head = chunk.split("\n", 200)[:200]
+        return (f"{path} (compressed {ext}, showing first {len(chunk)} chars / "
+                f"{len(head)} lines)\n" + "\n".join(head))
+    except Exception as e:
+        return f"Error decompressing {path}: {type(e).__name__}: {e}"
+
+
+# ---------- Summarize wrapper (calls _read_file, frames for the model) -----
+
+def _summarize_file(p: Dict) -> str:
+    """Wraps _read_file with a 'summarize this' directive + tighter cap. The
+    actual summary is produced by the calling LLM in its reply turn — we just
+    pre-extract the content cleanly so the model doesn't waste a separate
+    read_file call."""
+    max_chars = max(500, min(_coerce_int(p.get("max_chars"), 6000), 12000))
+    extracted = _read_file({"path": p["path"]})
+    # _read_file already errored cleanly if path bad / archive / image / etc.
+    if extracted.startswith("Error:") or extracted.startswith("Error "):
+        return extracted
+    # Honor hint-style returns ("X is an archive, use list_archive") verbatim.
+    if " is an archive (" in extracted[:200] or " is an image." in extracted[:200] or " is binary media (" in extracted[:200]:
+        return extracted
+    body = extracted
+    if len(body) > max_chars:
+        body = body[:max_chars] + f"\n…[truncated {len(extracted) - max_chars} chars]"
+    return (
+        "## TASK: Summarize this file in 3-5 short bullets (~50 words each).\n"
+        "Cover the main topic, key facts, and any actionable items. Skip the "
+        "preamble — produce just the bullets. Do not call read_file again; the "
+        "content is already extracted below.\n\n"
+        "---\n"
+        f"{body}\n"
+        "---\n"
+        "## END OF FILE — produce the summary in your reply now."
+    )
+
+
+# ---------- Archive tools (separate, not via read_file dispatch) -----------
+
+def _list_archive(p: Dict) -> str:
+    """List contents of zip/tar without extracting."""
+    path = _resolve_read(p["path"])
+    if not os.path.exists(path):
+        return f"Error: not found: {path}"
+    if os.path.isdir(path):
+        return f"Error: '{path}' is a directory, not an archive."
+    low = path.lower()
+    limit = _coerce_int(p.get("limit"), 200)
+
+    try:
+        if low.endswith((".zip", ".jar", ".whl", ".egg", ".apk")):
+            import zipfile as _zf
+            with _zf.ZipFile(path) as zf:
+                infos = zf.infolist()
+                lines = [f"{path} (ZIP, {len(infos)} entries, "
+                         f"compressed={sum(i.compress_size for i in infos)} bytes, "
+                         f"uncompressed={sum(i.file_size for i in infos)} bytes)"]
+                lines.append("size      | path")
+                lines.append("----------|-----")
+                for i, info in enumerate(infos[:limit]):
+                    sz = info.file_size
+                    suffix = "/" if info.is_dir() else ""
+                    lines.append(f"{sz:>10}| {info.filename}{suffix}")
+                if len(infos) > limit:
+                    lines.append(f"…[+{len(infos) - limit} more entries]")
+                return "\n".join(lines)
+        if low.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2",
+                         ".tar.xz", ".txz")):
+            import tarfile as _tf
+            with _tf.open(path) as tf:
+                infos = list(tf.getmembers())
+                lines = [f"{path} (TAR, {len(infos)} entries)"]
+                lines.append("size      | path")
+                lines.append("----------|-----")
+                for info in infos[:limit]:
+                    suffix = "/" if info.isdir() else ""
+                    lines.append(f"{info.size:>10}| {info.name}{suffix}")
+                if len(infos) > limit:
+                    lines.append(f"…[+{len(infos) - limit} more entries]")
+                return "\n".join(lines)
+        if low.endswith((".rar", ".7z")):
+            return (f"{path}: {low.rsplit('.', 1)[1]} format. Python stdlib can't "
+                    f"read it. Use run_command('7z l \"{path}\"') if 7-Zip is "
+                    f"installed, otherwise extract via the GUI first.")
+    except Exception as e:
+        return f"Error listing archive {path}: {type(e).__name__}: {e}"
+    return (f"Error: {path} doesn't look like a supported archive "
+            f"(zip/jar/whl/tar/tar.gz/tar.bz2/tar.xz). For .rar/.7z, ask "
+            f"run_command to invoke 7z.")
+
+
+def _extract_archive_file(p: Dict) -> str:
+    """Pull ONE file out of an archive into the workspace. Sandboxed."""
+    archive_path = _resolve_read(p["archive_path"])
+    inner_path = (p.get("inner_path") or "").strip().lstrip("/").lstrip("\\")
+    if not inner_path:
+        return "Error: inner_path required (use list_archive to see options)."
+    if ".." in inner_path.replace("\\", "/").split("/"):
+        return "Error: inner_path cannot contain '..' (refused for safety)."
+
+    out_name = p.get("output_name") or os.path.basename(inner_path) or "extracted.bin"
+    out_path = _resolve_write(out_name)
+    os.makedirs(os.path.dirname(out_path) or WORKSPACE, exist_ok=True)
+
+    if not os.path.exists(archive_path):
+        return f"Error: archive not found: {archive_path}"
+    low = archive_path.lower()
+    try:
+        if low.endswith((".zip", ".jar", ".whl", ".egg", ".apk")):
+            import zipfile as _zf
+            with _zf.ZipFile(archive_path) as zf:
+                try:
+                    info = zf.getinfo(inner_path)
+                except KeyError:
+                    matches = [n for n in zf.namelist()
+                               if n.endswith(inner_path) or inner_path in n]
+                    if len(matches) == 1:
+                        info = zf.getinfo(matches[0])
+                    elif len(matches) > 1:
+                        return ("Error: inner_path matched multiple entries:\n  "
+                                + "\n  ".join(matches[:10])
+                                + ("\n  ..." if len(matches) > 10 else "")
+                                + "\nPass the exact path.")
+                    else:
+                        return f"Error: inner_path '{inner_path}' not in archive."
+                with zf.open(info) as src, open(out_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                return (f"Extracted {info.filename} ({info.file_size} bytes) "
+                        f"-> {out_path}")
+        if low.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2",
+                         ".tar.xz", ".txz")):
+            import tarfile as _tf
+            with _tf.open(archive_path) as tf:
+                try:
+                    member = tf.getmember(inner_path)
+                except KeyError:
+                    matches = [m for m in tf.getmembers()
+                               if m.name.endswith(inner_path) or inner_path in m.name]
+                    if len(matches) == 1:
+                        member = matches[0]
+                    elif len(matches) > 1:
+                        return ("Error: inner_path matched multiple entries:\n  "
+                                + "\n  ".join(m.name for m in matches[:10])
+                                + ("\n  ..." if len(matches) > 10 else ""))
+                    else:
+                        return f"Error: inner_path '{inner_path}' not in archive."
+                src = tf.extractfile(member)
+                if src is None:
+                    return f"Error: '{member.name}' isn't a regular file."
+                with src, open(out_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                return f"Extracted {member.name} ({member.size} bytes) -> {out_path}"
+    except Exception as e:
+        return f"Error extracting from {archive_path}: {type(e).__name__}: {e}"
+    return f"Error: {archive_path} is not a supported archive type."
+
+
+def _write_file(p: Dict) -> str:
+    path = _resolve_write(p["path"])
+    content = p.get("content", "") or ""
+    overwrite = bool(p.get("overwrite"))
+    if len(content) > 5 * 1024 * 1024:
+        return "Error: content too large (>5MB)."
+    os.makedirs(os.path.dirname(path) or WORKSPACE, exist_ok=True)
+    existed = os.path.exists(path)
+
+    # ---- Anti-clobber guard ----
+    # The #1 failure mode: model writes a 200-line tictactoe.py, user asks to
+    # "tweak the win logic", model RE-WRITES THE WHOLE FILE via write_file.
+    # Slow, drops formatting, and erases unrelated edits the user made.
+    # Refuse here unless the caller opts in via overwrite=true.
+    if existed:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                old_lines = f.read().count("\n") + 1
+        except OSError:
+            old_lines = 0
+        if old_lines > 30 and not overwrite:
+            return (
+                f"Error (write_file): refused to overwrite '{path}' "
+                f"({old_lines} lines exist). USE edit_file INSTEAD for "
+                f"targeted changes — it's faster, preserves formatting, "
+                f"and won't blow away anything you didn't intend to touch. "
+                f"If you really mean to replace the whole file, re-call "
+                f"write_file with overwrite=true."
+            )
+
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
+    verb = "Updated" if existed else "Created"
+    return f"{verb}: {path} ({len(content)} chars, {content.count(chr(10))+1} lines)"
+
+
+def _edit_file(p: Dict) -> str:
+    """Targeted string-replace edits — never rewrites the whole file.
+
+    Inspired by Claude Code's Edit tool:
+      - `old_text` MUST be unique unless the edit sets `replace_all=true`.
+        If it appears multiple times, the edit errors out asking the model
+        to add context, rather than silently replacing the wrong one.
+      - Surrounding whitespace / indentation in `old_text` must match the
+        file exactly (we still offer a whitespace-tolerant fuzzy fallback
+        for cases where the model rephrased indentation).
+      - Per-edit `replace_all` flag enables variable/symbol renames.
+      - File is rewritten only if at least one byte changed.
+
+    Each edit dict: {old_text, new_text, replace_all? = false}.
+    Returns a per-edit status log so the model can see what landed.
+    """
+    path = _resolve_write(p["path"])
+    if not os.path.exists(path):
+        return f"Error: not found: {path}. Use write_file to create it."
+
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        original = f.read()
+    content = original
+
+    edits = p.get("edits", [])
+    if isinstance(edits, str):
+        try:
+            edits = json.loads(edits)
+        except Exception:
+            return ("Error: 'edits' must be a list of "
+                    "{old_text, new_text, replace_all?} dicts.")
+    if not isinstance(edits, list) or not edits:
+        return "Error: provide at least one edit."
+
+    log: List[str] = []
+    file_replace_all = bool(p.get("replace_all"))
+
+    for i, e in enumerate(edits, 1):
+        if not isinstance(e, dict):
+            log.append(f"  edit {i}: bad shape, skipped")
+            continue
+        old = e.get("old_text") or e.get("old_string") or e.get("old") or ""
+        new = e.get("new_text") if "new_text" in e else (
+            e.get("new_string") or e.get("new") or ""
+        )
+        # Per-edit override beats per-call default
+        replace_all = bool(e.get("replace_all", file_replace_all))
+
+        if not isinstance(old, str) or not isinstance(new, str):
+            log.append(f"  edit {i}: old/new not strings, skipped")
+            continue
+        if old == new:
+            log.append(f"  edit {i}: no-op (old == new)")
+            continue
+        if not old:
+            log.append(f"  edit {i}: empty old_text — use write_file for new files")
+            continue
+
+        # Exact-match path (preferred)
+        n_matches = content.count(old)
+        if n_matches > 0:
+            if n_matches > 1 and not replace_all:
+                # Ambiguity protection — the Claude Code pattern. Refuse
+                # silently picking one of N matches; the model must add
+                # context or set replace_all.
+                log.append(
+                    f"  edit {i}: AMBIGUOUS — old_text matches {n_matches} times. "
+                    f"Expand old_text with surrounding lines to make it unique, "
+                    f"OR set replace_all=true for this edit if you want all "
+                    f"occurrences replaced (good for variable renames)."
+                )
+                continue
+            if replace_all:
+                content = content.replace(old, new)
+                log.append(f"  edit {i}: applied (replace_all: {n_matches} occurrences)")
+            else:
+                content = content.replace(old, new, 1)
+                log.append(f"  edit {i}: applied")
+            continue
+
+        # Whitespace-tolerant fallback (model rephrased indentation)
+        old_lines = old.split("\n")
+        c_lines = content.split("\n")
+        matched_idx = -1
+        # Count fuzzy matches first so we can refuse ambiguous fuzzy too
+        candidates = []
+        for si in range(len(c_lines) - len(old_lines) + 1):
+            if all(c_lines[si + j].strip() == old_lines[j].strip()
+                   for j in range(len(old_lines))):
+                candidates.append(si)
+        if len(candidates) > 1 and not replace_all:
+            log.append(
+                f"  edit {i}: AMBIGUOUS fuzzy match — {len(candidates)} candidate "
+                f"locations. Add surrounding context to old_text or set replace_all."
+            )
+            continue
+        if candidates:
+            matched_idx = candidates[0]
+            si = matched_idx
+            file_indent = c_lines[si][: len(c_lines[si]) - len(c_lines[si].lstrip())]
+            model_indent = ""
+            for nl in new.split("\n"):
+                if nl.strip():
+                    model_indent = nl[: len(nl) - len(nl.lstrip())]
+                    break
+            new_lines = new.split("\n")
+            if model_indent and file_indent and model_indent != file_indent:
+                new_lines = [
+                    (file_indent + ln[len(model_indent):]) if ln.startswith(model_indent) else ln
+                    for ln in new_lines
+                ]
+            content = "\n".join(
+                c_lines[:si] + new_lines + c_lines[si + len(old_lines):]
+            )
+            log.append(f"  edit {i}: fuzzy match at line {si+1} (indent-corrected)")
+            continue
+
+        log.append(
+            f"  edit {i}: NOT FOUND — re-read the file with read_file and copy "
+            f"the EXACT text including surrounding whitespace."
+        )
+
+    if content == original:
+        return (
+            f"edit_file({path}):\n" + "\n".join(log) +
+            "\n\nNo bytes changed. If you expected edits to land, the old_text "
+            "didn't match anywhere — try read_file first."
+        )
+
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
+    chars_changed = abs(len(content) - len(original))
+    return (
+        f"edit_file({path}):\n" + "\n".join(log) +
+        f"\n\nFile updated ({chars_changed:+d} chars, "
+        f"{content.count(chr(10))+1} lines)."
+    )
+
+
+def _list_directory(p: Dict) -> str:
+    raw = (p.get("path") or WORKSPACE).strip().strip('"').strip("'")
+    path = _resolve_read(raw)
+    if not os.path.exists(path):
+        return f"Error: not found: {path}"
+    if not os.path.isdir(path):
+        return f"Error: not a directory: {path}"
+
+    recursive = bool(p.get("recursive"))
+    max_depth = int(p.get("max_depth") or 2)
+
+    # When the user asks for "Desktop", merge in Public Desktop + OneDrive Desktop
+    # — Windows scatters shortcuts across three locations and most "look at my
+    # desktop" intents want all three. Same for the "Public" overlay folder.
+    extra_roots: List[str] = []
+    if os.path.normpath(path).lower() == os.path.normpath(
+        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
+    ).lower():
+        for extra in (
+            os.path.join(os.environ.get("PUBLIC", ""), "Desktop"),
+            os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "Desktop"),
+            os.path.join(os.environ.get("ONEDRIVE", ""), "Desktop"),
+        ):
+            if extra and os.path.isdir(extra) and os.path.normpath(extra).lower() != os.path.normpath(path).lower():
+                extra_roots.append(extra)
+
+    out = [f"# {path}"]
+    if not recursive:
+        for name in sorted(os.listdir(path)):
+            if name in EXCLUDE_DIRS:
+                continue
+            full = os.path.join(path, name)
+            if os.path.isdir(full):
+                out.append(f"  [d] {name}/")
+            else:
+                size = os.path.getsize(full)
+                out.append(f"  [f] {name} ({size} B)")
+        for extra in extra_roots:
+            out.append(f"\n# (merged from {extra})")
+            try:
+                for name in sorted(os.listdir(extra)):
+                    if name in EXCLUDE_DIRS:
+                        continue
+                    full = os.path.join(extra, name)
+                    if os.path.isdir(full):
+                        out.append(f"  [d] {name}/")
+                    else:
+                        size = os.path.getsize(full)
+                        out.append(f"  [f] {name} ({size} B)")
+            except OSError:
+                continue
+        return "\n".join(out)
+
+    base_depth = path.rstrip(os.sep).count(os.sep)
+    for root, dirs, files in os.walk(path):
+        depth = root.count(os.sep) - base_depth
+        if depth > max_depth:
+            dirs[:] = []
+            continue
+        dirs[:] = sorted(d for d in dirs if d not in EXCLUDE_DIRS)
+        rel = os.path.relpath(root, path)
+        prefix = "  " * depth
+        if rel != ".":
+            out.append(f"{prefix}[d] {os.path.basename(root)}/")
+        for name in sorted(files):
+            out.append(f"{prefix}  [f] {name}")
+    return "\n".join(out)
+
+
+def _create_directory(p: Dict) -> str:
+    path = _resolve_write(p["path"])
+    os.makedirs(path, exist_ok=True)
+    return f"mkdir: {path}"
+
+
+def _delete_path(p: Dict) -> str:
+    path = _resolve_write(p["path"])
+    if not os.path.exists(path):
+        return f"Error: not found: {path}"
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+        return f"Deleted dir: {path}"
+    os.remove(path)
+    return f"Deleted: {path}"
+
+
+def _move_path(p: Dict) -> str:
+    src = _resolve_write(p["source"])
+    dst = _resolve_write(p["destination"])
+    if not os.path.exists(src):
+        return f"Error: source not found: {src}"
+    os.makedirs(os.path.dirname(dst) or WORKSPACE, exist_ok=True)
+    shutil.move(src, dst)
+    return f"Moved: {src} → {dst}"
+
+
+# ============================================================
+# SEARCH
+# ============================================================
+
+def _search_scope_guard(base: str) -> Optional[str]:
+    """Refuse drive-root scans — those always end in tears. Steer the model
+    to find_file or to narrow the path. Returns an error string if the scope
+    is too broad, else None."""
+    if _DRIVE_ROOT_RE.match(base):
+        return (f"Error: refusing to scan a whole drive root ({base}) — that's "
+                "almost always a model mistake and wastes minutes. Either narrow "
+                "the path (e.g. C:\\Users\\<you>\\Downloads) or call `find_file` "
+                "which walks common locations for you.")
+    return None
+
+
+def _grep_search(p: Dict) -> str:
+    pattern = p["pattern"]
+    base = _resolve_read(p.get("path") or WORKSPACE)
+    glob = p.get("glob")
+    ci = bool(p.get("case_insensitive"))
+    max_matches = int(p.get("max_matches") or 100)
+
+    guard = _search_scope_guard(base)
+    if guard:
+        return guard
+
+    rg = shutil.which("rg")
+    if rg:
+        args = [rg, "--no-heading", "--line-number", "--max-count", str(max_matches)]
+        if ci:
+            args.append("-i")
+        if glob:
+            args += ["-g", glob]
+        args += [pattern, base]
+        try:
+            r = subprocess.run(args, capture_output=True, text=True, timeout=30,
+                               creationflags=_NO_WINDOW)
+            out = r.stdout.strip() or "(no matches)"
+            return f"ripgrep: {pattern} in {base}\n{out}"
+        except subprocess.TimeoutExpired:
+            return "Error: ripgrep timed out."
+
+    flags = re.IGNORECASE if ci else 0
+    try:
+        rx = re.compile(pattern, flags)
+    except re.error as e:
+        return f"Error: bad regex: {e}"
+
+    hits: List[str] = []
+    files_scanned = 0
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        for fname in files:
+            files_scanned += 1
+            if files_scanned > MAX_FILES_TO_SCAN:
+                tail = f"\n…[scan capped at {MAX_FILES_TO_SCAN} files — narrow the path or use find_file]"
+                return ("\n".join(hits) if hits else "(no matches)") + tail
+            if glob and not fnmatch.fnmatch(fname, glob):
+                continue
+            full = os.path.join(root, fname)
+            try:
+                with open(full, "r", encoding="utf-8", errors="replace") as f:
+                    for ln, line in enumerate(f, 1):
+                        if rx.search(line):
+                            hits.append(f"{full}:{ln}: {line.rstrip()}")
+                            if len(hits) >= max_matches:
+                                return "\n".join(hits) + f"\n…[capped at {max_matches}]"
+            except OSError:
+                continue
+    return "\n".join(hits) if hits else "(no matches)"
+
+
+def _glob_files(p: Dict) -> str:
+    raw = p["pattern"]
+    base = _resolve_read(p.get("path") or WORKSPACE)
+
+    guard = _search_scope_guard(base)
+    if guard:
+        return guard
+
+    # Models often emit shell-style alternation: "*.png | *.jpg", "*.py;*.md",
+    # "*.png|*.jpg", or even a JSON list. Normalize all of them into a real
+    # list of patterns. fnmatch / glob don't natively support pipes.
+    if isinstance(raw, list):
+        patterns = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        s = str(raw).strip()
+        # Split on |, ;, or comma — but only if those characters aren't part
+        # of a valid filename (filenames with these are vanishingly rare on
+        # Windows anyway).
+        for sep in ("|", ";", ","):
+            if sep in s:
+                s = s.replace(sep, "\x00")
+        patterns = [chunk.strip() for chunk in s.split("\x00") if chunk.strip()]
+
+    all_matches: list = []
+    seen: set = set()
+    files_walked = 0
+    over_budget = False
+    for pattern in patterns:
+        if over_budget:
+            break
+        pat = pattern if os.path.isabs(pattern) else os.path.join(base, pattern)
+        pat = os.path.expanduser(pat)
+        # iglob lets us tap out mid-stream when the budget is hit, instead of
+        # materializing a million-element list first.
+        for m in globmod.iglob(pat, recursive=True):
+            files_walked += 1
+            if files_walked > MAX_FILES_TO_SCAN:
+                over_budget = True
+                break
+            if m in seen:
+                continue
+            if any(part in EXCLUDE_DIRS for part in m.split(os.sep)):
+                continue
+            seen.add(m)
+            all_matches.append(m)
+
+    all_matches.sort(
+        key=lambda m: os.path.getmtime(m) if os.path.exists(m) else 0,
+        reverse=True,
+    )
+    if not all_matches:
+        shown = ", ".join(patterns) if len(patterns) > 1 else patterns[0]
+        budget_note = f" (scan budget {MAX_FILES_TO_SCAN} reached — try a narrower path)" if over_budget else ""
+        return f"(no files match {shown}){budget_note}"
+    tail = f"\n…[scan capped at {MAX_FILES_TO_SCAN} files]" if over_budget else ""
+    return "\n".join(all_matches[:200]) + tail
+
+
+def _find_file(p: Dict) -> str:
+    """Smart find: walk common locations for files matching a name or glob.
+    Replaces the 'jarvis, where is X' question that used to make Jarvis ask
+    the user for a path. Walks workspace → Desktop → Documents → Downloads →
+    Pictures → Videos → Music → ~/Code → ~/Projects → cwd, shallow first."""
+    name = (p.get("name") or "").strip()
+    if not name:
+        return "Error: 'name' is required (filename substring or glob pattern)."
+    # Refuse meaningless catch-alls — `name="*"` plus no kind filter is
+    # "give me every file on the disk" which fills the result buffer with noise.
+    if name == "*" and not (p.get("kind") and p.get("kind") != "any"):
+        return ("Error: name='*' without a kind filter is too broad — would return "
+                "every file. Pass a real substring/pattern, or set kind to image/video/"
+                "audio/doc/code/archive/spreadsheet.")
+    kind = (p.get("kind") or "any").strip().lower()
+    limit = int(p.get("limit") or 10)
+    deep = bool(p.get("deep"))
+    # Optional `path` override: when the user says "search C drive" or "look
+    # in G:\Games", the model should pass path=<that> and we restrict to it.
+    # Override completely bypasses the COMMON_USER_DIRS enumeration AND grants
+    # a much bigger scan budget (50000 → 200000) since the user explicitly
+    # narrowed scope and presumably wants thorough.
+    explicit_path = (p.get("path") or "").strip()
+
+    exts = FIND_KIND_EXTENSIONS.get(kind) if kind != "any" else None
+    max_depth = 4 if deep else 2
+
+    is_glob = any(ch in name for ch in "*?[]")
+    name_lower = name.lower()
+    # Token-based fallback: split the name into space-separated words. A file
+    # matches if ALL tokens appear anywhere in the filename (not necessarily
+    # adjacent). This handles cases like name="XII results" matching
+    # "CBSE - Senior School Examination Class XII Results 2026.PDF" — substring
+    # match fails because "xii results" isn't contiguous, but both tokens are
+    # present.
+    name_tokens = [t for t in name_lower.split() if t] if not is_glob else []
+
+    seen_loc: set = set()
+    locations: List[str] = []
+
+    def _add_loc(path: str) -> None:
+        ap = os.path.abspath(path)
+        if ap in seen_loc or not os.path.isdir(ap):
+            return
+        if SAFE_READ_ONLY and not ap.startswith(WORKSPACE):
+            return
+        seen_loc.add(ap)
+        locations.append(ap)
+
+    # If the user/model gave an explicit path, walk only that — they've
+    # already done the location selection for us.
+    if explicit_path:
+        _add_loc(os.path.expandvars(os.path.expanduser(explicit_path)))
+        # Allow much deeper + bigger budget for explicit-path scans
+        max_depth = 8 if deep else 5
+    else:
+        _add_loc(WORKSPACE)
+        # Non-system drives (D:, E:, F:, G:, ...) come BEFORE deep HOME subdirs.
+        # Most users keep movies, games, music on these — putting them first means
+        # the scan budget reaches `D:\Movies\*.mkv` before being eaten by
+        # `~/Documents/Adobe/...` or similar deep noise.
+        for drive in _enumerate_non_system_drives():
+            _add_loc(drive)
+        for sub in COMMON_USER_DIRS + COMMON_DEV_DIRS:
+            _add_loc(os.path.join(HOME, sub))
+        _add_loc(os.getcwd())
+
+    # Bump global budget when path was explicitly given — user's saying
+    # "really look", we should really look.
+    effective_max_files = (MAX_FILES_TO_SCAN * 4) if explicit_path else MAX_FILES_TO_SCAN
+
+    files_scanned = 0
+    # path → (rank, -mtime). Dict-dedup so the same file can't appear twice
+    # when one search root is a parent of another (e.g. ~/Downloads above
+    # ~/Downloads/JARVIS).
+    seen_paths: Dict[str, Tuple[int, float]] = {}
+
+    # Per-directory budget so one folder with thousands of small files
+    # (photo dumps, node_modules-style noise that escaped EXCLUDE_DIRS)
+    # can't eat the whole global budget before we reach more interesting
+    # neighboring folders.
+    PER_DIR_BUDGET = 1500
+
+    # Build the dir-name priority function once. Lowest score = walked first.
+    kind_kw = _KIND_DIR_KEYWORDS.get(kind, ())
+
+    def _dir_priority(dname: str) -> int:
+        ln = dname.lower()
+        # Best: directory name literally contains the search term (e.g. "skyrim" → walk into "Skyrim/")
+        if not is_glob and name_lower and name_lower in ln:
+            return 0
+        # Next: dir name matches the kind hint ("movies" / "Videos" for kind=video)
+        if kind_kw and any(k in ln for k in kind_kw):
+            return 1
+        return 2  # alphabetical within this tier
+
+    for loc in locations:
+        if files_scanned > effective_max_files:
+            break
+        for root, dirs, files in os.walk(loc):
+            if files_scanned > effective_max_files:
+                break
+            # Depth = number of path components beyond `loc`. The root of the
+            # location itself is depth 0; its immediate children are depth 1.
+            # (The naive `count(sep)` approach miscounts because len(loc)
+            # strips the trailing separator inconsistently across drive roots
+            # vs subdirs — strip + count + 1 is the correct form.)
+            rel = root[len(loc):].strip(os.sep)
+            depth = 0 if not rel else rel.count(os.sep) + 1
+
+            # Match the current directory itself (for "where's my <project>
+            # FOLDER" type queries). Only when no kind filter — dirs aren't
+            # any specific kind, so kind=video excludes them.
+            if depth > 0 and exts is None:
+                dname = os.path.basename(root)
+                if dname:
+                    dl = dname.lower()
+                    dir_matched = (
+                        (is_glob and fnmatch.fnmatch(dl, name_lower))
+                        or (not is_glob and name_lower in dl)
+                    )
+                    if dir_matched:
+                        if is_glob or dl == name_lower:
+                            d_rank = 0
+                        elif dl.startswith(name_lower):
+                            d_rank = 1
+                        else:
+                            d_rank = 2
+                        try:
+                            d_mt = os.path.getmtime(root)
+                        except OSError:
+                            d_mt = 0
+                        norm = os.path.normpath(root) + os.sep
+                        if norm not in seen_paths:
+                            seen_paths[norm] = (d_rank, -d_mt)
+
+            if depth >= max_depth:
+                dirs[:] = []  # don't descend further, but still process this level's files
+            else:
+                # Filter junk dirs, THEN sort by relevance so os.walk descends
+                # into likely-match folders before noise (the os.walk contract
+                # respects mutations to `dirs` in place).
+                pruned = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith(".")]
+                pruned.sort(key=_dir_priority)
+                dirs[:] = pruned
+            files_in_this_dir = 0
+            for fname in files:
+                files_scanned += 1
+                files_in_this_dir += 1
+                if files_scanned > effective_max_files:
+                    break
+                if files_in_this_dir > PER_DIR_BUDGET:
+                    break  # bail this dir; move on to the next
+                if exts and os.path.splitext(fname)[1].lower() not in exts:
+                    continue
+                fl = fname.lower()
+                if is_glob:
+                    if not fnmatch.fnmatch(fl, name_lower):
+                        continue
+                    rank = 0
+                else:
+                    if name_lower in fl:
+                        # Contiguous substring match — best
+                        if fl == name_lower:
+                            rank = 0
+                        elif fl.startswith(name_lower):
+                            rank = 1
+                        else:
+                            rank = 2
+                    elif len(name_tokens) > 1 and all(tok in fl for tok in name_tokens):
+                        # Token match (all words present, not necessarily adjacent)
+                        rank = 3
+                    else:
+                        continue
+                full = os.path.normpath(os.path.join(root, fname))
+                if full in seen_paths:
+                    continue
+                try:
+                    mt = os.path.getmtime(full)
+                except OSError:
+                    mt = 0
+                seen_paths[full] = (rank, -mt)
+
+    hits: List[Tuple[int, float, str]] = [(r, m, p) for p, (r, m) in seen_paths.items()]
+
+    if not hits:
+        deep_hint = " — try `deep=true` for a wider sweep" if not deep else ""
+        kind_hint = f" of kind '{kind}'" if kind != "any" else ""
+        path_hint = (
+            f" Try narrowing with `path='<specific dir>'` (e.g. `path='G:\\\\SteamLibrary'`)."
+            if not explicit_path else
+            " If the user named a specific drive/folder, you already searched it — "
+            "consider web_search('how to launch <name>') for install-path hints."
+        )
+        return (f"(no files matching '{name}'{kind_hint} after scanning {files_scanned} "
+                f"files{' across ' + str(len(locations)) + ' locations' if not explicit_path else ' under ' + explicit_path}{deep_hint}).{path_hint}")
+
+    hits.sort()
+    shown = [h[2] for h in hits[:limit]]
+    footer = f"\n…[scan budget {MAX_FILES_TO_SCAN} reached]" if files_scanned >= MAX_FILES_TO_SCAN else ""
+    plural = "es" if len(hits) != 1 else ""
+    return (f"{len(hits)} match{plural} (showing top {len(shown)}, sorted by name-rank then recency):\n"
+            + "\n".join(shown) + footer)
+
+
+# ============================================================
+# WEB
+# ============================================================
+
+class _HTMLText(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts: List[str] = []
+        self.skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style", "noscript"):
+            self.skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "noscript") and self.skip:
+            self.skip -= 1
+        if tag in ("p", "br", "div", "h1", "h2", "h3", "h4", "li", "tr"):
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self.skip:
+            text = data.strip()
+            if text:
+                self.parts.append(text + " ")
+
+
+def _http_get(url: str, timeout: int = 15) -> Tuple[int, str, bytes]:
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Jarvis-Local)",
+        "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.status, r.headers.get("Content-Type", ""), r.read()
+
+
+def _web_search(p: Dict) -> str:
+    query = p["query"]
+    limit = int(p.get("limit") or 6)
+    url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
+    try:
+        _, _, body = _http_get(url, 15)
+    except Exception as e:
+        return f"Error: search failed: {e}"
+    html = body.decode("utf-8", errors="replace")
+    # Each result: <a class="result__a" href="...">title</a> ... <a class="result__snippet">snippet</a>
+    pattern = re.compile(
+        r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
+        r'(?:class="result__snippet"[^>]*>(.*?)</a>)?',
+        re.S,
+    )
+    out = []
+    for m in pattern.finditer(html):
+        href, title, snippet = m.group(1), m.group(2), m.group(3) or ""
+        # DDG wraps real URL inside redirect — try to extract uddg=
+        real = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get("uddg", [href])[0]
+        title_t = re.sub(r"<[^>]+>", "", title).strip()
+        snip_t = re.sub(r"<[^>]+>", "", snippet).strip()
+        out.append(f"• {title_t}\n  {real}\n  {snip_t}")
+        if len(out) >= limit:
+            break
+    return "\n\n".join(out) if out else "(no results)"
+
+
+def _web_fetch(p: Dict) -> str:
+    url = p["url"].strip()
+    # Auto-prepend https:// for bare domains. Models often emit
+    # "ishantsingh.vercel.app" without a scheme.
+    if not url.startswith(("http://", "https://", "file://")):
+        url = "https://" + url
+    try:
+        status, ctype, body = _http_get(url, 20)
+    except Exception as e:
+        return f"Error: fetch failed for {url}: {e}"
+    text = body.decode("utf-8", errors="replace")
+    if "json" in ctype.lower():
+        return f"[{status}] {url}\n{text}"
+    parser = _HTMLText()
+    try:
+        parser.feed(text)
+    except Exception:
+        return f"[{status}] {url}\n{text[:5000]}"
+    cleaned = re.sub(r"\n{3,}", "\n\n", "".join(parser.parts)).strip()
+    return f"[{status}] {url}\n{cleaned}"
+
+
+# ============================================================
+# SHELL
+# ============================================================
+
+def _rewrite_python_invocation(cmd: str) -> str:
+    """Route bare `pip`/`python` calls through THIS interpreter
+    (`sys.executable`) — Hearth's venv — so `pip install` lands where Hearth
+    can see it AND `python script.py` never hits the broken Microsoft Store
+    stub (`...\\WindowsApps\\python.exe`) that silently does nothing. That stub
+    was the root of the tictactoe spiral: the script "ran" with no output, so
+    the model kept hunting for a working python.
+
+    Handles COMPOUND commands too — `cd C:\\foo && python x.py` and
+    `setup; python y.py` — by rewriting each `&&`/`;`-separated segment whose
+    first token is python/pip. (The old version only checked the very first
+    token, so anything behind a `cd ... &&` prefix slipped through.)"""
+    if not cmd or not cmd.strip():
+        return cmd
+
+    # PowerShell needs the call operator `&` to run a quoted exe path; harmless
+    # to cmd.exe. See the long note that used to live here.
+    prefix = "& " if sys.platform == "win32" else ""
+
+    def _rewrite_segment(seg: str) -> str:
+        stripped = seg.lstrip()
+        lead = seg[: len(seg) - len(stripped)]  # preserve leading whitespace
+        if not stripped:
+            return seg
+        parts = stripped.split(None, 1)
+        first = parts[0].lower()
+        rest = parts[1] if len(parts) > 1 else ""
+        if first in ("pip", "pip3", "pip.exe"):
+            return f'{lead}{prefix}"{sys.executable}" -m pip {rest}'.rstrip()
+        if first in ("python", "python3", "py", "python.exe", "py.exe"):
+            return f'{lead}{prefix}"{sys.executable}" {rest}'.rstrip()
+        return seg
+
+    # Split on && / ; / & separators, keeping the separators so we can rejoin
+    # losslessly. (A bare `python ...` with no separators is just one segment.)
+    pieces = re.split(r"(\s*(?:&&|;|&)\s*)", cmd)
+    return "".join(
+        _rewrite_segment(p) if i % 2 == 0 else p
+        for i, p in enumerate(pieces)
+    )
+
+
+# Patterns we refuse to run without explicit JARVIS_AUTO_APPROVE=1 — these
+# are the "instantly regretted" kind: filesystem destruction, registry
+# nukes, process murder of common-name targets, force-shutdown, killing
+# everything in a folder. We block at the run_command layer because the
+# model has been known to run these as a "shortcut" instead of using
+# delete_path / move_path / list_processes which have their own gates.
+_DESTRUCTIVE_PATTERNS = [
+    re.compile(r"\bRemove-Item\b", re.I),
+    re.compile(r"\b(rm|del|erase)\b\s+(?!--help|-h\b)", re.I),
+    re.compile(r"\brmdir\b", re.I),
+    re.compile(r"\brd\s+/s\b", re.I),
+    re.compile(r"\bMove-Item\b", re.I),
+    re.compile(r"\b(mv|move)\b\s+[^\s]", re.I),
+    re.compile(r"\bCopy-Item\b", re.I),
+    re.compile(r"^\s*(cp|copy)\b\s+[^\s]", re.I),
+    re.compile(r"\bClear-Content\b", re.I),
+    re.compile(r"\bSet-Content\b", re.I),
+    re.compile(r"\bOut-File\b", re.I),
+    re.compile(r"\bStop-Process\b", re.I),
+    re.compile(r"\b(taskkill|kill|pkill)\b", re.I),
+    re.compile(r"\bShutdown\b|\bRestart-Computer\b", re.I),
+    re.compile(r"\bformat\b\s+[A-Za-z]:", re.I),
+    re.compile(r"\bdiskpart\b", re.I),
+    re.compile(r"\bcipher\b\s+/w", re.I),
+    re.compile(r"\bReg\b\s+(delete|add|import)", re.I),
+    re.compile(r"\bnet\s+user\b", re.I),
+    re.compile(r">\s*[A-Za-z]:[\\/]"),       # output redirect to disk path
+    re.compile(r"\|\s*Out-File"),
+]
+
+
+def _is_destructive(cmd: str) -> Optional[str]:
+    """Returns a short reason string if cmd matches a destructive pattern,
+    else None."""
+    for pat in _DESTRUCTIVE_PATTERNS:
+        m = pat.search(cmd)
+        if m:
+            return m.group(0)
+    return None
+
+
+# Commands that BLOCK the agent (foreground sleep/wait) or wait for keyboard
+# input that will never come (interactive prompts). These freeze the session
+# with no useful output — the user saw `timeout /t 20` freeze the UI for 20s.
+# Always refused (even under auto-approve); a frozen agent is never wanted.
+_BLOCKING_PATTERNS = [
+    re.compile(r"\btimeout\b\s+(/t\s+)?\d", re.I),   # cmd: timeout /t N
+    re.compile(r"\bStart-Sleep\b", re.I),            # PowerShell sleep
+    re.compile(r"(^|[;&|]\s*)sleep\s+\d", re.I),     # unix/git-bash sleep N
+    re.compile(r"\bpause\b", re.I),                  # cmd: pause (waits for key)
+    re.compile(r"\bRead-Host\b", re.I),              # PS interactive prompt
+    re.compile(r"\b(Get-Credential|Read-Host)\b", re.I),
+]
+
+
+def _is_blocking_command(cmd: str) -> Optional[str]:
+    """Returns the matched blocking/interactive snippet, else None."""
+    for pat in _BLOCKING_PATTERNS:
+        m = pat.search(cmd)
+        if m:
+            return m.group(0).strip()
+    return None
+
+
+# A recursive listing of a whole DRIVE ROOT (e.g. `Get-ChildItem C:\ -Recurse`,
+# `dir /s C:\`) can walk hundreds of thousands of files and run for minutes.
+# find_file / locate_path are purpose-built for "find a file by name" and are
+# far faster. We refuse the whole-drive recursive scan; a scan scoped to a
+# specific folder is allowed.
+_RECURSE_FLAG = re.compile(r"(-recurse\b|(^|\s)/s\b)", re.I)
+_DRIVE_ROOT_ARG = re.compile(r"""['"]?[A-Za-z]:[\\/]?['"]?(?=\s|$|\|)""")
+
+
+def _is_whole_drive_scan(cmd: str) -> bool:
+    if not _RECURSE_FLAG.search(cmd):
+        return False
+    for m in _DRIVE_ROOT_ARG.finditer(cmd):
+        tok = m.group(0).strip().strip("'\"")
+        if re.fullmatch(r"[A-Za-z]:[\\/]?", tok):  # a root like C: or C:\, not C:\sub
+            return True
+    return False
+
+
+def _run_command(p: Dict) -> str:
+    cmd = _rewrite_python_invocation(p["command"])
+    cwd = p.get("cwd")
+    # Destructive guardrail. Skipped when the user explicitly auto-approves
+    # everything via env var.
+    if os.environ.get("JARVIS_AUTO_APPROVE", "0") != "1":
+        bad = _is_destructive(cmd)
+        if bad:
+            return (
+                f"Error (run_command): refused to run a destructive command "
+                f"WITHOUT explicit user approval.\n"
+                f"  Detected pattern: '{bad}'\n"
+                f"  Full command:     {cmd}\n\n"
+                f"NEXT STEP: tell the user EXACTLY what this command would do "
+                f"and what it would touch (path, target, etc.). Wait for the "
+                f"user to type 'yes do it' or similar before retrying. Don't "
+                f"retry with `--force`, don't try to bypass with another shell, "
+                f"don't pipe to a different cmdlet. Just ask first.\n"
+                f"If the user truly wants this command auto-run, they can set "
+                f"JARVIS_AUTO_APPROVE=1."
+            )
+    if cwd:
+        cwd = _resolve_read(cwd)
+    else:
+        cwd = WORKSPACE
+    timeout = min(int(p.get("timeout") or 120), 300)
+    shell_pref = (p.get("shell") or "").lower().strip()
+    detached = bool(p.get("detached"))
+
+    # Detached mode — for daemons / UIs / dev servers / launchers that
+    # never exit on their own (Forge WebUI, npm run dev, ollama serve,
+    # game launchers). Spawn the process in a new console and return
+    # immediately. Without this, run_command blocks until the timeout.
+    if detached:
+        try:
+            if sys.platform == "win32" and shell_pref != "cmd":
+                # Detached launchers (game launchers, daemons, dev servers)
+                # WANT their own console window since they print to stdout —
+                # so we keep CREATE_NEW_CONSOLE here. But the PARENT shell
+                # call should still be invisible.
+                proc = subprocess.Popen(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
+                    cwd=cwd,
+                    creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+                )
+            elif sys.platform == "win32":
+                proc = subprocess.Popen(
+                    cmd, cwd=cwd, shell=True,
+                    creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+                )
+            else:
+                proc = subprocess.Popen(shlex.split(cmd), cwd=cwd)
+        except Exception as e:
+            return f"Error launching detached: {e}"
+        return (
+            f"$ {cmd}\n[detached, pid={proc.pid}] launched in a new window. "
+            f"It will keep running until you close that window or kill the pid. "
+            f"Use this for daemons/UIs only — for commands that print output "
+            f"and exit, call without detached."
+        )
+
+    # Blocking/interactive guard (foreground only — detached above is exempt).
+    # A `timeout /t 20` or `Start-Sleep`/`pause`/`Read-Host` would freeze the
+    # whole session with no useful output. Refuse and point at the right tool.
+    _block = _is_blocking_command(cmd)
+    if _block:
+        return (
+            f"Error (run_command): refused '{_block}' — it would BLOCK the session "
+            f"with no useful output (a sleep/timeout/keypress-wait). Never run these. "
+            f"If the user wants a DELAY or to be reminded later, use set_reminder "
+            f"(it fires in the background — you do NOT wait for it). If you were "
+            f"trying to pause before another step, just do the next step directly."
+        )
+
+    if _is_whole_drive_scan(cmd):
+        return (
+            "Error (run_command): refused a whole-drive recursive scan — it can walk "
+            "hundreds of thousands of files and hang for minutes. To FIND a file or "
+            "folder by name, use the find_file or locate_path tool (built for this, "
+            "far faster). If you really need a recursive listing, scope it to a "
+            "specific folder (not a drive root), e.g. a Documents/Downloads subpath."
+        )
+
+    try:
+        if sys.platform == "win32" and shell_pref != "cmd":
+            # Prefer PowerShell on Windows by default — `dir`, `where`,
+            # `tasklist` etc. all work as aliases, AND `Get-ChildItem`,
+            # `Get-Process`, etc. work natively. Lets the model use the
+            # full Windows toolbox without hitting a wall.
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
+                cwd=cwd, capture_output=True, timeout=timeout,
+                creationflags=_NO_WINDOW,
+            )
+        elif sys.platform == "win32":
+            # explicit shell=cmd path
+            r = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True,
+                               timeout=timeout, creationflags=_NO_WINDOW)
+        else:
+            r = subprocess.run(shlex.split(cmd), cwd=cwd, capture_output=True,
+                               timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"Error: '{cmd}' timed out after {timeout}s."
+    except Exception as e:
+        return f"Error: {e}"
+    # Decode with errors='replace' — never let a stray byte (0xDB and friends
+    # from raw file dumps or non-UTF-8 console code-page output) raise inside
+    # subprocess's reader thread. Crashes there came back as empty tool results
+    # and the model spam-retried, eating iterations.
+    stdout = (r.stdout or b"").decode("utf-8", errors="replace")
+    stderr = (r.stderr or b"").decode("utf-8", errors="replace")
+    out = stdout + (("\n[stderr]\n" + stderr) if stderr else "")
+    status_hint = _pip_status_hint(cmd, r.returncode, stdout, stderr)
+    body = out.strip()
+    if status_hint:
+        body = f"{status_hint}\n{body}" if body else status_hint
+    return f"$ {cmd}\n[exit {r.returncode}]\n{body}"
+
+
+def _pip_status_hint(cmd: str, exit_code: int, stdout: str, stderr: str) -> str:
+    """If this looks like a pip install, prepend a one-line status the model
+    can trust without parsing the full pip output. Solves the "model retries
+    pip install 6 times because it can't tell 'Requirement already satisfied'
+    is success" failure mode."""
+    low = cmd.lower()
+    if "pip install" not in low and "pip3 install" not in low:
+        return ""
+    combined = (stdout + "\n" + stderr).strip()
+    if exit_code != 0:
+        return "[pip install FAILED — read error below before retrying]"
+    # Count lines per outcome
+    sat_lines = sum(1 for ln in combined.splitlines()
+                    if "requirement already satisfied" in ln.lower())
+    installed_match = re.search(r"Successfully installed\s+(.+)", combined)
+    if installed_match and sat_lines == 0:
+        return f"[pip install SUCCEEDED — newly installed: {installed_match.group(1).strip()}]"
+    if installed_match and sat_lines > 0:
+        return (f"[pip install SUCCEEDED — newly installed: "
+                f"{installed_match.group(1).strip()}; "
+                f"{sat_lines} package(s) were already present]")
+    if sat_lines > 0:
+        return ("[pip install SUCCEEDED — all requested packages were already "
+                "installed. Don't retry; nothing to do.]")
+    return "[pip install SUCCEEDED — exit 0]"
+
+
+# ============================================================
+# SYSTEM (KNOW MY PC)
+# ============================================================
+
+def _try_psutil():
+    try:
+        import psutil  # type: ignore
+        return psutil
+    except ImportError:
+        return None
+
+
+def _system_info(p: Dict) -> str:
+    psu = _try_psutil()
+    info = {
+        "hostname": socket.gethostname(),
+        "user": os.environ.get("USERNAME") or os.environ.get("USER") or "?",
+        "os": f"{platform.system()} {platform.release()} ({platform.version()})",
+        "arch": platform.machine(),
+        "python": sys.version.split()[0],
+        "cwd": os.getcwd(),
+        "workspace": WORKSPACE,
+    }
+    if psu:
+        vm = psu.virtual_memory()
+        info["cpu_count"] = psu.cpu_count(logical=True)
+        info["cpu_percent"] = f"{psu.cpu_percent(interval=0.2)}%"
+        info["ram_total_gb"] = round(vm.total / (1024**3), 2)
+        info["ram_used_gb"] = round(vm.used / (1024**3), 2)
+        info["ram_percent"] = f"{vm.percent}%"
+        try:
+            boot = datetime.fromtimestamp(psu.boot_time())
+            info["boot_time"] = boot.strftime("%Y-%m-%d %H:%M:%S")
+            info["uptime_hours"] = round((datetime.now() - boot).total_seconds() / 3600, 1)
+        except Exception:
+            pass
+        disks = []
+        for part in psu.disk_partitions(all=False):
+            try:
+                u = psu.disk_usage(part.mountpoint)
+                disks.append({
+                    "mount": part.mountpoint,
+                    "fs": part.fstype,
+                    "total_gb": round(u.total / (1024**3), 1),
+                    "used_pct": f"{u.percent}%",
+                })
+            except OSError:
+                pass
+        info["disks"] = disks
+    else:
+        info["note"] = "Install 'psutil' for CPU/RAM/disk/uptime details: pip install psutil"
+    return json.dumps(info, indent=2)
+
+
+def _list_processes(p: Dict) -> str:
+    psu = _try_psutil()
+    if not psu:
+        return "Error: needs psutil. Run: pip install psutil"
+    flt = (p.get("name_filter") or "").lower()
+    limit = int(p.get("limit") or 20)
+    rows = []
+    for proc in psu.process_iter(["pid", "name", "memory_info", "cpu_percent"]):
+        try:
+            n = proc.info["name"] or ""
+            if flt and flt not in n.lower():
+                continue
+            rss = (proc.info["memory_info"].rss if proc.info["memory_info"] else 0) / (1024 * 1024)
+            rows.append((proc.info["pid"], n, rss, proc.info["cpu_percent"] or 0.0))
+        except (psu.NoSuchProcess, psu.AccessDenied):
+            continue
+    rows.sort(key=lambda r: r[2], reverse=True)
+    rows = rows[:limit]
+    out = ["PID\tNAME\tRAM(MB)\tCPU%"]
+    for pid, n, rss, cpu in rows:
+        out.append(f"{pid}\t{n}\t{rss:.1f}\t{cpu:.1f}")
+    return "\n".join(out)
+
+
+def _network_info(p: Dict) -> str:
+    info = {
+        "hostname": socket.gethostname(),
+    }
+    try:
+        info["local_ip"] = socket.gethostbyname(socket.gethostname())
+    except Exception:
+        info["local_ip"] = "?"
+    psu = _try_psutil()
+    if psu:
+        adapters = {}
+        for name, addrs in psu.net_if_addrs().items():
+            adapters[name] = [
+                {"family": str(a.family), "address": a.address, "netmask": a.netmask}
+                for a in addrs
+            ]
+        info["adapters"] = adapters
+        try:
+            stats = psu.net_io_counters(pernic=False)
+            info["io"] = {
+                "bytes_sent_mb": round(stats.bytes_sent / (1024**2), 1),
+                "bytes_recv_mb": round(stats.bytes_recv / (1024**2), 1),
+            }
+        except Exception:
+            pass
+    return json.dumps(info, indent=2, default=str)
+
+
+def _get_battery(p: Dict) -> str:
+    psu = _try_psutil()
+    if not psu:
+        return "Error: needs psutil."
+    b = psu.sensors_battery()
+    if b is None:
+        return "No battery detected (desktop?)."
+    return json.dumps({
+        "percent": round(b.percent, 1),
+        "plugged": b.power_plugged,
+        "secs_left": b.secsleft if b.secsleft != psu.POWER_TIME_UNLIMITED else "unlimited",
+    }, indent=2)
+
+
+def _disk_usage(p: Dict) -> str:
+    """Walk a directory tree, return top folders by recursive size + top
+    files anywhere under the tree. Pure Python, no shell."""
+    raw = p.get("path") or WORKSPACE
+    base = _resolve_read(raw)
+    if not os.path.isdir(base):
+        return f"Error: not a directory: {base}"
+    top_n = int(p.get("top_n") or 15)
+    kind = (p.get("kind") or "both").lower()
+    max_depth = int(p.get("max_depth") or 1)
+
+    folder_sizes: Dict[str, int] = {}
+    biggest_files: List[Tuple[int, str]] = []
+    total = 0
+    errors = 0
+
+    def _add_file(full: str, size: int):
+        nonlocal total
+        total += size
+        if kind in ("both", "files"):
+            biggest_files.append((size, full))
+
+    if max_depth <= 0:
+        # whole-tree scan, sum into the root
+        for root, dirs, files in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+            for fn in files:
+                full = os.path.join(root, fn)
+                try:
+                    sz = os.path.getsize(full)
+                except OSError:
+                    errors += 1
+                    continue
+                _add_file(full, sz)
+        if kind in ("both", "folders"):
+            folder_sizes[base] = total
+    else:
+        # tally sizes per immediate subfolder of `base`
+        try:
+            top_entries = os.listdir(base)
+        except OSError as e:
+            return f"Error: cannot list {base}: {e}"
+        for entry in top_entries:
+            full = os.path.join(base, entry)
+            try:
+                if os.path.isfile(full):
+                    sz = os.path.getsize(full)
+                    _add_file(full, sz)
+                    continue
+                if not os.path.isdir(full):
+                    continue
+            except OSError:
+                errors += 1
+                continue
+            # recurse INTO this subfolder
+            subtotal = 0
+            for root, dirs, files in os.walk(full):
+                dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+                for fn in files:
+                    fp = os.path.join(root, fn)
+                    try:
+                        sz = os.path.getsize(fp)
+                    except OSError:
+                        errors += 1
+                        continue
+                    subtotal += sz
+                    if kind in ("both", "files"):
+                        biggest_files.append((sz, fp))
+            total += subtotal
+            if kind in ("both", "folders"):
+                folder_sizes[full] = subtotal
+
+    def _fmt(n: int) -> str:
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024:
+                return f"{n:6.1f} {unit}"
+            n /= 1024
+        return f"{n:6.1f} PB"
+
+    out: List[str] = [f"path: {base}", f"total scanned: {_fmt(total)}", ""]
+    if kind in ("both", "folders"):
+        out.append(f"top {top_n} folders by size:")
+        sorted_folders = sorted(folder_sizes.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+        for path, sz in sorted_folders:
+            out.append(f"  {_fmt(sz)}  {path}")
+        out.append("")
+    if kind in ("both", "files"):
+        out.append(f"top {top_n} files by size:")
+        biggest_files.sort(key=lambda x: x[0], reverse=True)
+        for sz, path in biggest_files[:top_n]:
+            out.append(f"  {_fmt(sz)}  {path}")
+    if errors:
+        out.append(f"\n({errors} entries skipped — permission/access errors)")
+    return "\n".join(out)
+
+
+def _locate_path(p: Dict) -> str:
+    """Smart locator — finds a path/app by name across drives + start menu
+    + registry without recursive globbing. Same chain I'd use by hand."""
+    query = (p.get("query") or "").strip()
+    if not query:
+        return "Error: missing query"
+    q_lower = query.lower()
+    limit = int(p.get("limit") or 15)
+    results: List[Tuple[str, str]] = []  # (source_tag, path_or_label)
+    seen: set = set()
+
+    def _try_add(tag: str, path: str) -> None:
+        if path in seen:
+            return
+        seen.add(path)
+        results.append((tag, path))
+
+    # 1) Top-level dirs of every mounted drive (A-Z, not just C-P).
+    # Mirrors find_file's drive enumeration so SteamLibrary on G:, media on
+    # F:, etc. all get covered.
+    if sys.platform == "win32":
+        drives = []
+        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            root = f"{letter}:\\"
+            try:
+                if os.path.isdir(root):
+                    drives.append(root)
+            except OSError:
+                continue
+    else:
+        drives = ["/"]
+    # Note: no early-break here — we want all sources to contribute candidates
+    # even on big drives. The limit gets applied to the final ranked list.
+    for root in drives:
+        try:
+            for entry in os.listdir(root):
+                # Skip Windows system folders that show up at every drive root
+                if entry in EXCLUDE_DIRS:
+                    continue
+                if q_lower in entry.lower():
+                    _try_add(f"drive_root({root[:2]})", os.path.join(root, entry))
+        except (OSError, PermissionError):
+            continue
+
+    # 2) Common parent dirs (one level deeper)
+    common_parents = [
+        os.path.expanduser("~\\Documents"),
+        os.path.expanduser("~\\Downloads"),
+        os.path.expanduser("~\\Desktop"),
+        os.environ.get("ProgramFiles", "C:\\Program Files"),
+        os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+        os.environ.get("LOCALAPPDATA", ""),
+        os.environ.get("APPDATA", ""),
+    ]
+    for parent in common_parents:
+        if not parent or not os.path.isdir(parent):
+            continue
+        try:
+            for entry in os.listdir(parent):
+                if q_lower in entry.lower():
+                    _try_add("common_dir", os.path.join(parent, entry))
+        except (OSError, PermissionError):
+            continue
+
+    # 3) Start Menu shortcuts
+    if sys.platform == "win32":
+        lnk = _find_start_menu_lnk(query)
+        if lnk:
+            _try_add("start_menu", lnk)
+
+    # 4) Registry-installed apps
+    if sys.platform == "win32":
+        try:
+            apps = _list_installed_apps({"name_filter": query, "limit": 8})
+            if apps and not apps.startswith("Error") and apps != "(none)":
+                for line in apps.splitlines():
+                    line = line.strip()
+                    if line:
+                        _try_add("registry", line)
+        except Exception:
+            pass
+
+    if not results:
+        return f"(nothing matching {query!r} in drive roots / common dirs / start menu / registry)"
+
+    out = [f"Found {len(results)} match(es) for {query!r}:"]
+    for source, path in results[:limit]:
+        out.append(f"  [{source}] {path}")
+    return "\n".join(out)
+
+
+def _list_installed_apps(p: Dict) -> str:
+    if sys.platform != "win32":
+        return "Error: Windows-only (uses registry)."
+    flt = (p.get("name_filter") or "").lower()
+    limit = int(p.get("limit") or 50)
+    try:
+        import winreg
+    except ImportError:
+        return "Error: winreg unavailable."
+
+    keys = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ]
+    seen = set()
+    apps = []
+    for hive, sub in keys:
+        try:
+            with winreg.OpenKey(hive, sub) as k:
+                i = 0
+                while True:
+                    try:
+                        skn = winreg.EnumKey(k, i)
+                    except OSError:
+                        break
+                    i += 1
+                    try:
+                        with winreg.OpenKey(k, skn) as sk:
+                            try:
+                                name = winreg.QueryValueEx(sk, "DisplayName")[0]
+                            except FileNotFoundError:
+                                continue
+                            try:
+                                ver = winreg.QueryValueEx(sk, "DisplayVersion")[0]
+                            except FileNotFoundError:
+                                ver = ""
+                            try:
+                                pub = winreg.QueryValueEx(sk, "Publisher")[0]
+                            except FileNotFoundError:
+                                pub = ""
+                            key = (name, ver)
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            if flt and flt not in name.lower():
+                                continue
+                            apps.append((name, ver, pub))
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    apps.sort(key=lambda a: a[0].lower())
+    apps = apps[:limit]
+    out = [f"{n} {v}  —  {pub}" for n, v, pub in apps]
+    return "\n".join(out) if out else "(none)"
+
+
+# ============================================================
+# APP CONTROL
+# ============================================================
+
+# Verbose-name → canonical-executable map. Intentionally excludes regedit
+# and other sensitive launchers — those would need an explicit user request
+# anyway. Sandbox covers FILE ops, not what GUI apps do once running.
+_COMMON_APP_ALIASES = {
+    "calculator": "calc",
+    "calc": "calc",
+    "notepad": "notepad",
+    "paint": "mspaint",
+    "ms paint": "mspaint",
+    "explorer": "explorer",
+    "file explorer": "explorer",
+    "command prompt": "cmd",
+    "cmd": "cmd",
+    "powershell": "powershell",
+    "terminal": "wt",  # Windows Terminal if installed
+    "edge": "msedge",
+    "browser": "msedge",
+}
+
+
+def _find_start_menu_lnk(query: str) -> Optional[str]:
+    """Scan Start Menu + Desktop for a .lnk whose stem matches `query`
+    (case-insensitive substring). Returns full path or None.
+
+    Many users keep game launchers, app shortcuts etc. on the Desktop, not
+    in Start Menu — checking only Start Menu means open_app fails on every
+    desktop-shortcut game launcher."""
+    if sys.platform != "win32":
+        return None
+    roots = [
+        os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
+        os.path.join(os.environ.get("PROGRAMDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
+        # Desktop shortcuts — primary location for game launchers
+        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"),
+        os.path.join(os.environ.get("PUBLIC", ""), "Desktop"),
+        # OneDrive-managed Desktop (Windows 10+ often redirects here)
+        os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "Desktop"),
+        os.path.join(os.environ.get("ONEDRIVE", ""), "Desktop"),
+    ]
+    q = query.lower().strip()
+    fuzzy: Optional[str] = None
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        for dirpath, _, filenames in os.walk(root):
+            for fn in filenames:
+                if not fn.lower().endswith(".lnk"):
+                    continue
+                stem = os.path.splitext(fn)[0]
+                low = stem.lower()
+                if low == q:
+                    return os.path.join(dirpath, fn)
+                if fuzzy is None and q in low:
+                    fuzzy = os.path.join(dirpath, fn)
+    return fuzzy
+
+
+def _windows_uwp_uri(canonical: str) -> Optional[str]:
+    """Some Windows apps live as UWP and respond to URI schemes. Returns the
+    URI to feed `start` / os.startfile, or None."""
+    uwp = {
+        "calc": "calculator://",
+        "calculator": "calculator://",
+        "ms-settings": "ms-settings:",
+        "settings": "ms-settings:",
+    }
+    return uwp.get(canonical.lower())
+
+
+def _open_app(p: Dict) -> str:
+    name = (p.get("name") or "").strip()
+    if not name:
+        return "Error: missing app name"
+    # Strip surrounding quotes — model sometimes wraps paths in literal quotes
+    # (e.g. `"G:\Assassins Creed II\Game.exe"`), which then never resolves.
+    if (name.startswith('"') and name.endswith('"')) or (name.startswith("'") and name.endswith("'")):
+        name = name[1:-1].strip()
+    # Drop common UI suffixes that don't exist as executable names. Users say
+    # "Brave Browser" but the binary is just `brave.exe` and the Start Menu
+    # shortcut is "Brave". Same for "Google Chrome", "Discord Inc", etc.
+    bare = re.sub(r"\s+(browser|browsers|app|application|inc|launcher|client)$",
+                  "", name, flags=re.IGNORECASE).strip()
+    if bare and bare.lower() != name.lower():
+        # Try the bare name first, fall through to original if not found.
+        # We mutate canonical lookup below to use bare; original name remains
+        # available for the error message.
+        canonical_attempt_first = bare
+    else:
+        canonical_attempt_first = name
+
+    # Map verbose names → canonical executables
+    canonical = _COMMON_APP_ALIASES.get(canonical_attempt_first.lower(), canonical_attempt_first)
+
+    if sys.platform == "win32":
+        # 1. Real file path / folder path — opens with default association
+        # (videos in default player, .rar in archive viewer, folders in Explorer, etc.)
+        # Check this BEFORE PATH lookup so 'G:\foo.rar' isn't mistaken for an exe.
+        cand_path = os.path.expanduser(canonical)
+        if os.path.exists(cand_path):
+            os.startfile(cand_path)  # type: ignore[attr-defined]
+            return f"opened: {cand_path}"
+
+        # 2. URL-shaped → open in default browser via os.startfile
+        if canonical.startswith(("http://", "https://", "file://")):
+            os.startfile(canonical)  # type: ignore[attr-defined]
+            return f"opened url: {canonical}"
+
+        # 3. Direct PATH lookup (calc, notepad, mspaint, explorer, etc.)
+        for cand in (canonical, canonical + ".exe"):
+            full = shutil.which(cand)
+            if full:
+                subprocess.Popen([full], shell=False, close_fds=True,
+                                 creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+                return f"launched: {full}"
+
+        # 4. UWP URI scheme (Calculator on Win10/11 lives as a UWP app)
+        uri = _windows_uwp_uri(canonical)
+        if uri:
+            try:
+                os.startfile(uri)  # type: ignore[attr-defined]
+                return f"launched UWP: {uri}"
+            except OSError:
+                pass
+
+        # 5. Start Menu shortcut search
+        lnk = _find_start_menu_lnk(canonical)
+        if lnk:
+            os.startfile(lnk)  # type: ignore[attr-defined]
+            return f"launched: {os.path.basename(lnk)[:-4]} (via Start Menu shortcut)"
+
+        # 5. Failure — surface a real error and suggest matches
+        suggestions: List[str] = []
+        try:
+            installed = _list_installed_apps({"name_filter": canonical, "limit": 5})
+            if installed and not installed.startswith("Error") and installed != "(none)":
+                suggestions = [ln.split("  —")[0].strip() for ln in installed.splitlines() if ln.strip()]
+        except Exception:
+            pass
+        msg = (
+            f"Error: could not find '{name}' on this system. "
+            f"Tried PATH, UWP URI, file path, and Start Menu shortcuts. "
+            f"NEXT STEP: if '{name}' is a known web service (Discord, Spotify, "
+            f"WhatsApp, Telegram, YouTube, Twitter, Reddit, Gmail, Notion, "
+            f"GitHub, Slack, ChatGPT, Claude, etc.), call open_in_browser with "
+            f"the canonical URL (e.g. https://{name.lower()}.com) — that's the "
+            f"right fallback. Do NOT ask the user where it's installed."
+        )
+        if suggestions:
+            msg += "\nClosest installed matches (use list_installed_apps for more):\n  " + "\n  ".join(suggestions)
+        else:
+            msg += (
+                "\nTry an .exe name like 'calc', 'notepad', 'chrome', or "
+                "call list_installed_apps to find the registered name."
+            )
+        return msg
+
+    # Unix
+    full = shutil.which(canonical)
+    if not full:
+        return f"Error: '{canonical}' not found in PATH."
+    subprocess.Popen([full])
+    return f"launched: {full}"
+
+
+# --------------------------------------------------------------------------
+# Browser detection + URL helpers
+# --------------------------------------------------------------------------
+
+_BROWSER_CANDIDATES = {
+    "chrome": [
+        r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+        r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+        r"%LocalAppData%\Google\Chrome\Application\chrome.exe",
+    ],
+    "brave": [
+        r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe",
+        r"%ProgramFiles(x86)%\BraveSoftware\Brave-Browser\Application\brave.exe",
+        r"%LocalAppData%\BraveSoftware\Brave-Browser\Application\brave.exe",
+    ],
+    "edge": [
+        r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+        r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+    ],
+    "firefox": [
+        r"%ProgramFiles%\Mozilla Firefox\firefox.exe",
+        r"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe",
+    ],
+    "opera": [
+        r"%LocalAppData%\Programs\Opera\opera.exe",
+        r"%ProgramFiles%\Opera\opera.exe",
+    ],
+    "vivaldi": [
+        r"%LocalAppData%\Vivaldi\Application\vivaldi.exe",
+        r"%ProgramFiles%\Vivaldi\Application\vivaldi.exe",
+    ],
+}
+
+
+def _resolve_browser(name: str) -> Optional[str]:
+    """Return the absolute path to a browser executable, or None."""
+    name = (name or "").lower().strip()
+    if name not in _BROWSER_CANDIDATES:
+        # Try as a raw name on PATH
+        full = shutil.which(name) or shutil.which(name + ".exe")
+        return full
+    for raw in _BROWSER_CANDIDATES[name]:
+        path = os.path.expandvars(raw)
+        if os.path.isfile(path):
+            return path
+    # Last try: PATH
+    for stem in (name, name + ".exe"):
+        full = shutil.which(stem)
+        if full:
+            return full
+    return None
+
+
+def _list_browsers(p: Dict) -> str:
+    found: List[Tuple[str, str]] = []
+    for name in _BROWSER_CANDIDATES:
+        path = _resolve_browser(name)
+        if path:
+            found.append((name, path))
+    if not found:
+        return "(no browsers detected — try opening a URL with the system default via open_url)"
+    return "\n".join(f"  {name:<10} {path}" for name, path in found)
+
+
+def _validate_url(p: Dict) -> str:
+    raw_url = (p.get("url") or "").strip()
+    if not raw_url:
+        return "Error: missing url"
+    if not raw_url.startswith(("http://", "https://")):
+        raw_url = "https://" + raw_url
+    import time as _time
+    t0 = _time.time()
+    try:
+        # Try HEAD first (cheap), fall back to GET if server doesn't allow it
+        req = urllib.request.Request(raw_url, method="HEAD", headers={
+            "User-Agent": "Mozilla/5.0 (Jarvis-Local)",
+        })
+        try:
+            r = urllib.request.urlopen(req, timeout=10)
+        except urllib.error.HTTPError as he:
+            if he.code in (405, 400):
+                req = urllib.request.Request(raw_url, headers={
+                    "User-Agent": "Mozilla/5.0 (Jarvis-Local)",
+                })
+                r = urllib.request.urlopen(req, timeout=10)
+            else:
+                raise
+        ms = int((_time.time() - t0) * 1000)
+        info = {
+            "url": raw_url,
+            "status": r.status,
+            "ok": 200 <= r.status < 400,
+            "final_url": r.geturl(),
+            "content_type": r.headers.get("Content-Type", ""),
+            "response_ms": ms,
+        }
+        return json.dumps(info, indent=2)
+    except urllib.error.HTTPError as e:
+        return json.dumps({"url": raw_url, "status": e.code, "ok": False,
+                           "error": str(e)}, indent=2)
+    except Exception as e:
+        return json.dumps({"url": raw_url, "ok": False,
+                           "error": f"{type(e).__name__}: {e}"}, indent=2)
+
+
+def _resolve_chromium_profile(exe_path: str, name_or_dir: str) -> str:
+    """Map a friendly profile name ('personal', 'work') to its on-disk
+    directory ('Profile 5', 'Default') by reading the browser's Local State
+    JSON. If name_or_dir already names an existing profile dir, returns it
+    unchanged. Returns name_or_dir as-is when resolution fails — caller can
+    still try passing it raw to Chrome and accept the silent fallback.
+
+    Why this exists: Chrome/Brave/Edge store profiles as `Profile 1`, `Profile
+    2`, etc. on disk, but show them to the user under friendly names ("Work",
+    "Personal", a Gmail address). Users say "open in my personal profile" —
+    that string never matches a dir name, so `--profile-directory=personal`
+    silently does nothing. This maps it correctly."""
+    if not name_or_dir:
+        return name_or_dir
+
+    exe_lower = exe_path.lower()
+    appdata = os.environ.get("LOCALAPPDATA", "")
+    user_data: Optional[str] = None
+    if "brave" in exe_lower:
+        user_data = os.path.join(appdata, "BraveSoftware", "Brave-Browser", "User Data")
+    elif "chrome" in exe_lower:
+        user_data = os.path.join(appdata, "Google", "Chrome", "User Data")
+    elif "edge" in exe_lower or "msedge" in exe_lower:
+        user_data = os.path.join(appdata, "Microsoft", "Edge", "User Data")
+    elif "vivaldi" in exe_lower:
+        user_data = os.path.join(appdata, "Vivaldi", "User Data")
+    if not user_data or not os.path.isdir(user_data):
+        return name_or_dir
+
+    # Priority: display-name match wins over literal dir name. Most users
+    # say "open my work profile" expecting the DISPLAY name from Chrome's
+    # profile picker; literal dir names like "Profile 5" are rarely typed
+    # but can happen, so we accept those as a second pass.
+    local_state = os.path.join(user_data, "Local State")
+    target = name_or_dir.lower()
+    if os.path.isfile(local_state):
+        try:
+            with open(local_state, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            info_cache = data.get("profile", {}).get("info_cache", {})
+            # 1. Exact display-name match (case-insensitive)
+            for dir_name, info in info_cache.items():
+                if (info.get("name") or "").lower() == target:
+                    return dir_name
+            # 2. Substring display-name match
+            for dir_name, info in info_cache.items():
+                if target in (info.get("name") or "").lower():
+                    return dir_name
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # 3. Fallback: maybe they typed the literal dir name (Default, Profile 1)
+    if os.path.isdir(os.path.join(user_data, name_or_dir)):
+        return name_or_dir
+
+    return name_or_dir
+
+
+def _list_chromium_profiles(exe_path: str) -> str:
+    """Return a pretty list of `Display name -> dir` for the browser at exe_path.
+    Used in error messages so the model can tell the user what's available."""
+    appdata = os.environ.get("LOCALAPPDATA", "")
+    exe_lower = exe_path.lower()
+    user_data = None
+    if "brave" in exe_lower:
+        user_data = os.path.join(appdata, "BraveSoftware", "Brave-Browser", "User Data")
+    elif "chrome" in exe_lower:
+        user_data = os.path.join(appdata, "Google", "Chrome", "User Data")
+    elif "edge" in exe_lower or "msedge" in exe_lower:
+        user_data = os.path.join(appdata, "Microsoft", "Edge", "User Data")
+    if not user_data or not os.path.isdir(user_data):
+        return ""
+    local_state = os.path.join(user_data, "Local State")
+    if not os.path.isfile(local_state):
+        return ""
+    try:
+        with open(local_state, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        info_cache = data.get("profile", {}).get("info_cache", {})
+        lines = []
+        for dir_name, info in sorted(info_cache.items()):
+            display = info.get("name") or "(unnamed)"
+            lines.append(f"  {display!r}  ->  {dir_name}")
+        return "\n".join(lines) if lines else ""
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+
+def _open_in_browser(p: Dict) -> str:
+    url = (p.get("url") or "").strip()
+    if not url:
+        return "Error: missing url"
+    if not url.startswith(("http://", "https://", "file://")):
+        url = "https://" + url
+    browser = (p.get("browser") or "").strip()
+    profile = (p.get("profile") or "").strip()
+
+    if not browser:
+        # No browser specified — fall through to system default
+        try:
+            os.startfile(url)  # type: ignore[attr-defined]
+            return f"opened in default browser: {url}"
+        except Exception as e:
+            return f"Error: could not open {url}: {e}"
+
+    exe = _resolve_browser(browser)
+    if not exe:
+        installed = _list_browsers({})
+        return (
+            f"Error: '{browser}' not found on this machine.\n"
+            f"Installed browsers:\n{installed}"
+        )
+
+    args: List[str] = [exe]
+    if profile:
+        # Chromium-family (chrome, brave, edge, vivaldi, opera) use --profile-directory
+        # Firefox uses -P / --new-window with profile-name
+        is_firefox = "firefox" in os.path.basename(exe).lower()
+        if is_firefox:
+            args += ["-P", profile]
+        else:
+            # User said "personal" — that's the display name. Resolve to the
+            # actual on-disk dir like "Profile 5". Falls back to raw string if
+            # we can't resolve, which is the old broken behavior.
+            resolved = _resolve_chromium_profile(exe, profile)
+            args += [f"--profile-directory={resolved}"]
+            # If we couldn't resolve a friendly name to a real dir, tell the
+            # user (helps the model recover when they typed a name that
+            # doesn't exist).
+            if resolved == profile and not os.path.isdir(
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), profile)
+            ):
+                available = _list_chromium_profiles(exe)
+                if available and profile.lower() not in available.lower():
+                    # We're firing off the launch anyway (Chrome will silently
+                    # fall back to Default), but warn so model + user know.
+                    args.append(url)
+                    try:
+                        subprocess.Popen(args, shell=False, close_fds=True,
+                                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+                    except Exception as e:
+                        return f"Error launching {browser}: {e}"
+                    return (
+                        f"opened in {browser} (profile '{profile}' not found — "
+                        f"opened in default instead).\nAvailable profiles:\n{available}"
+                    )
+    args.append(url)
+    try:
+        subprocess.Popen(args, shell=False, close_fds=True,
+                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+    except Exception as e:
+        return f"Error launching {browser}: {e}"
+    pretty = browser + (f" / {profile}" if profile else "")
+    return f"opened in {pretty}: {url}"
+
+
+def _open_url(p: Dict) -> str:
+    import webbrowser
+    url = (p.get("url") or "").strip()
+    if not url:
+        return "Error: missing url"
+    if not url.startswith(("http://", "https://", "file://")):
+        url = "https://" + url
+    webbrowser.open(url)
+    return f"opened: {url}"
+
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+
+def _view_image(p: Dict) -> str:
+    """Read an image and return a marker the runtime understands.
+
+    - In LM Studio (via MCP), the mcp_server wraps this into an Image
+      content block so LM Studio shows the image to the model — vision
+      kicks in automatically on the next turn.
+    - In the CLI, the runtime auto-attaches the most recent image when
+      the user references it by name; this tool is a fallback.
+    """
+    raw = (p.get("path") or "").strip().strip('"').strip("'")
+    if not raw:
+        return "Error: missing path"
+    path = os.path.expanduser(raw)
+    if not os.path.isabs(path):
+        path = os.path.abspath(path)
+    if not os.path.isfile(path):
+        return f"Error: not a file: {path}"
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in _IMAGE_EXTS:
+        return f"Error: not a recognized image extension ({ext}). Supported: {sorted(_IMAGE_EXTS)}"
+    size = os.path.getsize(path)
+    if size > 20 * 1024 * 1024:
+        return f"Error: image too large ({size // 1024 // 1024}MB, max 20MB)"
+    # Return a structured marker. mcp_server.py detects this prefix and
+    # converts the call to a real Image content. The CLI just shows the
+    # text — its auto-attach handles vision separately.
+    return f"__JARVIS_IMAGE__ {path} ({size} bytes, {ext[1:]})"
+
+
+def _screenshot(p: Dict) -> str:
+    try:
+        from PIL import ImageGrab  # type: ignore
+    except ImportError:
+        return "Error: needs Pillow. Run: pip install pillow"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = os.path.join(SHOTS_DIR, f"shot_{ts}.png")
+    img = ImageGrab.grab()
+    img.save(out)
+    # Strong directive in the tool result — small models drop the path and
+    # yield; making the next action obvious in the result text fixes that.
+    return (
+        f"Saved: {out} ({img.size[0]}x{img.size[1]})\n"
+        f"NEXT STEP: if the user asked you to DESCRIBE / TELL THEM WHAT'S "
+        f"ON the screen, call view_image with path='{out}' RIGHT NOW in "
+        f"this same turn — don't stop here. If they asked you to SHOW or "
+        f"OPEN the screenshot in their gallery, call open_app with that "
+        f"path instead. Only stop if they only asked you to CAPTURE."
+    )
+
+
+def _clipboard_read(p: Dict) -> str:
+    if sys.platform == "win32":
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+                capture_output=True, text=True, timeout=5,
+                creationflags=_NO_WINDOW,
+            )
+            return r.stdout.rstrip("\r\n") or "(empty)"
+        except Exception as e:
+            return f"Error: {e}"
+    try:
+        from tkinter import Tk
+        root = Tk()
+        root.withdraw()
+        text = root.clipboard_get()
+        root.destroy()
+        return text or "(empty)"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def _clipboard_write(p: Dict) -> str:
+    text = p.get("text", "")
+    if sys.platform == "win32":
+        try:
+            r = subprocess.run(["clip"], input=text, text=True, timeout=5,
+                               creationflags=_NO_WINDOW)
+            return f"Copied ({len(text)} chars)" if r.returncode == 0 else "Error: clip failed"
+        except Exception as e:
+            return f"Error: {e}"
+    try:
+        from tkinter import Tk
+        root = Tk()
+        root.withdraw()
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+        root.destroy()
+        return f"Copied ({len(text)} chars)"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ============================================================
+# MEMORY (per-fact files + index, in hearth/memory.py)
+# ============================================================
+
+def _memory_save(p: Dict) -> str:
+    from . import memory  # local import to avoid circular at module load
+    return memory.save(
+        title=p["title"],
+        mtype=p.get("type", "user"),
+        description=p.get("description", ""),
+        body=p.get("body", ""),
+        tags=p.get("tags") or [],
+    )
+
+
+def _memory_recall(p: Dict) -> str:
+    from . import memory
+    return memory.recall(p.get("query", ""), int(p.get("limit") or 5))
+
+
+def _memory_list(p: Dict) -> str:
+    from . import memory
+    return memory.list_index()
+
+
+def _memory_forget(p: Dict) -> str:
+    from . import memory
+    return memory.forget(p["title"])
+
+
+# ============================================================
+# TIME
+# ============================================================
+
+# --------------------------------------------------------------------------
+# Forge WebUI orchestration (Stable Diffusion image generation).
+# Point JARVIS_FORGE_DIR at your local Forge / SD-WebUI install (e.g.
+# D:\AI\sd-webui-forge). We boot it with --api so /sdapi/v1/* is exposed.
+# --------------------------------------------------------------------------
+
+FORGE_DIR = os.environ.get("JARVIS_FORGE_DIR", "")
+FORGE_URL = os.environ.get("JARVIS_FORGE_URL", "http://127.0.0.1:7860")
+FORGE_BOOT_TIMEOUT = int(os.environ.get("JARVIS_FORGE_BOOT_TIMEOUT", "180"))
+
+# Track the subprocess so we can shut it down later. Module-level so it
+# survives across tool calls within a single Jarvis session.
+_forge_proc: Optional[subprocess.Popen] = None
+
+
+def _forge_reachable(timeout: float = 1.5) -> bool:
+    try:
+        req = urllib.request.Request(f"{FORGE_URL}/sdapi/v1/options",
+                                     method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _forge_status(p: Dict) -> str:
+    proc_alive = _forge_proc is not None and _forge_proc.poll() is None
+    reachable = _forge_reachable()
+    info = {
+        "forge_dir": FORGE_DIR,
+        "url": FORGE_URL,
+        "process_managed_by_jarvis": proc_alive,
+        "api_reachable": reachable,
+        "ready": reachable,
+    }
+    if not os.path.isdir(FORGE_DIR):
+        info["error"] = f"FORGE_DIR not found: {FORGE_DIR} — set JARVIS_FORGE_DIR"
+    return json.dumps(info, indent=2)
+
+
+def _boot_forge() -> str:
+    """Launch Forge with --api flag. Returns '' on success, error message on
+    failure. Already-running Forge counts as success."""
+    global _forge_proc
+    if _forge_reachable():
+        return ""  # already up — fine
+    if not os.path.isdir(FORGE_DIR):
+        return f"Error: Forge dir not found: {FORGE_DIR}"
+    # Use the universal launcher which sets up venv + env, plus --api so
+    # /sdapi/v1/* is exposed. --nowebui would disable the gradio UI entirely
+    # but many setups need the UI thread alive; --api alongside the UI is
+    # the safest default.
+    webui_bat = os.path.join(FORGE_DIR, "webui.bat")
+    if not os.path.isfile(webui_bat):
+        # fall back to webui-user.bat which chains into webui.bat
+        webui_bat = os.path.join(FORGE_DIR, "webui-user.bat")
+    if not os.path.isfile(webui_bat):
+        return f"Error: no webui.bat or webui-user.bat in {FORGE_DIR}"
+    try:
+        _forge_proc = subprocess.Popen(
+            ["cmd", "/c", webui_bat, "--api", "--listen=127.0.0.1"],
+            cwd=FORGE_DIR,
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+            stdin=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        return f"Error launching Forge: {e}"
+    # Poll until the API answers
+    import time as _t
+    deadline = _t.time() + FORGE_BOOT_TIMEOUT
+    while _t.time() < deadline:
+        if _forge_reachable(timeout=2.0):
+            return ""
+        if _forge_proc.poll() is not None:
+            return f"Error: Forge process exited with code {_forge_proc.returncode}"
+        _t.sleep(2)
+    return f"Error: Forge didn't become reachable on {FORGE_URL} within {FORGE_BOOT_TIMEOUT}s"
+
+
+def _try_release_llm_vram() -> str:
+    """Best-effort: tell LM Studio to JIT-eject the loaded model so Forge
+    can grab VRAM. LM Studio's native API (/api/v0/models/<id>) supports
+    POST with body {"loaded": false}, but the exact shape varies by build.
+    We try both shapes; failure is non-fatal (Forge can also coexist if
+    you have enough VRAM headroom)."""
+    base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
+    native = base.replace("/v1", "/api/v0")
+    candidates = [
+        # Newer LM Studio: /api/v0/models with action
+        (f"{native}/models/unload", b""),
+        (f"{base}/models/unload", b""),
+    ]
+    for url, body in candidates:
+        try:
+            req = urllib.request.Request(url, data=body, method="POST")
+            with urllib.request.urlopen(req, timeout=3) as r:
+                if 200 <= r.status < 300:
+                    return f"unloaded via {url}"
+        except Exception:
+            continue
+    return "LM Studio unload not exposed — relying on VRAM headroom"
+
+
+def _forge_shutdown(p: Dict) -> str:
+    global _forge_proc
+    msgs = []
+    if _forge_proc is not None and _forge_proc.poll() is None:
+        try:
+            # Send Ctrl-Break to the new console group on Windows, then kill
+            if sys.platform == "win32":
+                _forge_proc.send_signal(subprocess.signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        try:
+            _forge_proc.terminate()
+            _forge_proc.wait(timeout=10)
+            msgs.append("forge process terminated")
+        except subprocess.TimeoutExpired:
+            _forge_proc.kill()
+            msgs.append("forge process killed (didn't terminate cleanly)")
+        except Exception as e:
+            msgs.append(f"shutdown error: {e}")
+        _forge_proc = None
+    else:
+        # Maybe the user launched it manually — try the API's own shutdown
+        try:
+            req = urllib.request.Request(
+                f"{FORGE_URL}/sdapi/v1/server-kill",
+                data=b"",
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as _r:
+                msgs.append("requested forge api shutdown")
+        except Exception:
+            msgs.append("no jarvis-managed forge to kill, and API kill failed")
+    return "; ".join(msgs) or "nothing to do"
+
+
+def _forge_generate(p: Dict) -> str:
+    """Run the full txt2img pipeline. Returns the path to the saved image
+    or an Error: line."""
+    import base64 as _b64
+
+    positive = (p.get("positive") or "").strip()
+    if not positive:
+        return "Error: positive prompt required"
+    negative = (p.get("negative") or
+                "score_6, score_5, score_4, low quality, blurry, deformed, "
+                "extra limbs, bad anatomy")
+    width = int(p.get("width") or 1024)
+    height = int(p.get("height") or 1024)
+    steps = int(p.get("steps") or 25)
+    cfg = float(p.get("cfg_scale") or 6.0)
+    sampler = p.get("sampler") or "Euler a"
+    seed = int(p.get("seed") or -1)
+
+    # 1) Free LM Studio's VRAM (best-effort)
+    vram_msg = _try_release_llm_vram()
+
+    # 2) Make sure Forge is up
+    boot_err = _boot_forge()
+    if boot_err:
+        return boot_err
+
+    # 3) txt2img
+    body = json.dumps({
+        "prompt": positive,
+        "negative_prompt": negative,
+        "width": width,
+        "height": height,
+        "steps": steps,
+        "cfg_scale": cfg,
+        "sampler_name": sampler,
+        "seed": seed,
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            f"{FORGE_URL}/sdapi/v1/txt2img",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=600) as r:
+            payload = json.loads(r.read().decode())
+    except Exception as e:
+        return f"Error: txt2img call failed: {e}"
+
+    images = payload.get("images") or []
+    if not images:
+        return f"Error: Forge returned no images. Response info: {payload.get('info', '')[:300]}"
+
+    # 4) Save the first image
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(SHOTS_DIR, f"forge_{ts}.png")
+    try:
+        with open(out_path, "wb") as f:
+            f.write(_b64.b64decode(images[0]))
+    except Exception as e:
+        return f"Error: failed to decode/save image: {e}"
+
+    return (
+        f"Saved: {out_path}\n"
+        f"prompt: {positive}\n"
+        f"seed: {payload.get('info', '')[:200]}\n"
+        f"(VRAM: {vram_msg}. Forge is still running — call forge_shutdown to free VRAM.)"
+    )
+
+
+def _set_voice(p: Dict) -> str:
+    from . import voice as _voice
+    name = (p.get("name") or "").strip()
+    if not name:
+        return "Error: missing voice name"
+    _voice.set_default_voice(name)
+    if _voice.is_available():
+        _voice.stop()
+        _voice.speak(f"voice set to {name}", blocking=False)
+        return f"voice set to {name} (sample playing)"
+    return f"voice id stored as {name}, but engine not loaded yet — check /voice"
+
+
+def _list_voices(p: Dict) -> str:
+    from . import voice as _voice
+    return "Available Kokoro voices:\n  " + "\n  ".join(_voice.list_voices())
+
+
+def _end_session(p: Dict) -> str:
+    # The CLI watches for this tool name and exits after the response. The
+    # tool itself is a no-op marker so it works the same way through MCP
+    # (where it just acknowledges) or the CLI (where it triggers shutdown).
+    return "session_end_signaled"
+
+
+def _get_time(p: Dict) -> str:
+    now = datetime.now().astimezone()
+    return json.dumps({
+        "iso": now.isoformat(timespec="seconds"),
+        "local": now.strftime("%A, %d %B %Y %H:%M:%S"),
+        "tz": now.tzname() or "?",
+        "offset": now.strftime("%z"),
+        "epoch": int(now.timestamp()),
+    }, indent=2)
+
+
+# Runtime info the agent can introspect via whoami(). The CLI / bridge / web
+# frontends set this at startup so the model can answer "what model/endpoint
+# am I" without guessing or spawning shell commands. Falls back to env vars.
+_RUNTIME_INFO: Dict[str, Any] = {}
+
+
+def set_runtime_info(**kw: Any) -> None:
+    """Frontends call this once at startup with {model, endpoint, context_tokens}.
+    Stored process-wide so the whoami tool can report accurate live values."""
+    _RUNTIME_INFO.update({k: v for k, v in kw.items() if v is not None})
+
+
+def _notify(p: Dict) -> str:
+    msg = (p.get("message") or "").strip()
+    if not msg:
+        return "Error: notify needs a 'message'."
+    title = (p.get("title") or "Hearth").strip()
+    from . import reminders
+    fired = reminders.desktop_notify(title, msg)
+    return f"Notification shown: {title} — {msg}" + ("" if fired else " (toast lib missing; logged/spoken instead)")
+
+
+def _whoami(p: Dict) -> str:
+    base = _RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
+    b = base.lower()
+    is_local = any(h in b for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1",
+                                    "192.168.", "10.", "host.docker.internal"))
+    model = _RUNTIME_INFO.get("model") or os.getenv("LOCAL_MODEL") or "unknown"
+    ctx = _RUNTIME_INFO.get("context_tokens")
+    try:
+        from . import memory
+        idx = memory.list_index()
+        mem_count = 0 if idx.startswith("(no") else idx.count("\n") + 1
+    except Exception:
+        mem_count = 0
+    try:
+        from .persona import NAME as _persona_name
+    except Exception:
+        _persona_name = "JARVIS"
+    info = {
+        "agent": _persona_name,
+        "framework": "Hearth",
+        "model": model,
+        "endpoint": base,
+        "location": "local (this machine / LAN)" if is_local else "cloud",
+        "context_tokens": ctx if ctx else "auto",
+        "tools_available": len(TOOL_DEFINITIONS),
+        "memories_stored": mem_count,
+        "workspace": WORKSPACE,
+        "repo": "https://github.com/0pen-sourcer/hearth",
+        "license": "MIT",
+    }
+    return json.dumps(info, indent=2)
+
+
+def _list_models(p: Dict) -> str:
+    import urllib.request
+    base = (_RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
+    try:
+        with urllib.request.urlopen(base + "/models", timeout=5) as r:
+            data = json.loads(r.read().decode())
+        ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
+        if not ids:
+            return f"The server at {base} reports no models — is one loaded in LM Studio?"
+        cur = _RUNTIME_INFO.get("model")
+        lines = [f"Models available at {base}:"]
+        lines += [f"  - {i}" + ("  (current)" if i == cur else "") for i in ids]
+        return "\n".join(lines)
+    except Exception as e:
+        return (f"Couldn't reach the model server at {base}: {type(e).__name__}: {e}. "
+                f"Is LM Studio (or your endpoint) running? Don't scan the disk for model files.")
+
+
+def _learn_environment(p: Dict) -> str:
+    from .environment import learn_environment
+    endpoint = _RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE")
+    return learn_environment(endpoint=endpoint)
+
+
+# ============================================================
+# DISPATCH
+# ============================================================
+
+_HANDLERS = {
+    "read_file": _read_file,
+    "write_file": _write_file,
+    "edit_file": _edit_file,
+    "list_archive": _list_archive,
+    "extract_archive_file": _extract_archive_file,
+    "summarize_file": _summarize_file,
+    "search_chats":   lambda p: __import__("hearth.session_search", fromlist=["search","format_matches"]).format_matches(__import__("hearth.session_search", fromlist=["search"]).search(p.get("query", ""), int(p.get("limit") or 8))),
+    "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(p.get("when", ""), p.get("what", "")),
+    "list_reminders": lambda p: __import__("hearth.reminders", fromlist=["list_reminders"]).list_reminders(bool(p.get("include_fired"))),
+    "cancel_reminder": lambda p: {"ok": __import__("hearth.reminders", fromlist=["cancel_reminder"]).cancel_reminder(p.get("id", ""))},
+    "list_directory": _list_directory,
+    "create_directory": _create_directory,
+    "delete_path": _delete_path,
+    "move_path": _move_path,
+    "grep_search": _grep_search,
+    "glob_files": _glob_files,
+    "find_file": _find_file,
+    "web_search": _web_search,
+    "web_fetch": _web_fetch,
+    "run_command": _run_command,
+    "system_info": _system_info,
+    "list_processes": _list_processes,
+    "network_info": _network_info,
+    "get_battery": _get_battery,
+    "list_installed_apps": _list_installed_apps,
+    "disk_usage": _disk_usage,
+    "locate_path": _locate_path,
+    "open_app": _open_app,
+    "open_url": _open_url,
+    "validate_url": _validate_url,
+    "open_in_browser": _open_in_browser,
+    "list_browsers": _list_browsers,
+    "screenshot": _screenshot,
+    "view_image": _view_image,
+    "clipboard_read": _clipboard_read,
+    "clipboard_write": _clipboard_write,
+    "memory_save": _memory_save,
+    "memory_recall": _memory_recall,
+    "memory_list": _memory_list,
+    "memory_forget": _memory_forget,
+    "set_voice": _set_voice,
+    "list_voices": _list_voices,
+    "forge_generate": _forge_generate,
+    "forge_status": _forge_status,
+    "forge_shutdown": _forge_shutdown,
+    "end_session": _end_session,
+    "get_time": _get_time,
+    "whoami": _whoami,
+    "list_models": _list_models,
+    "learn_environment": _learn_environment,
+    "notify": _notify,
+}
+
+
+# ----- PLUGIN SYSTEM ------------------------------------------------------
+# Local, private, self-improving: the agent can author its own tools and any
+# ~/Jarvis/plugins/*.py is auto-loaded. See hearth/plugins.py. plugins.py takes
+# the registry as args (no import of tools) so there's no circular import.
+from . import plugins as _plugins
+
+
+def _create_plugin(p: Dict) -> str:
+    name = (p.get("name") or "").strip()
+    code = p.get("code") or ""
+    if not name or not code:
+        return ("Error: create_plugin needs 'name' (lower_snake_case) and 'code' "
+                "(the FULL plugin module: a module-level TOOL dict + a run(args) function).")
+    return _plugins.save_and_register(name, code, WORKSPACE, TOOL_DEFINITIONS, _HANDLERS)
+
+
+def _list_plugins(p: Dict) -> str:
+    return _plugins.list_plugins(WORKSPACE)
+
+
+def _delete_plugin(p: Dict) -> str:
+    return _plugins.delete_plugin(p.get("name", ""), WORKSPACE, TOOL_DEFINITIONS, _HANDLERS)
+
+
+_HANDLERS["create_plugin"] = _create_plugin
+_HANDLERS["list_plugins"] = _list_plugins
+_HANDLERS["delete_plugin"] = _delete_plugin
+
+
+# ----- INTERACTIVE BROWSER (Playwright-driven Chromium; see hearth/browse.py) -----
+def _browse(p: Dict) -> str:
+    from . import browse as _b
+    return _b.browse(p)
+
+
+def _browse_click(p: Dict) -> str:
+    from . import browse as _b
+    return _b.browse_click(p)
+
+
+def _browse_type(p: Dict) -> str:
+    from . import browse as _b
+    return _b.browse_type(p)
+
+
+def _browse_close(p: Dict) -> str:
+    from . import browse as _b
+    return _b.browse_close(p)
+
+
+_HANDLERS["browse"] = _browse
+_HANDLERS["browse_click"] = _browse_click
+_HANDLERS["browse_type"] = _browse_type
+_HANDLERS["browse_close"] = _browse_close
+
+# The browser tools register ONLY when Playwright is installed (opt-in via
+# `install.ps1 -Browser`). Otherwise the model would see browse + web_fetch +
+# web_search and not know which to reach for, and we'd waste prompt tokens on
+# tools that can't run. HEARTH_ENABLE_BROWSER=1 forces on, =0 forces off.
+import importlib.util as _ilu
+_b_env = os.environ.get("HEARTH_ENABLE_BROWSER")
+_browser_enabled = _b_env == "1" or (_b_env != "0" and _ilu.find_spec("playwright") is not None)
+
+for _bt in (
+    {
+        "name": "browse",
+        "description": (
+            "Drive a REAL web browser (controlled Chromium) — the user SEES the window. "
+            "Navigate, get the rendered text + a numbered list of clickable links/buttons, "
+            "then browse_click / browse_type. The session stays open across calls. "
+            "PREFER browse whenever you might need to KEEP control of what's on screen — "
+            "e.g. playing a video the user may then want changed ('next one', 'search "
+            "something else'), browsing a site, filling a form. With browse YOU can do "
+            "all that next; with open_url you can't (it hands off to their browser and you "
+            "lose control). Only use open_url/open_in_browser for a pure one-off handoff. "
+            "Leave the browse session OPEN while the user is still using it. It's a SINGLE "
+            "tab — each browse() navigation REPLACES the current page, so for 'open these "
+            "in separate tabs for me' use open_url (once per link), not browse. For a quick "
+            "text grab (you read it), use web_fetch; to search, web_search."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "URL to open (https:// assumed if omitted). Leave empty to re-read the current page."}},
+        },
+    },
+    {
+        "name": "browse_click",
+        "description": "Click a link or button on the CURRENT browser page by its visible text (use the exact text from the CLICKABLE list that browse returned). Returns the new page.",
+        "parameters": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "Visible text of the link/button to click."}},
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "browse_type",
+        "description": "Type into a field on the current browser page (a search box, login field, etc.). Set submit=true to press Enter after.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "What to type."},
+                "field": {"type": "string", "description": "Optional: the field's label/placeholder. If omitted, types into the first text input."},
+                "submit": {"type": "boolean", "description": "Press Enter after typing (e.g. to run a search)."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "browse_close",
+        "description": "Close the browser session. ONLY when the user is truly DONE with it. If they want to WATCH a video, READ a page, or are still looking at what you opened, LEAVE IT OPEN — closing it yanks away what they're viewing. When in doubt, don't close.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+):
+    if _browser_enabled:
+        TOOL_DEFINITIONS.append(_bt)
+
+TOOL_DEFINITIONS.append({
+    "name": "create_plugin",
+    "description": (
+        "Write a NEW local tool (plugin) for yourself when no existing tool fits "
+        "a capability the user needs — then use it immediately and forever after. "
+        "100% local, saved to ~/Jarvis/plugins/<name>.py. The `code` must be a "
+        "complete Python module defining EXACTLY two module-level names:\n"
+        "  TOOL = {\"name\": \"<same as name>\", \"description\": \"...\", "
+        "\"parameters\": {\"type\": \"object\", \"properties\": {...}, \"required\": [...]}}\n"
+        "  def run(args: dict) -> str: ...  # returns a string result\n"
+        "Use the Python stdlib freely. Don't shadow a built-in tool name. Keep it "
+        "SMALL — one focused capability, a few lines (a 100+ line module usually "
+        "means you're overcomplicating it). If create_plugin rejects your code, FIX "
+        "that error and call create_plugin AGAIN — never fall back to write_file / "
+        "run_command. Only create a plugin for a genuinely missing capability."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "lower_snake_case tool name; also the filename."},
+            "code": {"type": "string", "description": "Full plugin module source (TOOL dict + run(args) function)."},
+        },
+        "required": ["name", "code"],
+    },
+})
+
+TOOL_DEFINITIONS.append({
+    "name": "list_plugins",
+    "description": "List the self-authored/installed plugins in ~/Jarvis/plugins/ (name, status, description). Use to see what custom tools exist before creating or deleting one.",
+    "parameters": {"type": "object", "properties": {}},
+})
+
+TOOL_DEFINITIONS.append({
+    "name": "delete_plugin",
+    "description": "Delete an installed plugin by name (removes its file + unregisters the tool). Only plugins, never a built-in tool. Use when a plugin is broken/unwanted or the user asks to remove a custom tool.",
+    "parameters": {
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "The plugin/tool name to delete."}},
+        "required": ["name"],
+    },
+})
+
+# Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
+# can NEVER take down the core tools.
+try:
+    _loaded_plugins = _plugins.load_plugins(WORKSPACE, TOOL_DEFINITIONS, _HANDLERS)
+except Exception:
+    _loaded_plugins = []
+
+
+ACTIVITY_LOG = os.path.join(LOGS_DIR, "activity.jsonl")
+
+
+def _log_activity(event: str, **fields: Any) -> None:
+    rec = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event, **fields}
+    try:
+        with open(ACTIVITY_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+    except OSError:
+        pass
+
+
+def execute_tool(name: str, args: Optional[Dict] = None) -> str:
+    """Run a tool by name. Returns a string (truncated to per-tool cap)."""
+    args = args or {}
+    handler = _HANDLERS.get(name)
+    if not handler:
+        return f"Error: unknown tool '{name}'. Known: {', '.join(sorted(_HANDLERS))}"
+    _log_activity("call", tool=name, args=args)
+    t0 = datetime.now()
+    try:
+        result = handler(args)
+    except PermissionError as e:
+        msg = f"Error ({name}): {e}"
+        _log_activity("error", tool=name, error=str(e))
+        return msg
+    except FileNotFoundError as e:
+        msg = f"Error ({name}): file not found: {e}"
+        _log_activity("error", tool=name, error=str(e))
+        return msg
+    except KeyError as e:
+        msg = f"Error ({name}): missing required parameter {e}"
+        _log_activity("error", tool=name, error=str(e))
+        return msg
+    except Exception as e:
+        msg = f"Error ({name}): {type(e).__name__}: {e}"
+        _log_activity("error", tool=name, error=str(e))
+        return msg
+    if not isinstance(result, str):
+        result = json.dumps(result, ensure_ascii=False, default=str)
+    truncated = _trunc(result, RESULT_CAPS.get(name, DEFAULT_CAP))
+    dt_ms = int((datetime.now() - t0).total_seconds() * 1000)
+    _log_activity("result", tool=name, chars=len(truncated), ms=dt_ms)
+    return truncated
+
+
+# ============================================================
+# PROVIDER FORMAT CONVERTERS
+# ============================================================
+
+def to_openai_tools() -> List[Dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": td["name"],
+                "description": td["description"],
+                "parameters": td["parameters"],
+            },
+        }
+        for td in TOOL_DEFINITIONS
+    ]
+
+
+# Tool → category, so listings group sensibly instead of dumping a flat wall
+# (e.g. the 4 browser tools read as ONE "Web & browser" capability, not 4
+# count-padding entries). Order here = display order. Unknown names (user
+# plugins) fall into "Custom / plugins".
+_CATEGORY_ORDER = [
+    "Files & docs", "Web & browser", "System & apps", "Memory",
+    "Reminders & alerts", "Voice", "Self-extending (plugins)",
+    "Image generation", "Session",
+]
+_TOOL_CATEGORY = {
+    # Files & docs
+    "read_file": "Files & docs", "write_file": "Files & docs", "edit_file": "Files & docs",
+    "summarize_file": "Files & docs", "list_directory": "Files & docs",
+    "create_directory": "Files & docs", "delete_path": "Files & docs", "move_path": "Files & docs",
+    "find_file": "Files & docs", "grep_search": "Files & docs", "glob_files": "Files & docs",
+    "locate_path": "Files & docs", "list_archive": "Files & docs", "extract_archive_file": "Files & docs",
+    # Web & browser
+    "web_search": "Web & browser", "web_fetch": "Web & browser", "validate_url": "Web & browser",
+    "open_url": "Web & browser", "open_in_browser": "Web & browser", "list_browsers": "Web & browser",
+    "browse": "Web & browser", "browse_click": "Web & browser", "browse_type": "Web & browser",
+    "browse_close": "Web & browser",
+    # System & apps
+    "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
+    "network_info": "System & apps", "get_battery": "System & apps", "list_installed_apps": "System & apps",
+    "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
+    "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
+    "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps",
+    "learn_environment": "System & apps",
+    # Memory
+    "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
+    "memory_forget": "Memory", "search_chats": "Memory",
+    # Reminders & alerts
+    "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
+    "cancel_reminder": "Reminders & alerts", "notify": "Reminders & alerts",
+    # Voice
+    "set_voice": "Voice", "list_voices": "Voice",
+    # Self-extending
+    "create_plugin": "Self-extending (plugins)", "list_plugins": "Self-extending (plugins)",
+    "delete_plugin": "Self-extending (plugins)",
+    # Image generation
+    "forge_generate": "Image generation", "forge_status": "Image generation",
+    "forge_shutdown": "Image generation",
+    # Session
+    "end_session": "Session",
+}
+
+
+def tools_by_category() -> "List[Tuple[str, List[Dict[str, Any]]]]":
+    """Group the live TOOL_DEFINITIONS by category, in display order. Returns
+    [(category, [tooldef, ...]), ...]. Unmapped tools (user plugins) → 'Custom / plugins'."""
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for td in TOOL_DEFINITIONS:
+        cat = _TOOL_CATEGORY.get(td["name"], "Custom / plugins")
+        groups.setdefault(cat, []).append(td)
+    order = _CATEGORY_ORDER + [c for c in groups if c not in _CATEGORY_ORDER]
+    return [(c, groups[c]) for c in order if c in groups]
+
+
+def to_claude_tools() -> List[Dict[str, Any]]:
+    return [
+        {"name": td["name"], "description": td["description"], "input_schema": td["parameters"]}
+        for td in TOOL_DEFINITIONS
+    ]
+
+
+def to_gemini_tools():
+    """Lazy: only build if google.genai is installed."""
+    try:
+        from google.genai import types  # type: ignore
+    except ImportError:
+        raise RuntimeError("Install google-genai to use Gemini: pip install google-genai")
+
+    tmap = {"string": "STRING", "integer": "INTEGER", "number": "NUMBER",
+            "boolean": "BOOLEAN", "array": "ARRAY", "object": "OBJECT"}
+
+    def schema(s: Dict) -> Any:
+        kw: Dict[str, Any] = {"type": tmap.get(s.get("type", "string"), "STRING")}
+        if "description" in s:
+            kw["description"] = s["description"]
+        if "properties" in s:
+            kw["properties"] = {k: schema(v) for k, v in s["properties"].items()}
+        if "required" in s and s["required"]:
+            kw["required"] = s["required"]
+        if "items" in s:
+            kw["items"] = schema(s["items"])
+        return types.Schema(**kw)
+
+    decls = []
+    for td in TOOL_DEFINITIONS:
+        kw = {"name": td["name"], "description": td["description"]}
+        if td["parameters"].get("properties"):
+            kw["parameters"] = schema(td["parameters"])
+        decls.append(types.FunctionDeclaration(**kw))
+    return [types.Tool(function_declarations=decls)]
+
+
+# ============================================================
+# CONTEXT WINDOW MANAGEMENT
+# ----------------------------------------------------------------
+# Two strategies, used together:
+#
+# 1) trim_to_budget()  — Void's pattern. Greedy weight-based truncation.
+#    Protects system message + most-recent turns. Aggressively trims old
+#    assistant turns BEFORE touching user turns. Char-level cuts, no
+#    deletions, so tool_call links remain valid.
+#
+# 2) compact_history() — Graphify's pattern. When the conversation is
+#    genuinely too long for trimming alone, summarize the OLDEST chunk into
+#    a single synthetic system message and drop the originals. Caller
+#    supplies a summarizer callback (the LLM client) so this stays
+#    provider-agnostic.
+#
+# CHARS_PER_TOKEN of 4 is conservative — better to overestimate token cost
+# than to overflow the model.
+# ============================================================
+
+CHARS_PER_TOKEN = 4
+
+
+def _msg_chars(m: Dict[str, Any]) -> int:
+    content = m.get("content")
+    n = len(content) if isinstance(content, str) else 0
+    for tc in m.get("tool_calls") or []:
+        try:
+            n += len(tc["function"]["name"]) + len(tc["function"].get("arguments") or "")
+        except (KeyError, TypeError):
+            pass
+    return n
+
+
+def _msg_weight(m: Dict[str, Any], idx: int, total: int) -> float:
+    role = m.get("role")
+    if role == "system":
+        return 0.01  # never trim
+    # Protect first 2 and last 3 turns (recency bias)
+    if idx < 2 or idx >= total - 3:
+        return 0.05
+    if role == "tool":
+        return 8.0   # tool outputs are huge and stale fastest
+    if role == "assistant":
+        return 10.0  # narration; prefer to trim
+    return 1.0       # user — trim last
+
+
+def trim_to_budget(messages: List[Dict[str, Any]], context_window: int,
+                   reserved_output: int = 0) -> List[Dict[str, Any]]:
+    """Trim message contents (not whole messages) until total fits.
+
+    context_window is in TOKENS. We convert to chars via CHARS_PER_TOKEN.
+    Returns a NEW list — does not mutate input.
+    """
+    if reserved_output <= 0:
+        reserved_output = max(context_window // 4, 1024)
+    budget_chars = max(0, (context_window - reserved_output) * CHARS_PER_TOKEN)
+
+    msgs = [dict(m) for m in messages]
+    total = sum(_msg_chars(m) for m in msgs)
+    if total <= budget_chars:
+        return msgs
+
+    # Greedy phase 1: while over budget, find the heaviest weight*size message
+    # and cut its content to half (min 120 chars). Repeat.
+    while total > budget_chars:
+        best_idx = -1
+        best_score = 0.0
+        for i, m in enumerate(msgs):
+            chars = _msg_chars(m)
+            if chars <= 120:
+                continue
+            score = _msg_weight(m, i, len(msgs)) * chars
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        if best_idx < 0:
+            break  # nothing left to trim by content
+        m = msgs[best_idx]
+        if isinstance(m.get("content"), str):
+            cur = m["content"]
+            cut = max(120, len(cur) // 2)
+            if cut < len(cur):
+                m["content"] = cur[:cut] + "\n…[trimmed]"
+        new_total = sum(_msg_chars(x) for x in msgs)
+        if new_total >= total:
+            break  # no progress
+        total = new_total
+
+    # Phase 2: if STILL over budget after content-trimming (happens when the
+    # system prompt + many small messages exceed the window), DROP whole old
+    # messages — but never the system message, and never the last user turn
+    # or anything after it. This is what prevents the "No user query found in
+    # messages" crash: we structurally guarantee a user turn survives.
+    if total > budget_chars and len(msgs) > 2:
+        # index of the last user message
+        last_user = -1
+        for i in range(len(msgs) - 1, -1, -1):
+            if msgs[i].get("role") == "user":
+                last_user = i
+                break
+        # Protected tail = everything from last_user onward. Protected head =
+        # system message (index 0 if present).
+        sys_present = msgs and msgs[0].get("role") == "system"
+        head_keep = 1 if sys_present else 0
+        # Drop messages between head and last_user, oldest first, until we fit
+        # or there's nothing droppable left.
+        drop_lo = head_keep
+        while total > budget_chars and last_user > drop_lo:
+            # Removing index drop_lo; everything shifts down, last_user too.
+            removed = msgs.pop(drop_lo)
+            last_user -= 1
+            total -= _msg_chars(removed)
+        # A dropped tool message can orphan a tool_calls assistant turn or
+        # vice-versa; clean leading orphan tool messages after the head.
+        while len(msgs) > head_keep and msgs[head_keep].get("role") == "tool":
+            total -= _msg_chars(msgs[head_keep])
+            msgs.pop(head_keep)
+
+    return msgs
+
+
+def compact_history(messages: List[Dict[str, Any]],
+                    summarize: Any,
+                    keep_recent: int = 8) -> List[Dict[str, Any]]:
+    """Replace older turns with a single summary system message.
+
+    `summarize(text) -> str` is a caller-supplied callback (sync) — usually
+    a small LLM call. We hand it the concatenated old turns and expect a
+    short digest back. Recent turns are preserved verbatim.
+
+    Returns: [system, summary_msg, *recent_turns]. If there's nothing to
+    compact, returns the input unchanged.
+    """
+    if len(messages) <= keep_recent + 2:
+        return list(messages)
+
+    # split: leading system + everything-up-to-keep_recent + recent tail
+    head: List[Dict[str, Any]] = []
+    if messages and messages[0].get("role") == "system":
+        head = [messages[0]]
+        body = messages[1:]
+    else:
+        body = list(messages)
+
+    if len(body) <= keep_recent:
+        return list(messages)
+
+    # Walk the tail back until it contains at least one `user` message.
+    # LM Studio's Jinja templates require a user role somewhere — without
+    # this, compaction in the middle of a long tool chain would produce
+    # [system, summary_system, assistant, tool, assistant, tool, ...] with
+    # zero user messages, and the next API call would crash with
+    # "No user query found in messages.".
+    expand_to = keep_recent
+    while expand_to < len(body):
+        if any(m.get("role") == "user" for m in body[-expand_to:]):
+            break
+        expand_to += 1
+    # If even the entire body has no user message, bail out: don't compact.
+    if not any(m.get("role") == "user" for m in body[-expand_to:]):
+        return list(messages)
+
+    to_compact = body[:-expand_to]
+    recent = body[-expand_to:]
+    # Also: never start the kept tail with a `tool` message — that role
+    # only makes sense as a reply to an immediately-prior tool_calls turn.
+    # Drop leading orphan tool messages.
+    while recent and recent[0].get("role") == "tool":
+        to_compact.append(recent.pop(0))
+
+    transcript_parts = []
+    for m in to_compact:
+        role = m.get("role", "?")
+        content = m.get("content") or ""
+        if isinstance(content, str) and content:
+            transcript_parts.append(f"[{role}] {content}")
+        for tc in m.get("tool_calls") or []:
+            try:
+                transcript_parts.append(
+                    f"[{role}→tool] {tc['function']['name']}({tc['function'].get('arguments','')})"
+                )
+            except (KeyError, TypeError):
+                pass
+
+    transcript = "\n".join(transcript_parts)
+    try:
+        summary = summarize(transcript)
+    except Exception as e:
+        summary = f"[summary failed: {e}]"
+
+    summary_msg = {
+        "role": "system",
+        "content": (
+            "Earlier-conversation summary (compacted to save context):\n"
+            + (summary or "[empty]")
+        ),
+    }
+    return head + [summary_msg] + recent
+
+
+def estimate_tokens(messages: List[Dict[str, Any]]) -> int:
+    """Cheap token estimate for the whole message list."""
+    return sum(_msg_chars(m) for m in messages) // CHARS_PER_TOKEN

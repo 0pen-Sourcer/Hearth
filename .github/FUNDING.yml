@@ -1,0 +1,10 @@
+# If Hearth helps you, a little support keeps it shipping.
+# Built by a high-schooler in their spare time — every bit genuinely helps.
+#
+# SETUP: pick whichever you actually create (see docs/SUPPORT.md for the
+# India-friendly walkthrough), fill the value, remove the leading '#'.
+
+# ko_fi: 0pensourcer              # Ko-fi takes UPI + cards — lowest friction in India
+# buy_me_a_coffee: 0pensourcer    # alternative to Ko-fi
+# github: 0pen-sourcer            # GitHub Sponsors — needs Stripe (India supported, more setup)
+custom: ['https://github.com/0pen-sourcer/hearth/blob/main/docs/SUPPORT.md']

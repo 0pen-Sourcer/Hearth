@@ -1,0 +1,8 @@
+?blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/0pen-sourcer/hearth/discussions
+    about: For "how do I do X?" or open-ended ideas, please use Discussions — they're easier to find and don't clutter the issue tracker.
+  - name: Security vulnerability
+    url: https://github.com/0pen-sourcer/hearth/security/advisories/new
+    about: Don't open a public issue for security problems. Use private vulnerability reporting instead.
