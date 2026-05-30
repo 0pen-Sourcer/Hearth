@@ -156,7 +156,44 @@ def parse_when(s: str, now: Optional[datetime] = None) -> Optional[datetime]:
 # CRUD
 # ---------------------------------------------------------------------------
 
-def set_reminder(when: str, what: str) -> Dict:
+_RECUR_INTERVAL_S = {
+    "minute":   60,
+    "minutes":  60,
+    "hour":   3600,
+    "hours":  3600,
+    "day":   86400,
+    "daily": 86400,
+    "week":  86400 * 7,
+    "weekly": 86400 * 7,
+}
+
+
+def _parse_recurring(spec: str) -> Optional[int]:
+    """Parse a 'recurring' spec to a repeat-interval in seconds. Supports
+    'every 30 minutes' / '30m' / 'daily' / 'weekly' / 'hourly' etc. Returns
+    None for one-shot reminders."""
+    if not spec:
+        return None
+    s = spec.strip().lower()
+    if s in ("hourly", "every hour"):    return 3600
+    if s in ("daily", "every day"):      return 86400
+    if s in ("weekly", "every week"):    return 86400 * 7
+    # 'every N units' or 'N units' or 'Nm/Nh/Nd'
+    m = re.match(r"^(?:every\s+)?(\d+)\s*(minute|minutes|min|m|hour|hours|hr|h|day|days|d|week|weeks|w)$", s)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        if unit.startswith(("m", "min")):  return n * 60
+        if unit.startswith(("h", "hr")):   return n * 3600
+        if unit.startswith(("d",)):        return n * 86400
+        if unit.startswith(("w",)):        return n * 86400 * 7
+    return None
+
+
+def set_reminder(when: str, what: str, recurring: str = "") -> Dict:
+    """Set a reminder. `recurring` (optional) makes it repeat - e.g.
+    'every 30 minutes', 'daily', 'every 2 hours', 'weekly'. After each fire
+    the reminder re-arms itself for the next interval."""
     target = parse_when(when)
     if target is None:
         return {"ok": False, "error": f"Couldn't parse time: '{when}'. Try 'in 25 minutes', '2026-05-27 09:00', 'tomorrow at 7am'."}
@@ -169,6 +206,12 @@ def set_reminder(when: str, what: str) -> Dict:
         "fired": False,
         "created": datetime.now().isoformat(timespec="seconds"),
     }
+    if recurring:
+        sec = _parse_recurring(recurring)
+        if sec is None:
+            return {"ok": False, "error": f"Couldn't parse recurring spec: '{recurring}'. Try 'every 30 minutes', 'daily', 'every 2 hours', 'weekly'."}
+        new["recurring_text"] = recurring
+        new["recurring_seconds"] = sec
     items.append(new)
     _save_all(items)
     return {"ok": True, "reminder": new}
@@ -247,8 +290,17 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
                             notify("Hearth reminder", r.get("what", "(empty)"))
                         except Exception:
                             pass
-                        r["fired"] = True
-                        r["fired_at"] = now_iso
+                        # Recurring reminders re-arm themselves; one-shots
+                        # get flagged fired so they're skipped next iter.
+                        rec_s = r.get("recurring_seconds")
+                        if rec_s and isinstance(rec_s, (int, float)):
+                            from datetime import timedelta as _td
+                            next_due = datetime.now() + _td(seconds=rec_s)
+                            r["due_iso"] = next_due.isoformat(timespec="seconds")
+                            r["last_fired_at"] = now_iso
+                        else:
+                            r["fired"] = True
+                            r["fired_at"] = now_iso
                         dirty = True
                 if dirty:
                     _save_all(items)
