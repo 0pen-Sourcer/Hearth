@@ -104,3 +104,11 @@ docs/LAUNCH_POSTS.md
 docs/SCAVENGE.md
 docs/DEMO_SCRIPT.md
 docs/TEST_PLAYBOOK*.md
+docs/RUNBOOK.md
+
+# ---- Stale deep docs — deferred until rewritten post-launch ----
+# The codebase moved fast; these describe an older Hearth and would ship wrong
+# info. Better to ship fewer accurate docs (README + docs/TOOLS.md + CHANGELOG)
+# than stale ones. Remove from this list once they're brought up to date.
+docs/ARCHITECTURE.md
+docs/WAKE_WORD.md

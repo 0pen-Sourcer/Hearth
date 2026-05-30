@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import wave
 from io import BytesIO
 from typing import Optional, Tuple
@@ -50,6 +51,42 @@ _engine: Optional[Tuple[str, object]] = None  # ("kokoro" | "piper", obj)
 _lock = threading.Lock()
 # Set when caller wants the in-flight speech aborted (new turn arrived).
 _abort = threading.Event()
+
+# TTS playback state - so listen.py can mute the mic while Jarvis speaks
+# and avoid feedback-looping on its own voice through the speakers. Use a
+# COUNTER (not a bool) so streaming sentence-by-sentence play stays True for
+# the entire speak() call across multiple _play() chunks.
+_speaking_count = 0
+_last_spoke_at = 0.0
+_speaking_state_lock = threading.Lock()
+
+
+def is_speaking() -> bool:
+    """True while a speak() call is producing audio. listen.py gates STT on
+    this so the mic doesn't transcribe Jarvis's own voice through the speakers."""
+    return _speaking_count > 0
+
+
+def seconds_since_spoke() -> float:
+    """Seconds since the last TTS chunk finished playing; inf if never spoken.
+    Used to extend the post-TTS cooldown so the speaker buffer tail doesn't
+    trigger a phantom utterance."""
+    if _last_spoke_at == 0.0:
+        return float("inf")
+    return max(0.0, time.time() - _last_spoke_at)
+
+
+def _mark_speaking_start() -> None:
+    global _speaking_count
+    with _speaking_state_lock:
+        _speaking_count += 1
+
+
+def _mark_speaking_end() -> None:
+    global _speaking_count, _last_spoke_at
+    with _speaking_state_lock:
+        _speaking_count = max(0, _speaking_count - 1)
+        _last_spoke_at = time.time()
 # Last load error — surfaced in status() so we don't silently report
 # "engine: null" when the actual issue is, e.g., a missing file format.
 _last_load_error: Optional[str] = None
@@ -380,34 +417,38 @@ def speak(text: str, blocking: bool = False,
 
     def _run():
         _abort.clear()
-        with _lock:
-            engine = _load_engine()
-            if engine is None:
-                return
-            kind, obj = engine
-            try:
-                for chunk in _chunk_sentences(text):
-                    if _abort.is_set():
-                        return
-                    if kind == "kokoro":
-                        samples, sr = obj.create(  # type: ignore[attr-defined]
-                            chunk,
-                            voice=voice or DEFAULT_KOKORO_VOICE,
-                            speed=speed,
-                            lang="en-us",
-                        )
-                        _play(samples, sr)
-                    elif kind == "piper":
-                        buf = BytesIO()
-                        with wave.open(buf, "wb") as wav:
-                            obj.synthesize(chunk, wav)  # type: ignore[attr-defined]
-                        buf.seek(0)
-                        with wave.open(buf, "rb") as wav:
-                            sr = wav.getframerate()
-                            frames = wav.readframes(wav.getnframes())
-                        _play(frames, sr)
-            except Exception:
-                return
+        _mark_speaking_start()
+        try:
+            with _lock:
+                engine = _load_engine()
+                if engine is None:
+                    return
+                kind, obj = engine
+                try:
+                    for chunk in _chunk_sentences(text):
+                        if _abort.is_set():
+                            return
+                        if kind == "kokoro":
+                            samples, sr = obj.create(  # type: ignore[attr-defined]
+                                chunk,
+                                voice=voice or DEFAULT_KOKORO_VOICE,
+                                speed=speed,
+                                lang="en-us",
+                            )
+                            _play(samples, sr)
+                        elif kind == "piper":
+                            buf = BytesIO()
+                            with wave.open(buf, "wb") as wav:
+                                obj.synthesize(chunk, wav)  # type: ignore[attr-defined]
+                            buf.seek(0)
+                            with wave.open(buf, "rb") as wav:
+                                sr = wav.getframerate()
+                                frames = wav.readframes(wav.getnframes())
+                            _play(frames, sr)
+                except Exception:
+                    return
+        finally:
+            _mark_speaking_end()
 
     if blocking:
         _run()
