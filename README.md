@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  No cloud. No API keys. No subscription. Runs on the LLM you already have loaded in LM Studio / Ollama / vLLM / llama.cpp.
+  No cloud. No API keys. No subscription. <strong>Ships with its own built-in LLM server</strong> - first run picks a model that fits your GPU and downloads it from Hugging Face. Or point it at LM Studio / Ollama / vLLM / a cloud key. Your call.
 </p>
 
 <p align="center">

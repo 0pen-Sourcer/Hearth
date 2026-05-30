@@ -12,6 +12,7 @@ Lessons applied this iteration (from real Gemma/Qwen drift + ChatGPT advice):
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 from .tools import WORKSPACE, SAFE_READ_ONLY, TOOL_DEFINITIONS
@@ -501,5 +502,35 @@ Your toolbelt: {tool_names}.
         parts.append("\n# House rules (from rules.md, re-read every turn)\n" + rules + "\n")
 
     parts.append(f"\nNow: {today}.")
+
+    # Persona overlay - lets the user pick a tone without rewriting the whole
+    # persona. Set HEARTH_PERSONA=bro|chill|professional|formal in the env, or
+    # via Settings -> Persona once shipped. Default is no overlay (JARVIS).
+    _overlay_key = os.environ.get("HEARTH_PERSONA", "").strip().lower()
+    _OVERLAYS = {
+        "bro": (
+            "\n# TONE OVERLAY: BRO MODE\n"
+            "You're talking like a real friend - casual gen-z energy. Drop 'bro', "
+            "'fr', 'lmao', 'bet' naturally. Keep answers tight. Skip formalities. "
+            "Still do the job correctly - the tone is the only thing that changes."
+        ),
+        "chill": (
+            "\n# TONE OVERLAY: CHILL MODE\n"
+            "Relaxed, low-key, no pep. Plain English, no exclamation marks, no "
+            "performative enthusiasm. Short answers unless the user asks for depth."
+        ),
+        "professional": (
+            "\n# TONE OVERLAY: PROFESSIONAL MODE\n"
+            "Formal, concise, plain English. Address the user politely. No slang, "
+            "no emojis. Treat every reply as if it's going into a workplace chat."
+        ),
+        "formal": (
+            "\n# TONE OVERLAY: FORMAL MODE\n"
+            "Address the user as 'sir' or 'ma'am' depending on what's in memory. "
+            "Speak in measured British English, full sentences, zero slang."
+        ),
+    }
+    if _overlay_key in _OVERLAYS:
+        parts.append(_OVERLAYS[_overlay_key])
 
     return "\n".join(parts)
