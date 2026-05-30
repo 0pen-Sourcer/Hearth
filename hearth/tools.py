@@ -399,13 +399,16 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "'9pm', 'next monday at 10am', 'in 2 hours'. Saved to "
             "~/Jarvis/reminders.json; a background watcher fires the notification "
             "when due. Use this whenever the user says 'remind me to X at Y' or "
-            "'in N minutes remind me to Z'."
+            "'in N minutes remind me to Z'. For repeating reminders ('every 30 "
+            "minutes', 'daily', 'every Monday at 9am'), pass the cadence as "
+            "`recurring` - the reminder re-arms itself after each fire."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "when": {"type": "string", "description": "When to fire. Natural-language OK."},
+                "when": {"type": "string", "description": "When to fire the FIRST time. Natural-language OK."},
                 "what": {"type": "string", "description": "The message to show the user."},
+                "recurring": {"type": "string", "description": "Optional: 'every 30 minutes', 'hourly', 'daily', 'weekly', 'every 2 hours', etc. Omit for one-shot reminders."},
             },
             "required": ["when", "what"],
         },
@@ -3837,7 +3840,7 @@ _HANDLERS = {
     "extract_archive_file": _extract_archive_file,
     "summarize_file": _summarize_file,
     "search_chats":   lambda p: __import__("hearth.session_search", fromlist=["search","format_matches"]).format_matches(__import__("hearth.session_search", fromlist=["search"]).search(p.get("query", ""), int(p.get("limit") or 8))),
-    "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(p.get("when", ""), p.get("what", "")),
+    "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(p.get("when", ""), p.get("what", ""), p.get("recurring", "")),
     "list_reminders": lambda p: __import__("hearth.reminders", fromlist=["list_reminders"]).list_reminders(bool(p.get("include_fired"))),
     "cancel_reminder": lambda p: {"ok": __import__("hearth.reminders", fromlist=["cancel_reminder"]).cancel_reminder(p.get("id", ""))},
     "list_directory": _list_directory,

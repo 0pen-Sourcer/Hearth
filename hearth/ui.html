@@ -3548,6 +3548,10 @@ async function voiceCycle() {
   if (voiceSpeaking) return;  // never open mic while TTS is playing
   setVoiceTranscript('');
   setVoiceStatus('listening… (tap mic to send)');
+  // Clear the voice abort flag so the NEXT turn's TTS can actually play.
+  // Without this, the flag stop()'d during the previous barge-in would
+  // persist and silence the assistant forever.
+  try { await api('/api/voice/reset', { method: 'POST' }); } catch {}
   await startRecording();
   micLastVoice = performance.now();
   let voiceHasStarted = false;

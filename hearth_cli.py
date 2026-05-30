@@ -1564,9 +1564,11 @@ class JarvisCLI:
             # the UTF-8 encoder downstream.
             user_input = _sanitize(user_input)
             # New user turn = stop any in-flight TTS so audio doesn't
-            # trail into the next reply.
+            # trail into the next reply, then clear the abort flag so the
+            # assistant's response can actually speak.
             if self.voice_on:
                 voice.stop()
+                voice.reset_abort()
             if user_input.startswith("/") or user_input.lower() in ("exit", "quit"):
                 if await self.handle_command(user_input):
                     continue
@@ -1666,7 +1668,19 @@ class JarvisCLI:
                         "what the user wanted, what was tried, what was "
                         "learned, and the current state. Bullet points "
                         "fine. No fluff. Note: durable facts about the user "
-                        "have already been saved to memory separately."},
+                        "have already been saved to memory separately.\n\n"
+                        "# IDENTIFIER PRESERVATION (CRITICAL)\n"
+                        "Reproduce the FOLLOWING types of strings VERBATIM in "
+                        "the digest, never paraphrased and never abbreviated:\n"
+                        "  - file paths (C:\\..., /home/..., relative ./src/x.py)\n"
+                        "  - URLs (https://..., file://...)\n"
+                        "  - IP addresses, MAC addresses, ports\n"
+                        "  - UUIDs and any *_id strings (request_id, session_id, etc)\n"
+                        "  - exact error messages, stack-trace excerpts, exit codes\n"
+                        "  - SHA hashes, git commit IDs, semver versions\n"
+                        "  - tool names called and their key arguments\n"
+                        "Hallucinated-reconstructed identifiers WILL break the "
+                        "next turn. When in doubt, copy the original token."},
                     {"role": "user", "content": transcript},
                 ],
                 temperature=0.2,
