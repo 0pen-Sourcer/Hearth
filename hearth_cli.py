@@ -375,6 +375,11 @@ class JarvisCLI:
         # Per-tool permissions ([a]lways / [N]ever) — loaded from disk so they
         # survive restarts. Mutating choices write back via _save_persisted_perms.
         self.tool_perms: Dict[str, str] = _load_persisted_perms()
+        # /sleep mode - Jarvis stays silent until the user says the wake word.
+        # Anything else is ignored. Use /wake to come back out.
+        self.sleep_mode = False
+        self._sleep_wake_word = (os.environ.get("JARVIS_WAKE_WORD", "jarvis")
+                                 .strip().lower())
         self.auto_approve = os.getenv("JARVIS_AUTO_APPROVE", "0") == "1"
         # Lazy-init: prompt_toolkit needs a real terminal to construct a
         # session; we delay that until first input read so importing /
@@ -1038,6 +1043,16 @@ class JarvisCLI:
             arg = cmd.split(None, 1)[1].strip() if len(cmd.split(None, 1)) > 1 else ""
             print(f"{C_OK}{stt.set_model(arg)}{C_RESET}")
             return True
+        if low == "/sleep":
+            self.sleep_mode = True
+            print(f"{C_OK}sleep mode ON{C_RESET}  "
+                  f"{C_DIM}Jarvis is silent until you say '{self._sleep_wake_word}' "
+                  f"(or type /wake).{C_RESET}")
+            return True
+        if low == "/wake":
+            self.sleep_mode = False
+            print(f"{C_OK}awake.{C_RESET}")
+            return True
         if low == "/learn":
             print(f"{C_DIM}re-scanning your machine (hardware, models, drives)...{C_RESET}")
             try:
@@ -1554,6 +1569,23 @@ class JarvisCLI:
                 voice.stop()
             if user_input.startswith("/") or user_input.lower() in ("exit", "quit"):
                 if await self.handle_command(user_input):
+                    continue
+            # /sleep mode: drop input that doesn't start with the wake word.
+            # Keeps Jarvis silent at the desk until you actually call him.
+            if self.sleep_mode:
+                w = self._sleep_wake_word
+                low = user_input.lower().lstrip()
+                if w and (low.startswith(w + " ") or low == w
+                          or low.startswith(w + ",") or low.startswith(w + ":")
+                          or low.startswith(w + "?") or low.startswith(w + "!")):
+                    # Strip the wake word, wake up, fall through to respond.
+                    user_input = user_input[len(w):].lstrip(" ,:?!").lstrip()
+                    self.sleep_mode = False
+                    if not user_input:
+                        print(f"{C_DIM}(awake — what's up?){C_RESET}")
+                        continue
+                else:
+                    print(f"{C_DIM}(sleeping — say '{w}' or /wake){C_RESET}")
                     continue
             # Expand @<path> file attachments (text or image)
             content = self._resolve_attachments(user_input)
