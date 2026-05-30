@@ -634,6 +634,16 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/llmserver/status":
             from . import llmserver
             return self._send_json(200, llmserver.status(LOCAL_API_BASE))
+        if path == "/api/llmserver/hf-search":
+            # ?q=qwen returns HF GGUF results
+            from . import llmserver
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("q", [""])[0]
+            return self._send_json(200, {"results": llmserver.search_huggingface(q)})
+        if path == "/api/llmserver/hf-files":
+            # ?repo=user/model lists the .gguf files in that repo
+            from . import llmserver
+            repo = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("repo", [""])[0]
+            return self._send_json(200, {"files": llmserver.list_hf_files(repo)})
         self.send_error(404, "not found")
 
     def do_DELETE(self) -> None:
@@ -762,6 +772,41 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/llmserver/stop":
             from . import llmserver
             return self._send_json(200, llmserver.stop_builtin())
+        if path == "/api/llmserver/download-hf":
+            # Stream a download from an arbitrary HF repo + filename (user
+            # picked it via the search UI). Mirrors /api/llmserver/download
+            # but for non-curated picks.
+            from . import llmserver
+            body = self._read_json()
+            repo = (body.get("repo") or "").strip()
+            filename = (body.get("filename") or "").strip()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            _last_emit = [0.0]
+
+            def emit(obj: Dict[str, Any]) -> None:
+                try:
+                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def on_progress(done: int, total: int) -> None:
+                now = time.time()
+                if now - _last_emit[0] < 0.2 and done != total:
+                    return
+                _last_emit[0] = now
+                emit({"type": "progress", "done": done, "total": total})
+
+            try:
+                result = llmserver.download_from_hf_repo(repo, filename, on_progress=on_progress)
+                emit({"type": "done", **result})
+            except Exception as e:
+                emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
         if path == "/api/llmserver/download":
             # Download a curated pick from HF, streaming progress as NDJSON so
             # the GUI can render a real progress bar. {type:"progress", done, total}
@@ -1137,18 +1182,28 @@ def _start_reminder_watcher() -> None:
 
 
 def _apply_saved_llm_endpoint() -> None:
-    """At boot, if the user previously picked a cloud provider via Settings ->
-    LLM endpoint, apply it to LOCAL_API_BASE / LOCAL_API_KEY before the first
-    /chat call. Settings live in ~/Jarvis/settings.json so this survives every
-    restart and matches what the user sees in the UI."""
+    """At boot: (1) if the user previously picked a cloud provider via Settings
+    -> LLM endpoint, apply it. (2) Otherwise, auto-detect whatever local server
+    is actually running (LM Studio, Ollama, llama.cpp). Survives restart via
+    ~/Jarvis/settings.json."""
+    global LOCAL_API_BASE
     try:
         s = _load_settings()
         url = (s.get("llm_url") or "").strip()
+        # If no saved endpoint, sniff for any local server already running.
+        if not url:
+            try:
+                from . import llmserver as _ls
+                detected = _ls.detect_running_server(LOCAL_API_BASE)
+                if detected and detected != LOCAL_API_BASE:
+                    url = detected
+                    print(f"  [hearth.web] auto-detected local LLM server: {url}", flush=True)
+            except Exception:
+                pass
         if not url:
             return
         key = (s.get("llm_key") or "").strip()
         model = (s.get("llm_model") or "").strip()
-        global LOCAL_API_BASE
         LOCAL_API_BASE = url
         from . import headless as _hl
         _hl.LOCAL_API_BASE = url

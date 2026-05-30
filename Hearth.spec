@@ -91,6 +91,22 @@ try:
 except Exception:
     pass
 
+# Built-in LLM server (optional dep). Bundle llama-cpp-python so the PACKAGED
+# Hearth.exe can run its own OpenAI-compatible server with no LM Studio / no
+# Ollama / no extra installs - the "self-contained" story. We do NOT bundle a
+# GGUF; the welcome card downloads one from Hugging Face on first run, picked
+# to fit the user's VRAM. NOTE: this can balloon the bundle by 50-400 MB
+# depending on whether the user installed a CPU or CUDA wheel. Verified by
+# running the rebuilt exe -> Settings -> Models -> "Use built-in" path.
+try:
+    from PyInstaller.utils.hooks import collect_all as _collect_all
+    _llc_datas, _llc_bins, _llc_hidden = _collect_all("llama_cpp")
+    DATAS += _llc_datas
+    PW_BINARIES += _llc_bins
+    HIDDEN += _llc_hidden + ["llama_cpp", "llama_cpp.server", "hearth.llmserver"]
+except Exception:
+    pass
+
 # ============================================================
 # Analysis (shared imports across both entry points)
 # ============================================================
