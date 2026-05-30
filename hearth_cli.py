@@ -78,12 +78,55 @@ except ImportError as e:
     sys.exit(1)
 
 # ---- Config ---------------------------------------------------------------
-LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
-LOCAL_MODEL = os.getenv("LOCAL_MODEL", "local-model")
+# Env vars take precedence; otherwise we read ~/Jarvis/settings.json so that
+# whatever endpoint the user picked in the GUI (Settings -> LLM endpoint)
+# also drives the CLI. Same source of truth, no env-var duplication.
+def _read_settings_endpoint():
+    """Return (url, key, model) from settings.json, or all None if not set."""
+    try:
+        import json as _json
+        p = os.path.join(WORKSPACE, "settings.json")
+        if not os.path.isfile(p):
+            return None, None, None
+        with open(p, "r", encoding="utf-8") as f:
+            s = _json.load(f)
+        return ((s.get("llm_url") or "").strip() or None,
+                (s.get("llm_key") or "").strip() or None,
+                (s.get("llm_model") or "").strip() or None)
+    except Exception:
+        return None, None, None
+
+
+_S_URL, _S_KEY, _S_MODEL = _read_settings_endpoint()
+LOCAL_API_BASE = os.getenv("LOCAL_API_BASE") or _S_URL or "http://localhost:1234/v1"
+LOCAL_MODEL = os.getenv("LOCAL_MODEL") or _S_MODEL or "local-model"
 # Cloud endpoints (Gemini/OpenAI/etc) need a real key. Local LM Studio ignores
 # it, so the dummy fallback keeps localhost working with zero config.
-LOCAL_API_KEY = os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY") or "jarvis-local"
+LOCAL_API_KEY = (os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY")
+                 or _S_KEY or "jarvis-local")
 HISTORY_FILE = os.path.join(WORKSPACE, "logs", "jarvis_history.json")
+# Persistent per-tool permissions ([a]lways / [N]ever) so you don't have to
+# re-approve browse_click/run_command/etc on every restart. Stored next to
+# memory in the workspace so it survives across CLI/GUI/bridge sessions.
+PERMS_FILE = os.path.join(WORKSPACE, "permissions.json")
+
+
+def _load_persisted_perms() -> Dict[str, str]:
+    try:
+        with open(PERMS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v for k, v in data.items() if v in ("always", "never")}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_persisted_perms(perms: Dict[str, str]) -> None:
+    try:
+        os.makedirs(os.path.dirname(PERMS_FILE), exist_ok=True)
+        with open(PERMS_FILE, "w", encoding="utf-8") as f:
+            json.dump(perms, f, indent=2)
+    except OSError:
+        pass
 USE_LMSTUDIO_HISTORY = os.getenv("JARVIS_LMSTUDIO_HISTORY", "0") == "1"
 # Match this to the model you've loaded in LM Studio. Conservative default.
 CONTEXT_TOKENS = int(os.getenv("JARVIS_CONTEXT", "8192"))
@@ -329,8 +372,9 @@ class JarvisCLI:
         # Most-recent image path the user/screenshot tool produced. Used
         # to auto-attach when the user references "the/that image".
         self.last_image_path: str = ""
-        # Permission cache for risky tools: name → "always" | "never"
-        self.tool_perms: Dict[str, str] = {}
+        # Per-tool permissions ([a]lways / [N]ever) — loaded from disk so they
+        # survive restarts. Mutating choices write back via _save_persisted_perms.
+        self.tool_perms: Dict[str, str] = _load_persisted_perms()
         self.auto_approve = os.getenv("JARVIS_AUTO_APPROVE", "0") == "1"
         # Lazy-init: prompt_toolkit needs a real terminal to construct a
         # session; we delay that until first input read so importing /
@@ -670,7 +714,9 @@ class JarvisCLI:
             print(f"  {C_TOOL}/context <n|auto>{C_RESET}      set context window (or auto-detect)")
             print(f"  {C_TOOL}/think [on|off]{C_RESET}        toggle reasoning (off = fast, no thinking)")
             print(f"  {C_TOOL}/multi{C_RESET}                 toggle multi-line input mode")
-            print(f"  {C_TOOL}/perms{C_RESET}                 show cached tool permissions")
+            print(f"  {C_TOOL}/perms{C_RESET}                 show saved tool permissions (persist across restarts)")
+            print(f"  {C_TOOL}/perms forget <tool>{C_RESET}   forget the saved decision for one tool")
+            print(f"  {C_TOOL}/perms reset{C_RESET}           forget ALL saved tool decisions")
             print(f"  {C_TOOL}/allow <path>{C_RESET}          let Jarvis write under <path> this session")
             print(f"  {C_TOOL}/disallow <path>{C_RESET}       revoke an /allow")
             print(f"  {C_TOOL}/allowed{C_RESET}               list paths Jarvis can write to")
@@ -947,16 +993,28 @@ class JarvisCLI:
             return True
         if low == "/perms":
             if not self.tool_perms:
-                print(f"{C_DIM}(no per-tool permissions cached this session){C_RESET}")
+                print(f"{C_DIM}(no per-tool permissions saved yet){C_RESET}")
             else:
                 for tool, perm in self.tool_perms.items():
                     color = C_OK if perm == "always" else C_ERR
                     print(f"  {C_TOOL}{tool:<22}{C_RESET}{color}{perm}{C_RESET}")
-            print(f"{C_DIM}  use /perms reset to clear{C_RESET}")
+            print(f"{C_DIM}  /perms forget <tool> to drop one; /perms reset to clear all{C_RESET}")
             return True
         if low == "/perms reset":
             self.tool_perms.clear()
-            print(f"{C_OK}per-tool permissions cleared{C_RESET}")
+            _save_persisted_perms(self.tool_perms)
+            print(f"{C_OK}per-tool permissions cleared (also wiped from disk){C_RESET}")
+            return True
+        if low.startswith("/perms forget "):
+            tool = cmd.split(None, 2)[2].strip() if len(cmd.split(None, 2)) > 2 else ""
+            if tool in self.tool_perms:
+                self.tool_perms.pop(tool)
+                _save_persisted_perms(self.tool_perms)
+                print(f"{C_OK}forgot {tool} — it'll ask again next time{C_RESET}")
+            elif tool:
+                print(f"{C_DIM}no saved permission for {tool} (try /perms){C_RESET}")
+            else:
+                print(f"{C_DIM}usage: /perms forget <tool>{C_RESET}")
             return True
         if low == "/compact":
             n_before = len(self.messages)
@@ -2054,8 +2112,10 @@ class JarvisCLI:
                         pass  # blank Enter or y = allow once (less punishing in flow)
                     elif choice in ("a", "always"):
                         self.tool_perms[name] = "always"
+                        _save_persisted_perms(self.tool_perms)
                     elif choice in ("never",) or choice == "n!":
                         self.tool_perms[name] = "never"
+                        _save_persisted_perms(self.tool_perms)
                         denied = True
                     elif choice in ("n", "no"):
                         denied = True

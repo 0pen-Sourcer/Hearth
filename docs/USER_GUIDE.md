@@ -37,7 +37,7 @@ That's it. Hearth is now a tray icon that launches on every boot, opens a chat w
 | **CLI** | `.\hearth.bat` | Daily driver. Voice loop, slash commands, fast iteration. |
 | **Desktop app** | `.\.venv\Scripts\python.exe -m hearth.tray --open` OR `dist\Hearth\Hearth.exe` | Visual chat, multi-conversation sidebar, file drop, voice mode takeover, GPU stats. |
 | **Browser** | `python -m hearth.web` | Same UI in your default browser. Useful if you want LAN access. |
-| **MCP** | `python -m hearth.mcp_server` | Plugs Hearth's 46 tools into **LM Studio's native chat UI** — gets tool cards rendered there. |
+| **MCP** | `python -m hearth.mcp_server` | Plugs Hearth's 50+ tools into **LM Studio's native chat UI** — gets tool cards rendered there. |
 
 The desktop app and browser share one backend (`hearth/web.py`) and one HTML file (`hearth/ui.html`). Native window = same UI in a PyWebView wrapper.
 
@@ -76,7 +76,7 @@ The desktop app and browser share one backend (`hearth/web.py`) and one HTML fil
 /help                 list every command
 /clear                wipe THIS chat (history preserved server-side)
 /compact              ask Jarvis to summarize old turns + extract facts to memory
-/tools                show all 46 tools
+/tools                show all tools
 /models               list models LM Studio can see
 /model <id>           load a specific model
 /voice on|off         toggle TTS
@@ -119,7 +119,7 @@ A background thread listens with whisper (energy-gated — only transcribes when
 $env:JARVIS_WAKE_PHRASES = "jarvis,hearth,computer"
 ```
 
-See `docs/WAKE_WORD.md` for tuning thresholds + the resource budget.
+Tune detection sensitivity + the idle-CPU budget via the `JARVIS_WAKE_*` env vars.
 
 ---
 
@@ -279,5 +279,4 @@ Post on **r/LocalLLaMA** (Tuesday 9-11 AM EST is the data-backed sweet spot). Le
 - Issues: github.com/0pen-sourcer/hearth/issues
 - Source: github.com/0pen-sourcer/hearth
 - Docs: `docs/` folder in the repo
-- Architecture: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)
-- Roadmap / known-bad / shipped: [`IDEAS.md`](../IDEAS.md) (gitignored — not on GitHub, ask for it)
+- Full tool list: [`docs/TOOLS.md`](TOOLS.md)
