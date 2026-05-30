@@ -64,12 +64,14 @@ grok.ps1
 build/
 dist/
 *.egg
+build_log.txt
 
 # ---- Misc ----
 *.log
 .coverage
 htmlcov/
 .tox/
+.claude/
 
 # ---- Historical / superseded docs (kept locally, not shipped) ----
 # QUICKSTART duplicates README's install. Battleplans are Gemini's old wishlist

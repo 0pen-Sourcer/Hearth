@@ -33,7 +33,7 @@
 
 .EXAMPLE
     .\install.ps1
-    .\install.ps1 -Browser -VoiceDevice gpu
+    .\install.ps1 -Browser -BuiltinLLM cuda -VoiceDevice gpu
     .\install.ps1 -NoVoice -NoSTT
 #>
 
@@ -45,6 +45,7 @@ param(
     [switch]$NoFileReaders,
     [switch]$NoDesktop,
     [switch]$Browser,
+    [string]$BuiltinLLM = '',   # 'cuda' / 'cpu' / '' (off). Installs llama-cpp-python so Hearth has its own LLM server.
     [ValidateSet('cpu','gpu','ask')][string]$VoiceDevice = 'ask'
 )
 
@@ -219,6 +220,30 @@ if ($Browser) {
     }
 } else {
     Write-Skip "browser control (pass -Browser to enable the 'AI web browser' tools)"
+}
+
+if ($BuiltinLLM) {
+    $variant = $BuiltinLLM.ToLower().Trim()
+    if ($variant -eq 'cuda' -or $variant -eq 'gpu') {
+        Write-Step "Installing llama-cpp-python (CUDA 12.4 prebuilt wheel - ~400MB) so Hearth has its own LLM server"
+        & $venvPython -m pip install --quiet llama-cpp-python `
+            --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+    } elseif ($variant -eq 'cpu') {
+        Write-Step "Installing llama-cpp-python (CPU prebuilt wheel - ~50MB) so Hearth has its own LLM server"
+        & $venvPython -m pip install --quiet llama-cpp-python `
+            --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+    } else {
+        Write-WarnX "unknown -BuiltinLLM value '$BuiltinLLM' (use 'cuda' or 'cpu'). Skipping."
+        $variant = ''
+    }
+    if ($variant -and $LASTEXITCODE -ne 0) {
+        Write-WarnX "llama-cpp-python install failed. You can retry with:"
+        Write-WarnX "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/$( if ($variant -eq 'cuda' -or $variant -eq 'gpu') { 'cu124' } else { 'cpu' } )"
+    } elseif ($variant) {
+        Write-OK "installed (Hearth's welcome card can now download a GGUF and run a built-in server - no LM Studio needed)"
+    }
+} else {
+    Write-Skip "built-in LLM server (pass -BuiltinLLM cuda or -BuiltinLLM cpu to install llama-cpp-python and skip LM Studio entirely)"
 }
 
 # ----- 4. Workspace --------------------------------------------------------

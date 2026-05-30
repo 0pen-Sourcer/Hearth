@@ -390,14 +390,23 @@ def _chunk_sentences(text: str, min_chars: int = 60):
 
 
 def stop() -> None:
-    """Cut the currently-speaking turn. Called when a new user message
-    arrives so audio doesn't trail into the next response."""
+    """Cut the currently-speaking turn AND drop any queued sentence chunks
+    waiting on the lock. Called when a new user message arrives (or on
+    barge-in) so audio doesn't trail into the next response."""
     _abort.set()
     try:
         import sounddevice as sd  # type: ignore
         sd.stop()
     except Exception:
         pass
+
+
+def reset_abort() -> None:
+    """Clear the abort flag so the NEXT user turn's TTS can play. Called at the
+    start of a fresh recording cycle (CLI mic toggle / GUI voiceCycle listening
+    phase). Without this, the flag set by stop() would persist forever and
+    silence the assistant on every subsequent turn."""
+    _abort.clear()
 
 
 def speak(text: str, blocking: bool = False,
@@ -416,7 +425,15 @@ def speak(text: str, blocking: bool = False,
     speed = speed if speed is not None else DEFAULT_SPEED
 
     def _run():
-        _abort.clear()
+        # DO NOT clear _abort here. Multiple speak() calls fire in succession
+        # during a streaming assistant turn (one per sentence chunk). If each
+        # _run() clears the abort flag, then a barge-in mid-stream only kills
+        # the CURRENT chunk - the next queued chunk clears the flag and plays
+        # anyway, breaking barge-in. The flag is cleared explicitly by
+        # reset_abort() at the start of a fresh turn (CLI mic toggle / GUI
+        # voiceCycle entering 'listening' state).
+        if _abort.is_set():
+            return  # queued speak() arrived after a stop() - drop it
         _mark_speaking_start()
         try:
             with _lock:

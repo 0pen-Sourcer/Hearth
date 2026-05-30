@@ -712,6 +712,15 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._stt()
         if path == "/api/title":
             return self._title()
+        if path == "/api/voice/reset":
+            # Called by the GUI at the start of a fresh listening cycle so the
+            # abort flag set by the previous barge-in / stop() doesn't keep
+            # silencing TTS on the next turn.
+            try:
+                _voice.reset_abort()
+            except Exception:
+                pass
+            return self._send_json(200, {"ok": True})
         if path == "/api/voice/stop":
             if _voice:
                 try:
