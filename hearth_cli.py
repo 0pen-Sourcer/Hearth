@@ -2098,8 +2098,29 @@ class JarvisCLI:
             # active so we don't deadlock with prompt_toolkit's stdin grab.
             denied = False
             decline_reason = ""
+            # Path-scoped auto-approval (OpenClaw pattern): for file-touching
+            # tools, if the path argument resolves inside the workspace sandbox,
+            # just run it - prompting on every workspace edit is permission
+            # fatigue. Out-of-workspace paths still require the [y/n/a/N] dialogue.
+            _path_safe = False
+            try:
+                _path_arg = args.get("path") if isinstance(args, dict) else None
+                if _path_arg and isinstance(_path_arg, str) and name in (
+                    "write_file", "edit_file", "create_directory", "delete_path", "move_path",
+                ):
+                    from hearth.tools import WORKSPACE as _WS
+                    try:
+                        _abs = os.path.abspath(os.path.expanduser(_path_arg))
+                        _path_safe = os.path.normpath(_abs).lower().startswith(
+                            os.path.normpath(_WS).lower())
+                    except Exception:
+                        _path_safe = False
+            except Exception:
+                _path_safe = False
+
             if (name in RISKY_TOOLS
                     and not self.auto_approve
+                    and not _path_safe
                     and self.tool_perms.get(name) != "always"):
                 if self.tool_perms.get(name) == "never":
                     denied = True

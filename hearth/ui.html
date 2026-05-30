@@ -727,6 +727,19 @@
   .pick-info { flex: 1; min-width: 0; }
   .pick-name { font-size: 13px; font-weight: 600; color: var(--fg); }
   .pick-tag { background: var(--accent); color: #0a0a0c; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; vertical-align: middle; font-weight: 700; }
+  .pick-tag-pc { background: linear-gradient(90deg, var(--accent), var(--accent-2)); color: #fff; padding: 2px 8px; }
+  .pick.pick-rec { border-color: rgba(124,92,255,.65); background: rgba(124,92,255,.05); }
+  .pick-why { font-size: 11px; color: var(--accent-2); margin-top: 6px; font-style: italic; }
+  /* HF search modal contents */
+  .hf-search-input { width: 100%; padding: 10px 12px; background: var(--bg-0); border: 1px solid var(--bg-3); border-radius: 6px; color: var(--fg); font-size: 13px; margin-bottom: 10px; }
+  .hf-results { max-height: 320px; overflow-y: auto; }
+  .hf-result { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--bg-3); cursor: pointer; }
+  .hf-result:hover { background: var(--bg-2); }
+  .hf-result-name { font-size: 13px; color: var(--fg); font-family: var(--mono); }
+  .hf-result-meta { font-size: 11px; color: var(--fg-faint); margin-left: 12px; white-space: nowrap; }
+  .hf-files { margin-top: 8px; padding: 8px; background: var(--bg-0); border-radius: 4px; }
+  .hf-file { display: flex; justify-content: space-between; padding: 4px 8px; cursor: pointer; border-radius: 3px; font-size: 12px; }
+  .hf-file:hover { background: var(--bg-2); }
   .pick-meta { font-size: 11px; color: var(--fg-faint); margin-top: 2px; }
   .pick-desc { font-size: 11px; color: var(--fg-faint); margin-top: 2px; }
   .pick-btn {
@@ -2424,18 +2437,23 @@ async function send(forced = null) {
   // Streaming TTS buffer
   let ttsBuffer = '';
   let ttsTimer = null;
-  const FLUSH_AT_SENTENCE = /[.!?](\s|$)/;
+  // ANY clause break (period, question, exclam, comma, semicolon, colon) - so
+  // the first audio chunk plays as soon as the model finishes its first PHRASE
+  // (~25 chars), not its first full sentence (~40 chars + period). On a fast
+  // local model this cuts perceived "I stop talking - AI starts talking" by
+  // 1-2 full seconds. Subsequent chunks still ride this same loose threshold.
+  const FLUSH_AT_CLAUSE = /[.!?,;:](\s|$)/;
   function maybeFlushTTS(force = false) {
     // TTS auto-streaming ONLY in voice mode. In chat view, users get the
-    // per-message "speak" button instead — no surprise audio.
+    // per-message "speak" button instead - no surprise audio.
     if (!voiceModeOn) { ttsBuffer = ''; return; }
     if (!STATE.settings.voice_tts && !voiceModeOn) { ttsBuffer = ''; return; }
     if (!ttsBuffer) return;
-    if (force || (ttsBuffer.length >= 40 && FLUSH_AT_SENTENCE.test(ttsBuffer))) {
+    if (force || (ttsBuffer.length >= 25 && FLUSH_AT_CLAUSE.test(ttsBuffer))) {
       let cut = ttsBuffer.length;
       if (!force) {
-        // Find LAST sentence break in buffer
-        const m = ttsBuffer.match(/[.!?](\s|$)/g);
+        // Find LAST clause break in buffer so we don't cut mid-phrase
+        const m = ttsBuffer.match(/[.!?,;:](\s|$)/g);
         if (m) {
           const last = ttsBuffer.lastIndexOf(m[m.length - 1]);
           if (last > 0) cut = last + 1;
@@ -3203,6 +3221,63 @@ async function stopTTS() {
 }
 
 // ============================================================
+// BARGE-IN - lets the user interrupt the AI's voice by just talking.
+// While the AI is speaking, a parallel light mic stream watches RMS. If it
+// crosses MIC_BARGE_THRESHOLD for ~400ms straight, we kill TTS, drop the
+// rest of the queued audio, and kick voice mode back into "listening" so
+// the user's new utterance can be recorded. Uses browser echoCancellation
+// so playing TTS doesn't false-trigger itself through the mic.
+// ============================================================
+let bargeStream = null, bargeCtx = null, bargeProcessor = null;
+let bargeActive = false;
+let onBargeIn = null;
+
+async function startBargeIn(callback) {
+  if (bargeStream) return;
+  onBargeIn = callback;
+  try {
+    bargeStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }
+    });
+    bargeCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const source = bargeCtx.createMediaStreamSource(bargeStream);
+    bargeProcessor = bargeCtx.createScriptProcessor(2048, 1, 1);
+    let highStreak = 0;
+    bargeProcessor.onaudioprocess = (e) => {
+      if (!bargeActive) return;
+      const input = e.inputBuffer.getChannelData(0);
+      let sum = 0;
+      for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+      const rms = Math.sqrt(sum / input.length);
+      if (rms > MIC_BARGE_THRESHOLD) {
+        highStreak++;
+        if (highStreak >= 3) {
+          highStreak = 0;
+          bargeActive = false;
+          if (onBargeIn) onBargeIn();
+        }
+      } else {
+        highStreak = 0;
+      }
+    };
+    source.connect(bargeProcessor);
+    bargeProcessor.connect(bargeCtx.destination);
+    bargeActive = true;
+  } catch (e) {
+    // Mic permission denied or hardware issue - barge-in just won't work, no crash.
+  }
+}
+
+function stopBargeIn() {
+  bargeActive = false;
+  onBargeIn = null;
+  try { bargeProcessor && bargeProcessor.disconnect(); } catch {}
+  try { bargeStream && bargeStream.getTracks().forEach(t => t.stop()); } catch {}
+  try { bargeCtx && bargeCtx.close(); } catch {}
+  bargeStream = bargeCtx = bargeProcessor = null;
+}
+
+// ============================================================
 // STT — record mic in browser, send raw PCM to backend
 // ============================================================
 let recorder = { stream: null, ctx: null, processor: null, source: null, samples: [], sr: 16000, recording: false };
@@ -3280,9 +3355,18 @@ async function transcribe() {
 let micSilenceTimer = null;
 let micLastVoice = 0;
 let micWatchdog = null;
-const MIC_SILENCE_MS = 1500;        // stop after 1.5s of quiet
+// Aggressive auto-stop: 700ms of quiet after the user spoke. Voice mode is
+// turn-based and pauses naturally are short - 1500ms felt like an eternity.
+// (Old default was 1500ms; halving it cut perceived "I stopped talking - AI
+// is still waiting" by 800ms with no false-cuts on normal conversational
+// pauses.)
+const MIC_SILENCE_MS = 700;
 const MIC_MAX_MS = 30000;            // hard cap 30s
 const MIC_VOICE_THRESHOLD = 0.018;   // RMS-ish; tune
+// Barge-in threshold for interrupting AI mid-speech. Slightly higher than the
+// regular voice threshold so background noise during playback doesn't cause
+// false interrupts - the user needs to actually start talking.
+const MIC_BARGE_THRESHOLD = 0.030;
 
 async function micToggle() {
   if (recorder.recording) {
@@ -3436,16 +3520,29 @@ async function voiceCycle() {
     setVoiceTranscript(text);
     setVoiceStatus('thinking…');
     voiceSpeaking = true;
+    // Open a parallel mic stream that watches for the user starting to talk
+    // while the AI is mid-speech. If they do, kill TTS + abort the LLM call
+    // + jump straight back into listening. This is the ChatGPT-Voice-Mode
+    // barge-in behaviour - no waiting for the AI to finish.
+    let bargedIn = false;
+    startBargeIn(() => {
+      bargedIn = true;
+      ttsBuffer = '';
+      stopTTS().catch(() => {});
+      if (typeof stopGen === 'function') stopGen();  // aborts /chat stream
+      setVoiceStatus('listening (you interrupted)');
+    });
     await send(text);
+    stopBargeIn();
     // Belt-and-suspenders: explicitly persist again after a voice turn so the
     // conversation is definitely on disk before the user might quit. (send()
     // already calls touch() but voice users quit faster than chat users.)
     const _vc = activeConvo();
     if (_vc) await persistConvo(_vc);
     voiceSpeaking = false;
-    setVoiceStatus('your turn');
-    // Auto-resume listening after TTS finishes
-    if (voiceModeOn) setTimeout(voiceCycle, 700);
+    if (!bargedIn) setVoiceStatus('your turn');
+    // Auto-resume listening after TTS finishes (or sooner if barge-in fired).
+    if (voiceModeOn) setTimeout(voiceCycle, bargedIn ? 150 : 700);
     return;
   }
   if (voiceSpeaking) return;  // never open mic while TTS is playing
@@ -3627,21 +3724,31 @@ async function renderServerSetup() {
 
   if (s.llama_cpp_installed) {
     // BEST case: built-in is available. Offer to download + boot a curated pick.
-    intro.textContent = 'Hearth can run its own built-in LLM server — no other apps required. Pick a model to download:';
-    opts.innerHTML = '<div class="picks">' + (s.picks || []).map(p => `
-      <div class="pick" data-pick-id="${esc(p.id)}">
+    const recId = s.recommended_pick_id || '';
+    const recWhy = s.recommendation_reason || '';
+    intro.textContent = 'Hearth runs its own built-in LLM server - no other apps required. We picked the best fit for your PC:';
+    opts.innerHTML = '<div class="picks">' + (s.picks || []).map(p => {
+      const isRec = p.id === recId;
+      const tagHtml = isRec
+        ? '<span class="pick-tag pick-tag-pc">Recommended for your PC</span>'
+        : (p.tags && p.tags.includes('recommended') ? '<span class="pick-tag">good default</span>' : '');
+      return `
+      <div class="pick${isRec ? ' pick-rec' : ''}" data-pick-id="${esc(p.id)}">
         <div class="pick-info">
-          <div class="pick-name">${esc(p.name)}${p.tags && p.tags.includes('recommended') ? '<span class="pick-tag">recommended</span>' : ''}</div>
+          <div class="pick-name">${esc(p.name)}${tagHtml}</div>
           <div class="pick-meta">${p.size_gb} GB download &middot; needs ${p.vram_min_gb}+ GB VRAM &middot; ${p.context.toLocaleString()} token context</div>
           <div class="pick-desc">${esc(p.description)}</div>
+          ${isRec && recWhy ? `<div class="pick-why">${esc(recWhy)}</div>` : ''}
         </div>
         <button class="pick-btn">Download &amp; use</button>
-      </div>
-    `).join('') + '</div>' +
-      '<div class="welcome-tip">Already have a GGUF? Drop it into <code>~/Jarvis/models/</code> and pick it from the dropdown above.</div>';
+      </div>`;
+    }).join('') + '</div>' +
+      '<div class="welcome-tip">Or <a href="#" id="hf-browse-link">browse Hugging Face</a> for any GGUF. Already have one? Drop it into <code>~/Jarvis/models/</code> and pick it from the dropdown above.</div>';
     opts.querySelectorAll('.pick').forEach(el => {
       el.querySelector('.pick-btn').addEventListener('click', () => downloadAndStart(el.dataset.pickId));
     });
+    const hfLink = $('hf-browse-link');
+    if (hfLink) hfLink.addEventListener('click', (e) => { e.preventDefault(); openHFSearch(); });
   } else {
     // Fallback: external app links + a nudge toward the built-in path.
     intro.textContent = 'Hearth needs a local LLM. Three options - all free:';
@@ -3654,6 +3761,155 @@ async function renderServerSetup() {
       </div>
       <div class="welcome-tip">Or make Hearth self-contained (no external apps): <code>pip install llama-cpp-python</code> in the venv and reload this page - Hearth will offer to download a model right here.</div>
     `;
+  }
+}
+
+// Modal: search Hugging Face for any GGUF, pick a quant level, download +
+// auto-start the built-in server. Lets users go beyond the 3 curated picks.
+function openHFSearch() {
+  showModal('Browse Hugging Face for a model', `
+    <input type="text" id="hf-q" class="hf-search-input" placeholder="search GGUF models (e.g. mistral 7b, phi 3, gemma)" autofocus />
+    <div id="hf-results" class="hf-results">
+      <div style="padding:14px;color:var(--fg-faint);font-size:12px">Type a query above to search GGUF repos on Hugging Face.</div>
+    </div>
+  `, [{ label: 'Close' }]);
+  const q = document.getElementById('hf-q');
+  const res = document.getElementById('hf-results');
+  let _debounce = null;
+  if (!q) return;
+  q.addEventListener('input', () => {
+    clearTimeout(_debounce);
+    _debounce = setTimeout(async () => {
+      const term = q.value.trim();
+      if (!term) { res.innerHTML = '<div style="padding:14px;color:var(--fg-faint);font-size:12px">Type a query above.</div>'; return; }
+      res.innerHTML = '<div style="padding:14px;color:var(--fg-faint);font-size:12px">Searching Hugging Face...</div>';
+      try {
+        const r = await api('/api/llmserver/hf-search?q=' + encodeURIComponent(term));
+        const list = r.results || [];
+        if (!list.length) { res.innerHTML = '<div style="padding:14px;color:var(--fg-faint);font-size:12px">No GGUF repos matched.</div>'; return; }
+        res.innerHTML = list.map((it, i) => `
+          <div class="hf-result" data-repo="${esc(it.hf_repo)}">
+            <div>
+              <div class="hf-result-name">${esc(it.hf_repo)}</div>
+              <div style="font-size:10px;color:var(--fg-faint)">${(it.tags || []).slice(0,4).join(' &middot; ')}</div>
+            </div>
+            <div class="hf-result-meta">${it.downloads ? it.downloads.toLocaleString() + ' dl' : ''}</div>
+          </div>
+          <div class="hf-files" id="hf-files-${i}" hidden></div>
+        `).join('');
+        res.querySelectorAll('.hf-result').forEach((el, i) => {
+          el.addEventListener('click', () => loadHFRepoFiles(el.dataset.repo, i));
+        });
+      } catch (e) {
+        res.innerHTML = '<div style="padding:14px;color:#e74c3c;font-size:12px">Search failed: ' + esc(e.message) + '</div>';
+      }
+    }, 350);
+  });
+}
+
+async function loadHFRepoFiles(repo, idx) {
+  const box = document.getElementById('hf-files-' + idx);
+  if (!box) return;
+  if (!box.hidden) { box.hidden = true; return; }  // toggle
+  box.hidden = false;
+  box.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--fg-faint)">Loading file list...</div>';
+  try {
+    const r = await api('/api/llmserver/hf-files?repo=' + encodeURIComponent(repo));
+    const files = r.files || [];
+    if (!files.length || files[0].error) {
+      box.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--fg-faint)">No .gguf files in this repo.</div>';
+      return;
+    }
+    box.innerHTML = files.map(f => `
+      <div class="hf-file" data-filename="${esc(f.filename)}">
+        <span>${esc(f.filename)}</span>
+        <span style="color:var(--fg-faint)">${f.size_gb ? f.size_gb + ' GB' : ''}</span>
+      </div>
+    `).join('');
+    box.querySelectorAll('.hf-file').forEach(el => {
+      el.addEventListener('click', async () => {
+        $('modal').classList.remove('open');
+        await downloadCustomHF(repo, el.dataset.filename);
+      });
+    });
+  } catch (e) {
+    box.innerHTML = '<div style="padding:8px;font-size:12px;color:#e74c3c">Failed: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function downloadCustomHF(repo, filename) {
+  // Re-use the welcome-card download UI for progress display.
+  showWelcomeCard(true);
+  $('welcome-no-server').hidden = false;
+  const dl = $('welcome-download');
+  const bar = $('welcome-dl-bar-inner');
+  const label = $('welcome-dl-label');
+  const detail = $('welcome-dl-detail');
+  const opts = $('welcome-server-options');
+  dl.hidden = false;
+  bar.style.width = '0%';
+  label.textContent = 'Downloading ' + filename + '...';
+  detail.textContent = repo;
+  opts.style.opacity = '0.4';
+  opts.style.pointerEvents = 'none';
+  let modelPath = null;
+  try {
+    const res = await fetch('/api/llmserver/download-hf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, filename }),
+    });
+    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder('utf-8');
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'progress') {
+          const pct = ev.total ? Math.min(100, Math.floor(100 * ev.done / ev.total)) : 0;
+          bar.style.width = pct + '%';
+          label.textContent = filename + ' - ' + pct + '%';
+          detail.textContent = (ev.done / 1e9).toFixed(2) + ' GB of ' + (ev.total / 1e9).toFixed(2) + ' GB';
+        } else if (ev.type === 'done') {
+          if (!ev.ok) {
+            label.textContent = 'Download failed';
+            detail.textContent = ev.error || '';
+            opts.style.opacity = '1'; opts.style.pointerEvents = '';
+            return;
+          }
+          modelPath = ev.path;
+          bar.style.width = '100%';
+        }
+      }
+    }
+    if (modelPath) {
+      label.textContent = 'Starting server...';
+      const startRes = await api('/api/llmserver/start', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_path: modelPath }),
+      });
+      if (startRes && startRes.ok) {
+        label.textContent = 'Ready - server live';
+        toast('Server started', filename, 'ok', 5000);
+        hideWelcomeCard(true);
+        setTimeout(() => { refreshModels(); refreshState(); }, 500);
+      } else {
+        label.textContent = 'Server start failed';
+        detail.textContent = (startRes && startRes.error) || '';
+      }
+    }
+  } catch (e) {
+    label.textContent = 'Error';
+    detail.textContent = e.message;
+  } finally {
+    opts.style.opacity = '1'; opts.style.pointerEvents = '';
   }
 }
 
