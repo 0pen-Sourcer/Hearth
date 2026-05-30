@@ -231,8 +231,17 @@ def transcribe(audio) -> str:
         segments, _info = model.transcribe(
             audio,
             language="en",
-            beam_size=1,            # fast — boost to 5 for accuracy
-            vad_filter=False,        # we already trimmed silence
+            beam_size=1,            # fast - boost to 5 for accuracy
+            # Silero VAD (ships with faster-whisper, no extra dep) drops
+            # speech-free chunks AND tightens utterance edges - much smarter
+            # than our RMS-based pre-trim. Critical for the noisy-room case
+            # where RMS thresholds fail. Enabled with conservative params so
+            # short conversational pauses don't fragment the transcript.
+            vad_filter=True,
+            vad_parameters={
+                "min_silence_duration_ms": 400,
+                "speech_pad_ms":           250,
+            },
             condition_on_previous_text=False,
         )
         return " ".join(s.text.strip() for s in segments).strip()

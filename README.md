@@ -52,6 +52,8 @@ It's the project I'd want if I just got an RTX card and downloaded LM Studio. "C
 | Feature                       | **Hearth** | Open WebUI | OpenInterpreter | LibreChat | Aider |
 | ----------------------------- | :--------: | :--------: | :-------------: | :-------: | :---: |
 | Runs 100% locally             |     ✅     |     ✅     |        ✅        |     ⚠️     |    ⚠️   |
+| **Built-in LLM server (zero other apps)** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Hugging Face model browser + 1-click download** | ✅ | partial | ❌ | ❌ | ❌ |
 | Voice in (mic)                |     ✅     |     ❌     |        ❌        |     ❌     |    ❌   |
 | Voice out (TTS)               |     ✅     |     ❌     |        ❌        |     ❌     |    ❌   |
 | Voice **interrupt** (talk over it) | ✅    |     ❌     |        ❌        |     ❌     |    ❌   |
@@ -73,34 +75,38 @@ The unique combo nobody else has: **voice loop + computer control + writes its o
 
 ## ⚡ Install in 60 seconds
 
-> **You need:** Windows 10/11, Python 3.11+, an LLM server (we recommend [LM Studio](https://lmstudio.ai) — free, GUI, one-click model load).
+> **You need:** Windows 10/11, Python 3.11+.
 
 ```powershell
 # 1. Clone
 git clone https://github.com/0pen-sourcer/hearth.git
 cd hearth
 
-# 2. Install (creates venv, installs deps, auto-downloads voice models)
-.\install.ps1
+# 2. Install. Pick your LLM path:
+.\install.ps1 -BuiltinLLM cuda          # NVIDIA GPU - Hearth runs its OWN LLM server, no other apps
+.\install.ps1 -BuiltinLLM cpu           # no GPU - CPU-only built-in server
+.\install.ps1                           # bring your own (LM Studio, Ollama, vLLM, llama.cpp, cloud)
 
-# 3. Start LM Studio, load a chat model, click "Start Server".
-
-# 4. Launch
+# 3. Launch
 .\hearth.bat
 ```
 
-That's it. Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
+**First-run welcome card** detects your GPU/VRAM and recommends the right GGUF (Qwen 2.5 7B for 6 GB+, Hermes 3 3B for smaller). Click Download → it pulls from Hugging Face → Hearth's built-in server boots → ready to chat. **No LM Studio install, no Ollama install, no API key.** Or browse Hugging Face inside the welcome card for any other GGUF you want.
+
+Prefer your existing setup? Hearth auto-detects LM Studio (port 1234), Ollama (11434), or llama.cpp (8080) at boot — no env config needed. Or open **Settings → LLM endpoint** to plug in Gemini / Grok / OpenAI / OpenRouter with your API key.
+
+Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 
 ### Interfaces
 
 | Interface | Launch | Status |
 |---|---|---|
-| **CLI** (voice + keyboard) | `.\hearth.bat` | **v0.5 daily driver.** Voice loop with TTS interrupt, prompt_toolkit history, full slash commands, inline `[y/n/a/N]` permission prompts, context-usage footer. |
+| **CLI** (voice + keyboard) | `.\hearth.bat` | **v0.6 daily driver.** Voice loop with mid-sentence interrupt, prompt_toolkit history, slash autocomplete, persistent `[a]lways`/`[N]ever` decisions, context-usage footer. |
+| **Desktop app + Web UI** | `python -m hearth.tray --open` (or `Hearth.exe` from the release zip) | **Functional.** Multi-chat sidebar, file drop, native window, system tray, wake word, voice mode with barge-in, welcome card with HF model browser, inline keyboard permission prompts, cloud endpoint switcher. Same backend as the CLI. |
 | **Bridge** (programmatic) | `python -m hearth.headless --prompt "..."` | Stable. JSONL events to stdout — drive Hearth from CI, scripts, other agents. |
-| **MCP** (LM Studio chat) | `python -m hearth.mcp_server` | Stable. Exposes every built-in tool as a live tool-card inside LM Studio's native chat UI. |
-| **Desktop app + Web UI** | `python -m hearth.tray --open` | **Preview — v0.6 work-in-progress.** Multi-chat sidebar, file drop, native window, system tray, wake word, conversations that persist across restart. Working but a few rough edges vs the CLI. See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md). |
+| **MCP server** (other LLM chat UIs) | `python -m hearth.mcp_server` | Stable. Exposes every built-in tool as a live tool-card inside any MCP-aware chat UI. |
 
-**No LM Studio?** Anything OpenAI-compatible works — Ollama (with its compat layer), vLLM, llama.cpp, LocalAI. Set `LOCAL_API_BASE` to point at it.
+**LLM backend, pick any:** Hearth's bundled llama-cpp-python server (install with `-BuiltinLLM cuda`), LM Studio, Ollama, vLLM, llama.cpp, LocalAI — anything OpenAI-compatible. **Cloud:** Gemini, Grok, OpenAI, OpenRouter via Settings → LLM endpoint, with your key. Switch any time without restarting.
 
 **Mac / Linux:** Not officially supported in v0.5. Most of the codebase is cross-platform; what isn't is shell defaults, app-launching, and screenshot. PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
@@ -108,7 +114,7 @@ That's it. Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" w
 
 ## What Jarvis can actually do
 
-**Talk to him.** Voice in (faster-whisper), voice out (Kokoro), with mid-sentence interrupt: you start talking, he shuts up and listens. No "wait for him to finish" awkwardness.
+**Talk to him with real barge-in.** Voice in (faster-whisper), voice out (Kokoro), with parallel-mic barge-in: you start talking mid-response, his TTS dies instantly, the in-flight LLM call aborts, and recording starts. No "wait for him to finish" awkwardness. `/sleep` to silence him until you say the wake word, `/wake` to bring him back.
 
 ```
 ❯ /listen on
@@ -132,7 +138,7 @@ Top hits on D:: Games\Steam (340GB), Backups\2024 (89GB), ML\models (52GB)...
 
 **Knows your machine.** On first run (and via `/learn` anytime) Hearth detects your GPU/VRAM, RAM, the models on your server, and a top-level map of your drives, and remembers them. So he answers "what models do I have?" instantly and goes straight to the right folder — instead of burning two minutes recursively scanning a drive and finding nothing.
 
-**Drives a real web browser — and you watch it.** Not static scraping: `browse` opens a controlled Chromium (you see the window), reads the rendered page, and lists every clickable link/button; `browse_click` glides a visible cursor to an element and clicks it; `browse_type` fills fields. The session persists, so it browses multi-step (search → click result → read → click again). `pip install playwright && python -m playwright install chromium` to enable. (Best on a capable model — point it at Grok/Gemini for the slick demo.)
+**Drives a real web browser — and you watch it.** Not static scraping: `browse` opens YOUR installed Chrome (real one, with codecs, not bot-flagged), reads the rendered page, and lists every clickable link/button; `browse_click` smooth-scrolls the target into view then glides a visible violet cursor and clicks; `browse_type` fills fields. The session persists across calls (multi-step: search → click result → read → click again). 404s are caught so the model stops URL-guessing. **The packaged exe ships Playwright pre-bundled** — zero setup. (Best on a capable model — point it at Grok or Gemini via Settings → LLM endpoint for the slick demo.)
 
 **Grows its own tools.** This is the part nobody else does locally: when Hearth hits a capability it doesn't have, it can **write a new tool for itself** with `create_plugin` — validated, saved to `~/Jarvis/plugins/`, and usable the same turn. They auto-load forever after. You can hand-write plugins too (a `TOOL` dict + a `run(args)` function). `list_plugins` / `delete_plugin` to manage them. It's a self-improving agent — except 100% local, private, no account, no telemetry.
 
@@ -144,11 +150,15 @@ Top hits on D:: Games\Steam (340GB), Backups\2024 (89GB), ML\models (52GB)...
 hi jarvis → aGkgamFydmlz
 ```
 
-**Edit a `rules.md` to tweak behavior.** Re-read every turn. No code edits, no restarts.
+**Schedule reminders, recurring or one-shot.** "Remind me to take a break in 25 minutes" → desktop toast at 25. "Remind me to stretch every 30 minutes" → re-arms after each fire. Natural-language times (`tomorrow at 7am`, `next monday 10am`, `in 2 hours`). Stored in `~/Jarvis/reminders.json`, fired by a background watcher.
+
+**Edit a `rules.md` to tweak behavior.** Re-read every turn. No code edits, no restarts. Or set `HEARTH_PERSONA=bro|chill|professional|formal` to overlay a tone onto the base persona.
+
+**Cloud key for the slick demos.** Open **Settings → LLM endpoint**, pick Gemini / Grok / OpenAI / OpenRouter / Custom, paste your key, click Apply. The next message uses it — no restart. Saved to `~/Jarvis/settings.json` so the CLI picks it up too. Local stays the default; cloud is a transparent flex when you want bigger reasoning.
 
 **Web search + fetch** via DuckDuckGo. Free. No API key.
 
-**Permission prompts** for risky stuff (writes, shell commands, app launches). `[y]es / [n]o / [a]lways / [N]ever this session`. Skip with `JARVIS_AUTO_APPROVE=1` once you trust him.
+**Persistent permission prompts** for risky stuff (writes, shell commands, app launches). In the CLI: inline `[y]es / [n]o / [a]lways / [N]ever / or type what to do instead`. In the GUI: an inline keyboard strip above the input (1=Yes, 2=No, 3=Always, 4=Never, Enter=Yes, Esc=No, type any text = decline + tell Jarvis what to do instead). **`Always` and `Never` save to `~/Jarvis/permissions.json` — survive restarts AND are shared between CLI and GUI.** `/perms forget <tool>` drops one; `/perms reset` clears all. Workspace-internal writes (`~/Jarvis/**`) auto-approve.
 
 **Headless / scriptable mode.** Drive Jarvis from another script, another agent, a CI job — no typing required:
 
@@ -177,14 +187,15 @@ Emits JSONL events (user / thinking / tool_call / tool_result / assistant / done
                                             messages + tools (OpenAI format)
                                                           ▼
                             ┌─────────────────────────────────────┐
-                            │   LM Studio / Ollama / vLLM (local) │
-                            │   any chat model — Gemma, Qwen, …   │
+                            │   Built-in llama.cpp server (bundled), │
+                            │   or LM Studio / Ollama / vLLM,        │
+                            │   or Gemini / Grok / OpenAI (cloud)    │
                             └─────────────────────┬───────────────┘
                                                   │ stream + tool_calls
                                                   ▼
                                     ┌───────────────────────┐
                                     │  hearth/tools.py      │
-                                    │  48 tools, sandboxed  │
+                                    │  56 tools, sandboxed  │
                                     │  + your own plugins   │
                                     └────────┬──────────────┘
                                              │
@@ -197,7 +208,7 @@ Emits JSONL events (user / thinking / tool_call / tool_result / assistant / done
    YOU (ears) ◀── Kokoro TTS ◀── sentence chunks ◀── streamed reply
 ```
 
-Same `execute_tool` is also exposed via [`hearth/mcp_server.py`](hearth/mcp_server.py) so **LM Studio's native chat UI** sees every tool as a live card. Same tools, same memory, same workspace — whether you're in the CLI or LM Studio's chat.
+Same `execute_tool` is also exposed via [`hearth/mcp_server.py`](hearth/mcp_server.py) as an MCP server, so any MCP-aware chat UI (LM Studio, Cline, Claude Desktop) sees every tool as a live card. Same tools, same memory, same workspace — whether you're in the Hearth CLI, the Hearth desktop app, or a third-party chat host.
 
 ---
 
