@@ -339,9 +339,28 @@ async def run_once(
             resp = await client.chat.completions.create(**kwargs)
         except Exception as e:
             info = classify_api_error(e, _is_local_endpoint(LOCAL_API_BASE))
-            emit("error", message=info.hint, category=info.category,
-                 retryable=info.retryable, detail=f"{type(e).__name__}: {e}")
-            return 4
+            # Auto-retry retryable failures (rate_limit / timeout / server_error /
+            # transient unreachable). Exponential backoff capped at 3 attempts.
+            if info.retryable and depth < 25:  # don't infinitely retry
+                _retry_n = 0
+                _max_retries = int(os.getenv("HEARTH_API_RETRIES", "3"))
+                while info.retryable and _retry_n < _max_retries:
+                    _retry_n += 1
+                    _wait = min(2 ** _retry_n, 8)  # 2s, 4s, 8s
+                    emit("retry", attempt=_retry_n, max_attempts=_max_retries,
+                         wait_s=_wait, category=info.category, message=info.hint)
+                    await asyncio.sleep(_wait)
+                    try:
+                        resp = await client.chat.completions.create(**kwargs)
+                        info = None
+                        break
+                    except Exception as e2:
+                        info = classify_api_error(e2, _is_local_endpoint(LOCAL_API_BASE))
+                        e = e2
+            if info is not None:
+                emit("error", message=info.hint, category=info.category,
+                     retryable=info.retryable, detail=f"{type(e).__name__}: {e}")
+                return 4
 
         # Streaming accumulator. OpenAI streams tool_calls as partial deltas
         # keyed by `index` — we merge them as they arrive. Content streams as
