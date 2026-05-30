@@ -281,6 +281,14 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
     # ~200-400ms (audio buffer). Wait that out before recording so we don't
     # transcribe Jarvis's own tail.
     POST_STOP_DEBOUNCE_S = float(os.environ.get("JARVIS_STT_POST_STOP_DEBOUNCE", "0.4"))
+    # Hard-mute cooldown AFTER tts ends - the speaker buffer can keep playing
+    # for ~0.5-1s and we don't want that to feed back as a phantom utterance.
+    # The old guard tried to do this by raising the rms threshold, but the
+    # is_speaking() check was silently throwing (function didn't exist) so the
+    # threshold-raise never fired - hence the loop. With is_speaking() defined
+    # now, we ALSO hard-skip transcription for this cooldown to be belt-and-
+    # suspenders. Tunable via env.
+    POST_TTS_COOLDOWN_S = float(os.environ.get("JARVIS_STT_POST_TTS_COOLDOWN", "1.0"))
 
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1,
@@ -291,17 +299,23 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
                 except Exception:
                     time.sleep(0.05)
                     continue
-                mono = data[:, 0] if data.ndim > 1 else data
-                rms = float((mono ** 2).mean() ** 0.5)
 
-                # Effective threshold depends on whether Jarvis is currently
-                # speaking — feedback-loop prevention.
+                # Hard-mute while Jarvis is speaking AND for a brief cooldown
+                # after - kills the speaker-to-mic feedback loop deterministically.
                 tts_active = False
+                tts_recent = False
                 try:
                     tts_active = _voice.is_speaking()
+                    tts_recent = _voice.seconds_since_spoke() < POST_TTS_COOLDOWN_S
                 except Exception:
                     pass
-                threshold = SPEECH_RMS * TTS_MULT if tts_active else SPEECH_RMS
+                if tts_active or tts_recent:
+                    speech_run = 0  # reset so a partial run doesn't carry over
+                    continue
+
+                mono = data[:, 0] if data.ndim > 1 else data
+                rms = float((mono ** 2).mean() ** 0.5)
+                threshold = SPEECH_RMS  # tts is gated above; no need to raise here
 
                 if rms > threshold:
                     speech_run += 1

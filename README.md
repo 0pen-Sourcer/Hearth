@@ -102,7 +102,7 @@ That's it. Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" w
 
 **No LM Studio?** Anything OpenAI-compatible works — Ollama (with its compat layer), vLLM, llama.cpp, LocalAI. Set `LOCAL_API_BASE` to point at it.
 
-**Mac / Linux:** Not officially supported in v0.5. Most of the codebase is cross-platform; what isn't is shell defaults, app-launching, and screenshot. PRs welcome — see [`docs/PORTING.md`](docs/PORTING.md).
+**Mac / Linux:** Not officially supported in v0.5. Most of the codebase is cross-platform; what isn't is shell defaults, app-launching, and screenshot. PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
@@ -158,7 +158,7 @@ python -m hearth.headless --prompt "find my biggest folders on D and open the to
 
 Emits JSONL events (user / thinking / tool_call / tool_result / assistant / done) to stdout — pipe it anywhere. `--think` to see model reasoning, `--model qwen/qwen3.5-9b` to pin the model, `--format text` for human eyeballs.
 
-[Full tool list →](docs/TOOLS.md) · [Memory deep-dive →](docs/MEMORY.md) · [Voice setup →](docs/VOICE.md) · [Architecture →](docs/ARCHITECTURE.md)
+[Full tool list →](docs/TOOLS.md) · [Voice setup →](#voice-setup) · [User guide →](docs/USER_GUIDE.md)
 
 ---
 
@@ -242,7 +242,7 @@ pip install faster-whisper
 
 `/listen` for one-shot, `/listen on` for continuous-with-interrupt mode.
 
-[Full voice docs →](docs/VOICE.md)
+[More in the user guide →](docs/USER_GUIDE.md)
 
 ---
 
@@ -263,7 +263,7 @@ pip install faster-whisper
 
 `HEARTH_*` env vars are also accepted everywhere `JARVIS_*` is — pick whichever feels right.
 
-[Full config reference →](docs/CONFIG.md)
+The table above is the full env-var reference.
 
 ---
 

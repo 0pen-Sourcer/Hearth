@@ -151,11 +151,38 @@ _models_cache: Dict[str, Any] = {"ts": 0, "data": None}
 # When a risky tool fires during /chat, the bridge calls permission_check
 # which emits a `permission_request` NDJSON event, parks on a per-id queue,
 # and waits for the user to POST /api/permission with their decision.
-# `_always_allow` / `_always_deny` are session-only caches (no disk).
+# `_always_allow` / `_always_deny` persist to disk (same file the CLI uses) so
+# [a]lways / [N]ever survive restarts and are shared between CLI and GUI.
 import queue as _queue
 _permission_queues: Dict[str, _queue.Queue] = {}
-_always_allow: set = set()
-_always_deny: set = set()
+_PERMS_FILE = os.path.join(WORKSPACE, "permissions.json")
+
+
+def _load_perms_from_disk():
+    allow, deny = set(), set()
+    try:
+        with open(_PERMS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for name, v in data.items():
+            if v == "always": allow.add(name)
+            elif v == "never": deny.add(name)
+    except (OSError, ValueError):
+        pass
+    return allow, deny
+
+
+def _save_perms_to_disk():
+    data = {n: "always" for n in _always_allow}
+    data.update({n: "never" for n in _always_deny})
+    try:
+        os.makedirs(os.path.dirname(_PERMS_FILE), exist_ok=True)
+        with open(_PERMS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except OSError:
+        pass
+
+
+_always_allow, _always_deny = _load_perms_from_disk()
 
 
 def _make_permission_check(emit_fn):
@@ -173,8 +200,8 @@ def _make_permission_check(emit_fn):
                 decision = "deny"
         finally:
             _permission_queues.pop(req_id, None)
-        if decision == "always": _always_allow.add(name); return "allow"
-        if decision == "never":  _always_deny.add(name);  return "deny"
+        if decision == "always": _always_allow.add(name); _save_perms_to_disk(); return "allow"
+        if decision == "never":  _always_deny.add(name);  _save_perms_to_disk(); return "deny"
         return decision
     return _check
 
@@ -416,6 +443,10 @@ def _load_settings() -> Dict:
         "stt_model": "base.en",  # base.en / small.en / medium.en
         "theme": "warm-flame",
         "preferred_model": "",
+        "llm_provider": "local",
+        "llm_url": "",
+        "llm_key": "",
+        "llm_model": "",
     }
     if not os.path.isfile(SETTINGS_PATH):
         return defaults
@@ -600,6 +631,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {"tools": TOOL_DEFINITIONS})
         if path == "/api/persona":
             return self._send_json(200, {"system_prompt": system_prompt()})
+        if path == "/api/llmserver/status":
+            from . import llmserver
+            return self._send_json(200, llmserver.status(LOCAL_API_BASE))
         self.send_error(404, "not found")
 
     def do_DELETE(self) -> None:
@@ -684,10 +718,85 @@ class HearthHandler(BaseHTTPRequestHandler):
             ok = _resolve_permission(rid, dec)
             return self._send_json(200 if ok else 404, {"ok": ok})
         if path == "/api/permission/clear":
-            # User wants to reset always_allow / always_deny session caches
+            # User wants to reset always_allow / always_deny — also wipe disk so
+            # they don't come back on restart.
             _always_allow.clear()
             _always_deny.clear()
+            _save_perms_to_disk()
             return self._send_json(200, {"ok": True})
+        if path == "/api/llm-endpoint":
+            # Switch the active LLM endpoint at runtime (e.g. local <-> Gemini).
+            # Mutates the module-level constants in both web.py and headless.py
+            # so the very next /chat call uses the new server. Persists to
+            # ~/Jarvis/settings.json so the choice survives restart.
+            from . import headless as _hl
+            body = self._read_json()
+            url = (body.get("url") or "").strip()
+            key = (body.get("key") or "").strip()
+            model = (body.get("model") or "").strip()
+            if not url:
+                return self._send_json(400, {"ok": False, "error": "url required"})
+            global LOCAL_API_BASE
+            LOCAL_API_BASE = url
+            _hl.LOCAL_API_BASE = url
+            if key:
+                _hl.LOCAL_API_KEY = key
+            else:
+                # No key supplied: keep harmless default so local servers still work
+                _hl.LOCAL_API_KEY = "not-needed"
+            os.environ["LOCAL_API_BASE"] = url
+            if key:
+                os.environ["LOCAL_API_KEY"] = key
+            if model:
+                os.environ["LOCAL_MODEL"] = model
+            return self._send_json(200, {"ok": True, "url": url})
+        if path == "/api/llmserver/start":
+            # Boot the optional built-in llama-cpp-python server with a chosen
+            # model file. Returns {ok, url, pid} or {ok: False, error}.
+            from . import llmserver
+            body = self._read_json()
+            model_path = (body.get("model_path") or "").strip()
+            ctx = int(body.get("ctx") or 8192)
+            n_gpu = int(body.get("n_gpu_layers") if body.get("n_gpu_layers") is not None else -1)
+            return self._send_json(200, llmserver.start_builtin(model_path, ctx=ctx, n_gpu_layers=n_gpu))
+        if path == "/api/llmserver/stop":
+            from . import llmserver
+            return self._send_json(200, llmserver.stop_builtin())
+        if path == "/api/llmserver/download":
+            # Download a curated pick from HF, streaming progress as NDJSON so
+            # the GUI can render a real progress bar. {type:"progress", done, total}
+            # events while downloading, then a final {type:"done", ok, path|error}.
+            from . import llmserver
+            body = self._read_json()
+            pick_id = (body.get("pick_id") or "").strip()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            _last_emit = [0.0]
+
+            def emit(obj: Dict[str, Any]) -> None:
+                try:
+                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def on_progress(done: int, total: int) -> None:
+                now = time.time()
+                # Throttle to ~5 events/sec so we don't drown the socket.
+                if now - _last_emit[0] < 0.2 and done != total:
+                    return
+                _last_emit[0] = now
+                emit({"type": "progress", "done": done, "total": total})
+
+            try:
+                result = llmserver.download_model(pick_id, on_progress=on_progress)
+                emit({"type": "done", **result})
+            except Exception as e:
+                emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
         self.send_error(404, "not found")
 
     # -------- handlers --------
@@ -1025,6 +1134,35 @@ def _start_reminder_watcher() -> None:
                 pass
 
     _rem.start_watcher(_notify)
+
+
+def _apply_saved_llm_endpoint() -> None:
+    """At boot, if the user previously picked a cloud provider via Settings ->
+    LLM endpoint, apply it to LOCAL_API_BASE / LOCAL_API_KEY before the first
+    /chat call. Settings live in ~/Jarvis/settings.json so this survives every
+    restart and matches what the user sees in the UI."""
+    try:
+        s = _load_settings()
+        url = (s.get("llm_url") or "").strip()
+        if not url:
+            return
+        key = (s.get("llm_key") or "").strip()
+        model = (s.get("llm_model") or "").strip()
+        global LOCAL_API_BASE
+        LOCAL_API_BASE = url
+        from . import headless as _hl
+        _hl.LOCAL_API_BASE = url
+        _hl.LOCAL_API_KEY = key or "not-needed"
+        os.environ["LOCAL_API_BASE"] = url
+        if key:
+            os.environ["LOCAL_API_KEY"] = key
+        if model:
+            os.environ["LOCAL_MODEL"] = model
+    except Exception:
+        pass
+
+
+_apply_saved_llm_endpoint()
 
 
 def _maybe_learn_environment_async() -> None:

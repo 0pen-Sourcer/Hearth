@@ -462,6 +462,13 @@
     animation: msgIn 0.2s var(--ease);
   }
   .tool:hover { border-color: var(--border-strong); }
+  /* Quiet variant for browse/browse_click/etc - just a status line, no
+     expansion, no args. Keeps the chat clean during a long browsing session. */
+  .tool-quiet { background: transparent; border-color: transparent; margin: 2px 0; }
+  .tool-quiet:hover { border-color: transparent; }
+  .tool-quiet .t-head { cursor: default; padding: 4px 0; }
+  .tool-quiet .t-name { color: var(--fg-faint); font-family: inherit; font-size: 12px; font-style: italic; }
+  .tool-quiet .t-icon { color: var(--accent-2); opacity: 0.7; }
   .tool .t-head {
     display: flex; align-items: center; gap: 9px;
     padding: 8px 12px;
@@ -630,6 +637,150 @@
   .send-btn:disabled { background: var(--bg-3); color: var(--fg-faint); cursor: not-allowed; transform: none; }
   .send-btn.stopping { background: #c0392b; color: #fff; }
   .send-btn.stopping:hover { background: #e74c3c; }
+  /* Inline permission strip — sits right above the input. */
+  .perm-strip {
+    margin: 0 16px 6px; padding: 10px 14px;
+    background: linear-gradient(180deg, rgba(124,92,255,.10), rgba(124,92,255,.05));
+    border: 1px solid rgba(124,92,255,.45);
+    border-radius: var(--r);
+    animation: perm-in .18s var(--ease);
+  }
+  @keyframes perm-in { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .perm-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .perm-label { color: var(--fg-faint); font-size: 12px; }
+  .perm-tool { background: var(--bg-0); color: var(--accent-2); padding: 2px 8px; border-radius: 5px; font-size: 12px; }
+  .perm-args { color: var(--fg-faint); font-size: 11px; font-family: var(--mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .perm-close { margin-left: auto; color: var(--fg-faint); cursor: pointer; padding: 0 6px; font-size: 16px; line-height: 1; }
+  .perm-close:hover { color: #e74c3c; }
+  .perm-keys { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 12px; color: var(--fg-faint); }
+  .perm-key { cursor: pointer; padding: 3px 8px; border-radius: 5px; background: var(--bg-0); transition: all .12s var(--ease); }
+  .perm-key b { color: var(--accent-2); margin-right: 6px; font-weight: 700; }
+  .perm-key:hover { background: var(--bg-3); color: var(--fg); }
+  .perm-hint { color: var(--fg-faint); font-style: italic; margin-left: auto; }
+  /* Welcome card — first-run intro inside the chat view. Friendly. Click-to-try. */
+  .welcome-card {
+    margin: 24px 20px 8px;
+    padding: 22px;
+    background: linear-gradient(135deg, rgba(124,92,255,.10), rgba(124,92,255,.02));
+    border: 1px solid rgba(124,92,255,.30);
+    border-radius: 14px;
+    animation: welcome-in .35s var(--ease);
+  }
+  @keyframes welcome-in { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .welcome-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; }
+  .welcome-emoji { font-size: 30px; line-height: 1; }
+  .welcome-title { font-size: 20px; font-weight: 700; color: var(--fg); margin-bottom: 4px; }
+  .welcome-sub { font-size: 13px; color: var(--fg-faint); line-height: 1.5; }
+  .welcome-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .welcome-chip {
+    background: var(--bg-0);
+    border: 1px solid var(--bg-3);
+    color: var(--fg);
+    padding: 9px 14px;
+    border-radius: 18px;
+    font-size: 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all .14s var(--ease);
+  }
+  .welcome-chip span { font-size: 14px; }
+  .welcome-chip:hover {
+    background: rgba(124,92,255,.16);
+    border-color: rgba(124,92,255,.55);
+    transform: translateY(-1px);
+    color: var(--fg);
+  }
+  .welcome-server {
+    margin-top: 18px;
+    padding: 14px;
+    background: rgba(245,166,35,.08);
+    border: 1px solid rgba(245,166,35,.35);
+    border-radius: 10px;
+  }
+  .welcome-warn { font-size: 13px; font-weight: 600; color: #f5a623; margin-bottom: 6px; }
+  .welcome-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .welcome-link {
+    flex: 1; min-width: 220px;
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 10px 14px;
+    background: var(--bg-0); border: 1px solid var(--bg-3);
+    border-radius: 8px; text-decoration: none; color: var(--fg);
+    transition: all .15s var(--ease);
+  }
+  .welcome-link b { font-size: 14px; color: var(--accent-2); }
+  .welcome-link span { font-size: 11px; color: var(--fg-faint); }
+  .welcome-link code { background: var(--bg-1); padding: 1px 5px; border-radius: 3px; font-size: 10px; }
+  .welcome-link:hover { border-color: rgba(124,92,255,.55); background: rgba(124,92,255,.05); }
+  .welcome-tip { margin-top: 10px; font-size: 11px; color: var(--fg-faint); font-style: italic; }
+  /* Built-in-server model picker: one row per curated pick. */
+  .picks { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .pick {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-0); border: 1px solid var(--bg-3);
+    border-radius: 8px;
+    transition: all .14s var(--ease);
+  }
+  .pick:hover { border-color: rgba(124,92,255,.45); }
+  .pick-info { flex: 1; min-width: 0; }
+  .pick-name { font-size: 13px; font-weight: 600; color: var(--fg); }
+  .pick-tag { background: var(--accent); color: #0a0a0c; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; vertical-align: middle; font-weight: 700; }
+  .pick-meta { font-size: 11px; color: var(--fg-faint); margin-top: 2px; }
+  .pick-desc { font-size: 11px; color: var(--fg-faint); margin-top: 2px; }
+  .pick-btn {
+    background: var(--accent); color: #0a0a0c; border: none;
+    padding: 8px 14px; border-radius: 6px; cursor: pointer;
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+    transition: all .14s var(--ease);
+  }
+  .pick-btn:hover { background: var(--accent-2); transform: translateY(-1px); }
+  .pick-btn:disabled { background: var(--bg-3); color: var(--fg-faint); cursor: not-allowed; transform: none; }
+  /* Download progress UI. */
+  .welcome-dl { margin-top: 14px; padding: 12px; background: var(--bg-0); border-radius: 8px; border: 1px solid var(--bg-3); }
+  .welcome-dl-label { font-size: 13px; font-weight: 600; color: var(--fg); margin-bottom: 8px; }
+  .welcome-dl-bar { height: 6px; background: var(--bg-3); border-radius: 3px; overflow: hidden; }
+  .welcome-dl-bar-inner { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .3s var(--ease); }
+  .welcome-dl-detail { font-size: 11px; color: var(--fg-faint); margin-top: 6px; }
+  .welcome-actions {
+    display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px;
+    border-top: 1px solid rgba(255,255,255,.05); padding-top: 14px;
+  }
+  .welcome-dismiss, .welcome-more {
+    background: transparent; border: 1px solid var(--bg-3);
+    padding: 7px 14px; border-radius: 6px; cursor: pointer;
+    color: var(--fg-faint); font-size: 12px; transition: all .12s var(--ease);
+  }
+  .welcome-dismiss:hover { color: var(--fg); }
+  .welcome-more { background: var(--accent); color: #0a0a0c; border-color: var(--accent); font-weight: 600; }
+  .welcome-more:hover { background: var(--accent-2); border-color: var(--accent-2); }
+  /* Slash-command autocomplete - floats just above the input row. */
+  .input-row { position: relative; }
+  .slash-menu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0; right: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--bg-1);
+    border: 1px solid var(--bg-3);
+    border-radius: 8px;
+    box-shadow: 0 -8px 24px rgba(0,0,0,.35);
+    z-index: 200;
+    animation: slash-in .12s var(--ease);
+  }
+  @keyframes slash-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .slash-item {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 9px 14px; cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+  }
+  .slash-item:last-child { border-bottom: none; }
+  .slash-item.active { background: rgba(124,92,255,.16); }
+  .slash-item:hover { background: var(--bg-2); }
+  .slash-cmd { color: var(--accent-2); font-family: var(--mono); font-weight: 600; font-size: 13px; }
+  .slash-desc { color: var(--fg-faint); font-size: 11px; margin-left: 16px; text-align: right; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ============================================================
      MEMORY view
@@ -825,6 +976,33 @@
   .dot-strip.active .d.on {
     background: var(--accent);
     transform: scale(1.5);
+  }
+  /* Chat-mode "thinking" indicator - a horizontal dot-grid wave that lives
+     inside the empty assistant bubble until the first content chunk arrives. */
+  .thinking-grid {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 0;
+  }
+  .thinking-grid .d {
+    width: 7px; height: 7px; border-radius: 2px;
+    background: var(--bg-4);
+    animation: thinking-pulse 1.4s ease-in-out infinite;
+  }
+  .thinking-grid .d:nth-child(1)  { animation-delay: 0.00s; }
+  .thinking-grid .d:nth-child(2)  { animation-delay: 0.07s; }
+  .thinking-grid .d:nth-child(3)  { animation-delay: 0.14s; }
+  .thinking-grid .d:nth-child(4)  { animation-delay: 0.21s; }
+  .thinking-grid .d:nth-child(5)  { animation-delay: 0.28s; }
+  .thinking-grid .d:nth-child(6)  { animation-delay: 0.35s; }
+  .thinking-grid .d:nth-child(7)  { animation-delay: 0.42s; }
+  .thinking-grid .d:nth-child(8)  { animation-delay: 0.49s; }
+  .thinking-grid .d:nth-child(9)  { animation-delay: 0.56s; }
+  .thinking-grid .d:nth-child(10) { animation-delay: 0.63s; }
+  .thinking-grid .d:nth-child(11) { animation-delay: 0.70s; }
+  .thinking-grid .d:nth-child(12) { animation-delay: 0.77s; }
+  @keyframes thinking-pulse {
+    0%, 100% { background: var(--bg-4); transform: scale(1); box-shadow: none; }
+    50%      { background: var(--accent); transform: scale(1.35); box-shadow: 0 0 8px var(--accent-line); }
   }
 
   /* ============================================================
@@ -1078,9 +1256,65 @@
 
     <!-- CHAT -->
     <section class="view active" id="view-chat">
+      <!-- First-run welcome card. Click a chip to fire the prompt. Auto-hides
+           after the first message; comes back via /welcome. No emojis by
+           design — clean labels + hover does the visual work. -->
+      <div class="welcome-card" id="welcome-card" hidden>
+        <div class="welcome-head">
+          <div>
+            <div class="welcome-title">Hey, I'm JARVIS</div>
+            <div class="welcome-sub">Local AI for your machine. I can drive your PC, talk to you, remember what you tell me, and write my own tools when I hit a gap. Pick one of these to try me:</div>
+          </div>
+        </div>
+        <div class="welcome-chips">
+          <button class="welcome-chip" data-prompt="what's on my screen right now?">What's on my screen?</button>
+          <button class="welcome-chip" data-prompt="open chrome and show me the latest news on the RTX 5060, let me see it">Drive a browser</button>
+          <button class="welcome-chip" data-prompt="find my most recent download and open it">Find a file</button>
+          <button class="welcome-chip" data-prompt="remember that I prefer dark mode and short answers">Remember a preference</button>
+          <button class="welcome-chip" data-prompt="write me a tool that encodes text to morse code, then use it on the word jarvis">Write your own tool</button>
+          <button class="welcome-chip" data-prompt="set a reminder for 25 minutes from now to stretch">Set a reminder</button>
+        </div>
+        <div class="welcome-server" id="welcome-no-server" hidden>
+          <div class="welcome-warn">No LLM server detected</div>
+          <div class="welcome-sub" id="welcome-server-intro">Checking your setup...</div>
+          <div id="welcome-server-options"></div>
+          <div class="welcome-dl" id="welcome-download" hidden>
+            <div class="welcome-dl-label" id="welcome-dl-label"></div>
+            <div class="welcome-dl-bar"><div class="welcome-dl-bar-inner" id="welcome-dl-bar-inner"></div></div>
+            <div class="welcome-dl-detail" id="welcome-dl-detail"></div>
+          </div>
+        </div>
+        <div class="welcome-actions">
+          <button class="welcome-dismiss" id="welcome-dismiss">Got it, don't show again</button>
+          <button class="welcome-more" id="welcome-more">Show me more</button>
+        </div>
+      </div>
       <div class="chat-body" id="chat-body"></div>
 
+      <!-- Inline permission strip — appears above the input when Jarvis wants
+           to run a risky tool. Keyboard-driven (1=allow / 2=deny / 3=always /
+           4=never), and the input below becomes a free-text "type what to do
+           instead" field. No center modal, no mouse required. -->
+      <div class="perm-strip" id="perm-strip" hidden>
+        <div class="perm-line">
+          <span class="perm-label">Allow Jarvis to run</span>
+          <code class="perm-tool" id="perm-tool"></code>
+          <span class="perm-args" id="perm-args"></span>
+          <span class="perm-close" id="perm-close" title="Cancel">×</span>
+        </div>
+        <div class="perm-keys">
+          <span class="perm-key" data-decision="allow"><b>1</b> Yes (once)</span>
+          <span class="perm-key" data-decision="deny"><b>2</b> No</span>
+          <span class="perm-key" data-decision="always"><b>3</b> Always</span>
+          <span class="perm-key" data-decision="never"><b>4</b> Never</span>
+          <span class="perm-hint">or just type what to do instead ↓</span>
+        </div>
+      </div>
+
       <div class="input-row">
+        <!-- Slash-command autocomplete. Floats above the input as soon as you
+             type `/`. Arrow keys + Enter / Tab to select, Esc to dismiss. -->
+        <div class="slash-menu" id="slash-menu" hidden></div>
         <button class="toggle-btn" id="btn-think" title="Show model reasoning">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z"/></svg>
           think
@@ -1221,6 +1455,47 @@
             <option value="small.en">small.en (244M)</option>
             <option value="medium.en">medium.en (769M)</option>
           </select>
+        </div>
+
+        <h3>LLM endpoint</h3>
+        <div class="field">
+          <div class="label">
+            <div class="name">Provider</div>
+            <div class="hint">Local LM Studio / Ollama is the default. Pick a cloud provider if you want Hearth to talk to Gemini, Grok, OpenAI, etc. instead.</div>
+          </div>
+          <select id="setting-llm-provider">
+            <option value="local">Local (LM Studio / Ollama / vLLM)</option>
+            <option value="gemini">Gemini (Google)</option>
+            <option value="grok">Grok (xAI)</option>
+            <option value="openai">OpenAI</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="custom">Custom (set URL yourself)</option>
+          </select>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Endpoint URL</div>
+            <div class="hint">The OpenAI-compatible base URL. Auto-filled when you pick a provider above; edit for custom.</div>
+          </div>
+          <input type="text" id="setting-llm-url" placeholder="http://localhost:1234/v1" style="min-width:260px"/>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">API key</div>
+            <div class="hint">Required for cloud providers. Stays on your machine in ~/Jarvis/settings.json. Local servers ignore it.</div>
+          </div>
+          <input type="password" id="setting-llm-key" placeholder="sk-... or AIza..." style="min-width:260px"/>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Default model</div>
+            <div class="hint">For cloud providers, the exact model id (e.g. gemini-2.0-flash, grok-2-1212). Leave blank to auto-detect for local servers.</div>
+          </div>
+          <input type="text" id="setting-llm-model" placeholder="(auto-detect)" style="min-width:260px"/>
+        </div>
+        <div class="field">
+          <div class="label"><div class="hint">Apply changes (next message uses the new endpoint - no restart needed).</div></div>
+          <button class="btn-mini" id="btn-llm-apply">Apply endpoint</button>
         </div>
 
         <h3>About</h3>
@@ -1502,9 +1777,75 @@ $('modal').addEventListener('click', e => { if (e.target === $('modal')) $('moda
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if ($('voice-mode').classList.contains('show')) { exitVoiceMode(); }
+    else if (pendingPermId) { sendPermDecision('deny'); }
     else if ($('modal').classList.contains('open')) { $('modal').classList.remove('open'); }
   }
 });
+
+// ============================================================
+// INLINE PERMISSION PROMPT — keyboard-driven, sits above the input.
+// 1=Yes(once)  2=No  3=Always  4=Never  or type any text to deny + tell
+// Jarvis what to do instead. Replaces the old center modal entirely.
+// ============================================================
+let pendingPermId = null;
+let pendingPermTool = null;
+let pendingFollowup = null;  // text the user typed during a perm prompt; sent after current turn ends
+
+function showInlinePermission(reqId, toolName, args) {
+  pendingPermId = reqId;
+  pendingPermTool = toolName;
+  $('perm-tool').textContent = toolName;
+  let argsStr = '';
+  try { argsStr = JSON.stringify(args); } catch {}
+  if (argsStr.length > 160) argsStr = argsStr.slice(0, 160) + '…';
+  $('perm-args').textContent = argsStr;
+  $('perm-strip').hidden = false;
+  document.getElementById('input').placeholder =
+    'or type what to do instead… (1=Yes · 2=No · 3=Always · 4=Never · Esc=deny)';
+  setTimeout(() => document.getElementById('input').focus(), 0);
+}
+
+function hideInlinePermission() {
+  pendingPermId = null;
+  pendingPermTool = null;
+  $('perm-strip').hidden = true;
+  document.getElementById('input').placeholder =
+    'Talk to Jarvis…  (Enter to send, Shift+Enter for newline)';
+}
+
+async function sendPermDecision(decision) {
+  if (!pendingPermId) return;
+  const id = pendingPermId;
+  const tool = pendingPermTool;
+  hideInlinePermission();
+  if (decision === 'always') {
+    maybeHint('first_always', 'Saved across restarts',
+      `${tool} is now allow-always (written to ~/Jarvis/permissions.json). Use /perms to review or /perms forget ${tool} to drop it.`);
+  }
+  try {
+    await api('/api/permission', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, decision }),
+    });
+  } catch (e) { toast('Permission send failed', e.message, 'err'); }
+}
+
+// Click handlers for the 4 chips + the × close (treats as deny).
+document.querySelectorAll('#perm-strip .perm-key').forEach(el => {
+  el.addEventListener('click', () => sendPermDecision(el.dataset.decision));
+});
+$('perm-close').addEventListener('click', () => sendPermDecision('deny'));
+
+// Number-key shortcut on the input while a perm is pending AND the input is empty.
+// Typing anything else just goes into the input as the "do this instead" text.
+document.getElementById('input').addEventListener('keydown', (e) => {
+  if (!pendingPermId) return;
+  if (document.getElementById('input').value !== '') return;
+  if (['1','2','3','4'].includes(e.key)) {
+    e.preventDefault();
+    sendPermDecision({'1':'allow','2':'deny','3':'always','4':'never'}[e.key]);
+  }
+}, true);  // capture phase so we run before the textarea's default handling
 
 // ============================================================
 // STATE  +  CONVERSATIONS (localStorage)
@@ -1661,15 +2002,18 @@ function renderChat() {
   if (!c) { body.appendChild(emptyState()); return; }
   if (!c.messages.length) { body.appendChild(emptyState()); return; }
   for (const m of c.messages) {
-    // Replay tool/think/etc events ABOVE the assistant message they belong to
+    // Render the message FIRST so think/tool events render INSIDE the assistant
+    // bubble (under the "jarvis" header) instead of floating between the user
+    // and assistant headers, where they visually look like they belong to YOU.
+    const msgDiv = renderMessage(m);
+    body.appendChild(msgDiv);
     if (m.role === 'assistant' && Array.isArray(m.events)) {
-      // Group consecutive think_chunk into one collapsed block
       let thinkBuf = '';
       const flushThink = () => {
         if (thinkBuf) {
           const tb = makeThink(thinkBuf);
-          tb.classList.remove('open');  // collapsed by default on replay
-          body.appendChild(tb);
+          tb.classList.remove('open');
+          insertUnderAssistant(tb, msgDiv);
           thinkBuf = '';
         }
       };
@@ -1682,17 +2026,16 @@ function renderChat() {
             const t = makeToolCard(ev.name, ev.args || {});
             t.body.textContent = ev.result || '';
             if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
-            body.appendChild(t.div);
+            insertUnderAssistant(t.div, msgDiv);
           } else if (ev.kind === 'nudge') {
-            body.appendChild(makeMeta(`↻ ${ev.reason || 'nudge'}`, 'warn'));
+            insertUnderAssistant(makeMeta(`${ev.reason || 'nudge'}`, 'warn'), msgDiv);
           } else if (ev.kind === 'error') {
-            body.appendChild(makeMeta(ev.text || 'error', 'err'));
+            insertUnderAssistant(makeMeta(ev.text || 'error', 'err'), msgDiv);
           }
         }
       }
       flushThink();
     }
-    body.appendChild(renderMessage(m));
     // Render the "done" meta after the message
     if (m.role === 'assistant' && Array.isArray(m.events)) {
       for (const ev of m.events) {
@@ -1750,8 +2093,38 @@ function renderMessage(m) {
   return div;
 }
 
+// Place a tool card / think block / nudge meta INSIDE the assistant bubble
+// (under the "jarvis" header, above the text) so it visually belongs to JARVIS
+// rather than floating between the user and assistant headers.
+function insertUnderAssistant(node, liveDiv) {
+  const b = liveDiv && liveDiv.querySelector ? liveDiv.querySelector('.body') : null;
+  const c = liveDiv && liveDiv.querySelector ? liveDiv.querySelector('.content') : null;
+  if (b && c) b.insertBefore(node, c);
+  else $('chat-body').appendChild(node);
+}
+
 function makeToolCard(name, args) {
-  const div = document.createElement('div'); div.className = 'tool';
+  // Browse tools intentionally don't show their args / clickable lists / etc.
+  // It's noisy for users and looks like internal plumbing. We show a single
+  // status line ("Browsing the web...") and DON'T make the card expandable.
+  const isBrowse = name === 'browse' || name === 'browse_click' || name === 'browse_type' || name === 'browse_close';
+  const div = document.createElement('div'); div.className = 'tool' + (isBrowse ? ' tool-quiet' : '');
+  if (isBrowse) {
+    // Minimal, non-expandable status. Users don't need to see the raw
+    // Google search URL or the clickable list of links - that's noise.
+    const friendly = (name === 'browse')        ? 'Browsing the web...'
+                   : (name === 'browse_click')  ? 'Clicking on the page...'
+                   : (name === 'browse_type')   ? 'Typing on the page...'
+                   :                              'Closing the browser';
+    div.innerHTML = `
+      <div class="t-head">
+        <svg class="t-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span class="t-name">${friendly}</span>
+        <span class="t-ms"></span>
+      </div>
+    `;
+    return { div, body: { textContent: '' }, ms: div.querySelector('.t-ms') };
+  }
   div.innerHTML = `
     <div class="t-head">
       <svg class="t-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
@@ -1983,7 +2356,17 @@ thinkBtn.addEventListener('click', () => {
 
 async function send(forced = null) {
   const prompt = (forced ?? input.value).trim();
-  if (!prompt || STATE.streaming) return;
+  if (!prompt) return;
+  // Inline permission active — treat the typed text as "decline + do this instead":
+  // send a 'deny' for the pending tool, queue the text, and fire it after the
+  // current turn finishes (handled in the 'done' event below).
+  if (pendingPermId) {
+    pendingFollowup = prompt;
+    input.value = ''; input.style.height = '42px';
+    sendPermDecision('deny');
+    return;
+  }
+  if (STATE.streaming) return;
 
   // ----- Slash commands (parity with CLI) -----
   if (prompt.startsWith('/')) {
@@ -2022,6 +2405,12 @@ async function send(forced = null) {
   // Grab handles to the live assistant element + its content node.
   const live = chatBody.lastElementChild;
   const liveContent = live?.querySelector('.content');
+  // Drop the "thinking" dot-grid wave into the empty bubble. It gets overwritten
+  // as soon as the first assistant_chunk arrives (liveContent.innerHTML = ...).
+  if (liveContent) {
+    liveContent.innerHTML =
+      '<div class="thinking-grid">' + '<div class="d"></div>'.repeat(12) + '</div>';
+  }
 
   input.value = ''; input.style.height = '42px';
   STATE.streaming = true; setSendStop(true);
@@ -2093,6 +2482,12 @@ async function send(forced = null) {
     }
   } finally {
     STATE.streaming = false; setSendStop(false); currentAbort = null;
+    // If the user typed a "do this instead" during a permission prompt, fire it
+    // now that the current turn is done. (No await — we want the finally to finish.)
+    if (pendingFollowup) {
+      const t = pendingFollowup; pendingFollowup = null;
+      setTimeout(() => send(t), 50);
+    }
     stopTTSGrid();
     setState('idle');
     refreshState();
@@ -2121,7 +2516,7 @@ async function send(forced = null) {
       if (!thinkBlock) {
         thinkBlock = makeThink('');
         thinkBlock.classList.add('active');
-        chatBody.insertBefore(thinkBlock, live);
+        insertUnderAssistant(thinkBlock, live);
       }
       // Streaming text into the body span (not the header)
       const bodySpan = thinkBlock.querySelector('.think-body');
@@ -2134,8 +2529,19 @@ async function send(forced = null) {
       pendingTool = makeToolCard(ev.name, ev.args || {});
       pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0 };
       assistantMsg.events.push(pendingToolEvent);
-      chatBody.insertBefore(pendingTool.div, live);
+      insertUnderAssistant(pendingTool.div, live);
       setState(`calling ${ev.name}…`);
+      // First-time hints for high-novelty tools.
+      if (ev.name === 'browse') {
+        maybeHint('first_browse', 'Jarvis is driving a real browser',
+          'A Chrome window will open and you will watch the violet dot click for you. Hit the red Stop button any time to cancel.');
+      } else if (ev.name === 'create_plugin') {
+        maybeHint('first_plugin', 'Jarvis is writing its own tool',
+          'New plugins are saved to ~/Jarvis/plugins and auto-load on every restart. Use /tools later to see what it has built.');
+      } else if (ev.name === 'memory_save') {
+        maybeHint('first_memory', 'Jarvis saved a memory',
+          'Per-fact files live in ~/Jarvis/memory. The Memory tab on the left lets you browse, search, and delete.');
+      }
       return;
     }
 
@@ -2180,15 +2586,14 @@ async function send(forced = null) {
     }
 
     if (ev.type === 'nudge') {
-      chatBody.insertBefore(makeMeta(`↻ ${ev.reason || 'nudge'}`, 'warn'), live);
+      insertUnderAssistant(makeMeta(`${ev.reason || 'nudge'}`, 'warn'), live);
       assistantMsg.events.push({ kind: 'nudge', reason: ev.reason });
       return;
     }
 
     if (ev.type === 'permission_request') {
-      // Pop modal with allow / deny / always / never. User's choice POSTs back.
-      const argsStr = JSON.stringify(ev.args || {}, null, 2);
-      showPermissionModal(ev.id, ev.name, argsStr);
+      // Inline strip above the input — keyboard-driven, no center modal.
+      showInlinePermission(ev.id, ev.name, ev.args || {});
       return;
     }
 
@@ -2217,14 +2622,18 @@ async function handleSlash(raw) {
   const arg = rest.join(' ').trim();
   const c = activeConvo();
   switch (cmd.toLowerCase()) {
+    case '/welcome':
+      showWelcomeCard(true);
+      return true;
     case '/help':
       showModal('Slash commands', [
         '/help                 this list',
+        '/welcome              show the first-run welcome card',
         '/clear                wipe THIS chat (keeps system prompt)',
         '/compact              ask Jarvis to summarize older turns + extract facts to memory',
-        '/perms                show which risky tools are currently allowed/denied this session',
+        '/perms                show which risky tools are currently allowed/denied (persisted to disk)',
         '/perms clear          reset both lists',
-        '/tools                show all 42 tools Jarvis can call',
+        '/tools                show all tools Jarvis can call',
         '/voice on|off         TTS auto-speak toggle (chat view)',
         '/think on|off         show model reasoning inline',
         '/allow <path>         extend write access to a folder this session',
@@ -2671,6 +3080,57 @@ async function refreshSettings() {
       sttMdl.onchange = (e) => { saveSetting('stt_model', e.target.value); toast('STT model', 'reload Hearth to apply', 'warn'); };
     }
 
+    // LLM endpoint (local vs cloud providers).
+    const llmProv = $('setting-llm-provider');
+    const llmUrl = $('setting-llm-url');
+    const llmKey = $('setting-llm-key');
+    const llmMdl = $('setting-llm-model');
+    const llmApply = $('btn-llm-apply');
+    if (llmProv && llmUrl && llmKey && llmMdl && llmApply) {
+      const PRESETS = {
+        local:      'http://localhost:1234/v1',
+        gemini:     'https://generativelanguage.googleapis.com/v1beta/openai/',
+        grok:       'https://api.x.ai/v1',
+        openai:     'https://api.openai.com/v1',
+        openrouter: 'https://openrouter.ai/api/v1',
+      };
+      llmProv.value = s.llm_provider || 'local';
+      llmUrl.value = s.llm_url || PRESETS[llmProv.value] || PRESETS.local;
+      llmKey.value = s.llm_key || '';
+      llmMdl.value = s.llm_model || '';
+      llmProv.onchange = (e) => {
+        const v = e.target.value;
+        if (PRESETS[v]) llmUrl.value = PRESETS[v];
+        saveSetting('llm_provider', v);
+      };
+      llmApply.onclick = async () => {
+        const body = {
+          provider: llmProv.value,
+          url: llmUrl.value.trim(),
+          key: llmKey.value.trim(),
+          model: llmMdl.value.trim(),
+        };
+        if (!body.url) { toast('Endpoint URL is required', '', 'warn'); return; }
+        try {
+          const r = await api('/api/llm-endpoint', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (r.ok) {
+            // Also persist the fields to settings so they survive restart
+            await saveSetting('llm_provider', body.provider);
+            await saveSetting('llm_url', body.url);
+            await saveSetting('llm_key', body.key);
+            await saveSetting('llm_model', body.model);
+            toast('Endpoint applied', 'next message uses ' + (body.provider === 'local' ? 'your local server' : body.provider), 'ok');
+            refreshModels(); refreshState();
+          } else {
+            toast('Apply failed', r.error || 'unknown error', 'err');
+          }
+        } catch (e) { toast('Apply failed', e.message, 'err'); }
+      };
+    }
+
     const st = await api('/api/state');
     $('setting-endpoint').textContent = st.endpoint;
     $('setting-workspace').textContent = st.workspace;
@@ -2927,6 +3387,17 @@ function enterVoiceMode() {
   $('voice-mode').classList.add('show');
   setVoiceStatus('tap mic to start talking');
   stopVoiceGridWave();
+  // Ensure a real conversation exists BEFORE the user starts talking, so the
+  // voice exchange is recorded in the sidebar and persisted to ~/Jarvis/
+  // conversations like any other chat. Without this, voice-mode messages
+  // could end up on a stale/empty convo and vanish on quit.
+  let c = activeConvo();
+  if (!c || c.messages.length === 0) {
+    c = c || newConversation();
+    if (c && (!c.title || c.title === 'New chat')) c.title = 'Voice chat';
+    persistConvo(c);
+    renderConvoList();
+  }
   // Do NOT auto-start mic — user taps when ready (avoids accidental capture
   // before they're set up, and mic stays off if they immediately exit)
 }
@@ -2966,6 +3437,11 @@ async function voiceCycle() {
     setVoiceStatus('thinking…');
     voiceSpeaking = true;
     await send(text);
+    // Belt-and-suspenders: explicitly persist again after a voice turn so the
+    // conversation is definitely on disk before the user might quit. (send()
+    // already calls touch() but voice users quit faster than chat users.)
+    const _vc = activeConvo();
+    if (_vc) await persistConvo(_vc);
     voiceSpeaking = false;
     setVoiceStatus('your turn');
     // Auto-resume listening after TTS finishes
@@ -3010,6 +3486,295 @@ $('voice-mic-toggle').addEventListener('click', voiceCycle);
 $('voice-mode').addEventListener('keydown', e => {
   if (e.key === 'Escape') exitVoiceMode();
 });
+
+// ============================================================
+// CONTEXTUAL HINTS - fire once per event, never again (per-browser).
+// Non-blocking toast that explains a feature the FIRST time it's used.
+// Pattern lifted from Hermes Agent.
+// ============================================================
+function maybeHint(key, title, body) {
+  const k = 'hearth_hint_' + key;
+  if (localStorage.getItem(k)) return;
+  localStorage.setItem(k, '1');
+  toast(title, body, 'info', 8000);
+}
+// Allow user to reset all hints (e.g. for a fresh tour)
+window.resetHints = function() {
+  Object.keys(localStorage).filter(k => k.startsWith('hearth_hint_')).forEach(k => localStorage.removeItem(k));
+  toast('Hints reset', 'they will reappear as you use features', 'ok');
+};
+
+// ============================================================
+// SLASH-COMMAND AUTOCOMPLETE
+// Typing `/` shows a floating menu above the input. Arrows + Enter / Tab to
+// select, Esc to dismiss. Filtered live as the user keeps typing.
+// ============================================================
+const SLASH_COMMANDS = [
+  { cmd: '/help',         desc: 'list all slash commands' },
+  { cmd: '/welcome',      desc: 'show the first-run welcome card' },
+  { cmd: '/clear',        desc: 'wipe this chat (keeps system prompt)' },
+  { cmd: '/compact',      desc: 'summarize older turns + extract facts to memory' },
+  { cmd: '/perms',        desc: 'show saved tool permissions (persist across restarts)' },
+  { cmd: '/perms clear',  desc: 'forget every saved tool decision' },
+  { cmd: '/tools',        desc: 'list every tool Jarvis can call' },
+  { cmd: '/models',       desc: 'list models available on the server' },
+  { cmd: '/model',        desc: 'load a model by id - /model <id>' },
+  { cmd: '/voice on',     desc: 'enable TTS auto-speak in chat' },
+  { cmd: '/voice off',    desc: 'disable TTS auto-speak in chat' },
+  { cmd: '/think on',     desc: 'show model reasoning inline' },
+  { cmd: '/think off',    desc: 'hide model reasoning' },
+  { cmd: '/allow',        desc: 'extend write access to a folder - /allow <path>' },
+  { cmd: '/mem',          desc: 'jump to the Memory view' },
+  { cmd: '/log',          desc: 'jump to the Logs view' },
+  { cmd: '/exit',         desc: 'close the app window' },
+];
+let slashIdx = -1;
+
+function updateSlashMenu() {
+  const v = input.value;
+  if (!v.startsWith('/')) { hideSlashMenu(); return; }
+  const q = v.toLowerCase();
+  const matches = SLASH_COMMANDS.filter(c => c.cmd.toLowerCase().startsWith(q));
+  if (!matches.length) { hideSlashMenu(); return; }
+  const menu = $('slash-menu');
+  menu.innerHTML = matches.map((c, i) =>
+    `<div class="slash-item${i === 0 ? ' active' : ''}" data-cmd="${c.cmd}">
+       <span class="slash-cmd">${c.cmd}</span>
+       <span class="slash-desc">${c.desc}</span>
+     </div>`
+  ).join('');
+  menu.hidden = false;
+  slashIdx = 0;
+}
+
+function hideSlashMenu() {
+  $('slash-menu').hidden = true;
+  slashIdx = -1;
+}
+
+function pickSlash(idx) {
+  const items = $('slash-menu').querySelectorAll('.slash-item');
+  if (idx < 0 || idx >= items.length) return;
+  const cmd = items[idx].dataset.cmd;
+  // Single-word commands get a trailing space so the user can type args next.
+  // Sub-commands like '/voice on' are complete - leave as-is.
+  input.value = cmd + (cmd.includes(' ') ? '' : ' ');
+  input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px';
+  hideSlashMenu();
+  input.focus();
+}
+
+input.addEventListener('input', updateSlashMenu);
+input.addEventListener('keydown', (e) => {
+  const menu = $('slash-menu');
+  if (menu.hidden) return;
+  const items = menu.querySelectorAll('.slash-item');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    slashIdx = Math.min(slashIdx + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('active', i === slashIdx));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    slashIdx = Math.max(slashIdx - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('active', i === slashIdx));
+  } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+    e.preventDefault();
+    pickSlash(slashIdx);
+  } else if (e.key === 'Escape') {
+    hideSlashMenu();
+  }
+}, true);  // capture so we run before the textarea / send Enter handler
+
+$('slash-menu').addEventListener('click', (e) => {
+  const item = e.target.closest('.slash-item');
+  if (!item) return;
+  const idx = Array.from(item.parentNode.children).indexOf(item);
+  pickSlash(idx);
+});
+
+// ============================================================
+// WELCOME CARD — first-run "try one of these" experience.
+// Click a chip to fire the prompt; dismiss is per-browser (localStorage).
+// If no LLM server is reachable, also show LM Studio / Ollama setup links.
+// Bring it back any time with the /welcome slash command.
+// ============================================================
+const WELCOME_KEY = 'hearth_welcome_dismissed';
+
+function showWelcomeCard(force = false) {
+  if (!force && localStorage.getItem(WELCOME_KEY)) return;
+  // Server-not-detected sub-section: visible iff no model is loaded.
+  const showServerHelp = !STATE.loadedModel;
+  $('welcome-no-server').hidden = !showServerHelp;
+  $('welcome-card').hidden = false;
+  if (showServerHelp) renderServerSetup().catch(() => {});
+}
+
+async function renderServerSetup() {
+  // Pull the LLM-server snapshot (llama-cpp-python installed? builtin running?
+  // local models? curated picks?) and render the right call-to-action.
+  let s;
+  try { s = await api('/api/llmserver/status'); }
+  catch { s = { llama_cpp_installed: false, picks: [] }; }
+
+  const intro = $('welcome-server-intro');
+  const opts = $('welcome-server-options');
+
+  if (s.external_running || s.builtin_running) {
+    // Server actually came up between page load and this call - hide the section.
+    $('welcome-no-server').hidden = true;
+    return;
+  }
+
+  if (s.llama_cpp_installed) {
+    // BEST case: built-in is available. Offer to download + boot a curated pick.
+    intro.textContent = 'Hearth can run its own built-in LLM server — no other apps required. Pick a model to download:';
+    opts.innerHTML = '<div class="picks">' + (s.picks || []).map(p => `
+      <div class="pick" data-pick-id="${esc(p.id)}">
+        <div class="pick-info">
+          <div class="pick-name">${esc(p.name)}${p.tags && p.tags.includes('recommended') ? '<span class="pick-tag">recommended</span>' : ''}</div>
+          <div class="pick-meta">${p.size_gb} GB download &middot; needs ${p.vram_min_gb}+ GB VRAM &middot; ${p.context.toLocaleString()} token context</div>
+          <div class="pick-desc">${esc(p.description)}</div>
+        </div>
+        <button class="pick-btn">Download &amp; use</button>
+      </div>
+    `).join('') + '</div>' +
+      '<div class="welcome-tip">Already have a GGUF? Drop it into <code>~/Jarvis/models/</code> and pick it from the dropdown above.</div>';
+    opts.querySelectorAll('.pick').forEach(el => {
+      el.querySelector('.pick-btn').addEventListener('click', () => downloadAndStart(el.dataset.pickId));
+    });
+  } else {
+    // Fallback: external app links + a nudge toward the built-in path.
+    intro.textContent = 'Hearth needs a local LLM. Three options - all free:';
+    opts.innerHTML = `
+      <div class="welcome-links">
+        <a href="https://lmstudio.ai/" target="_blank" rel="noopener" class="welcome-link">
+          <b>LM Studio</b><span>Beginner-friendly desktop app. GUI + GPU. Recommended.</span></a>
+        <a href="https://ollama.com/" target="_blank" rel="noopener" class="welcome-link">
+          <b>Ollama</b><span>Lightweight CLI. <code>ollama pull harmonic-hermes</code>.</span></a>
+      </div>
+      <div class="welcome-tip">Or make Hearth self-contained (no external apps): <code>pip install llama-cpp-python</code> in the venv and reload this page - Hearth will offer to download a model right here.</div>
+    `;
+  }
+}
+
+async function downloadAndStart(pickId) {
+  const dl = $('welcome-download');
+  const bar = $('welcome-dl-bar-inner');
+  const label = $('welcome-dl-label');
+  const detail = $('welcome-dl-detail');
+  const opts = $('welcome-server-options');
+  dl.hidden = false;
+  bar.style.width = '0%';
+  label.textContent = 'Connecting to Hugging Face...';
+  detail.textContent = '';
+  opts.style.opacity = '0.4';
+  opts.style.pointerEvents = 'none';
+
+  let modelPath = null;
+  try {
+    const res = await fetch('/api/llmserver/download', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pick_id: pickId }),
+    });
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder('utf-8');
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'progress') {
+          const pct = ev.total ? Math.min(100, Math.floor(100 * ev.done / ev.total)) : 0;
+          bar.style.width = pct + '%';
+          label.textContent = `Downloading: ${pct}%`;
+          detail.textContent = `${(ev.done / 1e9).toFixed(2)} GB of ${(ev.total / 1e9).toFixed(2)} GB`;
+        } else if (ev.type === 'done') {
+          if (!ev.ok) {
+            label.textContent = 'Download failed';
+            detail.textContent = ev.error || 'unknown error';
+            opts.style.opacity = '1'; opts.style.pointerEvents = '';
+            return;
+          }
+          modelPath = ev.path;
+          bar.style.width = '100%';
+          label.textContent = ev.already ? 'Already downloaded' : 'Download complete';
+        }
+      }
+    }
+  } catch (e) {
+    label.textContent = 'Error';
+    detail.textContent = e.message || String(e);
+    opts.style.opacity = '1'; opts.style.pointerEvents = '';
+    return;
+  }
+
+  if (!modelPath) {
+    label.textContent = 'No model returned';
+    opts.style.opacity = '1'; opts.style.pointerEvents = '';
+    return;
+  }
+
+  label.textContent = 'Starting server...';
+  detail.textContent = 'Loading model into memory (10-30s)';
+  try {
+    const startRes = await api('/api/llmserver/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_path: modelPath }),
+    });
+    if (startRes && startRes.ok) {
+      label.textContent = 'Ready - server is live';
+      detail.textContent = 'Pick the model from the dropdown above and chat.';
+      toast('Built-in server started', 'No LM Studio needed. Talk to me.', 'ok', 6000);
+      hideWelcomeCard(true);
+      setTimeout(() => { refreshModels(); refreshState(); }, 500);
+    } else {
+      label.textContent = 'Server start failed';
+      detail.textContent = (startRes && startRes.error) || 'unknown error';
+    }
+  } catch (e) {
+    label.textContent = 'Server start failed';
+    detail.textContent = e.message || String(e);
+  } finally {
+    opts.style.opacity = '1'; opts.style.pointerEvents = '';
+  }
+}
+
+function hideWelcomeCard(remember) {
+  $('welcome-card').hidden = true;
+  if (remember) localStorage.setItem(WELCOME_KEY, '1');
+}
+
+// Click a try-this chip -> send that prompt + close the card (without remembering,
+// so it returns next session if the user wants).
+document.querySelectorAll('#welcome-card .welcome-chip').forEach(b => {
+  b.addEventListener('click', () => {
+    const p = b.dataset.prompt;
+    hideWelcomeCard(false);
+    send(p);
+  });
+});
+$('welcome-dismiss').addEventListener('click', () => hideWelcomeCard(true));
+$('welcome-more').addEventListener('click', () => {
+  toast('More to explore',
+    'Voice: hold the mic button or hit voice mode. Drag any file into the chat to read it. ' +
+    'Type /help for slash commands. Memory tab lists what I know. Plugins tab shows tools I have written ' +
+    'for myself. Settings tab tunes voice + behavior.', 'info', 9000);
+});
+
+// Hide the welcome card on the first real user message (it's done its job).
+const _origSend = send;
+send = async function(forced = null) {
+  const p = (forced ?? input.value).trim();
+  if (p) hideWelcomeCard(false);
+  return _origSend(forced);
+};
 
 // ============================================================
 // BOOT
@@ -3119,6 +3884,12 @@ $('ob-name').addEventListener('keydown', e => { if (e.key === 'Enter') saveOnboa
   input.focus();
   setState('idle');
   maybeOnboard();
+
+  // First-run welcome card: show only on an empty chat AND when not dismissed.
+  // Also reappears for users who haven't seen it yet (after the existing onboard
+  // modal closes — they don't conflict, the modal is centered, this is inline).
+  const _c = activeConvo();
+  if (!_c || _c.messages.length === 0) showWelcomeCard(false);
 })();
 </script>
 </body>
