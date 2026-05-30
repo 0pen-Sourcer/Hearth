@@ -1850,6 +1850,7 @@ document.querySelectorAll('#perm-strip .perm-key').forEach(el => {
 $('perm-close').addEventListener('click', () => sendPermDecision('deny'));
 
 // Number-key shortcut on the input while a perm is pending AND the input is empty.
+// Empty Enter = Allow (matches Claude Code's "Enter = first option" pattern).
 // Typing anything else just goes into the input as the "do this instead" text.
 document.getElementById('input').addEventListener('keydown', (e) => {
   if (!pendingPermId) return;
@@ -1857,6 +1858,9 @@ document.getElementById('input').addEventListener('keydown', (e) => {
   if (['1','2','3','4'].includes(e.key)) {
     e.preventDefault();
     sendPermDecision({'1':'allow','2':'deny','3':'always','4':'never'}[e.key]);
+  } else if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendPermDecision('allow');  // Enter on empty input = Yes (default action)
   }
 }, true);  // capture phase so we run before the textarea's default handling
 
@@ -3355,12 +3359,12 @@ async function transcribe() {
 let micSilenceTimer = null;
 let micLastVoice = 0;
 let micWatchdog = null;
-// Aggressive auto-stop: 700ms of quiet after the user spoke. Voice mode is
-// turn-based and pauses naturally are short - 1500ms felt like an eternity.
-// (Old default was 1500ms; halving it cut perceived "I stopped talking - AI
-// is still waiting" by 800ms with no false-cuts on normal conversational
-// pauses.)
-const MIC_SILENCE_MS = 700;
+// Aggressive auto-stop: 500ms of quiet after the user spoke. Voice mode is
+// turn-based and pauses naturally are short. Now that listen.py runs Silero
+// VAD via faster-whisper's vad_filter (much smarter than RMS at deciding
+// what's actually speech vs background hum), false-cuts on conversational
+// pauses are rare - we can safely go shorter than the old 1500ms / 700ms.
+const MIC_SILENCE_MS = 500;
 const MIC_MAX_MS = 30000;            // hard cap 30s
 const MIC_VOICE_THRESHOLD = 0.018;   // RMS-ish; tune
 // Barge-in threshold for interrupting AI mid-speech. Slightly higher than the
