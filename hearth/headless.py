@@ -71,9 +71,17 @@ def _is_local_endpoint(base: str) -> bool:
     b = (base or "").lower()
     return any(h in b for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1",
                                 "192.168.", "10.", "host.docker.internal"))
-DEFAULT_MAX_DEPTH = 20  # generous — let the model decide when it has enough,
-                        # not an artificial chain. The model almost always
-                        # stops on its own well before this.
+DEFAULT_MAX_DEPTH = 40  # Bumped 20 → 40 after a live LM Studio PDF read hit
+                        # the ceiling mid-task: Qwen 3.5 Harmonic 9B was
+                        # doing legitimate map-reduce-by-hand on a 514-page
+                        # PDF (extract → chunked reads → summarize) and
+                        # ran out of turn budget at 20. Override with
+                        # `--max-depth N` or `HEARTH_MAX_TURNS=N`.
+# Inject a wrap-up nudge to the model when we cross this fraction of the
+# cap so it has a chance to write a STATE_SNAPSHOT before we hard-stop.
+# Without it, the cap fires silently and the model has no idea on the next
+# turn that it was interrupted — it just starts the work over.
+WRAP_UP_AT_FRACTION = 0.75
 # Same context/compaction constants as the CLI (hearth_cli.py) so the bridge +
 # GUI auto-compact identically.
 #
@@ -344,6 +352,10 @@ async def run_once(
     # what happened), we fire a stronger nudge than the trigger-phrase one.
     _pending_next_step: Optional[str] = None
     _nextstep_nudged: bool = False
+    # Tracks whether we've already injected the wrap-up nudge for this turn.
+    # Fires exactly once when iterations crosses WRAP_UP_AT_FRACTION * max_depth.
+    _wrapup_nudged: bool = False
+    _wrapup_threshold = max(1, int(max_depth * WRAP_UP_AT_FRACTION))
 
     for depth in range(max_depth):
         iterations = depth + 1
@@ -351,6 +363,37 @@ async def run_once(
         if should_cancel is not None and should_cancel():
             emit("cancelled", message="stopped by user")
             break
+        # Wrap-up nudge: at 75% of the cap, tell the model how many turns
+        # it has left and ask it to write a STATE_SNAPSHOT if the task
+        # isn't done. Without this, the cap fires silently at the limit
+        # and the model has zero memory of being interrupted — on the next
+        # user message it just starts the work over. By injecting a system-
+        # role nudge at 75%, the model's NEXT response naturally ends with
+        # the snapshot, which then persists into chat history so future
+        # turns can resume.
+        if not _wrapup_nudged and iterations >= _wrapup_threshold:
+            _wrapup_nudged = True
+            turns_left = max_depth - iterations
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"[SYSTEM] You've used {iterations} of your {max_depth} agentic turns "
+                    f"this prompt — {turns_left} remain. If the task isn't complete, "
+                    f"end your NEXT response with a `STATE_SNAPSHOT` block in this exact "
+                    f"shape so the user can say 'continue' and you can resume cleanly:\n\n"
+                    f"```STATE_SNAPSHOT\n"
+                    f"task: <one-line restatement of what the user asked>\n"
+                    f"done: <what you've accomplished so far, concrete>\n"
+                    f"remaining: <what still needs to happen>\n"
+                    f"next_step: <the exact next tool call or action>\n"
+                    f"resume_from: <file/offset/state to pick up from, e.g. "
+                    f"'D:/books/.../history_extract.txt line 2001'>\n"
+                    f"```\n\n"
+                    f"If the task IS complete or near done, ignore this and finish "
+                    f"normally."
+                ),
+            })
+            emit("nudge", reason=f"wrap-up at {iterations}/{max_depth} — asked for STATE_SNAPSHOT")
         # Auto-compact: trim before each call so a long history OR a long tool
         # chain within one turn can't overflow the context window.
         if estimate_tokens(messages) > _budget:
@@ -726,10 +769,59 @@ async def run_once(
              reason="finished")
         return 0
 
+    # We hit the cap. The wrap-up nudge at 75% should have prompted the
+    # model to write a STATE_SNAPSHOT block in one of the last few responses.
+    # Extract it (if present) and persist + emit so:
+    #   - The CLI/GUI can show "stopped at turn N — say 'continue' to resume"
+    #   - The user's next message starts with the snapshot context visible
+    #     in chat history (it's already in `messages`)
+    #   - We optionally save to ~/Jarvis/cache/task_state.json so a fresh
+    #     session can find the last in-flight task.
+    snapshot_text = ""
+    for m in reversed(messages):
+        if m.get("role") == "assistant" and isinstance(m.get("content"), str):
+            content = m["content"] or ""
+            if "STATE_SNAPSHOT" in content:
+                # Extract the fenced block (```STATE_SNAPSHOT ... ```)
+                import re as _re
+                match = _re.search(r"```STATE_SNAPSHOT\s*\n(.*?)\n```", content, _re.DOTALL)
+                if match:
+                    snapshot_text = match.group(1).strip()
+                else:
+                    # Loose fallback: keep everything after the keyword
+                    snapshot_text = content.split("STATE_SNAPSHOT", 1)[1][:1200].strip()
+                break
+    # Persist for cross-session recovery — cheap, gitignored workspace path.
+    try:
+        from .tools import WORKSPACE as _WS
+        state_dir = os.path.join(_WS, "cache", "task_state")
+        os.makedirs(state_dir, exist_ok=True)
+        state_path = os.path.join(state_dir, "last_stopped.json")
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "prompt": prompt,
+                "iterations": iterations,
+                "max_depth": max_depth,
+                "snapshot": snapshot_text or "(model did not write STATE_SNAPSHOT)",
+                "stopped_at": time.time(),
+                "model": model,
+            }, f, indent=2)
+    except Exception:
+        state_path = None
     emit("done",
          duration_ms=int((time.time() - t_start) * 1000),
          iterations=iterations,
-         reason="max_depth_reached")
+         reason="max_depth_reached",
+         snapshot=snapshot_text or None,
+         resume_hint=(
+             f"Stopped at turn {iterations}/{max_depth}. "
+             f"Type 'continue' to resume — the snapshot above tells the model "
+             f"where to pick up." if snapshot_text else
+             f"Stopped at turn {iterations}/{max_depth}. The model didn't "
+             f"write a STATE_SNAPSHOT before the cap. Type 'continue' and it "
+             f"will see its own last tool calls in history."
+         ),
+         state_file=state_path if state_path else None)
     return 0
 
 
