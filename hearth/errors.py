@@ -1,14 +1,13 @@
 """API-error classification — turn cryptic LLM-endpoint failures into a clear
 category + a human next step + whether a retry could help.
 
-Why this exists: in a real session (run.txt) LM Studio returned a raw HTML 500
-mid-chat and EVERY following turn died with the same wall of HTML — the worst
-kind of "looks broken" moment. Generic `except Exception: print(e)` can't tell
-"server is down, go start it" from "you're rate-limited, wait 2s" from "bad API
-key". This maps the common failure shapes (local LM Studio + cloud Gemini/Grok/
-OpenAI) to a taxonomy, mirroring how Claude Code / Hermes / OpenClaw route
-errors to recovery. Both the CLI and the headless bridge use it so the message
-is consistent everywhere.
+Why this exists: in a real session LM Studio returned a raw HTML 500 mid-chat
+and EVERY following turn died with the same wall of HTML — the worst kind of
+"looks broken" moment. Generic `except Exception: print(e)` can't tell "server
+is down, go start it" from "you're rate-limited, wait 2s" from "bad API key".
+This maps the common failure shapes (local LM Studio + cloud Gemini/Grok/
+OpenAI) to a taxonomy and routes each one to a recovery hint. Both the CLI
+and the headless bridge use it so the message is consistent everywhere.
 """
 
 from __future__ import annotations

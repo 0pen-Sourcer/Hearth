@@ -114,3 +114,11 @@ docs/RUNBOOK.md
 # than stale ones. Remove from this list once they're brought up to date.
 docs/ARCHITECTURE.md
 docs/WAKE_WORD.md
+
+# ---- Local-only build artefacts ----
+# graphify knowledge-graph outputs (regenerate with scripts/run_graphify_on_hearth.py)
+graphify-out/
+# per-provider API keys saved by /brain command — contains plaintext secrets
+brain_keys.json
+# large reference PDF used for the map-reduce subagent demo
+Timelines of History*.pdf

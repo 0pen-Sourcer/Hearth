@@ -1,11 +1,11 @@
 <h1 align="center">Hearth 🔥</h1>
 
 <p align="center">
-  <strong>A local AI for your machine. It talks. It listens. It actually does things.</strong>
+  <strong>A local-first AI for your machine. It talks. It listens. It actually does things.</strong>
 </p>
 
 <p align="center">
-  No cloud. No API keys. No subscription. <strong>Ships with its own built-in LLM server</strong> - first run picks a model that fits your GPU and downloads it from Hugging Face. Or point it at LM Studio / Ollama / vLLM / a cloud key. Your call.
+  <strong>Local-first by default</strong> — Hearth ships with its own built-in LLM server, so the first run picks a model that fits your GPU and downloads it from Hugging Face. No accounts, no subscriptions, no API keys, no cloud, no system-wide CUDA Toolkit. <strong>Cloud-ready when you want it</strong> — paste a Gemini / OpenAI / Grok / OpenRouter key in Settings → Chat brain and flip it in one click. Same tools, same voice loop, same persona. Your call, your machine.
 </p>
 
 <p align="center">
@@ -22,13 +22,14 @@
 
 ---
 
-<p align="center">
-  <!-- TODO: record 20s screen-cap, drop as docs/demo.gif (or .webp/mp4), update src -->
-  <img src="docs/demo.gif" alt="Hearth — talking, listening, opening apps, reading files, all locally" width="720">
-</p>
+<!-- demo.gif lives in docs/demo.gif when present; until the screencap is
+     recorded for v0.6, the README leads with the concrete claims below
+     instead of a broken-image placeholder. -->
 
 <p align="center">
-  <em>Above: you say "Jarvis, find the biggest folders on D, open the top one." It speaks back, runs the scan, opens Explorer. All on your machine. <strong>No screenshot is staged — that's the actual CLI.</strong></em>
+  <em>Hearth runs entirely on your PC: talks, listens, opens apps, finds files,
+  drives a real browser, reads PDFs / DOCX / XLSX / EPUB / ZIP — and writes its
+  own tools when it hits a gap. Local-first by default, cloud-ready when you want it.</em>
 </p>
 
 ---
@@ -91,9 +92,9 @@ cd hearth
 .\hearth.bat
 ```
 
-**First-run welcome card** detects your GPU/VRAM and recommends the right GGUF (Qwen 2.5 7B for 6 GB+, Hermes 3 3B for smaller). Click Download → it pulls from Hugging Face → Hearth's built-in server boots → ready to chat. **No LM Studio install, no Ollama install, no API key.** Or browse Hugging Face inside the welcome card for any other GGUF you want.
+**First-run onboarding** is a 6-step card overlay — pick a brain (local or cloud), tune voice, personalize, you're in. The Models tab auto-detects every GGUF on your disk (LM Studio cache, Ollama, HF cache, Downloads, GPT4All), recommends one that fits your VRAM, and lets you tune llama.cpp's load config (GPU offload layers, context, KV cache quant, threads, flash attention) per-model — settings are remembered, so you only configure once. Click "Use this" → built-in server boots → topbar pill flips green → chat works. **No LM Studio install, no Ollama install, no API key, no system-wide CUDA Toolkit** — the CUDA runtime DLLs ship as pip wheels, so any NVIDIA RTX/GTX user with a recent driver works out of the box.
 
-Prefer your existing setup? Hearth auto-detects LM Studio (port 1234), Ollama (11434), or llama.cpp (8080) at boot — no env config needed. Or open **Settings → LLM endpoint** to plug in Gemini / Grok / OpenAI / OpenRouter with your API key.
+Prefer your existing setup? Hearth auto-detects LM Studio (port 1234), Ollama (11434), or llama.cpp (8080) at boot — no env config needed. Or open **Settings → Chat brain** to plug in Gemini / Grok / OpenAI / OpenRouter with your API key. Cloud and local are first-class; switch any time without restarting.
 
 Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 
@@ -101,14 +102,19 @@ Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 
 | Interface | Launch | Status |
 |---|---|---|
-| **CLI** (voice + keyboard) | `.\hearth.bat` | **v0.6 daily driver.** Voice loop with mid-sentence interrupt, prompt_toolkit history, slash autocomplete, persistent `[a]lways`/`[N]ever` decisions, context-usage footer. |
-| **Desktop app + Web UI** | `python -m hearth.tray --open` (or `Hearth.exe` from the release zip) | **Functional.** Multi-chat sidebar, file drop, native window, system tray, wake word, voice mode with barge-in, welcome card with HF model browser, inline keyboard permission prompts, cloud endpoint switcher. Same backend as the CLI. |
+| **CLI** (voice + keyboard) | `.\hearth.bat` | **v0.6 daily driver.** Violet HEARTH banner on boot. Voice loop with mid-sentence interrupt, prompt_toolkit history, slash autocomplete. `/models disk \| picks \| hf \| get \| use \| stop` for full model control without leaving the terminal — and `/models use <n>` now live-retargets the running session, no restart. Persistent `[a]lways`/`[N]ever` decisions, context-usage footer. |
+| **Desktop app + Web UI** | `python -m hearth.tray --open` (or `Hearth.exe` from the release zip) | **v0.6 polished.** Single-instance lock (click the exe 5× → still one tray icon). Models tab with My Models / Discover / Quick picks sub-nav, inline load-config (GPU offload, ctx, KV cache, threads, flash attn) saved per-model. Settings sidebar with Chat brain / Voice / Behavior / About. File drop + paperclip attach. Realtime voice mode (silero VAD + faster-whisper, 0.3s endpoint, instant barge-in). Inline permission prompts. Cloud endpoint switcher in onboarding + Settings. Same backend as the CLI. |
 | **Bridge** (programmatic) | `python -m hearth.headless --prompt "..."` | Stable. JSONL events to stdout — drive Hearth from CI, scripts, other agents. |
 | **MCP server** (other LLM chat UIs) | `python -m hearth.mcp_server` | Stable. Exposes every built-in tool as a live tool-card inside any MCP-aware chat UI. |
 
-**LLM backend, pick any:** Hearth's bundled llama-cpp-python server (install with `-BuiltinLLM cuda`), LM Studio, Ollama, vLLM, llama.cpp, LocalAI — anything OpenAI-compatible. **Cloud:** Gemini, Grok, OpenAI, OpenRouter via Settings → LLM endpoint, with your key. Switch any time without restarting.
+**Chat brain — pick anything OpenAI-compatible. Local-first, cloud-ready.**
+- **Local (default):** Hearth's bundled llama-cpp-python server (`-BuiltinLLM cuda` / `cpu`), or your existing LM Studio, Ollama, vLLM, llama.cpp, LocalAI.
+- **Cloud (optional):** Gemini, Grok, OpenAI, OpenRouter via Settings → Chat brain. Paste a key, hit "Use this brain" — done. No restart, no re-onboarding.
+- **Mix and match:** switch live mid-session. Voice mode, tools, memory, persona — all unchanged.
 
-**Mac / Linux:** Not officially supported in v0.5. Most of the codebase is cross-platform; what isn't is shell defaults, app-launching, and screenshot. PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+**Tool calls work on every modern open model.** Hearth ships a multi-family parser ([hearth/tool_call_parser.py](hearth/tool_call_parser.py)) that recognizes Gemma 3/4's `<|toolcall>` syntax, Hermes / Qwen 2.5 / Qwen 3 ChatML, Llama 3.x `<|python_tag|>`, Mistral `[TOOL_CALLS]`, Phi 3/4, Granite, Cohere Command-R, and any model that emits generic `<function=NAME>` blocks. When the model speaks tool-call syntax that llama-cpp-python's server doesn't natively parse, Hearth catches it, normalizes the tool name (Gemma's `viewimage` → real `view_image`), strips the gibberish from the chat surface, and routes it through the regular tool executor. The same parser feeds the CLI, GUI, and bridge.
+
+**Mac / Linux:** Not officially supported in v0.6. Most of the codebase is cross-platform; what isn't is shell defaults, app-launching, and screenshot. PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
@@ -195,7 +201,7 @@ Emits JSONL events (user / thinking / tool_call / tool_result / assistant / done
                                                   ▼
                                     ┌───────────────────────┐
                                     │  hearth/tools.py      │
-                                    │  56 tools, sandboxed  │
+                                    │  64 tools, sandboxed  │
                                     │  + your own plugins   │
                                     └────────┬──────────────┘
                                              │
@@ -267,7 +273,7 @@ pip install faster-whisper
 | `JARVIS_LOCKDOWN`      | `0`                       | `1` = confine reads to workspace too |
 | `JARVIS_CONTEXT`       | auto-detected from LM Studio | Tokens of context to use |
 | `JARVIS_VOICE`         | `am_michael`              | Kokoro voice ID |
-| `JARVIS_VOICE_SPEED`   | `1.5`                     | TTS playback rate (`/voice speed <n>` to change live) |
+| `JARVIS_VOICE_SPEED`   | `1.0`                     | TTS playback rate (`/voice speed <n>` to change live) |
 | `JARVIS_AUTO_APPROVE`  | `0`                       | `1` = skip risky-tool prompts |
 | `JARVIS_EXTRA_WORKSPACES` | (none)                | Extra paths writes are allowed in |
 | `JARVIS_WAKE_WORD`     | (none — accept all)       | If set (e.g. `"jarvis"` or `"hey jarvis"`), `/listen on` only triggers a turn when the utterance starts with it |
@@ -325,7 +331,7 @@ The LLM does (via LM Studio / your inference server). Whisper is CPU-by-default 
 Writes are sandboxed to `~/Jarvis/` by default. Risky tools prompt you the first time per session. `JARVIS_AUTO_APPROVE=1` removes the prompts once you trust it.
 
 **Q: Mac / Linux?**
-Not yet (v0.5). The codebase is mostly portable — `tools.py` has Windows branches for app-launching and registry access that need POSIX equivalents. [Help wanted →](https://github.com/0pen-sourcer/hearth/labels/help%20wanted)
+Not yet (v0.6). The codebase is mostly portable — `tools.py` has Windows branches for app-launching and registry access that need POSIX equivalents. [Help wanted →](https://github.com/0pen-sourcer/hearth/labels/help%20wanted)
 
 **Q: Does it work offline?**
 Everything except `web_search` / `web_fetch` works fully offline.

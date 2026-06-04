@@ -31,6 +31,10 @@
     'cpu' (recommended), 'gpu' (CUDA - installs onnxruntime-gpu, but steals VRAM
     from your LLM), or 'ask' (default - prompts you during install).
 
+.PARAMETER NoRealtimeVoice
+    Skip the real-time voice loop (RealtimeSTT + silero-vad). Without it,
+    voice-mode falls back to press-to-talk recording. Realtime adds ~30MB.
+
 .EXAMPLE
     .\install.ps1
     .\install.ps1 -Browser -BuiltinLLM cuda -VoiceDevice gpu
@@ -46,7 +50,8 @@ param(
     [switch]$NoDesktop,
     [switch]$Browser,
     [string]$BuiltinLLM = '',   # 'cuda' / 'cpu' / '' (off). Installs llama-cpp-python so Hearth has its own LLM server.
-    [ValidateSet('cpu','gpu','ask')][string]$VoiceDevice = 'ask'
+    [ValidateSet('cpu','gpu','ask')][string]$VoiceDevice = 'ask',
+    [switch]$NoRealtimeVoice
 )
 
 $ErrorActionPreference = 'Stop'
@@ -182,8 +187,8 @@ if (-not $NoMCP) {
 }
 
 if (-not $NoFileReaders) {
-    Write-Step "Installing file-reader deps (pypdf, python-docx, openpyxl, python-pptx)"
-    & $venvPython -m pip install --quiet pypdf python-docx openpyxl python-pptx
+    Write-Step "Installing file-reader deps (pypdf, pypdfium2, python-docx, openpyxl, python-pptx)"
+    & $venvPython -m pip install --quiet pypdf pypdfium2 python-docx openpyxl python-pptx
     if ($LASTEXITCODE -ne 0) {
         Write-WarnX "file-reader deps failed - PDF/DOCX/XLSX/PPTX won't be readable until installed. Re-run with -NoFileReaders to silence."
     } else {
@@ -225,13 +230,46 @@ if ($Browser) {
 if ($BuiltinLLM) {
     $variant = $BuiltinLLM.ToLower().Trim()
     if ($variant -eq 'cuda' -or $variant -eq 'gpu') {
-        Write-Step "Installing llama-cpp-python (CUDA 12.4 prebuilt wheel - ~400MB) so Hearth has its own LLM server"
+        Write-Step "Installing llama-cpp-python (CUDA 12.4 prebuilt wheel - ~460MB) so Hearth has its own LLM server"
         & $venvPython -m pip install --quiet llama-cpp-python `
             --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+        if ($LASTEXITCODE -eq 0) {
+            # CRITICAL: the prebuilt CUDA wheel links against cudart64_12.dll +
+            # cublas64_12.dll + nvrtc64_120_0.dll at runtime. If the user does
+            # NOT have CUDA Toolkit installed system-wide, llama.dll will fail
+            # to load with "could not find module" before this step we ship
+            # the runtime via pip wheels (~750MB total) so any RTX user works
+            # out of the box. hearth/__init__.py adds these to the DLL path.
+            Write-Step "Installing CUDA 12 runtime DLLs (cudart + cublas + nvrtc, ~750MB) - so llama.cpp loads on machines without CUDA Toolkit"
+            & $venvPython -m pip install --quiet `
+                nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cuda-nvrtc-cu12
+            if ($LASTEXITCODE -ne 0) {
+                Write-WarnX "CUDA runtime wheels failed to install - the built-in LLM may not load on this machine."
+                Write-WarnX "Retry: pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cuda-nvrtc-cu12"
+            }
+            # llama-cpp-python's prebuilt wheels do NOT include the [server]
+            # extras (fastapi/uvicorn/sse-starlette/starlette-context). Without
+            # them, `python -m llama_cpp.server` exits code 1 with ModuleNotFoundError.
+            Write-Step "Installing llama_cpp.server extras (fastapi, uvicorn, sse-starlette, starlette-context, pydantic-settings)"
+            & $venvPython -m pip install --quiet `
+                fastapi "uvicorn[standard]" sse-starlette pydantic-settings starlette-context
+            if ($LASTEXITCODE -ne 0) {
+                Write-WarnX "server extras failed - the built-in LLM HTTP server won't boot."
+                Write-WarnX "Retry: pip install fastapi 'uvicorn[standard]' sse-starlette pydantic-settings starlette-context"
+            }
+        }
     } elseif ($variant -eq 'cpu') {
         Write-Step "Installing llama-cpp-python (CPU prebuilt wheel - ~50MB) so Hearth has its own LLM server"
         & $venvPython -m pip install --quiet llama-cpp-python `
             --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+        if ($LASTEXITCODE -eq 0) {
+            Write-Step "Installing llama_cpp.server extras (fastapi, uvicorn, sse-starlette, starlette-context, pydantic-settings)"
+            & $venvPython -m pip install --quiet `
+                fastapi "uvicorn[standard]" sse-starlette pydantic-settings starlette-context
+            if ($LASTEXITCODE -ne 0) {
+                Write-WarnX "server extras failed - the built-in LLM HTTP server won't boot."
+            }
+        }
     } else {
         Write-WarnX "unknown -BuiltinLLM value '$BuiltinLLM' (use 'cuda' or 'cpu'). Skipping."
         $variant = ''
@@ -240,10 +278,22 @@ if ($BuiltinLLM) {
         Write-WarnX "llama-cpp-python install failed. You can retry with:"
         Write-WarnX "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/$( if ($variant -eq 'cuda' -or $variant -eq 'gpu') { 'cu124' } else { 'cpu' } )"
     } elseif ($variant) {
-        Write-OK "installed (Hearth's welcome card can now download a GGUF and run a built-in server - no LM Studio needed)"
+        Write-OK "installed (Hearth's Models tab can now download a GGUF and run a built-in server - no LM Studio needed)"
     }
 } else {
     Write-Skip "built-in LLM server (pass -BuiltinLLM cuda or -BuiltinLLM cpu to install llama-cpp-python and skip LM Studio entirely)"
+}
+
+if (-not $NoRealtimeVoice) {
+    Write-Step "Installing real-time voice deps (RealtimeSTT + silero-vad)"
+    & $venvPython -m pip install --quiet RealtimeSTT silero-vad
+    if ($LASTEXITCODE -ne 0) {
+        Write-WarnX "RealtimeSTT/silero-vad failed - voice mode will fall back to press-to-talk. Re-run with -NoRealtimeVoice to silence."
+    } else {
+        Write-OK "installed (voice-mode now does live captions + silero VAD - silero model auto-downloads on first use, ~2MB)"
+    }
+} else {
+    Write-Skip "real-time voice (-NoRealtimeVoice passed)"
 }
 
 # ----- 4. Workspace --------------------------------------------------------
@@ -324,6 +374,11 @@ try {
 
 if ($lmsRunning) {
     Write-OK "LM Studio is running on :1234 (perfect)"
+} elseif ($BuiltinLLM) {
+    # User opted into the built-in llama-cpp server with -BuiltinLLM. They
+    # don't need LM Studio at all, so warning about it not running is just
+    # noise that makes the install look broken when it isn't.
+    Write-OK "Built-in LLM server installed. Pick a GGUF from the Models tab to boot it."
 } else {
     $likelyPaths = @(
         "$env:LOCALAPPDATA\Programs\LM Studio\LM Studio.exe",
@@ -334,7 +389,7 @@ if ($lmsRunning) {
     if ($installed) {
         Write-WarnX "LM Studio installed but not serving on :1234. Open it, load a chat model, click 'Start Server'."
     } else {
-        Write-WarnX "LM Studio not detected. Install from https://lmstudio.ai (or point LOCAL_API_BASE at any OpenAI-compatible server)."
+        Write-WarnX "LM Studio not detected. Install from https://lmstudio.ai (or re-run with -BuiltinLLM cuda to use Hearth's built-in server, or point LOCAL_API_BASE at any OpenAI-compatible endpoint)."
     }
 }
 

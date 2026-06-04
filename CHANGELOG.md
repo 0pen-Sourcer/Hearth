@@ -2,9 +2,29 @@
 
 All notable changes to Hearth land here. Format vaguely follows [Keep a Changelog](https://keepachangelog.com); we don't sweat strict semver pre-1.0.
 
-## [Unreleased] — *"self-improving + cloud-capable"*
+## [Unreleased] — *"self-improving + cloud-capable + tools-on-every-model"*
 
-Headline: Hearth can now **write its own tools** (local, private), runs against **any cloud model** as an optional flex, and the agentic loop is bounded by a **principled loop-guard** (not a magic number) synthesized from how Claude Code / Hermes Agent / OpenClaw actually do it.
+Headline: Hearth can now **write its own tools** (local, private), runs against **any cloud model** as an optional flex, the agentic loop is bounded by a **principled loop-guard** (outcome-hash tiered detection, not a magic depth number) — and as of v0.6 round 7, **tool calls work on every modern open model family** via a multi-family parser, the **CLI has full feature parity with the GUI's model picker** (no restart on swap), and the builtin llama-cpp server is **guaranteed to free its port + VRAM** on Hearth exit no matter how Hearth dies.
+
+### v0.6 round 7 (this build)
+- **Multi-family tool-call parser** (`hearth/tool_call_parser.py`). Recognizes Gemma 3/4's `<|toolcall>call:NAME{...}<tool_call|>` syntax, Hermes / Qwen 2.5 / Qwen 3 ChatML, Llama 3.x `<|python_tag|>...<|eom_id|>`, Mistral `[TOOL_CALLS]`, Phi 3/4 `<|tool|>`, IBM Granite `<|tool_call|>...<|tool_call_end|>`, Cohere Command-R `Action: \`\`\`json [...]\`\`\``, and generic XML `<function=NAME>{...}</function>`. Normalizes mangled tool names (Gemma's `viewimage` → `view_image`), strips the raw syntax from the chat surface, injects clean OpenAI `tool_calls` into the assistant message, and routes through the regular executor. Adding a new family is one `_Pattern` + 2-line extractor. 9/9 unit tests pass on real-world emissions.
+- **CLI `/models use <n>` no longer requires a restart.** New `_retarget_to(url, key, path)` helper live-rebuilds the OpenAI client + updates `LOCAL_API_BASE` / `LOCAL_API_KEY` / `headless` module globals + refreshes `current_model` + auto-redetects context. `/models get <id>` does the same after a download finishes.
+- **HEARTH violet banner**. Boot art changed from "JARVIS" to "HEARTH" block-letters in the same violet gradient as the GUI (`#8b5cf6 → #a78bfa`). Persona name stays configurable via `HEARTH_PERSONA_NAME`.
+- **Windows Job Object on every spawned llama_cpp.server child** (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). When Hearth's parent dies — clean exit, Ctrl-C, taskbar close, force-kill, unhandled crash — the OS kills the child. Port 1234 is always free for the next launch. Belt + suspenders with the existing atexit hook.
+- **`external_server_running` honesty**. Only treats 401/403 as "alive" when we supplied an API key (i.e. we know we're probing our own auth-gated builtin). Stops phantom "External server detected" pills when a random unauthenticated listener squats port 1234.
+- **`_list_models` builtin-aware**. Matches LOCAL_API_BASE to builtin URL by **port** (not exact string) so `localhost` vs `127.0.0.1` drift can't suppress the loaded model. Passes the Bearer key on the generic `/v1/models` fallback so auth-gated servers actually answer.
+- **PDF → VLM-OCR fallback** (`hearth/tools.py:_extract_pdf`). Detects scanned/image-only pages, renders them via pypdfium2, sends to the currently loaded vision model. Honors `vlm_ocr=false` to opt out per call. Solves the "Hearth read page 1 of my math PDF and stopped" case.
+- **Multi-family parser available to CLI, GUI, and bridge.** All three surfaces share `hearth.tool_call_parser` via `headless.run_once`, so a model that emits Gemma-style syntax in the CLI gets the same auto-execution as in the desktop window.
+
+### v0.6 round 6
+- **Real-time voice mode** (silero VAD + RealtimeSTT). 0.3s endpoint, 0.1s partial-transcript cadence, instant mid-sentence barge-in via `on_vad_detect_start` callback. Phone-call feel.
+- **Models tab redesign** — sub-nav (My Models / Discover / Quick picks), per-row inline expansion with full llama.cpp load config (GPU offload, ctx, KV cache K/V quant, threads, flash-attn) saved per-model to `~/Jarvis/model_configs.json`. Capability tags drawn ONLY from HF tags (no heuristic name-guessing).
+- **Settings sidebar** (Chat brain / Voice / Behavior / About) — left sub-nav, gradient avatar + "@0pen-sourcer" footer.
+- **Onboarding overlay** — 6-step full-screen card flow (welcome / brain / cloud / voice / personalize / done).
+- **Hardened install path**: CUDA 12 runtime DLLs (`nvidia-cuda-runtime-cu12` + `nvidia-cublas-cu12` + `nvidia-cuda-nvrtc-cu12`) installed via pip wheels so users without a system-wide CUDA Toolkit get a working builtin LLM. `hearth/__init__.py` calls `os.add_dll_directory` on the wheel bin paths before any `import llama_cpp`.
+- **`llama_cpp.server` extras** (fastapi / uvicorn / sse-starlette / pydantic-settings / starlette-context) pinned in install.ps1 + Hearth.spec — without them the prebuilt llama-cpp-python wheel can't serve.
+
+### Original Unreleased baseline:
 
 ### Added
 - **Machine self-knowledge — Hearth learns your PC instead of disk-scanning for it.** New `hearth/environment.py` detects GPU/VRAM, RAM, the installed models (via the server API), and a NON-recursive top-level drive map, then writes them to local memory. Runs automatically at first-run onboarding (CLI **and** GUI/desktop — they share the path), on demand via the CLI **`/learn`** command, and the model can refresh it itself with the new **`learn_environment`** tool. This is the productized version of "a capable agent walks in already knowing your hardware/layout." Directly kills the failure where the model spent **118s** on `Get-ChildItem -Recurse` hunting for LM Studio model files and found nothing.

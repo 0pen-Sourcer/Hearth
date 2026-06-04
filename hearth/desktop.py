@@ -25,11 +25,11 @@ import webbrowser
 from typing import Optional
 
 from . import web as web_backend
+from . import singleton
 
 
 def _free_port(start: int = 8765, tries: int = 12) -> int:
-    """Walk forward from `start` until we find a free localhost port.
-    Saves the "port 8765 already in use, app won't open" footgun."""
+    """Walk forward from `start` until we find a free localhost port."""
     for off in range(tries):
         port = start + off
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -56,7 +56,15 @@ def main(argv: Optional[list] = None) -> int:
                         help="Start the server but don't open anything.")
     args = parser.parse_args(argv)
 
-    port = args.port or _free_port(8765)
+    # Single-instance check — if another Hearth is already running, surface
+    # its window and exit. The user clicking the exe 5 times no longer spawns
+    # 5 tray icons + 5 backends fighting over ports.
+    if not args.port:
+        primary, _existing_port = singleton.acquire_or_defer(singleton.DEFAULT_PORT)
+        if not primary:
+            singleton.announce_secondary_and_exit()
+
+    port = args.port or _free_port(singleton.DEFAULT_PORT)
     server = web_backend.serve(host="127.0.0.1", port=port)
     url = f"http://127.0.0.1:{port}/"
 
@@ -114,18 +122,34 @@ def main(argv: Optional[list] = None) -> int:
         text_select=True,
         confirm_close=False,
     )
+    # Hand the window object to the backend so /api/focus can surface it
+    # when a second launch attempt asks us to.
+    try:
+        web_backend.set_window_ref(win)
+    except Exception:
+        pass
+
+    def _bye() -> None:
+        # Always kill the builtin llama.cpp child so port 1234 is freed,
+        # whether we exit cleanly or via Ctrl-C.
+        try:
+            from . import llmserver
+            llmserver.stop_builtin()
+        except Exception:
+            pass
+        try: server.shutdown()
+        except Exception: pass
 
     def _shutdown_on_close() -> None:
-        # pywebview blocks .start() until window closes
         try:
             webview.start(gui=None, debug=False)
         finally:
-            server.shutdown()
+            _bye()
 
     try:
         _shutdown_on_close()
     except KeyboardInterrupt:
-        server.shutdown()
+        _bye()
     return 0
 
 

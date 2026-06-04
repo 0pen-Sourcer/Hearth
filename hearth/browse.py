@@ -52,10 +52,13 @@ _CURSOR_JS = r"""
     if (document.getElementById('__hearth_cursor')) return;
     const c = document.createElement('div');
     c.id = '__hearth_cursor';
-    c.style.cssText = 'position:fixed;left:50%;top:50%;width:18px;height:18px;'
+    // Visible from the moment the page loads so users see the agent is in
+    // control. Starts centered at top of viewport, glides on the first click.
+    c.style.cssText = 'position:fixed;left:50%;top:80px;width:18px;height:18px;'
       + 'border:2px solid #7c5cff;border-radius:50%;background:rgba(124,92,255,.25);'
       + 'z-index:2147483647;pointer-events:none;margin:-9px 0 0 -9px;'
-      + 'box-shadow:0 0 8px #7c5cff;opacity:0;transition:opacity .2s';
+      + 'box-shadow:0 0 12px #7c5cff;opacity:.85;'
+      + 'transition:left .45s ease, top .45s ease, opacity .2s';
     (document.body || document.documentElement).appendChild(c);
   };
   if (document.readyState !== 'loading') add();
@@ -108,7 +111,13 @@ class _BrowserWorker(threading.Thread):
             # navigator.webdriver flag so sites (Amazon, etc.) are less likely
             # to bot-block us. Optional window placement (set
             # HEARTH_BROWSE_WINDOW="x,y,w,h") so it can sit beside the terminal.
-            args = ["--disable-blink-features=AutomationControlled"]
+            # Maximize on open so the agent has the same screen real estate the
+            # user does, AND pages actually load full-width instead of squished
+            # into a tiny default 1280x720 viewport stuck in the top-left.
+            args = [
+                "--disable-blink-features=AutomationControlled",
+                "--start-maximized",
+            ]
             win = os.getenv("HEARTH_BROWSE_WINDOW", "").strip()
             if win and len(win.split(",")) == 4:
                 x, y, w, h = win.split(",")
@@ -123,7 +132,11 @@ class _BrowserWorker(threading.Thread):
                 self._browser = self._pw.chromium.launch(channel="chrome", **common)
             except Exception:
                 self._browser = self._pw.chromium.launch(**common)
-            self._page = self._browser.new_page()
+            # no_viewport=True lets the page resize to match the actual maximized
+            # window instead of being pinned to Playwright's default 1280x720.
+            # Combined with --start-maximized above, this is what makes pages
+            # render at full width when the user maximizes the browser.
+            self._page = self._browser.new_page(no_viewport=True)
             self._page.set_default_timeout(20000)
             # Inject a visible cursor that follows the mouse — Playwright moves
             # the real mouse during clicks but draws no cursor, so without this
@@ -301,6 +314,27 @@ def _cmd_click(page, args: dict) -> str:
     return f"Couldn't find a clickable element with text '{text}'. Use browse() to re-list clickable items."
 
 
+def _cmd_scroll(page, args: dict) -> str:
+    """Scroll the page so the agent can read more. direction can be 'down'
+    (default), 'up', 'top', 'bottom'. Pixels = how far (default = one viewport).
+    Returns the freshly summarized page after the scroll."""
+    direction = (args.get("direction") or "down").lower()
+    px = int(args.get("pixels") or 0)
+    try:
+        if direction == "top":
+            page.evaluate("window.scrollTo({top:0, left:0, behavior:'smooth'})")
+        elif direction == "bottom":
+            page.evaluate("window.scrollTo({top: document.body.scrollHeight, left:0, behavior:'smooth'})")
+        else:
+            sign = -1 if direction == "up" else 1
+            amount = px if px > 0 else "window.innerHeight"
+            page.evaluate(f"window.scrollBy({{top: {sign} * ({amount}), behavior:'smooth'}})")
+        time.sleep(0.6)  # let the smooth-scroll play out
+    except Exception as e:
+        return f"Couldn't scroll: {type(e).__name__}: {e}"
+    return _page_summary(page)
+
+
 def _cmd_type(page, args: dict) -> str:
     text = args.get("text") or ""
     label = (args.get("field") or "").strip()
@@ -327,6 +361,11 @@ def browse(args: dict) -> str:
 
 def browse_click(args: dict) -> str:
     code, res = _get_worker().call(_cmd_click, args)
+    return res
+
+
+def browse_scroll(args: dict) -> str:
+    code, res = _get_worker().call(_cmd_scroll, args)
     return res
 
 

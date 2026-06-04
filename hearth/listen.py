@@ -108,6 +108,23 @@ def set_model(size: str) -> str:
     return f"STT model -> '{size}'. It'll download (if new) on your next /listen."
 
 
+def set_device(device: str) -> str:
+    """Switch the STT device (cpu / cuda) at runtime. Resets the cached model
+    so the next transcribe rebuilds on the new device. Called by the GUI when
+    the user flips the 'Where to run voice' dropdown — without this, the
+    setting flips in the env but the in-process WhisperModel stays pinned
+    to whatever device it loaded on at import."""
+    global DEVICE, _model
+    device = (device or "cpu").strip().lower()
+    if device not in ("cpu", "cuda"):
+        return f"STT device must be 'cpu' or 'cuda' (got {device!r})"
+    with _load_lock:
+        DEVICE = device
+        os.environ["JARVIS_STT_DEVICE"] = device
+        _model = None
+    return f"STT device -> {device}"
+
+
 def _try_load_model():
     global _model, _last_load_error
     if _model is not None:
@@ -125,9 +142,13 @@ def _try_load_model():
             # out of their home dir clutter. Falls back to default cache.
             download_root = os.path.join(VOICES_DIR, "whisper")
             os.makedirs(download_root, exist_ok=True)
+            # Re-read env at load time so a runtime device flip from the GUI
+            # (which only updates env + DEVICE) actually takes effect on the
+            # next reload, even if Python import-time DEVICE was different.
+            _device_now = os.environ.get("JARVIS_STT_DEVICE", DEVICE)
             _model = WhisperModel(
                 MODEL_SIZE,
-                device=DEVICE,
+                device=_device_now,
                 compute_type=COMPUTE_TYPE,
                 download_root=download_root,
             )

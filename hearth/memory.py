@@ -1,6 +1,6 @@
 """Long-term memory for Jarvis.
 
-Pattern (cribbed from Claude Code's auto-memory):
+Storage layout:
   ~/Jarvis/memory/MEMORY.md       — always-loaded index. One line per fact.
   ~/Jarvis/memory/<slug>.md       — per-fact file. YAML frontmatter + body.
 
@@ -9,14 +9,14 @@ every turn (gives the model awareness of what it knows). Per-fact bodies are
 loaded only when the model calls memory_recall — so we don't burn tokens on
 facts irrelevant to the current question.
 
-Four types (same as Claude Code, since the taxonomy is genuinely useful):
+Four types:
   user       — who the user is, role, expertise, preferences
   feedback   — corrections / confirmations about how to behave
   project    — ongoing context: what they're building, deadlines, decisions
   reference  — pointers to external places: links, paths, tool URLs
 
 Hard caps:
-  index      — 200 lines / 25KB (matches Claude Code's MEMDIR caps)
+  index      — 200 lines / 25KB
   per-entry  — model-driven; aim for tight bodies (a paragraph or two)
 """
 

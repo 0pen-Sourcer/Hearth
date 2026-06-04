@@ -41,6 +41,10 @@ Out of scope (we don't claim to defend against these):
 - **`edit_file` / `write_file`** can damage files if the model writes the wrong thing. Confined to the workspace by default; permission-prompted on writes.
 - **`open_app`** can launch any executable findable on the system. Permission-prompted. Don't allow if you're running an untrusted prompt.
 - **`web_fetch`** can be steered to internal IPs (`http://192.168.x.x/admin`) by a model that's been told to. We don't block private ranges. If you don't want this, run Hearth on a host with no LAN access to admin panels.
+- **`browse` / `browse_click` / `browse_type`** drive a real Chromium with your existing session cookies (Playwright `channel="chrome"`). A jailbroken model can in theory navigate to your bank tab. Permission-prompted on the first call per session and on every `browse_type`. Don't paste API keys into a chat right before granting blanket browse permission.
+- **Tool-call parser** (v0.6+) post-processes model output to extract Gemma / Hermes / Llama 3 / Mistral / Phi / Granite / Command-R tool-call patterns. The parser is regex-based — it can't enforce that the extracted call is one the user actually wanted. The same permission prompt that gates native tool calls also gates parser-injected ones.
+- **Built-in llama-cpp server** binds to `127.0.0.1:1234` by default. A Windows Job Object kills the child process when Hearth exits, but a force-kill of the parent before the child registers with the job (rare race) can leave it orphan. Restart of Hearth always frees the port.
+- **`~/Jarvis/model_configs.json`** is plain JSON. If a malicious tool could write to it, it could pin a different model path. The file lives in your home dir and is only readable/writable by you on a default Windows install. Treat it as user data.
 
 ## Supported versions
 

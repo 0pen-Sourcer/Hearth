@@ -30,6 +30,7 @@ import webbrowser
 from typing import Optional
 
 from . import web as web_backend
+from . import singleton
 from .tools import WORKSPACE
 
 
@@ -150,10 +151,20 @@ def main(argv: Optional[list] = None) -> int:
                         help="Start with wake-word listener enabled (say 'Jarvis' to open).")
     args = parser.parse_args(argv)
 
+    # Single-instance check FIRST — otherwise clicking Hearth.exe N times
+    # creates N tray icons. If another Hearth is running, ask it to surface
+    # its window and exit.
+    if not args.port:
+        primary, _existing_port = singleton.acquire_or_defer(singleton.DEFAULT_PORT)
+        if not primary:
+            singleton.announce_secondary_and_exit()
+
     # Start backend
     global _server_url
-    port = args.port or 8765
-    # Try a few ports if the default is taken
+    port = args.port or singleton.DEFAULT_PORT
+    # If user passed --port OR our singleton-preferred port is unexpectedly
+    # taken (e.g. it WAS bound but the Hearth instance died between checks),
+    # walk forward to find a free one.
     import socket as _sk
     for off in range(0, 12):
         p = port + off
@@ -236,6 +247,15 @@ def main(argv: Optional[list] = None) -> int:
         _stop_wake()
         icon.stop()
         server.shutdown()
+        # Make ABSOLUTELY sure the llama_cpp.server child dies. The Windows
+        # Job Object will catch this on hard exits, but a clean Quit path
+        # should also call stop_builtin so port 1234 is freed before the
+        # next launch (so LM Studio "address already in use" stops happening).
+        try:
+            from . import llmserver
+            llmserver.stop_builtin()
+        except Exception:
+            pass
 
     menu = pystray.Menu(
         pystray.MenuItem("Open Hearth", on_open, default=True),
@@ -259,9 +279,44 @@ def main(argv: Optional[list] = None) -> int:
     if args.wake:
         threading.Timer(1.0, _start_wake).start()
 
+    # Signal handlers — Ctrl-C from the terminal MUST also free port 1234.
+    # Without this, the user kills Hearth from the terminal and the orphan
+    # llama_cpp.server keeps the port until reboot. Belt-and-suspenders with
+    # the Job Object in llmserver.py.
+    #
+    # NOTE: don't call sys.exit() from this handler. On Windows pystray
+    # runs its message loop via a ctypes WNDPROC callback; if a signal
+    # fires while that callback is on the stack, raising SystemExit
+    # propagates back into ctypes and Python prints "Exception ignored on
+    # calling ctypes callback function". icon.stop() is enough — it
+    # unblocks icon.run() in the main thread, which then returns from
+    # main() naturally.
+    import signal as _signal
+    def _bye(*_a):
+        try:
+            from . import llmserver
+            llmserver.stop_builtin()
+        except Exception:
+            pass
+        try: _stop_wake()
+        except Exception: pass
+        try: server.shutdown()
+        except Exception: pass
+        try: icon.stop()
+        except Exception: pass
+    _signal.signal(_signal.SIGINT, _bye)
+    _signal.signal(_signal.SIGTERM, _bye)
+
     icon.run()
     _stop_wake()
     server.shutdown()
+    # Final safety net — atexit also fires, but call explicitly so port 1234
+    # is reliably free before this main() returns.
+    try:
+        from . import llmserver
+        llmserver.stop_builtin()
+    except Exception:
+        pass
     return 0
 
 
