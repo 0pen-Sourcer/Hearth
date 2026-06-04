@@ -215,11 +215,31 @@ def _trunc(s: str, cap: int) -> str:
 # ============================================================
 
 def _resolve_read(p: str) -> str:
-    """Return absolute path for a read-style op."""
+    """Return absolute path for a read-style op.
+
+    Search order for relative paths:
+      1. Current working directory (where Hearth was launched from). This is
+         what most users expect when they type './file.pdf' or 'foo.txt'.
+      2. Workspace (~/Jarvis/). Fallback for when the file lives there.
+
+    The previous behavior was workspace-only, which made `./Timelines.pdf`
+    silently resolve to `~/Jarvis/Timelines.pdf` even when the file was
+    sitting in the user's CWD — confused agents AND users alike.
+    """
     p = os.path.expanduser(p)
     if not os.path.isabs(p):
-        p = os.path.join(WORKSPACE, p)
-    p = os.path.abspath(p)
+        cwd_candidate = os.path.abspath(os.path.join(os.getcwd(), p))
+        ws_candidate  = os.path.abspath(os.path.join(WORKSPACE, p))
+        # Prefer whichever actually exists; if neither does, prefer CWD so
+        # the error message at the call site shows the path the user meant.
+        if os.path.exists(cwd_candidate):
+            p = cwd_candidate
+        elif os.path.exists(ws_candidate):
+            p = ws_candidate
+        else:
+            p = cwd_candidate
+    else:
+        p = os.path.abspath(p)
     if SAFE_READ_ONLY and not p.startswith(WORKSPACE):
         raise PermissionError(f"Read locked to workspace: {WORKSPACE}")
     return p
