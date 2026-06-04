@@ -901,6 +901,13 @@ class JarvisCLI:
         print(f"{C_DIM}Subcommands:  /models disk  ·  picks  ·  hf <q>  ·  get <id>  ·  use <path|n>  ·  stop{C_RESET}\n")
 
     async def handle_command(self, text: str) -> bool:
+        # `global` MUST sit at the very top of this function, BEFORE any
+        # read of these names — Python parses the whole function body and
+        # raises SyntaxError "name 'X' is used prior to global declaration"
+        # if a global decl appears anywhere AFTER a read. The /brain branch
+        # below mutates these to flip the active brain. The /about and
+        # /models branches read them.
+        global LOCAL_API_BASE, LOCAL_API_KEY, LOCAL_MODEL
         cmd = text.strip()
         low = cmd.lower()
         if low in ("/exit", "/quit", "exit", "quit"):
@@ -994,11 +1001,8 @@ class JarvisCLI:
             # no arg auto-loads the saved key. To replace a saved key, pass a
             # new one (`/brain grok <new-key>`); to wipe one, use
             # `/brain forget <provider>`.
-            #
-            # `global` MUST be declared BEFORE any read of these names in this
-            # function — Python parses the whole function body and bails with
-            # "name X is used prior to global declaration" otherwise.
-            global LOCAL_API_BASE, LOCAL_API_KEY, LOCAL_MODEL
+            # (`global LOCAL_API_BASE / KEY / MODEL` already declared at the
+            # top of handle_command — Python requires it before any read.)
             import json as _json
             keys_path = os.path.join(WORKSPACE, "brain_keys.json")
             settings_path = os.path.join(WORKSPACE, "settings.json")
