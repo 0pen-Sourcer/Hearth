@@ -44,8 +44,10 @@ os.makedirs(VOICES_DIR, exist_ok=True)
 
 # Default voice id for Kokoro — am_michael is calm and Jarvis-leaning.
 DEFAULT_KOKORO_VOICE = os.environ.get("JARVIS_VOICE", "am_michael")
-# Slight bump above 1.0 so audio doesn't lag too far behind text.
-DEFAULT_SPEED = float(os.environ.get("JARVIS_VOICE_SPEED", "1.5"))
+# 1.0 = Kokoro's natural rate. Voiceover testing kept this at 1.0 (anything
+# higher starts to sound rushed during long answers). Override per session
+# with /voice speed <n> or set JARVIS_VOICE_SPEED before launch.
+DEFAULT_SPEED = float(os.environ.get("JARVIS_VOICE_SPEED", "1.0"))
 
 _engine: Optional[Tuple[str, object]] = None  # ("kokoro" | "piper", obj)
 _lock = threading.Lock()

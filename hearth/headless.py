@@ -3,7 +3,7 @@
 The CLI (`hearth_cli.py`) is built for humans — interactive prompts, voice,
 spinners, prompt_toolkit. Headless mode is for everything else: testing,
 CI, scripting, automation, and (the original motivation) so another agent
-(Claude Code, a regression harness, etc.) can drive Hearth without typing.
+or a regression harness can drive Hearth without typing.
 
 USAGE
 -----
@@ -55,7 +55,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from . import system_prompt, execute_tool, to_openai_tools
-from .loop_guard import ToolLoopGuard, MAX_TURNS, strip_tool_markup
+from .loop_guard import ToolLoopGuard, MAX_TURNS
 from .errors import classify_api_error
 
 LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
@@ -76,7 +76,14 @@ DEFAULT_MAX_DEPTH = 20  # generous — let the model decide when it has enough,
                         # stops on its own well before this.
 # Same context/compaction constants as the CLI (hearth_cli.py) so the bridge +
 # GUI auto-compact identically.
-CONTEXT_TOKENS = int(os.getenv("JARVIS_CONTEXT", "8192"))
+#
+# Default bumped from 8K → 32K so the GUI doesn't immediately overflow on a
+# cloud brain (where 128K-1M is normal). The old 8K against a 131K Grok was
+# the actual root cause of the "model forgot the conversation" bug — persona
+# alone is ~8K tokens, so trim chopped the persona in half before history
+# even arrived. The autodetect_context() probe overrides this when LM Studio
+# reports a real loaded_context_length.
+CONTEXT_TOKENS = int(os.getenv("JARVIS_CONTEXT", "32768"))
 RESERVED_OUTPUT = int(os.getenv("JARVIS_RESERVED_OUTPUT", "2048"))
 COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
 
@@ -85,8 +92,15 @@ def autodetect_context(model_id: str) -> Optional[int]:
     """Ask LM Studio for the loaded context length of the active model. Copied
     verbatim from hearth_cli.autodetect_context so the bridge uses the SAME logic
     (probe /v1/models then /api/v0/models, then the single-model detail endpoint).
-    Returns None on total miss."""
+    Returns None on total miss.
+
+    Passes Authorization so probes against our built-in server (which requires
+    `hearth-builtin` API key) don't generate a 401 storm in the server log
+    every time chat turns over. Without this every chat call leaked one 401.
+    """
     import urllib.request
+    _key = os.environ.get("LOCAL_API_KEY") or LOCAL_API_KEY or ""
+    _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
     candidates = (
         f"{LOCAL_API_BASE}/models",
         LOCAL_API_BASE.replace("/v1", "/api/v0") + "/models",
@@ -95,7 +109,8 @@ def autodetect_context(model_id: str) -> Optional[int]:
               "context_length", "n_ctx", "max_position_embeddings")
     for url in candidates:
         try:
-            with urllib.request.urlopen(url, timeout=2) as r:
+            req = urllib.request.Request(url, headers=_hdr)
+            with urllib.request.urlopen(req, timeout=2) as r:
                 data = json.loads(r.read().decode())
         except Exception:
             continue
@@ -108,7 +123,8 @@ def autodetect_context(model_id: str) -> Optional[int]:
                     return v
     try:
         detail_url = LOCAL_API_BASE.replace("/v1", "/api/v0") + f"/models/{model_id}"
-        with urllib.request.urlopen(detail_url, timeout=2) as r:
+        req = urllib.request.Request(detail_url, headers=_hdr)
+        with urllib.request.urlopen(req, timeout=2) as r:
             m = json.loads(r.read().decode())
         for key in fields:
             v = m.get(key)
@@ -219,7 +235,22 @@ async def run_once(
         emit("error", message="openai package not installed — run `pip install openai`")
         return 2
 
-    client = AsyncOpenAI(base_url=LOCAL_API_BASE, api_key=LOCAL_API_KEY, timeout=180.0)
+    # If we're talking to Hearth's BUILTIN llama-cpp server, it was booted
+    # with --api_key hearth-builtin. Any other key (including the default
+    # "not-needed") gets a 401 on the auto-detect probe + every chat request.
+    # Detect by probing: does this base answer with our builtin's signature?
+    _effective_key = LOCAL_API_KEY
+    try:
+        from . import llmserver as _ls
+        st = _ls.status(LOCAL_API_BASE)
+        if st.get("builtin_running") and st.get("builtin_url"):
+            # Match on port, not exact URL string (localhost vs 127.0.0.1)
+            from urllib.parse import urlparse
+            if urlparse(LOCAL_API_BASE).port == urlparse(st["builtin_url"]).port:
+                _effective_key = "hearth-builtin"
+    except Exception:
+        pass
+    client = AsyncOpenAI(base_url=LOCAL_API_BASE, api_key=_effective_key, timeout=180.0)
 
     # Auto-pick the LOADED model (not just downloaded) — LM Studio's v1
     # /models endpoint returns everything it knows about, but only one is
@@ -231,7 +262,10 @@ async def run_once(
         try:
             import urllib.request as _urlreq
             v0 = LOCAL_API_BASE.replace("/v1", "/api/v0")
-            with _urlreq.urlopen(f"{v0}/models", timeout=3) as r:
+            _hdr = ({"Authorization": f"Bearer {_effective_key}"}
+                    if _effective_key else {})
+            _req = _urlreq.Request(f"{v0}/models", headers=_hdr)
+            with _urlreq.urlopen(_req, timeout=3) as r:
                 v0_data = json.loads(r.read().decode("utf-8"))
             for m in v0_data.get("data", []):
                 if m.get("state") == "loaded" and m.get("type") in ("llm", "vlm"):
@@ -248,10 +282,10 @@ async def run_once(
             emit("error", message=f"Could not auto-detect a model on {LOCAL_API_BASE}: {e}")
             return 3
 
-    # Proactive memory (Hermes pattern): fold the saved facts most relevant to
-    # this prompt into the system message, fenced + authoritative, so the model
-    # uses what it knows instead of ignoring the passive index. Bounded; adds
-    # nothing when nothing matches. Same behavior as the CLI's _prepare_context.
+    # Proactive memory: fold the saved facts most relevant to this prompt into
+    # the system message, fenced + authoritative, so the model uses what it
+    # knows instead of ignoring the passive index. Bounded; adds nothing when
+    # nothing matches. Same behavior as the CLI's _prepare_context.
     from . import memory as _mem
     _sys = system_prompt()
     _block = _mem.recall_for_prompt(prompt)
@@ -274,7 +308,7 @@ async def run_once(
     # every prompt, so reserve them + output. trim_to_budget structurally keeps a
     # surviving user turn, so no extra invariant is needed.
     from .tools import trim_to_budget, estimate_tokens, CHARS_PER_TOKEN
-    context_tokens = CONTEXT_TOKENS
+    context_tokens = CONTEXT_TOKENS  # default 32K — see CONTEXT_TOKENS comment
     if not os.getenv("JARVIS_CONTEXT"):  # autodetect unless the user pinned it
         _d = autodetect_context(model)
         if _d:
@@ -284,6 +318,17 @@ async def run_once(
     except Exception:
         _tool_tokens = 0
     _budget = max(2048, context_tokens - _tool_tokens)
+    # Emit so the GUI / CLI can show what budget actually got picked.
+    try:
+        emit("context_budget",
+             context_tokens=context_tokens,
+             tool_tokens=_tool_tokens,
+             effective_budget=_budget,
+             source=("env JARVIS_CONTEXT" if os.getenv("JARVIS_CONTEXT")
+                     else "endpoint probe" if context_tokens != CONTEXT_TOKENS
+                     else f"default {CONTEXT_TOKENS//1024}K"))
+    except Exception:
+        pass
     t_start = time.time()
     iterations = 0
     # Tool-loop guard (outcome-hash based, tiered skip/warn/stop). Shared with
@@ -310,6 +355,13 @@ async def run_once(
         # chain within one turn can't overflow the context window.
         if estimate_tokens(messages) > _budget:
             messages[:] = trim_to_budget(messages, _budget, RESERVED_OUTPUT)
+        # Belt-and-suspenders: trim_to_budget now guarantees a user role, but
+        # ANY upstream caller that hands us a history without one will crash
+        # LM Studio's Jinja with "No user query found in messages". Cheap to
+        # check and idempotent — synthesize a continue-marker if needed.
+        if not any(m.get("role") == "user" for m in messages):
+            messages.append({"role": "user",
+                             "content": "Continue using the results above."})
         try:
             kwargs: Dict[str, Any] = {
                 "model": model,
@@ -414,12 +466,13 @@ async def run_once(
             return 4
 
         # Build the synthetic message in the same shape the rest of the loop
-        # expects. Strip malformed tool-call markup so it never lands in the
-        # streamed output OR the saved history (poisoned history -> LM Studio 500).
+        # expects. The legacy strip_tool_markup() + nudge here was made
+        # redundant by hearth.tool_call_parser below, which detects the same
+        # patterns AND extracts them into proper tool_calls instead of just
+        # deleting them. Keeping only the deletion left a visible "(stripped
+        # malformed tool-call markup)" line in the chat surface — confusing
+        # without adding value.
         msg_content = "".join(content_buf)
-        msg_content, _stripped = strip_tool_markup(msg_content)
-        if _stripped:
-            emit("nudge", reason="stripped malformed tool-call markup")
         msg_tool_calls = [tool_calls_by_idx[i] for i in sorted(tool_calls_by_idx)]
         msg_reasoning = "".join(reasoning_buf) if reasoning_buf else None
 
@@ -443,6 +496,34 @@ async def run_once(
             tc.function.arguments = tc_dict["function"]["arguments"]
             msg.tool_calls.append(tc)
         reasoning = msg_reasoning
+
+        # Multi-family tool-call fallback. Many open-weights families (Gemma,
+        # Llama 3, Phi, Command-R, Granite, some Hermes builds, and any model
+        # whose --chat_format wasn't set) emit tool calls as RAW TEXT in the
+        # content stream because llama_cpp.server didn't parse them. Detect
+        # those patterns here and inject them as if the server had parsed
+        # them natively. Without this, the model's tool intent is lost and
+        # the user just sees gibberish like `<|toolcall>call:viewimage{...}`
+        # in the chat.
+        if not msg.tool_calls and msg.content:
+            try:
+                from . import tool_call_parser as _tcp
+                if _tcp.has_tool_call(msg.content):
+                    tool_names = [t["name"] for t in TOOL_DEFINITIONS]
+                    cleaned, fallback_calls = _tcp.parse(msg.content, tool_names)
+                    if fallback_calls:
+                        msg.content = cleaned  # strip raw syntax from display
+                        for fc in fallback_calls:
+                            tc = _TC()
+                            tc.id = fc["id"]
+                            tc.function = _Fn()
+                            tc.function.name = fc["function"]["name"]
+                            tc.function.arguments = fc["function"]["arguments"]
+                            msg.tool_calls.append(tc)
+            except Exception as e:
+                # Parser is a best-effort fallback — if it throws, fall back
+                # to the original behavior of just showing the raw content.
+                emit("nudge", reason=f"tool-call parser error: {type(e).__name__}: {e}")
 
         if reasoning and think:
             # Emit aggregate for clients that don't process chunks
@@ -552,18 +633,22 @@ async def run_once(
                 # Loop guard: outcome check. warn -> append nudge the model sees;
                 # stop -> also force a text answer next turn.
                 decision = guard.after(name, args, tool_result)
+                display_result = tool_result  # what the GUI shows
+                model_result = tool_result    # what the model sees next turn
                 if decision.action in ("warn", "stop"):
-                    tool_result = f"{tool_result}\n\n{decision.note}"
-                    emit("nudge", reason=decision.note[:100])
+                    model_result = f"{tool_result}\n\n{decision.note}"
+                    # NOTE: don't show the loop-guard note in the UI - it's an
+                    # internal directive to the model, not user-facing. The
+                    # 'nudge' event is suppressed in the GUI for the same reason.
                 if decision.action == "stop":
                     _force_answer = True
 
-                emit("tool_result", name=name, content=tool_result, ms=ms)
+                emit("tool_result", name=name, content=display_result, ms=ms)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "name": name,
-                    "content": tool_result,
+                    "content": model_result,
                 })
                 # Did the tool result hand back a "NEXT STEP:" directive?
                 # If yes, arm the auto-nudge so a yielding next turn fires

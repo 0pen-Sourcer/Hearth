@@ -78,8 +78,11 @@ def _vram_guidance(vram_gb: Optional[float]) -> str:
 def detect_models(endpoint: Optional[str] = None) -> List[str]:
     """Query the OpenAI-compatible server for its model ids. [] if unreachable."""
     base = (endpoint or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
+    _key = os.environ.get("LOCAL_API_KEY") or ""
+    _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
     try:
-        with urllib.request.urlopen(base + "/models", timeout=5) as r:
+        _req = urllib.request.Request(base + "/models", headers=_hdr)
+        with urllib.request.urlopen(_req, timeout=5) as r:
             data = json.loads(r.read().decode())
         return [m.get("id") for m in data.get("data", []) if m.get("id")]
     except Exception:

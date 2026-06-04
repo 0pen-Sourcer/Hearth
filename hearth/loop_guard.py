@@ -5,31 +5,21 @@ command, or read the same file expecting a different answer. A hard "stop after
 N calls" cap is duct tape — it cuts legitimate multi-step work short AND lets
 real no-progress loops through.
 
-This module synthesizes how production agents actually bound the loop:
-
-  - Claude Code: trust the model to stop (a turn ends when it emits no tool
-    calls); a *generous* optional turn cap as safety net; tool errors fed back
-    so the model self-corrects; detect *diminishing returns*, not raw counts.
-  - Hermes Agent (`tool_guardrails.py`): signature = tool + canonical-args
-    hash; classify idempotent vs mutating; separate detectors for exact-failure
-    loops and idempotent no-progress; soft warnings injected into context vs
-    hard blocks; everything configurable.
-  - OpenClaw (`tool-loop-detection.ts`): hash the tool *outcome*, not just the
-    args — same args + *different* result = progress (polling); same args +
-    *same* result = stuck. Ping-pong detection (A->B->A->B, identical results).
-    Tiered warn -> critical.
-
-The principles we keep:
+The principles:
   1. Trust the model to stop; a generous depth cap is the only hard ceiling.
-  2. Detect NO-PROGRESS and FAILURE, not mere repetition (varied successful
-     calls are legitimate work and must never be clamped).
-  3. Hash outcomes, not just calls.
-  4. NUDGE first (inject a warning the model sees) — hard-stop is the rare
+  2. Detect NO-PROGRESS and FAILURE, not mere repetition — varied successful
+     calls are legitimate multi-step work and must never be clamped.
+  3. Hash tool OUTCOMES, not just args: same args + different result = progress
+     (polling is legitimate); same args + same result = stuck.
+  4. Tool signature = tool name + canonical-args hash; classify idempotent vs
+     mutating; separate detectors for exact-failure loops, idempotent
+     no-progress, and ping-pong (A->B->A->B with identical results).
+  5. NUDGE first (inject a warning the model sees) — hard-stop is the rare
      backstop, so we don't fight the model into emitting malformed tool markup.
-  5. Mutating dup-calls are SKIPPED (no duplicate side effects like 4 identical
+  6. Mutating dup-calls are SKIPPED (no duplicate side effects like 4 identical
      reminders); idempotent repeats are allowed but watched for no-progress.
 
-Thresholds are tuned tighter than the big frameworks (90 turns) because 9B
+Thresholds are tuned tighter than the typical 90-turn caps because 7-9B
 models stall faster, but every value is env-overridable.
 """
 
@@ -49,7 +39,7 @@ from typing import Dict, List, Optional, Tuple
 # LM Studio with a 500).
 _MARKUP_PATTERNS = [
     re.compile(r"<\|channel>call:.*?<tool_call\|>", re.DOTALL),  # Gemma
-    re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL),         # Hermes/Llama XML
+    re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL),         # XML envelope
     re.compile(r"<function=.*?</function>", re.DOTALL),           # bare function tag
 ]
 
@@ -74,8 +64,8 @@ def _env_int(name: str, default: int) -> int:
 
 
 # Generous hard ceiling on model turns per user message. Almost never hit in
-# normal use — it's the seatbelt, not the steering. (Claude Code leaves this
-# optional; Hermes uses 90. We pick a middle value for small-model safety.)
+# normal use — it's the seatbelt, not the steering. 25 is a middle value
+# picked for small-model (7-9B) safety; larger frameworks default to 90.
 MAX_TURNS = _env_int("HEARTH_MAX_TURNS", 25)
 
 # No-progress: the SAME call returning the SAME outcome this many times.
@@ -164,18 +154,18 @@ class ToolLoopGuard:
         return f"{name}|{a}"
 
     def before(self, name: str, args: dict) -> Optional[GuardDecision]:
-        """Call BEFORE executing. Returns a 'skip' decision when an identical
-        MUTATING call already succeeded this turn (so we don't repeat the side
-        effect). Returns None to proceed normally."""
-        sig = self.signature(name, args)
-        st = self._sigs.get(sig)
-        if st and st.last_succeeded and name in MUTATING_TOOLS:
-            return GuardDecision(
-                action="skip",
-                note=(f"Skipped: '{name}' was already run with these exact arguments "
-                      f"this turn and succeeded. Don't repeat it — use the earlier "
-                      f"result or answer the user now."),
-            )
+        """Call BEFORE executing. Always proceeds — we used to skip identical
+        MUTATING calls here to prevent side-effect duplication (e.g. two copies
+        of a reminder), but the heuristic killed legit iteration too. From a
+        run.txt session in v0.6 round 8: the model was iteratively fixing a
+        plugin via edit_file with the same path argument and the guard kept
+        marking it "skipped (duplicate call)" — sabotaging genuine work.
+
+        Trust the model's instinct + the permission prompt (which the user
+        sees and can decline). after() still catches real spirals (same
+        outcome N times → warn → stop) so true runaways still get killed.
+        Permission decisions persist per session so even a chatty model can't
+        spam mutating tools without the user actively approving each new call."""
         return None
 
     def after(self, name: str, args: dict, result: str) -> GuardDecision:

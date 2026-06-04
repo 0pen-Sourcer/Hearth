@@ -34,6 +34,32 @@ try:
 except Exception:
     pass
 
+# ---------------------------------------------------------------------------
+# Make CUDA runtime DLLs (cudart, cublas, nvrtc) shipped via pip wheels
+# discoverable to llama-cpp-python's loader BEFORE anything imports llama_cpp.
+# Without this, llama.dll fails with "could not find module" on Windows
+# machines that don't have a system-wide CUDA toolkit. We ship the runtime
+# via the nvidia-cuda-runtime-cu12 / nvidia-cublas-cu12 / nvidia-cuda-nvrtc-cu12
+# wheels so users don't need to install CUDA themselves.
+# ---------------------------------------------------------------------------
+if _os.name == "nt":
+    try:
+        import sysconfig as _sysconfig
+        _spkg = _sysconfig.get_paths().get("purelib") or _sysconfig.get_paths().get("platlib")
+        if _spkg:
+            for _sub in ("cuda_runtime", "cublas", "cuda_nvrtc"):
+                _bin = _os.path.join(_spkg, "nvidia", _sub, "bin")
+                if _os.path.isdir(_bin):
+                    try:
+                        _os.add_dll_directory(_bin)
+                    except Exception:
+                        pass
+                    # Also prepend to PATH for child processes (llama_cpp.server subprocess)
+                    if _bin not in _os.environ.get("PATH", ""):
+                        _os.environ["PATH"] = _bin + _os.pathsep + _os.environ.get("PATH", "")
+    except Exception:
+        pass
+
 from .tools import (
     TOOL_DEFINITIONS,
     execute_tool,

@@ -1,6 +1,6 @@
 # Tools
 
-Hearth gives the model **56 tools** to operate your machine. Everything runs locally; the only outbound calls are web searches the model itself makes. Risky tools (shell, file writes, app launch, browser control) prompt for `[y/n/a/N]` permission in the CLI before they run.
+Hearth gives the model **64 tools** to operate your machine. Everything runs locally; the only outbound calls are web searches the model itself makes. Risky tools (shell, file writes, app launch, browser control) prompt for `[y/n/a/N]` permission in the CLI before they run.
 
 _This list is generated from the live tool definitions._
 
