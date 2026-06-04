@@ -65,12 +65,28 @@ HIDDEN = [
     "pystray._win32", "PIL", "PIL.Image", "PIL.ImageDraw",
     "kokoro_onnx",
     "faster_whisper",
-    "pypdf", "docx", "openpyxl", "pptx",
+    "pypdf", "pypdfium2",  # pypdfium2 = PDF→VLM-OCR fallback for scanned pages
+    "docx", "openpyxl", "pptx",
     "psutil", "sounddevice", "numpy",
     "webview", "webview.platforms.edgechromium",
     "plyer", "plyer.platforms.win.notification",
+    # v0.6 round-7 modules — must be explicitly listed or PyInstaller's
+    # tree-shaker may drop them since nothing imports them at top level.
     "hearth.reminders", "hearth.session_search", "hearth.wake",
     "hearth.desktop_attach",
+    "hearth.singleton",           # tray single-instance lock
+    "hearth.realtime_voice",      # silero VAD + streaming whisper
+    "hearth.tool_call_parser",    # multi-family tool-call parser
+    # RealtimeSTT + silero VAD for "ChatGPT voice mode" feel
+    "RealtimeSTT", "silero_vad",
+    # llama_cpp.server's runtime extras — without these the builtin
+    # server exits code 1 with ModuleNotFoundError. Belt + suspenders
+    # with collect_all("llama_cpp") below.
+    "fastapi", "uvicorn", "sse_starlette",
+    "pydantic_settings", "starlette_context",
+    # CUDA runtime wheels (we ship them via pip so users without CUDA
+    # Toolkit installed can still boot the CUDA build of llama_cpp).
+    "nvidia.cuda_runtime", "nvidia.cublas", "nvidia.cuda_nvrtc",
 ]
 
 # Browser control (optional dep). Bundle the Playwright python package + its node
@@ -94,10 +110,10 @@ except Exception:
 # Built-in LLM server (optional dep). Bundle llama-cpp-python so the PACKAGED
 # Hearth.exe can run its own OpenAI-compatible server with no LM Studio / no
 # Ollama / no extra installs - the "self-contained" story. We do NOT bundle a
-# GGUF; the welcome card downloads one from Hugging Face on first run, picked
+# GGUF; the Models tab downloads one from Hugging Face on first run, picked
 # to fit the user's VRAM. NOTE: this can balloon the bundle by 50-400 MB
 # depending on whether the user installed a CPU or CUDA wheel. Verified by
-# running the rebuilt exe -> Settings -> Models -> "Use built-in" path.
+# running the rebuilt exe -> Models tab -> "Use this" path.
 try:
     from PyInstaller.utils.hooks import collect_all as _collect_all
     _llc_datas, _llc_bins, _llc_hidden = _collect_all("llama_cpp")
@@ -106,6 +122,52 @@ try:
     HIDDEN += _llc_hidden + ["llama_cpp", "llama_cpp.server", "hearth.llmserver"]
 except Exception:
     pass
+
+# CUDA runtime DLLs — bundle the nvidia-cuda-runtime-cu12 / nvidia-cublas-cu12 /
+# nvidia-cuda-nvrtc-cu12 pip wheels so llama.dll can find cudart64_12.dll +
+# cublas64_12.dll + nvrtc64_120_0.dll at runtime even on machines without
+# CUDA Toolkit installed. Without this, the builtin LLM 401's silently in
+# the frozen exe (the "could not find module" loader error that bit the
+# user before round 4). hearth/__init__.py adds the wheel bin dirs to the
+# DLL path on import.
+for _pkg in ("nvidia.cuda_runtime", "nvidia.cublas", "nvidia.cuda_nvrtc"):
+    try:
+        from PyInstaller.utils.hooks import collect_all as _collect_all
+        _d, _b, _h = _collect_all(_pkg)
+        DATAS += _d
+        PW_BINARIES += _b
+        HIDDEN += _h
+    except Exception:
+        pass
+
+# llama_cpp.server runtime extras — fastapi / uvicorn / sse-starlette /
+# pydantic-settings / starlette-context. The prebuilt llama-cpp-python wheel
+# DOES NOT bundle these and llama_cpp.server crashes with
+# ModuleNotFoundError without them. Collecting eagerly so PyInstaller's
+# tree-shaker can't drop them.
+for _pkg in ("fastapi", "uvicorn", "sse_starlette",
+             "pydantic_settings", "starlette_context"):
+    try:
+        from PyInstaller.utils.hooks import collect_all as _collect_all
+        _d, _b, _h = _collect_all(_pkg)
+        DATAS += _d
+        PW_BINARIES += _b
+        HIDDEN += _h
+    except Exception:
+        pass
+
+# Real-time voice (RealtimeSTT + silero VAD). Without collecting their
+# data files, the silero ONNX model is missing at runtime and the recorder
+# silently falls back to webrtc VAD (laggier endpoint).
+for _pkg in ("RealtimeSTT", "silero_vad"):
+    try:
+        from PyInstaller.utils.hooks import collect_all as _collect_all
+        _d, _b, _h = _collect_all(_pkg)
+        DATAS += _d
+        PW_BINARIES += _b
+        HIDDEN += _h
+    except Exception:
+        pass
 
 # ============================================================
 # Analysis (shared imports across both entry points)

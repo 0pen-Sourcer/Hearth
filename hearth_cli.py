@@ -70,7 +70,7 @@ try:
         memory,
         voice,
     )
-    from hearth.loop_guard import ToolLoopGuard, MAX_TURNS, strip_tool_markup
+    from hearth.loop_guard import ToolLoopGuard, MAX_TURNS
     from hearth.errors import classify_api_error
     from hearth import listen as stt
 except ImportError as e:
@@ -138,7 +138,7 @@ COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
 # hearth/loop_guard.py — outcome-hash based, not a magic per-tool count.)
 
 
-HEARTH_VERSION = "0.5.0"
+HEARTH_VERSION = "0.6.0"
 HEARTH_REPO = "https://github.com/0pen-sourcer/hearth"
 
 
@@ -163,12 +163,13 @@ LMSTUDIO_SYNC_PATH = os.path.expanduser(
 # ---- ANSI palette ---------------------------------------------------------
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
-# Brand gradient (cool blue → cyan, used for the banner cascade)
-GRAD = ["\033[38;5;39m", "\033[38;5;45m", "\033[38;5;51m",
-        "\033[38;5;87m", "\033[38;5;123m", "\033[38;5;159m"]
-C_BRAND = "\033[38;5;111m"
+# Brand gradient — Hearth's violet → lavender → soft-rose theme. Matches the
+# GUI's --accent (#8b5cf6 → #a78bfa) so the CLI feels like the same product.
+GRAD = ["\033[38;5;99m",  "\033[38;5;141m", "\033[38;5;177m",
+        "\033[38;5;183m", "\033[38;5;219m", "\033[38;5;225m"]
+C_BRAND = "\033[38;5;141m"   # bright violet
 C_USER = "\033[1;97m"
-C_BOT = "\033[38;5;117m"
+C_BOT = "\033[38;5;183m"     # lavender (matches assistant bubble vibe)
 C_TOOL = "\033[38;5;220m"
 C_OK = "\033[38;5;120m"
 C_DIM = "\033[38;5;240m"
@@ -571,11 +572,12 @@ class JarvisCLI:
 
     # -- Boot screen --------------------------------------------------------
     def animate_intro(self):
+        # Boot banner — was JARVIS, now HEARTH (the framework).
         art = [
-            "     ▒█ ▄▀█ █▀█ █░█ █ █▀     ",
-            "     ▄█ █▀█ █▀▄ ▀▄▀ █ ▄█     ",
+            "     █░█ █▀▀ ▄▀█ █▀█ ▀█▀ █░█     ",
+            "     █▀█ ██▄ █▀█ █▀▄ ░█░ █▀█     ",
         ]
-        sub = f"  local-only personal AI  ◆  hearth v{HEARTH_VERSION}"
+        sub = f"  local-first personal AI  ◆  hearth v{HEARTH_VERSION}"
         os.system("cls" if os.name == "nt" else "clear")
         # Gradient cascade banner
         for i, ln in enumerate(art):
@@ -690,6 +692,214 @@ class JarvisCLI:
             print(f"{C_ERR}Could not reach {LOCAL_API_BASE}/models: {e}{C_RESET}")
             return []
 
+    def _retarget_to(self, url: str, api_key: str = "not-needed",
+                     model_path: Optional[str] = None) -> None:
+        """Live-switch the running CLI to a new OpenAI-compatible endpoint
+        without forcing a restart. Updates the global LOCAL_API_BASE +
+        LOCAL_API_KEY env, rebuilds self.client, refreshes the current
+        model id, and prints a one-line confirmation. Used by /models use
+        and /models get after a successful builtin server start so the user
+        doesn't have to manually edit env vars."""
+        global LOCAL_API_BASE, LOCAL_API_KEY
+        if not url:
+            return
+        LOCAL_API_BASE = url
+        LOCAL_API_KEY = api_key or "not-needed"
+        os.environ["LOCAL_API_BASE"] = url
+        os.environ["LOCAL_API_KEY"] = LOCAL_API_KEY
+        # Mirror the headless module's globals too so any code path that
+        # imports from .headless picks up the new endpoint.
+        try:
+            from hearth import headless as _hl
+            _hl.LOCAL_API_BASE = url
+            _hl.LOCAL_API_KEY = LOCAL_API_KEY
+        except Exception:
+            pass
+        # Rebuild the OpenAI client so it uses the new base + key.
+        try:
+            self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+        except Exception as e:
+            print(f"{C_ERR}retarget: client rebuild failed: {e}{C_RESET}")
+            return
+        # Update the current_model to the basename of the loaded GGUF so the
+        # next chat call addresses it correctly.
+        if model_path:
+            self.current_model = os.path.basename(model_path)
+        else:
+            try:
+                detected = autodetect_model()
+                if detected: self.current_model = detected
+            except Exception:
+                pass
+        # Re-detect context unless the user pinned it.
+        if not self._context_pinned:
+            try:
+                detected_ctx = autodetect_context(self.current_model)
+                if detected_ctx: self.context_tokens = detected_ctx
+            except Exception:
+                pass
+        print(f"{C_OK}↳ switched to {LOCAL_API_BASE}{C_RESET}  "
+              f"{C_DIM}(model: {self.current_model}){C_RESET}")
+
+    async def _cmd_models(self, raw: str) -> None:
+        """Full model picker/downloader — matches the GUI Models tab.
+
+        Subcommands:
+          /models                — overview: server, on-disk GGUFs, recommended picks
+          /models disk           — list every .gguf found on disk + LM Studio / HF cache
+          /models picks          — show recommended downloads (PC-aware)
+          /models hf <query>     — search Hugging Face for GGUF repos
+          /models get <pick-id>  — download a recommended pick + boot built-in server
+          /models use <path|n>   — boot built-in server with a disk model (n = number from /models disk)
+          /models stop           — stop the built-in server
+        """
+        from hearth import llmserver
+        parts = raw.strip().split(None, 2)
+        sub = parts[1].lower() if len(parts) > 1 else ""
+        arg = parts[2] if len(parts) > 2 else ""
+
+        if sub == "stop":
+            r = llmserver.stop_builtin()
+            if r.get("ok") and r.get("was_running"):
+                print(f"{C_OK}Built-in server stopped.{C_RESET}")
+            else:
+                print(f"{C_DIM}{r.get('error') or 'no server was running'}{C_RESET}")
+            return
+
+        if sub == "disk":
+            disk = llmserver.scan_disk_for_models()
+            if not disk:
+                print(f"{C_DIM}No .gguf files found. Try '/models picks' to download one.{C_RESET}")
+                return
+            print(f"\n{C_BRAND}{len(disk)} model{'s' if len(disk)!=1 else ''} on disk:{C_RESET}")
+            for i, m in enumerate(disk, 1):
+                print(f"  [{i}] {C_TOOL}{m.get('filename')}{C_RESET} "
+                      f"{C_DIM}({m.get('size_gb')} GB · {m.get('source')}){C_RESET}")
+                print(f"      {C_DIM}{m.get('path')}{C_RESET}")
+            print(f"\n{C_DIM}Boot one with: /models use <n>{C_RESET}\n")
+            self._cli_disk_cache = disk
+            return
+
+        if sub == "picks":
+            s = llmserver.status(LOCAL_API_BASE)
+            picks = s.get("picks") or []
+            rec_id = s.get("recommended_pick_id") or ""
+            why = s.get("recommendation_reason") or ""
+            print(f"\n{C_BRAND}Recommended downloads:{C_RESET} {C_DIM}{why}{C_RESET}")
+            for p in picks:
+                star = " (recommended)" if p.get("id") == rec_id else ""
+                print(f"  {C_TOOL}{p.get('id')}{C_RESET}{C_OK}{star}{C_RESET}")
+                print(f"      {p.get('name')} · {p.get('size_gb')} GB · {p.get('context'):,} ctx")
+                print(f"      {C_DIM}{p.get('description')}{C_RESET}")
+            print(f"\n{C_DIM}Download + boot: /models get <id>{C_RESET}\n")
+            return
+
+        if sub == "hf":
+            if not arg:
+                print(f"{C_ERR}Usage: /models hf <search query>{C_RESET}")
+                return
+            results = llmserver.search_huggingface(arg)
+            if not results:
+                print(f"{C_DIM}No GGUF repos found for '{arg}'.{C_RESET}")
+                return
+            print(f"\n{C_BRAND}Hugging Face GGUF results for '{arg}':{C_RESET}")
+            for i, r in enumerate(results[:12], 1):
+                print(f"  [{i}] {C_TOOL}{r.get('id')}{C_RESET}  {C_DIM}{r.get('downloads') or 0:,} dl{C_RESET}")
+            print()
+            return
+
+        if sub == "get":
+            if not arg:
+                print(f"{C_ERR}Usage: /models get <pick-id>  (see /models picks){C_RESET}")
+                return
+            print(f"{C_DIM}Downloading + booting {arg} — this can take a while…{C_RESET}")
+            def _cb(done: int, total: int) -> None:
+                if total > 0:
+                    pct = int(100 * done / total)
+                    mb_done = done / (1024**2)
+                    mb_total = total / (1024**2)
+                    print(f"\r  {pct:3d}%  {mb_done:7.1f} / {mb_total:7.1f} MB", end="", flush=True)
+            try:
+                r = llmserver.download_model(arg, on_progress=_cb)
+                print()
+                if not r.get("ok"):
+                    print(f"{C_ERR}{r.get('error') or 'download failed'}{C_RESET}")
+                    return
+                path = r.get("path")
+                print(f"{C_OK}Saved to {path}{C_RESET}")
+                print(f"{C_DIM}Starting built-in server…{C_RESET}")
+                r2 = llmserver.start_builtin(path)
+                if r2.get("ok"):
+                    print(f"{C_OK}Built-in server up at {r2.get('url')}{C_RESET}")
+                    self._retarget_to(r2.get("url"), "hearth-builtin", path)
+                else:
+                    print(f"{C_ERR}{r2.get('error') or 'failed to start'}{C_RESET}")
+            except Exception as e:
+                print(f"{C_ERR}{type(e).__name__}: {e}{C_RESET}")
+            return
+
+        if sub == "use":
+            if not arg:
+                print(f"{C_ERR}Usage: /models use <path>  or  /models use <n>  (n from /models disk){C_RESET}")
+                return
+            path = arg
+            if arg.isdigit():
+                cache = getattr(self, "_cli_disk_cache", None) or llmserver.scan_disk_for_models()
+                idx = int(arg) - 1
+                if not (0 <= idx < len(cache)):
+                    print(f"{C_ERR}Out of range — run /models disk to see the list.{C_RESET}")
+                    return
+                path = cache[idx].get("path")
+            print(f"{C_DIM}Booting llama.cpp built-in server with {path}…{C_RESET}")
+            try:
+                r = llmserver.start_builtin(path)
+                if r.get("ok"):
+                    print(f"{C_OK}Up at {r.get('url')}{C_RESET}")
+                    self._retarget_to(r.get("url"), "hearth-builtin", path)
+                else:
+                    print(f"{C_ERR}{r.get('error') or 'failed'}{C_RESET}")
+            except Exception as e:
+                print(f"{C_ERR}{type(e).__name__}: {e}{C_RESET}")
+            return
+
+        # No subcommand — overview
+        try:
+            s = llmserver.status(LOCAL_API_BASE)
+        except Exception as e:
+            print(f"{C_ERR}Could not fetch status: {e}{C_RESET}")
+            await self.fetch_models()
+            return
+
+        print()
+        if s.get("builtin_running"):
+            print(f"{C_OK}● Built-in server running{C_RESET}  {C_DIM}{s.get('builtin_url') or ''}{C_RESET}")
+        elif s.get("external_running"):
+            print(f"{C_OK}● External server detected{C_RESET}  {C_DIM}{LOCAL_API_BASE}{C_RESET}")
+        else:
+            print(f"{C_DIM}○ No server reachable at {LOCAL_API_BASE}{C_RESET}")
+
+        if s.get("external_running"):
+            await self.fetch_models()
+
+        disk = s.get("disk_models") or []
+        if disk:
+            print(f"\n{C_BRAND}On your disk{C_RESET}  {C_DIM}({len(disk)}){C_RESET}")
+            for i, m in enumerate(disk[:6], 1):
+                print(f"  [{i}] {m.get('filename')}  {C_DIM}({m.get('size_gb')} GB · {m.get('source')}){C_RESET}")
+            if len(disk) > 6:
+                print(f"  {C_DIM}…and {len(disk)-6} more — /models disk{C_RESET}")
+            self._cli_disk_cache = disk
+
+        rec_id = s.get("recommended_pick_id")
+        rec = next((p for p in (s.get("picks") or []) if p.get("id") == rec_id), None)
+        if rec and not s.get("builtin_running"):
+            print(f"\n{C_BRAND}Recommended for your PC{C_RESET}  {C_DIM}{s.get('recommendation_reason') or ''}{C_RESET}")
+            print(f"  {C_TOOL}{rec.get('id')}{C_RESET}  {rec.get('size_gb')} GB · {rec.get('context'):,} ctx")
+            print(f"  {C_DIM}{rec.get('description')}{C_RESET}")
+
+        print()
+        print(f"{C_DIM}Subcommands:  /models disk  ·  picks  ·  hf <q>  ·  get <id>  ·  use <path|n>  ·  stop{C_RESET}\n")
+
     async def handle_command(self, text: str) -> bool:
         cmd = text.strip()
         low = cmd.lower()
@@ -698,8 +908,10 @@ class JarvisCLI:
             sys.exit(0)
         if low == "/help":
             print(f"{C_BOT}Commands:{C_RESET}")
-            print(f"  {C_TOOL}/models{C_RESET}                list local models")
+            print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server, disk, picks")
+            print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop{C_RESET}  full picker (see /models). `use` and `get` retarget THIS session — no restart.")
             print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model (alias: /load)")
+            print(f"  {C_TOOL}/brain{C_RESET}                 switch brain: local / grok / gemini / openai / openrouter / custom")
             print(f"  {C_TOOL}/tools{C_RESET}                 list available tools")
             print(f"  {C_TOOL}/clear{C_RESET}                 wipe context (keep system)")
             print(f"  {C_TOOL}/chats{C_RESET}                 list LM Studio threads")
@@ -747,8 +959,8 @@ class JarvisCLI:
             print(f"  {C_TOOL}repo{C_RESET}        {HEARTH_REPO}")
             print(f"  {C_DIM}MIT licensed · by 0pen-sourcer{C_RESET}\n")
             return True
-        if low == "/models":
-            await self.fetch_models()
+        if low == "/models" or low.startswith("/models "):
+            await self._cmd_models(cmd)
             return True
         if low.startswith("/model ") or low.startswith("/load "):
             arg = cmd.split(None, 1)[1].strip().strip("[]")
@@ -772,6 +984,183 @@ class JarvisCLI:
                 if detected and detected != self.context_tokens:
                     self.context_tokens = detected
                     print(f"{C_DIM}context auto-set to {detected} tokens (from /v1/models){C_RESET}")
+            return True
+        if low == "/brain" or low.startswith("/brain "):
+            # Switch LLM endpoint (local <-> cloud) without restarting Hearth.
+            # Mirrors the GUI's Settings → Chat brain switcher.
+            #
+            # KEY STORAGE: per-provider keys live in ~/Jarvis/brain_keys.json
+            # so users type each API key ONCE. After that, `/brain grok` with
+            # no arg auto-loads the saved key. To replace a saved key, pass a
+            # new one (`/brain grok <new-key>`); to wipe one, use
+            # `/brain forget <provider>`.
+            #
+            # `global` MUST be declared BEFORE any read of these names in this
+            # function — Python parses the whole function body and bails with
+            # "name X is used prior to global declaration" otherwise.
+            global LOCAL_API_BASE, LOCAL_API_KEY, LOCAL_MODEL
+            import json as _json
+            keys_path = os.path.join(WORKSPACE, "brain_keys.json")
+            settings_path = os.path.join(WORKSPACE, "settings.json")
+
+            def _load_keys() -> dict:
+                try:
+                    with open(keys_path, "r", encoding="utf-8") as f:
+                        return _json.load(f) or {}
+                except (OSError, _json.JSONDecodeError):
+                    return {}
+            def _save_keys(d: dict) -> None:
+                try:
+                    os.makedirs(WORKSPACE, exist_ok=True)
+                    with open(keys_path, "w", encoding="utf-8") as f:
+                        _json.dump(d, f, indent=2)
+                except OSError:
+                    pass
+
+            parts = cmd.split(None, 2)
+            if len(parts) == 1:
+                # Just /brain — show current + how to switch + which keys are saved
+                provider_label = "cloud" if not _is_local_endpoint(LOCAL_API_BASE) else "local"
+                print(f"\n{C_BOT}Current brain:{C_RESET} {C_TOOL}{provider_label}{C_RESET}  "
+                      f"{C_DIM}({self.current_model} via {LOCAL_API_BASE}){C_RESET}\n")
+                saved_keys = _load_keys()
+                if saved_keys:
+                    have = sorted(k for k in saved_keys if saved_keys[k].get("key"))
+                    print(f"{C_DIM}Saved keys: {', '.join(have) if have else '(none)'}{C_RESET}")
+                print(f"\n{C_BOT}Switch with:{C_RESET}")
+                print(f"  {C_TOOL}/brain local{C_RESET}                     LM Studio / built-in (default)")
+                print(f"  {C_TOOL}/brain grok [api-key]{C_RESET}            xAI Grok       (key optional if saved)")
+                print(f"  {C_TOOL}/brain gemini [api-key]{C_RESET}          Google Gemini  (key optional if saved)")
+                print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")
+                print(f"  {C_TOOL}/brain openrouter [api-key]{C_RESET}      OpenRouter     (key optional if saved)")
+                print(f"  {C_TOOL}/brain custom <url> <api-key>{C_RESET}    any OpenAI-compatible server")
+                print(f"  {C_TOOL}/brain forget <provider>{C_RESET}         delete a saved key")
+                print(f"\n{C_DIM}Keys saved to ~/Jarvis/brain_keys.json (gitignored, 0600 on POSIX).{C_RESET}\n")
+                return True
+
+            provider = parts[1].strip().lower()
+
+            # /brain forget <provider>
+            if provider == "forget":
+                if len(parts) < 3 or not parts[2].strip():
+                    print(f"{C_ERR}/brain forget needs a provider: /brain forget grok{C_RESET}")
+                    return True
+                target = parts[2].strip().lower()
+                saved_keys = _load_keys()
+                if target in saved_keys:
+                    saved_keys.pop(target, None)
+                    _save_keys(saved_keys)
+                    print(f"{C_OK}forgot saved key for {target}{C_RESET}")
+                else:
+                    print(f"{C_DIM}no saved key for {target}{C_RESET}")
+                return True
+
+            saved_keys = _load_keys()
+            arg = parts[2].strip() if len(parts) > 2 else ""
+            presets_url_model = {
+                "local":      ("http://localhost:1234/v1", "qwen2.5-7b-instruct"),
+                "grok":       ("https://api.x.ai/v1",       "grok-4.3"),
+                "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash"),
+                "openai":     ("https://api.openai.com/v1", "gpt-4o-mini"),
+                "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-3.5-sonnet"),
+            }
+
+            if provider == "custom":
+                # custom needs URL + key explicit each time (no good default)
+                if len(parts) < 3 or " " not in parts[2]:
+                    # Try to recover from saved
+                    sc = saved_keys.get("custom") or {}
+                    if sc.get("url") and sc.get("key"):
+                        url, key = sc["url"], sc["key"]
+                        model_hint = sc.get("model", "")
+                        print(f"{C_DIM}using saved custom: {url}{C_RESET}")
+                    else:
+                        print(f"{C_ERR}/brain custom needs URL and key: /brain custom <url> <key>{C_RESET}")
+                        return True
+                else:
+                    url, _, key = parts[2].partition(" ")
+                    key = key.strip()
+                    model_hint = ""
+            elif provider in presets_url_model:
+                url, model_hint = presets_url_model[provider]
+                # Key resolution: explicit arg > saved > error (local doesn't need one)
+                if arg:
+                    key = arg  # user provided new key; this also UPDATES the saved one
+                else:
+                    saved_entry = saved_keys.get(provider) or {}
+                    key = saved_entry.get("key", "")
+                    if not key and provider != "local":
+                        print(f"{C_ERR}no saved key for {provider}. Use: /brain {provider} <api-key>{C_RESET}")
+                        print(f"{C_DIM}(saved next time; type just /brain {provider} after that){C_RESET}")
+                        return True
+                # Allow saved entry to override the default model hint
+                if provider in saved_keys and saved_keys[provider].get("model"):
+                    model_hint = saved_keys[provider]["model"]
+            else:
+                print(f"{C_ERR}Unknown provider {provider!r}. "
+                      f"Try: local, grok, gemini, openai, openrouter, custom, forget.{C_RESET}")
+                return True
+
+            # Mutate the runtime + env so the next chat call picks up the new
+            # endpoint. (`global` already declared above.)
+            LOCAL_API_BASE = url
+            LOCAL_API_KEY = key or "not-needed"
+            if model_hint:
+                LOCAL_MODEL = model_hint
+                self.current_model = model_hint
+            os.environ["LOCAL_API_BASE"] = url
+            if key:
+                os.environ["LOCAL_API_KEY"] = key
+            else:
+                os.environ.pop("LOCAL_API_KEY", None)
+            if model_hint:
+                os.environ["LOCAL_MODEL"] = model_hint
+
+            # Rebuild the AsyncOpenAI client so the next request uses new creds
+            try:
+                self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+            except Exception as e:
+                print(f"{C_WARN}client rebuild warning: {e}{C_RESET}")
+
+            # Persist: save the key under its provider key so future
+            # `/brain <provider>` (no arg) auto-loads it.
+            if provider != "local" and key:
+                saved_keys[provider] = {"url": url, "key": key, "model": model_hint}
+                _save_keys(saved_keys)
+                # tighten file perms on POSIX (no-op on Windows; NTFS ACL
+                # already restricts to the user)
+                try:
+                    if os.name == "posix":
+                        os.chmod(keys_path, 0o600)
+                except OSError:
+                    pass
+
+            # Also update settings.json so the GUI Settings → Chat brain pane
+            # reflects this choice on next open (matches /api/llm-endpoint).
+            try:
+                saved = {}
+                if os.path.exists(settings_path):
+                    try:
+                        with open(settings_path, "r", encoding="utf-8") as f:
+                            saved = _json.load(f) or {}
+                    except Exception:
+                        pass
+                saved.update({
+                    "llm_provider": provider,
+                    "llm_url": url,
+                    "llm_key": key,
+                    "llm_model": model_hint or saved.get("llm_model", ""),
+                })
+                os.makedirs(WORKSPACE, exist_ok=True)
+                with open(settings_path, "w", encoding="utf-8") as f:
+                    _json.dump(saved, f, indent=2)
+            except Exception:
+                pass
+
+            print(f"{C_OK}brain → {provider}{C_RESET}  "
+                  f"{C_DIM}({url}{' · ' + model_hint if model_hint else ''}){C_RESET}")
+            if provider != "local" and arg:
+                print(f"{C_DIM}(key saved — next time just type /brain {provider}){C_RESET}")
             return True
         if low == "/tools":
             cats = tools_by_category()
@@ -1524,11 +1913,61 @@ class JarvisCLI:
               f"~/Jarvis/rules.md to edit by hand.{C_RESET}")
         print()
 
+    async def _ask_user_interactive(self, question: str, options: list, allow_other: bool) -> dict:
+        """CLI surface for the ask_user tool. Renders a numbered list, reads
+        the user's pick. Runs on the main asyncio loop (the tool dispatcher
+        bounces here via run_coroutine_threadsafe)."""
+        print()
+        print(f"{C_FRAME}╭─ {C_WARN}? {question}{C_RESET}")
+        for i, opt in enumerate(options, 1):
+            print(f"{C_FRAME}│  {C_ACCENT}[{i}]{C_RESET} {opt}")
+        if allow_other:
+            print(f"{C_FRAME}│  {C_DIM}[other] type a free-text answer instead{C_RESET}")
+        print(f"{C_FRAME}╰─{C_RESET}")
+        raw = (await self._read_choice(f"{C_FRAME}│ > {C_RESET}")).strip()
+        if not raw:
+            return {"ok": False, "error": "user gave no answer"}
+        if raw.isdigit():
+            n = int(raw)
+            if 1 <= n <= len(options):
+                return {"ok": True, "choice": options[n - 1], "other": False}
+        # Substring match — "y" picks "Yes", "first" picks "First option", etc.
+        low = raw.lower()
+        matches = [o for o in options if o.lower() == low] \
+               or [o for o in options if o.lower().startswith(low)] \
+               or [o for o in options if low in o.lower()]
+        if len(matches) == 1:
+            return {"ok": True, "choice": matches[0], "other": False}
+        if allow_other:
+            return {"ok": True, "choice": raw, "other": True}
+        return {"ok": False, "error": f"ambiguous answer {raw!r}; pick a number 1-{len(options)}"}
+
+    def _make_ask_user_bridge(self, loop: asyncio.AbstractEventLoop):
+        """Return the sync callback the tool dispatcher will invoke. The
+        callback runs in a worker thread (execute_tool is wrapped in
+        asyncio.to_thread); it bounces the actual prompt back to the main
+        event loop so prompt_toolkit doesn't fight with the worker."""
+        def _bridge(question: str, options: list, allow_other: bool) -> dict:
+            try:
+                fut = asyncio.run_coroutine_threadsafe(
+                    self._ask_user_interactive(question, options, allow_other), loop)
+                return fut.result(timeout=180)
+            except Exception as e:
+                return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return _bridge
+
     async def run(self):
         # The model can flip this to True via the end_session tool when it
         # judges the user is wrapping up. We finish the current response,
         # then exit on the next loop iteration.
         self._exit_requested = False
+        # Register the CLI as the interactive surface for ask_user — the tool
+        # handler bounces back to this loop via run_coroutine_threadsafe.
+        try:
+            from hearth.tools import set_ask_user_callback
+            set_ask_user_callback(self._make_ask_user_bridge(asyncio.get_running_loop()))
+        except Exception:
+            pass  # ask_user just stays inert if registration fails
         await self._maybe_run_onboarding()
 
         last_interrupt = 0.0
@@ -1771,7 +2210,7 @@ class JarvisCLI:
             self._yielded_this_turn = False
             # Tool-loop guard: outcome-hash based, tiered (skip dup / warn /
             # stop). Fresh per user turn. See hearth/loop_guard.py for the full
-            # rationale (synthesized from Claude Code + Hermes + OpenClaw).
+            # rationale.
             self._loop_guard = ToolLoopGuard()
             self._force_answer = False
             # Cloud vision: image to attach as a user turn after this round of
@@ -2074,14 +2513,13 @@ class JarvisCLI:
         # still "wants" to call something). Three known shapes:
         #   - Gemma:  <|channel>call:NAME{...}<tool_call|>
         #   - Hermes/Llama XML:  <tool_call><function=NAME>...<parameter=..>...
-        # We can't recover the call (the arg syntax isn't JSON), but we MUST
-        # hide it: leaving it in `content_captured` both shows junk to the user
-        # AND poisons history (re-rendering it later crashed LM Studio with a
-        # 500). Strip from screen + history.
-        if content_captured:
-            content_captured, _stripped = strip_tool_markup(content_captured)
-            if _stripped:
-                print(f"{C_DIM}(stripped malformed tool-call markup){C_RESET}")
+        # The new hearth.tool_call_parser (used by run_once / headless) RECOVERS
+        # the call into proper OpenAI tool_calls, so we no longer need to scrub
+        # here. Leaving the old strip_tool_markup() + visible "(stripped
+        # malformed tool-call markup)" line was just confusing residue.
+        # If a pattern slips through the parser we'll see it as text and can
+        # add a new family to tool_call_parser._PATTERNS rather than blindly
+        # nuking it from history.
 
         if content_captured:
             entry: Dict = {"role": "assistant", "content": content_captured}
@@ -2144,10 +2582,10 @@ class JarvisCLI:
             # active so we don't deadlock with prompt_toolkit's stdin grab.
             denied = False
             decline_reason = ""
-            # Path-scoped auto-approval (OpenClaw pattern): for file-touching
-            # tools, if the path argument resolves inside the workspace sandbox,
-            # just run it - prompting on every workspace edit is permission
-            # fatigue. Out-of-workspace paths still require the [y/n/a/N] dialogue.
+            # Path-scoped auto-approval: for file-touching tools, if the path
+            # argument resolves inside the workspace sandbox, just run it —
+            # prompting on every workspace edit is permission fatigue.
+            # Out-of-workspace paths still require the [y/n/a/N] dialogue.
             _path_safe = False
             try:
                 _path_arg = args.get("path") if isinstance(args, dict) else None

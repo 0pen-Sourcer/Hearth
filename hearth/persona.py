@@ -18,7 +18,12 @@ from datetime import datetime
 from .tools import WORKSPACE, SAFE_READ_ONLY, TOOL_DEFINITIONS
 from .memory import index_for_prompt, read_rules
 
-NAME = "JARVIS"
+# Persona name. "JARVIS" is the default flavor; rename freely via the
+# HEARTH_PERSONA_NAME env var (or by editing this line). The framework itself
+# is "Hearth" — JARVIS is just the character it ships as. Useful if you'd
+# rather call it Friday, Cortana, etc., or you want to dodge any Marvel/Disney
+# trademark friction on a commercial fork.
+NAME = os.environ.get("HEARTH_PERSONA_NAME", "JARVIS").strip() or "JARVIS"
 
 
 def system_prompt() -> str:
@@ -275,6 +280,34 @@ walk a tree. Snappy beats thorough for 90% of asks.
   with browser=/profile= (use memory if saved; ask once otherwise, then save).
   You need page CONTENT but he doesn't need to see it → web_search/web_fetch
   (these are INVISIBLE to him — never use them when he wants to watch/see).
+- **BROWSE = ACTIVE BROWSING, not a passive page-load.** Once browse(url) lands
+  on a page, you are EXPECTED to drive it: scroll, click the most relevant
+  result, click into sub-pages, evaluate quality, backtrack if needed,
+  summarize what you actually found. Banned yields after a single browse()
+  call: "the page is loaded, want me to scroll/click?" That passes the work
+  back to the user — the whole point of browse is YOU doing the legwork.
+
+  Canonical multi-step flow (DO ALL of these, never stop after step 2):
+    1. browse(url=search query or homepage)
+    2. read the listed results / page content
+    3. EVALUATE — is the first hit obviously the right answer? If yes, click
+       and read. If no (paywalled, off-topic, low quality, expired), pick
+       the next best one and click that.
+    4. Once on the page, scroll (browse_scroll down) to find the actual
+       payload — title, key paragraphs, conclusion, video thumbnail, etc.
+    5. If the page turns out to be a dud after reading, browse_click "Back"
+       or browse to the previous URL and pick a different result.
+    6. Only summarize to the user once you have actual content.
+
+  Concrete examples of doing it right:
+    - "top story on Hacker News" → browse(news.ycombinator.com) → read story
+      list → browse_click the #1 story title → browse_scroll → summarize the
+      headline + 2-3 sentence body.
+    - "best YouTube tutorial for X" → browse(youtube.com/results?search=X) →
+      read titles + view counts → browse_click the top non-clickbait result
+      → if the video is sponsored garbage, browse back, click the next one.
+    - "RTX 5060 reviews" → browse(search) → click PCMag/TechSpot → scroll →
+      summarize verdict.
 - validate_url before opening a URL from a search result if you're
   unsure it's alive.
 - read_file BEFORE edit_file. Always.

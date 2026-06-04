@@ -58,6 +58,54 @@ try:
     from . import listen as _listen
 except Exception:
     _listen = None
+try:
+    from . import realtime_voice as _rt_voice
+except Exception:
+    _rt_voice = None
+
+# Realtime caption + utterance queue. Filled by the recorder callbacks and
+# drained by the SSE-style /api/voice/realtime/stream handler.
+import queue as _queue_mod
+_rt_event_queue: "_queue_mod.Queue[dict]" = _queue_mod.Queue()
+
+# Window reference for single-instance focus. desktop.py sets this to its
+# pywebview window object so /api/focus can bring it to front when a second
+# launch attempt occurs.
+_window_ref = None
+
+
+def set_window_ref(win) -> None:
+    """desktop.py calls this so /api/focus can surface the existing window."""
+    global _window_ref
+    _window_ref = win
+
+
+def _focus_window() -> dict:
+    """Best-effort: bring the desktop window to the foreground."""
+    win = _window_ref
+    if win is None:
+        return {"ok": False, "reason": "no window ref (running headless?)"}
+    try:
+        # pywebview API: restore() un-minimizes; show() makes visible;
+        # on_top toggle flashes it to the front.
+        if hasattr(win, "restore"):
+            try: win.restore()
+            except Exception: pass
+        if hasattr(win, "show"):
+            try: win.show()
+            except Exception: pass
+        # Toggle on_top to force front on Windows (the only reliable way
+        # without win32gui).
+        if hasattr(win, "on_top"):
+            try:
+                win.on_top = True
+                import time as _time; _time.sleep(0.1)
+                win.on_top = False
+            except Exception:
+                pass
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _UI_PATH = os.path.join(_HERE, "ui.html")
@@ -217,9 +265,52 @@ def _resolve_permission(req_id: str, decision: str) -> bool:
         return False
 
 
-def _http_get_json(url: str, timeout: float = 3) -> Optional[Dict]:
+# ----- ask_user system -----
+# Mirrors the permission pattern: the ask_user tool emits an `ask_user_request`
+# event, parks on a per-id queue, and waits for the user's POST /api/ask.
+_ask_queues: Dict[str, _queue.Queue] = {}
+
+
+def _make_ask_user_bridge(emit_fn):
+    """Return the sync callback hearth.tools._ask_user will invoke. We emit
+    an event into the running chat stream, park on a queue, and block the
+    worker thread until the user clicks an option in the GUI modal."""
+    def _ask(question: str, options: list, allow_other: bool) -> Dict[str, Any]:
+        req_id = f"ask_{int(time.time()*1000)}"
+        _ask_queues[req_id] = _queue.Queue()
+        try:
+            emit_fn("ask_user_request", id=req_id, question=question,
+                    options=options, allow_other=allow_other)
+            try:
+                # 180s — same ceiling as permissions; long enough for the user
+                # to actually read the question.
+                answer = _ask_queues[req_id].get(timeout=180.0)
+            except _queue.Empty:
+                return {"ok": False, "error": "user did not answer within 3 minutes"}
+        finally:
+            _ask_queues.pop(req_id, None)
+        return answer  # already a dict shaped {ok, choice, other}
+
+
+    return _ask
+
+
+def _resolve_ask_user(req_id: str, answer: Dict[str, Any]) -> bool:
+    q = _ask_queues.get(req_id)
+    if q is None:
+        return False
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
+        q.put_nowait(answer)
+        return True
+    except _queue.Full:
+        return False
+
+
+def _http_get_json(url: str, timeout: float = 3,
+                   headers: Optional[Dict[str, str]] = None) -> Optional[Dict]:
+    try:
+        req = urllib.request.Request(url, headers=(headers or {}))
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
     except Exception:
         return None
@@ -238,25 +329,108 @@ def _http_post_json(url: str, body: Dict, timeout: float = 30) -> Optional[Dict]
 
 
 def _list_models() -> List[Dict]:
-    """Pull rich model list from LM Studio's v0 API. Cached 4s."""
+    """Return model list from whichever endpoint is currently active.
+
+    LM Studio: pull from /api/v0/models (rich metadata).
+    Builtin llama-cpp-python server: synthesize a single entry from _proc_info
+        (the v1/models endpoint exists but exposes almost nothing useful).
+    Anything else (Ollama, cloud, custom): use plain /v1/models and mark loaded.
+    Cached 4s either way.
+    """
     now = time.time()
     if _models_cache["data"] is not None and now - _models_cache["ts"] < 4:
         return _models_cache["data"]
-    data = _http_get_json(f"{LM_STUDIO_V0}/models") or {"data": []}
+
     out: List[Dict] = []
-    for m in data.get("data", []):
-        if m.get("type") == "embeddings":
-            continue
+
+    # 1) Built-in llama-cpp server is the active endpoint?
+    # Match on port (not full URL) so we tolerate localhost vs 127.0.0.1
+    # being written into LOCAL_API_BASE vs builtin_url after a start. We've
+    # been bitten by exact-string matches before.
+    try:
+        from . import llmserver
+        st = llmserver.status(LOCAL_API_BASE)
+        builtin_url = st.get("builtin_url") or ""
+        same_port = False
+        if st.get("builtin_running") and builtin_url:
+            try:
+                from urllib.parse import urlparse
+                same_port = urlparse(LOCAL_API_BASE).port == urlparse(builtin_url).port
+            except Exception:
+                same_port = (LOCAL_API_BASE == builtin_url)
+        if st.get("builtin_running") and same_port:
+            path = st.get("builtin_model") or ""
+            mid = os.path.basename(path) or "hearth-builtin"
+            # Surface the context the builtin server was launched with so
+            # the footer `ctx` pill shows the real value instead of staying
+            # stuck at "—". `_proc_info["ctx"]` is set in start_builtin.
+            from . import llmserver as _ls
+            builtin_ctx = (_ls._proc_info or {}).get("ctx")
+            out.append({
+                "id": mid,
+                "type": "llm",
+                "arch": "gguf",
+                "publisher": "llama.cpp (Hearth built-in)",
+                "state": "loaded",
+                "loaded_context_length": builtin_ctx,
+                "max_context_length": builtin_ctx,
+                "quantization": "",
+                "capabilities": [],
+            })
+            _models_cache["ts"] = now
+            _models_cache["data"] = out
+            return out
+    except Exception:
+        pass
+
+    # 2) LM Studio v0 (rich metadata path)
+    v0_url = LOCAL_API_BASE.replace("/v1", "/api/v0") + "/models"
+    data = _http_get_json(v0_url)
+    if data and isinstance(data, dict) and data.get("data"):
+        for m in data.get("data", []):
+            if m.get("type") == "embeddings":
+                continue
+            # Forward the model's on-disk path when LM Studio gives it to us
+            # so the GUI's topbar dropdown can dedupe against the disk-scan
+            # list (LM Studio renames models — "harmonic-hermes-9b" → file
+            # "Qwen3.5-9B-Harmonic.Q4_K_M.gguf" — so we can't dedupe by name).
+            out.append({
+                "id": m.get("id"),
+                "type": m.get("type"),
+                "arch": m.get("arch"),
+                "publisher": m.get("publisher"),
+                "state": m.get("state"),
+                "loaded_context_length": m.get("loaded_context_length"),
+                "max_context_length": m.get("max_context_length"),
+                "quantization": m.get("quantization"),
+                "capabilities": m.get("capabilities", []),
+                "path": m.get("path") or m.get("modelPath") or "",
+            })
+        _models_cache["ts"] = now
+        _models_cache["data"] = out
+        return out
+
+    # 3) Generic OpenAI-compatible /v1/models — assume the first one is loaded.
+    # Try with the configured API key so an auth-gated server (builtin /
+    # Gemini / etc.) actually answers instead of silently returning empty.
+    api_key = os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
+    data = _http_get_json(f"{LOCAL_API_BASE}/models",
+                          headers={"Authorization": f"Bearer {api_key}"}) or {"data": []}
+    for i, m in enumerate(data.get("data", [])):
+        # llama_cpp.server identifies models by the FULL --model path. Strip
+        # to basename here so the topbar shows "model.gguf" not "C:\Users\...".
+        raw_id = m.get("id") or ""
+        clean_id = os.path.basename(raw_id.replace("\\", "/")) or raw_id
         out.append({
-            "id": m.get("id"),
-            "type": m.get("type"),
-            "arch": m.get("arch"),
-            "publisher": m.get("publisher"),
-            "state": m.get("state"),
-            "loaded_context_length": m.get("loaded_context_length"),
-            "max_context_length": m.get("max_context_length"),
-            "quantization": m.get("quantization"),
-            "capabilities": m.get("capabilities", []),
+            "id": clean_id,
+            "type": "llm",
+            "arch": "",
+            "publisher": m.get("owned_by") or "",
+            "state": "loaded" if i == 0 else "",
+            "loaded_context_length": None,
+            "max_context_length": None,
+            "quantization": "",
+            "capabilities": [],
         })
     _models_cache["ts"] = now
     _models_cache["data"] = out
@@ -314,7 +488,39 @@ def _load_model(model_id: str) -> Dict:
 
 
 def _eject_model() -> Dict:
-    """Try REST eject, fall back to `lms unload --all`."""
+    """Free the currently-loaded model — for real, not just from our list.
+
+    Path 1: Hearth's BUILTIN llama-cpp server is the active endpoint → kill
+    the subprocess. llama.cpp releases all VRAM + RAM the instant the
+    process exits. Verified by nvidia-smi dropping back to ~0.
+
+    Path 2: LM Studio is the active endpoint → use its REST unload, falling
+    back to the `lms unload --all` CLI.
+    """
+    # Python rule: `global X` must come before ANY reference to X in the
+    # function body. Hoist it to the very top so the read on the next line
+    # doesn't make Python treat LOCAL_API_BASE as a local.
+    global LOCAL_API_BASE
+    from . import llmserver
+    # Builtin path — if our own server is running, killing the subprocess
+    # is the ONLY way to actually free VRAM. The "unload" REST on LM Studio
+    # doesn't exist for llama_cpp.server.
+    builtin_url = (llmserver._proc_info or {}).get("url") if llmserver._proc is not None else None
+    if builtin_url and llmserver._proc.poll() is None and LOCAL_API_BASE == builtin_url:
+        result = llmserver.stop_builtin()
+        _models_cache["data"] = None
+        # Revert endpoint back to the user's configured default so the next
+        # message doesn't hit a dead URL.
+        from . import headless as _hl
+        settings = _load_settings()
+        saved_url = (settings.get("llm_url") or "").strip()
+        new_base = saved_url or "http://localhost:1234/v1"
+        LOCAL_API_BASE = new_base
+        _hl.LOCAL_API_BASE = new_base
+        os.environ["LOCAL_API_BASE"] = new_base
+        return {"ok": bool(result.get("ok")), "via": "builtin-stop",
+                "freed_vram": True, **result}
+
     loaded = _detect_loaded()
     if not loaded:
         return {"ok": True, "msg": "nothing loaded"}
@@ -447,6 +653,12 @@ def _load_settings() -> Dict:
         "llm_url": "",
         "llm_key": "",
         "llm_model": "",
+        # Built-in server config exposed via the Settings → Server pane.
+        # Apply on the next start_builtin (settings persist; restart to act).
+        "server_autoboot": True,        # auto-load preferred_model on Hearth launch
+        "server_default_ctx": 8192,     # ctx used when no per-model config saved
+        "server_idle_min": 15,          # auto-unload after N idle minutes (0 = never)
+        "server_port": 1234,            # builtin HTTP port
     }
     if not os.path.isfile(SETTINGS_PATH):
         return defaults
@@ -536,12 +748,17 @@ class HearthHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, code: int, body: Any) -> None:
         payload = json.dumps(body, ensure_ascii=False, default=str).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+            # Browser tab closed / refresh / fast-clicked. Normal noise; the
+            # default BaseHTTPRequestHandler trace was scaring users. Silenced.
+            pass
 
     def _read_json(self) -> Dict:
         length = int(self.headers.get("content-length", "0") or "0")
@@ -603,9 +820,51 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {"events": _tail_log(n)})
         if path == "/api/logs/download":
             return self._download_logs()
+        if path == "/api/logs/server":
+            # Tail the llama_cpp.server stdout/stderr log so the GUI Logs tab
+            # can show what the builtin server is doing in real time (model
+            # load progress, request lines, OOM tracebacks). When the server
+            # has never been started in this session the file may not exist —
+            # return an honest empty result instead of 500'ing.
+            q = self._query()
+            try:
+                tail_kb = max(1, min(256, int(q.get("kb", "32"))))
+            except ValueError:
+                tail_kb = 32
+            log_path = os.path.join(WORKSPACE, "logs", "llamaserver.log")
+            text = ""
+            running = False
+            pid = None
+            try:
+                from . import llmserver as _ls
+                running = _ls._proc is not None and _ls._proc.poll() is None
+                if running and _ls._proc:
+                    pid = _ls._proc.pid
+            except Exception:
+                pass
+            try:
+                if os.path.exists(log_path):
+                    with open(log_path, "rb") as f:
+                        f.seek(0, 2)
+                        size = f.tell()
+                        f.seek(max(0, size - tail_kb * 1024))
+                        text = f.read().decode("utf-8", errors="replace")
+                    # If we landed mid-line, trim the first partial line.
+                    if size > tail_kb * 1024 and "\n" in text:
+                        text = text[text.index("\n") + 1:]
+            except OSError as e:
+                text = f"[hearth] couldn't read {log_path}: {e}"
+            return self._send_json(200, {
+                "log_path": log_path,
+                "exists": os.path.exists(log_path),
+                "running": running,
+                "pid": pid,
+                "text": text,
+            })
         if path == "/api/voice/status":
             tts_status = {"available": False, "reason": "voice module missing"}
             stt_status = {"ready": False, "reason": "listen module missing"}
+            rt_status = {"available": False}
             if _voice:
                 try:
                     tts_status = _voice.status()
@@ -616,7 +875,14 @@ class HearthHandler(BaseHTTPRequestHandler):
                     stt_status = _listen.status()
                 except Exception as e:
                     stt_status = {"ready": False, "reason": f"{type(e).__name__}: {e}"}
-            return self._send_json(200, {"tts": tts_status, "stt": stt_status})
+            if _rt_voice:
+                try:
+                    rt_status = _rt_voice.status()
+                except Exception as e:
+                    rt_status = {"available": False, "reason": f"{type(e).__name__}: {e}"}
+            return self._send_json(200, {"tts": tts_status, "stt": stt_status, "realtime": rt_status})
+        if path == "/api/voice/realtime/stream":
+            return self._realtime_stream()
         if path == "/api/permissions":
             return self._send_json(200, {
                 "always_allow": sorted(_always_allow),
@@ -634,6 +900,26 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/llmserver/status":
             from . import llmserver
             return self._send_json(200, llmserver.status(LOCAL_API_BASE))
+        if path == "/api/llmserver/progress":
+            # Live load-progress snapshot for the GUI's progress bar in both
+            # the Models modal AND the bottom status pill. Returns the parsed
+            # llama_cpp.server phase + a 0..100 percent so the user sees
+            # "loading_weights 45%" instead of an indeterminate spinner.
+            from . import llmserver
+            return self._send_json(200, llmserver.get_load_progress())
+        if path == "/api/llmserver/log":
+            log_path = os.path.join(WORKSPACE, "logs", "llamaserver.log")
+            try:
+                if os.path.exists(log_path):
+                    with open(log_path, "rb") as f:
+                        f.seek(0, 2)
+                        size = f.tell()
+                        f.seek(max(0, size - 8000))
+                        tail = f.read().decode("utf-8", errors="replace")
+                    return self._send_json(200, {"path": log_path, "tail": tail})
+                return self._send_json(200, {"path": log_path, "tail": ""})
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/llmserver/hf-search":
             # ?q=qwen returns HF GGUF results
             from . import llmserver
@@ -721,6 +1007,75 @@ class HearthHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             return self._send_json(200, {"ok": True})
+        if path == "/api/voice/reload":
+            # Apply new TTS/STT device or whisper size live. Whisper downloads
+            # the new model on first transcribe if missing - we kick that off
+            # here so the user doesn't have to wait at the first /listen.
+            settings = _load_settings()
+            tts_dev = settings.get("tts_device", "cpu")
+            stt_dev = settings.get("stt_device", "cpu")
+            stt_mdl = settings.get("stt_model", "base.en")
+            os.environ["JARVIS_TTS_DEVICE"] = tts_dev
+            os.environ["JARVIS_STT_DEVICE"] = stt_dev
+            os.environ["JARVIS_STT_MODEL"]  = stt_mdl
+            details = {}
+            if _voice:
+                try:
+                    _voice.reload(); details["tts"] = "reloaded"
+                except Exception as e:
+                    details["tts"] = f"{type(e).__name__}: {e}"
+            if _listen:
+                try:
+                    _listen.set_model(stt_mdl)
+                    # set_device flips the in-process DEVICE constant + env
+                    # AND clears the cached WhisperModel so the next load
+                    # actually uses the new device. Without this, the env
+                    # changes but the model stays pinned to whatever it
+                    # loaded on at import.
+                    _listen.set_device(stt_dev)
+                    # Eagerly load so the download happens NOW, not on first /listen
+                    _listen._try_load_model()
+                    details["stt"] = f"whisper {stt_mdl} on {stt_dev}"
+                except Exception as e:
+                    details["stt"] = f"{type(e).__name__}: {e}"
+            # Realtime voice recorder: kill so it rebuilds with new model next time
+            if _rt_voice:
+                try:
+                    _rt_voice.stop_continuous()
+                    _rt_voice._recorder = None
+                    details["realtime"] = "will rebuild on next start"
+                except Exception as e:
+                    details["realtime"] = f"{type(e).__name__}: {e}"
+            return self._send_json(200, {"ok": True, "details": details})
+        if path == "/api/voice/realtime/stop":
+            if _rt_voice:
+                try:
+                    _rt_voice.stop_continuous()
+                except Exception:
+                    pass
+            try:
+                _rt_event_queue.put({"type": "stopped"})
+            except Exception:
+                pass
+            return self._send_json(200, {"ok": True})
+        if path == "/api/focus":
+            # Single-instance hook — another launch attempt asked us to surface
+            # the existing window instead of spawning a duplicate.
+            return self._send_json(200, _focus_window())
+        if path == "/api/open-rules":
+            rules_path = os.path.join(WORKSPACE, "rules.md")
+            try:
+                if not os.path.exists(rules_path):
+                    with open(rules_path, "w", encoding="utf-8") as f:
+                        f.write(
+                            "# Your house rules for Jarvis\n\n"
+                            "This file is re-read every turn. Add anything Jarvis should always do\n"
+                            "or never do.\n"
+                        )
+                os.startfile(rules_path)  # type: ignore[attr-defined]
+                return self._send_json(200, {"ok": True, "path": rules_path})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/voice/stop":
             if _voice:
                 try:
@@ -743,6 +1098,18 @@ class HearthHandler(BaseHTTPRequestHandler):
             _always_deny.clear()
             _save_perms_to_disk()
             return self._send_json(200, {"ok": True})
+        if path == "/api/ask":
+            # Response to an ask_user_request event. Body shape:
+            # { id, choice, other? }. `other=true` means the user picked the
+            # free-text Other option and `choice` is their typed reply.
+            body = self._read_json()
+            rid = (body.get("id") or "").strip()
+            choice = (body.get("choice") or "").strip()
+            other = bool(body.get("other"))
+            if not rid or not choice:
+                return self._send_json(400, {"error": "id and choice are required"})
+            ok = _resolve_ask_user(rid, {"ok": True, "choice": choice, "other": other})
+            return self._send_json(200 if ok else 404, {"ok": ok})
         if path == "/api/llm-endpoint":
             # Switch the active LLM endpoint at runtime (e.g. local <-> Gemini).
             # Mutates the module-level constants in both web.py and headless.py
@@ -753,6 +1120,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             url = (body.get("url") or "").strip()
             key = (body.get("key") or "").strip()
             model = (body.get("model") or "").strip()
+            provider = (body.get("provider") or "").strip()
             if not url:
                 return self._send_json(400, {"ok": False, "error": "url required"})
             global LOCAL_API_BASE
@@ -766,21 +1134,128 @@ class HearthHandler(BaseHTTPRequestHandler):
             os.environ["LOCAL_API_BASE"] = url
             if key:
                 os.environ["LOCAL_API_KEY"] = key
+            else:
+                # When switching to cloud / non-builtin, drop the old builtin
+                # key from env so polls don't keep authenticating against an
+                # unrelated server.
+                os.environ.pop("LOCAL_API_KEY", None)
             if model:
                 os.environ["LOCAL_MODEL"] = model
-            return self._send_json(200, {"ok": True, "url": url})
+            else:
+                os.environ.pop("LOCAL_MODEL", None)
+            # Persist the user's choice so Settings + the Models tab pill
+            # both show the right thing on restart. Without this the pill
+            # said "Built-in server" even after the user switched to Grok.
+            try:
+                _saved = _load_settings()
+                _saved["llm_provider"] = provider or _saved.get("llm_provider", "")
+                _saved["llm_url"] = url
+                _saved["llm_key"] = key
+                _saved["llm_model"] = model
+                # If user moved to a non-local provider, stop preferring the
+                # built-in autoboot — saves them the 8-15s "why is it loading
+                # a model I'm not even using" surprise on next launch.
+                if provider and provider != "local":
+                    _saved["server_autoboot"] = False
+                _save_settings(_saved)
+            except Exception:
+                pass
+            # If we're switching to a CLOUD provider, free the built-in's
+            # 5+ GB of VRAM — it would just sit idle. Skipped for local
+            # endpoints since the user might be swapping between LM Studio
+            # and the builtin on purpose.
+            stopped_builtin = False
+            if provider and provider not in ("local", ""):
+                try:
+                    from . import llmserver
+                    if llmserver._proc and llmserver._proc.poll() is None:
+                        llmserver.stop_builtin()
+                        stopped_builtin = True
+                except Exception:
+                    pass
+            _models_cache["ts"] = 0  # force the next /api/models to repopulate
+            return self._send_json(200, {
+                "ok": True, "url": url, "provider": provider,
+                "stopped_builtin": stopped_builtin,
+            })
         if path == "/api/llmserver/start":
-            # Boot the optional built-in llama-cpp-python server with a chosen
-            # model file. Returns {ok, url, pid} or {ok: False, error}.
+            # Boot the optional built-in llama-cpp-python server with the user's
+            # picked model file + load config. The GUI surfaces every llama.cpp
+            # knob (n_gpu_layers, ctx, KV cache quant, threads, flash attn)
+            # — see the Models tab inline expansion.
             from . import llmserver
             body = self._read_json()
             model_path = (body.get("model_path") or "").strip()
-            ctx = int(body.get("ctx") or 8192)
-            n_gpu = int(body.get("n_gpu_layers") if body.get("n_gpu_layers") is not None else -1)
-            return self._send_json(200, llmserver.start_builtin(model_path, ctx=ctx, n_gpu_layers=n_gpu))
+            ctx        = int(body.get("ctx") or 8192)
+            n_gpu      = int(body.get("n_gpu_layers") if body.get("n_gpu_layers") is not None else -1)
+            n_threads  = body.get("n_threads")
+            n_threads  = int(n_threads) if n_threads not in (None, "", "auto") else None
+            ck         = (body.get("cache_type_k") or "").strip() or None
+            cv         = (body.get("cache_type_v") or "").strip() or None
+            flash      = bool(body.get("flash_attn", True))
+            result = llmserver.start_builtin(
+                model_path, ctx=ctx, n_gpu_layers=n_gpu,
+                n_threads=n_threads, cache_type_k=ck, cache_type_v=cv,
+                flash_attn=flash,
+            )
+            # On successful start, retarget the GLOBAL LLM endpoint to the
+            # builtin URL so the topbar dropdown + /api/models + chat all
+            # talk to it. Without this, the topbar keeps showing "no model
+            # loaded" because it still queries LM Studio's port.
+            # `global LOCAL_API_BASE` is already declared earlier in this
+            # do_POST (under /api/llm-endpoint) so we don't redeclare it.
+            if result.get("ok") and result.get("url"):
+                # `_hl` (hearth.headless) is imported lazily inside the
+                # /api/llm-endpoint branch above, so it's not visible to us
+                # here. Import locally so the chat client picks up the new
+                # base. Cheap — Python caches.
+                from . import headless as _hl
+                LOCAL_API_BASE = result["url"]
+                _hl.LOCAL_API_BASE = LOCAL_API_BASE
+                _hl.LOCAL_API_KEY  = "hearth-builtin"
+                os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
+                # Builtin uses a fixed key; bake it in so chat works without
+                # the user touching settings.
+                os.environ["LOCAL_API_KEY"] = "hearth-builtin"
+                _models_cache["ts"] = 0  # force /api/models to repopulate
+                # Sticky default: remember the model the user just picked so
+                # the NEXT launch auto-boots it (see _auto_boot_preferred_model_async).
+                # Setting persists in ~/Jarvis/settings.json as preferred_model.
+                try:
+                    saved = _load_settings()
+                    if saved.get("preferred_model") != model_path:
+                        saved["preferred_model"] = model_path
+                        os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
+                        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+                            json.dump(saved, f, indent=2)
+                except Exception:
+                    pass  # best-effort — preference is a nice-to-have
+            return self._send_json(200, result)
         if path == "/api/llmserver/stop":
             from . import llmserver
-            return self._send_json(200, llmserver.stop_builtin())
+            stop_result = llmserver.stop_builtin()
+            # Revert endpoint to whatever was configured before (LM Studio
+            # default) so subsequent chats don't try to hit a dead URL.
+            from . import headless as _hl
+            settings = _load_settings()
+            saved_url = (settings.get("llm_url") or "").strip()
+            new_base = saved_url or "http://localhost:1234/v1"
+            LOCAL_API_BASE = new_base
+            _hl.LOCAL_API_BASE = new_base
+            os.environ["LOCAL_API_BASE"] = new_base
+            # Clear preferred_model so the NEXT launch doesn't auto-re-load
+            # what the user just explicitly ejected. The user reported the
+            # builtin restarting itself after Eject — that was the autoboot
+            # picking up the still-set preferred_model on next boot. Eject
+            # should mean "stop AND stop wanting this".
+            try:
+                if settings.get("preferred_model"):
+                    settings["preferred_model"] = ""
+                    _save_settings(settings)
+            except Exception:
+                pass
+            _models_cache["ts"] = 0  # force /api/models to repopulate
+            return self._send_json(200, stop_result)
         if path == "/api/llmserver/download-hf":
             # Stream a download from an arbitrary HF repo + filename (user
             # picked it via the search UI). Mirrors /api/llmserver/download
@@ -950,6 +1425,17 @@ class HearthHandler(BaseHTTPRequestHandler):
         think = bool(body.get("think"))
         model = body.get("model") or None
         history = body.get("history") or []
+        # Diagnostic — print received history shape so we can see when the
+        # GUI client is sending an empty or malformed history despite the
+        # user being on turn 2+. Only logs when non-empty so it doesn't
+        # spam on the first turn of every chat.
+        if history:
+            try:
+                _shape = [(h.get("role"), len((h.get("content") or "")))
+                          for h in history]
+                print(f"[hearth.chat] /chat got {len(history)} history msgs: {_shape}", flush=True)
+            except Exception:
+                pass
         # Optional inline auto-load before chat
         if model and (loaded := _detect_loaded()) and loaded.get("id") != model:
             settings = _load_settings()
@@ -972,6 +1458,14 @@ class HearthHandler(BaseHTTPRequestHandler):
                 pass
 
         _CANCEL.clear()  # fresh generation — clear any prior stop request
+        # Wire the GUI as the ask_user surface for the lifetime of THIS chat
+        # turn — the tool dispatcher will route ask_user calls through here,
+        # blocking until the user clicks an option in the modal.
+        try:
+            from .tools import set_ask_user_callback
+            set_ask_user_callback(_make_ask_user_bridge(emit))
+        except Exception:
+            pass
         try:
             asyncio.run(run_once(
                 prompt, emit=emit, think=think, model=model, history=history,
@@ -980,8 +1474,102 @@ class HearthHandler(BaseHTTPRequestHandler):
             ))
         except Exception as e:
             emit("error", message=f"{type(e).__name__}: {e}")
+        finally:
+            # Tear down the ask_user binding so a later headless / CLI run
+            # doesn't unexpectedly route through a dead emit closure.
+            try:
+                from .tools import set_ask_user_callback
+                set_ask_user_callback(None)
+            except Exception:
+                pass
 
     # ----- Voice + title endpoints -----
+
+    def _realtime_stream(self) -> None:
+        """Streaming voice loop — silero VAD + faster-whisper.
+
+        Streams NDJSON events:
+          {"type":"partial","text":"..."}  — live partial transcript while user speaks
+          {"type":"final","text":"..."}    — finalized utterance after silence
+          {"type":"stopped"}               — recorder halted, client should close
+          {"type":"error","message":"..."} — fatal init error
+        """
+        if not _rt_voice or not _rt_voice.is_available():
+            return self._send_json(503, {
+                "error": "realtime voice unavailable",
+                "detail": "pip install RealtimeSTT silero-vad",
+            })
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        def emit(obj: dict) -> bool:
+            try:
+                self.wfile.write((json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+                self.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return False
+
+        # Drain any leftover events from a prior session.
+        while True:
+            try:
+                _rt_event_queue.get_nowait()
+            except Exception:
+                break
+
+        # Wire callbacks into the shared queue.
+        def _on_partial(text: str) -> None:
+            try:
+                _rt_event_queue.put({"type": "partial", "text": text})
+            except Exception:
+                pass
+
+        def _on_final(text: str) -> None:
+            try:
+                _rt_event_queue.put({"type": "final", "text": text})
+            except Exception:
+                pass
+
+        def _on_barge() -> None:
+            try:
+                _rt_event_queue.put({"type": "barge"})
+            except Exception:
+                pass
+
+        try:
+            _rt_voice.set_caption_callback(_on_partial)
+            _rt_voice.set_barge_callback(_on_barge)
+            msg = _rt_voice.start_continuous(_on_final)
+            emit({"type": "started", "detail": msg})
+        except Exception as e:
+            emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
+            return
+
+        # Drain events until client disconnects or stop posted.
+        try:
+            while True:
+                try:
+                    ev = _rt_event_queue.get(timeout=15.0)
+                except Exception:
+                    if not emit({"type": "heartbeat"}):
+                        break
+                    continue
+                if not emit(ev):
+                    break
+                if ev.get("type") == "stopped":
+                    break
+        finally:
+            try:
+                _rt_voice.set_caption_callback(None)
+                _rt_voice.set_barge_callback(None)
+                _rt_voice.stop_continuous()
+            except Exception:
+                pass
 
     def _tts(self) -> None:
         body = self._read_json()
@@ -1229,6 +1817,113 @@ def _apply_saved_llm_endpoint() -> None:
 _apply_saved_llm_endpoint()
 
 
+def _auto_boot_preferred_model_async() -> None:
+    """If the user picked a default model in Settings (`preferred_model`) and
+    nothing's already serving on the configured endpoint, boot Hearth's
+    built-in llama-cpp server with that model in the background.
+
+    Without this, "default model" was a stored string nothing read on boot
+    — the user had to click Use this in the Models tab every launch. Now
+    Hearth honors the setting automatically. Skip with JARVIS_NO_AUTOBOOT=1.
+
+    Match logic: the saved `preferred_model` may be the LM Studio short id
+    ('harmonic-hermes-9b'), a filename ('Qwen3.5-9B-Harmonic.Q4_K_M.gguf'),
+    or a full path. We try in order: exact path, exact filename, then
+    case-insensitive slug-match against each disk model's filename.
+    """
+    if os.environ.get("JARVIS_NO_AUTOBOOT") in ("1", "true", "yes"):
+        return
+    # Honor the user's Settings → Server → "Auto-boot last model on launch"
+    # toggle. Default True so the existing behavior is preserved.
+    try:
+        if not _load_settings().get("server_autoboot", True):
+            print("  [hearth.web] autoboot disabled in Settings; skipping", flush=True)
+            return
+    except Exception:
+        pass
+
+    def _go():
+        # Hoist `global` to the top of the function so Python doesn't infer
+        # LOCAL_API_BASE as a local from the assignment below — same trap that
+        # bit `_eject_model` earlier. Has to come BEFORE any read or write.
+        global LOCAL_API_BASE
+        try:
+            from . import llmserver, headless as _hl
+            settings = _load_settings()
+            wanted = (settings.get("preferred_model") or "").strip()
+            if not wanted:
+                return
+            # Don't fight an external server that's already serving — the
+            # user explicitly started LM Studio / Ollama, that's the brain.
+            if llmserver.external_server_running(LOCAL_API_BASE):
+                return
+            # Already serving via builtin? Nothing to do.
+            if llmserver._proc is not None and llmserver._proc.poll() is None:
+                return
+            disk = llmserver.scan_disk_for_models()
+            if not disk:
+                return
+            def _slug(s):
+                return ''.join(c for c in (s or '').lower() if c.isalnum())
+            want_slug = _slug(wanted)
+            pick = None
+            for m in disk:
+                if m.get("path") == wanted:
+                    pick = m; break
+                if m.get("filename") == wanted:
+                    pick = m; break
+                # Slug match must be BIDIRECTIONAL — a curated pick id like
+                # "harmonic-hermes-9b" doesn't slug-contain "Qwen3.5-9B-Harmonic"
+                # one way, but DOES the other. Check both directions plus a
+                # shared-substring tier for the messy LM-Studio-renamed cases.
+                file_slug = _slug(m.get("filename"))
+                if not want_slug or not file_slug:
+                    continue
+                if want_slug in file_slug or file_slug in want_slug:
+                    pick = m; break
+                # Last resort: any 6+ char run that appears in both — handles
+                # "harmonic-hermes-9b" ↔ "Qwen3.5-9B-Harmonic" via the shared
+                # "harmonic" token (LM Studio repackaged the same Hermes weights
+                # under a Qwen3.5-prefixed filename).
+                for n in range(min(len(want_slug), 16), 5, -1):
+                    if any(want_slug[i:i+n] in file_slug
+                           for i in range(len(want_slug) - n + 1)):
+                        pick = m; break
+                if pick: break
+            if not pick:
+                # Surface what we scanned so the next time this triggers the
+                # user (or we) can see WHY it missed — saves the "but the
+                # model is right there" round-trip.
+                names = ", ".join(m.get("filename","?") for m in disk[:6])
+                print(
+                    f"  [hearth.web] preferred_model {wanted!r} not matched "
+                    f"against any of {len(disk)} disk models: {names}"
+                    f"{'...' if len(disk) > 6 else ''} — skipping autoboot",
+                    flush=True,
+                )
+                return
+            # Load saved per-model config (ctx, n_gpu_layers, KV cache, ...)
+            cfg = llmserver.get_model_config(pick["path"]) or {}
+            print(f"  [hearth.web] auto-booting {pick['filename']} ({pick.get('size_gb','?')} GB)…", flush=True)
+            r = llmserver.start_builtin(pick["path"], **cfg)
+            if r.get("ok"):
+                # Retarget the GLOBAL endpoint to the builtin URL so the GUI
+                # topbar + chat all pick it up. Mirror what the manual Use
+                # this flow does in /api/llmserver/start.
+                LOCAL_API_BASE = r["url"]
+                _hl.LOCAL_API_BASE = LOCAL_API_BASE
+                os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
+                os.environ["LOCAL_API_KEY"] = "hearth-builtin"
+                _models_cache["ts"] = 0
+                print(f"  [hearth.web] builtin up at {r['url']} — endpoint switched", flush=True)
+            else:
+                print(f"  [hearth.web] autoboot failed: {r.get('error')}", flush=True)
+        except Exception as e:
+            print(f"  [hearth.web] autoboot skipped: {type(e).__name__}: {e}", flush=True)
+
+    threading.Thread(target=_go, daemon=True).start()
+
+
 def _maybe_learn_environment_async() -> None:
     """On first run (no memory yet), detect hardware/models/drive-map into memory
     so the GUI model has the same machine context the CLI gets from onboarding.
@@ -1256,14 +1951,32 @@ def _maybe_learn_environment_async() -> None:
     threading.Thread(target=_go, daemon=True).start()
 
 
+class _QuietHTTPServer(ThreadingHTTPServer):
+    """Threading HTTP server that quietly swallows connection-aborted errors.
+
+    Browsers close + reopen sockets aggressively; socketserver's default
+    handle_error dumps a full traceback per drop, which looks like Hearth is
+    crashing when it's not. We silence ONLY the connection-class errors and
+    keep tracebacks for everything else."""
+    def handle_error(self, request, client_address):
+        import sys
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionAbortedError,
+                            ConnectionResetError)):
+            return  # normal — client disconnected mid-write
+        # Real bug — let it bubble up so we see it in the terminal
+        super().handle_error(request, client_address)
+
+
 def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     """Start the server (non-blocking) and return the server instance.
     Used by hearth.desktop to embed the same backend in a PyWebView window."""
-    server = ThreadingHTTPServer((host, port), HearthHandler)
+    server = _QuietHTTPServer((host, port), HearthHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     _preload_whisper_async()
     _start_reminder_watcher()
     _maybe_learn_environment_async()
+    _auto_boot_preferred_model_async()
     return server
 
 
@@ -1294,6 +2007,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     _preload_whisper_async()
     _start_reminder_watcher()
     _maybe_learn_environment_async()
+    _auto_boot_preferred_model_async()
 
     try:
         server.serve_forever()

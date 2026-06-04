@@ -1,9 +1,9 @@
 """FTS5 cross-session search over the user's chat history.
 
-Inspired by Hermes Agent's session_search_tool. Builds an SQLite FTS5
-virtual table over every message in ~/Jarvis/conversations/*.json so the
-model can ask "what did we discuss about the Forge bug last week?" and
-get a real answer without loading 50 conversation files into context.
+Builds an SQLite FTS5 virtual table over every message in
+~/Jarvis/conversations/*.json so the model can ask "what did we discuss
+about the Forge bug last week?" and get a real answer without loading 50
+conversation files into context.
 
 Index lives at ~/Jarvis/session_index.db. Auto-rebuilt on tool call if
 older than a conversation file's mtime. Pure SQLite stdlib — no extra

@@ -25,7 +25,7 @@ import urllib.request
 import urllib.parse
 from datetime import datetime
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # ============================================================
 # CONFIG
@@ -124,6 +124,25 @@ HOME = os.path.expanduser("~")
 # the GUI/tray context. Without it, every nvidia-smi / tasklist / ripgrep
 # / lms call makes a black box flash on screen — looks like a virus.
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+
+# Pluggable callback the `ask_user` tool routes to. Each surface that wants
+# to support interactive questions registers its own — CLI prints a numbered
+# prompt via prompt_toolkit; the web surface emits an ndjson event and parks
+# on a queue. When no callback is registered (headless / batch), ask_user
+# returns an error and the model is expected to pick a safe default instead
+# of looping forever.
+_ask_user_callback: Optional[Callable[[str, list, bool], Dict[str, Any]]] = None
+
+
+def set_ask_user_callback(cb: Optional[Callable[[str, list, bool], Dict[str, Any]]]) -> None:
+    """Register the surface-specific implementation of ask_user.
+
+    The callback receives (question, options, allow_other) and must return
+    a dict shaped like {"ok": True, "choice": str, "other": bool} or
+    {"ok": False, "error": str}. Synchronous from the tool's perspective —
+    it blocks until the user answers (or the surface times out)."""
+    global _ask_user_callback
+    _ask_user_callback = cb
 
 # Common places users actually keep stuff — find_file walks these in order
 # before giving up. Order matters: workspace + Desktop tie-break first.
@@ -580,6 +599,99 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "detached": {"type": "boolean", "description": "If true, spawn in a new console and return immediately with the PID. Use for daemons / UI launchers / dev servers that don't self-terminate."},
             },
             "required": ["command"],
+        },
+    },
+
+    # ---- BACKGROUND JOBS (long-running shell commands that shouldn't block the agent) ----
+    {
+        "name": "start_job",
+        "description": (
+            "Run a shell command in the BACKGROUND and return a job_id "
+            "immediately so you can keep working while it runs. Use this for "
+            "anything that takes >30s (pip install of heavy deps, HF model "
+            "download, dataset preprocessing, build). The job's output streams "
+            "to disk; check it with job_status or wait for it with job_wait. "
+            "DO NOT use for fast commands (use run_command) or daemons / UIs "
+            "(use run_command with detached=true)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command":     {"type": "string"},
+                "cwd":         {"type": "string", "description": "Working dir. Default = workspace."},
+                "shell":       {"type": "string", "description": "'cmd' to force cmd.exe on Windows. Default = powershell."},
+                "description": {"type": "string", "description": "Short label for the job ('install torch', 'download Hermes-3 GGUF'). Shown in job_list."},
+            },
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "job_status",
+        "description": "Return current status + last ~40 lines of output for a background job. Cheap to poll. status is one of: starting / running / completed / failed / killed.",
+        "parameters": {
+            "type": "object",
+            "properties": {"job_id": {"type": "string"}},
+            "required": ["job_id"],
+        },
+    },
+    {
+        "name": "job_wait",
+        "description": "Block up to `timeout_s` seconds for the job to finish, then return final status + output. If timeout fires while still running, returns status='running' — call again to keep waiting. Default 30s, max 300s.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "job_id":    {"type": "string"},
+                "timeout_s": {"type": "number", "description": "Max seconds to block. Default 30, max 300."},
+            },
+            "required": ["job_id"],
+        },
+    },
+    {
+        "name": "job_kill",
+        "description": "Terminate a running background job by job_id. No-op if already finished.",
+        "parameters": {
+            "type": "object",
+            "properties": {"job_id": {"type": "string"}},
+            "required": ["job_id"],
+        },
+    },
+    {
+        "name": "job_list",
+        "description": "List recent background jobs (newest first). Pass active_only=true to see only running / starting jobs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "active_only": {"type": "boolean", "description": "Default false — include completed/failed/killed."},
+            },
+        },
+    },
+
+    # ---- INTERACTIVE: ASK THE USER ----
+    {
+        "name": "ask_user",
+        "description": (
+            "Ask the user a multi-choice question when you genuinely need a "
+            "decision before continuing — picking between two valid approaches, "
+            "clarifying an ambiguous file/folder, choosing which of several "
+            "matches to act on. The user sees a numbered list (CLI) or a modal "
+            "with buttons (GUI). Return value is the chosen label, or the "
+            "user's free-text reply if they pick 'Other'. "
+            "DO NOT use this for every small decision — it interrupts. Use it "
+            "only when running ahead would commit to the wrong thing. If the "
+            "user is clearly absent (headless / batch run), this returns an "
+            "error and you should pick the safest default and proceed."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "One-sentence question. End with '?'."},
+                "options":  {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "2-6 short option labels. Recommend the safest first.",
+                },
+                "allow_other": {"type": "boolean", "description": "Whether to offer an Other free-text option. Default true."},
+            },
+            "required": ["question", "options"],
         },
     },
 
@@ -1099,6 +1211,7 @@ def _extract_pdf(path: str, p: Dict) -> str:
 
     chunks: List[str] = [f"{path} (PDF, {n_pages} pages, extracting {start}-{end})"]
     extracted = 0
+    scanned_pages: List[int] = []  # pages where extract_text returned nothing
     for i in range(start - 1, end):
         try:
             txt = reader.pages[i].extract_text() or ""
@@ -1108,12 +1221,150 @@ def _extract_pdf(path: str, p: Dict) -> str:
         if txt:
             extracted += 1
             chunks.append(f"\n--- Page {i+1} ---\n{txt}")
-    if extracted == 0:
-        chunks.append("\n[no extractable text — PDF is blank or scanned. "
-                      "ACCEPT THIS — don't run shell commands to brute-force "
-                      "raw bytes; PDFs aren't grep-able. If it's scanned, "
-                      "tell the user it needs OCR.]")
+        else:
+            scanned_pages.append(i + 1)
+
+    # If we got SOME text but missed pages, try VLM-OCR the empty ones if a
+    # vision-capable model is loaded. If we got NO text and a VLM is up, try
+    # the whole range. Only triggers when pypdfium2 is importable AND the
+    # currently-loaded LM Studio model has type='vlm' or vision capability.
+    if scanned_pages:
+        vlm_block = _vlm_ocr_pdf_pages(path, scanned_pages, p)
+        if vlm_block:
+            chunks.append(vlm_block)
+        elif extracted == 0:
+            chunks.append("\n[no extractable text — PDF is blank or scanned. "
+                          "For VLM-OCR auto-fallback, install: pip install pypdfium2. "
+                          "Then load a vision model (Gemma 4 E4B, Qwen 2.5 VL, etc.) in LM Studio.]")
     return "\n".join(chunks)
+
+
+def _loaded_model_is_vision() -> bool:
+    """True if the currently-loaded LM Studio (or compatible) model has a
+    vision capability. Probes /api/v0/models for type=='vlm' or capabilities
+    array containing 'vision'/'image_input'. Falls back to name heuristic
+    when v0 endpoint isn't there (Ollama, vLLM, cloud)."""
+    base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
+    model_hint = os.environ.get("LOCAL_MODEL", "").lower()
+    try:
+        import urllib.request
+        host = base.rsplit("/v1", 1)[0]
+        _key = os.environ.get("LOCAL_API_KEY") or ""
+        _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
+        _req = urllib.request.Request(f"{host}/api/v0/models", headers=_hdr)
+        with urllib.request.urlopen(_req, timeout=2) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        for m in (data.get("data") or []):
+            mid = (m.get("id") or "").lower()
+            if model_hint and mid != model_hint:
+                continue
+            if m.get("type") == "vlm":
+                return True
+            caps = m.get("capabilities") or []
+            if any(c in caps for c in ("vision", "image_input", "image")):
+                return True
+            if not model_hint:
+                # If we don't know which model is loaded, take ANY vision-capable
+                # match — the user may have a VLM in the list even if not pinned.
+                pass
+    except Exception:
+        pass
+    # Heuristic fallback
+    needle = model_hint or ""
+    if needle and any(s in needle for s in
+                     ("vl", "vision", "gemma-3", "gemma-4", "gemma4", "llava",
+                      "moondream", "internvl", "minicpm-v", "qwen-vl", "qwen.5-vl",
+                      "gemini", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-sonnet",
+                      "claude-opus", "claude-haiku", "pixtral", "grok-2-vision")):
+        return True
+    return False
+
+
+def _vlm_ocr_pdf_pages(path: str, page_numbers: List[int], p: Dict) -> str:
+    """Render the listed PDF pages to images and ask the loaded vision model
+    to transcribe each one. Returns a joined markdown block, or '' if VLM
+    fallback isn't available (model not VL, pypdfium2 missing, OCR fails).
+
+    Honors `vlm_ocr=false` in tool args to opt out (saves time on huge PDFs
+    where the user explicitly only wants the extractable text)."""
+    if str(p.get("vlm_ocr", "true")).strip().lower() in ("false", "no", "0", "off"):
+        return ""
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+    except ImportError:
+        return ""
+    # Only fall through to VLM if a vision-capable model is loaded
+    if not _loaded_model_is_vision():
+        return ""
+
+    try:
+        import base64
+        from openai import OpenAI  # type: ignore
+    except Exception:
+        return ""
+
+    # Cap how many pages we VLM-OCR in one read_file call. Users hitting big
+    # scanned books should call read_file in smaller windows.
+    MAX_VLM_PAGES = int(p.get("vlm_max_pages", 6))
+    pages = page_numbers[:MAX_VLM_PAGES]
+
+    base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
+    key  = os.environ.get("LOCAL_API_KEY") or os.environ.get("OPENAI_API_KEY") or "local-vlm"
+    model = os.environ.get("LOCAL_MODEL", "")
+    if not model:
+        # Best-effort: ask the server for its loaded model id (auth header so
+        # the builtin doesn't 401-log every single read_file call).
+        try:
+            import urllib.request
+            _hdr = {"Authorization": f"Bearer {key}"} if key else {}
+            _req = urllib.request.Request(f"{base}/models", headers=_hdr)
+            with urllib.request.urlopen(_req, timeout=4) as r:
+                data = json.loads(r.read().decode("utf-8"))
+                ids = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
+                model = ids[0] if ids else ""
+        except Exception:
+            pass
+    if not model:
+        return ""
+
+    try:
+        client = OpenAI(base_url=base, api_key=key, timeout=120.0)
+        doc = pdfium.PdfDocument(path)
+    except Exception as e:
+        return f"\n[VLM-OCR setup failed: {type(e).__name__}: {e}]"
+
+    out: List[str] = ["", "[VLM-OCR fallback — scanned/image-only pages transcribed by the loaded vision model]"]
+    for pn in pages:
+        try:
+            page = doc[pn - 1]
+            bitmap = page.render(scale=1.5)
+            pil_img = bitmap.to_pil()
+            from io import BytesIO
+            buf = BytesIO(); pil_img.save(buf, "PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": (
+                            "Transcribe this PDF page into markdown. Preserve headings, "
+                            "lists, tables, and math (use $inline$ / $$display$$ LaTeX). "
+                            "Output ONLY the transcription, no preamble.")},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    ],
+                }],
+                max_tokens=2000,
+            )
+            txt = (resp.choices[0].message.content or "").strip()
+            out.append(f"\n--- Page {pn} (VLM-OCR) ---\n{txt}")
+        except Exception as e:
+            out.append(f"\n--- Page {pn} (VLM-OCR failed) ---\n[{type(e).__name__}: {e}]")
+    if len(page_numbers) > MAX_VLM_PAGES:
+        out.append(f"\n[truncated: only first {MAX_VLM_PAGES} of {len(page_numbers)} "
+                   f"image-only pages OCR'd. Re-call with vlm_max_pages=N for more, "
+                   f"or pass start_line/end_line to OCR a different range.]")
+    return "\n".join(out)
 
 
 def _extract_docx(path: str) -> str:
@@ -1640,7 +1891,7 @@ def _write_file(p: Dict) -> str:
 def _edit_file(p: Dict) -> str:
     """Targeted string-replace edits — never rewrites the whole file.
 
-    Inspired by Claude Code's Edit tool:
+    Rules:
       - `old_text` MUST be unique unless the edit sets `replace_all=true`.
         If it appears multiple times, the edit errors out asking the model
         to add context, rather than silently replacing the wrong one.
@@ -1699,9 +1950,8 @@ def _edit_file(p: Dict) -> str:
         n_matches = content.count(old)
         if n_matches > 0:
             if n_matches > 1 and not replace_all:
-                # Ambiguity protection — the Claude Code pattern. Refuse
-                # silently picking one of N matches; the model must add
-                # context or set replace_all.
+                # Ambiguity protection. Refuse silently picking one of N
+                # matches; the model must add context or set replace_all.
                 log.append(
                     f"  edit {i}: AMBIGUOUS — old_text matches {n_matches} times. "
                     f"Expand old_text with surrounding lines to make it unique, "
@@ -2245,37 +2495,81 @@ def _http_get(url: str, timeout: int = 15) -> Tuple[int, str, bytes]:
 
 
 def _web_search(p: Dict) -> str:
+    """DuckDuckGo HTML scrape. They blacklist scripted GETs without a proper
+    User-Agent and switched the /html/ endpoint to require POST. Both fixed
+    here. If DDG ever blocks again, we fall back to Wikipedia for definitional
+    queries so the model isn't left with '(no results)' forever."""
     query = p["query"]
     limit = int(p.get("limit") or 6)
-    url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
+    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
     try:
-        _, _, body = _http_get(url, 15)
+        data = urllib.parse.urlencode({"q": query, "kl": "us-en"}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://html.duckduckgo.com/html/",
+            data=data,
+            headers={
+                "User-Agent": ua,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "text/html",
+                "Referer": "https://duckduckgo.com/",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            html = r.read().decode("utf-8", errors="replace")
     except Exception as e:
         return f"Error: search failed: {e}"
-    html = body.decode("utf-8", errors="replace")
-    # Each result: <a class="result__a" href="...">title</a> ... <a class="result__snippet">snippet</a>
+    # Result block: <h2 class="result__title"><a class="result__a" href="...">title</a></h2>
+    # ... <a class="result__snippet" ...>snippet</a>
     pattern = re.compile(
-        r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
-        r'(?:class="result__snippet"[^>]*>(.*?)</a>)?',
+        r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>'
+        r'(?:.*?<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>)?',
         re.S,
     )
     out = []
     for m in pattern.finditer(html):
         href, title, snippet = m.group(1), m.group(2), m.group(3) or ""
-        # DDG wraps real URL inside redirect — try to extract uddg=
-        real = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get("uddg", [href])[0]
+        # DDG wraps real URL inside a /l/?uddg= redirect — extract.
+        try:
+            qs = urllib.parse.urlparse(href).query
+            real = urllib.parse.parse_qs(qs).get("uddg", [href])[0]
+        except Exception:
+            real = href
         title_t = re.sub(r"<[^>]+>", "", title).strip()
         snip_t = re.sub(r"<[^>]+>", "", snippet).strip()
         out.append(f"• {title_t}\n  {real}\n  {snip_t}")
         if len(out) >= limit:
             break
-    return "\n\n".join(out) if out else "(no results)"
+    if out:
+        return "\n\n".join(out)
+    # Fallback: Wikipedia opensearch so the model still gets SOMETHING
+    # when DDG rate-limits / blocks. Better than "(no results)" forever.
+    try:
+        wq = urllib.parse.urlencode({
+            "action": "opensearch", "search": query, "limit": str(limit),
+            "namespace": "0", "format": "json",
+        })
+        req = urllib.request.Request(
+            "https://en.wikipedia.org/w/api.php?" + wq,
+            headers={"User-Agent": ua, "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        titles, descs, urls = data[1], data[2], data[3]
+        if titles:
+            lines = []
+            for t, d, u in zip(titles[:limit], descs[:limit], urls[:limit]):
+                lines.append(f"• {t}\n  {u}\n  {d}")
+            return "[wikipedia fallback - DDG returned 0 results]\n\n" + "\n\n".join(lines)
+    except Exception:
+        pass
+    return "(no results)"
 
 
 def _web_fetch(p: Dict) -> str:
     url = p["url"].strip()
-    # Auto-prepend https:// for bare domains. Models often emit
-    # "ishantsingh.vercel.app" without a scheme.
+    # Auto-prepend https:// for bare domains. Models often emit a hostname
+    # like "ishantsingh.vercel.app" (the maintainer's portfolio) without a scheme.
     if not url.startswith(("http://", "https://", "file://")):
         url = "https://" + url
     try:
@@ -2421,6 +2715,31 @@ def _is_whole_drive_scan(cmd: str) -> bool:
         if re.fullmatch(r"[A-Za-z]:[\\/]?", tok):  # a root like C: or C:\, not C:\sub
             return True
     return False
+
+
+def _ask_user(p: Dict) -> Dict[str, Any]:
+    """Route an ask_user tool call to whatever interactive surface is active."""
+    question = (p.get("question") or "").strip()
+    options = p.get("options") or []
+    allow_other = p.get("allow_other")
+    if allow_other is None:
+        allow_other = True
+    if not question:
+        return {"ok": False, "error": "question is required"}
+    if not isinstance(options, list) or len(options) < 2:
+        return {"ok": False, "error": "options must be a list of 2+ strings"}
+    if len(options) > 6:
+        return {"ok": False, "error": "too many options — keep it to 6 or fewer"}
+    options = [str(o).strip() for o in options if str(o).strip()]
+    cb = _ask_user_callback
+    if cb is None:
+        return {"ok": False, "error":
+                "ask_user has no active interactive surface (running headless or batch). "
+                "Pick the safest default and proceed instead of asking."}
+    try:
+        return cb(question, options, bool(allow_other))
+    except Exception as e:
+        return {"ok": False, "error": f"ask_user surface error: {type(e).__name__}: {e}"}
 
 
 def _run_command(p: Dict) -> str:
@@ -3807,8 +4126,11 @@ def _whoami(p: Dict) -> str:
 def _list_models(p: Dict) -> str:
     import urllib.request
     base = (_RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
+    _key = os.environ.get("LOCAL_API_KEY") or ""
+    _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
     try:
-        with urllib.request.urlopen(base + "/models", timeout=5) as r:
+        _req = urllib.request.Request(base + "/models", headers=_hdr)
+        with urllib.request.urlopen(_req, timeout=5) as r:
             data = json.loads(r.read().decode())
         ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
         if not ids:
@@ -3853,6 +4175,18 @@ _HANDLERS = {
     "web_search": _web_search,
     "web_fetch": _web_fetch,
     "run_command": _run_command,
+    # Background-job tracking — see hearth/jobs.py. Lazy-import so a missing
+    # ~/Jarvis/jobs/ dir or a stale module doesn't break tool registration.
+    "start_job":  lambda p: __import__("hearth.jobs", fromlist=["start_job"]).start_job(
+        p.get("command", ""), cwd=p.get("cwd"),
+        shell=(p.get("shell") or "powershell"),
+        description=p.get("description", "")),
+    "job_status": lambda p: __import__("hearth.jobs", fromlist=["get_job"]).get_job(p.get("job_id", "")),
+    "job_wait":   lambda p: __import__("hearth.jobs", fromlist=["wait_job"]).wait_job(
+        p.get("job_id", ""), timeout_s=min(float(p.get("timeout_s") or 30), 300.0)),
+    "job_kill":   lambda p: __import__("hearth.jobs", fromlist=["kill_job"]).kill_job(p.get("job_id", "")),
+    "job_list":   lambda p: __import__("hearth.jobs", fromlist=["list_jobs"]).list_jobs(active_only=bool(p.get("active_only"))),
+    "ask_user":   _ask_user,
     "system_info": _system_info,
     "list_processes": _list_processes,
     "network_info": _network_info,
@@ -3937,9 +4271,15 @@ def _browse_close(p: Dict) -> str:
     return _b.browse_close(p)
 
 
+def _browse_scroll(p: Dict) -> str:
+    from . import browse as _b
+    return _b.browse_scroll(p)
+
+
 _HANDLERS["browse"] = _browse
 _HANDLERS["browse_click"] = _browse_click
 _HANDLERS["browse_type"] = _browse_type
+_HANDLERS["browse_scroll"] = _browse_scroll
 _HANDLERS["browse_close"] = _browse_close
 
 # The browser tools register ONLY when Playwright is installed (opt-in via
@@ -3979,6 +4319,17 @@ for _bt in (
             "type": "object",
             "properties": {"text": {"type": "string", "description": "Visible text of the link/button to click."}},
             "required": ["text"],
+        },
+    },
+    {
+        "name": "browse_scroll",
+        "description": "Smooth-scroll the current browser page so you can see more content. Use this when the user asks for 'everything on the page', a long article, or when initial summary cuts off mid-section. direction='down' (default), 'up', 'top', or 'bottom'. Optional pixels= for a specific amount; otherwise scrolls one viewport.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "direction": {"type": "string", "description": "down (default) / up / top / bottom"},
+                "pixels": {"type": "integer", "description": "Optional - how far to scroll. Defaults to one viewport."},
+            },
         },
     },
     {
@@ -4136,7 +4487,7 @@ _TOOL_CATEGORY = {
     # Web & browser
     "web_search": "Web & browser", "web_fetch": "Web & browser", "validate_url": "Web & browser",
     "open_url": "Web & browser", "open_in_browser": "Web & browser", "list_browsers": "Web & browser",
-    "browse": "Web & browser", "browse_click": "Web & browser", "browse_type": "Web & browser",
+    "browse": "Web & browser", "browse_click": "Web & browser", "browse_type": "Web & browser", "browse_scroll": "Web & browser",
     "browse_close": "Web & browser",
     # System & apps
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
@@ -4303,11 +4654,11 @@ def trim_to_budget(messages: List[Dict[str, Any]], context_window: int,
             break  # no progress
         total = new_total
 
-    # Phase 2: if STILL over budget after content-trimming (happens when the
-    # system prompt + many small messages exceed the window), DROP whole old
-    # messages — but never the system message, and never the last user turn
-    # or anything after it. This is what prevents the "No user query found in
-    # messages" crash: we structurally guarantee a user turn survives.
+    # Final safety net: NO MATTER WHAT the caller hands us, the output must
+    # contain at least one user role. LM Studio's chat templates (especially
+    # the Harmonic / Hermes finetunes) crash hard with "No user query found
+    # in messages" when this invariant is violated, and the trace doesn't
+    # tell you which trimming path lost it. We re-check at the end.
     if total > budget_chars and len(msgs) > 2:
         # index of the last user message
         last_user = -1
@@ -4332,6 +4683,21 @@ def trim_to_budget(messages: List[Dict[str, Any]], context_window: int,
         while len(msgs) > head_keep and msgs[head_keep].get("role") == "tool":
             total -= _msg_chars(msgs[head_keep])
             msgs.pop(head_keep)
+
+    # Final invariant: SOME user turn must exist in the output. If the
+    # incoming history had a user message and we somehow dropped it, restore
+    # the most-recent one from the original. If the incoming had NO user
+    # at all (rare: caller bug), synthesize a continue-marker so the chat
+    # template can render rather than crash.
+    if not any(m.get("role") == "user" for m in msgs):
+        original_user = next(
+            (m for m in reversed(messages) if m.get("role") == "user"),
+            None,
+        )
+        msgs.append(original_user or {
+            "role": "user",
+            "content": "Continue using the results above.",
+        })
 
     return msgs
 
