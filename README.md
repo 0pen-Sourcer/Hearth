@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Local-first by default</strong> — Hearth ships with its own built-in LLM server, so the first run picks a model that fits your GPU and downloads it from Hugging Face. No accounts, no subscriptions, no API keys, no cloud, no system-wide CUDA Toolkit. <strong>Cloud-ready when you want it</strong> — paste a Gemini / OpenAI / Grok / OpenRouter key in Settings → Chat brain and flip it in one click. Same tools, same voice loop, same persona. Your call, your machine.
+  <strong>Local-first by default</strong> — point Hearth at LM Studio / Ollama / any OpenAI-compatible local server and it just works. No accounts, no subscriptions, no API keys, no cloud. <strong>Cloud-ready when you want it</strong> — paste a Gemini / OpenAI / Grok / OpenRouter key in Settings → Chat brain and flip it in one click. Same tools, same voice loop, same persona. Your call, your machine.
 </p>
 
 <p align="center">
@@ -53,8 +53,7 @@ It's the project I'd want if I just got an RTX card and downloaded LM Studio. "C
 | Feature                       | **Hearth** | Open WebUI | OpenInterpreter | LibreChat | Aider |
 | ----------------------------- | :--------: | :--------: | :-------------: | :-------: | :---: |
 | Runs 100% locally             |     ✅     |     ✅     |        ✅        |     ⚠️     |    ⚠️   |
-| **Built-in LLM server (zero other apps)** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Hugging Face model browser + 1-click download** | ✅ | partial | ❌ | ❌ | ❌ |
+| Works with any OpenAI-compatible local server | ✅ | ✅ | ✅ | partial | partial |
 | Voice in (mic)                |     ✅     |     ❌     |        ❌        |     ❌     |    ❌   |
 | Voice out (TTS)               |     ✅     |     ❌     |        ❌        |     ❌     |    ❌   |
 | Voice **interrupt** (talk over it) | ✅    |     ❌     |        ❌        |     ❌     |    ❌   |
@@ -84,17 +83,19 @@ git clone https://github.com/0pen-sourcer/hearth.git
 cd hearth
 
 # 2. Install. Pick your LLM path:
-.\install.ps1 -BuiltinLLM cuda          # NVIDIA GPU - Hearth runs its OWN LLM server, no other apps
-.\install.ps1 -BuiltinLLM cpu           # no GPU - CPU-only built-in server
-.\install.ps1                           # bring your own (LM Studio, Ollama, vLLM, llama.cpp, cloud)
+.\install.ps1                           # recommended: bring your own (LM Studio, Ollama, vLLM, llama.cpp, cloud)
+.\install.ps1 -BuiltinLLM cuda          # experimental: NVIDIA GPU - Hearth runs its OWN llama.cpp server
+.\install.ps1 -BuiltinLLM cpu           # experimental: no GPU - CPU-only built-in server
 
 # 3. Launch
 .\hearth.bat
 ```
 
-**First-run onboarding** is a 6-step card overlay — pick a brain (local or cloud), tune voice, personalize, you're in. The Models tab auto-detects every GGUF on your disk (LM Studio cache, Ollama, HF cache, Downloads, GPT4All), recommends one that fits your VRAM, and lets you tune llama.cpp's load config (GPU offload layers, context, KV cache quant, threads, flash attention) per-model — settings are remembered, so you only configure once. Click "Use this" → built-in server boots → topbar pill flips green → chat works. **No LM Studio install, no Ollama install, no API key, no system-wide CUDA Toolkit** — the CUDA runtime DLLs ship as pip wheels, so any NVIDIA RTX/GTX user with a recent driver works out of the box.
+**First-run onboarding** is a 6-step card overlay — pick a brain (local server or cloud key), tune voice, personalize, you're in.
 
-Prefer your existing setup? Hearth auto-detects LM Studio (port 1234), Ollama (11434), or llama.cpp (8080) at boot — no env config needed. Or open **Settings → Chat brain** to plug in Gemini / Grok / OpenAI / OpenRouter with your API key. Cloud and local are first-class; switch any time without restarting.
+Hearth auto-detects **LM Studio** (port 1234), **Ollama** (11434), or **llama.cpp** (8080) at boot — no env config needed. Or open **Settings → Chat brain** to plug in **Gemini / Grok / OpenAI / OpenRouter** with your API key. Cloud and local are first-class; switch any time without restarting.
+
+> **Experimental: built-in llama.cpp server.** If you pass `-BuiltinLLM cuda` / `cpu` at install, Hearth bundles its own llama-cpp-python server, browses Hugging Face for a model that fits your VRAM, and runs it without LM Studio or Ollama. It works, but tool-call reliability on small models is still rough compared to LM Studio's chat template handling — recommended for v0.7. If you're launching today, use LM Studio with a tool-calling model (Harmonic-Hermes-9B is the gold standard).
 
 Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 
@@ -108,8 +109,9 @@ Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 | **MCP server** (other LLM chat UIs) | `python -m hearth.mcp_server` | Stable. Exposes every built-in tool as a live tool-card inside any MCP-aware chat UI. |
 
 **Chat brain — pick anything OpenAI-compatible. Local-first, cloud-ready.**
-- **Local (default):** Hearth's bundled llama-cpp-python server (`-BuiltinLLM cuda` / `cpu`), or your existing LM Studio, Ollama, vLLM, llama.cpp, LocalAI.
+- **Local (recommended):** LM Studio, Ollama, vLLM, llama.cpp, LocalAI — anything OpenAI-compatible. Hearth auto-detects.
 - **Cloud (optional):** Gemini, Grok, OpenAI, OpenRouter via Settings → Chat brain. Paste a key, hit "Use this brain" — done. No restart, no re-onboarding.
+- **Experimental:** bundled llama-cpp-python server (`-BuiltinLLM cuda` / `cpu`) — works, but tool-call reliability lags LM Studio's. Track for v0.7.
 - **Mix and match:** switch live mid-session. Voice mode, tools, memory, persona — all unchanged.
 
 **Tool calls work on every modern open model.** Hearth ships a multi-family parser ([hearth/tool_call_parser.py](hearth/tool_call_parser.py)) that recognizes Gemma 3/4's `<|toolcall>` syntax, Hermes / Qwen 2.5 / Qwen 3 ChatML, Llama 3.x `<|python_tag|>`, Mistral `[TOOL_CALLS]`, Phi 3/4, Granite, Cohere Command-R, and any model that emits generic `<function=NAME>` blocks. When the model speaks tool-call syntax that llama-cpp-python's server doesn't natively parse, Hearth catches it, normalizes the tool name (Gemma's `viewimage` → real `view_image`), strips the gibberish from the chat surface, and routes it through the regular tool executor. The same parser feeds the CLI, GUI, and bridge.

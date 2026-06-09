@@ -176,6 +176,7 @@ C_DIM = "\033[38;5;240m"
 C_FRAME = "\033[38;5;103m"
 C_ERR = "\033[1;31m"
 C_WARN = "\033[38;5;215m"
+C_ACCENT = C_BRAND
 
 _LOW_LATENCY_DIRECTIVE = (
     "\n\n# LOW-LATENCY MODE (active)\n"
@@ -843,6 +844,7 @@ class JarvisCLI:
                 print(f"{C_ERR}Usage: /models use <path>  or  /models use <n>  (n from /models disk){C_RESET}")
                 return
             path = arg
+            # 1) Numeric — index into disk cache
             if arg.isdigit():
                 cache = getattr(self, "_cli_disk_cache", None) or llmserver.scan_disk_for_models()
                 idx = int(arg) - 1
@@ -850,6 +852,49 @@ class JarvisCLI:
                     print(f"{C_ERR}Out of range — run /models disk to see the list.{C_RESET}")
                     return
                 path = cache[idx].get("path")
+            elif not os.path.isfile(path):
+                # 2) Not a real file path → try matching against on-disk models
+                # by filename. So `/models use harmonic-hermes-9b-q4_k_m`
+                # finds Qwen3.5-9B-Harmonic.Q4_K_M.gguf instead of failing
+                # with "model file not found". Same as how the GUI picker
+                # silently maps pick-id → existing GGUF.
+                disk = llmserver.scan_disk_for_models()
+                low_arg = arg.lower().replace("-", "").replace("_", "").replace(".", "")
+                match = None
+                for m in disk:
+                    fn = (m.get("filename") or "").lower().replace("-", "").replace("_", "").replace(".", "")
+                    if low_arg in fn or fn.startswith(low_arg[:12]):
+                        match = m
+                        break
+                if match:
+                    path = match.get("path")
+                    print(f"{C_DIM}↳ matched on-disk: {match.get('filename')}{C_RESET}")
+                else:
+                    # 3) No disk match either → try the recommended-pick
+                    # download path. This was the missing arm that caused
+                    # /models use harmonic-hermes-9b-q4_k_m to dead-end.
+                    try:
+                        st = llmserver.status(LOCAL_API_BASE)
+                        picks = st.get("picks") or []
+                        pick = next((p for p in picks if p.get("id") == arg), None)
+                    except Exception:
+                        pick = None
+                    if pick:
+                        print(f"{C_DIM}'{arg}' isn't on disk — kicking download then boot…{C_RESET}")
+                        try:
+                            dl = llmserver.download_model(arg)
+                            if not dl.get("ok"):
+                                print(f"{C_ERR}{dl.get('error') or 'download failed'}{C_RESET}")
+                                return
+                            path = dl.get("path")
+                        except Exception as e:
+                            print(f"{C_ERR}download failed: {type(e).__name__}: {e}{C_RESET}")
+                            return
+                    else:
+                        print(f"{C_ERR}'{arg}' isn't a file path, an on-disk filename, "
+                              f"or a known pick id. Run /models disk for paths, "
+                              f"or /models picks for downloadable ids.{C_RESET}")
+                        return
             print(f"{C_DIM}Booting llama.cpp built-in server with {path}…{C_RESET}")
             try:
                 r = llmserver.start_builtin(path)
@@ -915,10 +960,12 @@ class JarvisCLI:
             sys.exit(0)
         if low == "/help":
             print(f"{C_BOT}Commands:{C_RESET}")
+            print(f"  {C_DIM}── Endpoint / model ─────────────────────────{C_RESET}")
+            print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET})       switch brain: local / grok / gemini / openai / openrouter / custom")
             print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server, disk, picks")
-            print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop{C_RESET}  full picker (see /models). `use` and `get` retarget THIS session — no restart.")
-            print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model (alias: /load)")
-            print(f"  {C_TOOL}/brain{C_RESET}                 switch brain: local / grok / gemini / openai / openrouter / custom")
+            print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop{C_RESET}  full picker. `use`/`get` retarget THIS session — no restart.")
+            print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model on current server (alias: /load)")
+            print(f"  {C_DIM}── Chat / context ───────────────────────────{C_RESET}")
             print(f"  {C_TOOL}/tools{C_RESET}                 list available tools")
             print(f"  {C_TOOL}/clear{C_RESET}                 wipe context (keep system)")
             print(f"  {C_TOOL}/chats{C_RESET}                 list LM Studio threads")
@@ -930,6 +977,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/compact{C_RESET}               summarize old turns now")
             print(f"  {C_TOOL}/mem{C_RESET}                   show memory index")
             print(f"  {C_TOOL}/rules{C_RESET}                 show rules.md path")
+            print(f"  {C_TOOL}/name [NewName]{C_RESET}        show / set agent name (JARVIS, Cortana, Friday…)")
             print(f"  {C_TOOL}/voice [on|off]{C_RESET}        TTS toggle (alias: /voices)")
             print(f"  {C_TOOL}/voice speed <n>{C_RESET}       TTS playback rate (e.g. 1.2)")
             print(f"  {C_TOOL}/stt [model]{C_RESET}           show/switch STT model (tiny.en/base.en/small.en/...)")
@@ -971,6 +1019,14 @@ class JarvisCLI:
             return True
         if low.startswith("/model ") or low.startswith("/load "):
             arg = cmd.split(None, 1)[1].strip().strip("[]")
+            # Guard against `/model use 1` / `/model use X` etc. — easy typos
+            # because GUI users see `/models use` and reach for the singular.
+            # Hint at the right command instead of saving garbage as a model id.
+            if arg.lower().startswith("use ") or arg.lower() == "use":
+                print(f"{C_ERR}Did you mean {C_TOOL}/models use{C_RESET}{C_ERR}? "
+                      f"(plural). /model <id|n> picks a CURRENT-server model; "
+                      f"/models use <n> boots a local GGUF.{C_RESET}")
+                return True
             # Numeric: index into last /models result
             if arg.isdigit():
                 idx = int(arg) - 1
@@ -983,6 +1039,23 @@ class JarvisCLI:
                     print(f"{C_ERR}out of range — /models to see the list{C_RESET}")
                     return True
             else:
+                # Validate against the current server's actual model list before
+                # accepting an id. Stops garbage like `/model use 1` from being
+                # silently saved as a model name and then 400'ing every chat.
+                # If the server is unreachable (cloud 401, etc.) and the user
+                # passed a string, accept it but warn — cloud endpoints often
+                # don't expose /v1/models even with a valid key.
+                if not self.last_model_list:
+                    try:
+                        await self.fetch_models()
+                    except Exception:
+                        pass
+                if self.last_model_list and arg not in self.last_model_list:
+                    print(f"{C_ERR}'{arg}' is not in the server's model list.{C_RESET}")
+                    print(f"{C_DIM}  Available: {', '.join(self.last_model_list[:6])}"
+                          f"{'…' if len(self.last_model_list) > 6 else ''}{C_RESET}")
+                    print(f"{C_DIM}  Run /models to list, or /brain to switch endpoint.{C_RESET}")
+                    return True
                 self.current_model = arg
                 print(f"{C_OK}model → {self.current_model}{C_RESET}")
             # Re-detect context size for the new model (unless pinned)
@@ -992,6 +1065,15 @@ class JarvisCLI:
                     self.context_tokens = detected
                     print(f"{C_DIM}context auto-set to {detected} tokens (from /v1/models){C_RESET}")
             return True
+        # /endpoint is the natural-language alias for /brain — every cloud
+        # model + every user I've watched reaches for "endpoint" first. Treat
+        # them as the same command. Same with /provider.
+        if low.startswith("/endpoint") or low.startswith("/provider"):
+            # rewrite into a /brain command and fall through
+            parts = cmd.split(None, 1)
+            rest = parts[1] if len(parts) > 1 else ""
+            cmd = ("/brain " + rest).rstrip()
+            low = cmd.lower()
         if low == "/brain" or low.startswith("/brain "):
             # Switch LLM endpoint (local <-> cloud) without restarting Hearth.
             # Mirrors the GUI's Settings → Chat brain switcher.
@@ -1032,7 +1114,9 @@ class JarvisCLI:
                     have = sorted(k for k in saved_keys if saved_keys[k].get("key"))
                     print(f"{C_DIM}Saved keys: {', '.join(have) if have else '(none)'}{C_RESET}")
                 print(f"\n{C_BOT}Switch with:{C_RESET}")
-                print(f"  {C_TOOL}/brain local{C_RESET}                     LM Studio / built-in (default)")
+                print(f"  {C_TOOL}/brain local{C_RESET}                     auto: whatever's at localhost:1234")
+                print(f"  {C_TOOL}/brain lmstudio{C_RESET}                  use LM Studio (download.lmstudio.ai)")
+                print(f"  {C_TOOL}/brain builtin{C_RESET}                   use Hearth's bundled llama.cpp (no LM Studio needed)")
                 print(f"  {C_TOOL}/brain grok [api-key]{C_RESET}            xAI Grok       (key optional if saved)")
                 print(f"  {C_TOOL}/brain gemini [api-key]{C_RESET}          Google Gemini  (key optional if saved)")
                 print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")
@@ -1061,8 +1145,18 @@ class JarvisCLI:
 
             saved_keys = _load_keys()
             arg = parts[2].strip() if len(parts) > 2 else ""
+            # Three flavors of "local":
+            #   - local     : whatever's at localhost:1234 (most permissive; LM Studio if up, builtin if booted, etc.)
+            #   - lmstudio  : alias of local, but assumes LM Studio specifically. Hint message tells user what to load.
+            #   - builtin   : Hearth's bundled llama-cpp-python server. Doesn't START anything — `/models use <n>` does that.
+            # We route lmstudio + builtin through the same URL but the
+            # confirmation print differs so first-timers know which one they
+            # just picked. The conflict detection in llmserver.start_builtin
+            # keeps them from colliding at runtime.
             presets_url_model = {
                 "local":      ("http://localhost:1234/v1", "qwen2.5-7b-instruct"),
+                "lmstudio":   ("http://localhost:1234/v1", "qwen2.5-7b-instruct"),
+                "builtin":    ("http://localhost:1234/v1", "qwen2.5-7b-instruct"),
                 "grok":       ("https://api.x.ai/v1",       "grok-4.3"),
                 "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash"),
                 "openai":     ("https://api.openai.com/v1", "gpt-4o-mini"),
@@ -1163,7 +1257,20 @@ class JarvisCLI:
 
             print(f"{C_OK}brain → {provider}{C_RESET}  "
                   f"{C_DIM}({url}{' · ' + model_hint if model_hint else ''}){C_RESET}")
-            if provider != "local" and arg:
+            # Friendly first-timer hints — tells the user what to DO next
+            # depending on which "local" variant they picked.
+            if provider == "lmstudio":
+                print(f"{C_DIM}  Expecting LM Studio at {url}. If you don't have LM Studio:{C_RESET}")
+                print(f"{C_DIM}    • Download from https://lmstudio.ai (free)  · OR{C_RESET}")
+                print(f"{C_DIM}    • Use Hearth's built-in server: /brain builtin then /models use <n>{C_RESET}")
+            elif provider == "builtin":
+                print(f"{C_DIM}  Built-in mode picked. To load a model:{C_RESET}")
+                print(f"{C_DIM}    1. /models           → see what's on disk{C_RESET}")
+                print(f"{C_DIM}    2. /models use <n>   → boot Hearth's llama.cpp server with that model{C_RESET}")
+                print(f"{C_DIM}    Notes:{C_RESET}")
+                print(f"{C_DIM}      • If LM Studio is running on port 1234, stop it first.{C_RESET}")
+                print(f"{C_DIM}      • Hearth re-uses any GGUFs you have in LM Studio's cache — no double-download.{C_RESET}")
+            elif provider != "local" and arg:
                 print(f"{C_DIM}(key saved — next time just type /brain {provider}){C_RESET}")
             return True
         if low == "/tools":
@@ -1423,14 +1530,74 @@ class JarvisCLI:
             print(f"{C_OK}Compacted: {n_before} → {n_after} messages.{C_RESET}")
             self.save_history()
             return True
-        if low == "/mem":
-            idx = memory.list_index()
-            print(idx if idx else "(empty)")
+        if low == "/mem" or low.startswith("/mem "):
+            # /mem            — flat index (legacy)
+            # /mem tree       — ASCII tree (type → sub-category → fact)
+            # /mem map        — open the GUI memory tab in default browser
+            parts = cmd.split(None, 1)
+            sub = (parts[1].strip().lower() if len(parts) > 1 else "").split()[0] if len(parts) > 1 else ""
+            if sub in ("tree", "t"):
+                self._print_memory_tree()
+            elif sub in ("map", "graph", "g"):
+                self._open_memory_map()
+            else:
+                idx = memory.list_index()
+                print(idx if idx else "(empty)")
+                print(f"\n{C_DIM}/mem tree — ASCII tree by category"
+                      f"  ·  /mem map — open visual graph in browser{C_RESET}")
             return True
         if low == "/rules":
             memory.ensure_rules_exist()
             print(f"  {memory.RULES_PATH}")
             print(f"  {C_DIM}edit freely — Jarvis re-reads it every turn{C_RESET}")
+            return True
+        if low == "/name" or low.startswith("/name "):
+            # /name             — show current agent name
+            # /name <new>       — rename the agent (persona only, no folder
+            #                     rename here — that's a GUI-only flow because
+            #                     it requires a tray respawn). For CLI this
+            #                     just hot-swaps the persona NAME constant +
+            #                     persists to settings so the next launch
+            #                     uses it. Folder rename via GUI Settings.
+            import re as _re
+            parts = cmd.split(None, 1)
+            new_name = (parts[1].strip() if len(parts) > 1 else "")
+            from hearth import persona as _persona
+            if not new_name:
+                print(f"  current: {C_OK}{_persona.NAME}{C_RESET}")
+                print(f"  {C_DIM}usage: /name <NewName> "
+                      f"(letters/digits/spaces, 1-20 chars){C_RESET}")
+                print(f"  {C_DIM}for full rename incl. workspace folder "
+                      f"~/{_persona.NAME} → ~/<NewName>, use the GUI "
+                      f"Settings → Behavior → Rename button.{C_RESET}")
+                return True
+            if not _re.match(r"^[A-Za-z0-9 ]{1,20}$", new_name):
+                print(f"  {C_ERR}name must be 1-20 chars, letters/digits/spaces only{C_RESET}")
+                return True
+            try:
+                old = _persona.NAME
+                _persona.NAME = new_name
+                os.environ["HEARTH_PERSONA_NAME"] = new_name
+                # Persist so next CLI launch picks it up. Use the settings
+                # API path the GUI shares.
+                from pathlib import Path as _P
+                settings_path = _P.home() / "Jarvis" / "settings.json"
+                if settings_path.is_file():
+                    import json as _json
+                    try:
+                        with open(settings_path, "r", encoding="utf-8") as f:
+                            saved = _json.load(f)
+                    except Exception:
+                        saved = {}
+                    saved["agent_name"] = new_name
+                    with open(settings_path, "w", encoding="utf-8") as f:
+                        _json.dump(saved, f, indent=2)
+                print(f"  {C_OK}I'm {new_name} now{C_RESET} "
+                      f"{C_DIM}(was {old}){C_RESET}")
+                print(f"  {C_DIM}persona hot-swapped; next chat turn uses new name. "
+                      f"Workspace folder ~/{old} unchanged — use GUI to move it.{C_RESET}")
+            except Exception as e:
+                print(f"  {C_ERR}rename failed: {e}{C_RESET}")
             return True
         if low == "/stt" or low.startswith("/stt "):
             arg = cmd.split(None, 1)[1].strip() if len(cmd.split(None, 1)) > 1 else ""
@@ -2092,6 +2259,112 @@ class JarvisCLI:
                 pass
         return saved
 
+    def _print_memory_tree(self) -> None:
+        """Render the memory bank as an ASCII tree: type → sub-category → facts.
+        Colors match the GUI's left-border stripes (4 type colors). Mirrors
+        what `/mem map` shows visually, for terminal users."""
+        from hearth.memory_classify import classify_or_default
+        import os as _os
+        mem_dir = memory.MEM_DIR
+        if not _os.path.isdir(mem_dir):
+            print(f"{C_DIM}(no memory dir yet — first save creates it){C_RESET}")
+            return
+        # Build {type: {sub: [name, ...]}} from the same logic as the GUI
+        tree: Dict[str, Dict[str, list]] = {}
+        for fn in sorted(_os.listdir(mem_dir)):
+            if not fn.endswith(".md") or fn == "MEMORY.md":
+                continue
+            path = _os.path.join(mem_dir, fn)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()[:15]
+            except OSError:
+                continue
+            name = fn[:-3]; desc = ""; typ = ""; sub = ""
+            in_fm = False
+            for ln in lines:
+                s = ln.strip()
+                if s == "---":
+                    if in_fm: break
+                    in_fm = True; continue
+                if in_fm:
+                    if s.startswith("name:"):         name = s.split(":", 1)[1].strip()
+                    elif s.startswith("description:"): desc = s.split(":", 1)[1].strip()
+                    elif s.startswith("type:"):       typ = s.split(":", 1)[1].strip()
+                    elif s.startswith("sub_category:"): sub = s.split(":", 1)[1].strip()
+            if not sub:
+                sub = classify_or_default(typ or "user", desc)
+            t = typ if typ in ("user", "feedback", "project", "reference") else "other"
+            tree.setdefault(t, {}).setdefault(sub or "casual", []).append((name, desc))
+        if not tree:
+            print(f"{C_DIM}(no memories yet — type something casual and JARVIS will start saving facts){C_RESET}")
+            return
+        # Render in canonical order — same as the GUI
+        type_order = ["user", "project", "reference", "feedback", "other"]
+        type_colors = {
+            "user":      C_BOT,    # blue
+            "project":   C_OK,     # green
+            "reference": C_TOOL,   # tool color
+            "feedback":  C_BRAND,  # brand violet
+            "other":     C_DIM,
+        }
+        type_labels = {
+            "user": "User facts", "project": "Projects",
+            "reference": "Reference", "feedback": "Feedback", "other": "Other",
+        }
+        for t in type_order:
+            subs = tree.get(t)
+            if not subs:
+                continue
+            total = sum(len(v) for v in subs.values())
+            color = type_colors.get(t, C_RESET)
+            print(f"\n{color}● {type_labels[t]}{C_RESET}  {C_DIM}({total}){C_RESET}")
+            sub_keys = sorted(subs.keys())
+            for i, sub in enumerate(sub_keys):
+                leaves = subs[sub]
+                is_last_sub = (i == len(sub_keys) - 1)
+                sub_branch = "└─" if is_last_sub else "├─"
+                print(f"  {C_DIM}{sub_branch}{C_RESET} {C_TOOL}{sub}{C_RESET} {C_DIM}({len(leaves)}){C_RESET}")
+                for j, (name, desc) in enumerate(leaves):
+                    is_last_leaf = (j == len(leaves) - 1)
+                    leaf_branch = "└─" if is_last_leaf else "├─"
+                    indent = "    " if is_last_sub else "  │ "
+                    desc_short = (desc[:60] + "…") if len(desc) > 60 else desc
+                    print(f"{indent}{C_DIM}{leaf_branch}{C_RESET} {name}  "
+                          f"{C_DIM}{desc_short}{C_RESET}")
+        print()
+
+    def _open_memory_map(self) -> None:
+        """Open the GUI's Memory tab (tree view) in the default browser.
+        If the Hearth web backend isn't already running, spawn it on a free
+        port and open that. The user gets the full visual graph without
+        needing to switch to the GUI app."""
+        import urllib.request, webbrowser, threading, time
+        # Probe the standard GUI port first — if it answers, just open it.
+        for port in (8765, 8766):
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=1):
+                    url = f"http://127.0.0.1:{port}/?view=memory"
+                    print(f"{C_OK}↳ opening memory map at {url}{C_RESET}")
+                    webbrowser.open(url)
+                    return
+            except Exception:
+                continue
+        # Nothing running — spawn the web backend in a background thread
+        print(f"{C_DIM}(no GUI server running — booting one on :8765 for you){C_RESET}")
+        from hearth import web as _w
+        try:
+            threading.Thread(
+                target=lambda: _w.serve(host="127.0.0.1", port=8765),
+                daemon=True,
+            ).start()
+            time.sleep(1.2)
+            url = "http://127.0.0.1:8765/?view=memory"
+            print(f"{C_OK}↳ opening memory map at {url}{C_RESET}")
+            webbrowser.open(url)
+        except Exception as e:
+            print(f"{C_ERR}Could not start GUI backend: {e}{C_RESET}")
+
     def _summarize(self, transcript: str) -> str:
         """Sync summarizer used by compact_history. Saves durable facts to
         memory FIRST (so they survive past the compaction), then produces
@@ -2160,15 +2433,29 @@ class JarvisCLI:
             tool_tokens = 0
         effective_ctx = max(2048, self.context_tokens - tool_tokens)
 
-        # 2) Auto-compact ONLY at user-turn boundaries. Compacting in the
-        # middle of a tool chain (when self.messages[-1] is a `tool` reply)
-        # can strip the most recent user message, which crashes LM Studio's
-        # Jinja template with "No user query found in messages.".
+        # 2) Auto-compact at any SAFE boundary — i.e. not in the middle of an
+        # in-flight tool chain. Safe = last message is a user turn, OR an
+        # assistant text reply with no tool_calls (chain finished). Unsafe = the
+        # last message is a `tool` reply or an assistant message with pending
+        # tool_calls — compacting then can break the tool_call_id pairing or
+        # strip the user query, crashing LM Studio's Jinja template with
+        # "No user query found in messages.".
+        # Older logic only allowed `last_role == 'user'`, which meant a long
+        # tool chain that *finished* with an assistant answer never got
+        # compacted until the next user turn — and on the way there
+        # trim_to_budget would silently drop messages. That's why "compact at
+        # 75%" wasn't firing in long sessions.
         est = estimate_tokens(self.messages)
-        last_role = self.messages[-1].get("role") if self.messages else None
+        last_msg = self.messages[-1] if self.messages else {}
+        last_role = last_msg.get("role")
+        last_has_tool_calls = bool(last_msg.get("tool_calls"))
+        safe_to_compact = (
+            last_role == "user"
+            or (last_role == "assistant" and not last_has_tool_calls)
+        )
         if (est > effective_ctx * COMPACT_AT
                 and len(self.messages) > 12
-                and last_role == "user"):
+                and safe_to_compact):
             print(f"{C_DIM}[auto-compact: ~{est}+{tool_tokens}tools/{self.context_tokens} tokens]{C_RESET}")
             self.messages = compact_history(self.messages, self._summarize, keep_recent=8)
 
@@ -2194,10 +2481,20 @@ class JarvisCLI:
         from hearth import memory as _mem
         last_user_text = next((m.get("content", "") for m in reversed(sent)
                                if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
-        if last_user_text and sent and sent[0].get("role") == "system":
-            block = _mem.recall_for_prompt(last_user_text)
-            if block:
-                sent[0] = {**sent[0], "content": sent[0]["content"] + "\n\n" + block}
+        if sent and sent[0].get("role") == "system":
+            # Inject current local time so the model gets it for free —
+            # "what should I do?" / "good morning" / "remind me tomorrow"
+            # all work without a get_time call. Mirrors headless.py for
+            # CLI/GUI parity. ~50 chars cost per turn.
+            import datetime as _dt
+            _now = _dt.datetime.now().astimezone()
+            time_line = (f"\n\nCurrent local time: {_now.strftime('%Y-%m-%d %H:%M')} "
+                         f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).")
+            sent[0] = {**sent[0], "content": sent[0]["content"] + time_line}
+            if last_user_text:
+                block = _mem.recall_for_prompt(last_user_text)
+                if block:
+                    sent[0] = {**sent[0], "content": sent[0]["content"] + "\n\n" + block}
         return sent
 
     async def respond(self, depth: int = 0):  # noqa: C901  # see _looks_like_yield helper at module level
@@ -2313,22 +2610,40 @@ class JarvisCLI:
         def _maybe_flush_speech(force_tail: bool = False):
             """Look at unspoken portion of speak_buffer; if a sentence
             boundary is past, flush that prefix to voice.speak() and
-            advance the cursor. force_tail=True flushes whatever's left."""
+            advance the cursor. force_tail=True flushes whatever's left.
+
+            Goal: voice catches up to text within ~1 short sentence so
+            the user hears the reply STREAM in, not after the full turn.
+            Previously the floor was 60 chars which meant short replies
+            ('Hey bro. What's good?' = 21 chars) never spoke until
+            force_tail at end-of-turn — felt like a non-streaming voice."""
             nonlocal speak_cursor
             if not (self.voice_on and voice.is_available()):
                 return
             tail = speak_buffer[speak_cursor:]
             if not tail.strip():
                 return
-            # find the LAST sentence boundary in the tail
+            # Find the FIRST sentence boundary in the tail. Earlier code
+            # looked at the LAST boundary, which batched multi-sentence
+            # chunks together — defeated streaming. Now: flush each
+            # sentence as soon as its terminator arrives, but only if the
+            # next char is whitespace OR end-of-tail (avoids cutting on
+            # decimals like "v0.6" or filenames). force_tail flushes
+            # whatever remains regardless.
             cut = -1
             for i, ch in enumerate(tail):
-                if ch in ".!?\n":
+                if ch in ".!?":
+                    nxt = tail[i + 1] if i + 1 < len(tail) else ""
+                    if nxt == "" or nxt.isspace():
+                        cut = i + 1
+                        break
+                elif ch == "\n":
                     cut = i + 1
+                    break
             if force_tail:
                 cut = len(tail)
-            if cut < 60 and not force_tail:
-                return  # not enough yet — wait for more
+            if cut < 0:
+                return  # no boundary yet — wait for more chunks
             chunk = tail[:cut].strip()
             if not chunk:
                 return
@@ -2758,6 +3073,38 @@ class JarvisCLI:
                             self.last_image_path = img_path
 
             self.messages.append(tool_msg)
+
+            # generate_image / generate_video / check_video_task → pop the
+            # file open in the OS default viewer + show a clickable file:// path
+            # so the CLI user has the same "look, here's the image" moment
+            # the GUI gets via inline render. Markers are __JARVIS_IMAGE__
+            # <path> and __JARVIS_VIDEO__ <path>.
+            if (
+                name in ("generate_image", "generate_video", "check_video_task")
+                and not denied
+                and isinstance(result, str)
+            ):
+                _media_re = re.compile(r"__JARVIS_(?:IMAGE|VIDEO)__\s+([^\n(]+?)(?:\s+\(|\s*$)", re.MULTILINE)
+                for _m in _media_re.finditer(result):
+                    _media_path = _m.group(1).strip().rstrip(")").rstrip()
+                    if _media_path and os.path.isfile(_media_path):
+                        print(f"{C_FRAME}│ {C_OK}↳ saved:{C_RESET} {_media_path}")
+                        # Open in the OS default viewer (image viewer / mp4 player).
+                        # Non-blocking — we don't want to lock up the CLI.
+                        try:
+                            if sys.platform == "win32":
+                                os.startfile(_media_path)  # type: ignore[attr-defined]
+                            elif sys.platform == "darwin":
+                                import subprocess as _sp
+                                _sp.Popen(["open", _media_path], close_fds=True)
+                            else:
+                                import subprocess as _sp
+                                _sp.Popen(["xdg-open", _media_path], close_fds=True)
+                        except Exception:
+                            pass
+                        # Remember the last image for "see that screenshot" recall
+                        if _media_path.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                            self.last_image_path = _media_path
 
             # Model-driven session shutdown
             if name == "end_session" and not denied:

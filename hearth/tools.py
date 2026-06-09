@@ -433,14 +433,17 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "set_reminder",
         "description": (
-            "Schedule a desktop notification at a future time. Accepts natural "
+            "Schedule a future desktop notification, optionally with a TOOL CALL "
+            "that runs at the same moment (an 'action reminder'). Accepts natural "
             "time strings: 'in 25 minutes', 'tomorrow at 7am', '2026-05-27 09:00', "
             "'9pm', 'next monday at 10am', 'in 2 hours'. Saved to "
-            "~/Jarvis/reminders.json; a background watcher fires the notification "
-            "when due. Use this whenever the user says 'remind me to X at Y' or "
-            "'in N minutes remind me to Z'. For repeating reminders ('every 30 "
-            "minutes', 'daily', 'every Monday at 9am'), pass the cadence as "
-            "`recurring` - the reminder re-arms itself after each fire."
+            "~/Jarvis/reminders.json; a background watcher fires when due. Catches "
+            "up on missed reminders the next time Hearth launches (the user sees "
+            "'while you were away'). Use whenever the user says 'remind me to X at "
+            "Y'. For repeating reminders ('every 30 minutes', 'daily'), pass the "
+            "cadence as `recurring`. For 'at 5pm summarize my emails', pass "
+            "`action_tool='summarize_emails'` + `action_args={}` so the tool "
+            "actually runs alongside the notification."
         ),
         "parameters": {
             "type": "object",
@@ -448,8 +451,28 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "when": {"type": "string", "description": "When to fire the FIRST time. Natural-language OK."},
                 "what": {"type": "string", "description": "The message to show the user."},
                 "recurring": {"type": "string", "description": "Optional: 'every 30 minutes', 'hourly', 'daily', 'weekly', 'every 2 hours', etc. Omit for one-shot reminders."},
+                "action_tool": {"type": "string", "description": "Optional: name of a Hearth tool to RUN when the reminder fires. The tool's result is appended to the toast body. E.g. 'summarize_file', 'web_search', 'open_app'."},
+                "action_args": {"type": "object", "description": "Optional: arguments for action_tool. Object matching the tool's parameter schema. Ignored if action_tool is empty."},
+                "tag": {"type": "string", "description": "Optional: free-form label like 'work' / 'side' / 'medication' for grouping in the GUI."},
             },
             "required": ["when", "what"],
+        },
+    },
+    {
+        "name": "snooze_reminder",
+        "description": (
+            "Push a reminder's due time forward by N minutes (default 10). Works "
+            "on already-fired one-shots too - they resurrect as un-fired. Use when "
+            "the user says 'snooze that 5 min' / 'remind me again in an hour' / "
+            "'not yet, push it'. Cheaper than re-creating the reminder from scratch."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Reminder id from list_reminders or the set_reminder response."},
+                "minutes": {"type": "integer", "description": "Minutes to push forward. Default 10."},
+            },
+            "required": ["id"],
         },
     },
     {
@@ -686,6 +709,73 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
 
+    # ---- MEDIA GENERATION (image + video via xAI Grok Imagine / OpenAI) ----
+    {
+        "name": "generate_image",
+        "description": (
+            "Generate an image from a text prompt. Saves to ~/Jarvis/generated/ "
+            "and returns the file path. The GUI renders it inline; CLI opens "
+            "it in the default image viewer. Supported providers: xAI Grok "
+            "(grok-imagine-image-quality), OpenAI (gpt-image-2 by default — "
+            "their new flagship), Google Gemini (gemini-2.5-flash-image, aka "
+            "Nano Banana). Auto-routes based on whatever /brain you're on. "
+            "Will fail loudly on local LM Studio / Ollama (they don't do "
+            "image gen)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt":       {"type": "string", "description": "What to draw. Be specific — 'a glowing violet H logo on a charcoal background, minimalist, vector style'."},
+                "n":            {"type": "integer", "description": "How many to generate (1-4). Default 1."},
+                "aspect_ratio": {"type": "string", "description": "1:1 | 16:9 | 9:16 | 4:3 | 3:4 | 3:2 | 2:3 etc. Default 1:1."},
+                "resolution":   {"type": "string", "description": "xAI: '1k' or '2k'. Default '1k'."},
+            },
+            "required": ["prompt"],
+        },
+    },
+    {
+        "name": "generate_video",
+        "description": (
+            "Start an ASYNC video generation. Returns a task_id immediately; "
+            "videos take 20-60+ seconds. Poll with check_video_task(task_id) "
+            "or just tell the user 'video's cooking, I'll let you know'. The "
+            "user can ask 'is my video ready?' later and you can check then. "
+            "xAI Grok only today."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt":       {"type": "string", "description": "What to animate. Cinematic descriptions work best."},
+                "duration":     {"type": "integer", "description": "Seconds, 1-15. Default 5."},
+                "aspect_ratio": {"type": "string", "description": "16:9 | 9:16 | 1:1 | 4:3 | 3:4 | 3:2 | 2:3. Default 16:9."},
+                "resolution":   {"type": "string", "description": "'480p' or '720p'. Default 720p."},
+                "image_url":    {"type": "string", "description": "Optional — image URL to animate (image-to-video mode)."},
+            },
+            "required": ["prompt"],
+        },
+    },
+    {
+        "name": "check_video_task",
+        "description": (
+            "Poll a video generation task ONCE. Does NOT block. Status is one "
+            "of: pending / done / failed / expired / unknown. When done, the "
+            "response includes 'path' = the saved mp4 file the GUI/CLI can "
+            "render. Safe to call repeatedly — caches the downloaded file."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "The task_id returned by generate_video."},
+            },
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "list_generations",
+        "description": "List the 10 most recent image/video generation tasks (live + finished). Useful when the user says 'show me what you generated' or 'is anything still cooking?'",
+        "parameters": {"type": "object", "properties": {}},
+    },
+
     # ---- INTERACTIVE: ASK THE USER ----
     {
         "name": "ask_user",
@@ -762,7 +852,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Substring of the folder / app / game name (case-insensitive). E.g. 'forge webui', 'battlefield', 'spotify'."},
+                "query": {"type": "string", "description": "Substring of the folder / app / game name (case-insensitive). E.g. 'chrome', 'steam', 'vscode'."},
                 "limit": {"type": "integer", "description": "Max results. Default 15."},
             },
             "required": ["query"],
@@ -2589,7 +2679,7 @@ def _web_search(p: Dict) -> str:
 def _web_fetch(p: Dict) -> str:
     url = p["url"].strip()
     # Auto-prepend https:// for bare domains. Models often emit a hostname
-    # like "ishantsingh.vercel.app" (the maintainer's portfolio) without a scheme.
+    # (e.g. "example.com" or "docs.python.org") without a scheme.
     if not url.startswith(("http://", "https://", "file://")):
         url = "https://" + url
     try:
@@ -3850,7 +3940,72 @@ def _memory_forget(p: Dict) -> str:
 # D:\AI\sd-webui-forge). We boot it with --api so /sdapi/v1/* is exposed.
 # --------------------------------------------------------------------------
 
-FORGE_DIR = os.environ.get("JARVIS_FORGE_DIR", "")
+def _autodetect_forge_dir() -> str:
+    """Scan common install locations for an SD/Forge WebUI install.
+
+    Returns the first matching folder that contains a recognized launcher,
+    or "" if none found. Order: settings.json saved value > env var >
+    common candidates per OS.
+
+    A folder qualifies if it contains webui.bat / webui.sh /
+    webui-user.bat AND a 'modules' subdir (the WebUI signature)."""
+    # Saved setting wins
+    try:
+        from pathlib import Path as _Path
+        settings_path = _Path(os.path.expanduser("~")) / "Jarvis" / "settings.json"
+        if settings_path.is_file():
+            saved = json.loads(settings_path.read_text(encoding="utf-8"))
+            saved_dir = (saved.get("forge_dir") or "").strip()
+            if saved_dir and _looks_like_forge(saved_dir):
+                return saved_dir
+    except Exception:
+        pass
+    # Env var next
+    env_dir = (os.environ.get("JARVIS_FORGE_DIR") or "").strip()
+    if env_dir and _looks_like_forge(env_dir):
+        return env_dir
+    # Common install locations
+    home = os.path.expanduser("~")
+    candidates = []
+    if sys.platform == "win32":
+        for base in ("C:\\", "D:\\", "E:\\", "F:\\", "G:\\"):
+            for sub in ("AI", "stable-diffusion", "SD", "tools"):
+                candidates.append(os.path.join(base, sub, "sd-webui-forge"))
+                candidates.append(os.path.join(base, sub, "stable-diffusion-webui-forge"))
+                candidates.append(os.path.join(base, sub, "webui"))
+        for name in ("sd-webui-forge", "stable-diffusion-webui-forge",
+                     "stable-diffusion-webui"):
+            for parent in (home, os.path.join(home, "Documents"),
+                            os.path.join(home, "Downloads"),
+                            os.path.join(home, "Desktop")):
+                candidates.append(os.path.join(parent, name))
+    else:
+        for name in ("sd-webui-forge", "stable-diffusion-webui-forge",
+                     "stable-diffusion-webui"):
+            for parent in (home, os.path.join(home, "Documents"),
+                            "/opt", "/usr/local"):
+                candidates.append(os.path.join(parent, name))
+    for c in candidates:
+        if _looks_like_forge(c):
+            return c
+    return ""
+
+
+def _looks_like_forge(path: str) -> bool:
+    """A folder qualifies as a Forge/SD-WebUI install if it has both a
+    launcher script AND a modules/ subdir. Two-check guards against
+    matching random folders named "webui"."""
+    if not path or not os.path.isdir(path):
+        return False
+    has_launcher = any(
+        os.path.isfile(os.path.join(path, f))
+        for f in ("webui.bat", "webui.sh", "webui-user.bat", "webui-user.sh", "launch.py")
+    )
+    has_modules = os.path.isdir(os.path.join(path, "modules"))
+    return has_launcher and has_modules
+
+
+FORGE_DIR = _autodetect_forge_dir()
 FORGE_URL = os.environ.get("JARVIS_FORGE_URL", "http://127.0.0.1:7860")
 FORGE_BOOT_TIMEOUT = int(os.environ.get("JARVIS_FORGE_BOOT_TIMEOUT", "180"))
 
@@ -4160,7 +4315,30 @@ def _list_models(p: Dict) -> str:
         lines += [f"  - {i}" + ("  (current)" if i == cur else "") for i in ids]
         return "\n".join(lines)
     except Exception as e:
-        return (f"Couldn't reach the model server at {base}: {type(e).__name__}: {e}. "
+        # Tailor the hint to whatever the user is currently pointed at. The
+        # old message always said "Is LM Studio running?" even when the user
+        # was on a cloud endpoint that 401'd because the API key was bad or
+        # the endpoint doesn't expose /v1/models — that confused both the
+        # model and the user (Grok went hunting for LM Studio when the real
+        # fix was `/brain local`).
+        is_cloud = not any(h in base.lower() for h in (
+            "localhost", "127.0.0.1", "0.0.0.0", "::1",
+            "192.168.", "10.", "host.docker.internal",
+        ))
+        err_kind = type(e).__name__
+        err_str = str(e)
+        is_auth = "401" in err_str or "403" in err_str or "Unauthorized" in err_str or "Forbidden" in err_str
+        if is_cloud and is_auth:
+            return (f"Cloud endpoint {base} returned auth error ({err_kind}: {e}). "
+                    f"Either the API key is wrong/expired, or this provider doesn't "
+                    f"expose /v1/models. To list LOCAL models instead, the user can "
+                    f"run `/brain local` (CLI) or switch in Settings → Chat brain (GUI). "
+                    f"Don't scan the disk for model files.")
+        if is_cloud:
+            return (f"Cloud endpoint {base} unreachable ({err_kind}: {e}). "
+                    f"Hearth's /v1/models proxy isn't responding. If the user wants "
+                    f"local models, suggest `/brain local`. Don't scan the disk.")
+        return (f"Couldn't reach the local server at {base}: {err_kind}: {e}. "
                 f"Is LM Studio (or your endpoint) running? Don't scan the disk for model files.")
 
 
@@ -4168,6 +4346,99 @@ def _learn_environment(p: Dict) -> str:
     from .environment import learn_environment
     endpoint = _RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE")
     return learn_environment(endpoint=endpoint)
+
+
+# ---------------------------------------------------------------------------
+# Media generation (image + video). The returned strings use the same marker
+# convention as view_image so the GUI's existing media-render path picks them
+# up. CLI parses for the path and pops the OS default viewer.
+# ---------------------------------------------------------------------------
+
+def _generate_image(p: Dict) -> str:
+    from . import imagine
+    r = imagine.generate_image(
+        prompt=(p.get("prompt") or "").strip(),
+        n=_coerce_int(p.get("n"), 1),
+        aspect_ratio=(p.get("aspect_ratio") or "1:1"),
+        resolution=(p.get("resolution") or "1k"),
+    )
+    if not r.get("ok"):
+        return f"Error: {r.get('error')}"
+    paths = r.get("paths") or []
+    if not paths:
+        return "Error: provider returned no images."
+    # Emit one marker per file so the GUI renders each inline. CLI picks the
+    # first one to auto-open in the default viewer.
+    lines = [f"Generated {len(paths)} image{'s' if len(paths) != 1 else ''} via {r.get('provider')} "
+             f"({r.get('model')}): \"{r.get('prompt')[:80]}\""]
+    for path in paths:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        lines.append(f"__JARVIS_IMAGE__ {path} ({size} bytes, png)")
+    return "\n".join(lines)
+
+
+def _generate_video(p: Dict) -> str:
+    from . import imagine
+    r = imagine.start_video(
+        prompt=(p.get("prompt") or "").strip(),
+        duration=_coerce_int(p.get("duration"), 5),
+        aspect_ratio=(p.get("aspect_ratio") or "16:9"),
+        resolution=(p.get("resolution") or "720p"),
+        image_url=(p.get("image_url") or None),
+    )
+    if not r.get("ok"):
+        return f"Error: {r.get('error')}"
+    return (
+        f"Video generation started (task_id: {r.get('task_id')}).\n"
+        f"  model:  {r.get('model')}\n"
+        f"  prompt: \"{r.get('prompt')[:80]}\"\n"
+        f"{r.get('hint', '')}\n\n"
+        f"NEXT STEP: tell the user the video is cooking and they can ask "
+        f"'is the video ready?' later. Don't poll in a tight loop."
+    )
+
+
+def _check_video_task(p: Dict) -> str:
+    from . import imagine
+    task_id = (p.get("task_id") or "").strip()
+    if not task_id:
+        return "Error: task_id is required."
+    r = imagine.check_video_task(task_id)
+    if not r.get("ok"):
+        return f"Error: {r.get('error')}"
+    status = r.get("status", "unknown")
+    if status == "done":
+        path = r.get("path") or "(no local path)"
+        return (
+            f"Video DONE.\n"
+            f"  path:     {path}\n"
+            f"  duration: {r.get('duration', '?')}s\n"
+            f"__JARVIS_VIDEO__ {path}"
+        )
+    if status == "pending":
+        return f"Video still cooking (task {task_id}). Check back in 10-20 seconds."
+    return f"Video task {task_id}: status={status}. {r.get('error', '')}".strip()
+
+
+def _list_generations(p: Dict) -> str:
+    from . import imagine
+    r = imagine.list_recent_tasks(limit=10)
+    tasks = r.get("tasks") or []
+    if not tasks:
+        return "No generation tasks on file yet."
+    lines = [f"{len(tasks)} recent generation task{'s' if len(tasks) != 1 else ''}:"]
+    for t in tasks:
+        ts = time.strftime("%Y-%m-%d %H:%M",
+                           time.localtime(t.get("created_at", 0)))
+        lines.append(
+            f"  [{t.get('status','?'):<8}] {t.get('kind','?'):<5} "
+            f"{ts}  {t.get('task_id', '?')[:12]}…  "
+            f"\"{(t.get('prompt') or '')[:50]}\""
+        )
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -4182,7 +4453,12 @@ _HANDLERS = {
     "extract_archive_file": _extract_archive_file,
     "summarize_file": _summarize_file,
     "search_chats":   lambda p: __import__("hearth.session_search", fromlist=["search","format_matches"]).format_matches(__import__("hearth.session_search", fromlist=["search"]).search(p.get("query", ""), int(p.get("limit") or 8))),
-    "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(p.get("when", ""), p.get("what", ""), p.get("recurring", "")),
+    "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(
+        p.get("when", ""), p.get("what", ""), p.get("recurring", ""),
+        action_tool=p.get("action_tool", ""), action_args=p.get("action_args"),
+        tag=p.get("tag", "")),
+    "snooze_reminder": lambda p: __import__("hearth.reminders", fromlist=["snooze_reminder"]).snooze_reminder(
+        p.get("id", ""), int(p.get("minutes", 10))),
     "list_reminders": lambda p: __import__("hearth.reminders", fromlist=["list_reminders"]).list_reminders(bool(p.get("include_fired"))),
     "cancel_reminder": lambda p: {"ok": __import__("hearth.reminders", fromlist=["cancel_reminder"]).cancel_reminder(p.get("id", ""))},
     "list_directory": _list_directory,
@@ -4206,6 +4482,10 @@ _HANDLERS = {
         p.get("job_id", ""), timeout_s=min(float(p.get("timeout_s") or 30), 300.0)),
     "job_kill":   lambda p: __import__("hearth.jobs", fromlist=["kill_job"]).kill_job(p.get("job_id", "")),
     "job_list":   lambda p: __import__("hearth.jobs", fromlist=["list_jobs"]).list_jobs(active_only=bool(p.get("active_only"))),
+    "generate_image":    _generate_image,
+    "generate_video":    _generate_video,
+    "check_video_task":  _check_video_task,
+    "list_generations":  _list_generations,
     "ask_user":   _ask_user,
     "system_info": _system_info,
     "list_processes": _list_processes,
@@ -4521,7 +4801,8 @@ _TOOL_CATEGORY = {
     "memory_forget": "Memory", "search_chats": "Memory",
     # Reminders & alerts
     "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
-    "cancel_reminder": "Reminders & alerts", "notify": "Reminders & alerts",
+    "cancel_reminder": "Reminders & alerts", "snooze_reminder": "Reminders & alerts",
+    "notify": "Reminders & alerts",
     # Voice
     "set_voice": "Voice", "list_voices": "Voice",
     # Self-extending

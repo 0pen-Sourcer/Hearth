@@ -83,10 +83,15 @@ claude_battleplan_v2.md
 # ---- Private working notes (Ishant + Claude scratchpad) ----
 IDEAS.md
 dexter.txt
+other_insta.txt
 run.txt
 run2.txt
 run3.txt
 run4.txt
+# Personal diagnostic dumps the user pastes into chat for debugging
+book_log.txt
+hearth-server-log.txt
+*-server-log.txt
 
 # Benchmark reports reference local machine paths — keep private
 bench/reports/
@@ -106,6 +111,7 @@ docs/LAUNCH_POSTS.md
 docs/SCAVENGE.md
 docs/DEMO_SCRIPT.md
 docs/TEST_PLAYBOOK*.md
+docs/TESTBOOK*.md
 docs/RUNBOOK.md
 
 # ---- Stale deep docs — deferred until rewritten post-launch ----
@@ -122,3 +128,5 @@ graphify-out/
 brain_keys.json
 # large reference PDF used for the map-reduce subagent demo
 Timelines of History*.pdf
+# YouTube transcripts / competitor research notes — local context only
+Network_chuck*.md
