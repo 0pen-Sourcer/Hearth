@@ -190,10 +190,26 @@ def _parse_recurring(spec: str) -> Optional[int]:
     return None
 
 
-def set_reminder(when: str, what: str, recurring: str = "") -> Dict:
-    """Set a reminder. `recurring` (optional) makes it repeat - e.g.
-    'every 30 minutes', 'daily', 'every 2 hours', 'weekly'. After each fire
-    the reminder re-arms itself for the next interval."""
+def set_reminder(when: str, what: str, recurring: str = "",
+                 action_tool: str = "", action_args: Optional[Dict] = None,
+                 tag: str = "") -> Dict:
+    """Set a reminder. Two flavors:
+
+    Plain — fires a desktop toast + optional TTS at the due time.
+    Action — additionally fires a tool call on the same tick. The model can
+    use this to say "at 5pm run summarize_emails" and have the tool actually
+    execute, not just nudge the user to do it.
+
+    `recurring` (optional) repeats the reminder — e.g. 'every 30 minutes',
+    'daily', 'every 2 hours', 'weekly'. After each fire the reminder re-arms
+    itself for the next interval.
+
+    `action_tool` (optional) names any Hearth tool. `action_args` carries
+    its arguments. The tool's return value is appended to the toast body so
+    the user sees the result. Action reminders are the killer differentiator
+
+    `tag` (optional) is a free-form label for grouping/filtering in the GUI.
+    """
     target = parse_when(when)
     if target is None:
         return {"ok": False, "error": f"Couldn't parse time: '{when}'. Try 'in 25 minutes', '2026-05-27 09:00', 'tomorrow at 7am'."}
@@ -212,9 +228,39 @@ def set_reminder(when: str, what: str, recurring: str = "") -> Dict:
             return {"ok": False, "error": f"Couldn't parse recurring spec: '{recurring}'. Try 'every 30 minutes', 'daily', 'every 2 hours', 'weekly'."}
         new["recurring_text"] = recurring
         new["recurring_seconds"] = sec
+    if action_tool:
+        new["action_tool"] = action_tool
+        new["action_args"] = action_args or {}
+    if tag:
+        new["tag"] = tag.strip()
     items.append(new)
     _save_all(items)
     return {"ok": True, "reminder": new}
+
+
+def snooze_reminder(rid: str, minutes: int = 10) -> Dict:
+    """Push a reminder's due time forward by N minutes. Works on fired
+    one-shots too (resurrects them as un-fired). Avoids the "I have to
+    re-create the reminder I just dismissed" friction.
+
+    Returns {ok: True, new_due_iso} or {ok: False, error}.
+    """
+    if minutes <= 0:
+        return {"ok": False, "error": "minutes must be > 0"}
+    items = _load_all()
+    for r in items:
+        if r.get("id") == rid:
+            base = datetime.now()
+            new_due = base + timedelta(minutes=int(minutes))
+            r["due_iso"] = new_due.isoformat(timespec="seconds")
+            r["fired"] = False  # resurrect if it had already fired
+            r.pop("fired_at", None)
+            r["snoozed_at"] = datetime.now().isoformat(timespec="seconds")
+            r["snooze_count"] = int(r.get("snooze_count", 0)) + 1
+            _save_all(items)
+            return {"ok": True, "id": rid, "new_due_iso": r["due_iso"],
+                    "snooze_count": r["snooze_count"]}
+    return {"ok": False, "error": f"no reminder with id {rid}"}
 
 
 def list_reminders(include_fired: bool = False) -> List[Dict]:
@@ -269,38 +315,113 @@ def desktop_notify(title: str, body: str) -> bool:
     return False
 
 
+def _run_action(action_tool: str, action_args: Dict) -> str:
+    """Execute a reminder's bound tool. Returns a short result snippet to
+    append to the toast body so the user sees what happened. Bounded so a
+    runaway tool result doesn't spill a full screen into a notification."""
+    if not action_tool:
+        return ""
+    try:
+        from . import execute_tool
+        result = execute_tool(action_tool, action_args or {})
+        text = str(result) if result is not None else "(ok)"
+        if len(text) > 240:
+            text = text[:240].rstrip() + "..."
+        return text
+    except Exception as e:
+        return f"(action failed: {type(e).__name__}: {e})"
+
+
+def _prune_old_fired(items: List[Dict], days: int = 30) -> List[Dict]:
+    """Drop one-shot reminders that fired more than N days ago. Keeps the
+    list small without losing recently-fired entries the user might want
+    to inspect. Recurring reminders are never pruned."""
+    if not items:
+        return items
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    out = []
+    for r in items:
+        if (r.get("fired") and not r.get("recurring_seconds")
+                and (r.get("fired_at") or "") < cutoff):
+            continue
+        out.append(r)
+    return out
+
+
 def start_watcher(notify: Callable[[str, str], None]) -> None:
-    """Begin firing reminders. `notify(title, body)` is called per fire."""
+    """Begin firing reminders. `notify(title, body)` is called per fire.
+
+    On startup, scans for already-due reminders (catch-up: Hearth was off
+    when they should have fired) and fires them with a "while you were
+    away" prefix so the user sees what they missed instead of silent drops.
+
+    Action reminders execute their bound tool inline; the tool's return
+    value is appended to the toast body. Tool exceptions never crash the
+    watcher.
+    """
     global _watcher_thread
     if _watcher_thread is not None and _watcher_thread.is_alive():
         return
     _watcher_stop.clear()
 
+    def _fire(r: Dict, missed: bool = False) -> None:
+        body = r.get("what", "(empty)")
+        action_tool = r.get("action_tool", "")
+        if action_tool:
+            tail = _run_action(action_tool, r.get("action_args") or {})
+            if tail:
+                body = f"{body}\n> {tail}"
+        title = "Hearth - while you were away" if missed else "Hearth reminder"
+        try:
+            notify(title, body)
+        except Exception:
+            pass
+
+    def _advance_after_fire(r: Dict, now: datetime, now_iso: str) -> None:
+        rec_s = r.get("recurring_seconds")
+        if rec_s and isinstance(rec_s, (int, float)):
+            next_due = now + timedelta(seconds=rec_s)
+            r["due_iso"] = next_due.isoformat(timespec="seconds")
+            r["last_fired_at"] = now_iso
+        else:
+            r["fired"] = True
+            r["fired_at"] = now_iso
+
     def _loop():
+        # Catch-up pass: any reminder due in the past that never fired gets
+        # fired NOW and marked missed. Recurring reminders advance to the
+        # next slot relative to NOW (so a weekly that missed 3 cycles
+        # doesn't fire 3 toasts in a row - fires once, next slot is one
+        # interval from now). Also prunes one-shots older than 30 days.
+        try:
+            now = datetime.now()
+            now_iso = now.isoformat(timespec="seconds")
+            items = _prune_old_fired(_load_all())
+            dirty = False
+            for r in items:
+                if r.get("fired"):
+                    continue
+                if r.get("due_iso", "") < now_iso:
+                    _fire(r, missed=True)
+                    _advance_after_fire(r, now, now_iso)
+                    dirty = True
+            _save_all(items)  # save even if not dirty - pruning may have changed shape
+            del dirty
+        except Exception:
+            pass
+
         while not _watcher_stop.is_set():
             try:
-                now_iso = datetime.now().isoformat(timespec="seconds")
+                now = datetime.now()
+                now_iso = now.isoformat(timespec="seconds")
                 items = _load_all()
                 dirty = False
                 for r in items:
                     if r.get("fired"):
                         continue
                     if r.get("due_iso", "") <= now_iso:
-                        try:
-                            notify("Hearth reminder", r.get("what", "(empty)"))
-                        except Exception:
-                            pass
-                        # Recurring reminders re-arm themselves; one-shots
-                        # get flagged fired so they're skipped next iter.
-                        rec_s = r.get("recurring_seconds")
-                        if rec_s and isinstance(rec_s, (int, float)):
-                            from datetime import timedelta as _td
-                            next_due = datetime.now() + _td(seconds=rec_s)
-                            r["due_iso"] = next_due.isoformat(timespec="seconds")
-                            r["last_fired_at"] = now_iso
-                        else:
-                            r["fired"] = True
-                            r["fired_at"] = now_iso
+                        _fire(r)
+                        _advance_after_fire(r, now, now_iso)
                         dirty = True
                 if dirty:
                     _save_all(items)

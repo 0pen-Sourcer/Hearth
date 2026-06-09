@@ -47,7 +47,7 @@ DEFAULT_KOKORO_VOICE = os.environ.get("JARVIS_VOICE", "am_michael")
 # 1.0 = Kokoro's natural rate. Voiceover testing kept this at 1.0 (anything
 # higher starts to sound rushed during long answers). Override per session
 # with /voice speed <n> or set JARVIS_VOICE_SPEED before launch.
-DEFAULT_SPEED = float(os.environ.get("JARVIS_VOICE_SPEED", "1.0"))
+DEFAULT_SPEED = float(os.environ.get("JARVIS_VOICE_SPEED", "1.5"))
 
 _engine: Optional[Tuple[str, object]] = None  # ("kokoro" | "piper", obj)
 _lock = threading.Lock()
@@ -89,9 +89,14 @@ def _mark_speaking_end() -> None:
     with _speaking_state_lock:
         _speaking_count = max(0, _speaking_count - 1)
         _last_spoke_at = time.time()
-# Last load error — surfaced in status() so we don't silently report
+# Last HARD load error — surfaced in status() so we don't silently report
 # "engine: null" when the actual issue is, e.g., a missing file format.
 _last_load_error: Optional[str] = None
+# Last SOFT degradation warning — engine still loaded fine but with a
+# downgrade the user should know about (e.g. CUDA requested but onnxruntime-gpu
+# isn't installed → fell back to CPU). GUI can render this as a yellow toast
+# with an "install" hint, without making it look like TTS is broken.
+_last_load_warning: Optional[str] = None
 
 
 def _find(*candidates: str) -> Optional[str]:
@@ -173,17 +178,39 @@ def _try_kokoro():
         _last_load_error = f"kokoro_onnx not installed: {e}"
         return None
     # Honor TTS device preference: cuda / dml / cpu (default cpu).
-    # kokoro_onnx exposes onnxruntime InferenceSession providers via
-    # ONNXRuntimeError if the provider isn't available — we set them via the
-    # `ORT_PROVIDERS` env var which onnxruntime reads on session creation.
+    # CRITICAL: gracefully degrade to CPU if the requested provider isn't
+    # installed. The base `onnxruntime` pip wheel ships only CPU+Azure;
+    # `onnxruntime-gpu` is a separate install for CUDA, and `onnxruntime-directml`
+    # for DML. Without this check, kokoro_onnx silently produces zero-audio
+    # frames when a missing provider is requested — looks like "TTS broken"
+    # but is really "wrong wheel installed". The fallback exposes the real
+    # state via `last_load_error` so the GUI can prompt the user to install
+    # the right wheel (or just stay on CPU, which is plenty fast for Kokoro).
     tts_device = os.environ.get("JARVIS_TTS_DEVICE", "cpu").lower()
-    providers_map = {
-        "cuda": ["CUDAExecutionProvider", "CPUExecutionProvider"],
-        "gpu":  ["CUDAExecutionProvider", "CPUExecutionProvider"],
-        "dml":  ["DmlExecutionProvider", "CPUExecutionProvider"],
-        "cpu":  ["CPUExecutionProvider"],
-    }
-    providers = providers_map.get(tts_device, ["CPUExecutionProvider"])
+    try:
+        import onnxruntime as _ort  # type: ignore
+        available = set(_ort.get_available_providers())
+    except Exception:
+        available = {"CPUExecutionProvider"}
+    requested = {
+        "cuda": "CUDAExecutionProvider",
+        "gpu":  "CUDAExecutionProvider",
+        "dml":  "DmlExecutionProvider",
+        "cpu":  "CPUExecutionProvider",
+    }.get(tts_device, "CPUExecutionProvider")
+    if requested != "CPUExecutionProvider" and requested not in available:
+        # Soft degradation — engine still loads on CPU, but tell the user so
+        # they don't think TTS is broken / can install the right wheel.
+        global _last_load_warning
+        wheel = "onnxruntime-gpu" if "CUDA" in requested else "onnxruntime-directml"
+        _last_load_warning = (
+            f"TTS device '{tts_device}' requested but the '{requested}' provider "
+            f"isn't installed. Falling back to CPU. To enable {tts_device.upper()}, "
+            f"install: pip install {wheel}"
+        )
+        tts_device = "cpu"
+        requested = "CPUExecutionProvider"
+    providers = [requested] if requested == "CPUExecutionProvider" else [requested, "CPUExecutionProvider"]
     os.environ.setdefault("ORT_TENSORRT_FP16_ENABLE", "1")
     try:
         # Newer kokoro_onnx accepts a `providers=` kw on init; older versions
@@ -230,10 +257,15 @@ def _try_piper():
 
 
 def _load_engine() -> Optional[Tuple[str, object]]:
-    global _engine, _last_load_error
+    global _engine, _last_load_error, _last_load_warning
     if _engine is not None:
         return _engine
     _last_load_error = None
+    # NOTE: don't reset _last_load_warning here — _try_kokoro may set it
+    # mid-call to flag a soft degradation (e.g. CUDA->CPU fallback). We
+    # only clear it on a successful engine load WITHOUT a warning being set.
+    pre_warning = _last_load_warning
+    _last_load_warning = None
     k = _try_kokoro()
     if k is not None:
         _engine = ("kokoro", k)
@@ -244,6 +276,8 @@ def _load_engine() -> Optional[Tuple[str, object]]:
         _engine = ("piper", p)
         _last_load_error = None
         return _engine
+    # No engine — restore the prior warning in case it was relevant
+    _last_load_warning = pre_warning
     return None
 
 
@@ -508,6 +542,15 @@ def status() -> dict:
         "default_voice": DEFAULT_KOKORO_VOICE,
         "default_speed": DEFAULT_SPEED,
         "last_load_error": _last_load_error,
+        # Soft warning — engine loaded but with a downgrade (e.g. CUDA->CPU
+        # fallback). GUI should render this as a yellow toast w/ install hint
+        # so the user doesn't think TTS is silently broken when speak() works
+        # but their picked device wasn't honored.
+        "last_load_warning": _last_load_warning,
+        # ONNX providers actually available on this machine — so the GUI can
+        # disable picks that need a wheel the user hasn't installed yet, and
+        # render a download icon next to them.
+        "onnx_providers_available": (lambda: __import__("onnxruntime").get_available_providers() if have_kokoro else [])(),
     }
 
 

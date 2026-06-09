@@ -143,6 +143,57 @@ def autodetect_context(model_id: str) -> Optional[int]:
     return None
 
 
+def resolve_context_tokens(model_id: str) -> tuple:
+    """Return (tokens, source) for the given model on the current LOCAL_API_BASE.
+
+    Single source of truth for "what context window are we using?". Both
+    the chat path and the /api/context-budget endpoint call this so the
+    GUI's bottom bar + ring + chat budget all agree. Without one helper
+    the ring was showing 32K default while the chat path used 200K via
+    provider table.
+
+    Precedence:
+      1. JARVIS_CONTEXT env var (hard pin — testing / debugging)
+      2. Endpoint probe (LM Studio / Ollama / built-in expose loaded_context)
+      3. Per-provider known-context table (cloud endpoints don't expose ctx)
+      4. CONTEXT_TOKENS default (32K)
+    """
+    pinned = os.getenv("JARVIS_CONTEXT")
+    if pinned:
+        try:
+            v = int(pinned)
+            if v > 0:
+                return v, f"JARVIS_CONTEXT={v // 1024}K (env pin)"
+        except ValueError:
+            pass
+    probed = autodetect_context(model_id)
+    if probed:
+        return probed, "endpoint probe"
+    # Per-provider table — Grok 4.x = 1M (cap 200K), Gemini 1.5+ = 1M
+    # (cap 200K), GPT-4o = 128K, Claude 3.x = 200K. 200K ceiling because
+    # KV cache cost scales linearly even on cloud.
+    base = (LOCAL_API_BASE or "").lower()
+    m = (model_id or "").lower()
+    known = None
+    if "api.x.ai" in base:
+        if "grok-4" in m or "grok-build" in m: known = 200000
+        elif "grok-2" in m: known = 131072
+        else: known = 131072
+    elif "generativelanguage.googleapis" in base:
+        known = 200000 if any(t in m for t in ("1.5", "2.0", "2.5", "3.0", "3.1")) else 32768
+    elif "api.openai.com" in base:
+        if "gpt-4.1" in m: known = 200000
+        elif "gpt-4o" in m or "o3" in m or "o1" in m: known = 128000
+        else: known = 128000
+    elif "api.anthropic.com" in base or "claude" in m:
+        known = 200000
+    elif "openrouter.ai" in base:
+        known = 128000
+    if known:
+        return known, f"provider table ({known // 1024}K)"
+    return CONTEXT_TOKENS, f"default {CONTEXT_TOKENS // 1024}K"
+
+
 # Phrases that signal "I'm going to do X" without an actual tool call.
 # Kept in sync with hearth_cli.py's _YIELD_TRIGGERS.
 _YIELD_TRIGGERS = (
@@ -296,6 +347,14 @@ async def run_once(
     # nothing matches. Same behavior as the CLI's _prepare_context.
     from . import memory as _mem
     _sys = system_prompt()
+    # Inject the current local time on every turn so the model can reason
+    # about "what should I do?" / "is it late?" / "remind me tomorrow" /
+    # "good morning" without needing a get_time tool call. ~50 chars cost,
+    # avoids the model confidently asserting a stale training-time date.
+    import datetime as _dt
+    _now = _dt.datetime.now().astimezone()
+    _sys += (f"\n\nCurrent local time: {_now.strftime('%Y-%m-%d %H:%M')} "
+             f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).")
     _block = _mem.recall_for_prompt(prompt)
     if _block:
         _sys += "\n\n" + _block
@@ -315,26 +374,55 @@ async def run_once(
     # drops the user turn ("No user query found in messages"). Tool schemas ride
     # every prompt, so reserve them + output. trim_to_budget structurally keeps a
     # surviving user turn, so no extra invariant is needed.
-    from .tools import trim_to_budget, estimate_tokens, CHARS_PER_TOKEN
-    context_tokens = CONTEXT_TOKENS  # default 32K — see CONTEXT_TOKENS comment
-    if not os.getenv("JARVIS_CONTEXT"):  # autodetect unless the user pinned it
-        _d = autodetect_context(model)
-        if _d:
-            context_tokens = _d
+    from .tools import trim_to_budget, estimate_tokens, CHARS_PER_TOKEN, compact_history
+    # Single source of truth — see resolve_context_tokens() above. Same call
+    # is reused by the /api/context-budget endpoint so the GUI ring + bottom
+    # bar agree with what the chat path actually uses.
+    context_tokens, context_source = resolve_context_tokens(model)
+    # SAFETY: if the SERVER's loaded context is smaller than what we're
+    # about to pack into a prompt, we'll get "Requested tokens exceed
+    # context window" 500s. This happened on launch day: GUI defaulted to
+    # 8K builtin while persona+tools alone needed 19K. Now we cross-check.
+    # If we detect a server-reported ctx (autodetect_context > 0) and it's
+    # smaller than our estimate of persona+tools+output overhead, emit a
+    # loud warning so the GUI can surface it instead of silent 500s.
+    # Compute tool-schema overhead FIRST (the warning math below reads it).
+    # Earlier ordering bug had the warning read _tool_tokens before it was
+    # assigned — UnboundLocalError on every chat. Image gen, all chat,
+    # everything 500'd at this line.
     try:
         _tool_tokens = len(json.dumps(tools)) // CHARS_PER_TOKEN
     except Exception:
         _tool_tokens = 0
     _budget = max(2048, context_tokens - _tool_tokens)
+    try:
+        from . import system_prompt as _sp
+        _sys_tok = len(_sp()) // 4
+    except Exception:
+        _sys_tok = 8000  # conservative fallback
+    _est_overhead = _sys_tok + _tool_tokens + RESERVED_OUTPUT
+    if context_tokens < _est_overhead:
+        emit("context_warning",
+             loaded_ctx=context_tokens,
+             estimated_overhead=_est_overhead,
+             hint=(
+                 f"Loaded model context ({context_tokens}) is smaller than "
+                 f"Hearth's prompt overhead ({_est_overhead} = persona "
+                 f"{_sys_tok}t + tools {_tool_tokens}t + reserved {RESERVED_OUTPUT}t). "
+                 f"Chats will 500. Reload the model at >={_est_overhead + 4096} "
+                 f"context (Models tab → expand model → ctx slider)."
+             ))
     # Emit so the GUI / CLI can show what budget actually got picked.
     try:
         emit("context_budget",
              context_tokens=context_tokens,
              tool_tokens=_tool_tokens,
              effective_budget=_budget,
+             # Use the source string we computed above — covers env override,
+             # endpoint probe, and the per-provider table (Grok 1M, Gemini 1M,
+             # GPT-4o 128K, Claude 200K, etc).
              source=("env JARVIS_CONTEXT" if os.getenv("JARVIS_CONTEXT")
-                     else "endpoint probe" if context_tokens != CONTEXT_TOKENS
-                     else f"default {CONTEXT_TOKENS//1024}K"))
+                     else context_source))
     except Exception:
         pass
     t_start = time.time()
@@ -394,8 +482,92 @@ async def run_once(
                 ),
             })
             emit("nudge", reason=f"wrap-up at {iterations}/{max_depth} — asked for STATE_SNAPSHOT")
-        # Auto-compact: trim before each call so a long history OR a long tool
-        # chain within one turn can't overflow the context window.
+        # Auto-compact at 75% of budget (matches CLI behavior). Two-stage:
+        #   1) At 75% with a SAFE boundary (no in-flight tool chain) → real
+        #      summarize-compact via compact_history. Replaces middle chunk
+        #      with a 4-bullet summary preserving the chat thread.
+        #   2) Hard trim_to_budget as last-resort. Used to be the ONLY path,
+        #      which is why "websearch then question later" → "hey what's up?"
+        #      (the user's history got truncated to nothing because the bridge
+        #      never actually summarized, it just dropped messages).
+        _est = estimate_tokens(messages)
+        _pct = int(_est * 100 / max(1, _budget))
+        # Emit context state on every turn so the GUI can render a footer chip
+        # showing N% used + a 'Compacting...' badge when it kicks in.
+        emit("context_state", used=_est, budget=_budget, pct=_pct,
+             messages=len(messages))
+        if _est > _budget * COMPACT_AT and len(messages) > 12:
+            _last_msg = messages[-1] if messages else {}
+            _last_role = _last_msg.get("role")
+            _last_has_tool_calls = bool(_last_msg.get("tool_calls"))
+            _safe = (
+                _last_role == "user"
+                or (_last_role == "assistant" and not _last_has_tool_calls)
+            )
+            if _safe:
+                emit("compacting", pct=_pct, before=len(messages))
+                # Synchronous LLM-summarize via the SAME client (cheap turn —
+                # uses fewer tokens than letting the next chat call overflow).
+                def _sync_summarize(chunk_text: str) -> str:
+                    """Squeeze the dropped middle into a 4-bullet summary so
+                    the model doesn't forget what we just did. Best-effort —
+                    if the LLM call fails, fall back to a trivial summary so
+                    the chain can keep going instead of crashing."""
+                    try:
+                        import openai as _openai
+                        sync = _openai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+                        r = sync.chat.completions.create(
+                            model=model,
+                            messages=[
+                                {"role": "system", "content":
+                                    "Summarize the conversation excerpt below in "
+                                    "3-5 short bullets: what the user asked for, "
+                                    "what tools you ran, key results, anything "
+                                    "still pending. Preserve concrete facts (file "
+                                    "paths, names, numbers). Plain prose, no "
+                                    "preamble."},
+                                {"role": "user", "content": chunk_text[:8000]},
+                            ],
+                            temperature=0.0,
+                            max_tokens=400,
+                        )
+                        return (r.choices[0].message.content or "").strip() or "[summary unavailable]"
+                    except Exception as _e:
+                        # Don't crash the chat — degrade gracefully to a trivial
+                        # marker so the surviving recent turns still anchor.
+                        return f"[earlier conversation summary unavailable: {type(_e).__name__}]"
+                # PASSIVE FACT EXTRACTION — runs BEFORE compact so the
+                # extractor sees the FULL chunk that's about to be summarized
+                # into oblivion. Hermes-pattern: at every safe boundary
+                # (compact, end-of-session), do one cheap LLM pass over recent
+                # turns and persist durable facts into memory.save(). The user
+                # doesn't have to say "remember that" — facts get saved
+                # automatically, with a joke/quote/violence filter on the
+                # extractor side. Failure is silent — never blocks the chat.
+                try:
+                    from . import memory_extract as _mx
+                    import openai as _oai_module
+                    _sync = _oai_module.OpenAI(
+                        api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE
+                    )
+                    _llm = _mx.make_openai_llm_call(_sync, model, max_tokens=600)
+                    _saved, _warns = _mx.extract_and_save(
+                        messages, _llm, recent_turns=6
+                    )
+                    if _saved:
+                        emit("facts_saved", count=len(_saved),
+                             titles=[f["title"] for f in _saved])
+                except Exception as _mx_err:
+                    # Don't surface as an error event — fact extraction failing
+                    # mid-compact shouldn't look scary in the GUI. Just log.
+                    emit("nudge", reason=f"fact_extract skipped: {type(_mx_err).__name__}")
+                messages[:] = compact_history(messages, _sync_summarize, keep_recent=8)
+                _est = estimate_tokens(messages)
+                emit("compacted", after=len(messages), used=_est,
+                     pct=int(_est * 100 / max(1, _budget)))
+        # Hard trim as last-resort guard if compact didn't fire (unsafe boundary
+        # or already past budget). This is the truncate path — keeps the
+        # invariant "prompt fits" but drops messages, so we'd rather compact.
         if estimate_tokens(messages) > _budget:
             messages[:] = trim_to_budget(messages, _budget, RESERVED_OUTPUT)
         # Belt-and-suspenders: trim_to_budget now guarantees a user role, but
@@ -762,6 +934,103 @@ async def run_once(
         # producing false positives (model saying "let me check" as a polite
         # opener while ACTUALLY calling the tool), adding latency, and rarely
         # helping. The NEXT-STEP wrapper above covers the real failure mode.
+
+        # AGENT-LOOP SELF-CHECK: did the model stop too early?
+        # The user's #1 complaint: "feels like a chatbot, not an agent —
+        # does X and stops when I asked for the whole alphabet". The persona
+        # rule above tells the model to keep going; this is the safety net.
+        #
+        # Cheap, pattern-based — no extra LLM call. Triggers ONE nudge if
+        # the final response shape SCREAMS "I'm bailing early":
+        #   - Trailing chatbot-pitch question ("want me to also...?")
+        #   - Tiny answer to a clearly-large ask (long prompt, short reply)
+        #   - "Let me know" / "anything else" sign-off after a small action
+        #
+        # Fires at most ONCE per user turn (tracked via _early_stop_nudged).
+        try:
+            _final_msg = next(
+                (m for m in reversed(messages)
+                 if m.get("role") == "assistant" and isinstance(m.get("content"), str)),
+                None,
+            )
+            _final = (_final_msg or {}).get("content", "") or ""
+            _user_msg = next(
+                (m for m in messages
+                 if m.get("role") == "user" and isinstance(m.get("content"), str)),
+                None,
+            )
+            _user_text = (_user_msg or {}).get("content", "") or ""
+            if (
+                _final and _user_text
+                and not getattr(run_once, "_early_stop_nudged", False)
+                and iterations < max_depth - 1
+            ):
+                early_stop_patterns = [
+                    r"want me to (also|then|next)",
+                    r"shall i (also|continue|proceed|run)",
+                    r"should i (also|continue|proceed)",
+                    r"let me know (if|when)",
+                    r"anything else\?",
+                    r"would you like me to",
+                ]
+                import re as _re
+                tail = _final[-300:].lower()
+                hit = next((p for p in early_stop_patterns if _re.search(p, tail)), None)
+                # Sample-and-bail detector for long asks: user wrote >=300
+                # chars, but reply is <200 chars AND contains no real numbers
+                # (suggests "gave 3 things and stopped" on a "read the whole
+                # X" prompt). Heuristic, not exact.
+                long_ask_short_reply = (
+                    len(_user_text) >= 300
+                    and len(_final) < 200
+                    and not _re.search(r"\b\d{2,}\b", _final)
+                )
+                if hit or long_ask_short_reply:
+                    run_once._early_stop_nudged = True  # type: ignore[attr-defined]
+                    reason = ("trailing chatbot-pitch in reply"
+                              if hit else "short reply to a long ask")
+                    emit("nudge",
+                         reason=f"agent-loop self-check: {reason} — keep going")
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[SYSTEM] You stopped early. Re-read the ORIGINAL "
+                            "user request and check: did you actually cover "
+                            "the whole ask, or sample and bail? If the ask "
+                            "was 'read it thoroughly' you should still be "
+                            "running the chunk loop. If it was 'find + launch X' "
+                            "you should be calling open_app, not asking 'want "
+                            "me to launch?'. Do the next concrete step. NOW. "
+                            "No 'want me to' questions. Just act."
+                        ),
+                    })
+                    continue  # loop back, run another turn
+        except Exception:
+            pass  # never block the chat reply on a self-check exception
+
+        # PASSIVE FACT EXTRACTION on clean finish too — same pattern as the
+        # compaction-boundary hook above. Runs once per turn that actually
+        # completes (no max_depth bail) so durable facts accumulate naturally
+        # without the user ever saying "remember that".
+        try:
+            from . import memory_extract as _mx
+            import openai as _oai_module
+            _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+            _llm = _mx.make_openai_llm_call(_sync, model, max_tokens=600)
+            _saved, _warns = _mx.extract_and_save(messages, _llm, recent_turns=4)
+            if _saved:
+                emit("facts_saved", count=len(_saved),
+                     titles=[f["title"] for f in _saved])
+        except Exception:
+            pass  # fact extraction failure NEVER blocks the chat reply
+
+        # Reset the per-turn nudge flag so a fresh user message can trigger
+        # the self-check again (we only block re-triggering within one user
+        # turn — across user turns it must be re-enabled).
+        try:
+            del run_once._early_stop_nudged  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
 
         emit("done",
              duration_ms=int((time.time() - t_start) * 1000),

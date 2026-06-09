@@ -154,8 +154,16 @@ def _index_entry_for_slug(lines: List[str], slug: str) -> Optional[int]:
 
 
 def save(title: str, mtype: str, description: str, body: str = "",
-         tags: Optional[List[str]] = None) -> str:
-    """Write a memory file + add/update the index entry."""
+         tags: Optional[List[str]] = None,
+         sub_category: Optional[str] = None) -> str:
+    """Write a memory file + add/update the index entry.
+
+    The optional sub_category groups facts within a type for the v0.6 memory
+    graph view. If omitted, a regex classifier picks one based on the
+    description+body text (Hermes Holographic pattern, zero LLM cost). The
+    sub_category goes BOTH in the frontmatter (for the graph viz) AND as a
+    `cat:<name>` tag (so recall_for_prompt's existing keyword scorer can
+    surface it without schema changes)."""
     # Lenient: map any reasonable synonym to a canonical type instead
     # of erroring. Small models love to invent "User Preference" etc.
     canonical = _normalize_type(mtype)
@@ -169,8 +177,31 @@ def save(title: str, mtype: str, description: str, body: str = "",
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
 
+    # Auto-classify the sub-category if not given. The classifier scans
+    # description + body for known patterns (hardware/media/routine/etc).
+    # Falls back to a type-specific default so every memory belongs to
+    # SOMETHING — the tree view never has orphans.
+    if not sub_category:
+        try:
+            from .memory_classify import classify_or_default
+            sub_category = classify_or_default(
+                mtype,
+                (description or "") + " " + (body or ""),
+                tags=tags,
+            )
+        except Exception:
+            sub_category = None
+    if sub_category:
+        # Mirror into tags as `cat:<name>` so memory_recall's keyword
+        # scorer can find it without us changing its signature.
+        cat_tag = f"cat:{sub_category}"
+        if cat_tag not in tags:
+            tags = list(tags) + [cat_tag]
+
     front = ["---", f"name: {title}", f"type: {mtype}",
              f"description: {description.strip()}"]
+    if sub_category:
+        front.append(f"sub_category: {sub_category}")
     if tags:
         front.append(f"tags: [{', '.join(tags)}]")
     front.append(f"updated: {datetime.now().isoformat(timespec='seconds')}")
@@ -222,16 +253,35 @@ def list_index() -> str:
     return "\n".join(lines)
 
 
-def index_for_prompt() -> str:
+def index_for_prompt(max_lines: int = 20, max_line_chars: int = 120) -> str:
     """Compact form to inject into the system prompt every turn.
 
-    The model should be able to see WHAT IT KNOWS without us loading every
-    body. If a fact looks relevant to the current turn, it can call
-    memory_recall to load the body."""
+    The model should see WHAT IT KNOWS without us loading every body. If a
+    fact looks relevant, it can call memory_recall to load the body.
+
+    Capped at max_lines so the index doesn't grow without bound as the user
+    accumulates facts (the auto-extraction hook adds facts every turn). When
+    over the cap, show recent items + 'and N more — call memory_recall to
+    find others'. memory_recall keyword-scores against ALL facts regardless
+    of what's shown here, so capping the prompt-injection is safe."""
     lines = _read_index_lines()
     if not lines:
         return ""
-    return "[ Memories on file (call memory_recall to load any) ]\n" + "\n".join(lines)
+    # Trim each line so a verbose memory entry doesn't eat 300 tokens alone
+    trimmed = [(l[:max_line_chars] + "…") if len(l) > max_line_chars else l
+               for l in lines]
+    if len(trimmed) <= max_lines:
+        body = "\n".join(trimmed)
+    else:
+        # Show the most recent N (index lines are appended chronologically;
+        # most recent is at the END — show those + summary).
+        kept = trimmed[-max_lines:]
+        body = (
+            "\n".join(kept)
+            + f"\n…and {len(trimmed) - max_lines} older memories — "
+              f"call memory_recall('<topic>') to find anything not shown here."
+        )
+    return "[ Memories on file (call memory_recall to load any) ]\n" + body
 
 
 def _read_body(path: str) -> Tuple[Dict[str, str], str]:
@@ -299,8 +349,43 @@ def _score_memories(query: str) -> List[Tuple[float, int, int, str, Dict[str, st
     return [(s, m, total, fn, fm, body) for (s, _u, m, fn, fm, body) in scored]
 
 
-def recall(query: str, limit: int = 5) -> str:
-    """Keyword search across the memory store. Returns top N matches with bodies."""
+def _siblings_in_sub_category(sub_category: str, mtype: str,
+                              exclude_filenames: set,
+                              limit: int = 4) -> List[Tuple[str, Dict[str, str], str]]:
+    """Find other memories in the same sub_category + type. THIS IS THE MOAT —
+    nobody else (Hermes, OpenHuman, etc) pulls siblings on recall. Asking
+    'what's my GPU?' should also surface 'how much RAM you have' and
+    'which monitor you use' because they're one mental cluster.
+
+    Returns [(fn, fm, body), ...] sorted by recency. Empty if no siblings."""
+    if not sub_category:
+        return []
+    out: List[Tuple[str, Dict[str, str], str]] = []
+    for fn in os.listdir(MEM_DIR):
+        if not fn.endswith(".md") or fn == "MEMORY.md" or fn in exclude_filenames:
+            continue
+        full = os.path.join(MEM_DIR, fn)
+        try:
+            fm, body = _read_body(full)
+        except OSError:
+            continue
+        if fm.get("sub_category") != sub_category:
+            continue
+        if mtype and fm.get("type") != mtype:
+            continue
+        out.append((fn, fm, body))
+    # Sort by recency (newest first)
+    out.sort(key=lambda c: c[1].get("updated", ""), reverse=True)
+    return out[:limit]
+
+
+def recall(query: str, limit: int = 5, with_siblings: bool = True) -> str:
+    """Keyword search across the memory store. Returns top N matches with bodies.
+
+    with_siblings=True (default) ALSO pulls a few sibling facts from each
+    top match's sub_category. Asking "what's my GPU?" surfaces the GPU
+    fact AND the RAM + drive facts because they're in the same cluster.
+    Set False for a pure keyword match (back-compat)."""
     query = (query or "").strip()
     if not query:
         return list_index()
@@ -308,13 +393,40 @@ def recall(query: str, limit: int = 5) -> str:
     if not candidates:
         return f"(no memories match '{query}')"
     out: List[str] = []
+    seen_files = set()
+    sibling_blocks: List[Tuple[str, str, list]] = []  # (sub, type, [(name, body)])
     for score, _matched, _total, fn, fm, body in candidates:
+        seen_files.add(fn)
         title = fm.get("name", fn[:-3])
         mtype = fm.get("type", "?")
         updated = fm.get("updated", "")
         out.append(f"## {title}  ({mtype}, score={score:.0f}, {updated})")
         out.append(body.strip()[:1500])
         out.append("")
+        # Sibling pull — adjacent facts in the same sub_category
+        if with_siblings:
+            sub = fm.get("sub_category", "")
+            if sub:
+                sibs = _siblings_in_sub_category(sub, mtype, seen_files, limit=3)
+                for sfn, sfm, sbody in sibs:
+                    seen_files.add(sfn)
+                    sibling_blocks.append((sub, mtype,
+                        [(sfm.get("name", sfn[:-3]), sbody)]))
+    # Render sibling block AFTER the direct matches, fenced as "related facts"
+    if sibling_blocks:
+        out.append("---")
+        out.append("**Related facts** (same cluster — surfaced automatically):")
+        seen_sub: set = set()
+        for sub, mtype, leaves in sibling_blocks:
+            key = (sub, mtype)
+            if key in seen_sub:
+                continue
+            seen_sub.add(key)
+            out.append(f"\n### {sub} ({mtype})")
+            for name, body in leaves:
+                # Compact — first line of body only, save tokens
+                first = body.strip().split("\n", 1)[0][:200]
+                out.append(f"- **{name}**: {first}")
     return "\n".join(out)
 
 

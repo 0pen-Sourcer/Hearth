@@ -199,6 +199,29 @@ def detect_gpu_vram_gb() -> Optional[float]:
     return None
 
 
+def detect_gpu_vram_free_gb() -> Optional[float]:
+    """Return FREE VRAM in GB right now. Different from detect_gpu_vram_gb()
+    (which returns total). Used by start_builtin pre-flight to catch the
+    'LM Studio is already using 5 GB of your 8 GB' scenario before we boot
+    another 5+ GB model on top and freeze the whole PC.
+
+    The launch-day freeze came from this exact gap: total said 8 GB so the
+    fit check said 'ok', but only ~3 GB was actually free."""
+    try:
+        import subprocess
+        no_window = 0x08000000 if os.name == "nt" else 0
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=4, creationflags=no_window,
+        )
+        line = (out.stdout or "").strip().splitlines()[0].strip()
+        if line:
+            return round(float(line) / 1024.0, 1)
+    except Exception:
+        pass
+    return None
+
+
 def detect_ram_gb() -> Optional[float]:
     """Total system RAM in GB. Fallback when there's no GPU - llama.cpp will
     run on CPU + RAM, so we pick a tinier model in that case."""
@@ -412,15 +435,41 @@ def download_model(pick_id: str,
     """Download a curated pick from Hugging Face into ~/Jarvis/models/.
     `on_progress(done_bytes, total_bytes)` is called every ~256KB. Returns
     {ok, path} on success or {ok: False, error: ...}. Uses a .part file so
-    interrupted downloads never look complete."""
+    interrupted downloads never look complete.
+
+    Disk-first: before downloading, scan every known location (LM Studio's
+    cache, Ollama, HF cache, ~/Jarvis/models) for a file matching the pick's
+    hf_file. If found, return that path with `already: True` and source so
+    the caller can tell the user "using your LM Studio copy" instead of
+    silently burning 5+ GB of disk and bandwidth on a duplicate."""
     pick = next((p for p in TOP_PICKS if p["id"] == pick_id), None)
     if not pick:
         return {"ok": False, "error": f"unknown pick id: {pick_id!r}"}
 
+    # Disk-first short-circuit: does this exact filename already live on disk
+    # somewhere Hearth knows how to find it? LM Studio users routinely have
+    # the same GGUF cached under .lmstudio/models/<author>/<repo>/ and there's
+    # no reason to redownload it into ~/Jarvis/models/.
+    target_name = pick["hf_file"].lower()
+    try:
+        for existing in scan_disk_for_models():
+            fn = (existing.get("filename") or "").lower()
+            if fn == target_name:
+                return {
+                    "ok": True,
+                    "path": existing["path"],
+                    "already": True,
+                    "source": existing.get("source", "disk"),
+                }
+    except Exception:
+        # scan failure should NEVER block the user from downloading — fall
+        # through to the normal HF path.
+        pass
+
     url = f"https://huggingface.co/{pick['hf_repo']}/resolve/main/{pick['hf_file']}"
     dest = MODELS_DIR / pick["hf_file"]
     if dest.exists():
-        return {"ok": True, "path": str(dest), "already": True}
+        return {"ok": True, "path": str(dest), "already": True, "source": "Hearth"}
 
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
@@ -534,11 +583,12 @@ def server_extras_missing() -> Optional[str]:
 
 
 def start_builtin(model_path: str, port: Optional[int] = None,
-                  ctx: int = 8192, n_gpu_layers: int = -1,
+                  ctx: int = 24576, n_gpu_layers: int = -1,
                   n_threads: Optional[int] = None,
                   cache_type_k: Optional[str] = None,
                   cache_type_v: Optional[str] = None,
-                  flash_attn: bool = True) -> Dict[str, Any]:
+                  flash_attn: bool = True,
+                  force: bool = False) -> Dict[str, Any]:
     """Spawn llama-cpp-python's OpenAI-compatible server.
 
     Args:
@@ -606,11 +656,57 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     if n_gpu_layers != 0:
         try:
             sz = Path(model_path).stat().st_size / (1024 ** 3)
+            needed = sz + estimate_kv_cache_gb(sz, ctx)
+
+            # HARD GUARDRAIL: probe FREE VRAM (not total) and REFUSE if the
+            # model can't fit. The launch-day freeze came from this exact
+            # gap: total said 8 GB so the warning path said "should still
+            # load", but only ~3 GB was actually free (LM Studio had loaded
+            # Gemma already). llama.cpp then page-swapped weights through
+            # the pagefile until the whole system stalled.
+            #
+            # We refuse with a clear error instead of trying anyway. The
+            # user can stop the other model and retry, or pick a smaller
+            # quant. Loud-fail beats silent-freeze every time.
+            free_vram = detect_gpu_vram_free_gb()
+            if free_vram is not None and needed > free_vram + 0.5 and not force:
+                with _start_lock: _starting_paths.discard(normalized_path)
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Not enough free VRAM. This model needs ~{needed:.1f} GB "
+                        f"(weights {sz:.1f} + KV cache {needed - sz:.1f} at {ctx} ctx) "
+                        f"but only {free_vram:.1f} GB is free right now. "
+                        f"Likely causes: LM Studio / another LLM is holding VRAM, "
+                        f"or another app is using your GPU. Free some VRAM "
+                        f"(close LM Studio / eject its model / pick a smaller quant) "
+                        f"and try again."
+                    ),
+                    # Surface the numbers so the GUI can show a "Force load anyway
+                    # (spill to RAM)" button — slow but works. `force_available`
+                    # is the flag the frontend keys off to render that button.
+                    "vram_needed_gb": round(needed, 1),
+                    "vram_free_gb": free_vram,
+                    "force_available": True,
+                }
+            # Force path: guardrail bypass triggered. n_gpu_layers=-1
+            # means "all to GPU" — would OOM at load. Auto-downgrade to a
+            # partial-offload count that fits free VRAM so llama.cpp spills
+            # excess layers to system RAM. Only adjust if we wouldn't fit
+            # at the original setting.
+            if (force and n_gpu_layers == -1 and free_vram is not None
+                    and needed > free_vram + 0.5):
+                est = estimate_safe_gpu_layers(sz, free_vram, ctx)
+                n_gpu_layers = est
+                print(f"  [llmserver] force-load: auto-set n_gpu_layers={est} "
+                      f"(weights {sz:.1f}GB, KV {needed-sz:.1f}GB, free {free_vram:.1f}GB) "
+                      f"— rest spills to RAM", flush=True)
+
             fit = vram_fit_class(sz, ctx=ctx)
             if fit["tier"] == "overflow":
                 vram_warning = (
-                    f"VRAM tight: this model needs ~{sz + estimate_kv_cache_gb(sz, ctx):.1f} GB "
-                    f"(weights {sz:.1f} + KV {estimate_kv_cache_gb(sz, ctx):.1f} at {ctx} ctx). "
+                    f"VRAM tight: this model needs ~{needed:.1f} GB "
+                    f"(weights {sz:.1f} + KV {needed - sz:.1f} at {ctx} ctx). "
                     f"{fit['label']}. llama.cpp will spill what doesn't fit to CPU — "
                     f"loading will work but tokens/sec may drop. Smaller quant or lower "
                     f"ctx fixes it if you'd rather pick again."
@@ -621,6 +717,42 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             pass  # if we can't stat or VRAM probe fails, just proceed silently
 
     port = port or BUILTIN_PORT
+
+    # Pre-flight: is something ELSE already on this port? If yes, refuse with a
+    # clear, first-timer-friendly error instead of letting llama.cpp.server
+    # silently fail to bind. The most common case: LM Studio is already running
+    # at localhost:1234. Two paths Hearth can offer the user:
+    #   1) "Use what's already there" → /brain local (LM Studio answers chat)
+    #   2) "Stop the other one + boot ours" → user closes LM Studio, retries
+    # We don't auto-kill LM Studio — that's their data/their choice.
+    other_api = f"http://127.0.0.1:{port}/v1"
+    # external_server_running accepts our builtin's api_key too, so a fresh
+    # check WITHOUT the builtin key tells us "is something not-ours there?".
+    # We pass api_key=None so a 401 from a foreign server with auth still
+    # registers as "something's there" (unlike auth-blind probes).
+    foreign_running = False
+    try:
+        # short probe to keep startup snappy — we just need yes/no
+        foreign_running = external_server_running(other_api, timeout=0.5, api_key=None)
+    except Exception:
+        foreign_running = False
+    # But only treat as conflict if it's not OUR builtin (re-checked inside
+    # the locked region above; this catches the case where LM Studio / Ollama
+    # / a stray process is already squatting the port we want).
+    if foreign_running and (_proc is None or _proc.poll() is not None):
+        with _start_lock:
+            _starting_paths.discard(normalized_path)
+        return {
+            "ok": False,
+            "error": (
+                f"Port {port} is already taken by another LLM server (most likely "
+                f"LM Studio or Ollama). Two ways out:\n"
+                f"  • Use what's already there → CLI: /brain lmstudio  ·  GUI: Settings → Chat brain → Local LM Studio\n"
+                f"  • Stop the other server, then retry  →  Hearth's built-in will boot on port {port}."
+            ),
+            "conflict_port": port,
+        }
+
     # Auto-pick CPU thread counts when caller didn't specify. LM Studio uses
     # all logical cores by default for batch + worker counts; previously we
     # only passed --n_threads when explicitly set, leaving llama.cpp to fall
@@ -664,6 +796,10 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         # llama_cpp.server CLI accepts boolean flags as 'true'/'false' strings.
         # Must come AFTER --n_gpu_layers in older builds (was order-sensitive).
         cmd += ["--flash_attn", "true"]
+    # Suppress llama.cpp's internal CUDA debug logging — server log was
+    # filling with 404x "CUDA Graph id N reused" per session. Real errors
+    # still hit stderr → log file → GUI failure modal.
+    cmd += ["--verbose", "false"]
 
     # Pipe stdout+stderr to a real log file so the user (and the GUI failure
     # toast) can see WHY a start failed. Without this the user just sees "did
@@ -934,6 +1070,33 @@ def _estimate_gguf_size_gb(filename: str) -> Optional[float]:
 _VRAM_DRIVER_RESERVE_GB = 2.29
 
 
+def estimate_safe_gpu_layers(model_size_gb: Optional[float],
+                             free_vram_gb: Optional[float],
+                             ctx: int = 24576) -> int:
+    """For force-load mode: estimate how many transformer layers fit in free
+    VRAM, leaving room for KV cache + driver overhead. Layers beyond this
+    stay on CPU/RAM (true partial offload).
+
+    n_gpu_layers=-1 ("all to GPU") OOMs the second the guardrail is
+    bypassed. n_gpu_layers=0 (CPU-only) works but ~10x slower than partial.
+    A positive integer is the sweet spot.
+
+    Heuristic — doesn't parse GGUF layer count, uses 40 as a proxy (typical
+    for 7-13B models). llama.cpp clamps if we overshoot. Returns 0 when
+    estimation isn't possible or VRAM budget is gone."""
+    if not model_size_gb or not free_vram_gb or model_size_gb <= 0:
+        return 0
+    kv_gb = estimate_kv_cache_gb(model_size_gb, ctx)
+    # Keep ~1 GB for driver + small allocs, plus half the KV cache
+    # (heuristic: KV split roughly tracks layer split, leave half on GPU).
+    safety = 1.0
+    budget = max(0.0, free_vram_gb - safety - kv_gb * 0.5)
+    if budget <= 0:
+        return 0
+    fraction = min(1.0, budget / model_size_gb)
+    return max(1, int(fraction * 40))
+
+
 def estimate_kv_cache_gb(model_size_gb: Optional[float], ctx: int = 8192) -> float:
     """Approximate KV cache footprint at the given context window. Linear in
     ctx (KV grows per token) and ~10% of weights at the 4K-ctx baseline."""
@@ -1144,13 +1307,14 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
     # Tight timeout — when no server is listening, urllib will block for the
     # full timeout before returning. 0.5s is plenty for a local TCP probe
     # while keeping the GUI snappy in the "no brain active" path.
-    ext = external_server_running(api_base, timeout=0.5) and not builtin
+    # Pass the same key external_server_running uses for downstream probes
+    # so the server log doesn't fill with 401s on every status() call
+    # (the GUI polls every ~8s, each probe was unauthenticated → 401).
+    _key = os.environ.get("LOCAL_API_KEY") or ""
+    ext = external_server_running(api_base, timeout=0.5,
+                                  api_key=_key or "hearth-builtin") and not builtin
     ext_id: Optional[str] = None
     ext_path: Optional[str] = None
-    # Authenticate the probes — when the external server IS our builtin (e.g.
-    # autoboot brought it up before the user noticed), unauth probes 401-spam
-    # the log. Pass the configured key; LM Studio + Ollama ignore unknown auth.
-    _key = os.environ.get("LOCAL_API_KEY") or ""
     _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
     if ext:
         # Try LM Studio's v0/models first (gives us a real path field).

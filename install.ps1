@@ -49,7 +49,7 @@ param(
     [switch]$NoFileReaders,
     [switch]$NoDesktop,
     [switch]$Browser,
-    [string]$BuiltinLLM = '',   # 'cuda' / 'cpu' / '' (off). Installs llama-cpp-python so Hearth has its own LLM server.
+    [string]$BuiltinLLM = '',   # 'cuda' / 'cpu' / '' (off). EXPERIMENTAL: installs llama-cpp-python so Hearth runs its own LLM server. Tool-call reliability lags LM Studio's in v0.6 - BYO is recommended for daily use.
     [ValidateSet('cpu','gpu','ask')][string]$VoiceDevice = 'ask',
     [switch]$NoRealtimeVoice
 )

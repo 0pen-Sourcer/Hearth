@@ -530,15 +530,17 @@
   }
   .think.open .think-chev { transform: rotate(90deg); }
   .think-label { text-transform: lowercase; letter-spacing: 0.4px; }
+  /* Subtle dot — solid when active, hidden once thinking ends. The old
+     pulse animation was flagged as eye-sore. */
   .think-spinner {
     margin-left: auto;
-    width: 8px; height: 8px;
+    width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--tool);
     opacity: 0;
-    animation: pulse 1.4s infinite;
+    transition: opacity 200ms;
   }
-  .think.active .think-spinner { opacity: 0.8; }
+  .think.active .think-spinner { opacity: 0.6; }
   .think-body {
     display: none;
     padding: 4px 14px 10px 28px;
@@ -595,6 +597,84 @@
   }
   .input-row textarea:focus { border-color: var(--accent-line); }
   .input-row textarea::placeholder { color: var(--fg-faint); }
+  /* Pinned chat title at the top of the chat pane. Always visible so the
+     user can SEE which conversation thread they're typing into — fixes the
+     "I thought I was still in the MW4 chat but I was in a new one" trap. */
+  .chat-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--fg-dim);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .chat-header-icon { opacity: 0.6; }
+  .chat-header-title { color: var(--fg); font-weight: 600; max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-header-meta  { color: var(--fg-faint); margin-left: auto; font-variant-numeric: tabular-nums; }
+  /* Context-usage ring — inline next to input controls. Conic-gradient
+     fill shows ratio; percent rendered in the center. Same idea as LM Studio
+     / Claude Code's filled wheel. Subtle when empty, warns amber over 70%,
+     red over 90%, violet pulse during compaction.
+
+     CSS var `--ctx-deg` controls the fill arc (0deg empty, 360deg full).
+     Set from JS via `el.style.setProperty('--ctx-deg', '...')`. */
+  .ctx-ring {
+    --ctx-deg: 0deg;
+    --ctx-color: var(--accent);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background:
+      conic-gradient(var(--ctx-color) var(--ctx-deg), transparent 0),
+      var(--bg-3);
+    /* Hollow center via a circular mask so the ring is the only visible part. */
+    -webkit-mask: radial-gradient(circle, transparent 9px, black 10px);
+            mask: radial-gradient(circle, transparent 9px, black 10px);
+    position: relative;
+    transition: --ctx-deg 200ms;
+    flex-shrink: 0;
+    cursor: help;
+  }
+  /* Center label sits inside the mask hole, so we mount it OUTSIDE the mask
+     by giving the ring a wrapper. Implemented below as .ctx-ring-wrap. */
+  .ctx-ring-wrap {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: help;
+  }
+  .ctx-ring-pct {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-dim);
+    pointer-events: none;
+    transition: color 200ms;
+  }
+  .ctx-ring-wrap.warn .ctx-ring { --ctx-color: #fbbf24; }
+  .ctx-ring-wrap.warn .ctx-ring-pct { color: #fbbf24; }
+  .ctx-ring-wrap.hot  .ctx-ring { --ctx-color: #f87171; }
+  .ctx-ring-wrap.hot  .ctx-ring-pct { color: #f87171; }
+  .ctx-ring-wrap.compacting .ctx-ring {
+    --ctx-color: #a78bfa;
+    animation: ctx-ring-spin 1.4s linear infinite;
+  }
+  @keyframes ctx-ring-spin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
   .toggle-btn {
     background: var(--bg-2);
     border: 1px solid var(--border);
@@ -637,24 +717,17 @@
   }
   .send-btn:hover { background: var(--accent-2); transform: translateY(-1px); }
   .send-btn:disabled { background: var(--bg-3); color: var(--fg-faint); cursor: not-allowed; transform: none; }
-  /* Stop button: pulsing accent ring around a smaller square. Reads as
-     "generating — click to interrupt" without resorting to a generic red. */
+  /* Stop button: static accent ring, no pulse. The pulsing version was
+     visually noisy per user feedback ("eye-sore"). Hover lights it up so
+     the affordance is still obvious. */
   .send-btn.stopping {
     background: var(--bg-2);
     color: var(--accent-2);
     border: 1px solid var(--accent-line);
-    box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.55);
-    animation: stop-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
   .send-btn.stopping:hover {
     color: #fff;
     background: linear-gradient(135deg, #8b5cf6, #a78bfa);
-    animation-play-state: paused;
-  }
-  @keyframes stop-pulse {
-    0%   { box-shadow: 0 0 0 0   rgba(139, 92, 246, 0.55); }
-    70%  { box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); }
-    100% { box-shadow: 0 0 0 0   rgba(139, 92, 246, 0); }
   }
   /* Inline permission strip — sits right above the input. */
   .perm-strip {
@@ -1127,6 +1200,244 @@
   .tag.project   { background: rgba(74,222,128,0.10); color: var(--ok); }
   .tag.reference { background: rgba(192,132,252,0.10); color: var(--tool); }
   .tag.other     { background: var(--bg-3); color: var(--fg-faint); }
+  /* Memory list row gets a left-border stripe matching its type. Makes
+     scanning the Memory tab a glance instead of a read — pick out
+     "all the user-facts" or "all the project-facts" by color band. */
+  .item[data-mem-type="user"]      { border-left: 3px solid var(--info); }
+  .item[data-mem-type="feedback"]  { border-left: 3px solid var(--accent-2); }
+  .item[data-mem-type="project"]   { border-left: 3px solid var(--ok); }
+  .item[data-mem-type="reference"] { border-left: 3px solid var(--tool); }
+  .item[data-mem-type="other"]     { border-left: 3px solid var(--fg-faint); }
+
+  /* Memory view-mode toggle (List vs Tree). Sits in the view-head row. */
+  .mem-view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-right: 8px;
+  }
+  .mem-view-btn {
+    background: var(--bg-2);
+    color: var(--fg-dim);
+    border: 0;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+  }
+  .mem-view-btn:hover { color: var(--fg); background: var(--bg-3); }
+  .mem-view-btn.active { background: var(--accent-bg); color: var(--accent-2); }
+
+  /* Tree pane: collapsible group per type → sub-category → fact rows.
+     Each group header has a count badge + a colored bar matching its
+     parent type's stripe color. Clicking the header collapses the group. */
+  .tree-pane {
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+  .tree-type {
+    margin-bottom: 14px;
+  }
+  .tree-type-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 16px;
+    cursor: pointer;
+    font-size: 13px; font-weight: 600;
+    color: var(--fg-dim);
+    text-transform: lowercase;
+    letter-spacing: 0.3px;
+    user-select: none;
+  }
+  .tree-type-head:hover { color: var(--fg); }
+  .tree-type-chev {
+    width: 12px; height: 12px;
+    transition: transform 0.15s;
+    /* SVG draws `>` (chevron-right). EXPANDED = rotate 90° → `▼` points
+       down (under what it expanded). COLLAPSED = no rotation → `▶` points
+       right (the thing to click to open). Matches every file tree ever. */
+    transform: rotate(90deg);
+  }
+  .tree-type.collapsed .tree-type-chev { transform: rotate(0deg); }
+  .tree-type.collapsed .tree-type-body { display: none; }
+  .tree-type-count {
+    margin-left: auto;
+    font-size: 11px; font-weight: 400;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .tree-type[data-type="user"] .tree-type-bar      { background: var(--info); }
+  .tree-type[data-type="feedback"] .tree-type-bar  { background: var(--accent-2); }
+  .tree-type[data-type="project"] .tree-type-bar   { background: var(--ok); }
+  .tree-type[data-type="reference"] .tree-type-bar { background: var(--tool); }
+  .tree-type[data-type="other"] .tree-type-bar     { background: var(--fg-faint); }
+  .tree-type-bar {
+    width: 4px; height: 14px; border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .tree-type-body {
+    padding-left: 24px;
+  }
+  .tree-sub {
+    margin-top: 6px;
+  }
+  .tree-sub-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 16px;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--fg-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    user-select: none;
+  }
+  .tree-sub-head:hover { color: var(--fg-dim); }
+  .tree-sub-chev {
+    width: 10px; height: 10px;
+    transition: transform 0.15s;
+    opacity: 0.6;
+    /* Same convention as tree-type-chev — expanded points down, collapsed right. */
+    transform: rotate(90deg);
+  }
+  .tree-sub.collapsed .tree-sub-chev { transform: rotate(0deg); }
+  .tree-sub.collapsed .tree-sub-body { display: none; }
+  .tree-sub-count {
+    margin-left: 6px;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .tree-leaf {
+    display: flex; align-items: center;
+    padding: 6px 16px 6px 28px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--fg-dim);
+    border-left: 2px solid transparent;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+  .tree-leaf:hover {
+    background: var(--bg-2);
+    color: var(--fg);
+    border-left-color: var(--accent-line);
+  }
+  .tree-leaf-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-leaf-desc {
+    color: var(--fg-faint);
+    font-size: 11px;
+    margin-left: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 50%;
+  }
+
+  /* Memory graph constellation — D3 force-directed render.
+     Dark backdrop, nodes glow violet (with their cluster's hue tint),
+     edges are thin radial fades between sibling memories, hover surfaces
+     the fact body in a floating tip. Looks like a star map of your mind. */
+  .graph-pane {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 200px);
+    min-height: 480px;
+    background:
+      radial-gradient(ellipse at center, #14102a 0%, #0a0814 70%, #050410 100%);
+    overflow: hidden;
+    border-radius: 8px;
+    margin: 0 16px;
+  }
+  #mem-graph-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+  }
+  #mem-graph-svg:active { cursor: grabbing; }
+  .graph-help {
+    position: absolute;
+    bottom: 8px;
+    right: 12px;
+    font-size: 10px;
+    color: var(--fg-faint);
+    background: rgba(12, 10, 20, 0.7);
+    padding: 3px 8px;
+    border-radius: 999px;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+  }
+  /* Tooltip — floats next to whichever node the user is hovering. */
+  .graph-tip {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(20, 16, 42, 0.95);
+    border: 1px solid var(--accent-line);
+    border-radius: 6px;
+    padding: 8px 12px;
+    max-width: 320px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 12px rgba(139, 92, 246, 0.3);
+    z-index: 10;
+    font-size: 12px;
+  }
+  .graph-tip .tip-name {
+    color: var(--accent-2);
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .graph-tip .tip-meta {
+    color: var(--fg-faint);
+    font-size: 10px;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .graph-tip .tip-desc {
+    color: var(--fg-dim);
+    line-height: 1.4;
+  }
+  /* D3 element-level styling — applied via attribute, not class */
+  .graph-edge {
+    stroke: rgba(139, 92, 246, 0.18);
+    stroke-width: 1;
+    pointer-events: none;
+    transition: stroke 0.2s, stroke-width 0.2s;
+  }
+  .graph-edge.highlighted {
+    stroke: rgba(167, 139, 250, 0.7);
+    stroke-width: 2;
+  }
+  .graph-node {
+    cursor: pointer;
+    transition: transform 0.15s, filter 0.15s;
+  }
+  .graph-node:hover { filter: brightness(1.4) drop-shadow(0 0 8px currentColor); }
+  .graph-node-label {
+    fill: rgba(233, 224, 255, 0.65);
+    font-size: 9px;
+    font-family: ui-monospace, "Cascadia Code", monospace;
+    pointer-events: none;
+    text-anchor: middle;
+    text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+  }
+  /* Per-type color (matches the list view stripes + tree view bars) */
+  .graph-node[data-type="user"]      { color: #38bdf8; }
+  .graph-node[data-type="project"]   { color: #4ade80; }
+  .graph-node[data-type="reference"] { color: #c084fc; }
+  .graph-node[data-type="feedback"]  { color: #a78bfa; }
+  .graph-node[data-type="other"]     { color: #9ca3af; }
+  /* Search highlighting — matched nodes pulse and glow, neighbors stay
+     readable, everything else dims so the connections leap out. */
+  .graph-node.matched circle:first-child {
+    r: 8;
+    filter: drop-shadow(0 0 12px currentColor) drop-shadow(0 0 4px currentColor);
+  }
+  .graph-node.matched .graph-node-label {
+    fill: rgba(255, 255, 255, 0.95);
+    font-weight: 600;
+    font-size: 11px;
+  }
+  .graph-node.neighbor { opacity: 0.85; }
+  .graph-node.neighbor .graph-node-label { fill: rgba(233, 224, 255, 0.85); }
+  .graph-node.dim { opacity: 0.18; }
+  .graph-node.dim .graph-node-label { opacity: 0.3; }
+  .graph-edge.dim { stroke: rgba(139, 92, 246, 0.05); }
   .item .body { flex: 1; min-width: 0; }
   .item .name { color: var(--fg); font-weight: 500; font-size: 13px; }
   .item .desc {
@@ -1340,11 +1651,22 @@
     border-bottom: 1px solid var(--border);
     gap: 16px;
   }
-  .field .label { flex: 1; }
+  .field .label { flex: 1; min-width: 0; }   /* min-width:0 prevents the label from being squished by a wide right column */
   .field .label .name { color: var(--fg); font-weight: 500; }
   .field .label .hint {
     font-size: 11px; color: var(--fg-faint); margin-top: 3px;
     line-height: 1.45;
+  }
+  /* Cap the right-column control widths so a long select option doesn't
+     squish the label column. Selects + inputs in Settings get a max width.
+     The install-hint text inside <option> still shows on hover/focus. */
+  .field > select,
+  .field > input[type="text"],
+  .field > input[type="password"],
+  .field > input[type="range"] {
+    max-width: 320px;
+    min-width: 200px;
+    width: auto;
   }
   .switch {
     position: relative;
@@ -1485,6 +1807,287 @@
   .dot-strip.wave .d:nth-child(8) { animation-delay: 0.49s; }
   .dot-strip.wave .d:nth-child(9) { animation-delay: 0.56s; }
   .dot-strip.wave .d:nth-child(10){ animation-delay: 0.63s; }
+  /* Range slider — re-skinned to the violet UI palette. Browser default
+     (blue track + white thumb on Windows) was off-palette per user feedback. */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+    border-radius: 3px;
+    outline: none;
+    padding: 0;
+    margin: 0;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--fg);
+    border: 2px solid var(--accent-2);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 6px rgba(139, 92, 246, 0.5);
+    transition: transform 0.1s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: var(--fg);
+    border: 2px solid var(--accent-2);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 6px rgba(139, 92, 246, 0.5);
+  }
+  input[type="range"]::-moz-range-track {
+    height: 6px;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+    border-radius: 3px;
+  }
+
+  /* Keyboard shortcut chip — proper key-cap look matching the violet UI. */
+  kbd {
+    display: inline-block;
+    background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
+    border: 1px solid var(--accent-line);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 10.5px;
+    font-family: ui-monospace, "Cascadia Code", monospace;
+    font-weight: 600;
+    color: var(--accent-2);
+    line-height: 1;
+    min-width: 18px;
+    text-align: center;
+  }
+  /* Grid layout: two columns — chip stack on left, plain description right. */
+  .kbd-grid {
+    display: grid;
+    grid-template-columns: minmax(120px, max-content) 1fr;
+    gap: 6px 16px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 14px 18px;
+    margin-top: 6px;
+  }
+  .kbd-row { display: contents; }
+  .kbd-keys { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .kbd-plus { color: var(--fg-faint); font-size: 10px; }
+  .kbd-desc { color: var(--fg-dim); font-size: 12px; align-self: center; }
+  /* Generated-media display: image / video + a toolbar with Open + Reveal-in-folder.
+     Click image = open in new tab (full size). Double-click image OR click
+     the Reveal button = open the OS file explorer with the file selected. */
+  .gen-media-wrap {
+    margin-top: 6px;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .gen-media-img {
+    max-width: 480px;
+    max-height: 480px;
+    border-radius: 8px;
+    display: block;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .gen-media-img:hover {
+    box-shadow: 0 0 16px rgba(139, 92, 246, 0.4);
+  }
+  /* Video uses native HTML5 controls (play/pause/seek/volume/fullscreen
+     come for free). Same size constraints as image. */
+  .gen-media-vid {
+    max-width: 480px;
+    max-height: 480px;
+    border-radius: 8px;
+    display: block;
+    background: #000;
+  }
+
+  /* Lightbox overlay — full-screen, dark backdrop with violet glow, click
+     background or press Esc to close. Shared by image and video media. */
+  .lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 6, 16, 0.92);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    padding: 40px;
+  }
+  .lightbox.open { display: flex; }
+  .lightbox-content {
+    max-width: 95vw;
+    max-height: 85vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .lightbox-content img,
+  .lightbox-content video {
+    max-width: 100%;
+    max-height: 85vh;
+    width: auto;
+    height: auto;
+    border-radius: 8px;
+    box-shadow: 0 0 60px rgba(139, 92, 246, 0.35), 0 0 120px rgba(139, 92, 246, 0.15);
+  }
+  .lightbox-close {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(20, 16, 42, 0.8);
+    border: 1px solid var(--accent-line);
+    color: var(--fg);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s;
+  }
+  .lightbox-close:hover {
+    background: var(--accent-bg);
+    transform: scale(1.1);
+  }
+  .lightbox-caption {
+    margin-top: 16px;
+    color: var(--fg-faint);
+    font-size: 11px;
+    font-family: ui-monospace, "Cascadia Code", monospace;
+    max-width: 80vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .gen-media-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--fg-faint);
+  }
+  .gen-media-btn {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--fg-dim);
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+  .gen-media-btn:hover {
+    background: var(--bg-3);
+    color: var(--accent-2);
+    border-color: var(--accent-line);
+  }
+  .gen-media-path {
+    margin-left: auto;
+    font-family: ui-monospace, "Cascadia Code", monospace;
+    font-size: 10px;
+    color: var(--fg-faint);
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Image/video generation placeholder — violet noise canvas that "cooks"
+     while we wait for the cloud provider to return the finished image.
+     Pure CSS so there's nothing to load. Layered radial gradients that
+     drift in opposite directions give the illusion of churning particles.
+     Tip text overlays in the center with a soft drop-shadow so it stays
+     legible against any phase of the animation. */
+  .gen-placeholder {
+    position: relative;
+    width: 100%;
+    max-width: 360px;
+    aspect-ratio: 1 / 1;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #0c0a14;
+    border: 1px solid var(--accent-line);
+    box-shadow: 0 0 24px rgba(139, 92, 246, 0.25), inset 0 0 32px rgba(139, 92, 246, 0.18);
+    margin: 6px 0;
+  }
+  .gen-noise {
+    position: absolute;
+    inset: -25%;
+    background:
+      radial-gradient(circle at 25% 30%, rgba(167, 139, 250, 0.55) 0%, transparent 28%),
+      radial-gradient(circle at 75% 60%, rgba(139, 92, 246, 0.50) 0%, transparent 32%),
+      radial-gradient(circle at 50% 80%, rgba(196, 181, 253, 0.40) 0%, transparent 26%),
+      radial-gradient(circle at 80% 20%, rgba(124, 58, 237, 0.45) 0%, transparent 30%),
+      radial-gradient(circle at 15% 75%, rgba(167, 139, 250, 0.35) 0%, transparent 24%),
+      linear-gradient(135deg, #1a1530 0%, #0c0a14 50%, #1f1838 100%);
+    filter: blur(8px);
+    animation: gen-drift 9s ease-in-out infinite alternate;
+  }
+  .gen-placeholder::after {
+    /* Static violet scrim — keeps the colors saturated even when the gradients
+       drift to the edges of the visible area. */
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 50%, transparent 40%, rgba(12, 10, 20, 0.55) 100%);
+    pointer-events: none;
+  }
+  .gen-tip {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #e9e0ff;
+    font-size: 13px;
+    font-weight: 500;
+    font-style: italic;
+    text-shadow: 0 0 8px rgba(0, 0, 0, 0.8), 0 0 12px rgba(139, 92, 246, 0.5);
+    padding: 0 20px;
+    text-align: center;
+    z-index: 1;
+    transition: opacity 0.4s;
+  }
+  @keyframes gen-drift {
+    0%   { transform: translate(0, 0)     rotate(0deg)   scale(1.05); }
+    33%  { transform: translate(8%, -6%)  rotate(8deg)   scale(1.12); }
+    66%  { transform: translate(-6%, 8%)  rotate(-6deg)  scale(1.08); }
+    100% { transform: translate(4%, 4%)   rotate(4deg)   scale(1.10); }
+  }
+
+  /* Subtle 3-dot bounce while the model is generating. Calm, not eye-sore.
+     Sits in the empty assistant bubble; overwritten on first content chunk. */
+  .dot-bounce {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    padding: 8px 2px;
+  }
+  .dot-bounce span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--fg-faint);
+    animation: dot-bounce 1.0s ease-in-out infinite;
+  }
+  .dot-bounce span:nth-child(2) { animation-delay: 0.15s; }
+  .dot-bounce span:nth-child(3) { animation-delay: 0.30s; }
+  @keyframes dot-bounce {
+    0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+    40%           { opacity: 1.0; transform: translateY(-3px); }
+  }
+
+  /* Legacy 12-cube grid — kept for any other consumers but no longer used
+     by the chat path. Safe to delete later if nothing else references it. */
   /* Chat-mode "thinking" indicator - a horizontal dot-grid wave that lives
      inside the empty assistant bubble until the first content chunk arrives. */
   .thinking-grid {
@@ -1844,7 +2447,7 @@
     <div class="brand">
       <div class="brand-mark" id="brand-mark">H</div>
       <span>Hearth</span>
-      <span class="brand-sub">· local</span>
+      <span class="brand-sub" id="brand-sub">· local</span>
     </div>
 
     <div class="model-picker" title="LM Studio model">
@@ -1920,6 +2523,14 @@
            is now clean by default. Functions referencing it are kept as no-ops
            for backward compat (showWelcomeCard / hideWelcomeCard). -->
       <div class="welcome-card" id="welcome-card" hidden></div>
+      <!-- Chat header retired — user found it aesthetically distracting.
+           Chat title stays visible in the sidebar (highlighted active chat),
+           so the "which thread am I in" signal is preserved without the bar. -->
+      <div class="chat-header" id="chat-header" hidden style="display:none;">
+        <span class="chat-header-icon">💬</span>
+        <span class="chat-header-title" id="chat-header-title">—</span>
+        <span class="chat-header-meta" id="chat-header-meta"></span>
+      </div>
       <div class="chat-body" id="chat-body"></div>
 
       <!-- Inline permission strip — appears above the input when Jarvis wants
@@ -1962,6 +2573,13 @@
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z"/></svg>
           think
         </button>
+        <!-- Context-usage ring. Inline next to controls instead of a detached
+             pill above. Conic-gradient fills as ctx fills; percent in center;
+             tooltip shows raw used/budget. Hidden until first context_state event. -->
+        <div id="ctx-ring-wrap" class="ctx-ring-wrap" title="" hidden>
+          <div id="ctx-ring" class="ctx-ring"></div>
+          <div id="ctx-ring-pct" class="ctx-ring-pct">0%</div>
+        </div>
         <button class="mic-btn" id="btn-mic" title="Hold to talk (Whisper STT)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/><path d="M8 23h8"/></svg>
         </button>
@@ -1970,7 +2588,7 @@
         </button>
         <input type="file" id="file-input" multiple hidden>
         <div class="grow">
-          <textarea id="input" rows="1" placeholder="Talk to Jarvis…  (Enter to send, Shift+Enter for newline)"></textarea>
+          <textarea id="input" rows="1" placeholder="Talk to Jarvis…"></textarea>
         </div>
         <button class="send-btn" id="btn-send" title="Send (Enter)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
@@ -1982,11 +2600,26 @@
     <section class="view" id="view-memory">
       <div class="view-head">
         <h2>Memory</h2>
-        <span class="sub">facts Jarvis remembers across sessions</span>
+        <span class="sub" id="mem-sub">facts Jarvis remembers across sessions</span>
         <div class="grow"></div>
+        <!-- View-mode toggle: List (flat search) vs Tree (grouped by sub-category).
+             Tree view is the v0.6 hero — same data, hierarchical render. -->
+        <!-- Order: Graph first (the hero view), then Tree, then List. -->
+        <div class="mem-view-toggle">
+          <button class="mem-view-btn active" data-mem-view="graph" title="Force-directed constellation graph">Graph</button>
+          <button class="mem-view-btn" data-mem-view="tree" title="Grouped by sub-category">Tree</button>
+          <button class="mem-view-btn" data-mem-view="list" title="Flat searchable list">List</button>
+        </div>
         <input type="text" id="mem-search" placeholder="Search…">
       </div>
-      <div class="list-pane" id="mem-list"></div>
+      <!-- Graph default-visible; List/Tree start hidden. Matches the toggle. -->
+      <div class="list-pane" id="mem-list" hidden></div>
+      <div class="tree-pane" id="mem-tree" hidden></div>
+      <div class="graph-pane" id="mem-graph">
+        <svg id="mem-graph-svg" preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="mem-graph-tip" class="graph-tip" hidden></div>
+        <div class="graph-help">drag nodes · hover for fact · click to open</div>
+      </div>
     </section>
 
     <!-- FILES -->
@@ -2090,7 +2723,11 @@
           </button>
           <button class="settings-side-btn" data-st="server">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-            <span>Server</span>
+            <span>Built-in server</span>
+          </button>
+          <button class="settings-side-btn" data-st="mcp">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/><polyline points="22 4 12 14.01 9 11.01"/><path d="M2 12h6"/><path d="M16 12h6"/></svg>
+            <span>MCP servers</span>
           </button>
           <button class="settings-side-btn" data-st="about">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
@@ -2131,13 +2768,14 @@
           </div>
           <input type="password" id="setting-llm-key" placeholder="paste your key here" style="min-width:260px"/>
         </div>
-        <div class="field" id="brain-model-field" hidden>
-          <div class="label">
-            <div class="name">Model name</div>
-            <div class="hint" id="brain-model-hint">For Gemini try <code>gemini-2.5-flash</code>. For OpenAI try <code>gpt-4o-mini</code>.</div>
-          </div>
-          <input type="text" id="setting-llm-model" placeholder="e.g. gemini-2.5-flash" style="min-width:260px"/>
-        </div>
+        <!-- Model picker retired from Settings — was causing source-of-truth
+             confusion (Settings said grok-4.3 while topbar showed grok-4.20-...).
+             The topbar dropdown is the single source: it queries the live
+             provider /v1/models and persists the pick. Settings is now just
+             "where to connect" (provider + URL + key); "which model" is one
+             click in the topbar. Kept the hidden element for backward-compat
+             with JS that still reads its value. -->
+        <input type="hidden" id="setting-llm-model" value=""/>
         <div class="field" id="brain-custom-url" hidden>
           <div class="label">
             <div class="name">Custom URL</div>
@@ -2186,9 +2824,19 @@
           </div>
           <select id="setting-tts-device">
             <option value="cpu">CPU (recommended)</option>
-            <option value="cuda">GPU (CUDA)</option>
-            <option value="dml">GPU (DirectML)</option>
+            <option value="cuda" data-needs="onnxruntime-gpu">GPU (CUDA)</option>
+            <option value="dml" data-needs="onnxruntime-directml">GPU (DirectML)</option>
           </select>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Voice speed</div>
+            <div class="hint">1.5 is the new default — faster, less monotone. Slide higher if you want it snappier; lower if it's too quick to follow.</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px; min-width:240px;">
+            <input id="setting-voice-speed" type="range" min="0.5" max="2.5" step="0.1" value="1.5" style="flex:1;">
+            <span id="setting-voice-speed-label" style="min-width:36px; text-align:right; font-variant-numeric:tabular-nums; opacity:0.8;">1.5x</span>
+          </div>
         </div>
         <div class="field">
           <div class="label">
@@ -2217,6 +2865,25 @@
 
         <div class="settings-pane" data-st="behavior" hidden>
         <h3>Behavior</h3>
+
+        <!-- Agent identity: name + (later) personality. Renaming is a real
+             event — drives the chat avatar letter, the message label,
+             persona prompt, AND the workspace folder. Two-step process:
+             quick rename (instant, persona + avatar) and full rename
+             (slow, also moves ~/Jarvis → ~/<NewName>). -->
+        <div class="field">
+          <div class="label">
+            <div class="name">Agent name</div>
+            <div class="hint">What do you want to call me? Shows up everywhere — chat avatar, persona signature, workspace folder. Letters/digits/spaces only, 1-20 chars. Default: JARVIS.</div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
+            <input type="text" id="setting-agent-name" maxlength="20" pattern="[A-Za-z0-9 ]+" style="flex:1; min-width:160px;"/>
+            <button type="button" class="btn-mini" id="btn-agent-rename" title="Apply name + rename workspace folder (~10s, restarts tray)">
+              Rename
+            </button>
+          </div>
+        </div>
+
         <div class="field">
           <div class="label">
             <div class="name">Show reasoning by default</div>
@@ -2230,6 +2897,75 @@
             <div class="hint">Always-do / never-do rules live in <code>~/Jarvis/rules.md</code> and are re-read every turn. Edit freely, no restart.</div>
           </div>
           <button class="btn-mini" id="btn-edit-rules">Open rules.md</button>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Forge / SD-WebUI folder</div>
+            <div class="hint">
+              For LOCAL image gen via Stable Diffusion. Point at your sd-webui-forge install
+              (the folder with <code>webui.bat</code> + <code>modules/</code>). Auto-detected if
+              installed in a common location; otherwise paste the full path.
+              <span id="forge-detect-hint" style="color:var(--fg-faint)">scanning…</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
+            <input type="text" id="setting-forge-dir" placeholder="e.g. D:\AI\sd-webui-forge" style="flex:1; min-width:220px;"/>
+            <button type="button" class="btn-mini" id="btn-forge-detect" title="Re-scan common install paths">Detect</button>
+          </div>
+        </div>
+
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">Reminders</div>
+            <div class="hint">
+              Set via chat: <i>"remind me to leave in 30 min"</i> or
+              <i>"every Monday 9am, run web_search on new GPU benchmarks"</i>.
+              Action reminders run a tool when they fire (not just a toast).
+              Missed reminders catch up on next launch.
+            </div>
+          </div>
+          <div id="reminders-box" style="min-width:300px;flex:1;padding:10px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--fg-dim);max-height:340px;overflow-y:auto;">
+            loading reminders…
+          </div>
+        </div>
+
+        <!-- Toast quiet-mode: user-controlled noise level for popups -->
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Toasts</h4>
+        <div class="field">
+          <div class="label">
+            <div class="name">"Remembered N facts" toast</div>
+            <div class="hint">Pops up when Hearth auto-extracts durable facts at end of a turn. Off = silent saves; check the Memory tab to see what landed.</div>
+          </div>
+          <div class="switch" data-key="toast_facts_saved"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">"Context compacted" toast</div>
+            <div class="hint">Brief pop when compaction shrinks your context. The ring next to the input already changes color — toast is extra.</div>
+          </div>
+          <div class="switch" data-key="toast_compacted"></div>
+        </div>
+
+        <!-- Keep-warm toggle for /brain cloud switches -->
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Local server</h4>
+        <div class="field">
+          <div class="label">
+            <div class="name">Keep local model loaded when switching to cloud</div>
+            <div class="hint">Off (default) = free the 5+ GB VRAM when you go to Grok/Gemini. On = leave it warm so swapping back is instant (~10s reload tax saved). Recommended off on 8 GB VRAM cards.</div>
+          </div>
+          <div class="switch" data-key="keep_local_warm"></div>
+        </div>
+
+        <!-- Keyboard shortcuts cheatsheet — grid table of shortcut chips. -->
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Keyboard shortcuts</h4>
+        <div class="kbd-grid">
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>6</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>N</kbd></div><div class="kbd-desc">new chat</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>L</kbd></div><div class="kbd-desc">focus chat input</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>K</kbd></div><div class="kbd-desc">focus model picker</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Esc</kbd></div><div class="kbd-desc">stop generation</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Enter</kbd></div><div class="kbd-desc">send message</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Shift</kbd><span class="kbd-plus">+</span><kbd>Enter</kbd></div><div class="kbd-desc">newline in input</div></div>
         </div>
 
         </div><!-- /pane behavior -->
@@ -2269,7 +3005,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Auto-boot last model on launch</div>
-            <div class="hint">When you start Hearth, automatically load the model you used last. Saves the 15-30s "wait for me to click Use this" beat.</div>
+            <div class="hint">When you start Hearth, automatically load the last <strong>local GGUF</strong> you used into the built-in server. Saves the 15-30s "wait for me to click Use this" beat. Does NOT affect cloud brains (Grok / Gemini / OpenAI) — those just need the API key.</div>
           </div>
           <div class="switch" data-key="server_autoboot"></div>
         </div>
@@ -2280,11 +3016,11 @@
             <div class="hint">Used for newly loaded models that don't have a saved config yet. Higher = more memory headroom but more KV cache VRAM.</div>
           </div>
           <select id="setting-server-ctx">
-            <option value="2048">2K</option>
-            <option value="4096">4K</option>
-            <option value="8192" selected>8K (recommended)</option>
-            <option value="16384">16K</option>
-            <option value="32768">32K</option>
+            <option value="8192">8K (too small)</option>
+            <option value="16384">16K (tight — no headroom for long chats)</option>
+            <option value="24576" selected>24K (recommended)</option>
+            <option value="32768">32K (comfortable)</option>
+            <option value="65536">64K (uses noticeably more KV-cache VRAM)</option>
           </select>
         </div>
 
@@ -2311,10 +3047,58 @@
         </div>
 
         <div class="hint" style="margin-top:18px; color:var(--fg-faint)">
-          Port / idle changes take effect on the next server start. Restart the server above to apply now.
+          Default context / port / idle changes apply on the next server start. Hit Restart above to act on the new value now.
         </div>
 
         </div><!-- /pane server -->
+
+        <div class="settings-pane" data-st="mcp" hidden>
+        <h3>MCP servers</h3>
+        <p style="color:var(--fg-dim);font-size:13px;line-height:1.55;margin:0 0 18px 0">
+          Hearth speaks the <b>Model Context Protocol</b> — Anthropic's standard for letting one
+          AI client talk to many tool servers. <b>Hearth itself is an MCP server</b> (point LM Studio
+          or Claude Desktop at <code>hearth/mcp_server.py</code> to use Hearth's tools elsewhere).
+          And below, you can wire <em>other</em> MCP servers <em>into</em> Hearth so their tools
+          show up alongside the built-in 64.
+        </p>
+
+        <div class="field">
+          <div class="label">
+            <div class="name">Outbound — Hearth as a CLIENT</div>
+            <div class="hint">
+              Paste a standard mcp.json config. Each server runs as a subprocess; its tools join the
+              Hearth tool list and are usable by every chat brain (local / cloud). Restart Hearth
+              after editing — bridge spin-up happens at launch.
+            </div>
+          </div>
+          <button class="btn-mini" id="btn-mcp-edit" style="min-width:140px;">Edit mcp.json</button>
+        </div>
+
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">Active MCP bridges</div>
+            <div class="hint">
+              Live list of MCP servers Hearth has connected to. Each row shows the server name,
+              transport (stdio / sse), and how many tools it contributed. Errors surface here so a
+              broken config is visible instead of silently dropped.
+            </div>
+          </div>
+          <div id="mcp-status-box" style="min-width:260px;flex:1;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:12px;color:var(--fg-dim);">
+            no bridges configured yet
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="label">
+            <div class="name">Inbound — Hearth as a SERVER</div>
+            <div class="hint">
+              Other MCP clients (LM Studio chat UI, Claude Desktop, Cursor, your own scripts) can
+              call into Hearth's 64 tools. The snippet below goes in their mcp.json.
+            </div>
+          </div>
+          <button class="btn-mini" id="btn-mcp-snippet" style="min-width:140px;">Show config</button>
+        </div>
+        </div><!-- /pane mcp -->
 
         <div class="settings-pane" data-st="about" hidden>
         <h3>About</h3>
@@ -2504,6 +3288,36 @@
           </button>
         </div>
         <div class="ob-status-row" id="ob-voice-status"><span class="ob-dot"></span><span>checking voice…</span></div>
+
+        <!-- Voice picker — revealed only after the user picks "Yes". A small
+             curated set (6 Jarvis-leaning picks out of Kokoro's 54); the full
+             list stays in Settings → Voice. Speed defaults to 1.5x because
+             1.0 sounds like a turtle for daily-driver pace. The Test button
+             actually speaks the chosen voice/speed combo so the user hears
+             it BEFORE committing — no surprises post-onboarding. -->
+        <div id="ob-voice-picker" hidden style="margin-top:18px; padding:14px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r);">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:end;">
+            <div>
+              <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Voice</label>
+              <select id="ob-voice-name" style="width:100%;">
+                <option value="am_michael">am_michael — American, calm Jarvis baseline</option>
+                <option value="bm_george">bm_george — British, deep, formal butler</option>
+                <option value="bm_fable">bm_fable — British, warmer, conversational</option>
+                <option value="am_fenrir">am_fenrir — American, gravelly, low</option>
+                <option value="am_onyx">am_onyx — American, smooth deep</option>
+                <option value="bm_daniel">bm_daniel — British, crisp, professional</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Speed <span id="ob-voice-speed-label" style="opacity:0.7; margin-left:4px;">1.5x</span></label>
+              <input id="ob-voice-speed" type="range" min="0.8" max="2.2" step="0.1" value="1.5" style="width:100%;">
+            </div>
+          </div>
+          <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+            <button type="button" id="ob-voice-test" class="ob-choice" style="padding:8px 14px; font-size:12px;">▶ Test voice</button>
+            <span id="ob-voice-test-msg" style="font-size:11px; color:var(--fg-faint);">Hear it before you commit.</span>
+          </div>
+        </div>
       </div>
 
       <!-- ---- step 5: personalize ---- -->
@@ -2521,6 +3335,14 @@
         <div class="ob-section">
           <div class="ob-label">What should I call you?</div>
           <input type="text" id="ob-name" class="ob-input" placeholder="e.g. Ishant, Sam, whatever you like">
+        </div>
+        <div class="ob-section">
+          <div class="ob-label">What should you call me?</div>
+          <input type="text" id="ob-agent-name" class="ob-input" maxlength="20" pattern="[A-Za-z0-9 ]+"
+                 placeholder="JARVIS (default) — try Cortana, Friday, Athena, anything">
+          <div style="font-size:11px;color:var(--fg-faint);margin-top:4px">
+            Sets the chat avatar letter, persona signature, and workspace folder name (~/&lt;NewName&gt;/). Letters/digits/spaces, 1-20 chars.
+          </div>
         </div>
         <div class="ob-section">
           <div class="ob-label">How should I sound?</div>
@@ -2594,6 +3416,10 @@
   <div class="voice-bottom-text">Esc to exit · type any time, your keyboard still works</div>
 </div>
 
+<!-- D3 v7 — vendored for the Memory tab's force-directed constellation
+     graph. Loaded as a separate <script> tag (not inlined) so the browser
+     can cache the 273 KB across page reloads. MIT license. -->
+<script src="/assets/d3.v7.min.js"></script>
 <script>
 'use strict';
 
@@ -3001,7 +3827,7 @@ async function persistConvo(c) {
 function newConversation() {
   const c = { id: uuid(), title: 'New chat', messages: [], created: Date.now(), updated: Date.now() };
   STATE.conversations.unshift(c);
-  STATE.activeId = c.id;
+  setActiveId(c.id);
   persistConvo(c);
   renderConvoList();
   renderChat();
@@ -3021,7 +3847,7 @@ async function deleteConversation(id) {
     await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
   } catch {}
   if (STATE.activeId === id) {
-    STATE.activeId = STATE.conversations[0]?.id || null;
+    setActiveId(STATE.conversations[0]?.id || null);
     if (!STATE.activeId) newConversation();
   }
   renderConvoList(); renderChat();
@@ -3054,6 +3880,9 @@ function renderConvoList() {
 function renderConvoRow(c) {
   const div = document.createElement('div');
   div.className = 'convo' + (c.id === STATE.activeId ? ' active' : '');
+  // data-cid: lets generateTitle's animator find this specific row after
+  // the auto-title arrives, so the swap typewrites instead of jump-cuts.
+  div.setAttribute('data-cid', c.id);
   div.innerHTML = `
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.6">
       <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
@@ -3070,7 +3899,7 @@ function renderConvoRow(c) {
   `;
   div.addEventListener('click', e => {
     if (e.target.closest('.convo-actions')) return;
-    STATE.activeId = c.id; renderConvoList(); renderChat(); showView('chat');
+    setActiveId(c.id); renderConvoList(); renderChat(); showView('chat');
   });
   div.querySelector('.rename').addEventListener('click', e => {
     e.stopPropagation();
@@ -3103,10 +3932,48 @@ function renderConvoRow(c) {
 // ============================================================
 // CHAT RENDERING
 // ============================================================
+// Persist activeId across page reloads so the user lands back in the same
+// chat thread instead of whichever was last-touched. The previous behavior
+// (open the most-recently-updated chat) is what caused the "I restarted and
+// it didn't remember MW4" bug — it had silently opened a different thread.
+function setActiveId(id) {
+  STATE.activeId = id || null;
+  try { localStorage.setItem('hearth.activeId', id || ''); } catch {}
+  updateChatHeader();
+}
+
+// Keep the pinned chat-title in the chat header up to date so the user can
+// SEE which thread is active before typing.
+function updateChatHeader() {
+  const hdr = document.getElementById('chat-header');
+  if (!hdr) return;
+  const c = activeConvo();
+  if (!c) { hdr.hidden = true; return; }
+  const titleEl = document.getElementById('chat-header-title');
+  const metaEl  = document.getElementById('chat-header-meta');
+  if (titleEl) titleEl.textContent = c.title || 'Untitled chat';
+  if (metaEl) {
+    const n = (c.messages || []).length;
+    metaEl.textContent = n ? `${n} message${n === 1 ? '' : 's'}` : 'new chat';
+  }
+  hdr.hidden = false;
+}
+
 function renderChat() {
   const body = $('chat-body');
   body.innerHTML = '';
   const c = activeConvo();
+  updateChatHeader();
+  // Hide the ctx ring on every chat switch — it's only meaningful for the
+  // CURRENT chat's pressure. Without this, the ring would carry over a 90%
+  // state from a long previous chat into a fresh empty one (the bug the
+  // user reported as "I see the ring even though I haven't typed anything").
+  // It re-appears on the first context_state event of the next turn.
+  const wrap = document.getElementById('ctx-ring-wrap');
+  if (wrap) {
+    wrap.hidden = true;
+    wrap.classList.remove('hot', 'warn', 'compacting');
+  }
   if (!c) { body.appendChild(emptyState()); return; }
   if (!c.messages.length) { body.appendChild(emptyState()); return; }
   for (const m of c.messages) {
@@ -3135,6 +4002,10 @@ function renderChat() {
             t.body.textContent = ev.result || '';
             if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
             insertUnderAssistant(t.div, msgDiv);
+          } else if (ev.kind === 'media') {
+            // Re-render persisted media block (image or video). Same factory
+            // as the live path so DOM is identical regardless of when it's built.
+            insertUnderAssistant(makeMediaBlock(ev.mediaKind, ev.path), msgDiv);
           } else if (ev.kind === 'nudge') {
             // Internal-only - never shown in chat (see live handler).
           } else if (ev.kind === 'error') {
@@ -3165,13 +4036,26 @@ function emptyState() {
   return wrap;
 }
 
+function _agentName() {
+  // Source of truth for the displayed agent name (avatar letter + label).
+  // Falls back to JARVIS if settings haven't loaded yet — same default the
+  // backend uses, so first render before settings load doesn't flicker.
+  return (STATE.settings && STATE.settings.agent_name) || 'JARVIS';
+}
+function _agentInitial() {
+  const n = _agentName().trim();
+  return (n[0] || 'J').toUpperCase();
+}
+
 function renderMessage(m) {
   const div = document.createElement('div');
   div.className = `msg ${m.role}`;
+  const agentInit = _agentInitial();
+  const agentLabel = _agentName().toLowerCase();
   div.innerHTML = `
-    <div class="role-mark">${m.role === 'user' ? 'U' : 'J'}</div>
+    <div class="role-mark">${m.role === 'user' ? 'U' : esc(agentInit)}</div>
     <div class="body">
-      <div class="role-name">${m.role === 'user' ? 'you' : 'jarvis'}</div>
+      <div class="role-name">${m.role === 'user' ? 'you' : esc(agentLabel)}</div>
       <div class="content"></div>
       ${m.role === 'assistant' ? `
         <div class="actions">
@@ -3249,6 +4133,131 @@ function makeToolCard(name, args) {
   div.querySelector('.t-head').addEventListener('click', () => div.classList.toggle('open'));
   return { div, body: div.querySelector('.t-body'), ms: div.querySelector('.t-ms') };
 }
+function makeMediaBlock(kind, path) {
+  // Standalone media card — sits in the assistant's message stream (NOT
+  // inside the tool card body). Survives re-render because it's keyed off
+  // the assistant message's `events` array, not the live tool element.
+  // - image: click = lightbox enlarge. Toolbar buttons: open, reveal in folder.
+  // - video: native HTML5 controls (play/pause/seek/volume). Toolbar same.
+  const wrap = document.createElement('div');
+  wrap.className = 'gen-media-wrap';
+  const fileUrl = '/file?path=' + encodeURIComponent(path);
+  const fname = path.split(/[\\/]/).pop();
+  if (kind === 'image') {
+    const img = document.createElement('img');
+    img.src = fileUrl;
+    img.className = 'gen-media-img';
+    img.alt = fname;
+    img.title = 'Click to enlarge · double-click to reveal in folder';
+    img.style.cursor = 'zoom-in';
+    img.addEventListener('click', (e) => {
+      e.preventDefault();
+      openLightbox(fileUrl, 'image', path);
+    });
+    img.addEventListener('dblclick', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        await api('/api/file/reveal', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ path }),
+        });
+      } catch (err) { toast('Reveal failed', err.message, 'err'); }
+    });
+    wrap.appendChild(img);
+  } else {
+    const vid = document.createElement('video');
+    vid.src = fileUrl;
+    vid.controls = true;              // native play/pause/volume/seek
+    vid.preload = 'metadata';         // load duration + first frame, not full video
+    vid.className = 'gen-media-vid';
+    vid.title = 'Double-click frame to reveal in folder';
+    vid.addEventListener('dblclick', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/file/reveal', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ path }),
+        });
+      } catch (err) { toast('Reveal failed', err.message, 'err'); }
+    });
+    wrap.appendChild(vid);
+  }
+  // Toolbar: enlarge / reveal / filename. Filename is clickable, opens lightbox.
+  const bar = document.createElement('div');
+  bar.className = 'gen-media-bar';
+  const enlargeLabel = kind === 'image' ? '⛶ enlarge' : '⛶ fullscreen';
+  bar.innerHTML = `
+    <button type="button" class="gen-media-btn" data-enlarge>${enlargeLabel}</button>
+    <button type="button" class="gen-media-btn" data-reveal>📁 reveal in folder</button>
+    <span class="gen-media-path" title="${path}">${fname}</span>
+  `;
+  bar.querySelector('[data-enlarge]').addEventListener('click', () => {
+    openLightbox(fileUrl, kind, path);
+  });
+  bar.querySelector('[data-reveal]').addEventListener('click', async () => {
+    try {
+      await api('/api/file/reveal', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ path }),
+      });
+    } catch (err) { toast('Reveal failed', err.message, 'err'); }
+  });
+  wrap.appendChild(bar);
+  return wrap;
+}
+
+// Lightbox: full-screen overlay with the media at max size, Esc/click-bg/X to close.
+// Shared by images + videos. Built once on first call, reused after that.
+let _lightboxEl = null;
+function openLightbox(fileUrl, kind, path) {
+  if (!_lightboxEl) {
+    _lightboxEl = document.createElement('div');
+    _lightboxEl.className = 'lightbox';
+    _lightboxEl.innerHTML = `
+      <button class="lightbox-close" title="Close (Esc)">×</button>
+      <div class="lightbox-content"></div>
+      <div class="lightbox-caption"></div>
+    `;
+    document.body.appendChild(_lightboxEl);
+    _lightboxEl.querySelector('.lightbox-close').addEventListener('click', closeLightbox);
+    _lightboxEl.addEventListener('click', (e) => {
+      // Close only when clicking the BACKGROUND (not the media itself)
+      if (e.target === _lightboxEl) closeLightbox();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _lightboxEl && _lightboxEl.classList.contains('open')) {
+        closeLightbox();
+      }
+    });
+  }
+  const content = _lightboxEl.querySelector('.lightbox-content');
+  const caption = _lightboxEl.querySelector('.lightbox-caption');
+  content.innerHTML = '';
+  if (kind === 'image') {
+    const img = document.createElement('img');
+    img.src = fileUrl;
+    content.appendChild(img);
+  } else {
+    const vid = document.createElement('video');
+    vid.src = fileUrl;
+    vid.controls = true;
+    vid.autoplay = true;
+    content.appendChild(vid);
+  }
+  caption.textContent = path;
+  _lightboxEl.classList.add('open');
+  document.body.style.overflow = 'hidden';   // lock page scroll while open
+}
+function closeLightbox() {
+  if (!_lightboxEl) return;
+  _lightboxEl.classList.remove('open');
+  document.body.style.overflow = '';
+  // Stop any playing video
+  const v = _lightboxEl.querySelector('video');
+  if (v) { try { v.pause(); } catch {} }
+}
+
 function makeThink(text) {
   // Collapsible thinking block — header click toggles. Active streaming
   // block has class "active" (gets removed on assistant_chunk arrival).
@@ -3412,7 +4421,19 @@ $('model-select').addEventListener('change', async (e) => {
       STATE.loadedModel = prevLoaded || null;
       $('st-model').textContent = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '—';
       setState('idle');
-      toast('Load failed', (r && r.error) || 'unknown', 'err', 7000);
+      // Special case: VRAM refusal (the launch-day freeze guardrail). Give
+      // a longer, friendlier toast so the user knows what to do — generic
+      // "Load failed" isn't actionable for a memory exhaustion error.
+      if (r && r.vram_needed_gb && r.vram_free_gb !== undefined) {
+        toast(
+          `Not enough free VRAM (${r.vram_free_gb} GB free, needs ${r.vram_needed_gb} GB)`,
+          'Close LM Studio or eject its current model, then click Use this again.',
+          'err',
+          15000,
+        );
+      } else {
+        toast('Load failed', (r && r.error) || 'unknown', 'err', 7000);
+      }
     }
   } catch (err) {
     STATE.loadedModel = prevLoaded || null;
@@ -3523,9 +4544,41 @@ function updateStatus() {
         ? `${(ctx/1024).toFixed(0)}K`
         : `${ctx}`;
     }
+  } else if (STATE._ctxBudget && STATE._ctxBudget.total) {
+    // Cloud brain: no loadedModel object (that's local-only), but we DO
+    // have a context budget from /api/context-budget — show that so the
+    // user sees "200K" on Grok instead of a misleading "—" or "8K".
+    const ctx = STATE._ctxBudget.total;
+    $('st-ctx').textContent = (ctx >= 1024)
+      ? `${(ctx/1024).toFixed(0)}K`
+      : `${ctx}`;
   } else {
     $('st-ctx').textContent = '—';
   }
+}
+
+// Fetch the current brain's context window so the ring + bottom bar update
+// the MOMENT the user swaps providers, not on the next chat turn. Called
+// from refreshSettings (provider swap, autoboot pick) + after model load.
+async function refreshCtxBudget() {
+  try {
+    const b = await api('/api/context-budget');
+    if (!b || !b.total) return;
+    STATE._ctxBudget = {
+      total: b.total, tools: b.tools,
+      effective: b.effective, source: b.source,
+    };
+    updateStatus();  // re-render bottom bar with the new ctx
+    // Update the tooltip on the ring so users get the why even without
+    // sending a message yet. The percentage stays at whatever last fired
+    // (no chat = 0%, hidden anyway since shouldShow is gated at >=70%).
+    const wrap = document.getElementById('ctx-ring-wrap');
+    if (wrap) {
+      const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
+      wrap.title = `model context: ${fmt(b.total)} total = ${fmt(b.effective)} effective + ${fmt(b.tools)} tool schemas\n` +
+                   `source: ${b.source}`;
+    }
+  } catch {}
 }
 
 // Status-bar dot strip — wave from center, smooth, only during assistant TTS.
@@ -3701,8 +4754,10 @@ async function send(forced = null, displayAs = null) {
   // Drop the "thinking" dot-grid wave into the empty bubble. It gets overwritten
   // as soon as the first assistant_chunk arrives (liveContent.innerHTML = ...).
   if (liveContent) {
+    // Clean 3-dot bounce instead of the 12-cube wave (was eye-sore per user
+    // feedback). Same DOM shape — overwritten on first assistant_chunk.
     liveContent.innerHTML =
-      '<div class="thinking-grid">' + '<div class="d"></div>'.repeat(12) + '</div>';
+      '<div class="dot-bounce"><span></span><span></span><span></span></div>';
   }
 
   input.value = ''; input.style.height = '42px';
@@ -3808,12 +4863,25 @@ async function send(forced = null, displayAs = null) {
     if (ev.type === 'user') return;
 
     if (ev.type === 'thinking_chunk') {
-      // Streaming delta — reuse the SAME think block, append.
+      // Streaming delta. Resurrect the most-recent think block on this
+      // assistant message (.active OR the last .think we made) so models
+      // that go think→text→think don't render TWO think blocks per turn.
+      // (Was the "double thinking tab" bug the user saw.)
       let thinkBlock = chatBody.querySelector('.think.active');
       if (!thinkBlock) {
-        thinkBlock = makeThink('');
-        thinkBlock.classList.add('active');
-        insertUnderAssistant(thinkBlock, live);
+        // No active block. Is there a recently-closed one we should reopen?
+        const last = chatBody.querySelector('.think:last-of-type');
+        if (last && !last._closedAt) {
+          thinkBlock = last;
+          thinkBlock.classList.add('active');
+        } else {
+          thinkBlock = makeThink('');
+          thinkBlock.classList.add('active');
+          thinkBlock._startedAt = Date.now();
+          insertUnderAssistant(thinkBlock, live);
+        }
+      } else if (!thinkBlock._startedAt) {
+        thinkBlock._startedAt = Date.now();
       }
       const bodySpan = thinkBlock.querySelector('.think-body');
       if (bodySpan) bodySpan.textContent += ev.content || '';
@@ -3821,22 +4889,24 @@ async function send(forced = null, displayAs = null) {
       return;
     }
     if (ev.type === 'thinking') {
-      // Aggregate event fired AFTER all chunks streamed. The backend emits
-      // both — chunks during streaming, then the full aggregate when the
-      // model turn completes. If we APPENDED this on top of the chunks the
-      // thinking block would render the same paragraph twice (which the
-      // user saw). REPLACE the block content instead so the final aggregate
-      // becomes the canonical text. If chunks never streamed (e.g. older
-      // backend that only emits the aggregate), this still populates fine.
+      // Aggregate event fired AFTER all chunks streamed. REPLACE the block
+      // body so the final canonical text wins over any partial stream
+      // (avoids the same paragraph rendering twice).
       let thinkBlock = chatBody.querySelector('.think.active');
       if (!thinkBlock) {
-        thinkBlock = makeThink('');
-        thinkBlock.classList.add('active');
-        insertUnderAssistant(thinkBlock, live);
+        const last = chatBody.querySelector('.think:last-of-type');
+        if (last && !last._closedAt) {
+          thinkBlock = last;
+          thinkBlock.classList.add('active');
+        } else {
+          thinkBlock = makeThink('');
+          thinkBlock.classList.add('active');
+          thinkBlock._startedAt = Date.now();
+          insertUnderAssistant(thinkBlock, live);
+        }
       }
       const bodySpan = thinkBlock.querySelector('.think-body');
       if (bodySpan) bodySpan.textContent = ev.content || '';
-      // Don't push to events again — chunks already populated it.
       return;
     }
 
@@ -3846,6 +4916,41 @@ async function send(forced = null, displayAs = null) {
       assistantMsg.events.push(pendingToolEvent);
       insertUnderAssistant(pendingTool.div, live);
       setState(`calling ${ev.name}…`);
+
+      // Generation placeholder — animated violet noise canvas + rotating
+      // status text overlay. Why this and not "watch the image build":
+      // cloud providers (Grok / OpenAI / Gemini) return the finished image
+      // in ONE shot, no intermediate frames. So instead of faking
+      // progress we just keep the user company with motion that matches
+      // the Hearth palette. Forge could show real diffusion steps in v0.7.
+      if (ev.name === 'generate_image' || ev.name === 'generate_video') {
+        const isVid = ev.name === 'generate_video';
+        const beats = isVid
+          ? ['Sketching the scene…', 'Choreographing motion…', 'Lighting the set…',
+             'Rendering frames…', 'Adding sound design…', 'Polishing the edit…',
+             'Almost there, hang on…']
+          : ['Composing scene…', 'Mixing colors…', 'Adding lighting…',
+             'Refining details…', 'Polishing pixels…', 'Almost done…'];
+        const placeholder = document.createElement('div');
+        placeholder.className = 'gen-placeholder';
+        placeholder.innerHTML = `
+          <div class="gen-noise"></div>
+          <div class="gen-tip">${beats[0]}</div>
+        `;
+        if (pendingTool && pendingTool.body) {
+          pendingTool.body.innerHTML = '';
+          pendingTool.body.appendChild(placeholder);
+        }
+        let idx = 0;
+        const tip = placeholder.querySelector('.gen-tip');
+        const interval = setInterval(() => {
+          idx = (idx + 1) % beats.length;
+          if (tip && tip.isConnected) tip.textContent = beats[idx];
+          else clearInterval(interval);
+        }, 2400);
+        // Stash the interval id so the tool_result handler can stop it.
+        pendingToolEvent._statusInterval = interval;
+      }
       // First-time hints for high-novelty tools.
       if (ev.name === 'browse') {
         maybeHint('first_browse', 'Jarvis is driving a real browser',
@@ -3862,10 +4967,35 @@ async function send(forced = null, displayAs = null) {
 
     if (ev.type === 'tool_result') {
       if (pendingTool) {
-        pendingTool.body.textContent = ev.content || '';
+        // Stop the cycling status text if it was running (image/video gen).
+        if (pendingToolEvent && pendingToolEvent._statusInterval) {
+          clearInterval(pendingToolEvent._statusInterval);
+          pendingToolEvent._statusInterval = null;
+        }
+        const raw = ev.content || '';
+        // Tool card body stays as TEXT — that way re-render after the
+        // turn doesn't nuke any live <img> elements. Media render lives
+        // separately, attached as a `kind: 'media'` event on the assistant
+        // message AND rendered live below the tool card. Survives compact,
+        // survives re-render, survives chat-switch.
+        pendingTool.body.textContent = raw;
+
+        // Detect media markers and surface them as a SEPARATE message-level
+        // event + a live block under the tool card.
+        const mediaRe = /__JARVIS_(IMAGE|VIDEO)__\s+([^\n]+?)(?:\s+\(\d+\s+bytes[^)]*\))?$/gim;
+        for (const m of [...raw.matchAll(mediaRe)]) {
+          const kind = m[1].toLowerCase();
+          const path = m[2].trim();
+          // Persist on the assistant message — re-render-safe.
+          assistantMsg.events.push({ kind: 'media', mediaKind: kind, path });
+          // Live render NOW so the user sees it during the turn too. The
+          // re-render later (renderMessage path) uses the same helper so
+          // both paths produce identical DOM.
+          insertUnderAssistant(makeMediaBlock(kind, path), live);
+        }
         if (ev.ms != null) pendingTool.ms.textContent = `${ev.ms}ms`;
         if (pendingToolEvent) {
-          pendingToolEvent.result = ev.content || '';
+          pendingToolEvent.result = raw;
           pendingToolEvent.ms = ev.ms || 0;
         }
         pendingTool = null;
@@ -3875,11 +5005,20 @@ async function send(forced = null, displayAs = null) {
     }
 
     if (ev.type === 'assistant_chunk') {
-      // First chunk → collapse the active thinking block (it's done)
+      // First chunk → collapse the active thinking block. Stamp "thought for
+      // X seconds" into the head so the user sees what just happened even
+      // when the body is collapsed.
       if (!assistantMsg.content) {
         const activeThink = chatBody.querySelector('.think.active');
         if (activeThink) {
           activeThink.classList.remove('active', 'open');
+          const startedAt = activeThink._startedAt;
+          if (startedAt) {
+            const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+            const label = activeThink.querySelector('.think-label');
+            if (label) label.textContent = `thought for ${seconds}s`;
+            activeThink._closedAt = Date.now();
+          }
         }
       }
       // Live append to the in-progress assistant message
@@ -3937,6 +5076,110 @@ async function send(forced = null, displayAs = null) {
       });
       if (ev.reason && ev.reason !== 'finished' && ev.reason !== 'stopped') {
         chatBody.appendChild(makeMeta(`stopped: ${ev.reason}`, 'warn'));
+      }
+      return;
+    }
+
+    if (ev.type === 'context_warning') {
+      // Loud warning when the loaded model's ctx is too small for Hearth's
+      // prompt overhead. Otherwise chats silently 500 with "Requested
+      // tokens exceed context window" — and the user has no idea why.
+      // Stays as an error toast (longer-lived than a regular toast).
+      toast(
+        `Context too small: ${ev.loaded_ctx} tokens`,
+        ev.hint || `Reload the model at higher context.`,
+        'err',
+        15000,
+      );
+      return;
+    }
+
+    if (ev.type === 'context_budget') {
+      // Stash for tooltip context — shows users where the budget came from
+      // (env override, endpoint probe, default 32K, per-provider 200K, etc).
+      STATE._ctxBudget = {
+        total: ev.context_tokens, tools: ev.tool_tokens,
+        effective: ev.effective_budget, source: ev.source,
+      };
+      return;
+    }
+    if (ev.type === 'context_state') {
+      // Warn-on-pressure mode: hide the ring entirely until ctx crosses 70%.
+      // Most users never care about percentage; show it ONLY when something
+      // is actually about to happen (compaction looming). Power users who
+      // want it always-visible can toggle via Settings (future v0.7).
+      const wrap = document.getElementById('ctx-ring-wrap');
+      const ring = document.getElementById('ctx-ring');
+      const pct  = document.getElementById('ctx-ring-pct');
+      if (wrap && ring && pct) {
+        const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
+        const p = Math.max(0, Math.min(100, ev.pct || 0));
+        // Show ring only when ctx pressure is real. Compaction badge needs
+        // it visible regardless, so we don't hide while .compacting is set.
+        const shouldShow = p >= 70 || wrap.classList.contains('compacting');
+        wrap.hidden = !shouldShow;
+        ring.style.setProperty('--ctx-deg', (p * 3.6).toFixed(1) + 'deg');
+        pct.textContent = p + '%';
+        // Build a tooltip that explains the math: chat usage / effective
+        // budget (which is total_ctx minus tool-schema overhead). Without
+        // this, users wondered why a 1M-context Grok showed 200K — because
+        // ~9K is permanent tool-schema overhead the chat can't use.
+        const b = STATE._ctxBudget || {};
+        const total = b.total ? fmt(b.total) : '?';
+        const tools = b.tools ? fmt(b.tools) : '?';
+        const src = b.source ? ` · source: ${b.source}` : '';
+        wrap.title = `chat usage: ${fmt(ev.used||0)} / ${fmt(ev.budget||0)} effective (${p}%)\n` +
+                     `model context: ${total} total = ${fmt(ev.budget||0)} effective + ${tools} tool schemas${src}`;
+        wrap.classList.toggle('hot',  p >= 90);
+        wrap.classList.toggle('warn', p >= 70 && p < 90);
+        wrap.classList.remove('compacting');
+      }
+      return;
+    }
+
+    if (ev.type === 'compacting') {
+      const wrap = document.getElementById('ctx-ring-wrap');
+      if (wrap) {
+        wrap.classList.add('compacting');
+        wrap.title = 'compacting…';
+      }
+      return;
+    }
+
+    if (ev.type === 'facts_saved') {
+      // Passive fact-extraction hook landed a memory. Surface it briefly so
+      // the user knows Hearth "got something" from the turn without spamming.
+      // Gated by Settings → toast_facts_saved (user can mute this category).
+      if (STATE.settings && STATE.settings.toast_facts_saved === false) return;
+      const n = ev.count || 0;
+      const titles = (ev.titles || []).slice(0, 3).join(', ');
+      const more = (ev.titles || []).length > 3 ? `, +${(ev.titles||[]).length - 3} more` : '';
+      toast(
+        n === 1 ? 'Remembered 1 fact' : `Remembered ${n} facts`,
+        titles + more,
+        'ok',
+        3500,
+      );
+      return;
+    }
+
+    if (ev.type === 'compacted') {
+      const wrap = document.getElementById('ctx-ring-wrap');
+      const ring = document.getElementById('ctx-ring');
+      const pct  = document.getElementById('ctx-ring-pct');
+      if (wrap && ring && pct) {
+        const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
+        const p = Math.max(0, Math.min(100, ev.pct || 0));
+        ring.style.setProperty('--ctx-deg', (p * 3.6).toFixed(1) + 'deg');
+        pct.textContent = p + '%';
+        wrap.title = `context ${fmt(ev.used||0)} / ${fmt((ev.budget)||(ev.used||1))} · ${p}% (just compacted ✓)`;
+        wrap.classList.remove('compacting', 'hot', 'warn');
+        if (p >= 70) wrap.classList.add('warn');
+        // Brief toast so the user knows what just happened — the ring itself
+        // doesn't shout "compacted", it just shrinks. Gated by Settings.
+        if (!(STATE.settings && STATE.settings.toast_compacted === false)) {
+          toast('Context compacted', `now ${p}%`, 'ok', 2200);
+        }
       }
       return;
     }
@@ -4120,10 +5363,50 @@ async function generateTitle(c) {
       body: JSON.stringify({ text: first }),
     });
     if (r.title) {
-      c.title = r.title;
-      touch(c);
+      _animateTitleChange(c, r.title);
     }
   } catch {}
+}
+
+// Typewriter the new title in instead of jump-cutting "New chat" → final.
+// Erase the placeholder first, then type the real title at ~28ms/char
+// with a tiny gap between the phases so it reads as a transition.
+function _animateTitleChange(c, newTitle) {
+  const target = String(newTitle || '').trim();
+  if (!target || target === c.title) return;
+  const row = document.querySelector(`.convo[data-cid="${c.id}"] .title-text`);
+  if (!row) {
+    // Sidebar isn't in the DOM (maybe collapsed view); just set + persist.
+    c.title = target;
+    touch(c);
+    return;
+  }
+  // Erase the placeholder ("New chat") then type the real title. Smaller
+  // erase delay than type delay so it feels snappy, not languid.
+  let eraseLen = (c.title || '').length;
+  const eraseStep = () => {
+    if (eraseLen > 0) {
+      eraseLen--;
+      row.textContent = (c.title || '').slice(0, eraseLen);
+      setTimeout(eraseStep, 18);
+    } else {
+      setTimeout(typeStep, 60);
+    }
+  };
+  let i = 0;
+  const typeStep = () => {
+    if (i <= target.length) {
+      row.textContent = target.slice(0, i++);
+      setTimeout(typeStep, 28);
+    } else {
+      // Done — commit to the data model + persist (touch re-renders the
+      // list which sets the final text, redundant with what we just did
+      // but keeps the rest of the list sort-order in sync).
+      c.title = target;
+      touch(c);
+    }
+  };
+  eraseStep();
 }
 
 sendBtn.addEventListener('click', () => { if (STATE.streaming) stopGen(); else send(); });
@@ -4223,7 +5506,13 @@ async function refreshMemory() {
   try {
     const { memories } = await api('/api/memory');
     memCache = memories;
-    renderMem('');
+    // Render the active view (graph is default). Earlier this only ever
+    // called renderMem() which only renders the LIST pane; switching to
+    // the tree/graph tab then required a click to populate the data.
+    const q = ($('mem-search')?.value || '').trim();
+    if (MEM_VIEW === 'graph') renderMemGraph(q);
+    else if (MEM_VIEW === 'tree') renderMemTree(q);
+    else renderMem(q);
   } catch (e) { toast('Memory error', e.message, 'err'); }
 }
 function renderMem(filter) {
@@ -4241,6 +5530,7 @@ function renderMem(filter) {
     const div = document.createElement('div');
     div.className = 'item';
     const tcls = ['user','feedback','project','reference'].includes(m.type) ? m.type : 'other';
+    div.setAttribute('data-mem-type', tcls);
     div.innerHTML = `
       <span class="tag ${tcls}">${esc(m.type || '?')}</span>
       <div class="body">
@@ -4273,7 +5563,354 @@ function renderMem(filter) {
     list.appendChild(div);
   }
 }
-$('mem-search').addEventListener('input', e => renderMem(e.target.value));
+$('mem-search').addEventListener('input', e => {
+  // Search applies to whichever view is active (list / tree / graph)
+  if (MEM_VIEW === 'tree') renderMemTree(e.target.value);
+  else if (MEM_VIEW === 'graph') renderMemGraph(e.target.value);
+  else renderMem(e.target.value);
+});
+
+// ---- Tree view: collapsible type → sub-category → fact leaves -----------
+let MEM_VIEW = 'graph';                            // 'graph' | 'tree' | 'list' (graph is default hero view)
+const _treeCollapsed = new Set();                 // group ids the user collapsed
+const TYPE_LABELS = {
+  user:      'User facts',
+  feedback:  'Feedback',
+  project:   'Projects',
+  reference: 'Reference',
+  other:     'Other',
+};
+const TYPE_ORDER = ['user', 'project', 'reference', 'feedback', 'other'];
+
+function _typeOf(m) {
+  return ['user','feedback','project','reference'].includes(m.type) ? m.type : 'other';
+}
+function _subOf(m) {
+  return (m.sub_category || '').trim() || 'casual';
+}
+function _esc(s) { return (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function renderMemTree(filter) {
+  const pane = $('mem-tree');
+  pane.innerHTML = '';
+  const f = (filter || '').toLowerCase();
+  const items = memCache.filter(m =>
+    !f || m.name.toLowerCase().includes(f) || (m.description || '').toLowerCase().includes(f)
+  );
+  if (!items.length) {
+    pane.innerHTML = `<div style="color:var(--fg-faint);padding:24px;text-align:center">no memories${f ? ' matching "' + _esc(f) + '"' : ' yet'}</div>`;
+    return;
+  }
+  // Group: type → sub_category → [leaves]
+  const tree = {};
+  for (const m of items) {
+    const t = _typeOf(m);
+    const s = _subOf(m);
+    (tree[t] = tree[t] || {});
+    (tree[t][s] = tree[t][s] || []).push(m);
+  }
+  // Render in canonical type order so colors are stable left-to-right
+  for (const t of TYPE_ORDER) {
+    const subs = tree[t];
+    if (!subs) continue;
+    const total = Object.values(subs).reduce((acc, arr) => acc + arr.length, 0);
+    const typeEl = document.createElement('div');
+    typeEl.className = 'tree-type';
+    typeEl.dataset.type = t;
+    const typeId = 't:' + t;
+    if (_treeCollapsed.has(typeId)) typeEl.classList.add('collapsed');
+    typeEl.innerHTML = `
+      <div class="tree-type-head" data-toggle="${typeId}">
+        <svg class="tree-type-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        <span class="tree-type-bar"></span>
+        <span>${_esc(TYPE_LABELS[t] || t)}</span>
+        <span class="tree-type-count">${total}</span>
+      </div>
+      <div class="tree-type-body"></div>
+    `;
+    const body = typeEl.querySelector('.tree-type-body');
+    // Render sub-categories alphabetically inside each type so order is stable
+    for (const sub of Object.keys(subs).sort()) {
+      const leaves = subs[sub];
+      const subEl = document.createElement('div');
+      subEl.className = 'tree-sub';
+      const subId = 's:' + t + ':' + sub;
+      if (_treeCollapsed.has(subId)) subEl.classList.add('collapsed');
+      subEl.innerHTML = `
+        <div class="tree-sub-head" data-toggle="${subId}">
+          <svg class="tree-sub-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          <span>${_esc(sub)}</span>
+          <span class="tree-sub-count">(${leaves.length})</span>
+        </div>
+        <div class="tree-sub-body"></div>
+      `;
+      const subBody = subEl.querySelector('.tree-sub-body');
+      for (const m of leaves) {
+        const leaf = document.createElement('div');
+        leaf.className = 'tree-leaf';
+        leaf.innerHTML = `
+          <span class="tree-leaf-name">${_esc(m.name)}</span>
+          <span class="tree-leaf-desc">${_esc((m.description || '').slice(0, 80))}</span>
+        `;
+        leaf.addEventListener('click', async () => {
+          try {
+            const r = await api(`/api/memory/${encodeURIComponent(m.name)}`);
+            showModal(m.name, r.body, [{ label: 'Close' }]);
+          } catch (e) { toast('Read failed', e.message, 'err'); }
+        });
+        subBody.appendChild(leaf);
+      }
+      body.appendChild(subEl);
+    }
+    pane.appendChild(typeEl);
+  }
+  // Wire collapse handlers (event-delegated would be cleaner but this is fine)
+  pane.querySelectorAll('[data-toggle]').forEach(head => {
+    head.addEventListener('click', () => {
+      const id = head.dataset.toggle;
+      const wrap = head.parentElement;
+      wrap.classList.toggle('collapsed');
+      if (wrap.classList.contains('collapsed')) _treeCollapsed.add(id);
+      else _treeCollapsed.delete(id);
+    });
+  });
+}
+
+// ---- Constellation graph view (D3 force-directed) ---------------------
+// Why this exists: every other personal-AI project either has zero memory
+// visualization (Hermes/Jan/OpenClaw) or a static tree (OpenHuman). A
+// LIVE FORCE GRAPH where you see clusters self-organize is what makes
+// people screenshot. Same data as List/Tree views — different lens.
+let _memSimulation = null;   // active D3 force simulation (we kill it on view-switch)
+
+function renderMemGraph(filter) {
+  const svg = document.getElementById('mem-graph-svg');
+  const pane = document.getElementById('mem-graph');
+  const tip = document.getElementById('mem-graph-tip');
+  if (!svg || !pane || typeof d3 === 'undefined') return;
+  // Kill any prior simulation so we don't have two running at once
+  if (_memSimulation) { try { _memSimulation.stop(); } catch {} _memSimulation = null; }
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const f = (filter || '').toLowerCase();
+  // Always render the full graph. Search highlights matches + their
+  // neighbors instead of removing the rest, so connections stay visible
+  // (the point of the graph view). The match set drives CSS classes —
+  // CSS dims non-matches and brightens matches/neighbors.
+  const items = memCache;
+  if (!items.length) {
+    svg.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="var(--fg-faint)" font-size="14">no memories yet</text>`;
+    return;
+  }
+  const matchSet = new Set();
+  if (f) {
+    for (const m of items) {
+      if (m.name.toLowerCase().includes(f) || (m.description || '').toLowerCase().includes(f)) {
+        matchSet.add(m.name);
+      }
+    }
+  }
+
+  const w = pane.clientWidth || 800;
+  const h = pane.clientHeight || 600;
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+  // Build nodes + edges. Each memory = node. Edge = same sub_category.
+  // Cluster centers — laid out in a circle so user can SEE the 4 type families.
+  const TYPES = ['user', 'project', 'reference', 'feedback', 'other'];
+  const typeOf = m => TYPES.includes(m.type) ? m.type : 'other';
+  const subOf = m => (m.sub_category || '').trim() || 'casual';
+  // Pre-position by type cluster (D3 forceX/Y by type group)
+  const typeAngle = {};
+  TYPES.forEach((t, i) => { typeAngle[t] = (i / TYPES.length) * Math.PI * 2 - Math.PI / 2; });
+
+  const nodes = items.map(m => ({
+    id: m.name,
+    name: m.name,
+    type: typeOf(m),
+    sub: subOf(m),
+    desc: m.description || '',
+    // gentle hint position around the type's cluster center
+    x: w / 2 + Math.cos(typeAngle[typeOf(m)]) * (w * 0.25) + (Math.random() - 0.5) * 60,
+    y: h / 2 + Math.sin(typeAngle[typeOf(m)]) * (h * 0.25) + (Math.random() - 0.5) * 60,
+  }));
+  // Build edges: nodes in the same (type, sub_category) are linked
+  const edges = [];
+  const byBucket = {};
+  for (const n of nodes) {
+    const k = n.type + ':' + n.sub;
+    (byBucket[k] = byBucket[k] || []).push(n);
+  }
+  for (const k of Object.keys(byBucket)) {
+    const grp = byBucket[k];
+    if (grp.length < 2) continue;
+    // Connect each node to every other in its sub-cluster (small clusters
+    // only — cap at 6 to keep edge count bounded for memory dirs with
+    // 100+ facts)
+    const cap = Math.min(grp.length, 6);
+    for (let i = 0; i < cap; i++) {
+      for (let j = i + 1; j < cap; j++) {
+        edges.push({ source: grp[i].id, target: grp[j].id, sub: grp[i].sub });
+      }
+    }
+  }
+
+  const svgD3 = d3.select(svg);
+  // Inner <g> that gets transformed by zoom/pan — links + nodes live INSIDE
+  // this group so the whole scene moves together. d3.zoom() targets the SVG
+  // and applies the transform to gZoom on every wheel/drag event.
+  const gZoom = svgD3.append('g').attr('class', 'zoom-layer');
+  const linkSel = gZoom.append('g').attr('class', 'links')
+    .selectAll('line')
+    .data(edges)
+    .join('line')
+    .attr('class', 'graph-edge');
+  // Compute neighbor set for the active filter so search highlights both
+  // the matched node AND its connected friends (the whole point: see what
+  // is linked). Dim everything else via the .dim class.
+  const neighborSet = new Set();
+  if (matchSet.size) {
+    for (const e of edges) {
+      if (matchSet.has(e.source) || matchSet.has(e.target)) {
+        neighborSet.add(e.source);
+        neighborSet.add(e.target);
+      }
+    }
+  }
+  const nodeClass = (d) => {
+    let cls = 'graph-node';
+    if (matchSet.size) {
+      if (matchSet.has(d.id)) cls += ' matched';
+      else if (neighborSet.has(d.id)) cls += ' neighbor';
+      else cls += ' dim';
+    }
+    return cls;
+  };
+  const edgeClass = (e) => {
+    let cls = 'graph-edge';
+    if (matchSet.size) {
+      const sid = typeof e.source === 'object' ? e.source.id : e.source;
+      const tid = typeof e.target === 'object' ? e.target.id : e.target;
+      if (matchSet.has(sid) || matchSet.has(tid)) cls += ' highlighted';
+      else cls += ' dim';
+    }
+    return cls;
+  };
+  linkSel.attr('class', edgeClass);
+  const nodeSel = gZoom.append('g').attr('class', 'nodes')
+    .selectAll('g')
+    .data(nodes)
+    .join('g')
+    .attr('class', nodeClass)
+    .attr('data-type', d => d.type);
+  // Wheel = zoom, drag background = pan. Scale range 0.2 → 4× so the user
+  // can zoom out to see the whole constellation when memory gets dense, and
+  // zoom in for label-readability.
+  const zoomBehavior = d3.zoom()
+    .scaleExtent([0.2, 4])
+    .on('zoom', (event) => {
+      gZoom.attr('transform', event.transform);
+    });
+  svgD3.call(zoomBehavior);
+  // Double-click empty space → reset zoom (centers + scales back to 1)
+  svgD3.on('dblclick.zoom', null);  // disable d3's default dblclick-zoom
+  svgD3.on('dblclick', (event) => {
+    if (event.target === svg) {
+      svgD3.transition().duration(400)
+        .call(zoomBehavior.transform, d3.zoomIdentity);
+    }
+  });
+  // Glowing node = filled circle + soft outer ring
+  nodeSel.append('circle')
+    .attr('r', 5)
+    .attr('fill', 'currentColor')
+    .attr('stroke', 'currentColor')
+    .attr('stroke-opacity', 0.4)
+    .attr('stroke-width', 6);
+  nodeSel.append('text')
+    .attr('class', 'graph-node-label')
+    .attr('y', 16)
+    .text(d => d.name.length > 22 ? d.name.slice(0, 22) + '…' : d.name);
+
+  // Hover tip
+  nodeSel.on('mouseenter', (event, d) => {
+    tip.hidden = false;
+    tip.innerHTML = `
+      <div class="tip-name">${_esc(d.name)}</div>
+      <div class="tip-meta">${_esc(d.type)} · ${_esc(d.sub)}</div>
+      <div class="tip-desc">${_esc((d.desc || '').slice(0, 240))}</div>
+    `;
+    // position next to cursor
+    const rect = pane.getBoundingClientRect();
+    tip.style.left = (event.clientX - rect.left + 14) + 'px';
+    tip.style.top  = (event.clientY - rect.top + 14) + 'px';
+    // Highlight this node's edges
+    linkSel.classed('highlighted', l => l.source.id === d.id || l.target.id === d.id);
+  });
+  nodeSel.on('mouseleave', () => {
+    tip.hidden = true;
+    linkSel.classed('highlighted', false);
+  });
+  nodeSel.on('click', async (event, d) => {
+    try {
+      const r = await api(`/api/memory/${encodeURIComponent(d.id)}`);
+      showModal(d.name, r.body, [{ label: 'Close' }]);
+    } catch (e) { toast('Read failed', e.message, 'err'); }
+  });
+
+  // Force simulation: keep nodes apart, pull them toward type-cluster
+  // centers, draw edges. forceManyBody negative = repulsion. forceLink
+  // gives the sub-category edges their springy pull.
+  _memSimulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(edges).id(d => d.id).distance(40).strength(0.6))
+    .force('charge', d3.forceManyBody().strength(-180))
+    .force('center', d3.forceCenter(w / 2, h / 2))
+    .force('collide', d3.forceCollide().radius(18))
+    // Pull each node toward its type-cluster anchor
+    .force('typeX', d3.forceX(d => w / 2 + Math.cos(typeAngle[d.type]) * (w * 0.28)).strength(0.18))
+    .force('typeY', d3.forceY(d => h / 2 + Math.sin(typeAngle[d.type]) * (h * 0.28)).strength(0.18))
+    .on('tick', () => {
+      linkSel
+        .attr('x1', l => l.source.x).attr('y1', l => l.source.y)
+        .attr('x2', l => l.target.x).attr('y2', l => l.target.y);
+      nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+  // Drag node to reorganize. We stopPropagation so D3-zoom's pan handler
+  // doesn't ALSO fire (otherwise both compete and the node sticks weirdly).
+  // .filter ensures zoom only triggers on background drag, not node drag.
+  nodeSel.call(d3.drag()
+    .on('start', (event, d) => {
+      event.sourceEvent.stopPropagation();
+      if (!event.active) _memSimulation.alphaTarget(0.3).restart();
+      d.fx = d.x; d.fy = d.y;
+    })
+    .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+    .on('end', (event, d) => {
+      if (!event.active) _memSimulation.alphaTarget(0);
+      d.fx = null; d.fy = null;
+    })
+  );
+}
+
+// Toggle wiring: List ↔ Tree ↔ Graph. Each button swaps which pane is visible.
+document.querySelectorAll('.mem-view-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const want = btn.dataset.memView;
+    if (want === MEM_VIEW) return;
+    MEM_VIEW = want;
+    document.querySelectorAll('.mem-view-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.memView === MEM_VIEW));
+    const list = $('mem-list'); const tree = $('mem-tree'); const graph = $('mem-graph');
+    const q = ($('mem-search').value || '').trim();
+    list.hidden = (MEM_VIEW !== 'list');
+    tree.hidden = (MEM_VIEW !== 'tree');
+    graph.hidden = (MEM_VIEW !== 'graph');
+    if (MEM_VIEW === 'tree') renderMemTree(q);
+    else if (MEM_VIEW === 'graph') renderMemGraph(q);
+    else renderMem(q);
+  });
+});
 
 // ============================================================
 // FILES view
@@ -4421,6 +6058,110 @@ function stopLoadProgress() {
 // ============================================================
 // SERVER settings pane — live status card + actions
 // ============================================================
+async function refreshReminders() {
+  const box = document.getElementById('reminders-box');
+  if (!box) return;
+  try {
+    const r = await api('/api/reminders');
+    const items = (r && r.items) || [];
+    if (!items.length) {
+      box.innerHTML = '<span style="opacity:0.6">no reminders set — just ask me</span>';
+      return;
+    }
+    const fmtWhen = (iso) => {
+      try {
+        const d = new Date(iso);
+        const now = new Date();
+        const diff = (d - now) / 1000;
+        if (diff < 0) return 'overdue';
+        if (diff < 60) return `${Math.round(diff)}s`;
+        if (diff < 3600) return `${Math.round(diff/60)}m`;
+        if (diff < 86400) return `${Math.round(diff/3600)}h`;
+        if (diff < 86400*7) return `${Math.round(diff/86400)}d`;
+        return d.toLocaleDateString();
+      } catch { return iso; }
+    };
+    box.innerHTML = items.map(it => {
+      const isAction = !!it.action_tool;
+      const isRecurring = !!it.recurring_seconds;
+      const tag = it.tag ? `<span style="background:var(--accent-2);color:var(--bg-0);padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px">${esc(it.tag)}</span>` : '';
+      const badges = [];
+      if (isAction) badges.push(`<span style="color:var(--ok);font-size:10px;font-weight:600">⚡ ACTION: ${esc(it.action_tool)}</span>`);
+      if (isRecurring) badges.push(`<span style="color:var(--accent-2);font-size:10px">⟳ ${esc(it.recurring_text || 'recurring')}</span>`);
+      const meta = badges.length ? `<div style="margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">${badges.join('')}</div>` : '';
+      return `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border-faint);display:flex;justify-content:space-between;gap:10px;align-items:start">
+          <div style="flex:1;min-width:0">
+            <div style="color:var(--fg);font-weight:500">${esc(it.what)}${tag}</div>
+            <div style="color:var(--fg-faint);font-size:11px;margin-top:2px">in ${fmtWhen(it.due_iso)} · ${esc(it.when_text || it.due_iso)}</div>
+            ${meta}
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0">
+            <button class="btn-mini" data-rsnooze="${esc(it.id)}" title="Snooze 10 min">snooze</button>
+            <button class="btn-mini danger" data-rcancel="${esc(it.id)}" title="Cancel reminder">×</button>
+          </div>
+        </div>`;
+    }).join('');
+    box.querySelectorAll('button[data-rsnooze]').forEach(b => {
+      b.onclick = async () => {
+        try {
+          const rr = await api('/api/reminders/snooze', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ id: b.dataset.rsnooze, minutes: 10 }),
+          });
+          if (rr.ok) {
+            toast('Snoozed 10 min', '', 'ok', 2500);
+            refreshReminders();
+          } else { toast('Snooze failed', rr.error || 'unknown', 'err'); }
+        } catch (e) { toast('Snooze failed', e.message, 'err'); }
+      };
+    });
+    box.querySelectorAll('button[data-rcancel]').forEach(b => {
+      b.onclick = async () => {
+        try {
+          const rr = await api('/api/reminders/cancel', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ id: b.dataset.rcancel }),
+          });
+          if (rr.ok) {
+            toast('Reminder cancelled', '', 'ok', 2500);
+            refreshReminders();
+          } else { toast('Cancel failed', rr.error || 'unknown', 'err'); }
+        } catch (e) { toast('Cancel failed', e.message, 'err'); }
+      };
+    });
+  } catch (e) {
+    box.innerHTML = '<span style="opacity:0.6">load failed: ' + esc(e.message) + '</span>';
+  }
+}
+
+async function refreshMcpStatus() {
+  const box = document.getElementById('mcp-status-box');
+  if (!box) return;
+  try {
+    const r = await api('/api/mcp/status');
+    if (!r || !Array.isArray(r.bridges) || !r.bridges.length) {
+      box.innerHTML = '<span style="opacity:0.7">no bridges configured yet — click <b>Edit mcp.json</b> to wire some</span>';
+      return;
+    }
+    const rows = r.bridges.map(b => {
+      const stateColor = b.state === 'connected' ? 'var(--ok)'
+                       : b.state === 'error' ? 'var(--err)'
+                       : 'var(--fg-faint)';
+      const meta = b.state === 'connected'
+        ? `<span style="color:var(--fg-faint)">${b.tools || 0} tools · ${esc(b.transport || 'stdio')}</span>`
+        : `<span style="color:${stateColor}">${esc(b.error || b.state)}</span>`;
+      return `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;">
+        <span style="color:${stateColor}">● ${esc(b.name)}</span>
+        ${meta}
+      </div>`;
+    }).join('');
+    box.innerHTML = rows;
+  } catch {
+    box.innerHTML = '<span style="opacity:0.7">status unavailable</span>';
+  }
+}
+
 async function refreshServerCard() {
   if (!$('server-st-state')) return;
   try {
@@ -4642,12 +6383,17 @@ $('btn-log-download').addEventListener('click', async () => {
   } catch (e) { toast('Download failed', e.message, 'err'); }
 });
 $('btn-log-clear').addEventListener('click', () => {
-  showModal('Clear activity log?', 'Backs up the current log file (renamed with timestamp) and starts a fresh one. Existing log data is preserved on disk.', [
+  // Honor whichever log the user is currently looking at — server vs agent.
+  // Before this routing the button always wiped the AGENT log even when
+  // the user was on the server view (user reported the cross-wire bug).
+  const which = (typeof LOGS_SOURCE !== 'undefined' && LOGS_SOURCE === 'server') ? 'server' : 'agent';
+  const label = which === 'server' ? 'server log' : 'activity log';
+  showModal(`Clear ${label}?`, `Backs up the current ${label} file (renamed with timestamp) and starts a fresh one. Existing log data is preserved on disk.`, [
     { label: 'Cancel' },
-    { label: 'Clear log', kind: 'danger', onclick: async () => {
+    { label: `Clear ${label}`, kind: 'danger', onclick: async () => {
       try {
-        await api('/api/logs/clear', { method: 'POST' });
-        toast('Log cleared', 'previous log saved as .bak', 'ok');
+        await api('/api/logs/clear?which=' + which, { method: 'POST' });
+        toast('Log cleared', `${label} saved as .bak`, 'ok');
         refreshLogs();
       } catch (e) { toast('Clear failed', e.message, 'err'); }
     }},
@@ -4661,22 +6407,127 @@ async function refreshSettings() {
   try {
     const s = await api('/api/settings');
     STATE.settings = s;
+    // Brain might have just changed — pull the live context budget so the
+    // ring + bottom bar reflect the new brain immediately (Grok 200K vs
+    // builtin 8K). Don't await — settings render shouldn't block on it.
+    refreshCtxBudget();
+    // Brand-sub label reflects the actual brain (was always hardcoded "· local"
+    // even when the user was on Grok/Gemini — user noticed). One source of truth.
+    const brandSub = document.getElementById('brand-sub');
+    if (brandSub) {
+      const provLabel = {
+        local: 'local', lmstudio: 'LM Studio', builtin: 'built-in',
+        grok: 'xAI Grok', gemini: 'Gemini', openai: 'OpenAI',
+        openrouter: 'OpenRouter', custom: 'custom',
+      }[s.llm_provider || 'local'] || (s.llm_provider || 'local');
+      brandSub.textContent = '· ' + provLabel;
+    }
     $$('.switch').forEach(sw => {
       const k = sw.dataset.key;
       sw.classList.toggle('on', !!s[k]);
     });
+    // Agent name field — populated from current setting. The Rename button
+    // triggers the full workspace rename (slow, restarts tray). Typing in
+    // the field without clicking Rename does nothing — that's intentional,
+    // so a half-typed name doesn't apply mid-keystroke.
+    const agentNameInput = document.getElementById('setting-agent-name');
+    if (agentNameInput) {
+      agentNameInput.value = s.agent_name || 'JARVIS';
+    }
+    const forgeInput = document.getElementById('setting-forge-dir');
+    if (forgeInput) {
+      forgeInput.value = s.forge_dir || '';
+      forgeInput.onchange = (e) => saveSetting('forge_dir', e.target.value.trim());
+      const hint = document.getElementById('forge-detect-hint');
+      if (hint) {
+        hint.textContent = s.forge_dir
+          ? `· using ${s.forge_dir}`
+          : '· not configured';
+      }
+    }
+    const forgeDetectBtn = document.getElementById('btn-forge-detect');
+    if (forgeDetectBtn) forgeDetectBtn.onclick = async () => {
+      forgeDetectBtn.disabled = true;
+      forgeDetectBtn.textContent = 'Scanning…';
+      try {
+        const r = await api('/api/forge/detect');
+        if (r && r.path) {
+          forgeInput.value = r.path;
+          await saveSetting('forge_dir', r.path);
+          toast('Forge found', r.path, 'ok', 4500);
+        } else {
+          toast('No Forge install found',
+            'Checked common paths under C:/D:/E: drives. Paste a custom path manually.',
+            'warn', 7000);
+        }
+      } catch (e) { toast('Detect failed', e.message, 'err'); }
+      finally {
+        forgeDetectBtn.disabled = false;
+        forgeDetectBtn.textContent = 'Detect';
+      }
+    };
     // Device selectors
     const ttsDev = $('setting-tts-device');
     const sttDev = $('setting-stt-device');
     const sttMdl = $('setting-stt-model');
     if (ttsDev) {
       ttsDev.value = s.tts_device || 'cpu';
+      // Grey-out options whose ONNX provider isn't actually installed on this
+      // machine, and append a download hint so the user knows WHY it's grey
+      // (and what to install). Without this, picking "GPU (CUDA)" with only
+      // the CPU wheel installed used to silently fall back to CPU AND
+      // sometimes emit zero-audio frames — confused users into thinking TTS
+      // was muted. (See voice.py `last_load_warning` path.)
+      try {
+        const vstat = await api('/api/voice/status');
+        const tprov = (vstat.tts && vstat.tts.onnx_providers_available) || [];
+        const installed = new Set(tprov);
+        const providerMap = {
+          'cuda': 'CUDAExecutionProvider',
+          'dml':  'DmlExecutionProvider',
+        };
+        for (const opt of ttsDev.options) {
+          const need = providerMap[opt.value];
+          if (need && !installed.has(need)) {
+            const wheel = opt.dataset.needs || '';
+            // Compact label so the option doesn't stretch the dropdown.
+            // Full install command lives in title (hover tooltip).
+            opt.text = `${opt.text} (not installed)`;
+            opt.title = `Install: pip install ${wheel}`;
+            opt.disabled = true;
+          }
+        }
+      } catch {}
       ttsDev.onchange = async (e) => {
         await saveSetting('tts_device', e.target.value);
         try {
           await api('/api/voice/reload', { method: 'POST' });
-          toast('TTS', 'switched to ' + e.target.value, 'ok');
+          // Re-fetch status: if the engine reports a soft warning (e.g. it
+          // gracefully fell back), tell the user instead of pretending success.
+          const after = await api('/api/voice/status');
+          const warn = after.tts && after.tts.last_load_warning;
+          if (warn) {
+            toast('TTS fell back', warn, 'warn', 8000);
+          } else {
+            toast('TTS', 'switched to ' + e.target.value, 'ok');
+          }
         } catch (err) { toast('TTS device', err.message, 'err'); }
+      };
+    }
+    // Voice speed slider — applies live, persists to settings.json
+    const speedInp = $('setting-voice-speed');
+    const speedLbl = $('setting-voice-speed-label');
+    if (speedInp) {
+      const curSpeed = (typeof s.voice_speed === 'number' && s.voice_speed > 0) ? s.voice_speed : 1.5;
+      speedInp.value = String(curSpeed);
+      if (speedLbl) speedLbl.textContent = curSpeed.toFixed(1) + 'x';
+      speedInp.oninput = (e) => {
+        const v = parseFloat(e.target.value) || 1.5;
+        if (speedLbl) speedLbl.textContent = v.toFixed(1) + 'x';
+      };
+      speedInp.onchange = async (e) => {
+        const v = parseFloat(e.target.value) || 1.5;
+        await saveSetting('voice_speed', v);
       };
     }
     if (sttDev) {
@@ -4730,12 +6581,12 @@ async function refreshSettings() {
       function applyMode(v) {
         const isLocal = (v === 'local');
         cloudFields.hidden = isLocal;
-        modelField.hidden  = isLocal;
+        if (modelField) modelField.hidden = true; // hidden placeholder; topbar owns model pick now
         customUrl.hidden   = (v !== 'custom');
         applyRow.hidden    = false;
         const p = PRESETS[v] || PRESETS.local;
         brainHint.innerHTML = p.hint;
-        if (p.modelHint) modelHint.innerHTML = p.modelHint;
+        if (modelHint && p.modelHint) modelHint.innerHTML = p.modelHint;
         if (!isLocal && v !== 'custom') llmUrl.value = p.url;
         if (!llmMdl.value && p.sample) llmMdl.placeholder = 'e.g. ' + p.sample;
       }
@@ -4764,13 +6615,32 @@ async function refreshSettings() {
             await saveSetting('llm_url', body.url);
             await saveSetting('llm_key', body.key);
             await saveSetting('llm_model', body.model);
-            toast('Switched brain', 'Next message uses ' + (body.provider === 'local' ? 'your local server' : body.provider), 'ok');
+            // Honest toast — tell the user what's ACTUALLY serving, not
+            // just "Switched brain". For local: probe shows LM Studio vs
+            // built-in vs nothing. Saves them from chatting into the void.
+            if (body.provider === 'local' && r.local_probe) {
+              if (r.local_probe.kind === 'lmstudio') {
+                toast('Switched to local · LM Studio', 'Detected LM Studio on ' + body.url + ' — preferred over built-in', 'ok', 5000);
+              } else if (r.local_probe.kind === 'builtin') {
+                toast('Switched to local · built-in', 'Connected to Hearth\'s built-in server', 'ok', 4000);
+              } else {
+                toast('Switched to local · nothing serving', 'Nothing on ' + body.url + '. Start LM Studio or boot a model in the Models tab.', 'warn', 8000);
+              }
+            } else {
+              toast('Switched brain', 'Next message uses ' + (body.provider === 'local' ? 'your local server' : body.provider), 'ok');
+            }
             refreshModels(); refreshState();
+            // Refresh brand-sub label so the "Hearth · local" / "· Grok"
+            // header updates immediately without waiting for next settings poll.
+            refreshSettings().catch(() => {});
+            // Auto-populate the model dropdown now that the brain is live.
+            try { await loadModelDropdownForBrain(); } catch {}
           } else {
             toast('Apply failed', r.error || 'unknown error', 'err');
           }
         } catch (e) { toast('Apply failed', e.message, 'err'); }
       };
+
     }
     const goModelsBtn = $('btn-go-models');
     if (goModelsBtn) goModelsBtn.onclick = () => showView('models');
@@ -4781,11 +6651,126 @@ async function refreshSettings() {
         toast('Opening rules.md', r.ok ? 'Edit freely - re-read every turn.' : (r.error || 'failed'), r.ok ? 'ok' : 'err');
       } catch (e) { toast('Open failed', e.message, 'err'); }
     };
+    // Agent rename — full workspace move. Backend stops the tray,
+    // renames ~/Jarvis → ~/<NewName>, updates env, and restarts (~10s).
+    // Confirm first since a rename mid-stream is destructive.
+    const agentRenameBtn = $('btn-agent-rename');
+    if (agentRenameBtn) agentRenameBtn.onclick = async () => {
+      const input = document.getElementById('setting-agent-name');
+      if (!input) return;
+      const newName = (input.value || '').trim();
+      if (!newName) { toast('Pick a name', 'Empty name not allowed', 'warn'); return; }
+      if (!/^[A-Za-z0-9 ]{1,20}$/.test(newName)) {
+        toast('Invalid name', 'Letters / digits / spaces only, 1-20 chars', 'warn');
+        return;
+      }
+      const current = (STATE.settings && STATE.settings.agent_name) || 'JARVIS';
+      if (newName === current) {
+        toast('Same name', 'Already called ' + current, 'info', 2000);
+        return;
+      }
+      showModal(`Rename to ${newName}?`,
+        `This will:\n` +
+        `  • Change my name everywhere (chat avatar, persona, signature)\n` +
+        `  • Rename workspace folder ~/${current} → ~/${newName}\n` +
+        `  • Restart the tray (~10s, you'll need to reopen the window)\n\n` +
+        `All your memory, chats, generated files come along — nothing is lost.`, [
+        { label: 'Cancel' },
+        { label: `Rename to ${newName}`, kind: 'danger', onclick: async () => {
+          try {
+            toast('Renaming…', 'Stopping tray + moving workspace', 'info', 8000);
+            const r = await api('/api/agent/rename', {
+              method: 'POST', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({ new_name: newName }),
+            });
+            if (r.ok) {
+              toast('Renamed', `I'm ${newName} now. Tray restarting…`, 'ok', 6000);
+              // Backend kicks itself — wait a beat then reload the page so
+              // the JS state picks up the new workspace path / avatar / etc.
+              setTimeout(() => window.location.reload(), 3500);
+            } else {
+              toast('Rename failed', r.error || 'unknown error', 'err', 9000);
+            }
+          } catch (e) { toast('Rename failed', e.message, 'err', 9000); }
+        }},
+      ]);
+    };
     const replayBtn = $('btn-replay-onboard');
     if (replayBtn) replayBtn.onclick = () => {
       obStep = 1; obState = { brain: '', voice: '' };
       obShow();
     };
+
+    // MCP pane wiring — edit mcp.json + show client snippet. Live bridge
+    // status comes from /api/mcp/status; rendered into #mcp-status-box.
+    const mcpEditBtn = $('btn-mcp-edit');
+    if (mcpEditBtn) mcpEditBtn.onclick = async () => {
+      try {
+        const r = await api('/api/mcp/config');
+        const current = (r && r.json) ? r.json : JSON.stringify({
+          mcpServers: {
+            "example-filesystem": {
+              command: "npx",
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "~/Documents"],
+              env: {}
+            }
+          }
+        }, null, 2);
+        showModal('Edit mcp.json',
+          `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
+          `Standard MCP server config. Each entry spawns at Hearth launch. ` +
+          `Restart Hearth after saving.</div>` +
+          `<textarea id="mcp-json-input" style="width:100%;min-height:340px;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:12px;resize:vertical;">${esc(current)}</textarea>` +
+          `<div id="mcp-json-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>`,
+          [
+            { label: 'Cancel' },
+            { label: 'Save', primary: true, onclick: async () => {
+                const ta = document.getElementById('mcp-json-input');
+                const errBox = document.getElementById('mcp-json-err');
+                const txt = (ta?.value || '').trim();
+                try { JSON.parse(txt); } catch (e) {
+                  if (errBox) errBox.textContent = 'JSON parse error: ' + e.message;
+                  return false;  // keep modal open
+                }
+                try {
+                  const sv = await api('/api/mcp/config', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ json: txt }),
+                  });
+                  if (sv.ok) {
+                    toast('mcp.json saved', 'Restart Hearth to apply.', 'ok', 6000);
+                  } else {
+                    toast('Save failed', sv.error || 'unknown', 'err');
+                  }
+                } catch (e) { toast('Save failed', e.message, 'err'); }
+              }
+            },
+          ]);
+      } catch (e) { toast('Open failed', e.message, 'err'); }
+    };
+    const mcpSnippetBtn = $('btn-mcp-snippet');
+    if (mcpSnippetBtn) mcpSnippetBtn.onclick = () => {
+      const repo = (STATE.workspace || '').replace(/\\/g, '/');
+      const snippet = JSON.stringify({
+        mcpServers: {
+          hearth: {
+            command: "python",
+            args: ["-m", "hearth.mcp_server"]
+          }
+        }
+      }, null, 2);
+      showModal('Hearth as MCP server',
+        `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
+        `Paste this into the OTHER tool's mcp.json (LM Studio, Claude Desktop, Cursor, etc.). ` +
+        `Hearth's 64 tools become available there.</div>` +
+        `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:auto;max-height:360px">${esc(snippet)}</pre>`,
+        [{ label: 'Close', primary: true }]);
+    };
+    // Live bridge status — pulled when the MCP pane is opened. Polled
+    // lightly while visible. No bridges yet → friendly placeholder.
+    refreshMcpStatus().catch(() => {});
+    // Reminders panel in the Behavior pane.
+    refreshReminders().catch(() => {});
 
     const st = await api('/api/state');
     $('setting-endpoint').textContent = st.endpoint;
@@ -5909,9 +7894,13 @@ async function refreshModelsView() {
     gemini: 'Gemini', openai: 'OpenAI', grok: 'Grok',
     openrouter: 'OpenRouter', custom: 'custom endpoint',
   }[provider] || provider;
-  if (isBuiltin) head.innerHTML = '<span class="server-pill is-on">Built-in server &middot; ' + esc(s.builtin_url || '') + (s.builtin_model ? ' &middot; ' + esc((s.builtin_model || '').split(/[\\/]/).pop()) : '') + '</span>';
+  // ORDER MATTERS: cloud wins if explicitly picked. Without this, the
+  // pill said "External server · LM Studio" whenever LM Studio happened
+  // to be running locally, even when the user had picked Grok as their
+  // brain. Confused everyone.
+  if (usingCloud) head.innerHTML = '<span class="server-pill is-on">Cloud brain &middot; ' + esc(cloudLabel) + (settingsSnapshot.llm_model ? ' &middot; ' + esc(settingsSnapshot.llm_model) : '') + '</span><span class="server-pill-note">Local models below are for switching brains.</span>';
+  else if (isBuiltin) head.innerHTML = '<span class="server-pill is-on">Built-in server &middot; ' + esc(s.builtin_url || '') + (s.builtin_model ? ' &middot; ' + esc((s.builtin_model || '').split(/[\\/]/).pop()) : '') + '</span>';
   else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; LM Studio / Ollama' + (s.external_model_id ? ' &middot; ' + esc(s.external_model_id) : '') + '</span>';
-  else if (usingCloud) head.innerHTML = '<span class="server-pill is-on">Cloud brain &middot; ' + esc(cloudLabel) + (settingsSnapshot.llm_model ? ' &middot; ' + esc(settingsSnapshot.llm_model) : '') + '</span><span class="server-pill-note">Local models below are for switching brains.</span>';
   else head.innerHTML = '<span class="server-pill is-off">No brain active &middot; pick a model below</span>';
 
   // Disk-count badge on the "My Models" tab
@@ -5937,9 +7926,13 @@ function _renderModelsHeader(s) {
     gemini: 'Gemini', openai: 'OpenAI', grok: 'Grok',
     openrouter: 'OpenRouter', custom: 'custom endpoint',
   }[provider] || provider;
-  if (isBuiltin) head.innerHTML = '<span class="server-pill is-on">Built-in server &middot; ' + esc(s.builtin_url || '') + (s.builtin_model ? ' &middot; ' + esc((s.builtin_model || '').split(/[\\/]/).pop()) : '') + '</span>';
+  // ORDER MATTERS: cloud wins if explicitly picked. Without this, the
+  // pill said "External server · LM Studio" whenever LM Studio happened
+  // to be running locally, even when the user had picked Grok as their
+  // brain. Confused everyone.
+  if (usingCloud) head.innerHTML = '<span class="server-pill is-on">Cloud brain &middot; ' + esc(cloudLabel) + (settingsSnapshot.llm_model ? ' &middot; ' + esc(settingsSnapshot.llm_model) : '') + '</span><span class="server-pill-note">Local models below are for switching brains.</span>';
+  else if (isBuiltin) head.innerHTML = '<span class="server-pill is-on">Built-in server &middot; ' + esc(s.builtin_url || '') + (s.builtin_model ? ' &middot; ' + esc((s.builtin_model || '').split(/[\\/]/).pop()) : '') + '</span>';
   else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; LM Studio / Ollama' + (s.external_model_id ? ' &middot; ' + esc(s.external_model_id) : '') + '</span>';
-  else if (usingCloud) head.innerHTML = '<span class="server-pill is-on">Cloud brain &middot; ' + esc(cloudLabel) + (settingsSnapshot.llm_model ? ' &middot; ' + esc(settingsSnapshot.llm_model) : '') + '</span><span class="server-pill-note">Local models below are for switching brains.</span>';
   else head.innerHTML = '<span class="server-pill is-off">No brain active &middot; pick a model below</span>';
   $('tab-mine-n').textContent = (s.disk_models || []).length;
 }
@@ -6187,8 +8180,10 @@ function modelsWireRowClicks(pane) {
           await refreshModelsView();
         } else {
           // Show the failure modal with the llama.cpp log tail so the user
-          // can see WHY (OOM / missing CUDA / wrong format / etc.).
-          modelsShowStartFailure(r, fname);
+          // can see WHY (OOM / missing CUDA / wrong format / etc.). Pass
+          // the original body so the modal's "Force load" button can resend
+          // with force:true (bypasses VRAM guardrail, spills to RAM).
+          modelsShowStartFailure(r, fname, body);
         }
       } catch (err) {
         toast('Start failed', err.message, 'err', 8000);
@@ -6254,8 +8249,10 @@ function modelsWireRowClicks(pane) {
           await refreshModelsView();
         } else {
           // Show the failure modal with the llama.cpp log tail so the user
-          // can see WHY (OOM / missing CUDA / wrong format / etc.).
-          modelsShowStartFailure(r, fname);
+          // can see WHY (OOM / missing CUDA / wrong format / etc.). Pass
+          // the cfg so the modal's "Force load" button can resend with
+          // force:true (bypasses VRAM guardrail, spills to RAM).
+          modelsShowStartFailure(r, fname, cfg);
         }
       } catch (err) {
         toast('Start failed', err.message, 'err', 8000);
@@ -6308,23 +8305,53 @@ function modelsWireRowClicks(pane) {
   pane.querySelectorAll('.model-expand').forEach(modelsWireLoadConfig);
 }
 
-function modelsShowStartFailure(r, fname) {
+function modelsShowStartFailure(r, fname, origBody) {
   const err = r.error || 'unknown error';
   const tail = r.log_tail || '';
   const logPath = r.log_path || '';
-  const body = (tail
+  const bodyHtml = (tail
     ? `<div style="color:var(--fg-dim);margin-bottom:10px;font-size:13px">${esc(err)}</div>` +
       `<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--accent-2);margin-bottom:6px">llama.cpp log tail</div>` +
       `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:var(--mono);font-size:11px;color:var(--fg-dim);max-height:280px;overflow:auto;white-space:pre-wrap">${esc(tail)}</pre>` +
       (logPath ? `<div style="font-size:11px;color:var(--fg-faint);margin-top:8px">Full log: <code>${esc(logPath)}</code></div>` : '')
     : `<div style="color:var(--fg-dim);font-size:13px">${esc(err)}</div>`);
-  showModal('Could not start ' + fname, body, [
+  const actions = [
     { label: 'Open log file', onClick: () => {
         if (logPath) { try { api('/api/open-rules', { method: 'POST' }); } catch {} }
       }
     },
-    { label: 'Close', primary: true },
-  ]);
+  ];
+  // VRAM guardrail tripped — escape hatch that spills weights to system
+  // RAM. Slow but works (10-30 tok/sec vs 50+ all-on-GPU).
+  if (r.force_available && origBody) {
+    actions.push({
+      label: 'Force load (spill to RAM)',
+      kind: 'warn',
+      onClick: async () => {
+        try {
+          modelsSetStartingLock(true, 'Force-loading ' + fname + ' (slow, spilling to RAM)…');
+          const forced = Object.assign({}, origBody, { force: true });
+          const r2 = await api('/api/llmserver/start', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(forced),
+          });
+          if (r2.ok) {
+            toast('Server ready (RAM-spill mode)', fname + ' — expect slower tok/sec', 'ok', 6000);
+            refreshModels(); refreshState();
+            await refreshModelsView();
+          } else {
+            modelsShowStartFailure(r2, fname, origBody);
+          }
+        } catch (err) {
+          toast('Force load failed', err.message, 'err', 8000);
+        } finally {
+          modelsSetStartingLock(false);
+        }
+      }
+    });
+  }
+  actions.push({ label: 'Close', primary: true });
+  showModal('Could not start ' + fname, bodyHtml, actions);
 }
 
 function modelsToggleRow(row) {
@@ -6921,8 +8948,53 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
     document.querySelectorAll('#ob-body [data-voice]').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
     obState.voice = b.dataset.voice;
+    // Reveal the curated voice picker only when the user picks "talk + listen".
+    // Hidden on text-only so the card doesn't crowd people who don't want voice.
+    const picker = document.getElementById('ob-voice-picker');
+    if (picker) picker.hidden = obState.voice !== 'full';
   });
 });
+
+// Onboarding voice picker — speed label tracking + Test button
+(function setupOnboardingVoicePicker() {
+  const speedInput = document.getElementById('ob-voice-speed');
+  const speedLabel = document.getElementById('ob-voice-speed-label');
+  const voiceSel   = document.getElementById('ob-voice-name');
+  const testBtn    = document.getElementById('ob-voice-test');
+  const testMsg    = document.getElementById('ob-voice-test-msg');
+  if (!speedInput || !voiceSel || !testBtn) return;
+  speedInput.oninput = (e) => {
+    const v = parseFloat(e.target.value) || 1.5;
+    if (speedLabel) speedLabel.textContent = v.toFixed(1) + 'x';
+  };
+  testBtn.onclick = async () => {
+    const voice = voiceSel.value || 'am_michael';
+    const speed = parseFloat(speedInput.value) || 1.5;
+    if (testMsg) testMsg.textContent = 'playing…';
+    testBtn.disabled = true;
+    try {
+      // Save the pair first so /api/tts uses it (speak doesn't take per-call
+      // voice/speed in the current shape — it reads DEFAULT_VOICE/SPEED).
+      await api('/api/settings', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ voice_name: voice, voice_speed: speed }),
+      });
+      const r = await fetch('/api/tts', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ text: "Right boss, this is me at " + speed.toFixed(1) + "x. If this feels right, lock it in." }),
+      });
+      if (r.ok) {
+        if (testMsg) testMsg.textContent = '✓ played — adjust and re-test if needed.';
+      } else {
+        if (testMsg) testMsg.textContent = '✗ playback failed — see Settings → Voice for details.';
+      }
+    } catch (e) {
+      if (testMsg) testMsg.textContent = '✗ error: ' + (e.message || 'network');
+    } finally {
+      testBtn.disabled = false;
+    }
+  };
+})();
 
 // Wire "try these" cards
 document.querySelectorAll('#ob-body .ob-try').forEach(b => {
@@ -6939,7 +9011,27 @@ async function obFinish(skipped) {
   const name = ($('ob-name').value || '').trim();
   const tone = $('ob-tone').value;
   const browser = $('ob-browser').value;
+  // Agent name — validate against the same regex /api/agent/rename uses
+  // so an invalid value is caught here instead of failing the rename
+  // silently after onboarding.
+  let agentName = ($('ob-agent-name')?.value || '').trim();
+  if (agentName && !/^[A-Za-z0-9 ]{1,20}$/.test(agentName)) {
+    toast('Agent name skipped', 'Must be 1-20 chars, letters/digits/spaces. Using JARVIS — change later in Settings.', 'warn', 6000);
+    agentName = '';
+  }
   const voiceOn = obState.voice === 'full';
+  // Onboarding voice picker — only persist these if the user actually picked
+  // "talk + listen" AND tweaked them (the Test button already saved a partial
+  // commit, but obFinish is the authoritative save). Defaults are fine if
+  // untouched: am_michael at 1.5x.
+  let pickedVoice;
+  let pickedSpeed;
+  if (voiceOn) {
+    const vSel = document.getElementById('ob-voice-name');
+    const sIn  = document.getElementById('ob-voice-speed');
+    if (vSel && vSel.value) pickedVoice = vSel.value;
+    if (sIn && sIn.value)   pickedSpeed = parseFloat(sIn.value) || 1.5;
+  }
   try {
     await api('/api/settings', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -6948,10 +9040,31 @@ async function obFinish(skipped) {
         user_name: name || undefined,
         tone_preference: tone || undefined,
         preferred_browser: browser || undefined,
+        agent_name: agentName || undefined,
         voice_tts: voiceOn || undefined,
         voice_stt: voiceOn || undefined,
+        voice_name: pickedVoice,
+        voice_speed: pickedSpeed,
       }),
     });
+    // If the user picked a non-default agent name during onboarding,
+    // trigger the FULL rename (workspace folder + persona module +
+    // env). Settings save already changed the in-memory persona name,
+    // but the workspace folder still needs to move. Background — no
+    // UI block. User sees the next chat already using the new name;
+    // the folder rename happens via tray respawn behind the scenes.
+    if (agentName && agentName !== 'JARVIS') {
+      try {
+        await api('/api/agent/rename', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ new_name: agentName }),
+        });
+        // Backend respawns the tray ~1.5s later — schedule a soft
+        // reload so the GUI picks up the new workspace path. The
+        // success toast from the rename endpoint will follow.
+        setTimeout(() => window.location.reload(), 4000);
+      } catch {}
+    }
     if (!skipped) {
       const descParts = [];
       if (name) descParts.push(`name: ${name}`);
@@ -7070,15 +9183,83 @@ $('ob-name').addEventListener('keydown', e => { if (e.key === 'Enter') saveOnboa
   img.src = '/assets/icon.png';
 })();
 
+// Global keyboard shortcuts — documented in Settings → Behavior →
+// Keyboard shortcuts. Modifier is Ctrl on Win/Linux, Cmd on Mac.
+// Tab-switch uses Ctrl+1..6 matching sidebar order.
+window.addEventListener('keydown', (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod) return;
+  // Don't hijack when the user is typing in a text field (except Ctrl+L /
+  // Ctrl+N which we still want everywhere).
+  const inText = ['INPUT', 'TEXTAREA'].includes((e.target.tagName || ''));
+  const keyMap = {
+    '1': 'chat', '2': 'memory', '3': 'files',
+    '4': 'logs', '5': 'models', '6': 'settings',
+  };
+  if (e.key in keyMap && !inText) {
+    e.preventDefault();
+    try { showView(keyMap[e.key]); } catch {}
+    return;
+  }
+  if (e.key.toLowerCase() === 'n' && !inText) {
+    e.preventDefault();
+    try { newConversation(); } catch {}
+    return;
+  }
+  if (e.key.toLowerCase() === 'l') {
+    e.preventDefault();
+    try { const i = $('input'); if (i) i.focus(); } catch {}
+    return;
+  }
+  if (e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    try { const d = $('model-dropdown'); if (d) d.focus(); } catch {}
+    return;
+  }
+});
+// Esc to stop current generation (when streaming).
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && STATE.streaming) {
+    e.preventDefault();
+    try { if (currentAbort) currentAbort.abort(); } catch {}
+  }
+});
+// Show shortcut hint on tab hover so users can discover without reading docs.
+const TAB_SHORTCUTS = {
+  chat: 'Ctrl+1', memory: 'Ctrl+2', files: 'Ctrl+3',
+  logs: 'Ctrl+4', models: 'Ctrl+5', settings: 'Ctrl+6',
+};
+document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
+  const v = btn.dataset.view;
+  if (TAB_SHORTCUTS[v]) btn.title = TAB_SHORTCUTS[v];
+});
+
 (async function boot() {
   await loadConversations();
-  if (!STATE.conversations.length) newConversation();
-  else { STATE.activeId = STATE.conversations[0].id; }
+  if (!STATE.conversations.length) {
+    newConversation();
+  } else {
+    // Restore the chat the user actually had open last time (if it still
+    // exists), instead of always opening whichever was touched most recently.
+    // The old behavior silently opened a different thread after restart and
+    // looked like "the AI forgot what we were talking about" — see the MW4
+    // amnesia case where the model had no context because the GUI had
+    // quietly switched threads under the user.
+    let saved = null;
+    try { saved = localStorage.getItem('hearth.activeId'); } catch {}
+    const exists = saved && STATE.conversations.find(c => c.id === saved);
+    setActiveId(exists ? saved : STATE.conversations[0].id);
+  }
   renderConvoList();
   renderChat();
 
-  await Promise.all([refreshModels(), refreshState(), refreshGpu()]);
+  // Settings FIRST — refreshModels' pill logic depends on STATE.settings
+  // (specifically llm_provider) to know whether to render "Cloud brain" or
+  // fall through to "External / Built-in / No brain". Without this, opening
+  // Models in the first ~200ms after boot showed "pick a model" even when
+  // the user was on Grok.
   await refreshSettings();
+  await Promise.all([refreshModels(), refreshState(), refreshGpu()]);
 
   // If a builtin autoboot is already in flight when the GUI opens, kick the
   // sticker progress bar so the user sees it instead of an empty pill.

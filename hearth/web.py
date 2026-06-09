@@ -316,16 +316,38 @@ def _http_get_json(url: str, timeout: float = 3,
         return None
 
 
-def _http_post_json(url: str, body: Dict, timeout: float = 30) -> Optional[Dict]:
+def _http_post_json(url: str, body: Dict, timeout: float = 30,
+                    headers: Optional[Dict[str, str]] = None) -> Optional[Dict]:
     data = json.dumps(body).encode("utf-8")
+    all_headers = {"Content-Type": "application/json"}
+    if headers:
+        all_headers.update(headers)
     req = urllib.request.Request(url, data=data, method="POST",
-                                 headers={"Content-Type": "application/json"})
+                                 headers=all_headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read().decode("utf-8")
             return json.loads(raw) if raw else {"ok": True}
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
+
+
+def _models_probe_endpoint() -> str:
+    """Where should the chat-model dropdown look?
+
+    Honest rule: the dropdown shows whatever the CURRENT brain serves. If
+    you're on Grok, you see Grok's models (grok-4.3, grok-build-0.1, ...);
+    if you're on local LM Studio, you see local GGUFs. Don't silently
+    auto-redirect — that confused users into thinking 'I switched to Grok
+    but I see Hermes? what's loaded?'.
+
+    The Models tab ALSO shows the local-on-disk models (for switching
+    brains) via the separate `disk_models` field in /api/llmserver/status.
+    That keeps the two concerns clean:
+      - dropdown / topbar = current brain (cloud or local)
+      - Models tab "On your machine" list = local GGUFs (always)
+    """
+    return LOCAL_API_BASE or "http://localhost:1234/v1"
 
 
 def _list_models() -> List[Dict]:
@@ -342,6 +364,9 @@ def _list_models() -> List[Dict]:
         return _models_cache["data"]
 
     out: List[Dict] = []
+    # The endpoint we'll actually probe — may differ from LOCAL_API_BASE if
+    # the chat is currently routed to a cloud endpoint. See _models_probe_endpoint.
+    probe_base = _models_probe_endpoint()
 
     # 1) Built-in llama-cpp server is the active endpoint?
     # Match on port (not full URL) so we tolerate localhost vs 127.0.0.1
@@ -383,13 +408,35 @@ def _list_models() -> List[Dict]:
     except Exception:
         pass
 
-    # 2) LM Studio v0 (rich metadata path)
-    v0_url = LOCAL_API_BASE.replace("/v1", "/api/v0") + "/models"
-    data = _http_get_json(v0_url)
+    # 2) LM Studio v0 (rich metadata path). Pass the Bearer key so an
+    # auth-gated builtin/cloud server doesn't 401-storm the log on every
+    # GUI poll (this was 5-10 spurious 401s in server-log per second
+    # because the GUI polls /api/models every 9s + Hearth's internal probes).
+    v0_url = probe_base.replace("/v1", "/api/v0") + "/models"
+    _v0_key = os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
+    data = _http_get_json(v0_url, headers={"Authorization": f"Bearer {_v0_key}"})
     if data and isinstance(data, dict) and data.get("data"):
+        # Cross-reference with /v1/models to verify "loaded" state isn't stale.
+        # LM Studio v0 sometimes reports state="loaded" for a model the user
+        # has just ejected (it caches per-model state, doesn't auto-clear).
+        # The /v1/models endpoint only lists actually-loaded models, so we
+        # use that as the truth for liveness.
+        live_ids = set()
+        try:
+            v1_data = _http_get_json(probe_base + "/models",
+                                     headers={"Authorization": f"Bearer {_v0_key}"}) or {}
+            for lm in v1_data.get("data", []):
+                if lm.get("id"):
+                    live_ids.add(lm["id"])
+        except Exception:
+            live_ids = set()
         for m in data.get("data", []):
             if m.get("type") == "embeddings":
                 continue
+            # Trust v1 over v0 for liveness — kills the "phantom Gemma loaded"
+            # bug where v0 still reports state=loaded for an ejected model.
+            v0_state = m.get("state")
+            actual_state = v0_state if (m.get("id") in live_ids or not live_ids) else ""
             # Forward the model's on-disk path when LM Studio gives it to us
             # so the GUI's topbar dropdown can dedupe against the disk-scan
             # list (LM Studio renames models — "harmonic-hermes-9b" → file
@@ -399,7 +446,7 @@ def _list_models() -> List[Dict]:
                 "type": m.get("type"),
                 "arch": m.get("arch"),
                 "publisher": m.get("publisher"),
-                "state": m.get("state"),
+                "state": actual_state,
                 "loaded_context_length": m.get("loaded_context_length"),
                 "max_context_length": m.get("max_context_length"),
                 "quantization": m.get("quantization"),
@@ -414,12 +461,21 @@ def _list_models() -> List[Dict]:
     # Try with the configured API key so an auth-gated server (builtin /
     # Gemini / etc.) actually answers instead of silently returning empty.
     api_key = os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
-    data = _http_get_json(f"{LOCAL_API_BASE}/models",
+    data = _http_get_json(f"{probe_base}/models",
                           headers={"Authorization": f"Bearer {api_key}"}) or {"data": []}
+    # Skip non-chat models — xAI lists grok-imagine-image / grok-imagine-video
+    # alongside chat models, but they 400 on /v1/chat/completions because
+    # they use /v1/images/generations and /v1/videos/generations instead.
+    # Hide them from the chat-model picker; they're still callable via the
+    # generate_image / generate_video TOOLS once a chat model is selected.
+    NON_CHAT_PATTERNS = ("imagine-image", "imagine-video", "imagine-audio",
+                         "embedding", "embed-")
     for i, m in enumerate(data.get("data", [])):
+        raw_id = m.get("id") or ""
+        if any(p in raw_id.lower() for p in NON_CHAT_PATTERNS):
+            continue
         # llama_cpp.server identifies models by the FULL --model path. Strip
         # to basename here so the topbar shows "model.gguf" not "C:\Users\...".
-        raw_id = m.get("id") or ""
         clean_id = os.path.basename(raw_id.replace("\\", "/")) or raw_id
         out.append({
             "id": clean_id,
@@ -612,7 +668,7 @@ def _memory_index() -> List[Dict]:
                 lines = f.readlines()[:15]
         except OSError:
             continue
-        name, desc, typ = fn[:-3], "", ""
+        name, desc, typ, sub_cat = fn[:-3], "", "", ""
         in_fm = False
         for ln in lines:
             s = ln.strip()
@@ -628,11 +684,22 @@ def _memory_index() -> List[Dict]:
                     desc = s.split(":", 1)[1].strip()
                 elif s.startswith("type:"):
                     typ = s.split(":", 1)[1].strip()
+                elif s.startswith("sub_category:"):
+                    sub_cat = s.split(":", 1)[1].strip()
+        # Fallback for old memories that haven't been migrated yet — classify
+        # on the fly so the GUI tree never has orphans. Cheap (regex only).
+        if not sub_cat:
+            try:
+                from .memory_classify import classify_or_default
+                sub_cat = classify_or_default(typ or "user", desc)
+            except Exception:
+                sub_cat = ""
         try:
             mtime = os.path.getmtime(path)
         except OSError:
             mtime = 0
         out.append({"name": name, "description": desc, "type": typ,
+                    "sub_category": sub_cat,
                     "path": path, "mtime": mtime})
     out.sort(key=lambda x: -x["mtime"])
     return out
@@ -646,6 +713,9 @@ def _load_settings() -> Dict:
         "voice_stt": False,
         "stt_device": "cpu",   # cpu / cuda
         "tts_device": "cpu",   # cpu / cuda / dml
+        "voice_speed": 1.5,    # Kokoro playback rate (0.5x-2.5x). 1.5 is the snappier default that doesn't sound like a turtle.
+        "voice_name": "am_michael",  # Kokoro voice id (am_/af_/bm_/bf_ + name). am_michael = Jarvis-leaning baseline.
+        "agent_name": "JARVIS",      # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
         "stt_model": "base.en",  # base.en / small.en / medium.en
         "theme": "warm-flame",
         "preferred_model": "",
@@ -656,9 +726,18 @@ def _load_settings() -> Dict:
         # Built-in server config exposed via the Settings → Server pane.
         # Apply on the next start_builtin (settings persist; restart to act).
         "server_autoboot": True,        # auto-load preferred_model on Hearth launch
-        "server_default_ctx": 8192,     # ctx used when no per-model config saved
+        "server_default_ctx": 24576,    # 24K. Persona+tools = ~18K; needs headroom for chat+output. 16K was tight, 8K silently OOM'd.
+        "keep_local_warm": False,       # when switching to cloud, keep the local builtin loaded? Off = free VRAM (default). On = leave it warm so quick swap-back doesn't reload (~10s tax). Power-user toggle.
+        # ---- Toast quiet-mode toggles (user-controlled noise level) ----
+        "toast_facts_saved": True,      # "Remembered N facts" on auto-extract
+        "toast_compacted":   True,      # "Context compacted, now X%"
+        "toast_errors":      True,      # Hard errors (always recommended)
         "server_idle_min": 15,          # auto-unload after N idle minutes (0 = never)
         "server_port": 1234,            # builtin HTTP port
+        # Forge / SD-WebUI install path for local image gen. "" = either
+        # not installed or use whatever _autodetect_forge_dir picks. Set
+        # via Settings → Behavior or the Detect button.
+        "forge_dir": "",
     }
     if not os.path.isfile(SETTINGS_PATH):
         return defaults
@@ -672,6 +751,13 @@ def _load_settings() -> Dict:
     os.environ["JARVIS_STT_DEVICE"] = defaults.get("stt_device", "cpu")
     os.environ["JARVIS_STT_MODEL"]  = defaults.get("stt_model",  "base.en")
     os.environ["JARVIS_TTS_DEVICE"] = defaults.get("tts_device", "cpu")
+    os.environ["JARVIS_VOICE_SPEED"] = str(defaults.get("voice_speed", 1.5))
+    os.environ["JARVIS_VOICE"]      = defaults.get("voice_name", "am_michael")
+    # Agent name → persona module reads this at import-time via
+    # HEARTH_PERSONA_NAME. Setting it here means the very next chat turn
+    # picks up the user's renamed agent. On boot, this fires before any
+    # chat call so the persona is correct from turn 1.
+    os.environ["HEARTH_PERSONA_NAME"] = (defaults.get("agent_name") or "JARVIS").strip() or "JARVIS"
     return defaults
 
 
@@ -685,7 +771,31 @@ def _save_settings(d: Dict) -> Dict:
     os.environ["JARVIS_STT_DEVICE"] = cur.get("stt_device", "cpu")
     os.environ["JARVIS_STT_MODEL"]  = cur.get("stt_model",  "base.en")
     os.environ["JARVIS_TTS_DEVICE"] = cur.get("tts_device", "cpu")
+    os.environ["JARVIS_VOICE_SPEED"] = str(cur.get("voice_speed", 1.5))
+    os.environ["JARVIS_VOICE"]      = cur.get("voice_name", "am_michael")
+    # Agent rename: hot-update the persona module's NAME constant so the
+    # very next chat turn uses the new name in system prompt, signatures,
+    # and tone rules — no restart needed. Folder rename happens via a
+    # separate /api/agent/rename endpoint (it's slow + interrupts the tray).
+    new_agent_name = (cur.get("agent_name") or "JARVIS").strip() or "JARVIS"
+    os.environ["HEARTH_PERSONA_NAME"] = new_agent_name
+    try:
+        from . import persona as _persona
+        _persona.NAME = new_agent_name
+    except Exception:
+        pass
     if _voice:
+        # Apply speed live (no engine reload needed — it's a per-call param
+        # the speak() handler reads from DEFAULT_SPEED). The voice id picks
+        # up on the next speak() call too.
+        try:
+            _voice.set_speed(float(cur.get("voice_speed", 1.5)))
+        except Exception:
+            pass
+        try:
+            _voice.set_default_voice(str(cur.get("voice_name", "am_michael")))
+        except Exception:
+            pass
         try: _voice.reload()
         except Exception: pass
     return cur
@@ -791,6 +901,30 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_asset(path[len("/assets/"):])
         if path == "/api/state":
             return self._send_state()
+        if path == "/api/context-budget":
+            # Live read of the current brain's context window so the GUI
+            # ring + bottom bar update instantly on provider swap (don't
+            # have to wait for the next chat turn to fire context_budget
+            # SSE events). Same helper the chat path uses, so they agree.
+            try:
+                from . import headless as _hl
+                # Sync helper's view of base/model to whatever GUI has set.
+                s = _load_settings()
+                model = (s.get("llm_model") or "").strip()
+                tokens, source = _hl.resolve_context_tokens(model)
+                # Tool-schema overhead — same math as the chat path.
+                try:
+                    tool_tokens = len(json.dumps(TOOL_DEFINITIONS)) // 4
+                except Exception:
+                    tool_tokens = 0
+                effective = max(2048, tokens - tool_tokens)
+                return self._send_json(200, {
+                    "total": tokens, "tools": tool_tokens,
+                    "effective": effective, "source": source,
+                    "model": model,
+                })
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/conversations":
             return self._send_json(200, {"conversations": _list_convos()})
         if path.startswith("/api/conversations/"):
@@ -801,6 +935,54 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, data)
         if path == "/api/models":
             return self._send_json(200, {"models": _list_models()})
+        if path == "/api/mcp/config":
+            # Outbound MCP config — pasted from a standard mcp.json. Stored
+            # at ~/Jarvis/mcp.json. Empty file → empty config (valid).
+            mcp_path = os.path.join(WORKSPACE, "mcp.json")
+            try:
+                if os.path.isfile(mcp_path):
+                    with open(mcp_path, "r", encoding="utf-8") as f:
+                        body = f.read()
+                else:
+                    body = ""
+                return self._send_json(200, {"json": body, "path": mcp_path})
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/forge/detect":
+            try:
+                from . import tools as _t
+                detected = _t._autodetect_forge_dir()
+                return self._send_json(200, {"path": detected or ""})
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/reminders":
+            try:
+                from . import reminders as _r
+                items = _r.list_reminders(include_fired=False)
+                return self._send_json(200, {"items": items})
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/mcp/status":
+            # Live bridge status. Runtime spawning lands in a follow-up;
+            # for now report what the config WOULD spin up so the UI shows
+            # the user's intent + clear "not yet connected" markers.
+            mcp_path = os.path.join(WORKSPACE, "mcp.json")
+            bridges = []
+            try:
+                if os.path.isfile(mcp_path):
+                    with open(mcp_path, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    for name, spec in (cfg.get("mcpServers") or {}).items():
+                        bridges.append({
+                            "name": name,
+                            "state": "pending",
+                            "transport": "stdio" if spec.get("command") else "sse",
+                            "error": "runtime bridge ships in v0.7 — config is saved",
+                        })
+            except Exception as e:
+                bridges = [{"name": "(config error)", "state": "error",
+                            "error": f"{type(e).__name__}: {e}"}]
+            return self._send_json(200, {"bridges": bridges})
         if path == "/api/memory":
             return self._send_json(200, {"memories": _memory_index()})
         if path.startswith("/api/memory/"):
@@ -811,6 +993,11 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _list_files(q.get("path", "")))
         if path == "/api/file":
             return self._send_file_op()
+        if path == "/file":
+            # Binary file serve for inline media render in the chat (generated
+            # images, videos). Restricted to WORKSPACE — so a malicious chat
+            # response can't `<img src="/file?path=C:/Windows/...">` and exfil.
+            return self._serve_binary_file()
         if path == "/api/logs":
             q = self._query()
             try:
@@ -950,6 +1137,15 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/cancel":
             _CANCEL.set()  # run_once checks this between turns and bails out
             return self._send_json(200, {"cancelled": True})
+        if path == "/api/file/reveal":
+            # Open the OS file explorer with the given file selected. Safety:
+            # same workspace-sandbox check as /file so a chat-injected path
+            # can't pop arbitrary Explorer windows. Windows uses
+            # `explorer /select,<path>`, mac uses `open -R`, linux uses
+            # whatever xdg-open does for the parent dir (no select equivalent).
+            return self._reveal_in_folder()
+        if path == "/api/agent/rename":
+            return self._rename_agent()
         if path == "/api/models/load":
             body = self._read_json()
             mid = (body.get("id") or "").strip()
@@ -960,6 +1156,44 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _eject_model())
         if path == "/api/settings":
             return self._send_json(200, _save_settings(self._read_json()))
+        if path == "/api/reminders/snooze":
+            try:
+                from . import reminders as _r
+                body = self._read_json()
+                rid = (body.get("id") or "").strip()
+                mins = int(body.get("minutes", 10))
+                if not rid:
+                    return self._send_json(400, {"ok": False, "error": "missing id"})
+                return self._send_json(200, _r.snooze_reminder(rid, mins))
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/reminders/cancel":
+            try:
+                from . import reminders as _r
+                body = self._read_json()
+                rid = (body.get("id") or "").strip()
+                if not rid:
+                    return self._send_json(400, {"ok": False, "error": "missing id"})
+                ok = _r.cancel_reminder(rid)
+                return self._send_json(200, {"ok": ok, "id": rid})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/mcp/config":
+            body = self._read_json()
+            txt = (body.get("json") or "").strip()
+            if txt:
+                try:
+                    json.loads(txt)
+                except Exception as e:
+                    return self._send_json(400, {"ok": False, "error": f"JSON: {e}"})
+            mcp_path = os.path.join(WORKSPACE, "mcp.json")
+            try:
+                os.makedirs(os.path.dirname(mcp_path) or WORKSPACE, exist_ok=True)
+                with open(mcp_path, "w", encoding="utf-8") as f:
+                    f.write(txt)
+                return self._send_json(200, {"ok": True, "path": mcp_path})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/conversations":
             data = self._read_json()
             if not data.get("id"):
@@ -967,15 +1201,27 @@ class HearthHandler(BaseHTTPRequestHandler):
             ok = _save_convo(data)
             return self._send_json(200 if ok else 500, {"ok": ok})
         if path == "/api/logs/clear":
-            log_path = os.path.join(LOGS_DIR, "activity.jsonl")
+            # Clears AGENT log (activity.jsonl). The Logs view's clear button
+            # passes which=server when the dropdown is showing server logs,
+            # so the button no longer cross-wires onto the wrong file.
+            q = self._query()
+            which = (q.get("which") or "agent").lower()
+            if which == "server":
+                log_path = os.path.join(WORKSPACE, "logs", "llamaserver.log")
+                bak_prefix = "llamaserver"
+                bak_ext = "log"
+            else:
+                log_path = os.path.join(LOGS_DIR, "activity.jsonl")
+                bak_prefix = "activity"
+                bak_ext = "jsonl"
             try:
                 if os.path.isfile(log_path):
-                    # Move to a dated backup, start fresh
-                    bak = os.path.join(LOGS_DIR, f"activity.{int(time.time())}.jsonl.bak")
+                    bak = os.path.join(os.path.dirname(log_path),
+                                       f"{bak_prefix}.{int(time.time())}.{bak_ext}.bak")
                     os.rename(log_path, bak)
                 with open(log_path, "w", encoding="utf-8") as f:
                     f.write("")
-                return self._send_json(200, {"ok": True})
+                return self._send_json(200, {"ok": True, "cleared": which})
             except OSError as e:
                 return self._send_json(500, {"error": str(e)})
         if path == "/api/upload":
@@ -1163,9 +1409,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             # If we're switching to a CLOUD provider, free the built-in's
             # 5+ GB of VRAM — it would just sit idle. Skipped for local
             # endpoints since the user might be swapping between LM Studio
-            # and the builtin on purpose.
+            # and the builtin on purpose. Power-users can opt out with the
+            # `keep_local_warm` setting — useful if they bounce between
+            # cloud and local during one session and don't want the 8-15s
+            # reload tax.
             stopped_builtin = False
-            if provider and provider not in ("local", ""):
+            keep_warm = bool(_load_settings().get("keep_local_warm", False))
+            if provider and provider not in ("local", "") and not keep_warm:
                 try:
                     from . import llmserver
                     if llmserver._proc and llmserver._proc.poll() is None:
@@ -1174,9 +1424,33 @@ class HearthHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             _models_cache["ts"] = 0  # force the next /api/models to repopulate
+            # For local: probe the URL so the apply doesn't silently succeed
+            # when nothing's listening. Empty chat responses on first send
+            # had no surface explanation otherwise. Three outcomes:
+            #   - LM Studio responding: prefer it (more robust than builtin)
+            #   - Our builtin responding
+            #   - Nothing: surface a hint to start one
+            local_probe = None
+            if (provider or "").lower() == "local":
+                try:
+                    from . import llmserver as _ls
+                    if _ls.external_server_running(url, timeout=1.0, api_key=key or None):
+                        # Distinguish LM Studio from our own builtin — the
+                        # builtin is recognizable via the PID we track.
+                        is_ours = (_ls._proc is not None and _ls._proc.poll() is None
+                                   and (_ls._proc_info or {}).get("url") == url)
+                        local_probe = {
+                            "reachable": True,
+                            "kind": "builtin" if is_ours else "lmstudio",
+                        }
+                    else:
+                        local_probe = {"reachable": False, "kind": "none"}
+                except Exception:
+                    pass
             return self._send_json(200, {
                 "ok": True, "url": url, "provider": provider,
                 "stopped_builtin": stopped_builtin,
+                "local_probe": local_probe,
             })
         if path == "/api/llmserver/start":
             # Boot the optional built-in llama-cpp-python server with the user's
@@ -1186,17 +1460,23 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import llmserver
             body = self._read_json()
             model_path = (body.get("model_path") or "").strip()
-            ctx        = int(body.get("ctx") or 8192)
+            # Body wins (Models tab can override per-load); else user's saved
+            # Settings → Default context window; else 24K as final fallback.
+            ctx        = int(body.get("ctx") or _load_settings().get("server_default_ctx") or 24576)
             n_gpu      = int(body.get("n_gpu_layers") if body.get("n_gpu_layers") is not None else -1)
             n_threads  = body.get("n_threads")
             n_threads  = int(n_threads) if n_threads not in (None, "", "auto") else None
             ck         = (body.get("cache_type_k") or "").strip() or None
             cv         = (body.get("cache_type_v") or "").strip() or None
             flash      = bool(body.get("flash_attn", True))
+            # `force=true` from the GUI bypasses the VRAM guardrail — opt-in
+            # only, after the user clicks "Force load anyway" in the modal.
+            # llama.cpp will spill weights to system RAM (slow but boots).
+            force      = bool(body.get("force", False))
             result = llmserver.start_builtin(
                 model_path, ctx=ctx, n_gpu_layers=n_gpu,
                 n_threads=n_threads, cache_type_k=ck, cache_type_v=cv,
-                flash_attn=flash,
+                flash_attn=flash, force=force,
             )
             # On successful start, retarget the GLOBAL LLM endpoint to the
             # builtin URL so the topbar dropdown + /api/models + chat all
@@ -1217,6 +1497,27 @@ class HearthHandler(BaseHTTPRequestHandler):
                 # Builtin uses a fixed key; bake it in so chat works without
                 # the user touching settings.
                 os.environ["LOCAL_API_KEY"] = "hearth-builtin"
+                # Pop LOCAL_MODEL so chat falls back to probing the
+                # builtin's /v1/models for the loaded id. Without this,
+                # Cloud→sticker-pick-builtin sent the prior brain's
+                # model id ("grok-4-0709-...") to the builtin, which
+                # returns empty completions. Mirrored in /api/llm-endpoint
+                # for the case where provider switches without an
+                # explicit model body.
+                os.environ.pop("LOCAL_MODEL", None)
+                # Mirror the brain change into settings so the GUI's
+                # llm_provider pill + Chat brain dropdown reflect reality
+                # — otherwise the GUI keeps showing "Grok" after the
+                # retarget to the builtin.
+                try:
+                    _s = _load_settings()
+                    _s["llm_provider"] = "local"
+                    _s["llm_url"]      = LOCAL_API_BASE
+                    _s["llm_key"]      = ""  # builtin key isn't user-facing
+                    _s["llm_model"]    = ""  # let probe pick it
+                    _save_settings(_s)
+                except Exception:
+                    pass
                 _models_cache["ts"] = 0  # force /api/models to repopulate
                 # Sticky default: remember the model the user just picked so
                 # the NEXT launch auto-boots it (see _auto_boot_preferred_model_async).
@@ -1381,6 +1682,211 @@ class HearthHandler(BaseHTTPRequestHandler):
         except Exception as e:
             return self._send_json(500, {"error": str(e)})
         self._send_json(200, {"ok": True, "name": name})
+
+    def _reveal_in_folder(self) -> None:
+        """Open the OS file explorer with the given file selected. Workspace-
+        sandboxed (same rule as _serve_binary_file). Non-blocking spawn."""
+        from .tools import list_extra_workspaces
+        body = self._read_json()
+        path = (body.get("path") or "").strip()
+        if not path:
+            return self._send_json(400, {"error": "missing path"})
+        try:
+            real = os.path.realpath(path)
+        except Exception:
+            return self._send_json(400, {"error": "bad path"})
+        ws_real = os.path.realpath(WORKSPACE)
+        allowed_roots = [ws_real] + [os.path.realpath(p) for p in list_extra_workspaces()]
+        if not any(real.lower().startswith(root.lower() + os.sep) or
+                   real.lower() == root.lower() for root in allowed_roots):
+            return self._send_json(403, {"error": "path outside allowed roots"})
+        if not os.path.exists(real):
+            return self._send_json(404, {"error": "not found"})
+        try:
+            if sys.platform == "win32":
+                # explorer /select,<path> pops Explorer with file highlighted
+                subprocess.Popen(["explorer", "/select,", real],
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", real])
+            else:
+                # Linux: no portable "select file" — open the parent dir.
+                parent = real if os.path.isdir(real) else os.path.dirname(real)
+                subprocess.Popen(["xdg-open", parent])
+            return self._send_json(200, {"ok": True})
+        except Exception as e:
+            return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def _rename_agent(self) -> None:
+        """Rename the agent end-to-end: persona NAME, settings.agent_name,
+        AND the workspace folder (~/Jarvis -> ~/<NewName>). The folder move
+        forces a tray restart because WORKSPACE / SETTINGS_PATH / MEM_DIR /
+        CONVOS_DIR are bound at import time; a helper subprocess does the
+        rename + relaunch AFTER this process exits so no file is locked."""
+        import re as _re
+        import shutil as _shutil
+        body = self._read_json()
+        new_name = (body.get("new_name") or "").strip()
+        if not new_name:
+            return self._send_json(400, {"error": "missing new_name"})
+        # Strict whitelist: letters / digits / spaces, 1-20 chars. Rejects
+        # path-traversal (../), reserved chars (\\ / : * ? " < > |), and any
+        # leading/trailing whitespace funkiness.
+        if not _re.match(r"^[A-Za-z0-9 ]{1,20}$", new_name):
+            return self._send_json(400, {"error": "name must be 1-20 chars, letters/digits/spaces only"})
+        current_name = (_load_settings().get("agent_name") or "JARVIS").strip() or "JARVIS"
+        if new_name == current_name:
+            return self._send_json(200, {"ok": True, "noop": True, "name": new_name})
+        # Compute target workspace. Use the PARENT of current WORKSPACE so a
+        # user who already set $JARVIS_WORKSPACE=D:\Stuff\Jarvis gets the
+        # rename done in-place (D:\Stuff\Cortana), not yanked back to ~.
+        cur_ws = os.path.realpath(WORKSPACE)
+        parent = os.path.dirname(cur_ws)
+        new_ws = os.path.join(parent, new_name)
+        if os.path.exists(new_ws):
+            return self._send_json(409, {"error": f"target folder already exists: {new_ws}"})
+        # Persist the new name FIRST. settings.json lives inside the current
+        # workspace, so the rename carries it along — when the relaunched
+        # tray reads settings, it sees agent_name=NewName already.
+        try:
+            _save_settings({"agent_name": new_name})
+        except Exception as e:
+            return self._send_json(500, {"error": f"settings save failed: {e}"})
+        # Stop the built-in LLM server (if any) so its file handles in
+        # WORKSPACE don't block the rename. Best-effort; cloud-only users
+        # have nothing to stop.
+        try:
+            from . import llmserver as _ls
+            if _ls._proc is not None and _ls._proc.poll() is None:
+                _ls.stop_builtin()
+        except Exception:
+            pass
+        # Schedule the rename + respawn AFTER this HTTP response flushes.
+        # The helper waits for our PID to be gone before touching the dir.
+        def _do_rename_then_respawn():
+            import time as _t
+            _t.sleep(1.5)  # let the HTTP response reach the browser
+            # Build a tiny self-contained helper command. We can't do the
+            # rename from this process because settings.json / DB files may
+            # still hold a handle on Windows. Spawn a detached python that
+            # outlives us, waits for our PID to exit, then does the move +
+            # relaunches the tray with JARVIS_WORKSPACE pointing at the
+            # new folder. Same drive => os.rename (instant). Cross-drive
+            # => copytree + rmtree fallback.
+            here = os.path.dirname(os.path.abspath(__file__))
+            repo_root = os.path.dirname(here)
+            venv_pyw = os.path.join(repo_root, ".venv", "Scripts", "pythonw.exe")
+            venv_py  = os.path.join(repo_root, ".venv", "Scripts", "python.exe")
+            py = venv_pyw if os.path.isfile(venv_pyw) else (
+                 venv_py  if os.path.isfile(venv_py)  else sys.executable)
+            our_pid = os.getpid()
+            helper = (
+                "import os, sys, time, shutil, subprocess\n"
+                f"old={cur_ws!r}\n"
+                f"new={new_ws!r}\n"
+                f"pid={our_pid}\n"
+                "for _ in range(200):\n"
+                "    try:\n"
+                "        if sys.platform == 'win32':\n"
+                "            import ctypes\n"
+                "            PROCESS_QUERY = 0x1000\n"
+                "            h = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY, False, pid)\n"
+                "            if not h: break\n"
+                "            ctypes.windll.kernel32.CloseHandle(h)\n"
+                "        else:\n"
+                "            os.kill(pid, 0)\n"
+                "    except Exception:\n"
+                "        break\n"
+                "    time.sleep(0.1)\n"
+                "time.sleep(0.5)\n"
+                "try:\n"
+                "    os.rename(old, new)\n"
+                "except OSError:\n"
+                "    try:\n"
+                "        shutil.copytree(old, new)\n"
+                "        shutil.rmtree(old, ignore_errors=True)\n"
+                "    except Exception as e:\n"
+                "        print('rename failed:', e); sys.exit(1)\n"
+                "env = os.environ.copy()\n"
+                "env['JARVIS_WORKSPACE'] = new\n"
+                f"env['HEARTH_PERSONA_NAME'] = {new_name!r}\n"
+                "flags = 0\n"
+                "if sys.platform == 'win32':\n"
+                "    flags = 0x08000000 | subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008\n"
+                f"subprocess.Popen([{py!r}, '-m', 'hearth.tray', '--open'],\n"
+                "                 env=env, creationflags=flags, close_fds=True)\n"
+            )
+            try:
+                flags = 0
+                if sys.platform == "win32":
+                    flags = (0x08000000  # CREATE_NO_WINDOW
+                             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                             | 0x00000008)  # DETACHED_PROCESS
+                subprocess.Popen([py, "-c", helper],
+                                 creationflags=flags, close_fds=True)
+            except Exception:
+                pass
+            # Step down. The helper takes over.
+            _t.sleep(0.3)
+            os._exit(0)
+        threading.Thread(target=_do_rename_then_respawn, daemon=True).start()
+        return self._send_json(200, {
+            "ok": True,
+            "name": new_name,
+            "old_workspace": cur_ws,
+            "new_workspace": new_ws,
+            "restarting_in_ms": 1500,
+        })
+
+    def _serve_binary_file(self) -> None:
+        """Stream a raw file with correct Content-Type so the chat can render
+        <img src="/file?path=..."> and <video src="/file?path=..."> inline.
+
+        Hard restriction: the path MUST resolve inside WORKSPACE (or
+        list_extra_workspaces()). Without this, a chat that includes
+        __JARVIS_IMAGE__ C:/Windows/System32/config/SAM could try to slurp
+        arbitrary files via the browser fetch. Reject anything that escapes.
+        """
+        import mimetypes
+        from .tools import list_extra_workspaces
+        q = self._query()
+        path = q.get("path", "")
+        if not path:
+            return self._send_json(400, {"error": "missing path"})
+        try:
+            real = os.path.realpath(path)
+        except Exception:
+            return self._send_json(400, {"error": "bad path"})
+        ws_real = os.path.realpath(WORKSPACE)
+        allowed_roots = [ws_real] + [os.path.realpath(p) for p in list_extra_workspaces()]
+        if not any(real.lower().startswith(root.lower() + os.sep) or
+                   real.lower() == root.lower() for root in allowed_roots):
+            return self._send_json(403, {"error": "path outside allowed roots"})
+        if not os.path.isfile(real):
+            return self._send_json(404, {"error": "not found"})
+        ctype, _ = mimetypes.guess_type(real)
+        ctype = ctype or "application/octet-stream"
+        try:
+            size = os.path.getsize(real)
+            with open(real, "rb") as f:
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(size))
+                self.send_header("Cache-Control", "public, max-age=3600")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                # Stream in chunks so a big video doesn't hold the whole
+                # bytes object in memory.
+                while True:
+                    chunk = f.read(256 * 1024)
+                    if not chunk:
+                        break
+                    try:
+                        self.wfile.write(chunk)
+                    except (BrokenPipeError, ConnectionResetError):
+                        break
+        except OSError as e:
+            return self._send_json(500, {"error": str(e)})
 
     def _send_file_op(self) -> None:
         q = self._query()
@@ -1640,9 +2146,28 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return text[:50]
             return " ".join(words[:6]) + "…"
 
-        loaded = _detect_loaded()
-        if not loaded:
+        # Pick a model: prefer the active brain (cloud or local). The old
+        # path only checked _detect_loaded() (local servers) and fell back
+        # to a verbatim truncate when on cloud — title would be "draw me a
+        # glowing logo" instead of "Hearth Logo Design". Now: use whatever
+        # the chat is actually pointed at.
+        settings = _load_settings()
+        provider = (settings.get("llm_provider") or "").lower()
+        is_cloud = provider not in ("", "local", "lmstudio", "builtin")
+        model_id = (settings.get("llm_model") or "").strip()
+        if not model_id:
+            loaded = _detect_loaded()
+            if loaded:
+                model_id = loaded.get("id") or ""
+        if not model_id and not is_cloud:
             return self._send_json(200, {"title": _fallback(first)})
+        if not model_id and is_cloud:
+            # Cloud provider with no model_id saved — pick a sensible default
+            model_id = {
+                "grok": "grok-4.3",
+                "gemini": "gemini-2.5-flash",
+                "openai": "gpt-4o-mini",
+            }.get(provider, "gpt-4o-mini")
         prompt = (
             f"Output ONLY a 3-5 word title (no quotes, no preamble) for this "
             f"chat message. Nothing else.\n\n"
@@ -1650,13 +2175,19 @@ class HearthHandler(BaseHTTPRequestHandler):
             f"Title:"
         )
         payload = {
-            "model": loaded.get("id"),
+            "model": model_id,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 16,
             "temperature": 0.3,
             "stream": False,
         }
-        resp = _http_post_json(f"{LOCAL_API_BASE}/chat/completions", payload, timeout=20)
+        # Pass Authorization header so cloud endpoints (and our authed
+        # builtin) actually accept the call instead of 401'ing.
+        api_key = (os.environ.get("LOCAL_API_KEY") or
+                   settings.get("llm_key") or "hearth-builtin")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        resp = _http_post_json(f"{LOCAL_API_BASE}/chat/completions", payload,
+                               timeout=20, headers=headers)
         if not isinstance(resp, dict) or resp.get("error"):
             return self._send_json(200, {"title": _fallback(first)})
         try:
@@ -1717,6 +2248,11 @@ class HearthHandler(BaseHTTPRequestHandler):
             ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
             ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
             ".ico": "image/x-icon",
+            # JS/CSS for vendored libraries (d3, mermaid in future). Without
+            # the correct Content-Type, the browser refuses to execute d3
+            # under strict-mime-sniffing.
+            ".js": "application/javascript", ".css": "text/css",
+            ".json": "application/json", ".woff": "font/woff", ".woff2": "font/woff2",
         }.get(ext, "application/octet-stream")
         with open(target, "rb") as f:
             payload = f.read()
@@ -1836,8 +2372,19 @@ def _auto_boot_preferred_model_async() -> None:
     # Honor the user's Settings → Server → "Auto-boot last model on launch"
     # toggle. Default True so the existing behavior is preserved.
     try:
-        if not _load_settings().get("server_autoboot", True):
+        settings = _load_settings()
+        if not settings.get("server_autoboot", True):
             print("  [hearth.web] autoboot disabled in Settings; skipping", flush=True)
+            return
+        # If the user's last brain was a cloud provider, DON'T autoboot a
+        # local model under them. They explicitly picked cloud; loading a
+        # local model would silently hijack the brain back to local and the
+        # Models tab would show LM Studio instead of Grok (the bug they
+        # reported). When the user wants local back, they pick it via
+        # Settings → Chat brain.
+        prov = (settings.get("llm_provider") or "").strip().lower()
+        if prov and prov not in ("local", "lmstudio", "builtin", ""):
+            print(f"  [hearth.web] cloud brain '{prov}' selected — skipping local autoboot", flush=True)
             return
     except Exception:
         pass
@@ -1853,9 +2400,40 @@ def _auto_boot_preferred_model_async() -> None:
             wanted = (settings.get("preferred_model") or "").strip()
             if not wanted:
                 return
-            # Don't fight an external server that's already serving — the
-            # user explicitly started LM Studio / Ollama, that's the brain.
-            if llmserver.external_server_running(LOCAL_API_BASE):
+
+            # Don't fight an external server on the BUILTIN port (1234). The
+            # old check probed LOCAL_API_BASE which might point at Grok/Gemini
+            # (set by last CLI session) — fails to detect LM Studio sitting at
+            # localhost:1234, then start_builtin's pre-flight correctly refuses
+            # because of the conflict. Result the user saw: GUI launches, says
+            # "Port 1234 already taken", Models tab looks empty.
+            # New behavior: check 1234 first; if LM Studio is there with a
+            # model loaded, retarget the GUI to it instead of trying to boot.
+            builtin_api = f"http://127.0.0.1:{llmserver.BUILTIN_PORT}/v1"
+            if llmserver.external_server_running(builtin_api, timeout=0.8, api_key=None):
+                # Something IS on the builtin port — must NOT be us (we'd
+                # already be in llmserver._proc). It's LM Studio / Ollama /
+                # something else. Retarget the GUI endpoint to it and walk
+                # away. The user explicitly started that server; honor it.
+                if LOCAL_API_BASE != builtin_api:
+                    LOCAL_API_BASE = builtin_api
+                    _hl.LOCAL_API_BASE = LOCAL_API_BASE
+                    os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
+                    # External servers like LM Studio don't require a key;
+                    # clear ours so we don't 401 against them.
+                    os.environ.pop("LOCAL_API_KEY", None)
+                    _models_cache["ts"] = 0
+                    print(
+                        f"  [hearth.web] external server on port {llmserver.BUILTIN_PORT} "
+                        f"(likely LM Studio) — retargeted GUI to it, skipping autoboot",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"  [hearth.web] external server already serving at {LOCAL_API_BASE} — "
+                        f"skipping autoboot",
+                        flush=True,
+                    )
                 return
             # Already serving via builtin? Nothing to do.
             if llmserver._proc is not None and llmserver._proc.poll() is None:
@@ -1904,7 +2482,14 @@ def _auto_boot_preferred_model_async() -> None:
                 return
             # Load saved per-model config (ctx, n_gpu_layers, KV cache, ...)
             cfg = llmserver.get_model_config(pick["path"]) or {}
-            print(f"  [hearth.web] auto-booting {pick['filename']} ({pick.get('size_gb','?')} GB)…", flush=True)
+            # Per-model cfg WINS — some models need different ctx based on
+            # VRAM. Settings → Default context window is just the fallback
+            # for models without a saved cfg. User clarified: floor logic
+            # was wrong because it ignored per-model VRAM realities.
+            if "ctx" not in cfg:
+                cfg["ctx"] = int(s.get("server_default_ctx", 24576))
+            print(f"  [hearth.web] auto-booting {pick['filename']} "
+                  f"({pick.get('size_gb','?')} GB, ctx={cfg.get('ctx')})…", flush=True)
             r = llmserver.start_builtin(pick["path"], **cfg)
             if r.get("ok"):
                 # Retarget the GLOBAL endpoint to the builtin URL so the GUI
@@ -1914,6 +2499,11 @@ def _auto_boot_preferred_model_async() -> None:
                 _hl.LOCAL_API_BASE = LOCAL_API_BASE
                 os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
                 os.environ["LOCAL_API_KEY"] = "hearth-builtin"
+                # CRITICAL: pop stale LOCAL_MODEL so chat probes the builtin
+                # for the actually-loaded model. Same root-cause as the
+                # sticker-bypass empty-response bug: previous brain's model
+                # id was still in env and got sent to the new server.
+                os.environ.pop("LOCAL_MODEL", None)
                 _models_cache["ts"] = 0
                 print(f"  [hearth.web] builtin up at {r['url']} — endpoint switched", flush=True)
             else:

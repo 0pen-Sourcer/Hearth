@@ -162,19 +162,43 @@ def main(argv: Optional[list] = None) -> int:
     # Start backend
     global _server_url
     port = args.port or singleton.DEFAULT_PORT
-    # If user passed --port OR our singleton-preferred port is unexpectedly
-    # taken (e.g. it WAS bound but the Hearth instance died between checks),
-    # walk forward to find a free one.
     import socket as _sk
-    for off in range(0, 12):
-        p = port + off
+
+    # Try to bind the canonical port. If it's taken and we DIDN'T pass --port
+    # explicitly, that means a race-condition let another Hearth slip past
+    # singleton.acquire_or_defer between probe + bind — bail rather than
+    # quietly starting on 8766 as a phantom parallel instance (this was the
+    # "two Hearth trays running, one making ghost tool calls" bug).
+    if not args.port:
         try:
             with _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM) as s:
-                s.bind(("127.0.0.1", p))
-                port = p
-                break
+                s.bind(("127.0.0.1", port))
+            # Free — release immediately, real server binds next
         except OSError:
-            continue
+            # Race-lost. The other instance won; ask it to surface, exit clean.
+            print(
+                f"Hearth is already on port {port} (race-condition during boot — "
+                f"another instance won). Surfacing the existing window.",
+                flush=True,
+            )
+            try:
+                singleton._focus_existing(port)
+            except Exception:
+                pass
+            sys.exit(0)
+    else:
+        # User explicitly asked for a port — walk forward if it's taken.
+        # This is the supported "I want a second instance for testing" path.
+        for off in range(0, 12):
+            p = port + off
+            try:
+                with _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM) as s:
+                    s.bind(("127.0.0.1", p))
+                    port = p
+                    break
+            except OSError:
+                continue
+
     server = web_backend.serve(host="127.0.0.1", port=port)
     _server_url = f"http://127.0.0.1:{port}/"
     time.sleep(0.3)
