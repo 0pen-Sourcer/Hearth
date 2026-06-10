@@ -30,6 +30,18 @@ from typing import Dict, List, Optional, Tuple
 from .tools import WORKSPACE
 
 MEM_DIR = os.path.join(WORKSPACE, "memory")
+# Cold-storage for evicted facts. Files keep their frontmatter and can be
+# read or warmed back into MEM_DIR by recall_count crossing a threshold.
+# Drop the underscore prefix if you want the GUI graph to walk it.
+_ARCHIVE_DIR = os.path.join(MEM_DIR, "_archive")
+# Per-(type, sub_category) char budget before eviction triggers. Picked so
+# typical clusters (~25 facts of 200-300 chars each) don't churn; only the
+# bloated buckets get pruned. Tuneable via JARVIS_MEM_SUBCAT_CAP env var.
+_SUBCAT_CHAR_CAP = int(os.environ.get("JARVIS_MEM_SUBCAT_CAP", "6000"))
+# When an archived fact gets recalled this many times via sibling pull, it
+# promotes back into the hot store. Three hits = "user keeps coming back
+# to this topic, stop hiding it".
+_PROMOTE_THRESHOLD = 3
 INDEX_PATH = os.path.join(MEM_DIR, "MEMORY.md")
 RULES_PATH = os.path.join(WORKSPACE, "rules.md")
 
@@ -225,6 +237,17 @@ def save(title: str, mtype: str, description: str, body: str = "",
     msg = f"{verb} memory: {slug} ({mtype})"
     if warn:
         msg += f"  [{warn}]"
+    # Eviction pass: if the (type, sub_category) bucket got too big,
+    # archive the coldest facts. Coldness combines recall_count with
+    # last_recalled_at. Archived facts stay readable + warmable via
+    # sibling pull, but stop bloating the hot list / system prompt.
+    if sub_category:
+        try:
+            archived = _evict_if_over_cap(mtype, sub_category, protect_slug=slug)
+            if archived:
+                msg += f"  [archived {len(archived)} cold: {', '.join(archived[:3])}{'...' if len(archived) > 3 else ''}]"
+        except Exception:
+            pass
     return msg
 
 
@@ -284,6 +307,177 @@ def index_for_prompt(max_lines: int = 20, max_line_chars: int = 120) -> str:
     return "[ Memories on file (call memory_recall to load any) ]\n" + body
 
 
+def _rewrite_frontmatter(path: str, fm: Dict[str, str], body: str) -> None:
+    """Persist a memory file with updated frontmatter. Preserves field order
+    when possible: standard keys first, then anything else. Used by the
+    recall-count bumper; cheap to call per-pick because most chats touch
+    only 1-2 memories per turn."""
+    order = ["name", "type", "description", "sub_category", "tags",
+             "recall_count", "last_recalled_at", "updated"]
+    lines = ["---"]
+    for k in order:
+        if k in fm:
+            lines.append(f"{k}: {fm[k]}")
+    for k, v in fm.items():
+        if k not in order:
+            lines.append(f"{k}: {v}")
+    lines.append("---")
+    text = "\n".join(lines) + "\n\n" + body.lstrip("\n").rstrip() + "\n"
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except OSError:
+        pass
+
+
+def _bump_recall(path: str) -> None:
+    """Increment recall_count + stamp last_recalled_at on a memory file.
+    Idempotent; quietly no-ops if the file is unreadable. Promotes the file
+    back from archive if it crosses _PROMOTE_THRESHOLD hits there."""
+    try:
+        fm, body = _read_body(path)
+    except OSError:
+        return
+    try:
+        n = int(fm.get("recall_count", "0") or "0")
+    except ValueError:
+        n = 0
+    fm["recall_count"] = str(n + 1)
+    fm["last_recalled_at"] = datetime.now().isoformat(timespec="seconds")
+    _rewrite_frontmatter(path, fm, body)
+    # Promote out of archive once a topic gets pulled enough times that
+    # hiding it is clearly wrong.
+    parent = os.path.dirname(path)
+    if (os.path.basename(parent) == "_archive"
+            and (n + 1) >= _PROMOTE_THRESHOLD):
+        _promote_from_archive(path)
+
+
+def _promote_from_archive(archive_path: str) -> None:
+    """Move a fact back from _archive/ to MEM_DIR. Also re-indexes it in
+    MEMORY.md so the GUI list view + sibling scan can see it again."""
+    fn = os.path.basename(archive_path)
+    new_path = os.path.join(MEM_DIR, fn)
+    try:
+        if not os.path.exists(new_path):
+            os.rename(archive_path, new_path)
+        else:
+            # collision (same slug exists in hot store): drop the archive
+            # copy rather than overwriting newer state
+            os.remove(archive_path)
+            return
+    except OSError:
+        return
+    try:
+        fm, _body = _read_body(new_path)
+    except OSError:
+        return
+    slug = fn[:-3] if fn.endswith(".md") else fn
+    title = fm.get("name", slug)
+    mtype = fm.get("type", "user")
+    desc = fm.get("description", "")
+    lines = _read_index_lines()
+    if _index_entry_for_slug(lines, slug) is None:
+        lines.append(_index_entry(slug, title, mtype, desc))
+        _write_index_lines(lines)
+
+
+def _bucket_files(mtype: str, sub_category: str,
+                  base: str = MEM_DIR) -> List[Tuple[str, Dict[str, str], str, int]]:
+    """List all files in a (type, sub_category) bucket with their parsed
+    frontmatter + body + current size in chars. Used by the eviction pass
+    to know what's in scope + how big the bucket is."""
+    out = []
+    if not os.path.isdir(base):
+        return out
+    for fn in os.listdir(base):
+        if not fn.endswith(".md") or fn == "MEMORY.md":
+            continue
+        full = os.path.join(base, fn)
+        if not os.path.isfile(full):
+            continue
+        try:
+            fm, body = _read_body(full)
+        except OSError:
+            continue
+        if fm.get("type") != mtype:
+            continue
+        if (fm.get("sub_category") or "") != sub_category:
+            continue
+        try:
+            size = os.path.getsize(full)
+        except OSError:
+            size = len(body) + sum(len(k) + len(v) for k, v in fm.items())
+        out.append((fn, fm, body, size))
+    return out
+
+
+def _coldness(fm: Dict[str, str]) -> float:
+    """Higher = better eviction candidate. Combines recency-of-recall and
+    how often it's been recalled — a fact recalled 10 times last week is
+    warmer than one created yesterday and never touched."""
+    try:
+        n = int(fm.get("recall_count", "0") or "0")
+    except ValueError:
+        n = 0
+    when = fm.get("last_recalled_at") or fm.get("updated") or ""
+    try:
+        last = datetime.fromisoformat(when)
+    except (ValueError, TypeError):
+        return 1e6  # malformed → maximally cold so it sheds first
+    days = (datetime.now() - last).total_seconds() / 86400.0
+    return days / (n + 1)
+
+
+def _evict_if_over_cap(mtype: str, sub_category: str,
+                       protect_slug: str = "") -> List[str]:
+    """If the bucket exceeds _SUBCAT_CHAR_CAP, archive the coldest facts
+    until under cap. The just-saved fact (protect_slug) is never evicted
+    even if the bucket can't fit otherwise — saving a fact bigger than
+    the cap shouldn't make it instantly vanish. Returns the slug list
+    that got archived."""
+    if not sub_category:
+        return []
+    bucket = _bucket_files(mtype, sub_category)
+    total = sum(sz for _fn, _fm, _b, sz in bucket)
+    if total <= _SUBCAT_CHAR_CAP or len(bucket) <= 1:
+        return []
+    os.makedirs(_ARCHIVE_DIR, exist_ok=True)
+    # Coldest first; protect_slug is forcibly last so it's never touched.
+    protect_fn = (protect_slug + ".md") if protect_slug else ""
+    bucket.sort(key=lambda r: (r[0] == protect_fn, -_coldness(r[1])))
+    archived: List[str] = []
+    for fn, _fm, _body, sz in bucket:
+        if total <= _SUBCAT_CHAR_CAP:
+            break
+        if fn == protect_fn:
+            break  # would be the last item; bail to avoid evicting it
+        src = os.path.join(MEM_DIR, fn)
+        dst = os.path.join(_ARCHIVE_DIR, fn)
+        try:
+            if os.path.exists(dst):
+                os.remove(dst)
+            os.rename(src, dst)
+            archived.append(fn[:-3] if fn.endswith(".md") else fn)
+            total -= sz
+        except OSError:
+            continue
+    # Drop the index entries for archived files so the public list view
+    # stays clean; readers can still walk _archive/ manually.
+    if archived:
+        lines = _read_index_lines()
+        keep = []
+        archive_set = set(archived)
+        for ln in lines:
+            m = re.match(r"^- \[[^\]]+\]\(([^)]+)\.md\)", ln)
+            slug = m.group(1) if m else None
+            if slug and slug in archive_set:
+                continue
+            keep.append(ln)
+        _write_index_lines(keep)
+    return archived
+
+
 def _read_body(path: str) -> Tuple[Dict[str, str], str]:
     """Return (frontmatter_dict, body_text)."""
     with open(path, "r", encoding="utf-8") as f:
@@ -312,71 +506,128 @@ who why will with would you your find open play set go got am pm
 """.split())
 
 
-def _score_memories(query: str) -> List[Tuple[float, int, int, str, Dict[str, str], str]]:
+def _score_memories(query: str) -> List[Tuple[float, int, int, str, Dict[str, str], str, str]]:
     """Score every memory against the query. Returns
-    [(score, matched_terms, total_terms, fn, fm, body)] sorted best-first.
+    [(score, matched_terms, total_terms, fn, fm, body, root_dir)] sorted best-first.
     Score = keyword hits (filename hits weighted 3x) scaled by how MANY distinct
     query terms a fact matches (breadth beats repetition); recency is the tiebreak.
-    Stopwords are dropped so common words don't create spurious matches."""
+    Stopwords are dropped so common words don't create spurious matches.
+    Walks the archive too when nothing matches in the hot store; archived hits
+    get a 0.6x score multiplier so a hot fact always wins a tie. root_dir is
+    MEM_DIR or _ARCHIVE_DIR — callers that bump recall counts use it to find
+    the file."""
     terms = [t for t in (w.lower() for w in re.findall(r"\w+", query))
              if len(t) >= 2 and t not in _STOPWORDS]
     if not terms:
         return []
     total = len(terms)
-    scored: List[Tuple[float, str, int, str, Dict[str, str], str]] = []
-    for fn in os.listdir(MEM_DIR):
-        if not fn.endswith(".md") or fn == "MEMORY.md":
-            continue
-        full = os.path.join(MEM_DIR, fn)
+
+    def _scan(root: str, archived: bool):
+        results = []
         try:
-            fm, body = _read_body(full)
+            files = os.listdir(root)
         except OSError:
-            continue
-        text = (fn + " " + " ".join(fm.values()) + " " + body).lower()
-        matched = set()
-        raw = 0.0
-        for t in terms:
-            c = text.count(t)
-            if c:
-                matched.add(t)
-                raw += c * (3.0 if t in fn.lower() else 1.0)
-        if raw <= 0:
-            continue
-        coverage = len(matched) / total  # 0..1
-        score = raw * (0.5 + coverage)   # breadth-of-match boost
-        scored.append((score, fm.get("updated", ""), len(matched), fn, fm, body))
+            return results
+        for fn in files:
+            if not fn.endswith(".md") or fn == "MEMORY.md":
+                continue
+            full = os.path.join(root, fn)
+            if not os.path.isfile(full):
+                continue
+            try:
+                fm, body = _read_body(full)
+            except OSError:
+                continue
+            text = (fn + " " + " ".join(fm.values()) + " " + body).lower()
+            matched = set()
+            raw = 0.0
+            for t in terms:
+                c = text.count(t)
+                if c:
+                    matched.add(t)
+                    raw += c * (3.0 if t in fn.lower() else 1.0)
+            if raw <= 0:
+                continue
+            coverage = len(matched) / total
+            # Archive facts score the same on relevance but get demoted via
+            # a 0.6x multiplier so a hot fact always wins a tie. They only
+            # surface as primary hits when nothing in the hot store matches.
+            score = raw * (0.5 + coverage) * (0.6 if archived else 1.0)
+            # Track the root so recall_for_prompt's _bump_recall knows
+            # whether to look in MEM_DIR or _ARCHIVE_DIR for the file.
+            results.append((score, fm.get("updated", ""), len(matched),
+                            fn, fm, body, root))
+        return results
+
+    scored = _scan(MEM_DIR, archived=False)
+    if not scored and os.path.isdir(_ARCHIVE_DIR):
+        # Hot store has nothing — fall through to archive so cold facts
+        # can still answer direct questions. The recall_count bump in
+        # recall_for_prompt may end up promoting them back if the user
+        # keeps asking about this topic.
+        scored = _scan(_ARCHIVE_DIR, archived=True)
     scored.sort(key=lambda c: (c[0], c[1]), reverse=True)  # score, then recency
-    return [(s, m, total, fn, fm, body) for (s, _u, m, fn, fm, body) in scored]
+    # The 7th tuple element (root path) is kept on the result so callers
+    # that bump recall counts use the correct file location. Callers that
+    # don't care can ignore it via unpacking with a trailing _.
+    return [(s, m, total, fn, fm, body, root)
+            for (s, _u, m, fn, fm, body, root) in scored]
 
 
 def _siblings_in_sub_category(sub_category: str, mtype: str,
                               exclude_filenames: set,
-                              limit: int = 4) -> List[Tuple[str, Dict[str, str], str]]:
-    """Find other memories in the same sub_category + type. THIS IS THE MOAT —
-    nobody else (Hermes, OpenHuman, etc) pulls siblings on recall. Asking
-    'what's my GPU?' should also surface 'how much RAM you have' and
-    'which monitor you use' because they're one mental cluster.
+                              limit: int = 4,
+                              include_archived: bool = True
+                              ) -> List[Tuple[str, Dict[str, str], str, bool]]:
+    """Find other memories in the same sub_category + type. Sibling-on-recall
+    pattern — asking "what's my GPU?" also surfaces RAM + drive facts
+    because they're in the same cluster.
 
-    Returns [(fn, fm, body), ...] sorted by recency. Empty if no siblings."""
+    Walks both the hot store (MEM_DIR) and the archive (_archive/) when
+    include_archived. Archived facts get marked so the renderer can flag
+    them. When a sibling is pulled, the caller is expected to _bump_recall
+    on it — if an archived fact crosses _PROMOTE_THRESHOLD, it moves back
+    to hot automatically.
+
+    Returns [(fn, fm, body, archived), ...] sorted hot-first then by recency.
+    """
     if not sub_category:
         return []
-    out: List[Tuple[str, Dict[str, str], str]] = []
-    for fn in os.listdir(MEM_DIR):
-        if not fn.endswith(".md") or fn == "MEMORY.md" or fn in exclude_filenames:
-            continue
-        full = os.path.join(MEM_DIR, fn)
+    out: List[Tuple[str, Dict[str, str], str, bool]] = []
+    roots: List[Tuple[str, bool]] = [(MEM_DIR, False)]
+    if include_archived and os.path.isdir(_ARCHIVE_DIR):
+        roots.append((_ARCHIVE_DIR, True))
+    for root, archived in roots:
         try:
-            fm, body = _read_body(full)
+            files = os.listdir(root)
         except OSError:
             continue
-        if fm.get("sub_category") != sub_category:
-            continue
-        if mtype and fm.get("type") != mtype:
-            continue
-        out.append((fn, fm, body))
-    # Sort by recency (newest first)
-    out.sort(key=lambda c: c[1].get("updated", ""), reverse=True)
-    return out[:limit]
+        for fn in files:
+            if not fn.endswith(".md") or fn == "MEMORY.md" or fn in exclude_filenames:
+                continue
+            full = os.path.join(root, fn)
+            if not os.path.isfile(full):
+                continue
+            try:
+                fm, body = _read_body(full)
+            except OSError:
+                continue
+            if fm.get("sub_category") != sub_category:
+                continue
+            if mtype and fm.get("type") != mtype:
+                continue
+            out.append((fn, fm, body, archived))
+    # Hot-first; within each tier, newest first.
+    out.sort(key=lambda c: (not c[3], c[1].get("updated", "")), reverse=False)
+    out.sort(key=lambda c: (c[3], -ord("9")), reverse=False)
+    # The above keeps hot (False) before archived (True), with hot ordered
+    # by recency desc when we re-walk after sort. Simpler: do it in two
+    # passes.
+    hot = [t for t in out if not t[3]]
+    cold = [t for t in out if t[3]]
+    hot.sort(key=lambda c: c[1].get("updated", ""), reverse=True)
+    cold.sort(key=lambda c: c[1].get("updated", ""), reverse=True)
+    return (hot + cold)[:limit]
 
 
 def recall(query: str, limit: int = 5, with_siblings: bool = True) -> str:
@@ -395,27 +646,36 @@ def recall(query: str, limit: int = 5, with_siblings: bool = True) -> str:
     out: List[str] = []
     seen_files = set()
     sibling_blocks: List[Tuple[str, str, list]] = []  # (sub, type, [(name, body)])
-    for score, _matched, _total, fn, fm, body in candidates:
+    for score, _matched, _total, fn, fm, body, root in candidates:
         seen_files.add(fn)
         title = fm.get("name", fn[:-3])
         mtype = fm.get("type", "?")
         updated = fm.get("updated", "")
-        out.append(f"## {title}  ({mtype}, score={score:.0f}, {updated})")
+        cold = (root == _ARCHIVE_DIR)
+        cold_tag = " (cold)" if cold else ""
+        out.append(f"## {title}{cold_tag}  ({mtype}, score={score:.0f}, {updated})")
         out.append(body.strip()[:1500])
         out.append("")
-        # Sibling pull — adjacent facts in the same sub_category
+        # Sibling pull — adjacent facts in the same sub_category. Archived
+        # facts are included with a (cold) marker so the model can see them
+        # while still treating hot facts as primary.
         if with_siblings:
             sub = fm.get("sub_category", "")
             if sub:
                 sibs = _siblings_in_sub_category(sub, mtype, seen_files, limit=3)
-                for sfn, sfm, sbody in sibs:
+                for sfn, sfm, sbody, archived in sibs:
                     seen_files.add(sfn)
+                    # Bump recall on the sibling too — surfacing it counts
+                    # as usage, and archived siblings may promote back to
+                    # hot after enough hits.
+                    parent = _ARCHIVE_DIR if archived else MEM_DIR
+                    _bump_recall(os.path.join(parent, sfn))
                     sibling_blocks.append((sub, mtype,
-                        [(sfm.get("name", sfn[:-3]), sbody)]))
+                        [(sfm.get("name", sfn[:-3]), sbody, archived)]))
     # Render sibling block AFTER the direct matches, fenced as "related facts"
     if sibling_blocks:
         out.append("---")
-        out.append("**Related facts** (same cluster — surfaced automatically):")
+        out.append("**Related facts** (same cluster):")
         seen_sub: set = set()
         for sub, mtype, leaves in sibling_blocks:
             key = (sub, mtype)
@@ -423,10 +683,10 @@ def recall(query: str, limit: int = 5, with_siblings: bool = True) -> str:
                 continue
             seen_sub.add(key)
             out.append(f"\n### {sub} ({mtype})")
-            for name, body in leaves:
-                # Compact — first line of body only, save tokens
+            for name, body, archived in leaves:
                 first = body.strip().split("\n", 1)[0][:200]
-                out.append(f"- **{name}**: {first}")
+                marker = " *(cold)*" if archived else ""
+                out.append(f"- **{name}**{marker}: {first}")
     return "\n".join(out)
 
 
@@ -444,21 +704,28 @@ def recall_for_prompt(query: str, max_chars: int = 900, limit: int = 2) -> str:
     if not query:
         return ""
     picked: List[str] = []
+    picked_paths: List[str] = []
     used = 0
-    for score, matched, total, fn, fm, body in _score_memories(query):
+    for score, matched, total, fn, fm, body, root in _score_memories(query):
         if not (matched >= 2 or matched == total) or score < 2.0:
             continue
         title = fm.get("name", fn[:-3])
         snippet = " ".join(body.split())
         chunk = f"- {title}: {snippet}"
         if len(chunk) > max_chars:
-            chunk = chunk[:max_chars] + " …"
+            chunk = chunk[:max_chars] + " ..."
         if picked and used + len(chunk) > max_chars:
             break
         picked.append(chunk)
+        picked_paths.append(os.path.join(root, fn))
         used += len(chunk)
         if len(picked) >= limit:
             break
+    # Bump recall counters AFTER selection so a fact pulled into the
+    # system prompt counts toward warming. Pass the full path so the
+    # archive fallback bumps the right file (and can promote on threshold).
+    for p in picked_paths:
+        _bump_recall(p)
     if not picked:
         return ""
     return ("<memory>\n"
