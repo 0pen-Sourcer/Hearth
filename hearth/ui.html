@@ -4607,9 +4607,9 @@ $('model-select').addEventListener('change', async (e) => {
       STATE.loadedModel = prevLoaded || null;
       $('st-model').textContent = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '—';
       setState('idle');
-      // Special case: VRAM refusal (the launch-day freeze guardrail). Give
-      // a longer, friendlier toast so the user knows what to do — generic
-      // "Load failed" isn't actionable for a memory exhaustion error.
+      // Special case: VRAM refusal. Give a longer, friendlier toast so
+      // the user knows what to do — generic "Load failed" isn't
+      // actionable for a memory exhaustion error.
       if (r && r.vram_needed_gb && r.vram_free_gb !== undefined) {
         toast(
           `Not enough free VRAM (${r.vram_free_gb} GB free, needs ${r.vram_needed_gb} GB)`,

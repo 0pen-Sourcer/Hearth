@@ -236,10 +236,7 @@ def detect_gpu_vram_free_gb() -> Optional[float]:
     """Return FREE VRAM in GB right now. Different from detect_gpu_vram_gb()
     (which returns total). Used by start_builtin pre-flight to catch the
     'LM Studio is already using 5 GB of your 8 GB' scenario before we boot
-    another 5+ GB model on top and freeze the whole PC.
-
-    The launch-day freeze came from this exact gap: total said 8 GB so the
-    fit check said 'ok', but only ~3 GB was actually free."""
+    another 5+ GB model on top and freeze the whole PC."""
     try:
         import subprocess
         no_window = 0x08000000 if os.name == "nt" else 0
@@ -630,7 +627,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                   cache_type_k: Optional[str] = None,
                   cache_type_v: Optional[str] = None,
                   flash_attn: bool = True,
-                  force: bool = False) -> Dict[str, Any]:
+                  force: bool = False) -> Dict[str, Any]:  # noqa: ARG001 — kept for caller compat; load no longer refuses on VRAM
     """Spawn llama-cpp-python's OpenAI-compatible server.
 
     Args:
@@ -700,49 +697,27 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             sz = Path(model_path).stat().st_size / (1024 ** 3)
             needed = sz + estimate_kv_cache_gb(sz, ctx)
 
-            # HARD GUARDRAIL: probe FREE VRAM (not total) and REFUSE if the
-            # model can't fit. The launch-day freeze came from this exact
-            # gap: total said 8 GB so the warning path said "should still
-            # load", but only ~3 GB was actually free (LM Studio had loaded
-            # Gemma already). llama.cpp then page-swapped weights through
-            # the pagefile until the whole system stalled.
-            #
-            # We refuse with a clear error instead of trying anyway. The
-            # user can stop the other model and retry, or pick a smaller
-            # quant. Loud-fail beats silent-freeze every time.
+            # VRAM check: WARN, don't refuse. The user's machine, the
+            # user's call. If they want to spill to system RAM (slow but
+            # works for emergencies), let them. We auto-downgrade
+            # n_gpu_layers from "all" to a safe partial-offload count so
+            # the load doesn't OOM outright, and we surface the warning
+            # so the GUI can show a non-blocking notice + the numbers.
             free_vram = detect_gpu_vram_free_gb()
-            if free_vram is not None and needed > free_vram + 0.5 and not force:
-                with _start_lock: _starting_paths.discard(normalized_path)
-                return {
-                    "ok": False,
-                    "error": (
-                        f"Not enough free VRAM. This model needs ~{needed:.1f} GB "
-                        f"(weights {sz:.1f} + KV cache {needed - sz:.1f} at {ctx} ctx) "
-                        f"but only {free_vram:.1f} GB is free right now. "
-                        f"Likely causes: LM Studio / another LLM is holding VRAM, "
-                        f"or another app is using your GPU. Free some VRAM "
-                        f"(close LM Studio / eject its model / pick a smaller quant) "
-                        f"and try again."
-                    ),
-                    # Surface the numbers so the GUI can show a "Force load anyway
-                    # (spill to RAM)" button — slow but works. `force_available`
-                    # is the flag the frontend keys off to render that button.
-                    "vram_needed_gb": round(needed, 1),
-                    "vram_free_gb": free_vram,
-                    "force_available": True,
-                }
-            # Force path: guardrail bypass triggered. n_gpu_layers=-1
-            # means "all to GPU" — would OOM at load. Auto-downgrade to a
-            # partial-offload count that fits free VRAM so llama.cpp spills
-            # excess layers to system RAM. Only adjust if we wouldn't fit
-            # at the original setting.
-            if (force and n_gpu_layers == -1 and free_vram is not None
-                    and needed > free_vram + 0.5):
+            if (free_vram is not None and needed > free_vram + 0.5
+                    and n_gpu_layers == -1):
                 est = estimate_safe_gpu_layers(sz, free_vram, ctx)
                 n_gpu_layers = est
-                print(f"  [llmserver] force-load: auto-set n_gpu_layers={est} "
+                print(f"  [llmserver] tight-fit: auto-set n_gpu_layers={est} "
                       f"(weights {sz:.1f}GB, KV {needed-sz:.1f}GB, free {free_vram:.1f}GB) "
-                      f"— rest spills to RAM", flush=True)
+                      f"— rest spills to RAM, will be slower", flush=True)
+                vram_warning = (
+                    f"Tight VRAM: model needs ~{needed:.1f} GB but only "
+                    f"{free_vram:.1f} GB free. Auto-offloading {est} layers "
+                    f"to GPU and the rest to RAM — load will work but "
+                    f"inference will be slower. Eject another model or pick "
+                    f"a smaller quant for full GPU speed."
+                )
 
             fit = vram_fit_class(sz, ctx=ctx)
             if fit["tier"] == "overflow":

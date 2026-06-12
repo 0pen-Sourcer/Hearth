@@ -71,6 +71,8 @@ It's the project I'd want if I just got an RTX card and downloaded LM Studio. "C
 | **Sub-agents** (fork focused workers, sync or background) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Auto-background long ops** (no 30-min spinner) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Migrate from Hermes / OpenClaw** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Generates PDFs / decks / spreadsheets on request**  | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Background workers (results auto-arrive in chat)** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Action reminders** (fire a tool, not just a toast) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Renameable agent** (chat avatar + persona + folder) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Writes its own tools (local, self-improving)** | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -133,7 +135,13 @@ Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 
 **Long ops don't freeze the agent.** Drive-root scans (`disk_usage('C:\')`), whole-tree walks, big find_file queries — they can take many minutes. Hearth auto-backgrounds them: the tool returns a `job_id` in milliseconds, the scan runs in a daemon thread, you keep chatting. `/jobs` lists what's running; `/jobs <id>` shows the result when done. Same pattern (via `hearth/jobs.py`) is available for any in-process Python task and any shell command you want to fire and forget.
 
-**Plug into other MCP servers, expose Hearth as one.** Both directions wired. Drop a standard `mcp.json` at `~/Jarvis/mcp.json` (Settings → MCP servers → Edit), point at the filesystem / git / postgres / whatever MCP server you like, and on next launch Hearth spawns them as child processes and surfaces every one of their tools as `mcp_<server>_<tool>` — the model can call them like any built-in. Other way: `python -m hearth.mcp_server` exposes Hearth's 72 tools to LM Studio / Claude Desktop / Cursor / anything MCP-aware. Hearth speaks the protocol in both directions.
+**Plug into other MCP servers, expose Hearth as one.** Drop a standard `mcp.json` in your workspace, point at any MCP server (filesystem, git, postgres, whatever), and Hearth surfaces those tools alongside its own. Going the other way, Hearth's own toolset is exposed to any MCP-aware client. Same protocol both directions.
+
+**Skills — say what you want, get a real document.** Ask for a deck, a brief, a spreadsheet, a one-pager — Hearth picks the right format, picks a style that fits the topic, builds the file, and opens it. PDFs, slide decks, Excel sheets. You can drop your own skill folders into the workspace and they're invokable by name on next launch.
+
+**Background workers that come back on their own.** Tell Hearth to research three things at once, or summarize a 500-page PDF while you keep chatting. It spawns the work in the background, names each worker, and surfaces the results in your chat the moment they're done — no "are you finished yet?" needed. Each worker has its own scoped toolset so a researcher can't write files and a summarizer can't run shell commands.
+
+**Memory that doesn't pile up the same fact three different ways.** When you change something you've told it before, Hearth notices the overlap and asks itself whether to update the existing fact or save as a new one. Your saved profile stays sharp instead of accumulating five contradictory entries.
 
 **Memory that curates itself.** Per-fact markdown files with regex-classified sub-categories. Each fact tracks `recall_count` + `last_recalled_at`. When a sub-category bucket exceeds a soft cap (~6000 chars), the coldest facts auto-archive (move to `_archive/`, never deleted). When the chat surfaces a topic, sibling facts in the same cluster get pulled in too — **including from archive, marked `(cold)`**. After 3 hits, an archived fact auto-promotes back to hot. Hot + cold + warm-back in one system. No other local-AI ships this combo.
 
@@ -223,8 +231,8 @@ Emits JSONL events (user / thinking / tool_call / tool_result / assistant / done
                                                   │ stream + tool_calls
                                                   ▼
                                     ┌───────────────────────┐
-                                    │  hearth/tools.py      │
-                                    │  72 tools, sandboxed  │
+                                    │  hearth/tools.py (82) │
+                                    │  82 tools, sandboxed  │
                                     │  + your own plugins   │
                                     │  + remote MCP servers │
                                     │  + spawn_subagent fork│
