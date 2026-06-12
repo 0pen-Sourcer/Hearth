@@ -160,6 +160,104 @@ def _drain(job_id: str, proc: subprocess.Popen) -> None:
             _procs.pop(job_id, None)
 
 
+def start_python_job(label: str, fn, args: Optional[dict] = None,
+                     description: str = "") -> Dict[str, Any]:
+    """Run a Python callable in a daemon thread; its return value is
+    stashed at ~/Jarvis/jobs/<job_id>.result.json when it completes.
+    Returns {ok, job_id, log_path, result_path}.
+
+    Use this for slow IN-PROCESS work like disk_usage on a whole drive
+    or a deep recursive scan — work that doesn't make sense as a shell
+    subprocess but blocks the agent loop for minutes if run inline.
+    """
+    if not callable(fn):
+        return {"ok": False, "error": "fn must be callable"}
+    args = args or {}
+    job_id = _new_job_id()
+    meta = {
+        "job_id": job_id,
+        "command": f"python:{label}",
+        "cwd": str(WORKSPACE),
+        "shell": "python",
+        "description": description or label,
+        "status": "running",
+        "started_at": time.time(),
+        "exit_code": None,
+        "pid": os.getpid(),
+        "kind": "python",
+    }
+    _write_meta(job_id, meta)
+    out_path = _out_path(job_id)
+    result_path = JOBS_DIR / f"{job_id}.result.json"
+    # Touch the output file so get_job's tail-read doesn't error out
+    # before the worker produces its first line.
+    try:
+        out_path.write_text(f"[start] {label}\n", encoding="utf-8")
+    except OSError:
+        pass
+
+    def _worker():
+        try:
+            result = fn(args) if args else fn()
+            ok = True
+            error = ""
+        except Exception as e:
+            result = None
+            ok = False
+            error = f"{type(e).__name__}: {e}"
+        end_ts = time.time()
+        m = _read_meta(job_id) or meta
+        m["status"] = "completed" if ok else "failed"
+        m["ended_at"] = end_ts
+        m["exit_code"] = 0 if ok else 1
+        if error:
+            m["error"] = error
+        _write_meta(job_id, m)
+        try:
+            payload = {"ok": ok, "result": result, "error": error,
+                       "elapsed_s": round(end_ts - meta["started_at"], 2)}
+            result_path.write_text(
+                json.dumps(payload, ensure_ascii=False, default=str, indent=2),
+                encoding="utf-8")
+        except OSError:
+            pass
+        # Append a final marker so tail-readers see the close
+        try:
+            with open(out_path, "a", encoding="utf-8") as f:
+                f.write(f"[end] status={m['status']} elapsed={m.get('ended_at', 0) - meta['started_at']:.1f}s\n")
+                if error:
+                    f.write(f"[error] {error}\n")
+        except OSError:
+            pass
+
+    threading.Thread(target=_worker, name=f"hearth-job-{job_id}",
+                     daemon=True).start()
+    return {"ok": True, "job_id": job_id, "log_path": str(out_path),
+            "result_path": str(result_path), "description": meta["description"]}
+
+
+def get_job_result(job_id: str) -> Dict[str, Any]:
+    """Return the JSON result of a completed python-job, or status info if
+    still running / failed. Cheap to poll."""
+    meta = _read_meta(job_id)
+    if meta is None:
+        return {"ok": False, "error": f"no such job: {job_id}"}
+    result_path = JOBS_DIR / f"{job_id}.result.json"
+    if meta.get("status") in ("running", "starting"):
+        return {"ok": True, "status": meta["status"],
+                "elapsed_s": round(time.time() - meta.get("started_at", time.time()), 1),
+                "note": "still running; try again later"}
+    if result_path.is_file():
+        try:
+            return {"ok": True, "status": meta["status"],
+                    **json.loads(result_path.read_text(encoding="utf-8"))}
+        except Exception as e:
+            return {"ok": False, "error": f"result parse: {e}"}
+    return {"ok": True, "status": meta.get("status", "unknown"),
+            "error": meta.get("error", "no result file"),
+            "log_path": str(_out_path(job_id))}
+
+
 def start_job(command: str, cwd: Optional[str] = None,
               shell: str = "powershell",
               description: str = "") -> Dict[str, Any]:

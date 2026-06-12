@@ -67,6 +67,7 @@ HIDDEN = [
     "faster_whisper",
     "pypdf", "pypdfium2",  # pypdfium2 = PDF→VLM-OCR fallback for scanned pages
     "docx", "openpyxl", "pptx",
+    "reportlab", "reportlab.pdfgen", "reportlab.platypus", "reportlab.lib", "reportlab.lib.pagesizes", "reportlab.lib.styles", "reportlab.lib.units", "reportlab.lib.colors",
     "psutil", "sounddevice", "numpy",
     "webview", "webview.platforms.edgechromium",
     "plyer", "plyer.platforms.win.notification",

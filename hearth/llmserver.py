@@ -144,6 +144,17 @@ def _assign_to_job(proc: subprocess.Popen) -> None:
 # a clean "pick a model" panel.
 TOP_PICKS: List[Dict[str, Any]] = [
     {
+        "id": "qwen2.5-3b-instruct-q4_k_m",
+        "name": "Qwen 2.5 3B Instruct (Q4_K_M)",
+        "size_gb": 1.9,
+        "vram_min_gb": 3,
+        "context": 32768,
+        "hf_repo": "Qwen/Qwen2.5-3B-Instruct-GGUF",
+        "hf_file": "qwen2.5-3b-instruct-q4_k_m.gguf",
+        "description": "Tiny daily-driver. Fits 4 GB GPUs and CPU-only rigs without breaking a sweat.",
+        "tags": ["tiny", "tools", "low-vram"],
+    },
+    {
         "id": "qwen2.5-7b-instruct-q4_k_m",
         "name": "Qwen 2.5 7B Instruct (Q4_K_M)",
         "size_gb": 4.7,
@@ -151,30 +162,52 @@ TOP_PICKS: List[Dict[str, Any]] = [
         "context": 32768,
         "hf_repo": "Qwen/Qwen2.5-7B-Instruct-GGUF",
         "hf_file": "qwen2.5-7b-instruct-q4_k_m.gguf",
-        "description": "Best balance of speed + tool use. Solid daily-driver default.",
+        "description": "Best balance of speed + tool use. Solid daily-driver default on 6-8 GB cards.",
         "tags": ["recommended", "tools"],
     },
     {
         "id": "harmonic-hermes-9b-q4_k_m",
         "name": "Harmonic Hermes 9B (Q4_K_M)",
         "size_gb": 5.3,
-        "vram_min_gb": 6,
+        "vram_min_gb": 8,
         "context": 32768,
         "hf_repo": "DJLougen/Harmonic-Hermes-9B-GGUF",
         "hf_file": "Qwen3.5-9B-Harmonic.Q4_K_M.gguf",
-        "description": "Hearth's launch favorite. Qwen3.5 base + Hermes finetune — strong reasoning + tool-use. Fits 10 GB without spilling.",
+        "description": "Qwen3.5 base + Hermes finetune. Strong reasoning + tool-use. Fits 10 GB without spilling.",
         "tags": ["recommended", "reasoning", "tools"],
     },
     {
         "id": "gemma-4-e4b-it-q4_k_m",
         "name": "Gemma 4 E4B Instruct (Q4_K_M)",
         "size_gb": 5.3,
-        "vram_min_gb": 6,
+        "vram_min_gb": 8,
         "context": 8192,
         "hf_repo": "lmstudio-community/gemma-4-E4B-it-GGUF",
         "hf_file": "gemma-4-E4B-it-Q4_K_M.gguf",
         "description": "Google Gemma 4 — multimodal vision-capable, sharp reasoning. Comfortable on 8 GB.",
         "tags": ["smart", "vision"],
+    },
+    {
+        "id": "qwen2.5-14b-instruct-q4_k_m",
+        "name": "Qwen 2.5 14B Instruct (Q4_K_M)",
+        "size_gb": 8.5,
+        "vram_min_gb": 12,
+        "context": 32768,
+        "hf_repo": "Qwen/Qwen2.5-14B-Instruct-GGUF",
+        "hf_file": "qwen2.5-14b-instruct-q4_k_m.gguf",
+        "description": "Step up in reasoning quality. Lands cleanly on 12-16 GB cards.",
+        "tags": ["smart", "tools", "mid-vram"],
+    },
+    {
+        "id": "qwen2.5-32b-instruct-q4_k_m",
+        "name": "Qwen 2.5 32B Instruct (Q4_K_M)",
+        "size_gb": 18.5,
+        "vram_min_gb": 24,
+        "context": 32768,
+        "hf_repo": "Qwen/Qwen2.5-32B-Instruct-GGUF",
+        "hf_file": "qwen2.5-32b-instruct-q4_k_m.gguf",
+        "description": "Top-tier local reasoning. For 24 GB+ cards (RTX 3090 / 4090 / 5090 / pro).",
+        "tags": ["heavy", "reasoning", "high-vram"],
     },
 ]
 
@@ -248,21 +281,30 @@ def recommend_pick_for_this_pc() -> Dict[str, Any]:
     vram = detect_gpu_vram_gb()
     ram = detect_ram_gb()
 
-    if vram is not None and vram >= 8:
+    if vram is not None and vram >= 24:
+        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-32b-instruct-q4_k_m")
+        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 2.5 32B Q4 fits with room for context."
+    elif vram is not None and vram >= 12:
+        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-14b-instruct-q4_k_m")
+        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 2.5 14B is the sweet spot at this tier."
+    elif vram is not None and vram >= 8:
         pick = next(p for p in TOP_PICKS if p["id"] == "harmonic-hermes-9b-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected - Harmonic Hermes 9B is the sweet spot (reasoning + tool use)."
+        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Harmonic Hermes 9B is the sweet spot (reasoning + tool use)."
     elif vram is not None and vram >= 6:
         pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-7b-instruct-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected - Qwen 7B Q4 fits and gives the best tool-use."
+        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 7B Q4 fits and gives the best tool-use at this tier."
+    elif vram is not None and vram >= 3.5:
+        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-3b-instruct-q4_k_m")
+        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 2.5 3B fits cleanly without spillover."
     elif vram is not None:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-7b-instruct-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM - Qwen 2.5 7B will partial-offload to CPU but still runs."
+        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-3b-instruct-q4_k_m")
+        reason = f"NVIDIA GPU with {vram:g} GB VRAM — Qwen 2.5 3B will partial-offload to CPU but still runs."
     elif ram is not None and ram >= 8:
         pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-7b-instruct-q4_k_m")
-        reason = f"No NVIDIA GPU; {ram:g} GB RAM - Qwen 2.5 7B can run on CPU (slow but works)."
+        reason = f"No NVIDIA GPU; {ram:g} GB RAM — Qwen 2.5 7B can run on CPU (slow but works)."
     else:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-7b-instruct-q4_k_m")
-        reason = "Couldn't probe GPU/RAM - defaulting to Qwen 2.5 7B (best tool-use of the picks)."
+        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-3b-instruct-q4_k_m")
+        reason = "Couldn't probe GPU/RAM — defaulting to Qwen 2.5 3B (fits anywhere)."
 
     out = dict(pick)
     out["recommended_for_this_pc"] = True
@@ -1304,19 +1346,24 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
             and _status_cache["key"] == cache_key
             and now - _status_cache["ts"] < _STATUS_TTL_SECONDS):
         return _status_cache["data"]
-    # Tight timeout — when no server is listening, urllib will block for the
-    # full timeout before returning. 0.5s is plenty for a local TCP probe
-    # while keeping the GUI snappy in the "no brain active" path.
-    # Pass the same key external_server_running uses for downstream probes
-    # so the server log doesn't fill with 401s on every status() call
-    # (the GUI polls every ~8s, each probe was unauthenticated → 401).
+    # Detect cloud vs local endpoint so we can skip LM-Studio-specific probes
+    # when the user is on Grok/Gemini/OpenAI. The /api/v0/models probe is
+    # pointless against cloud (returns 404 after a 2s timeout each call). The
+    # disk scan is also skipped on cloud → snappy startup when llm_provider
+    # is xai/anthropic/google/openai/openrouter.
+    try:
+        from urllib.parse import urlparse
+        _host = (urlparse(api_base).hostname or "").lower()
+        _is_local = _host in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "")
+    except Exception:
+        _is_local = True
     _key = os.environ.get("LOCAL_API_KEY") or ""
     ext = external_server_running(api_base, timeout=0.5,
                                   api_key=_key or "hearth-builtin") and not builtin
     ext_id: Optional[str] = None
     ext_path: Optional[str] = None
     _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
-    if ext:
+    if ext and _is_local:
         # Try LM Studio's v0/models first (gives us a real path field).
         # Same response is needed by _list_models elsewhere — we share via
         # the status cache so neither caller hits LM Studio twice.
@@ -1346,6 +1393,19 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
             except Exception:
                 pass
     rec = recommend_pick_for_this_pc()
+    # Cloud-aware disk scan: do a full scan when on local endpoints OR
+    # when the cache is cold. On subsequent cloud polls, reuse the cached
+    # result so the Models tab keeps showing what's on disk without
+    # paying multi-second filesystem scans on every status poll.
+    if _is_local or _status_cache.get("disk_models_cache") is None:
+        _disk = scan_disk_for_models()
+        _local = list_local_models()
+        _status_cache["disk_models_cache"] = _disk
+        _status_cache["local_models_cache"] = _local
+    else:
+        _disk = _status_cache.get("disk_models_cache") or []
+        _local = _status_cache.get("local_models_cache") or []
+    _is_scanning = bool(_status_cache.get("rescan_in_progress"))
     result = {
         "llama_cpp_installed": llama_cpp_available(),
         "external_running": ext,
@@ -1355,10 +1415,10 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
         "builtin_pid": (_proc.pid if (_proc and builtin) else None),
         "builtin_url": _proc_info.get("url") if builtin else None,
         "builtin_model": _proc_info.get("model_path") if builtin else None,
-        # Models the user already has (~/Jarvis/models + LM Studio + Ollama +
-        # GPT4All + HF cache + Downloads). No manual copy required.
-        "disk_models": scan_disk_for_models(),
-        "local_models": list_local_models(),
+        "disk_models": _disk,
+        "local_models": _local,
+        "remote_endpoint": not _is_local,
+        "scanning": _is_scanning,
         "picks": TOP_PICKS,
         "recommended_pick_id": rec.get("id"),
         "recommendation_reason": rec.get("recommendation_reason"),
@@ -1381,6 +1441,32 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
     _status_cache["ts"] = time.time()
     _status_cache["key"] = cache_key
     return result
+
+
+def force_local_rescan() -> Dict[str, Any]:
+    """Invalidate the disk-model cache and kick a fresh scan on a background
+    thread. Used by the GUI when the user switches their brain from cloud to
+    local: the cached disk_models from the last local poll may be stale, and
+    silently re-scanning makes the user think the app froze. Now we return
+    immediately, the scan runs in the background, and status() reports
+    `scanning: true` until it finishes."""
+    import threading
+
+    def _run():
+        try:
+            _status_cache["disk_models_cache"] = scan_disk_for_models()
+            _status_cache["local_models_cache"] = list_local_models()
+        finally:
+            _status_cache["rescan_in_progress"] = False
+            _status_cache["data"] = None  # next status() does a fresh build
+
+    if _status_cache.get("rescan_in_progress"):
+        return {"ok": True, "scanning": True, "note": "already in progress"}
+    _status_cache["rescan_in_progress"] = True
+    t = threading.Thread(target=_run, daemon=True,
+                          name="hearth-local-rescan")
+    t.start()
+    return {"ok": True, "scanning": True}
 
 
 def _atexit():

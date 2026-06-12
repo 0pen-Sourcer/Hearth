@@ -114,20 +114,19 @@ def _make_tool(name: str, description: str, schema: Dict[str, Any]):
 
     # Build a function signature dynamically. We can't use real annotations
     # on a runtime-generated function without exec, so we go via exec.
-    sig_parts: List[str] = []
+    # Python syntax requires required params BEFORE optional ones, so sort
+    # accordingly before emitting the signature (the tool schemas list
+    # properties in declaration order which sometimes puts optionals first).
+    req_parts: List[str] = []
+    opt_parts: List[str] = []
     for pname, pschema in props.items():
         pytype = _TYPE_PY.get(pschema.get("type", "string"), "str")
-        if pytype == "list":
-            pytype = "list"
-        if pytype == "dict":
-            pytype = "dict"
         if pname in required:
-            sig_parts.append(f"{pname}: {pytype}")
+            req_parts.append(f"{pname}: {pytype}")
         else:
-            default = "None"
-            sig_parts.append(f"{pname}: Optional[{pytype}] = {default}")
+            opt_parts.append(f"{pname}: Optional[{pytype}] = None")
 
-    sig = ", ".join(sig_parts) if sig_parts else ""
+    sig = ", ".join(req_parts + opt_parts)
 
     src = (
         f"def _tool({sig}):\n"

@@ -70,25 +70,39 @@ The desktop app and browser share one backend (`hearth/web.py`) and one HTML fil
 
 ---
 
-## Slash commands (work in both CLI and GUI chat)
+## Slash commands (CLI)
 
 ```
-/help                 list every command
-/clear                wipe THIS chat (history preserved server-side)
-/compact              ask Jarvis to summarize old turns + extract facts to memory
-/tools                show all tools
-/models               list models LM Studio can see
-/model <id>           load a specific model
-/voice on|off         toggle TTS
-/think on|off         toggle inline reasoning display
-/perms                show which risky tools are allow/deny-ed this session
-/perms clear          reset both lists
-/allow <path>         extend write access to a folder this session
-/mem                  jump to Memory view (GUI) or list memories (CLI)
-/log                  Logs view (GUI) or tail activity log (CLI)
-/files                Files view (GUI only)
-/settings             Settings view (GUI only)
-/exit  /quit          close
+/help                          list every command
+/clear                         wipe THIS chat (history preserved server-side)
+/compact                       ask Jarvis to summarize old turns + extract facts
+/tools                         show all tools
+/models                        list models the running server can see
+/model <id>                    load a specific model
+/voice on|off                  toggle TTS
+/voice speed <n>               TTS playback rate (0.5x - 2.5x)
+/listen [on|off]               continuous voice-in with TTS interrupt
+/think on|off                  toggle inline reasoning display
+/brain [local|grok|...]        switch chat brain mid-session
+/name [NewName]                show / set agent name (Cortana, Friday, etc.)
+/perms                         show saved tool permissions
+/perms forget <tool>           drop one saved decision
+/perms reset                   forget ALL saved decisions
+/allow <path>                  extend write access to a folder this session
+/mem                           list memories (CLI)
+/mem tree                      ASCII tree by category
+/mem map                       open the GUI memory graph in browser
+/log                           tail activity log
+/agent                         list available sub-agent personas
+/agent <slug> "<prompt>"       spawn a sub-agent synchronously
+/jobs [all|<id>|kill <id>]     background jobs (disk_usage / shell / etc.)
+/mcp                           MCP server status
+/mcp edit                      open ~/Jarvis/mcp.json in $EDITOR
+/mcp config                    print the snippet for LM Studio / Claude Desktop
+/mcp run                       run Hearth as an MCP server in this terminal
+/migrate <hermes|openclaw>     import memory from another agent (dry-run)
+/migrate <src> apply           write the import
+/exit  /quit                   close
 ```
 
 ---

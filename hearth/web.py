@@ -234,7 +234,9 @@ _always_allow, _always_deny = _load_perms_from_disk()
 
 
 def _make_permission_check(emit_fn):
-    """Returns a callback the bridge can hand each risky tool call to."""
+    """Returns a callback the bridge can hand each risky tool call to. Also
+    wires up the extend-workspace callback used by tools._resolve_write so
+    out-of-workspace writes prompt the user instead of silently raising."""
     def _check(name: str, args: Dict) -> str:
         if name in _always_allow: return "allow"
         if name in _always_deny:  return "deny"
@@ -251,6 +253,33 @@ def _make_permission_check(emit_fn):
         if decision == "always": _always_allow.add(name); _save_perms_to_disk(); return "allow"
         if decision == "never":  _always_deny.add(name);  _save_perms_to_disk(); return "deny"
         return decision
+
+    def _extend(path: str) -> bool:
+        # Re-uses the same permission queue + emit channel. The GUI keys
+        # off name="__extend_workspace__" to render a different prompt
+        # ("allow JARVIS to write outside ~/Jarvis?") with the path as args.
+        # "always" decision adds the parent dir to EXTRA_WORKSPACES via
+        # tools._resolve_write's own logic; we just return True here.
+        req_id = f"perm_{int(time.time()*1000)}_extend"
+        _permission_queues[req_id] = _queue.Queue()
+        try:
+            emit_fn("permission_request", id=req_id,
+                    name="__extend_workspace__",
+                    args={"path": path,
+                          "parent": os.path.dirname(path) or path})
+            try:
+                decision = _permission_queues[req_id].get(timeout=180.0)
+            except _queue.Empty:
+                decision = "deny"
+        finally:
+            _permission_queues.pop(req_id, None)
+        return decision in ("allow", "always")
+
+    try:
+        from . import tools as _t
+        _t.set_extend_workspace_callback(_extend)
+    except Exception:
+        pass
     return _check
 
 
@@ -763,10 +792,29 @@ def _load_settings() -> Dict:
 
 def _save_settings(d: Dict) -> Dict:
     cur = _load_settings()
+    # Detect a cloud→local or local→cloud brain switch BEFORE writing — the
+    # disk-model cache populated under cloud is shorter (cached scan) and
+    # needs a fresh rescan when the user goes back to local. Don't block
+    # the settings save; kick the rescan async + report it back via status.
+    _prev_provider = (cur.get("llm_provider") or "").strip().lower()
+    _new_provider = (d.get("llm_provider") or _prev_provider or "").strip().lower()
+    _CLOUD = {"grok", "xai", "gemini", "google", "openai", "anthropic",
+              "openrouter", "custom"}
+    _was_cloud = _prev_provider in _CLOUD
+    _is_cloud_now = _new_provider in _CLOUD
     cur.update({k: v for k, v in d.items() if v is not None})
     os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
     with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
         json.dump(cur, f, indent=2)
+    # Brain switched cloud → local: ditch the cached disk_models and rescan
+    # in the background so the Models tab reflects what's actually on disk
+    # without making the user think the GUI froze.
+    if _was_cloud and not _is_cloud_now:
+        try:
+            from . import llmserver as _ls
+            _ls.force_local_rescan()
+        except Exception:
+            pass
     # Re-apply env vars + reload voice/listen so new device picks effect
     os.environ["JARVIS_STT_DEVICE"] = cur.get("stt_device", "cpu")
     os.environ["JARVIS_STT_MODEL"]  = cur.get("stt_model",  "base.en")
@@ -962,27 +1010,39 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"items": items})
             except Exception as e:
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
-        if path == "/api/mcp/status":
-            # Live bridge status. Runtime spawning lands in a follow-up;
-            # for now report what the config WOULD spin up so the UI shows
-            # the user's intent + clear "not yet connected" markers.
-            mcp_path = os.path.join(WORKSPACE, "mcp.json")
-            bridges = []
+        if path == "/api/migrate/probe":
+            # Report which sources have data on disk so the UI can grey out
+            # buttons for ones that aren't installed. Cheap stat-only call.
             try:
-                if os.path.isfile(mcp_path):
-                    with open(mcp_path, "r", encoding="utf-8") as f:
-                        cfg = json.load(f)
-                    for name, spec in (cfg.get("mcpServers") or {}).items():
-                        bridges.append({
-                            "name": name,
-                            "state": "pending",
-                            "transport": "stdio" if spec.get("command") else "sse",
-                            "error": "runtime bridge ships in v0.7 — config is saved",
-                        })
+                from . import migrate as _m
+                hermes_home = _m._hermes_home()
+                hermes_mem = _m._hermes_active_memory_dir(hermes_home)
+                openclaw_ws = _m._openclaw_workspace_dir()
+                return self._send_json(200, {
+                    "hermes": {
+                        "home": str(hermes_home),
+                        "found": (hermes_mem / "USER.md").is_file()
+                              or (hermes_mem / "MEMORY.md").is_file(),
+                    },
+                    "openclaw": {
+                        "workspace": str(openclaw_ws),
+                        "found": (openclaw_ws / "MEMORY.md").is_file()
+                              or (openclaw_ws / "memory").is_dir(),
+                    },
+                })
             except Exception as e:
-                bridges = [{"name": "(config error)", "state": "error",
-                            "error": f"{type(e).__name__}: {e}"}]
-            return self._send_json(200, {"bridges": bridges})
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/mcp/status":
+            # Live bridge status. Each row reports actual subprocess state
+            # ('starting' / 'connected' / 'error'), tool count, and uptime.
+            try:
+                from . import mcp_client
+                return self._send_json(200,
+                    {"bridges": mcp_client.list_bridges()})
+            except Exception as e:
+                return self._send_json(500,
+                    {"bridges": [{"name": "(client error)", "state": "error",
+                                  "error": f"{type(e).__name__}: {e}"}]})
         if path == "/api/memory":
             return self._send_json(200, {"memories": _memory_index()})
         if path.startswith("/api/memory/"):
@@ -1087,6 +1147,48 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/llmserver/status":
             from . import llmserver
             return self._send_json(200, llmserver.status(LOCAL_API_BASE))
+        if path == "/api/subagent/pending":
+            # Idle-poll surface for the GUI: returns pending background
+            # subagent completions WITHOUT draining the queue.
+            try:
+                from . import subagents as _sa
+                return self._send_json(200, {
+                    "pending": _sa.peek_pending_notifications(),
+                })
+            except Exception as e:
+                return self._send_json(500, {"error": str(e)})
+        if path == "/api/subagent/activity":
+            # Recent subagent runs (from ~/Jarvis/subagents/*.jsonl) for
+            # the Logs tab's "agents" subview. Newest first, capped.
+            try:
+                from . import subagents as _sa
+                lim = int(self._query().get("limit", "50") or 50)
+                return self._send_json(200, {
+                    "agents": _sa.list_subagent_activity(limit=lim),
+                })
+            except Exception as e:
+                return self._send_json(500, {"error": str(e)})
+        if path == "/api/subagent/transcript":
+            # Full JSONL transcript for one agent — for the Logs detail view.
+            try:
+                q = self._query()
+                aid = q.get("agent_id", "").strip()
+                from . import subagents as _sa
+                tpath = _sa._transcript_path(aid) if aid else None
+                if tpath and tpath.is_file():
+                    return self._send_json(200, {
+                        "agent_id": aid,
+                        "content": tpath.read_text(encoding="utf-8")[:200_000],
+                    })
+                return self._send_json(404, {"error": "no such transcript"})
+            except Exception as e:
+                return self._send_json(500, {"error": str(e)})
+        if path == "/api/llmserver/rescan":
+            # Manual trigger for the user to force a fresh local-model sweep
+            # — e.g. after dropping a new GGUF into ~/Jarvis/models/. Returns
+            # immediately; status() reports `scanning: true` until done.
+            from . import llmserver
+            return self._send_json(200, llmserver.force_local_rescan())
         if path == "/api/llmserver/progress":
             # Live load-progress snapshot for the GUI's progress bar in both
             # the Models modal AND the bottom status pill. Returns the parsed
@@ -1151,11 +1253,56 @@ class HearthHandler(BaseHTTPRequestHandler):
             mid = (body.get("id") or "").strip()
             if not mid:
                 return self._send_json(400, {"error": "missing id"})
+            try:
+                from urllib.parse import urlparse
+                _host = (urlparse(_active_base()).hostname or "").lower()
+                if _host not in ("localhost", "127.0.0.1", "::1", "0.0.0.0", ""):
+                    return self._send_json(200, {
+                        "ok": True, "via": "cloud-noop",
+                        "note": f"endpoint {_host} is cloud — no local load needed; the model id is sent on each /chat call.",
+                    })
+            except Exception:
+                pass
             return self._send_json(200, _load_model(mid))
         if path == "/api/models/eject":
             return self._send_json(200, _eject_model())
         if path == "/api/settings":
             return self._send_json(200, _save_settings(self._read_json()))
+        if path == "/api/migrate/run":
+            body = self._read_json()
+            source = (body.get("source") or "").strip().lower()
+            if source not in ("hermes", "openclaw", "md"):
+                return self._send_json(400, {"error": "source must be hermes, openclaw, or md"})
+            apply_ = bool(body.get("apply"))
+            include_skills = bool(body.get("include_skills"))
+            include_config = bool(body.get("include_config"))
+            override_path = (body.get("path") or "").strip() or None
+            # Migrator's main() reads sys.argv; build the same arg vector
+            # and capture stdout so the UI gets the same dry-run text the
+            # CLI sees. Runs synchronously; for typical Hermes/OpenClaw
+            # imports this is well under a second.
+            import io as _io, contextlib as _ctx
+            argv = ["--from", source]
+            if apply_:           argv.append("--apply")
+            if include_skills:   argv.append("--include-skills")
+            if include_config:   argv.append("--include-config")
+            if override_path:    argv += ["--path", override_path]
+            buf = _io.StringIO()
+            old_argv = sys.argv
+            sys.argv = ["hearth.migrate"] + argv
+            try:
+                from . import migrate as _migrate
+                with _ctx.redirect_stdout(buf):
+                    rc = _migrate.main()
+            except SystemExit as e:
+                rc = int(getattr(e, "code", 0) or 0)
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+            finally:
+                sys.argv = old_argv
+            return self._send_json(200, {
+                "ok": rc == 0, "rc": rc, "log": buf.getvalue(),
+            })
         if path == "/api/reminders/snooze":
             try:
                 from . import reminders as _r
@@ -1499,11 +1646,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 os.environ["LOCAL_API_KEY"] = "hearth-builtin"
                 # Pop LOCAL_MODEL so chat falls back to probing the
                 # builtin's /v1/models for the loaded id. Without this,
-                # Cloud→sticker-pick-builtin sent the prior brain's
-                # model id ("grok-4-0709-...") to the builtin, which
-                # returns empty completions. Mirrored in /api/llm-endpoint
-                # for the case where provider switches without an
-                # explicit model body.
+                # switching from a cloud brain to the builtin would
+                # forward the cloud model id to the new server and the
+                # server would 404 it, producing empty completions.
+                # Mirrored in /api/llm-endpoint for the case where the
+                # provider switches without an explicit model body.
                 os.environ.pop("LOCAL_MODEL", None)
                 # Mirror the brain change into settings so the GUI's
                 # llm_provider pill + Chat brain dropdown reflect reality
@@ -1915,8 +2062,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             blob = base64.b64decode(b64, validate=True)
         except Exception as e:
             return self._send_json(400, {"error": f"bad base64: {e}"})
-        if len(blob) > 50 * 1024 * 1024:
-            return self._send_json(400, {"error": "file too large (>50MB)"})
+        if len(blob) > 200 * 1024 * 1024:
+            return self._send_json(400, {"error": "file too large (>200MB) — use a workspace path instead"})
         dest = os.path.join(WORKSPACE, "uploads", name)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as f:
@@ -1942,8 +2089,17 @@ class HearthHandler(BaseHTTPRequestHandler):
                 print(f"[hearth.chat] /chat got {len(history)} history msgs: {_shape}", flush=True)
             except Exception:
                 pass
-        # Optional inline auto-load before chat
-        if model and (loaded := _detect_loaded()) and loaded.get("id") != model:
+        # Optional inline auto-load before chat. SKIP when we're on a cloud
+        # endpoint — `_load_model` calls LM Studio's `lms load <id>` which
+        # has no idea what "grok-4.3" is and errors with "Model not found".
+        # Cloud models are served by their providers; no local load step.
+        try:
+            from urllib.parse import urlparse
+            _host = (urlparse(_active_base()).hostname or "").lower()
+            _is_local_endpoint = _host in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "")
+        except Exception:
+            _is_local_endpoint = True
+        if _is_local_endpoint and model and (loaded := _detect_loaded()) and loaded.get("id") != model:
             settings = _load_settings()
             if settings.get("auto_load_model"):
                 _load_model(model)
@@ -2131,10 +2287,9 @@ class HearthHandler(BaseHTTPRequestHandler):
 
     def _title(self) -> None:
         """Generate a 3-5 word chat title from the first user message.
-        ALWAYS calls the model when one is loaded — short messages still
-        get a real AI title (was previously fallback-on-short, which the
-        user flagged as 'sidebar just shows my first message'). Only
-        falls back to first-N-words when no model is loaded at all."""
+        Always calls the model when one is loaded so short messages still
+        get a real title instead of an echoed first-N-words slice. Falls
+        back to first-N-words only when no model is loaded at all."""
         body = self._read_json()
         first = (body.get("text") or "").strip()
         if not first:
@@ -2499,10 +2654,10 @@ def _auto_boot_preferred_model_async() -> None:
                 _hl.LOCAL_API_BASE = LOCAL_API_BASE
                 os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
                 os.environ["LOCAL_API_KEY"] = "hearth-builtin"
-                # CRITICAL: pop stale LOCAL_MODEL so chat probes the builtin
-                # for the actually-loaded model. Same root-cause as the
-                # sticker-bypass empty-response bug: previous brain's model
-                # id was still in env and got sent to the new server.
+                # Pop stale LOCAL_MODEL so chat probes the builtin for
+                # the actually-loaded id. Without this, a previous
+                # brain's model id can carry over in env and get sent
+                # to the new server, which 404s it.
                 os.environ.pop("LOCAL_MODEL", None)
                 _models_cache["ts"] = 0
                 print(f"  [hearth.web] builtin up at {r['url']} — endpoint switched", flush=True)
@@ -2567,6 +2722,22 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     _start_reminder_watcher()
     _maybe_learn_environment_async()
     _auto_boot_preferred_model_async()
+    # MCP client: spawn the servers configured in ~/Jarvis/mcp.json and
+    # register their tools. Each server runs in its own subprocess; their
+    # tools surface as 'mcp_<server>_<tool>' in to_openai_tools(). Safe
+    # to call even with no config (returns servers=0 immediately).
+    try:
+        from . import mcp_client
+        mcp_client.bootstrap()
+    except Exception as e:
+        print(f"[hearth.web] MCP client bootstrap failed: {e}", flush=True)
+    # Sync subagents should bail when the user hits Stop. Background
+    # subagents intentionally survive — that's the whole point of background.
+    try:
+        from . import subagents as _sa
+        _sa.set_parent_cancel_check(_CANCEL.is_set)
+    except Exception:
+        pass
     return server
 
 

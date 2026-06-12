@@ -22,6 +22,7 @@ import sys
 import json
 import time
 import asyncio
+import threading
 import urllib.request
 from typing import Dict, List, Optional
 
@@ -82,28 +83,70 @@ except ImportError as e:
 # whatever endpoint the user picked in the GUI (Settings -> LLM endpoint)
 # also drives the CLI. Same source of truth, no env-var duplication.
 def _read_settings_endpoint():
-    """Return (url, key, model) from settings.json, or all None if not set."""
+    """Return (url, key, model, provider) from settings.json or all None.
+    `provider` (when present) drives the brain_keys.json fallback below —
+    settings.json stores the URL + provider name; the actual API key for
+    cloud providers lives in brain_keys.json (the /brain command writes
+    it there). Without reading both, restarts lose cloud auth."""
     try:
         import json as _json
         p = os.path.join(WORKSPACE, "settings.json")
         if not os.path.isfile(p):
-            return None, None, None
+            return None, None, None, None
         with open(p, "r", encoding="utf-8") as f:
             s = _json.load(f)
         return ((s.get("llm_url") or "").strip() or None,
                 (s.get("llm_key") or "").strip() or None,
-                (s.get("llm_model") or "").strip() or None)
+                (s.get("llm_model") or "").strip() or None,
+                (s.get("llm_provider") or "").strip().lower() or None)
     except Exception:
-        return None, None, None
+        return None, None, None, None
 
 
-_S_URL, _S_KEY, _S_MODEL = _read_settings_endpoint()
+def _read_brain_key(provider: str) -> str:
+    """Look up a saved cloud key from ~/Jarvis/brain_keys.json.
+    File shape: {"<provider>": {"url": ..., "key": "<api-key>", "model": ...}}
+    Returns '' if no key for that provider. Mirrors what /brain reads/writes."""
+    if not provider or provider in ("local", "lmstudio", "builtin"):
+        return ""
+    try:
+        import json as _json
+        p = os.path.join(WORKSPACE, "brain_keys.json")
+        if not os.path.isfile(p):
+            return ""
+        with open(p, "r", encoding="utf-8") as f:
+            data = _json.load(f) or {}
+        return (data.get(provider) or {}).get("key", "") or ""
+    except Exception:
+        return ""
+
+
+_S_URL, _S_KEY, _S_MODEL, _S_PROV = _read_settings_endpoint()
 LOCAL_API_BASE = os.getenv("LOCAL_API_BASE") or _S_URL or "http://localhost:1234/v1"
 LOCAL_MODEL = os.getenv("LOCAL_MODEL") or _S_MODEL or "local-model"
-# Cloud endpoints (Gemini/OpenAI/etc) need a real key. Local LM Studio ignores
-# it, so the dummy fallback keeps localhost working with zero config.
+# Cloud endpoints need a real key. Resolution order:
+#   1. LOCAL_API_KEY env (explicit override)
+#   2. OPENAI_API_KEY env (legacy compat)
+#   3. settings.json llm_key (rare — most cloud users have this empty)
+#   4. brain_keys.json[<provider>].key (where /brain saves it)
+#   5. "jarvis-local" dummy (local servers ignore the field)
+# Step 4 is what was missing before: restarting on a cloud brain would
+# fall straight to the dummy and 401 every request, forcing a /brain
+# <provider> re-run every launch.
+_BRAIN_KEY = _read_brain_key(_S_PROV)
 LOCAL_API_KEY = (os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY")
-                 or _S_KEY or "jarvis-local")
+                 or _S_KEY or _BRAIN_KEY or "jarvis-local")
+
+# Propagate resolved values into os.environ so downstream modules
+# (hearth.imagine reads os.environ["LOCAL_API_BASE"] at call time)
+# see them. Only set LOCAL_API_KEY in env when we have a real key
+# (not the dummy) — writing "jarvis-local" over a brain_keys.json
+# entry would re-introduce the auth-fail regression.
+os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
+if LOCAL_API_KEY and LOCAL_API_KEY != "jarvis-local":
+    os.environ["LOCAL_API_KEY"] = LOCAL_API_KEY
+if _S_MODEL:
+    os.environ.setdefault("LOCAL_MODEL", LOCAL_MODEL)
 HISTORY_FILE = os.path.join(WORKSPACE, "logs", "jarvis_history.json")
 # Persistent per-tool permissions ([a]lways / [N]ever) so you don't have to
 # re-approve browse_click/run_command/etc on every restart. Stored next to
@@ -361,10 +404,27 @@ class JarvisCLI:
         self.listen_continuous = False
         self._stt_queue: asyncio.Queue = asyncio.Queue()
         self._stt_loop: Optional[asyncio.AbstractEventLoop] = None
+        # Cancel signal raised when the user wants to abort the in-flight
+        # response (Esc / Ctrl-C during streaming). The respond() loop
+        # checks it between stream chunks + between tool calls; subagents
+        # check it via set_parent_cancel_check. Set with .set(), cleared
+        # at the start of each new user turn.
+        self._respond_cancel = threading.Event()
         if not self._context_pinned:
-            detected = autodetect_context(self.current_model)
-            if detected and detected > 1024:
-                self.context_tokens = detected
+            # Single source of truth — same helper the GUI/bridge use. Has
+            # per-provider fallback (Grok 200K, Gemini 200K, Claude 200K,
+            # GPT-4o 128K, etc.) for cloud endpoints that don't expose
+            # loaded_context_length via /v1/models. Bare autodetect_context
+            # alone returns None for cloud and CLI would silently use 8K.
+            try:
+                from hearth.headless import resolve_context_tokens
+                tokens, _src = resolve_context_tokens(self.current_model)
+                if tokens and tokens > 1024:
+                    self.context_tokens = tokens
+            except Exception:
+                detected = autodetect_context(self.current_model)
+                if detected and detected > 1024:
+                    self.context_tokens = detected
         self.multiline_mode = False  # toggled with /multi
         # ONE thinking toggle:
         #   /think on  → model reasons AND we show the body inline
@@ -732,13 +792,22 @@ class JarvisCLI:
                 if detected: self.current_model = detected
             except Exception:
                 pass
-        # Re-detect context unless the user pinned it.
+        # Re-detect context unless the user pinned it. Use the shared
+        # helper so cloud brains (Grok/Gemini/...) get their real ctx
+        # via the per-provider table instead of silently defaulting to 8K.
         if not self._context_pinned:
             try:
-                detected_ctx = autodetect_context(self.current_model)
-                if detected_ctx: self.context_tokens = detected_ctx
+                from hearth.headless import resolve_context_tokens
+                tokens, _src = resolve_context_tokens(self.current_model)
+                if tokens and tokens > 1024:
+                    self.context_tokens = tokens
             except Exception:
-                pass
+                try:
+                    detected_ctx = autodetect_context(self.current_model)
+                    if detected_ctx:
+                        self.context_tokens = detected_ctx
+                except Exception:
+                    pass
         print(f"{C_OK}↳ switched to {LOCAL_API_BASE}{C_RESET}  "
               f"{C_DIM}(model: {self.current_model}){C_RESET}")
 
@@ -978,6 +1047,10 @@ class JarvisCLI:
             print(f"  {C_TOOL}/mem{C_RESET}                   show memory index")
             print(f"  {C_TOOL}/rules{C_RESET}                 show rules.md path")
             print(f"  {C_TOOL}/name [NewName]{C_RESET}        show / set agent name (JARVIS, Cortana, Friday…)")
+            print(f"  {C_TOOL}/migrate <hermes|openclaw>{C_RESET}  import memory/skills/config from another agent")
+            print(f"  {C_TOOL}/jobs [all|<id>|kill <id>]{C_RESET}    background jobs (disk_usage / start_job / etc.)")
+            print(f"  {C_TOOL}/mcp [edit|config|run]{C_RESET}     Model Context Protocol — Hearth as server / configure outbound")
+            print(f"  {C_TOOL}/agent [<slug> \"<prompt>\"]{C_RESET}  list personas / spawn a sub-agent synchronously")
             print(f"  {C_TOOL}/voice [on|off]{C_RESET}        TTS toggle (alias: /voices)")
             print(f"  {C_TOOL}/voice speed <n>{C_RESET}       TTS playback rate (e.g. 1.2)")
             print(f"  {C_TOOL}/stt [model]{C_RESET}           show/switch STT model (tiny.en/base.en/small.en/...)")
@@ -1058,12 +1131,19 @@ class JarvisCLI:
                     return True
                 self.current_model = arg
                 print(f"{C_OK}model → {self.current_model}{C_RESET}")
-            # Re-detect context size for the new model (unless pinned)
+            # Re-detect context for the new model (unless pinned). Uses
+            # the shared per-provider helper so cloud brains land at their
+            # real ctx instead of the 8K default.
             if not self._context_pinned:
-                detected = autodetect_context(self.current_model)
-                if detected and detected != self.context_tokens:
-                    self.context_tokens = detected
-                    print(f"{C_DIM}context auto-set to {detected} tokens (from /v1/models){C_RESET}")
+                try:
+                    from hearth.headless import resolve_context_tokens
+                    tokens, src = resolve_context_tokens(self.current_model)
+                except Exception:
+                    tokens = autodetect_context(self.current_model)
+                    src = "v1/models probe"
+                if tokens and tokens != self.context_tokens and tokens > 1024:
+                    self.context_tokens = tokens
+                    print(f"{C_DIM}context auto-set to {tokens} tokens ({src}){C_RESET}")
             return True
         # /endpoint is the natural-language alias for /brain — every cloud
         # model + every user I've watched reaches for "endpoint" first. Treat
@@ -1396,22 +1476,41 @@ class JarvisCLI:
             return True
         if low.startswith("/context"):
             parts = cmd.split()
+            # Sanity ceiling — no real provider serves >1M ctx today; values
+            # above this are almost certainly a typo (a transcript showed
+            # /context 100000000000 being accepted silently, which made the
+            # ring math nonsense and confused downstream trim logic).
+            _CTX_MAX = 1_048_576
+            _CTX_MIN = 1024
             if len(parts) >= 2 and parts[1].lower() in ("auto", "detect"):
-                detected = autodetect_context(self.current_model)
+                try:
+                    from hearth.headless import resolve_context_tokens
+                    detected, src = resolve_context_tokens(self.current_model)
+                except Exception:
+                    detected = autodetect_context(self.current_model)
+                    src = "v1/models probe"
                 if detected:
                     self.context_tokens = detected
                     self._context_pinned = False
-                    print(f"{C_OK}context auto-detected: {detected} tokens{C_RESET}")
+                    print(f"{C_OK}context auto-detected: {detected} tokens ({src}){C_RESET}")
                 else:
-                    print(f"{C_ERR}could not detect — LM Studio didn't return loaded_context_length{C_RESET}")
+                    print(f"{C_ERR}could not detect ctx — endpoint didn't expose loaded_context_length{C_RESET}")
             elif len(parts) >= 2 and parts[1].isdigit():
-                self.context_tokens = int(parts[1])
+                requested = int(parts[1])
+                if requested > _CTX_MAX:
+                    print(f"{C_ERR}context {requested:,} is above the 1M ceiling — capping to {_CTX_MAX:,}.{C_RESET}")
+                    print(f"{C_DIM}  no real model accepts >1M tokens. If you wanted N thousand, drop the extra zeros.{C_RESET}")
+                    requested = _CTX_MAX
+                elif requested < _CTX_MIN:
+                    print(f"{C_ERR}context {requested} is below the {_CTX_MIN} floor — capping to {_CTX_MIN}.{C_RESET}")
+                    requested = _CTX_MIN
+                self.context_tokens = requested
                 self._context_pinned = True
-                print(f"{C_OK}context window → {self.context_tokens} tokens (pinned){C_RESET}")
+                print(f"{C_OK}context window → {self.context_tokens:,} tokens (pinned){C_RESET}")
             else:
-                print(f"  current: {self.context_tokens} tokens ({'pinned' if self._context_pinned else 'auto-detected'})")
-                print(f"  usage:   /context <number>   (e.g. /context 20480)")
-                print(f"           /context auto       (re-detect from LM Studio)")
+                print(f"  current: {self.context_tokens:,} tokens ({'pinned' if self._context_pinned else 'auto-detected'})")
+                print(f"  usage:   /context <number>   (e.g. /context 20480; capped at {_CTX_MAX:,})")
+                print(f"           /context auto       (re-detect via per-provider table + endpoint probe)")
             return True
         if low == "/listen" or low.startswith("/listen "):
             parts = cmd.split()
@@ -1598,6 +1697,238 @@ class JarvisCLI:
                       f"Workspace folder ~/{old} unchanged — use GUI to move it.{C_RESET}")
             except Exception as e:
                 print(f"  {C_ERR}rename failed: {e}{C_RESET}")
+            return True
+        if low == "/jobs" or low.startswith("/jobs "):
+            # /jobs                  -> list active + recently-finished
+            # /jobs all              -> include old completed
+            # /jobs <id>             -> tail that job's log + result
+            # /jobs kill <id>        -> stop a running job
+            from hearth import jobs as _jobs
+            parts = cmd.split()
+            sub = parts[1] if len(parts) > 1 else ""
+            if sub == "kill" and len(parts) > 2:
+                r = _jobs.kill_job(parts[2])
+                print(f"  {C_OK if r.get('ok') else C_ERR}{r}{C_RESET}")
+                return True
+            if sub and sub.startswith("j-"):
+                # Treat as a job id - show meta + result + log tail
+                g = _jobs.get_job(sub, tail_lines=40)
+                if not g.get("ok"):
+                    print(f"  {C_ERR}{g.get('error', 'no such job')}{C_RESET}")
+                    return True
+                print(f"  {C_TOOL}{g.get('status', '?')}{C_RESET}  "
+                      f"{C_DIM}{g.get('description', '')}{C_RESET}")
+                gr = _jobs.get_job_result(sub)
+                if gr.get("ok") and gr.get("status") == "completed":
+                    r = gr.get("result")
+                    if isinstance(r, str):
+                        print(f"\n{r[:2000]}")
+                    else:
+                        import json as _json
+                        print(f"\n{_json.dumps(r, indent=2, default=str)[:2000]}")
+                else:
+                    print(f"  {C_DIM}{gr.get('note', gr.get('error', ''))}{C_RESET}")
+                tail = g.get("tail", "")
+                if tail:
+                    print(f"\n{C_DIM}--- log tail ---{C_RESET}")
+                    print(tail[-1500:])
+                return True
+            include_done = (sub == "all")
+            active_only = not include_done
+            items = _jobs.list_jobs(active_only=active_only)
+            if not items:
+                print(f"  {C_DIM}no {'active' if active_only else ''} jobs{C_RESET}")
+                print(f"  {C_DIM}(disk_usage on a drive root auto-backgrounds — "
+                      f"check this after asking JARVIS to scan something){C_RESET}")
+                return True
+            for j in items:
+                status = j.get("status", "?")
+                color = (C_OK if status == "completed" else
+                         C_WARN if status == "running" else
+                         C_ERR if status == "failed" else C_DIM)
+                desc = (j.get("description", "") or "")[:60]
+                elapsed = ""
+                if j.get("started_at"):
+                    end = j.get("ended_at") or time.time()
+                    elapsed = f"{end - j['started_at']:.1f}s"
+                print(f"  {color}{status:10}{C_RESET}  "
+                      f"{C_TOOL}{j.get('job_id', '')}{C_RESET}  "
+                      f"{C_DIM}{elapsed:>8} {desc}{C_RESET}")
+            print()
+            print(f"  {C_DIM}/jobs <id>     show one job's result/log{C_RESET}")
+            print(f"  {C_DIM}/jobs kill <id>  stop a running job{C_RESET}")
+            print(f"  {C_DIM}/jobs all      include old completed jobs{C_RESET}")
+            return True
+        if low == "/mcp" or low.startswith("/mcp "):
+            # /mcp                 -> status + how to use
+            # /mcp edit            -> open ~/Jarvis/mcp.json in $EDITOR
+            # /mcp config          -> print the snippet to paste into LM Studio / Claude Desktop
+            # /mcp run             -> run hearth.mcp_server in this terminal (Ctrl-C to stop)
+            parts = cmd.split()[1:]
+            sub = parts[0].lower() if parts else ""
+            from pathlib import Path as _P
+            mcp_path = _P.home() / "Jarvis" / "mcp.json"
+            if not sub:
+                # Status: count Hearth's exported tools + show client-config file location
+                try:
+                    from hearth import TOOL_DEFINITIONS as _td
+                    print(f"  {C_OK}Hearth is an MCP server{C_RESET}  "
+                          f"{C_DIM}({len(_td)} tools exported via hearth.mcp_server){C_RESET}")
+                except Exception:
+                    pass
+                exists = mcp_path.is_file()
+                print(f"  {C_DIM}client config: {mcp_path} "
+                      f"({'exists' if exists else 'not configured'}){C_RESET}")
+                print()
+                print(f"  {C_TOOL}/mcp run{C_RESET}        run as MCP server in this terminal (Ctrl-C to stop)")
+                print(f"  {C_TOOL}/mcp edit{C_RESET}       open ~/Jarvis/mcp.json (outbound client config)")
+                print(f"  {C_TOOL}/mcp config{C_RESET}     print the snippet to paste into LM Studio / Claude Desktop / Cursor")
+                # Show outbound bridge status (the v0.8 runtime, not v0.7 stub).
+                try:
+                    from hearth import mcp_client as _mc
+                    bridges = _mc.list_bridges()
+                except Exception:
+                    bridges = []
+                if bridges:
+                    print()
+                    print(f"  {C_DIM}outbound bridges (Hearth USING other MCP servers):{C_RESET}")
+                    for b in bridges:
+                        color = (C_OK if b.get("state") == "connected"
+                                 else C_WARN if b.get("state") in ("starting", "pending")
+                                 else C_ERR)
+                        ntools = len(b.get("tools", []))
+                        err = b.get("error", "")
+                        print(f"  {color}● {b['name']:20}{C_RESET} {b.get('state', '?'):12} "
+                              f"{C_DIM}{ntools} tools{C_RESET}"
+                              + (f"  {C_ERR}{err[:60]}{C_RESET}" if err else ""))
+                else:
+                    print()
+                    print(f"  {C_DIM}no outbound MCP servers configured yet. "
+                          f"Run /mcp edit to add some.{C_RESET}")
+                return True
+            if sub == "edit":
+                mcp_path.parent.mkdir(parents=True, exist_ok=True)
+                if not mcp_path.is_file():
+                    sample = {"mcpServers": {
+                        "example-filesystem": {
+                            "command": "npx",
+                            "args": ["-y", "@modelcontextprotocol/server-filesystem", str(_P.home() / "Documents")],
+                            "env": {},
+                        }
+                    }}
+                    mcp_path.write_text(__import__("json").dumps(sample, indent=2), encoding="utf-8")
+                editor = os.environ.get("EDITOR") or ("notepad" if sys.platform == "win32" else "nano")
+                try:
+                    __import__("subprocess").Popen([editor, str(mcp_path)])
+                    print(f"  {C_OK}opened {mcp_path} in {editor}{C_RESET}")
+                except Exception as e:
+                    print(f"  {C_ERR}could not open editor: {e}{C_RESET}")
+                    print(f"  {C_DIM}path: {mcp_path}{C_RESET}")
+                return True
+            if sub == "config":
+                snippet = __import__("json").dumps({
+                    "mcpServers": {
+                        "hearth": {
+                            "command": "python",
+                            "args": ["-m", "hearth.mcp_server"],
+                        }
+                    }
+                }, indent=2)
+                print(f"  {C_DIM}Paste into the OTHER tool's mcp.json:{C_RESET}")
+                print()
+                for ln in snippet.split("\n"):
+                    print(f"  {C_TOOL}{ln}{C_RESET}")
+                return True
+            if sub == "run":
+                print(f"  {C_OK}starting hearth.mcp_server (Ctrl-C to stop){C_RESET}")
+                try:
+                    import runpy
+                    runpy.run_module("hearth.mcp_server", run_name="__main__")
+                except KeyboardInterrupt:
+                    print(f"\n  {C_DIM}stopped{C_RESET}")
+                except Exception as e:
+                    print(f"  {C_ERR}mcp_server failed: {type(e).__name__}: {e}{C_RESET}")
+                return True
+            print(f"  {C_ERR}unknown /mcp subcommand: {sub}{C_RESET}")
+            return True
+        if low == "/agent" or low.startswith("/agent "):
+            # /agent                           -> list available personas
+            # /agent <slug> "<prompt text>"    -> spawn synchronously
+            from hearth import subagents as _sa
+            parts = cmd.split(None, 2)
+            if len(parts) < 2:
+                personas = _sa.list_personas()
+                if not personas:
+                    print(f"  {C_DIM}no personas under hearth/subagents/{C_RESET}")
+                else:
+                    print(f"  {C_OK}available subagent personas:{C_RESET}")
+                    for p in personas:
+                        if "error" in p:
+                            print(f"  {C_ERR}  ! {p['slug']}: {p['error']}{C_RESET}")
+                            continue
+                        print(f"  {C_TOOL}  {p['slug']}{C_RESET} "
+                              f"{C_DIM}({p['cost_class']}, max {p['max_turns']} turns){C_RESET}")
+                        print(f"  {C_DIM}    {p['description']}{C_RESET}")
+                        print(f"  {C_DIM}    tools: {', '.join(p['allowed_tools'])}{C_RESET}")
+                print()
+                print(f"  {C_DIM}usage: /agent <slug> \"<prompt>\"{C_RESET}")
+                return True
+            slug = parts[1]
+            sub_prompt = parts[2].strip().strip('"').strip("'") if len(parts) > 2 else ""
+            if not sub_prompt:
+                print(f"  {C_ERR}prompt required: /agent {slug} \"<prompt>\"{C_RESET}")
+                return True
+            print(f"  {C_DIM}spawning {slug} sync...{C_RESET}")
+            try:
+                r = _sa.spawn_subagent(slug, sub_prompt)
+            except Exception as e:
+                print(f"  {C_ERR}spawn failed: {type(e).__name__}: {e}{C_RESET}")
+                return True
+            if r.get("ok"):
+                elapsed = r.get("elapsed_s", "?")
+                print(f"  {C_OK}done in {elapsed}s "
+                      f"({r.get('turns', '?')} turns, "
+                      f"used: {', '.join(r.get('used_tools', [])) or 'no tools'}){C_RESET}")
+                print()
+                print(r.get("text", "(empty)"))
+            else:
+                print(f"  {C_ERR}subagent failed: {r.get('error', 'unknown')}{C_RESET}")
+            return True
+        if low == "/migrate" or low.startswith("/migrate "):
+            # /migrate                    -> usage hint
+            # /migrate hermes             -> dry-run from $HERMES_HOME / ~/.hermes
+            # /migrate openclaw           -> dry-run from $OPENCLAW_WORKSPACE_DIR / ~/.openclaw/workspace
+            # /migrate hermes apply       -> actually write
+            # /migrate hermes apply skills config  -> also park skills + import model/provider
+            parts = cmd.split()[1:]
+            if not parts:
+                print(f"  {C_TOOL}/migrate hermes{C_RESET}                 dry-run from ~/.hermes (or HERMES_HOME)")
+                print(f"  {C_TOOL}/migrate openclaw{C_RESET}               dry-run from ~/.openclaw/workspace")
+                print(f"  {C_TOOL}/migrate <src> apply{C_RESET}            actually write to ~/Jarvis/memory")
+                print(f"  {C_TOOL}/migrate <src> apply skills{C_RESET}     also park SKILL.md dirs under ~/Jarvis/imported_skills/")
+                print(f"  {C_TOOL}/migrate <src> apply config{C_RESET}     also import the source's model/provider (no API keys)")
+                print(f"  {C_DIM}for one-off markdown imports use: python -m hearth.migrate --from md --path FILE --apply{C_RESET}")
+                return True
+            source = parts[0].lower()
+            if source not in ("hermes", "openclaw"):
+                print(f"  {C_ERR}unknown source: {source}. Try hermes or openclaw.{C_RESET}")
+                return True
+            argv = ["--from", source]
+            flags = {p.lower() for p in parts[1:]}
+            if "apply" in flags:        argv.append("--apply")
+            if "skills" in flags:       argv.append("--include-skills")
+            if "config" in flags:       argv.append("--include-config")
+            try:
+                from hearth.migrate import main as _migrate_main
+                # The migrator's argparse reads sys.argv, so patch it for this call.
+                old_argv = sys.argv
+                sys.argv = ["hearth.migrate"] + argv
+                try:
+                    _migrate_main()
+                finally:
+                    sys.argv = old_argv
+            except Exception as e:
+                print(f"  {C_ERR}migrate failed: {type(e).__name__}: {e}{C_RESET}")
             return True
         if low == "/stt" or low.startswith("/stt "):
             arg = cmd.split(None, 1)[1].strip() if len(cmd.split(None, 1)) > 1 else ""
@@ -2084,6 +2415,44 @@ class JarvisCLI:
               f"~/Jarvis/rules.md to edit by hand.{C_RESET}")
         print()
 
+        # Migrate prompt — only shown when a prior agent install is detected.
+        # Mirrors the GUI onboarding step 6 logic so CLI users get parity.
+        try:
+            from hearth import migrate as _mig
+            sources_found = []
+            hh = _mig._hermes_home()
+            hmem = _mig._hermes_active_memory_dir(hh)
+            if (hmem / "USER.md").is_file() or (hmem / "MEMORY.md").is_file():
+                sources_found.append(("hermes", str(hh)))
+            ows = _mig._openclaw_workspace_dir()
+            if (ows / "MEMORY.md").is_file() or (ows / "memory").is_dir():
+                sources_found.append(("openclaw", str(ows)))
+            if sources_found:
+                print(f"  {C_TOOL}Found a prior agent install:{C_RESET}")
+                for i, (src, path) in enumerate(sources_found, 1):
+                    print(f"  {C_DIM}  [{i}] {src} ({path}){C_RESET}")
+                print(f"  {C_DIM}Import its memory into Hearth? "
+                      f"(API keys never copied){C_RESET}")
+                pick = ask("Pick 1-N or press Enter to skip")
+                if pick.isdigit():
+                    n = int(pick)
+                    if 1 <= n <= len(sources_found):
+                        src = sources_found[n - 1][0]
+                        print(f"  {C_DIM}importing from {src}...{C_RESET}")
+                        try:
+                            import sys as _sys
+                            old_argv = _sys.argv
+                            _sys.argv = ["hearth.migrate", "--from", src, "--apply"]
+                            try:
+                                _mig.main()
+                            finally:
+                                _sys.argv = old_argv
+                        except Exception as e:
+                            print(f"  {C_ERR}migrate failed: {e}{C_RESET}")
+                print()
+        except Exception:
+            pass  # migrate is opt-in, never block onboarding on its failure
+
     async def _ask_user_interactive(self, question: str, options: list, allow_other: bool) -> dict:
         """CLI surface for the ask_user tool. Renders a numbered list, reads
         the user's pick. Runs on the main asyncio loop (the tool dispatcher
@@ -2127,6 +2496,36 @@ class JarvisCLI:
                 return {"ok": False, "error": f"{type(e).__name__}: {e}"}
         return _bridge
 
+    async def _extend_workspace_interactive(self, path: str) -> bool:
+        """Ask whether to allow writes to a path outside the workspace.
+        [y]es allows for this turn; [a]lways adds to EXTRA_WORKSPACES."""
+        parent = os.path.dirname(path) or path
+        print()
+        print(f"{C_FRAME}╭─ {C_WARN}? extend workspace to write here?{C_RESET}")
+        print(f"{C_FRAME}│ {C_DIM}path:   {C_RESET}{path}")
+        print(f"{C_FRAME}│ {C_DIM}parent: {C_RESET}{parent}")
+        print(f"{C_FRAME}│ {C_DIM}[y]es (this write only) / [a]lways "
+              f"(add parent to EXTRA_WORKSPACES) / [n]o{C_RESET}")
+        print(f"{C_FRAME}╰─{C_RESET}")
+        raw = (await self._read_choice(f"{C_FRAME}│ > {C_RESET}")).strip().lower()
+        if raw in ("y", "yes"):
+            return True
+        if raw in ("a", "always"):
+            return True  # tools._resolve_write adds parent on True; same effect
+        return False
+
+    def _make_extend_workspace_bridge(self, loop: asyncio.AbstractEventLoop):
+        """Sync callback wired into tools.set_extend_workspace_callback. Same
+        worker-thread -> main-loop bridge pattern as the ask_user one."""
+        def _bridge(path: str) -> bool:
+            try:
+                fut = asyncio.run_coroutine_threadsafe(
+                    self._extend_workspace_interactive(path), loop)
+                return bool(fut.result(timeout=180))
+            except Exception:
+                return False
+        return _bridge
+
     async def run(self):
         # The model can flip this to True via the end_session tool when it
         # judges the user is wrapping up. We finish the current response,
@@ -2135,10 +2534,28 @@ class JarvisCLI:
         # Register the CLI as the interactive surface for ask_user — the tool
         # handler bounces back to this loop via run_coroutine_threadsafe.
         try:
-            from hearth.tools import set_ask_user_callback
-            set_ask_user_callback(self._make_ask_user_bridge(asyncio.get_running_loop()))
+            from hearth.tools import set_ask_user_callback, set_extend_workspace_callback
+            _loop = asyncio.get_running_loop()
+            set_ask_user_callback(self._make_ask_user_bridge(_loop))
+            set_extend_workspace_callback(self._make_extend_workspace_bridge(_loop))
         except Exception:
-            pass  # ask_user just stays inert if registration fails
+            pass  # ask_user / extend-workspace stay inert if registration fails
+        # Bootstrap MCP client (spawns the servers configured in
+        # ~/Jarvis/mcp.json so their tools appear in to_openai_tools()).
+        try:
+            from hearth import mcp_client
+            r = mcp_client.bootstrap()
+            if r.get("servers", 0) > 0:
+                print(f"{C_DIM}● MCP: spawning {r['servers']} bridge(s){C_RESET}")
+        except Exception as e:
+            print(f"{C_DIM}● MCP client bootstrap skipped: {e}{C_RESET}")
+        # Sync subagents inherit the CLI's cancel signal so a Ctrl-C
+        # during a respond() stream also aborts any active child loop.
+        try:
+            from hearth import subagents as _sa
+            _sa.set_parent_cancel_check(self._respond_cancel.is_set)
+        except Exception:
+            pass
         await self._maybe_run_onboarding()
 
         last_interrupt = 0.0
@@ -2199,10 +2616,35 @@ class JarvisCLI:
                 else:
                     print(f"{C_DIM}(sleeping — say '{w}' or /wake){C_RESET}")
                     continue
+            # Drain background subagent completion notifications BEFORE
+            # the user's new prompt so the model sees them in arrival
+            # order. Each notification is a synthetic user-role message
+            # with a <task-notification> block.
+            try:
+                from hearth import subagents as _sa
+                for notif in _sa.drain_pending_notifications():
+                    xml = _sa.format_notification_as_user_message(notif)
+                    self.messages.append({"role": "user", "content": xml})
+                    print(f"{C_DIM}● subagent done: "
+                          f"{notif.get('persona', '?')} "
+                          f"({notif.get('status', '?')}){C_RESET}")
+            except Exception:
+                pass
             # Expand @<path> file attachments (text or image)
             content = self._resolve_attachments(user_input)
             self.messages.append({"role": "user", "content": content})
-            await self.respond()
+            # Ctrl-C during the response sets the cancel signal; the
+            # stream loop checks it between chunks and bails cleanly
+            # without killing the CLI. A second Ctrl-C inside 1s
+            # falls through to the outer "exit?" handler.
+            try:
+                await self.respond()
+            except KeyboardInterrupt:
+                self._respond_cancel.set()
+                print(f"\n{C_DIM}● cancelling…{C_RESET}")
+                # Give the stream + any tool a beat to notice + clean up
+                await asyncio.sleep(0.2)
+                last_interrupt = time.time()
 
     def _extract_facts_to_memory(self, transcript: str) -> int:
         """Before summarizing, ask the LLM to surface durable facts from the
@@ -2457,7 +2899,14 @@ class JarvisCLI:
                 and len(self.messages) > 12
                 and safe_to_compact):
             print(f"{C_DIM}[auto-compact: ~{est}+{tool_tokens}tools/{self.context_tokens} tokens]{C_RESET}")
-            self.messages = compact_history(self.messages, self._summarize, keep_recent=8)
+            # target_chars = compact aggressively enough that the SUM of
+            # head + summary + recent fits comfortably under the chat
+            # budget. Without this, compact "succeeded" but the kept
+            # tail still held 4 huge browse results — server wedged.
+            target_chars = max(2000, effective_ctx * CHARS_PER_TOKEN // 2)
+            self.messages = compact_history(self.messages, self._summarize,
+                                            keep_recent=8,
+                                            target_chars=target_chars)
 
         # 3) Hard trim to fit. Budget against effective_ctx so the tool schemas
         # + reserved output always have room.
@@ -2517,6 +2966,8 @@ class JarvisCLI:
             # Cloud vision: image to attach as a user turn after this round of
             # tool calls (set by the view_image handler on cloud endpoints).
             self._pending_image_block = None
+            # Fresh cancel signal — clear any stale state from the prior turn.
+            self._respond_cancel.clear()
 
         send_messages = await asyncio.to_thread(self._prepare_context)
 
@@ -2713,6 +3164,17 @@ class JarvisCLI:
             # else: silently absorb — only the summary line shows
 
         async for chunk in stream:
+            # Ctrl-C during the stream sets _respond_cancel; bail cleanly
+            # so prompt_toolkit re-takes the terminal without killing the
+            # CLI. Any in-flight subagent also sees this via the parent
+            # cancel hook.
+            if self._respond_cancel.is_set():
+                try: spinner_task.cancel()
+                except Exception: pass
+                try: await stream.close()
+                except Exception: pass
+                print(f"\r\033[K{C_DIM}● interrupted by user.{C_RESET}")
+                return
             if not chunk.choices:
                 continue
             if first:
@@ -2890,12 +3352,28 @@ class JarvisCLI:
                 args = json.loads(args_raw)
             except json.JSONDecodeError:
                 args = {}
-            preview = json.dumps(args, ensure_ascii=False)
-            if len(preview) > 100:
-                preview = preview[:100] + "…"
-
+            # Args preview. Risky tools (run_command, write_file, etc.)
+            # ALWAYS show the full argument set so the user can audit what
+            # they're about to approve — a hidden ">D:\evil.bat" tail would
+            # be a security disaster. Non-risky tools still get a one-line
+            # truncated preview to keep scrollback tidy.
+            preview_full = json.dumps(args, ensure_ascii=False)
+            is_risky = name in RISKY_TOOLS
             print(f"{C_FRAME}╭─ {C_TOOL}⚡ {name}{C_FRAME} ─{C_RESET}")
-            print(f"{C_FRAME}│ {C_DIM}{preview}{C_RESET}")
+            if is_risky and len(preview_full) > 100:
+                # Pretty-print + word-wrap so the full args read cleanly on
+                # multiple lines before the [y/n/a/N] prompt.
+                try:
+                    pretty = json.dumps(args, ensure_ascii=False, indent=2)
+                except Exception:
+                    pretty = preview_full
+                for ln in pretty.split("\n"):
+                    print(f"{C_FRAME}│ {C_DIM}{ln}{C_RESET}")
+            else:
+                preview = preview_full
+                if len(preview) > 100:
+                    preview = preview[:100] + "…"
+                print(f"{C_FRAME}│ {C_DIM}{preview}{C_RESET}")
 
             # Permission gate for risky tools — uses prompt_async if pt is
             # active so we don't deadlock with prompt_toolkit's stdin grab.
@@ -2973,14 +3451,23 @@ class JarvisCLI:
                 skipped = True
             else:
                 t0 = time.time()
-                result = await asyncio.to_thread(execute_tool, name, args)
+                # The user has already approved this specific call via the
+                # [y]es/[a]lways prompt above (or it's an always-allowed
+                # tool). Mark _approved so the inner destructive-pattern
+                # guard doesn't refuse it a SECOND time — the redundant
+                # gate would make echo>file fail after user already said y.
+                _approved_args = dict(args, _approved=True) if isinstance(args, dict) else args
+                result = await asyncio.to_thread(execute_tool, name, _approved_args)
                 dt = (time.time() - t0) * 1000
 
-            # Loop-guard outcome check (only for calls that actually executed).
-            if not denied and not skipped:
+            # Loop-guard outcome check. Includes DENIED calls now: an
+            # identical retry after the user said no is the worst kind of
+            # spiral (the model is fighting the user, not the data). The
+            # 'skipped' branch is the only one we skip because skip-call
+            # results are synthetic notes, not real outcomes worth tracking.
+            if not skipped:
                 decision = self._loop_guard.after(name, args, result)
                 if decision.action == "warn":
-                    # Append the nudge to what the MODEL sees; keep screen clean.
                     result = f"{result}\n\n{decision.note}"
                 elif decision.action == "stop":
                     result = f"{result}\n\n{decision.note}"
@@ -3166,6 +3653,14 @@ if __name__ == "__main__":
 
     app = JarvisCLI()
     app.animate_intro()
+    # Suppress the httpx/anyio cleanup spam that happens when the asyncio
+    # loop closes before background openai clients finish their TLS
+    # teardown. The spam looks like 30+ "Event loop is closed" tracebacks
+    # at the bottom of every session. It's purely cosmetic — the loop is
+    # closing because we asked it to — so hide that one ExceptionGroup
+    # without hiding real errors.
+    import logging as _logging
+    _logging.getLogger("asyncio").setLevel(_logging.CRITICAL)
     # Top-level exit handling: Ctrl-C anywhere (even mid-tool-call) should
     # surface as a clean exit, not the full asyncio traceback the user was
     # seeing when run_command got stuck on a daemon batch file.
@@ -3177,5 +3672,10 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception as _e:
+        # Swallow the "Event loop is closed" race that fires when a
+        # background httpx client tries to aclose() after we've already
+        # torn the loop down. Not a real failure.
+        if "Event loop is closed" in str(_e):
+            sys.exit(0)
         print(f"\n{C_ERR}● fatal: {type(_e).__name__}: {_e}{C_RESET}")
         sys.exit(1)

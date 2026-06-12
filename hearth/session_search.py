@@ -195,7 +195,32 @@ def _safe_fts_query(q: str) -> str:
 def format_matches(matches: List[Match]) -> str:
     """Render matches as readable text for the model's tool result."""
     if not matches:
-        return "No past conversations matched. (Index has 0 results — try a different query.)"
+        # Include the actual conversation count + index state so the model
+        # can distinguish "no chats exist yet" from "you matched zero of
+        # 200 chats — try a broader query". Previously a 0-results return
+        # looked the same as an empty store, and the model would tell the
+        # user "I have no history" when really they have 50 chats.
+        try:
+            n_files = 0
+            if os.path.isdir(CONVOS_DIR):
+                n_files = sum(1 for f in os.listdir(CONVOS_DIR) if f.endswith(".json"))
+            n_indexed = 0
+            if os.path.isfile(INDEX_PATH):
+                conn = _connect()
+                try:
+                    n_indexed = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+                finally:
+                    conn.close()
+        except Exception:
+            n_files = n_indexed = -1
+        if n_files == 0:
+            return ("No past conversations exist yet — this is the first "
+                    "chat. Don't say 'I have no history'; say 'this is "
+                    "our first session, what's up?'.")
+        return (f"No past conversations matched the query. "
+                f"({n_files} conversation file(s) in store, {n_indexed} "
+                f"indexed messages — try broader terms, fewer terms, or "
+                f"a different phrasing.)")
     import datetime
     out: List[str] = [f"Top {len(matches)} match(es):"]
     for i, m in enumerate(matches, 1):

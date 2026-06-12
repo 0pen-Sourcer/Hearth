@@ -8,11 +8,12 @@ Architecture:
     follow-up tool call retrieves the finished mp4.
 
 Provider awareness:
-  - Today: xAI only (the user has $2500 in credits and this is the
-    fastest path). The endpoint shape is OpenAI-compatible so adding
-    OpenAI/Together/etc. later is a 1-config addition.
-  - Detected automatically from LOCAL_API_BASE — if it's not an xAI URL
-    we surface a clear error instead of silently 400-ing.
+  - Supports xAI Grok Imagine, OpenAI Images, and Gemini's image API
+    (gemini-2.5-flash-image / "nano-banana"). All exposed under one
+    `generate_image(prompt, ...)` tool; the provider is detected from
+    LOCAL_API_BASE.
+  - Anything else surfaces a clear "switch brain to one of: grok / openai
+    / gemini" error instead of silently 400-ing.
 
 Files land in WORKSPACE/generated/ with timestamped names so they're easy
 to find later. The path is what tools return; downstream renderers
@@ -411,7 +412,9 @@ def start_video(
             "ok": False,
             "error": (
                 f"Video generation not supported on this endpoint ({base or '(unset)'}). "
-                f"Currently xAI only — switch with /brain grok."
+                f"Only xAI's video API is wired today — switch with /brain grok "
+                f"and retry. Gemini's Veo + OpenAI Sora can be added later "
+                f"(both are on the OpenAI-compatible-ish surface)."
             ),
         }
     if not api_key:

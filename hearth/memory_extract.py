@@ -50,10 +50,10 @@ Be GENEROUS here. The goal is "JARVIS feels like he knows me" — that comes
 from remembering casual life details, not just formal preferences. If the
 user mentions it offhand, it's probably worth saving:
 
-- Their name, role, hardware they own ("got new Sony WF-1000XM5s"), OS,
+- Their name, role, hardware they own ("just got new wireless earbuds"), OS,
   file/drive layout they referenced.
-- Stuff they're hyped for or planning ("picking up Cyberpunk Phantom
-  Liberty 2 next Friday", "going to Goa next month").
+- Stuff they're hyped for or planning ("picking up that new game next
+  Friday", "going on vacation next month").
 - Stuff that just broke / they're annoyed about ("left earbud died",
   "WiFi's been flaky"). These age out but are useful for 1-2 weeks.
 - Stated preferences ("I prefer dark mode", "always use uv not pip",
@@ -94,13 +94,13 @@ If you find NOTHING worth saving, return: []
 
 # Examples
 GOOD (will save):
-  {"title": "primary-gpu", "category": "user", "description": "User runs an RTX 5060 with 8 GB VRAM.", "body": "Hearth has to fit local LLMs in 8 GB. User mentioned this when sizing model picks.", "confidence": 5}
+  {"title": "primary-gpu", "category": "user", "description": "User runs a mid-range NVIDIA GPU with ~8 GB VRAM.", "body": "Local LLMs need to fit in 8 GB. Surfaced when sizing model picks.", "confidence": 5}
 
-  {"title": "broken-left-earbud", "category": "user", "description": "User's left Sony WF-1000XM5 earbud died recently.", "body": "Annoyance — they might fix or replace soon. Worth asking about next time audio comes up.", "confidence": 4}
+  {"title": "broken-earbud", "category": "user", "description": "One side of the user's wireless earbuds stopped working.", "body": "Minor annoyance — they may repair or replace. Worth bringing up the next time audio comes up.", "confidence": 4}
 
-  {"title": "hyped-cyberpunk-pl2", "category": "user", "description": "User picking up Cyberpunk Phantom Liberty 2 next Friday, super hyped.", "body": "Game launch they're excited about — ask how it is afterwards. Cyberpunk fan.", "confidence": 4}
+  {"title": "upcoming-game-release", "category": "user", "description": "User excited about a specific game launching this week.", "body": "Game launch they're looking forward to — ask how it went afterwards.", "confidence": 4}
 
-  {"title": "hearth-launch-target", "category": "project", "description": "Hearth v0.6 public launch targeting r/LocalLLaMA Tue/Wed AM EST.", "body": "Avoid weekend posts. Star-farm is the win condition. User drives the actual gh repo create.", "confidence": 5}
+  {"title": "side-project-deadline", "category": "project", "description": "Side project has a hard ship date this month.", "body": "Avoid blocking on related work. Star-farm or release is the win condition.", "confidence": 5}
 
 BAD (will NOT save — extractor must filter these):
   {"title": "likes-breaking-bad", "category": "user", "description": "User likes kids who cook Heisenberg's Blue.", ...}  # joke / quote — DROP
