@@ -492,6 +492,12 @@
     font-family: var(--mono); font-size: 11px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* Opening the tool card unwraps args so long run_command lines (etc.)
+     are fully readable. Hover already shows full via the title attr. */
+  .tool.open .t-args {
+    white-space: pre-wrap; word-break: break-all;
+    overflow: visible; text-overflow: clip;
+  }
   .tool .t-ms { color: var(--fg-faint); font-family: var(--mono); font-size: 11px; }
   .tool .t-body {
     display: none;
@@ -615,9 +621,8 @@
   .chat-header-title { color: var(--fg); font-weight: 600; max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat-header-meta  { color: var(--fg-faint); margin-left: auto; font-variant-numeric: tabular-nums; }
   /* Context-usage ring — inline next to input controls. Conic-gradient
-     fill shows ratio; percent rendered in the center. Same idea as LM Studio
-     / Claude Code's filled wheel. Subtle when empty, warns amber over 70%,
-     red over 90%, violet pulse during compaction.
+     fill shows ratio; percent rendered in the center. Subtle when empty,
+     warns amber over 70%, red over 90%, violet pulse during compaction.
 
      CSS var `--ctx-deg` controls the fill arc (0deg empty, 360deg full).
      Set from JS via `el.style.setProperty('--ctx-deg', '...')`. */
@@ -2588,7 +2593,8 @@
         </button>
         <input type="file" id="file-input" multiple hidden>
         <div class="grow">
-          <textarea id="input" rows="1" placeholder="Talk to Jarvis…"></textarea>
+          <div id="attach-tray" style="display:none;flex-wrap:wrap;gap:6px;padding:6px 0 4px 0;"></div>
+          <textarea id="input" rows="1" placeholder="Message…"></textarea>
         </div>
         <button class="send-btn" id="btn-send" title="Send (Enter)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
@@ -2683,6 +2689,13 @@
         <span class="sub" id="models-server-line">checking server…</span>
         <div class="grow"></div>
         <input type="text" class="models-search" id="models-search" placeholder="Search Hugging Face (e.g. qwen 7b, llama 3.2)" autocomplete="off"/>
+        <button id="btn-models-rescan" title="Rescan local model catalog (LM Studio, Ollama, HF cache, Downloads)" style="margin-left:8px;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);cursor:pointer;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+        <button id="btn-models-download" title="Download a model — opens the download tray with progress for any in-flight transfers" style="margin-left:6px;position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);cursor:pointer;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span id="btn-models-download-badge" hidden style="position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;background:var(--accent);color:var(--bg-0);border-radius:9px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"></span>
+        </button>
       </div>
       <div class="models-sub-nav">
         <button class="models-tab active" data-tab="mine">My Models <span class="count" id="tab-mine-n">0</span></button>
@@ -2916,6 +2929,34 @@
 
         <div class="field" style="align-items:flex-start;">
           <div class="label">
+            <div class="name">Migrate from another agent</div>
+            <div class="hint">
+              Import memory, skills, and (optionally) the model/provider
+              config from <b>Hermes</b> or <b>OpenClaw</b>. API keys are
+              never copied. Memory files become Hearth memories under
+              <code>~/Jarvis/memory/</code>; skills get parked under
+              <code>~/Jarvis/imported_skills/</code> for later review.
+              Dry-run shows what would happen before any write.
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:260px;">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <select id="migrate-source" style="flex:1;">
+                <option value="hermes">Hermes (~/.hermes)</option>
+                <option value="openclaw">OpenClaw (~/.openclaw/workspace)</option>
+              </select>
+              <button type="button" class="btn-mini" id="btn-migrate-dryrun">Dry-run</button>
+              <button type="button" class="btn-mini" id="btn-migrate-apply">Import</button>
+            </div>
+            <div style="display:flex;gap:14px;font-size:11px;color:var(--fg-faint);">
+              <label><input type="checkbox" id="migrate-skills"> include skills</label>
+              <label><input type="checkbox" id="migrate-config"> include model/provider</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
             <div class="name">Reminders</div>
             <div class="hint">
               Set via chat: <i>"remind me to leave in 30 min"</i> or
@@ -3055,11 +3096,11 @@
         <div class="settings-pane" data-st="mcp" hidden>
         <h3>MCP servers</h3>
         <p style="color:var(--fg-dim);font-size:13px;line-height:1.55;margin:0 0 18px 0">
-          Hearth speaks the <b>Model Context Protocol</b> — Anthropic's standard for letting one
-          AI client talk to many tool servers. <b>Hearth itself is an MCP server</b> (point LM Studio
-          or Claude Desktop at <code>hearth/mcp_server.py</code> to use Hearth's tools elsewhere).
+          Hearth speaks the <b>Model Context Protocol</b> — the open standard for letting one
+          AI client talk to many tool servers. <b>Hearth itself is an MCP server</b> (point any
+          MCP-compatible client at <code>hearth/mcp_server.py</code> to use Hearth's tools elsewhere).
           And below, you can wire <em>other</em> MCP servers <em>into</em> Hearth so their tools
-          show up alongside the built-in 64.
+          show up alongside the built-in ones.
         </p>
 
         <div class="field">
@@ -3181,6 +3222,7 @@
   <div class="ob-card">
     <div class="ob-progress" id="ob-progress">
       <div class="dot cur"></div>
+      <div class="dot"></div>
       <div class="dot"></div>
       <div class="dot"></div>
       <div class="dot"></div>
@@ -3365,8 +3407,28 @@
         </div>
       </div>
 
-      <!-- ---- step 6: all set ---- -->
+      <!-- ---- step 6: migrate (auto-skipped if no source detected) ---- -->
       <div class="ob-step" data-step="6" hidden>
+        <div class="ob-hero">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 11l-4-4-4 4"/>
+            <path d="M19 7v10"/>
+          </svg>
+        </div>
+        <h1 class="ob-title">Bring your old agent's memory along?</h1>
+        <p class="ob-sub" id="ob-migrate-sub">Looking for Hermes / OpenClaw installs…</p>
+        <div class="ob-choices" id="ob-migrate-choices" style="margin-top:18px"></div>
+        <div class="ob-tipline">
+          API keys are <b>never</b> copied. Memory files import as Hearth memories;
+          skills get parked under <code>~/Jarvis/imported_skills/</code> for later.
+          You can re-run this any time via Settings → Behavior → Migrate.
+        </div>
+      </div>
+
+      <!-- ---- step 7: all set ---- -->
+      <div class="ob-step" data-step="7" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/>
@@ -3381,7 +3443,7 @@
     </div>
 
     <div class="ob-footer">
-      <div class="ob-meta" id="ob-step-meta">Step 1 of 6</div>
+      <div class="ob-meta" id="ob-step-meta">Step 1 of 7</div>
       <div class="ob-buttons">
         <button class="ob-btn ghost" id="ob-skip">Skip setup</button>
         <button class="ob-btn" id="ob-back" hidden>Back</button>
@@ -3634,11 +3696,21 @@ let pendingFollowup = null;  // text the user typed during a perm prompt; sent a
 function showInlinePermission(reqId, toolName, args) {
   pendingPermId = reqId;
   pendingPermTool = toolName;
-  $('perm-tool').textContent = toolName;
-  let argsStr = '';
-  try { argsStr = JSON.stringify(args); } catch {}
-  if (argsStr.length > 160) argsStr = argsStr.slice(0, 160) + '…';
-  $('perm-args').textContent = argsStr;
+  // Special case: extend-workspace request from tools._resolve_write.
+  // Show the actual path being requested instead of dumping {"path":...} JSON.
+  if (toolName === '__extend_workspace__') {
+    const p = (args && (args.parent || args.path)) || '(unknown path)';
+    $('perm-tool').textContent = 'write outside workspace';
+    $('perm-args').textContent = p;
+    $('perm-args').title = (args && args.path) || p;
+  } else {
+    $('perm-tool').textContent = toolName;
+    let argsStr = '';
+    try { argsStr = JSON.stringify(args); } catch {}
+    if (argsStr.length > 160) argsStr = argsStr.slice(0, 160) + '…';
+    $('perm-args').textContent = argsStr;
+    $('perm-args').title = argsStr;  // hover to see full
+  }
   $('perm-strip').hidden = false;
   document.getElementById('input').placeholder =
     'or type what to do instead… (1=Yes · 2=No · 3=Always · 4=Never · Esc=deny)';
@@ -3649,8 +3721,7 @@ function hideInlinePermission() {
   pendingPermId = null;
   pendingPermTool = null;
   $('perm-strip').hidden = true;
-  document.getElementById('input').placeholder =
-    'Talk to Jarvis…  (Enter to send, Shift+Enter for newline)';
+  document.getElementById('input').placeholder = `Message ${_agentName()}…`;
 }
 
 async function sendPermDecision(decision) {
@@ -3712,8 +3783,7 @@ function hideAskUser() {
   pendingAskAllowOther = true;
   pendingAskOptions = [];
   $('ask-strip').hidden = true;
-  document.getElementById('input').placeholder =
-    'Talk to Jarvis…  (Enter to send, Shift+Enter for newline)';
+  document.getElementById('input').placeholder = `Message ${_agentName()}…`;
 }
 
 async function sendAskAnswer(choice, isOther) {
@@ -3908,15 +3978,42 @@ function renderConvoRow(c) {
     input.type = 'text'; input.value = c.title; input.className = 'title-input';
     titleEl.replaceWith(input);
     input.focus(); input.select();
+    // committed flag stops the double-fire: pressing Enter calls commit
+    // which re-renders the list which destroys the input which fires blur
+    // which would call commit a second time. Without the guard two
+    // persistConvo calls race and the older value can win.
+    let committed = false;
     const commit = () => {
-      const v = input.value.trim();
-      if (v) c.title = v;
-      saveConversations(); renderConvoList();
+      if (committed) return;
+      committed = true;
+      const v = (input.value || '').trim();
+      const target = (v && v !== c.title) ? v : null;
+      if (target) {
+        // Set the new title FIRST so subsequent renders see the new value.
+        // Then persist + repaint. The animator finds the freshly-rendered
+        // .title-text via data-cid and types the new value into it (the
+        // erase-then-type happens against the new text, so it looks like
+        // the new title is being written in fresh).
+        const old = c.title;
+        c.title = target;
+        persistConvo(c);
+        renderConvoList();
+        _animateTitleChange(c, target, old);
+      } else {
+        // No-op (empty input or same title) — just rebuild the static row.
+        renderConvoList();
+      }
     };
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', ev => {
-      if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
-      if (ev.key === 'Escape') { renderConvoList(); }
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        commit();
+      } else if (ev.key === 'Escape') {
+        committed = true;  // suppress the blur-after-cancel from re-firing
+        renderConvoList();
+      }
     });
   });
   div.querySelector('.del').addEventListener('click', e => {
@@ -4006,6 +4103,10 @@ function renderChat() {
             // Re-render persisted media block (image or video). Same factory
             // as the live path so DOM is identical regardless of when it's built.
             insertUnderAssistant(makeMediaBlock(ev.mediaKind, ev.path), msgDiv);
+          } else if (ev.kind === 'subagent_done') {
+            // Same factory as the live path so DOM is identical regardless
+            // of when the card is built (in-stream vs re-render).
+            insertUnderAssistant(makeSubagentCard(ev), msgDiv);
           } else if (ev.kind === 'nudge') {
             // Internal-only - never shown in chat (see live handler).
           } else if (ev.kind === 'error') {
@@ -4034,6 +4135,34 @@ function emptyState() {
     <div class="empty-sub">Local AI that talks, listens, and actually does things on your machine.</div>
   `;
   return wrap;
+}
+
+// Track which subagent agent_ids we've already announced in-chat so the
+// poll doesn't spam the same banner every 3s. Cleared on chat switch.
+const _announcedSubagents = new Set();
+
+async function pollSubagentCompletions() {
+  if (STATE.streaming) return;  // banner would clash with the live response
+  try {
+    const r = await fetch('/api/subagent/pending').then(x => x.json());
+    const items = (r && r.pending) || [];
+    let newCount = 0;
+    for (const n of items) {
+      const id = n.agent_id || '';
+      if (!id || _announcedSubagents.has(id)) continue;
+      _announcedSubagents.add(id);
+      newCount++;
+    }
+    // Auto-fold: if any new completions arrived AND we're idle, fire a
+    // chat call with an invisible synthetic prompt. The headless drain
+    // injects the <task-notification> for each pending subagent ahead of
+    // this prompt, so the model sees the results + responds — without
+    // the user having to type "done?" or anything else.
+    if (newCount > 0 && !STATE.streaming && activeConvo()) {
+      send('(synthesize from the subagent results above — they just arrived)',
+           '(auto: subagent results arrived)');
+    }
+  } catch {}
 }
 
 function _agentName() {
@@ -4120,12 +4249,18 @@ function makeToolCard(name, args) {
   // would be a nice-to-have UI touch but they belong as a presentation tweak
   // on top of the same card, not a different code path.
   const div = document.createElement('div'); div.className = 'tool';
+  // Pretty-printed JSON for the title (hover tooltip). For run_command in
+  // particular the cmd arg often runs long; ellipsis in the header hides
+  // it but hover + opening the card both reveal the full text.
+  let fullArgs = '';
+  try { fullArgs = JSON.stringify(args || {}, null, 2); } catch { fullArgs = String(args); }
+  const headerArgs = JSON.stringify(args || {});
   div.innerHTML = `
     <div class="t-head">
       <svg class="t-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       <svg class="t-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6"/></svg>
       <span class="t-name">${esc(name)}</span>
-      <span class="t-args">${esc(JSON.stringify(args || {}))}</span>
+      <span class="t-args" title="${esc(fullArgs)}">${esc(headerArgs)}</span>
       <span class="t-ms"></span>
     </div>
     <div class="t-body"></div>
@@ -4133,6 +4268,39 @@ function makeToolCard(name, args) {
   div.querySelector('.t-head').addEventListener('click', () => div.classList.toggle('open'));
   return { div, body: div.querySelector('.t-body'), ms: div.querySelector('.t-ms') };
 }
+// Subagent completion card — visually matches the regular tool pill
+// (chevron + name + meta + expandable body) so the chat doesn't have
+// two different completion UIs. The body holds the FULL agent result
+// text, not just a 200-char snippet; user can expand to read everything.
+function makeSubagentCard(notif) {
+  const div = document.createElement('div');
+  div.className = 'tool subagent';
+  const persona = notif.persona || 'subagent';
+  const label = notif.name ? ` (${notif.name})` : '';
+  const status = notif.status || 'completed';
+  const elapsed = (typeof notif.elapsed_s === 'number')
+    ? `${Math.round(notif.elapsed_s)}s`
+    : '';
+  const headerArgs = label.trim() ? esc(label.trim()) : esc(status);
+  div.innerHTML = `
+    <div class="t-head">
+      <svg class="t-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      <svg class="t-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      <span class="t-name">${esc(persona)}${esc(label)}</span>
+      <span class="t-args">${esc(status)}</span>
+      <span class="t-ms">${esc(elapsed)}</span>
+    </div>
+    <div class="t-body"></div>
+  `;
+  const bodyEl = div.querySelector('.t-body');
+  // Full result text, not the truncated summary — user can scroll.
+  bodyEl.textContent = notif.result_text || notif.summary || '(no output)';
+  // Default to open so the user sees the result without clicking.
+  div.classList.add('open');
+  div.querySelector('.t-head').addEventListener('click', () => div.classList.toggle('open'));
+  return div;
+}
+
 function makeMediaBlock(kind, path) {
   // Standalone media card — sits in the assistant's message stream (NOT
   // inside the tool card body). Survives re-render because it's keyed off
@@ -4388,6 +4556,12 @@ $('model-select').addEventListener('change', async (e) => {
   // phase markers (loading_weights → init → KV reserve → HTTP → ready).
   // Stops automatically when phase=='ready' or 'error'.
   startLoadProgress();
+  // ctx that's about to be used — surfaced in the loading pill + post-load
+  // toast so the user can SEE if they're about to load at an undersized
+  // value. Persona+tools alone need ~18K; anything < 16K silently OOMs
+  // after a few turns ("Requested tokens (17900) exceed context window
+  // of 8192"). When user sees "loading at 8K" they know to fix it.
+  let plannedCtx = 0;
   try {
     let r;
     if (id.startsWith('disk::')) {
@@ -4395,6 +4569,9 @@ $('model-select').addEventListener('change', async (e) => {
       const savedCfg = (_modelsState
         && _modelsState.status && _modelsState.status.model_configs
         && _modelsState.status.model_configs[path.toLowerCase()]) || {};
+      const settingsCtx = (STATE.settings && STATE.settings.server_default_ctx) || 24576;
+      plannedCtx = savedCfg.ctx || settingsCtx;
+      setState(`loading at ${(plannedCtx/1024).toFixed(0)}K ctx…`);
       r = await api('/api/llmserver/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.assign({ model_path: path }, savedCfg)),
@@ -4410,7 +4587,16 @@ $('model-select').addEventListener('change', async (e) => {
       STATE.loadedModel = { id: displayId, state: 'loaded' };
       $('st-model').textContent = displayId.split(/[\/\\]/).pop();
       $('model-state').classList.add('loaded');
-      toast('Model loaded', displayId, 'ok');
+      const ctxNote = plannedCtx ? ` at ${(plannedCtx/1024).toFixed(0)}K ctx` : '';
+      toast('Model loaded', displayId + ctxNote, 'ok');
+      // Hard warning: anything < 16K with our persona+tools (~18K) will
+      // crash with "Requested tokens exceed context window" on the first
+      // multi-turn chat. The "8K stays sticky in saved per-model cfg" bug.
+      if (plannedCtx && plannedCtx < 16384) {
+        toast('Ctx too small for safe chat',
+          `This model is loaded at ${(plannedCtx/1024).toFixed(0)}K but persona + tools already use ~18K. Open Models tab > expand this row > raise ctx, then reload.`,
+          'warn', 12000);
+      }
       // Surface a non-blocking VRAM warning (model loaded but the math says
       // it'll spill to CPU). User asked for warn-not-block — we never refuse
       // the load, just flag the trade-off.
@@ -4691,7 +4877,23 @@ async function send(forced = null, displayAs = null) {
   // instruction, etc.). `displayAs` is the OPTIONAL short version shown in
   // the chat bubble. Lets file uploads send "view_image at C:\...\foo.png"
   // to the model while the user just sees a clean "📎 foo.png" chip.
-  const prompt = (forced ?? input.value).trim();
+  let prompt = (forced ?? input.value).trim();
+  // Weave pending attachments (from the attach button or clipboard paste)
+  // into the prompt — the user's typed text comes first, then a hidden
+  // line telling the model exactly which paths to read/view.
+  const _attach = _pendingAttachments.slice();
+  if (_attach.length && !forced) {
+    const lines = _attach.map(a => a.isImage
+      ? `Attached image: "${a.path}" — call view_image on it if relevant to my message.`
+      : `Attached file: "${a.path}" — call read_file on it if relevant to my message.`);
+    if (!prompt) prompt = '(see attachments)';
+    prompt = `${prompt}\n\n${lines.join('\n')}`;
+    if (!displayAs) {
+      const chips = _attach.map(a => a.name).join(', ');
+      const usrText = (forced ?? input.value).trim();
+      displayAs = usrText ? `${usrText}\n[attached: ${chips}]` : `[attached: ${chips}]`;
+    }
+  }
   if (!prompt) return;
   // Inline permission active — treat the typed text as "decline + do this instead":
   // send a 'deny' for the pending tool, queue the text, and fire it after the
@@ -4761,6 +4963,11 @@ async function send(forced = null, displayAs = null) {
   }
 
   input.value = ''; input.style.height = '42px';
+  // Wipe the attachment tray — the paths are now woven into the message.
+  // If the user pasted/attached more during streaming, they'll show up on
+  // the next send.
+  _pendingAttachments = [];
+  _renderAttachTray();
   STATE.streaming = true; setSendStop(true);
   currentAbort = new AbortController();
   setState('thinking…');
@@ -4859,8 +5066,50 @@ async function send(forced = null, displayAs = null) {
     chatBody.scrollTop = chatBody.scrollHeight;
   }
 
+  // Close whatever .think.active is live, stamp "thought for Xs" into the
+  // header, mark it closed. Called when a tool_call fires (think → tool
+  // transition) or when assistant text starts streaming. Without this, a
+  // second round of thinking after a tool_call appends to the FIRST block
+  // instead of opening a new one (the "all thinking in block 1" glitch).
+  function _closeActiveThink() {
+    const activeThink = chatBody.querySelector('.think.active');
+    if (!activeThink) return;
+    activeThink.classList.remove('active', 'open');
+    const startedAt = activeThink._startedAt;
+    if (startedAt) {
+      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      const label = activeThink.querySelector('.think-label');
+      if (label) label.textContent = `thought for ${seconds}s`;
+    }
+    activeThink._closedAt = Date.now();
+  }
+
   function handleEvent(ev) {
     if (ev.type === 'user') return;
+
+    if (ev.type === 'slow_tool') {
+      // Watchdog fires this when a tool takes >30s / >90s. Tell the user
+      // the loop didn't hang — it's a slow tool. They can hit Stop or wait.
+      const sec = ev.elapsed_s || 0;
+      const tip = ev.suggestion === 'stop'
+        ? 'Still running. Hit Stop if you want to bail — model can move it to a background subagent on the next turn.'
+        : 'Still running. Want to keep waiting, or hit Stop and ask the model to background it?';
+      toast(`${ev.name} is taking ${sec}s`, tip, 'warn', 6000);
+      return;
+    }
+
+    if (ev.type === 'subagent_done') {
+      // Background subagent finished. Render as a tool-pill-shaped card
+      // (chevron + name + meta + expandable body with the FULL result).
+      const card = makeSubagentCard(ev);
+      insertUnderAssistant(card, live);
+      // Persist on the assistant message so re-render keeps the card.
+      assistantMsg.events.push({ kind: 'subagent_done',
+        persona: ev.persona, name: ev.name, status: ev.status,
+        summary: ev.summary, result_text: ev.result_text,
+        elapsed_s: ev.elapsed_s });
+      return;
+    }
 
     if (ev.type === 'thinking_chunk') {
       // Streaming delta. Resurrect the most-recent think block on this
@@ -4911,6 +5160,9 @@ async function send(forced = null, displayAs = null) {
     }
 
     if (ev.type === 'tool_call') {
+      // think → tool transition: stamp the prior thinking block so the
+      // next thinking_chunk opens a fresh block instead of appending.
+      _closeActiveThink();
       pendingTool = makeToolCard(ev.name, ev.args || {});
       pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0 };
       assistantMsg.events.push(pendingToolEvent);
@@ -4931,25 +5183,24 @@ async function send(forced = null, displayAs = null) {
              'Almost there, hang on…']
           : ['Composing scene…', 'Mixing colors…', 'Adding lighting…',
              'Refining details…', 'Polishing pixels…', 'Almost done…'];
-        const placeholder = document.createElement('div');
-        placeholder.className = 'gen-placeholder';
-        placeholder.innerHTML = `
-          <div class="gen-noise"></div>
-          <div class="gen-tip">${beats[0]}</div>
-        `;
-        if (pendingTool && pendingTool.body) {
-          pendingTool.body.innerHTML = '';
-          pendingTool.body.appendChild(placeholder);
+        // Rotating status BELOW the tool card so the tool card itself stays
+        // a clean "prompt only" header. The finished image renders as its
+        // own block below the status text when tool_result arrives.
+        const status = document.createElement('div');
+        status.className = 'gen-status';
+        status.style.cssText = 'margin:6px 0 10px 8px;font-size:12px;color:var(--fg-faint);font-style:italic;';
+        status.textContent = beats[0];
+        if (pendingTool && pendingTool.div && pendingTool.div.parentNode) {
+          pendingTool.div.parentNode.insertBefore(status, pendingTool.div.nextSibling);
         }
         let idx = 0;
-        const tip = placeholder.querySelector('.gen-tip');
         const interval = setInterval(() => {
           idx = (idx + 1) % beats.length;
-          if (tip && tip.isConnected) tip.textContent = beats[idx];
+          if (status.isConnected) status.textContent = beats[idx];
           else clearInterval(interval);
         }, 2400);
-        // Stash the interval id so the tool_result handler can stop it.
         pendingToolEvent._statusInterval = interval;
+        pendingToolEvent._statusNode = status;
       }
       // First-time hints for high-novelty tools.
       if (ev.name === 'browse') {
@@ -4971,6 +5222,10 @@ async function send(forced = null, displayAs = null) {
         if (pendingToolEvent && pendingToolEvent._statusInterval) {
           clearInterval(pendingToolEvent._statusInterval);
           pendingToolEvent._statusInterval = null;
+        }
+        if (pendingToolEvent && pendingToolEvent._statusNode) {
+          try { pendingToolEvent._statusNode.remove(); } catch {}
+          pendingToolEvent._statusNode = null;
         }
         const raw = ev.content || '';
         // Tool card body stays as TEXT — that way re-render after the
@@ -5009,17 +5264,7 @@ async function send(forced = null, displayAs = null) {
       // X seconds" into the head so the user sees what just happened even
       // when the body is collapsed.
       if (!assistantMsg.content) {
-        const activeThink = chatBody.querySelector('.think.active');
-        if (activeThink) {
-          activeThink.classList.remove('active', 'open');
-          const startedAt = activeThink._startedAt;
-          if (startedAt) {
-            const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-            const label = activeThink.querySelector('.think-label');
-            if (label) label.textContent = `thought for ${seconds}s`;
-            activeThink._closedAt = Date.now();
-          }
-        }
+        _closeActiveThink();
       }
       // Live append to the in-progress assistant message
       assistantMsg.content += ev.content;
@@ -5371,23 +5616,30 @@ async function generateTitle(c) {
 // Typewriter the new title in instead of jump-cutting "New chat" → final.
 // Erase the placeholder first, then type the real title at ~28ms/char
 // with a tiny gap between the phases so it reads as a transition.
-function _animateTitleChange(c, newTitle) {
+function _animateTitleChange(c, newTitle, oldTitle) {
+  // newTitle: the value to type in. oldTitle: optional, what to erase from
+  // first. Callers that set c.title BEFORE invoking pass oldTitle so the
+  // animator knows what was on screen; callers that haven't set c.title
+  // yet (the auto-title path) leave it undefined and we read c.title.
   const target = String(newTitle || '').trim();
-  if (!target || target === c.title) return;
+  if (!target) return;
+  const fromText = (oldTitle != null) ? String(oldTitle) : String(c.title || '');
+  if (target === fromText) return;
   const row = document.querySelector(`.convo[data-cid="${c.id}"] .title-text`);
   if (!row) {
     // Sidebar isn't in the DOM (maybe collapsed view); just set + persist.
-    c.title = target;
-    touch(c);
+    if (c.title !== target) { c.title = target; touch(c); }
     return;
   }
-  // Erase the placeholder ("New chat") then type the real title. Smaller
-  // erase delay than type delay so it feels snappy, not languid.
-  let eraseLen = (c.title || '').length;
+  // Seed the row with the OLD text so erase has something to chew on, then
+  // animate erase -> type. (renderConvoList may have already painted the
+  // new title if the caller set it first; overwrite for the animation.)
+  row.textContent = fromText;
+  let eraseLen = fromText.length;
   const eraseStep = () => {
     if (eraseLen > 0) {
       eraseLen--;
-      row.textContent = (c.title || '').slice(0, eraseLen);
+      row.textContent = fromText.slice(0, eraseLen);
       setTimeout(eraseStep, 18);
     } else {
       setTimeout(typeStep, 60);
@@ -5399,11 +5651,8 @@ function _animateTitleChange(c, newTitle) {
       row.textContent = target.slice(0, i++);
       setTimeout(typeStep, 28);
     } else {
-      // Done — commit to the data model + persist (touch re-renders the
-      // list which sets the final text, redundant with what we just did
-      // but keeps the rest of the list sort-order in sync).
-      c.title = target;
-      touch(c);
+      // Done. Only touch if caller hadn't already set+persisted.
+      if (c.title !== target) { c.title = target; touch(c); }
     }
   };
   eraseStep();
@@ -5451,6 +5700,11 @@ document.addEventListener('drop', async e => {
 // HTML5 drop doesn't fire on a given Windows build.
 const _attachBtn = document.getElementById('btn-attach');
 const _fileInput = document.getElementById('file-input');
+const _attachTray = document.getElementById('attach-tray');
+// Pending attachments — each {name, path, isImage}. Stay queued until the
+// user sends a message; then woven into the LLM prompt with their text.
+let _pendingAttachments = [];
+
 if (_attachBtn && _fileInput) {
   _attachBtn.addEventListener('click', () => _fileInput.click());
   _fileInput.addEventListener('change', async () => {
@@ -5462,8 +5716,40 @@ if (_attachBtn && _fileInput) {
 
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','bmp','tiff']);
 
+// Inline SVGs — keeping these out of the emoji set on purpose. Hearth's
+// UI uses no emojis anywhere; chips get small icon glyphs instead.
+const _ICON_FILE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+const _ICON_X = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+function _renderAttachTray() {
+  if (!_attachTray) return;
+  _attachTray.innerHTML = '';
+  if (!_pendingAttachments.length) { _attachTray.style.display = 'none'; return; }
+  _attachTray.style.display = 'flex';
+  _pendingAttachments.forEach((a, i) => {
+    const chip = document.createElement('div');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:4px 8px 4px 6px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--fg-dim);max-width:240px;';
+    // Real image thumbnail when it's an image, file glyph otherwise.
+    let lead;
+    if (a.isImage && a.path) {
+      lead = `<img src="/file?path=${encodeURIComponent(a.path)}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;display:block;">`;
+    } else {
+      lead = `<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:var(--bg-1);border-radius:4px;color:var(--fg-faint);">${_ICON_FILE}</span>`;
+    }
+    chip.innerHTML =
+      lead +
+      `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;">${esc(a.name)}</span>` +
+      `<button data-i="${i}" style="background:none;border:none;color:var(--fg-faint);cursor:pointer;padding:0 2px;display:inline-flex;align-items:center;">${_ICON_X}</button>`;
+    chip.querySelector('button').addEventListener('click', () => {
+      _pendingAttachments.splice(i, 1);
+      _renderAttachTray();
+    });
+    _attachTray.appendChild(chip);
+  });
+}
+
 async function uploadFile(file) {
-  setState(`uploading ${file.name}…`);
+  setState(`uploading ${file.name}`);
   try {
     const buf = await file.arrayBuffer();
     const bytes = new Uint8Array(buf);
@@ -5477,26 +5763,66 @@ async function uploadFile(file) {
       body: JSON.stringify({ name: file.name, content_b64: b64 }),
     });
     const ext = (file.name.split('.').pop() || '').toLowerCase();
-    toast('Uploaded', `${file.name} (${fmtBytes(file.size)})`, 'ok');
+    const isImage = IMAGE_EXTS.has(ext);
     showView('chat');
-    if (IMAGE_EXTS.has(ext)) {
-      // Vision: ask Jarvis to look at the image via the view_image tool.
-      // The LLM needs the full path + tool instruction; the user just needs
-      // to see "📎 Screenshot foo.png". `displayAs` keeps the surface clean.
-      send(
-        `I just dropped an image at "${r.path}". Call view_image on that path and describe what you see.`,
-        `📎 ${file.name}`
-      );
-    } else {
-      send(
-        `I just uploaded "${file.name}". Read it and tell me what's in it.`,
-        `📎 ${file.name}`
-      );
-    }
+    // Queue as pending — silent. No toast, no auto-send.
+    _pendingAttachments.push({ name: file.name, path: r.path, isImage });
+    _renderAttachTray();
   } catch (e) {
     toast('Upload failed', e.message, 'err', 5000);
   } finally { setState('idle'); }
 }
+
+// Clipboard paste — any file kind, not just images. PDFs/docs/binaries all
+// drop onto the chat input via Ctrl-V the same way.
+const _chatInputEl = document.getElementById('input');
+if (_chatInputEl) {
+  _chatInputEl.addEventListener('paste', async (ev) => {
+    const items = (ev.clipboardData && ev.clipboardData.items) || [];
+    for (const it of items) {
+      if (it.kind === 'file') {
+        const blob = it.getAsFile();
+        if (!blob) continue;
+        ev.preventDefault();
+        // Synthesize a name if the OS didn't hand one over (clipboard
+        // images often come as blobs without filenames).
+        let name = blob.name;
+        if (!name) {
+          const ext = ((blob.type || '').split('/')[1] || 'bin').toLowerCase();
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+          name = `paste_${stamp}.${ext}`;
+        }
+        const f = new File([blob], name, { type: blob.type });
+        await uploadFile(f);
+        return;
+      }
+    }
+  });
+}
+
+// Drag-and-drop into the chat input or its surrounding row.
+function _wireDropTarget(el) {
+  if (!el) return;
+  el.addEventListener('dragover', (ev) => {
+    if (ev.dataTransfer && ev.dataTransfer.types && ev.dataTransfer.types.indexOf('Files') !== -1) {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'copy';
+    }
+  });
+  el.addEventListener('drop', async (ev) => {
+    const files = ev.dataTransfer && ev.dataTransfer.files ? Array.from(ev.dataTransfer.files) : [];
+    if (!files.length) return;
+    ev.preventDefault();
+    for (const f of files) await uploadFile(f);
+  });
+}
+_wireDropTarget(_chatInputEl);
+_wireDropTarget(_attachTray);
+const _chatRow = _chatInputEl && _chatInputEl.closest('.row, .chat-input, .composer');
+_wireDropTarget(_chatRow);
+// Also accept drops anywhere over the chat view — large target so the user
+// doesn't have to aim at the tiny input bar.
+_wireDropTarget(document.getElementById('view-chat'));
 
 // ============================================================
 // MEMORY view
@@ -5554,20 +5880,38 @@ function renderMem(filter) {
       showModal(`Delete '${m.name}'?`, 'Removes the memory file from ~/Jarvis/memory/.', [
         { label: 'Cancel' },
         { label: 'Delete', kind: 'danger', onclick: async () => {
-          await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
-          toast('Deleted', m.name, 'ok');
-          refreshMemory(); refreshState();
+          try {
+            const r = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
+            if (r && r.ok === false) {
+              toast('Delete failed', r.error || 'backend rejected', 'err');
+              return;
+            }
+            toast('Deleted', m.name, 'ok');
+            refreshMemory(); refreshState();
+          } catch (e) {
+            toast('Delete failed', e.message, 'err');
+          }
         }},
       ]);
     });
     list.appendChild(div);
   }
 }
+// Debounce the search so each keystroke doesn't tear down + rebuild the
+// graph (causes node jitter as the force sim restarts from scratch on
+// every char). 220ms feels responsive without re-running the simulation
+// mid-type. List + tree views debounce shorter since they're cheap text
+// re-renders.
+let _memSearchTimer = null;
 $('mem-search').addEventListener('input', e => {
-  // Search applies to whichever view is active (list / tree / graph)
-  if (MEM_VIEW === 'tree') renderMemTree(e.target.value);
-  else if (MEM_VIEW === 'graph') renderMemGraph(e.target.value);
-  else renderMem(e.target.value);
+  if (_memSearchTimer) clearTimeout(_memSearchTimer);
+  const q = e.target.value;
+  const wait = (MEM_VIEW === 'graph') ? 220 : 80;
+  _memSearchTimer = setTimeout(() => {
+    if (MEM_VIEW === 'tree') renderMemTree(q);
+    else if (MEM_VIEW === 'graph') renderMemGraph(q);
+    else renderMem(q);
+  }, wait);
 });
 
 // ---- Tree view: collapsible type → sub-category → fact leaves -----------
@@ -5861,20 +6205,40 @@ function renderMemGraph(filter) {
   // Force simulation: keep nodes apart, pull them toward type-cluster
   // centers, draw edges. forceManyBody negative = repulsion. forceLink
   // gives the sub-category edges their springy pull.
+  // Build the simulation but warm it up off-screen for a few dozen ticks
+  // BEFORE attaching the tick renderer. That way users don't see the
+  // initial "star pattern" of edges at the typeAngle positions before
+  // forces settle. After the warm-up we attach tick + fade in the scene.
+  gZoom.style.opacity = '0';
   _memSimulation = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(edges).id(d => d.id).distance(40).strength(0.6))
     .force('charge', d3.forceManyBody().strength(-180))
     .force('center', d3.forceCenter(w / 2, h / 2))
     .force('collide', d3.forceCollide().radius(18))
-    // Pull each node toward its type-cluster anchor
     .force('typeX', d3.forceX(d => w / 2 + Math.cos(typeAngle[d.type]) * (w * 0.28)).strength(0.18))
     .force('typeY', d3.forceY(d => h / 2 + Math.sin(typeAngle[d.type]) * (h * 0.28)).strength(0.18))
-    .on('tick', () => {
-      linkSel
-        .attr('x1', l => l.source.x).attr('y1', l => l.source.y)
-        .attr('x2', l => l.target.x).attr('y2', l => l.target.y);
-      nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
-    });
+    .stop();
+  // Run synchronous ticks until nodes settle to ~stable positions. 80
+  // ticks is enough for graphs up to ~50 nodes; cost is ~10ms on the
+  // main thread (the alternative is the user seeing a star-of-lines for
+  // 400ms while the live simulation runs).
+  for (let i = 0; i < 80; i++) _memSimulation.tick();
+  // Now place links + nodes at warmed positions and fade in.
+  linkSel
+    .attr('x1', l => l.source.x).attr('y1', l => l.source.y)
+    .attr('x2', l => l.target.x).attr('y2', l => l.target.y);
+  nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+  gZoom.style.transition = 'opacity 220ms ease-out';
+  gZoom.style.opacity = '1';
+  // Wire the live tick renderer for any subsequent simulation re-heats
+  // (drag, zoom-induced reflow). The simulation is still alpha~0 so it
+  // won't auto-restart until the user drags.
+  _memSimulation.on('tick', () => {
+    linkSel
+      .attr('x1', l => l.source.x).attr('y1', l => l.source.y)
+      .attr('x2', l => l.target.x).attr('y2', l => l.target.y);
+    nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
 
   // Drag node to reorganize. We stopPropagation so D3-zoom's pan handler
   // doesn't ALSO fire (otherwise both compete and the node sticks weirdly).
@@ -6407,6 +6771,11 @@ async function refreshSettings() {
   try {
     const s = await api('/api/settings');
     STATE.settings = s;
+    // Sync the chat-input placeholder with the configured agent name so
+    // "Message JARVIS" becomes "Message Cortana" the moment the user
+    // saves the rename in Settings.
+    const _inp = document.getElementById('input');
+    if (_inp) _inp.placeholder = `Message ${_agentName()}…`;
     // Brain might have just changed — pull the live context budget so the
     // ring + bottom bar reflect the new brain immediately (Grok 200K vs
     // builtin 8K). Don't await — settings render shouldn't block on it.
@@ -6605,6 +6974,18 @@ async function refreshSettings() {
           toast('API key needed', body.provider + ' requires a key', 'warn');
           return;
         }
+        // Switching to cloud stops the built-in server (5-15s VRAM unload);
+        // switching to local can spin up the built-in (model load). Either
+        // way the user was watching a frozen-looking pane with no feedback.
+        // Disable the button + state pill spinner + brand-sub status carry
+        // the truth while it's happening.
+        const provLabel = body.provider === 'local' ? 'local' : body.provider;
+        llmApply.disabled = true;
+        llmApply.textContent = 'Switching…';
+        setState(`switching to ${provLabel}…`);
+        const brandSub = document.getElementById('brand-sub');
+        const prevBrand = brandSub ? brandSub.textContent : '';
+        if (brandSub) brandSub.textContent = `· switching to ${provLabel}…`;
         try {
           const r = await api('/api/llm-endpoint', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6637,8 +7018,16 @@ async function refreshSettings() {
             try { await loadModelDropdownForBrain(); } catch {}
           } else {
             toast('Apply failed', r.error || 'unknown error', 'err');
+            if (brandSub) brandSub.textContent = prevBrand;
           }
-        } catch (e) { toast('Apply failed', e.message, 'err'); }
+        } catch (e) {
+          toast('Apply failed', e.message, 'err');
+          if (brandSub) brandSub.textContent = prevBrand;
+        } finally {
+          llmApply.disabled = false;
+          llmApply.textContent = 'Use this brain';
+          setState('idle');
+        }
       };
 
     }
@@ -6772,6 +7161,70 @@ async function refreshSettings() {
     // Reminders panel in the Behavior pane.
     refreshReminders().catch(() => {});
 
+    // Migrate-from-another-agent — Behavior pane. Disable buttons for
+    // sources we don't see on disk. Dry-run + Import both go through
+    // /api/migrate/run and dump the migrator's stdout into a modal so
+    // the user sees exactly what would happen / what happened.
+    const migrateSource = document.getElementById('migrate-source');
+    const migrateDryBtn = document.getElementById('btn-migrate-dryrun');
+    const migrateApplyBtn = document.getElementById('btn-migrate-apply');
+    if (migrateSource && migrateDryBtn && migrateApplyBtn) {
+      let migrateProbe = {};
+      (async () => {
+        try {
+          migrateProbe = await api('/api/migrate/probe');
+          // Append a "(found)" / "(not found)" hint to each option.
+          for (const opt of migrateSource.options) {
+            const info = migrateProbe[opt.value];
+            if (info) {
+              const tag = info.found ? '✓ found' : 'not found';
+              opt.textContent = opt.textContent.replace(/\s*[·-].*$/, '') + `  · ${tag}`;
+            }
+          }
+        } catch {}
+      })();
+      const runMigrate = async (apply) => {
+        const source = migrateSource.value;
+        const body = {
+          source,
+          apply,
+          include_skills: document.getElementById('migrate-skills').checked,
+          include_config: document.getElementById('migrate-config').checked,
+        };
+        migrateDryBtn.disabled = true; migrateApplyBtn.disabled = true;
+        const oldLabel = apply ? migrateApplyBtn.textContent : migrateDryBtn.textContent;
+        (apply ? migrateApplyBtn : migrateDryBtn).textContent = 'Working…';
+        try {
+          const r = await api('/api/migrate/run', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(body),
+          });
+          const title = apply ? `Migrated from ${source}` : `Dry-run: ${source}`;
+          const log = (r && r.log) || '(no output)';
+          showModal(title,
+            `<pre style="background:var(--bg-0);padding:12px;border-radius:8px;font-family:var(--mono);font-size:11px;color:var(--fg-dim);max-height:400px;overflow:auto;white-space:pre-wrap">${esc(log)}</pre>`,
+            [{ label: 'Close', primary: true }]);
+          if (apply) refreshMem?.();  // memory list refresh if defined
+        } catch (e) {
+          toast('Migrate failed', e.message, 'err', 8000);
+        } finally {
+          migrateDryBtn.disabled = false; migrateApplyBtn.disabled = false;
+          migrateDryBtn.textContent = 'Dry-run';
+          migrateApplyBtn.textContent = 'Import';
+        }
+      };
+      migrateDryBtn.onclick = () => runMigrate(false);
+      migrateApplyBtn.onclick = () => {
+        showModal('Run import?',
+          `This will read from <b>${migrateSource.value}</b> and write Hearth memories to ~/Jarvis/memory/. ` +
+          `Existing memories with the same slug update in place (no dupes). API keys are never copied.`,
+          [
+            { label: 'Cancel' },
+            { label: 'Import now', primary: true, onclick: () => runMigrate(true) },
+          ]);
+      };
+    }
+
     const st = await api('/api/state');
     $('setting-endpoint').textContent = st.endpoint;
     $('setting-workspace').textContent = st.workspace;
@@ -6807,12 +7260,40 @@ async function refreshSettings() {
   } catch (e) { toast('Settings', e.message, 'err'); }
 }
 async function saveSetting(key, value) {
+  // Snapshot the prior provider BEFORE we mutate STATE.settings — needed to
+  // detect a cloud→local brain switch so we can show a "sweeping local
+  // catalog" toast + refresh the Models tab.
+  const _prevProv = (STATE.settings && STATE.settings.llm_provider || '').toLowerCase();
   STATE.settings[key] = value;
   try {
     await api('/api/settings', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ [key]: value }),
     });
+    if (key === 'llm_provider') {
+      const _CLOUD = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
+      const wasCloud = _CLOUD.has(_prevProv);
+      const isCloudNow = _CLOUD.has(String(value || '').toLowerCase());
+      if (wasCloud && !isCloudNow) {
+        toast('Sweeping local model catalog', 'One sec — checking LM Studio, Ollama, HF cache, Downloads.', 'ok', 4000);
+        // Pull a fresh Models render so the scanning banner shows up.
+        if (typeof refreshModelsView === 'function') refreshModelsView();
+        // Poll until scanning clears, then refresh once more for the
+        // populated list.
+        const _watcher = setInterval(async () => {
+          try {
+            const st = await api('/api/llmserver/status');
+            if (!st.scanning) {
+              clearInterval(_watcher);
+              _modelsState.status = st;
+              if (typeof refreshModelsView === 'function') refreshModelsView();
+              toast('Local catalog ready', `${(st.disk_models||[]).length} model${(st.disk_models||[]).length===1?'':'s'} on disk`, 'ok', 2500);
+            }
+          } catch {}
+        }, 800);
+        setTimeout(() => clearInterval(_watcher), 30000);  // hard cap
+      }
+    }
   } catch (e) { toast('Save', e.message, 'err'); }
 }
 $$('.switch').forEach(sw => {
@@ -7947,16 +8428,26 @@ function modelsRenderMine() {
   const pane = $('models-pane-mine');
   const disk = s.disk_models || [];
   const isBuiltin = s.builtin_running;
+  // Scanning banner — when the user just switched brain cloud→local OR
+  // hit Rescan, the disk scan runs in the background. Show that motion
+  // is happening so they don't think the app froze.
+  const scanBanner = s.scanning ? `
+    <div class="models-section" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg-2);border:1px solid var(--accent-line);border-radius:8px;color:var(--fg-dim);font-size:13px;">
+        <div class="dot-bounce"><span></span><span></span><span></span></div>
+        <div>Sweeping ~/Jarvis/models, LM Studio, Ollama, HF cache, and Downloads. Refreshes in a moment.</div>
+      </div>
+    </div>` : '';
   if (!disk.length) {
-    pane.innerHTML = `
+    pane.innerHTML = scanBanner + `
       <div class="models-empty">
-        <div class="big">No models on this PC yet</div>
-        <div>Use the <b>Discover</b> tab to search Hugging Face, or grab a <b>Quick pick</b>.<br>
-        Hearth auto-detects models from LM Studio, Ollama, HF cache, and Downloads.</div>
+        <div class="big">${s.scanning ? 'Scanning local model catalog…' : 'No models on this PC yet'}</div>
+        <div>${s.scanning ? 'One sec — Hearth is checking LM Studio, Ollama, HF cache, and Downloads.' : 'Use the <b>Discover</b> tab to search Hugging Face, or grab a <b>Quick pick</b>.<br>Hearth auto-detects models from LM Studio, Ollama, HF cache, and Downloads.'}</div>
       </div>`;
     return;
   }
-  let html = '<div class="models-section"><div class="sec-head"><h3>On your machine</h3><span class="sub">' +
+  let html = scanBanner +
+             '<div class="models-section"><div class="sec-head"><h3>On your machine</h3><span class="sub">' +
              disk.length + ' file' + (disk.length === 1 ? '' : 's') +
              ' &middot; pulled from LM Studio, HF cache, and Downloads</span></div><div class="sec-body">';
   // Slug helper for fuzzy match — LM Studio short id ("harmonic-hermes-9b")
@@ -8154,7 +8645,11 @@ async function modelsRenderDiscover() {
 
 function modelsWireRowClicks(pane) {
   // Row click → toggle expand. Skip if click was on an action button.
-  pane.querySelectorAll('.model-row').forEach(row => {
+  // Generic row toggle for disk/local rows. HF rows handle their own click
+  // below (with lazy-loading) so we EXCLUDE [data-hf-repo] here — otherwise
+  // both handlers fire and the open-then-close cancels out (user sees the
+  // card refuse to expand).
+  pane.querySelectorAll('.model-row:not([data-hf-repo])').forEach(row => {
     row.addEventListener('click', (e) => {
       if (e.target.closest('button') || e.target.closest('.model-expand')) return;
       modelsToggleRow(row);
@@ -8512,6 +9007,41 @@ document.querySelectorAll('.models-tab').forEach(t => {
       modelsRenderDiscover();
     }, 300);
   });
+  // Rescan button — force a fresh local catalog sweep + visible banner.
+  const rescanBtn = $('btn-models-rescan');
+  if (rescanBtn) {
+    rescanBtn.addEventListener('click', async () => {
+      try {
+        await api('/api/llmserver/rescan');
+        toast('Sweeping local model catalog', 'Checking LM Studio, Ollama, HF cache, Downloads.', 'ok', 3000);
+        if (typeof refreshModelsView === 'function') refreshModelsView();
+        const watcher = setInterval(async () => {
+          try {
+            const st = await api('/api/llmserver/status');
+            if (!st.scanning) {
+              clearInterval(watcher);
+              _modelsState.status = st;
+              refreshModelsView();
+              toast('Catalog ready', `${(st.disk_models||[]).length} model${(st.disk_models||[]).length===1?'':'s'} on disk`, 'ok', 2500);
+            }
+          } catch {}
+        }, 800);
+        setTimeout(() => clearInterval(watcher), 30000);
+      } catch (e) { toast('Rescan failed', e.message, 'err'); }
+    });
+  }
+  // Download button — jump to Discover tab so user can pick a repo.
+  const dlBtn = $('btn-models-download');
+  if (dlBtn) {
+    dlBtn.addEventListener('click', () => {
+      document.querySelectorAll('.models-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === 'discover'));
+      document.querySelectorAll('.models-pane').forEach(p => { p.hidden = (p.dataset.pane !== 'discover'); });
+      _modelsState.tab = 'discover';
+      modelsRenderDiscover();
+      const _inp = $('models-search');
+      if (_inp) _inp.focus();
+    });
+  }
 }
 
 async function modelsHFSearch(query) {
@@ -8788,7 +9318,62 @@ send = async function(forced = null) {
 // ============================================================
 // ONBOARDING — multi-step card overlay on first launch.
 // ============================================================
-const OB_TOTAL_STEPS = 6;
+const OB_TOTAL_STEPS = 7;
+// Migrate step (6) self-detects whether any source agent is installed.
+// When the probe comes back empty, _obSkipMigrate is set and obNext/Back
+// jump over step 6 so the user doesn't see an empty 'nothing here' card.
+let _obMigrateProbed = false;
+let _obSkipMigrate = false;
+let _obMigrateChoice = null;  // 'hermes' | 'openclaw' | 'skip'
+
+async function _obProbeMigrate() {
+  if (_obMigrateProbed) return;
+  _obMigrateProbed = true;
+  try {
+    const r = await api('/api/migrate/probe');
+    const choices = [];
+    if (r?.hermes?.found)   choices.push({src: 'hermes',   path: r.hermes.home});
+    if (r?.openclaw?.found) choices.push({src: 'openclaw', path: r.openclaw.workspace});
+    const sub = document.getElementById('ob-migrate-sub');
+    const box = document.getElementById('ob-migrate-choices');
+    if (!choices.length) {
+      _obSkipMigrate = true;
+      if (sub) sub.textContent = 'No prior agent install detected — skipping ahead.';
+      // Auto-advance after a beat so the user sees the message briefly
+      setTimeout(() => {
+        if (obStep === 6 && _obSkipMigrate) { obStep = 7; obRender(); }
+      }, 800);
+      return;
+    }
+    if (sub) sub.textContent = 'Found a prior agent install. Want me to pull its memory into Hearth?';
+    if (box) {
+      box.innerHTML = '';
+      for (const c of choices) {
+        const btn = document.createElement('button');
+        btn.className = 'ob-choice';
+        btn.innerHTML = `
+          <div class="ob-choice-title">Import from ${esc(c.src)}</div>
+          <div class="ob-choice-sub">Reading ${esc(c.path)}. API keys stay where they are.</div>
+        `;
+        btn.onclick = () => { _obMigrateChoice = c.src; btn.classList.add('selected'); };
+        box.appendChild(btn);
+      }
+      const skipBtn = document.createElement('button');
+      skipBtn.className = 'ob-choice';
+      skipBtn.innerHTML = `
+        <div class="ob-choice-title">Skip for now</div>
+        <div class="ob-choice-sub">You can run this any time via Settings → Behavior → Migrate.</div>
+      `;
+      skipBtn.onclick = () => { _obMigrateChoice = 'skip'; skipBtn.classList.add('selected'); };
+      box.appendChild(skipBtn);
+    }
+  } catch {
+    _obSkipMigrate = true;
+    setTimeout(() => {
+      if (obStep === 6 && _obSkipMigrate) { obStep = 7; obRender(); }
+    }, 400);
+  }
+}
 let obStep = 1;
 let obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
 
@@ -8831,6 +9416,7 @@ function obRender() {
   if (obStep === 3) obWireCloudStep();
   if (obStep === 4) obLoadVoiceStatus();
   if (obStep === 5) setTimeout(() => $('ob-name').focus(), 80);
+  if (obStep === 6) _obProbeMigrate();
 }
 
 function obWireCloudStep() {
@@ -9065,6 +9651,28 @@ async function obFinish(skipped) {
         setTimeout(() => window.location.reload(), 4000);
       } catch {}
     }
+    // Migrate step's pick (if any) runs after settings are saved so the
+    // imported facts have a workspace + agent name to land in.
+    if (_obMigrateChoice && _obMigrateChoice !== 'skip') {
+      try {
+        const mr = await api('/api/migrate/run', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            source: _obMigrateChoice, apply: true,
+            include_skills: false, include_config: false,
+          }),
+        });
+        if (mr?.ok) {
+          toast('Imported from ' + _obMigrateChoice,
+                'Check Memory tab for the new facts.', 'ok', 5000);
+        } else {
+          toast('Migrate skipped', (mr && mr.log) ? 'see log' : 'unknown error',
+                'warn', 5000);
+        }
+      } catch (e) {
+        toast('Migrate failed', e.message, 'warn', 5000);
+      }
+    }
     if (!skipped) {
       const descParts = [];
       if (name) descParts.push(`name: ${name}`);
@@ -9274,6 +9882,13 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
   setInterval(refreshModels, 9000);
   setInterval(refreshGpu, 4000);
   setInterval(() => { if (STATE.view === 'logs') refreshLogs(); }, 6000);
+  // Background-subagent push: poll every 3s. If a new completion shows
+  // up, drop a violet heads-up banner in the chat body so the user sees
+  // it the moment work returns — no need to type "done?" to surface it.
+  // Already-seen agent_ids are tracked so each completion only renders
+  // once; the actual context-injection still happens on the next user
+  // turn via run_once's drain.
+  setInterval(pollSubagentCompletions, 3000);
 
   input.focus();
   setState('idle');

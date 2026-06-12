@@ -1,4 +1,4 @@
-"""Regex-first memory categorizer (Hermes Holographic pattern).
+"""Regex-first memory categorizer.
 
 Why regex over LLM:
   - Zero added latency on every chat turn (we call this on EVERY save).
@@ -9,15 +9,11 @@ When regex misses:
   - LLM tiebreaker can be called explicitly by the caller (async, optional).
   - Memory_extract already runs an LLM pass; this just refines the type.
 
-Patterns adapted from hermes-agent-main Holographic provider
-(plugins/memory/holographic/__init__.py:359-397) and broadened to fit
-Hearth's 4-type schema (user/feedback/project/reference) instead of
-Hermes's 4 (user_pref/project/tool/general).
-
-Categories below are SUB-CATEGORIES for the v0.6 memory graph view —
-they group facts within a TYPE for the "tree" rendering. The TYPE itself
-stays the 4 canonical values; categories are added to tags so the
-graph viz + recall can group on them without changing the schema.
+Categories below are SUB-CATEGORIES for the memory graph view — they
+group facts within a TYPE for the "tree" rendering. The TYPE itself
+stays the 4 canonical values (user/feedback/project/reference);
+categories are added to tags so the graph viz + recall can group on
+them without changing the schema.
 """
 
 from __future__ import annotations

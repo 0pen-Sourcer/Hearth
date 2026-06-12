@@ -169,26 +169,42 @@ def resolve_context_tokens(model_id: str) -> tuple:
     probed = autodetect_context(model_id)
     if probed:
         return probed, "endpoint probe"
-    # Per-provider table — Grok 4.x = 1M (cap 200K), Gemini 1.5+ = 1M
-    # (cap 200K), GPT-4o = 128K, Claude 3.x = 200K. 200K ceiling because
-    # KV cache cost scales linearly even on cloud.
+    # Per-provider known-context table. Cloud providers almost never
+    # expose ctx via /v1/models (the probe above tries; comes back None
+    # for nearly all of them), so this table is the fallback. Values are
+    # the REAL ceiling each provider advertises. Update here whenever a
+    # new model lands with a different ctx. Tracked in IDEAS.md so the
+    # next session knows to revisit.
     base = (LOCAL_API_BASE or "").lower()
     m = (model_id or "").lower()
     known = None
     if "api.x.ai" in base:
-        if "grok-4" in m or "grok-build" in m: known = 200000
-        elif "grok-2" in m: known = 131072
-        else: known = 131072
+        # Grok 4 / 4-fast = 2M, Grok 4.3 = 1M, Grok build = 256K,
+        # Grok 2 = 131K. Sources: x.ai/api docs as of 2026-06.
+        if "grok-4-fast" in m or "grok-4-mini" in m: known = 2_000_000
+        elif "grok-4.3" in m or "grok-4-3" in m: known = 1_000_000
+        elif "grok-4" in m: known = 2_000_000  # base grok-4 = 2M
+        elif "grok-build" in m: known = 256_000
+        elif "grok-2" in m: known = 131_072
+        else: known = 131_072  # safe Grok default for unknown ids
     elif "generativelanguage.googleapis" in base:
-        known = 200000 if any(t in m for t in ("1.5", "2.0", "2.5", "3.0", "3.1")) else 32768
+        # Gemini 1.5/2.0/2.5/3.x = 1M+, older = 32K
+        if any(t in m for t in ("1.5", "2.0", "2.5", "3.0", "3.1")):
+            known = 1_000_000
+        else:
+            known = 32_768
     elif "api.openai.com" in base:
-        if "gpt-4.1" in m: known = 200000
-        elif "gpt-4o" in m or "o3" in m or "o1" in m: known = 128000
-        else: known = 128000
+        # GPT-4.1 = 1M, GPT-4o / o3 / o1 = 128K
+        if "gpt-4.1" in m: known = 1_000_000
+        elif "gpt-4o" in m or "o3" in m or "o1" in m: known = 128_000
+        else: known = 128_000
     elif "api.anthropic.com" in base or "claude" in m:
-        known = 200000
+        # Claude Sonnet 4.x / Opus 4.x = 200K (1M Sonnet via beta header,
+        # but we don't set that; conservative default).
+        known = 200_000
     elif "openrouter.ai" in base:
-        known = 128000
+        # OpenRouter is a passthrough — assume 128K conservatively.
+        known = 128_000
     if known:
         return known, f"provider table ({known // 1024}K)"
     return CONTEXT_TOKENS, f"default {CONTEXT_TOKENS // 1024}K"
@@ -364,6 +380,25 @@ async def run_once(
         for h in history:
             if h.get("role") and h.get("role") != "system":
                 messages.append({"role": h["role"], "content": h.get("content", "")})
+    # Background subagent completions queue up between turns; drain them
+    # BEFORE the new user prompt so the model sees the results in the
+    # right order (completion -> user reply). Each notification arrives
+    # as its own synthetic user-role message with a <task-notification>
+    # block.
+    try:
+        from . import subagents as _sa
+        pending = _sa.drain_pending_notifications()
+        for notif in pending:
+            xml = _sa.format_notification_as_user_message(notif)
+            messages.append({"role": "user", "content": xml})
+            emit("subagent_done", agent_id=notif.get("agent_id"),
+                 persona=notif.get("persona"), name=notif.get("name"),
+                 status=notif.get("status"),
+                 summary=notif.get("summary"),
+                 result_text=notif.get("result_text"),
+                 elapsed_s=notif.get("elapsed_s"))
+    except Exception:
+        pass
     messages.append({"role": "user", "content": prompt})
     emit("user", content=prompt)
 
@@ -561,7 +596,13 @@ async def run_once(
                     # Don't surface as an error event — fact extraction failing
                     # mid-compact shouldn't look scary in the GUI. Just log.
                     emit("nudge", reason=f"fact_extract skipped: {type(_mx_err).__name__}")
-                messages[:] = compact_history(messages, _sync_summarize, keep_recent=8)
+                # Aggressive target so the kept tail (which may include
+                # big browse / read_file results) gets re-tightened if
+                # the first pass leaves us still over budget.
+                _target = max(2000, _budget * CHARS_PER_TOKEN // 2)
+                messages[:] = compact_history(messages, _sync_summarize,
+                                              keep_recent=8,
+                                              target_chars=_target)
                 _est = estimate_tokens(messages)
                 emit("compacted", after=len(messages), used=_est,
                      pct=int(_est * 100 / max(1, _budget)))
@@ -799,10 +840,19 @@ async def run_once(
                         decision = "deny"
                     if decision in ("deny", "never"):
                         tool_result = (
-                            f"USER DECLINED this tool call ('{decision}'). "
+                            f"The user declined this tool call ('{decision}'). "
                             f"Move on or pick a non-risky alternative. Don't "
                             f"retry the same call."
                         )
+                        # Run the decline through the loop guard so a
+                        # second identical retry trips FAILURE_WARN and
+                        # a fourth trips FAILURE_STOP. Without this the
+                        # model can repeat the same denied call forever.
+                        gd = guard.after(name, args, tool_result)
+                        if gd.action in ("warn", "stop"):
+                            tool_result = f"{tool_result}\n\n{gd.note}"
+                        if gd.action == "stop":
+                            _force_answer = True
                         emit("tool_result", name=name, content=tool_result, ms=0)
                         messages.append({
                             "role": "tool",
@@ -812,13 +862,17 @@ async def run_once(
                         })
                         continue
                 elif name in RISKY:
-                    # No callback — fall back to legacy env var
                     if os.environ.get("JARVIS_AUTO_APPROVE", "1") == "0":
                         tool_result = (
-                            f"USER DECLINED this tool call. Strict permission "
+                            f"The user declined this tool call. Strict permission "
                             f"mode is on (JARVIS_AUTO_APPROVE=0) and '{name}' "
                             f"is risky."
                         )
+                        gd = guard.after(name, args, tool_result)
+                        if gd.action in ("warn", "stop"):
+                            tool_result = f"{tool_result}\n\n{gd.note}"
+                        if gd.action == "stop":
+                            _force_answer = True
                         emit("tool_result", name=name, content=tool_result, ms=0)
                         messages.append({
                             "role": "tool",
@@ -839,8 +893,41 @@ async def run_once(
                     continue
 
                 t0 = time.time()
+                # Pass _approved=True since this branch only runs AFTER
+                # the permission check above said allow. Without it the
+                # destructive-pattern guard inside run_command would
+                # refuse a SECOND time even though the user just said yes.
+                _approved_args = dict(args, _approved=True) if isinstance(args, dict) else args
+                # Watchdog: fire slow_tool events at 30s + 90s so the GUI
+                # can pop "this is taking a while — send to background?" —
+                # tells the user the loop didn't hang, just a slow tool.
+                tool_task = asyncio.create_task(
+                    asyncio.to_thread(execute_tool, name, _approved_args))
+                NUDGE_AT = (30, 90)
+                nudge_idx = 0
+                tool_result = None
                 try:
-                    tool_result = await asyncio.to_thread(execute_tool, name, args)
+                    while True:
+                        if nudge_idx < len(NUDGE_AT):
+                            timeout = NUDGE_AT[nudge_idx] - (time.time() - t0)
+                            if timeout <= 0:
+                                emit("slow_tool", name=name,
+                                     elapsed_s=int(time.time() - t0),
+                                     suggestion="background" if nudge_idx == 0 else "stop")
+                                nudge_idx += 1
+                                continue
+                            try:
+                                tool_result = await asyncio.wait_for(
+                                    asyncio.shield(tool_task), timeout=timeout)
+                                break
+                            except asyncio.TimeoutError:
+                                emit("slow_tool", name=name,
+                                     elapsed_s=int(time.time() - t0),
+                                     suggestion="background" if nudge_idx == 0 else "stop")
+                                nudge_idx += 1
+                        else:
+                            tool_result = await tool_task
+                            break
                 except Exception as e:
                     tool_result = f"Error: tool '{name}' raised {type(e).__name__}: {e}"
                 ms = int((time.time() - t0) * 1000)

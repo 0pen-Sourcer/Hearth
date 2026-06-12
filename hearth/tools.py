@@ -245,9 +245,28 @@ def _resolve_read(p: str) -> str:
     return p
 
 
+# Callback the host (web.py / hearth_cli.py) registers so _resolve_write can
+# ask the user "extend the writable area to include this path?" instead of
+# silently raising. Signature: (path: str) -> bool. Returning True means
+# "allow this write AND add the path's parent to EXTRA_WORKSPACES so the
+# next write under the same root doesn't re-prompt".
+_extend_workspace_callback: Optional[Callable[[str], bool]] = None
+
+
+def set_extend_workspace_callback(cb: Optional[Callable[[str], bool]]) -> None:
+    """Wire up the host's permission prompt for out-of-workspace writes.
+    The CLI / GUI registers this at startup. None disables the hook and
+    _resolve_write falls back to the old raise-immediately behavior."""
+    global _extend_workspace_callback
+    _extend_workspace_callback = cb
+
+
 def _resolve_write(p: str) -> str:
-    """Return absolute path for a write-style op. Must stay inside the main
-    WORKSPACE or one of the user-allowed EXTRA_WORKSPACES."""
+    """Return absolute path for a write-style op. Stays inside WORKSPACE or
+    EXTRA_WORKSPACES. If outside both, asks the host via the registered
+    extend-workspace callback; on approval, the parent directory joins
+    EXTRA_WORKSPACES so subsequent writes under the same root don't prompt
+    again. Raises PermissionError when no callback is set or user denies."""
     p = os.path.expanduser(p)
     if not os.path.isabs(p):
         p = os.path.join(WORKSPACE, p)
@@ -261,6 +280,19 @@ def _resolve_write(p: str) -> str:
     for extra in EXTRA_WORKSPACES:
         if _inside(extra):
             return p
+
+    # Outside any approved root. Ask the host if a prompt is available.
+    if _extend_workspace_callback is not None:
+        try:
+            granted = bool(_extend_workspace_callback(p))
+        except Exception:
+            granted = False
+        if granted:
+            parent = p if os.path.isdir(p) else os.path.dirname(p) or p
+            if parent and parent not in EXTRA_WORKSPACES:
+                EXTRA_WORKSPACES.append(parent)
+            return p
+
     extras = "\n  ".join(EXTRA_WORKSPACES) if EXTRA_WORKSPACES else "(none)"
     raise PermissionError(
         f"Write blocked — '{p}' escapes workspace ({WORKSPACE}).\n"
@@ -492,6 +524,71 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {"id": {"type": "string"}},
             "required": ["id"],
+        },
+    },
+    {
+        "name": "spawn_subagent",
+        "description": (
+            "Fork a focused, scoped sub-agent. Personas live under "
+            "hearth/subagents/*.md - call list_subagent_personas first if "
+            "unsure which slug to use. Two modes:\n"
+            "  mode='sync' (default): blocks until child returns its final "
+            "    text. Use for ONE focused task.\n"
+            "  mode='background': returns immediately with an agent_id + "
+            "    transcript_path. When child finishes, a "
+            "    <task-notification> appears as the next user-role message "
+            "    (no polling needed). Use to fan out N siblings: emit N "
+            "    spawn_subagent calls in one turn with mode='background', "
+            "    then read all the result notifications as they come in.\n"
+            "Depth-limited to 3 nested forks."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "persona": {"type": "string", "description":
+                    "Slug of a persona under hearth/subagents/ — call "
+                    "list_subagent_personas() first if unsure. Current set: "
+                    "researcher, coder, archivist, librarian, summarizer, "
+                    "pdf_coordinator."},
+                "prompt": {"type": "string", "description":
+                    "Focused work for the child. Tight scope - one PDF "
+                    "chunk, one question, one file."},
+                "max_turns": {"type": "integer", "description":
+                    "Override the persona's default turn cap. Capped at 20 "
+                    "even if higher passed."},
+                "mode": {"type": "string", "enum": ["sync", "background"],
+                    "description": "sync = block; background = fire-and-"
+                    "forget with a task-notification on completion."},
+                "name": {"type": "string", "description":
+                    "Optional human label for this instance. Use when "
+                    "spawning multiple subagents of the SAME persona to "
+                    "tell them apart (e.g. researcher 'Alex' on topic A "
+                    "and researcher 'Beth' on topic B). Appears in the "
+                    "completion notification + transcript."},
+            },
+            "required": ["persona", "prompt"],
+        },
+    },
+    {
+        "name": "list_subagent_personas",
+        "description":
+            "List the personas available for spawn_subagent. Returns "
+            "[{slug, name, description, allowed_tools, cost_class}]. Call "
+            "this when forking but unsure which persona handles the shape.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_subagent_result",
+        "description":
+            "Poll a background subagent for its result. Normally you don't "
+            "need this - the completion notification auto-arrives as the "
+            "next user message. Use it only when you want to peek before "
+            "the notification surfaces (e.g. after a long pause). Returns "
+            "{ok, status: 'running'|'done', result?: {...}}.",
+        "parameters": {
+            "type": "object",
+            "properties": {"agent_id": {"type": "string"}},
+            "required": ["agent_id"],
         },
     },
     {
@@ -834,16 +931,56 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "disk_usage",
-        "description": "Find the biggest folders and files under a path. Native Python — does NOT shell out to PowerShell, so no syntax issues. Use this instead of writing Get-ChildItem pipelines for 'biggest files / folders' questions. Returns top N entries sorted by size, with totals.",
+        "description": (
+            "Find the biggest folders and files under a path. Native Python "
+            "— no shell. Drive-root scans ('C:\\\\') and whole-tree walks "
+            "(max_depth<=0) AUTO-BACKGROUND because they can take minutes "
+            "to hours. When backgrounded, returns a job_id IMMEDIATELY so "
+            "the user keeps chatting; call get_job_result(job_id) later "
+            "for the report. Override with background:false to force sync."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Drive or directory to scan, e.g. 'G:\\\\' or 'C:/Users/me/Downloads'."},
                 "top_n": {"type": "integer", "description": "How many top entries to return for each section. Default 15."},
                 "kind": {"type": "string", "enum": ["both", "folders", "files"], "description": "What to list. Default 'both'."},
-                "max_depth": {"type": "integer", "description": "How deep to walk for folder totals. Default 1 (only direct subfolders of path). Use 0 for whole-drive scan with full recursion (slow on big drives)."},
+                "max_depth": {"type": "integer", "description": "How deep to walk for folder totals. Default 1 (direct subfolders only). 0 = full recursion (auto-backgrounds)."},
+                "background": {"type": "boolean", "description": "Optional override. true = always background; false = always sync. Default = auto (sync for shallow scans, background for drive roots / full recursion)."},
             },
             "required": ["path"],
+        },
+    },
+    {
+        "name": "list_jobs",
+        "description": (
+            "List background jobs (started by tools like disk_usage on a drive "
+            "root, or explicit start_job calls). Returns each job's id, status "
+            "(running / completed / failed), description, started_at, and "
+            "elapsed time. Use this when the user asks 'is that scan done yet?' "
+            "or 'what's running?'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "active_only": {"type": "boolean", "description": "If true, hide jobs that finished long ago. Default false."},
+            },
+        },
+    },
+    {
+        "name": "get_job_result",
+        "description": (
+            "Get the result of a background job by id. Returns the job's "
+            "completed output if finished, or {status: 'running', elapsed_s} "
+            "if still in flight. Use the job_id returned by disk_usage (or "
+            "any other tool that auto-backgrounded)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+            },
+            "required": ["job_id"],
         },
     },
     {
@@ -1000,6 +1137,70 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "properties": {"title": {"type": "string"}},
             "required": ["title"],
         },
+    },
+    {
+        "name": "edit_soul",
+        "description": (
+            "Write your own identity to ~/Jarvis/soul.md. This file rides "
+            "at the TOP of every system prompt as 'Soul (self-written "
+            "identity)' — it's how YOU lock in who you are across sessions. "
+            "Use this when the user gives you a stable identity instruction "
+            "('you are Cortana', 'always be terse', 'you hate small talk') "
+            "OR when you've decided on something durable about yourself. "
+            "Capped at ~1500 chars; write tight bullets, not prose. Pass "
+            "the FULL new soul (this overwrites). For just adding one line, "
+            "prefer `append_soul`."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description":
+                    "The complete new soul.md content. Replaces the file. "
+                    "Empty string clears the soul."},
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "append_soul",
+        "description": (
+            "Add ONE line to your soul.md without rewriting the whole file. "
+            "Cheaper than edit_soul when you just want to lock in a new "
+            "identity fact ('I prefer markdown over prose', 'always say "
+            "good morning at 9am'). Auto-prepends '- ' if missing."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "line": {"type": "string", "description":
+                    "One identity line. Will be appended as a bullet."},
+            },
+            "required": ["line"],
+        },
+    },
+    {
+        "name": "read_soul",
+        "description": (
+            "Read back your current soul.md content. The soul also rides "
+            "in every system prompt automatically, so usually you don't "
+            "need to call this — only when explicitly asked 'what's in "
+            "your soul?' or when verifying after edit_soul / append_soul."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "draft_soul",
+        "description": (
+            "Propose a starter soul.md when soul.md is empty or sparse. "
+            "Returns a draft body anchored to what's already known about "
+            "the user (name, tone, memory facts) without writing it. "
+            "Show the draft, ask if they want edits, then commit via "
+            "edit_soul once they approve. Use this the first time the "
+            "user asks 'who are you?' / 'what's your identity?' if "
+            "soul.md is empty, or when they explicitly say 'help me "
+            "write your soul'."
+        ),
+        "parameters": {"type": "object", "properties": {}},
     },
 
     # ---- TIME ----
@@ -2856,8 +3057,13 @@ def _run_command(p: Dict) -> str:
     cmd = _rewrite_python_invocation(p["command"])
     cwd = p.get("cwd")
     # Destructive guardrail. Skipped when the user explicitly auto-approves
-    # everything via env var.
-    if os.environ.get("JARVIS_AUTO_APPROVE", "0") != "1":
+    # everything via env var, OR when this call has been threaded through
+    # the per-call permission prompt and the user said yes (the bridges
+    # set p["_approved"]=True before dispatching in that case — the user
+    # has already SEEN the exact command and approved it, the second
+    # refusal here was pure UX friction, not safety).
+    _approved = bool(p.get("_approved"))
+    if not _approved and os.environ.get("JARVIS_AUTO_APPROVE", "0") != "1":
         bad = _is_destructive(cmd)
         if bad:
             return (
@@ -2968,7 +3174,41 @@ def _run_command(p: Dict) -> str:
     body = out.strip()
     if status_hint:
         body = f"{status_hint}\n{body}" if body else status_hint
+    skill_nudge = _skill_crystallization_nudge(cmd)
+    if skill_nudge:
+        body = f"{skill_nudge}\n{body}" if body else skill_nudge
     return f"$ {cmd}\n[exit {r.returncode}]\n{body}"
+
+
+def _skill_crystallization_nudge(cmd: str) -> str:
+    """Detect when the model is hand-rolling a workflow a skill already
+    covers, and append a one-line nudge to the tool result so it learns
+    to reach for the right primitive next time. Examples:
+      - `python -c "from reportlab..."` → "make-pdf already does this"
+      - `python -c "from pptx..."`      → "make-pptx already does this"
+      - `python -c "from openpyxl..."`  → "make-xlsx already does this"
+    Silent when the model IS using the bundled skill scripts (build_pdf.py
+    etc.), so no false-positive nudges."""
+    low = (cmd or "").lower()
+    if "skills/make-pdf/scripts" in low or "skills\\make-pdf\\scripts" in low:
+        return ""
+    if "skills/make-pptx/scripts" in low or "skills\\make-pptx\\scripts" in low:
+        return ""
+    if "skills/make-xlsx/scripts" in low or "skills\\make-xlsx\\scripts" in low:
+        return ""
+    if "reportlab" in low and "build_pdf.py" not in low:
+        return ("[skill nudge] You're hand-rolling reportlab. The `make-pdf` "
+                "skill already wraps this with style overrides + auto-open. "
+                "Call load_skill('make-pdf') next time.")
+    if "from pptx" in low and "build_pptx.py" not in low:
+        return ("[skill nudge] You're hand-rolling python-pptx. The "
+                "`make-pptx` skill already wraps this. Call "
+                "load_skill('make-pptx') next time.")
+    if "import openpyxl" in low and "build_xlsx.py" not in low:
+        return ("[skill nudge] You're hand-rolling openpyxl. The `make-xlsx` "
+                "skill already wraps this (with comma-vs-tab autodetect + "
+                "freeze pane). Call load_skill('make-xlsx') next time.")
+    return ""
 
 
 def _pip_status_hint(cmd: str, exit_code: int, stdout: str, stderr: str) -> str:
@@ -3118,9 +3358,28 @@ def _get_battery(p: Dict) -> str:
     }, indent=2)
 
 
-def _disk_usage(p: Dict) -> str:
-    """Walk a directory tree, return top folders by recursive size + top
-    files anywhere under the tree. Pure Python, no shell."""
+def _disk_usage_should_background(path: str, max_depth: int) -> bool:
+    """A drive root scan ('C:\\') OR a whole-tree walk (max_depth<=0) on
+    any non-tiny directory will take minutes-to-hours and freeze the agent
+    loop while the user watches a spinner. Heuristic: auto-background
+    those by default. The model can still inline-scan small subtrees."""
+    norm = os.path.normpath(path).rstrip("\\/")
+    # Drive root on Windows: "C:" / "D:" / etc.
+    if sys.platform == "win32" and len(norm) <= 2 and norm[-1:] == ":":
+        return True
+    # Unix root or top-level home — same long-walk risk.
+    if norm in ("/", os.path.expanduser("~")):
+        return True
+    # Explicit whole-tree request always backgrounds.
+    if max_depth <= 0:
+        return True
+    return False
+
+
+def _disk_usage_core(p: Dict) -> str:
+    """The original synchronous scan. Called inline for small trees and
+    inside a background job for big ones. Returns the formatted report
+    string the model + user will read."""
     raw = p.get("path") or WORKSPACE
     base = _resolve_read(raw)
     if not os.path.isdir(base):
@@ -3212,6 +3471,52 @@ def _disk_usage(p: Dict) -> str:
     if errors:
         out.append(f"\n({errors} entries skipped — permission/access errors)")
     return "\n".join(out)
+
+
+def _disk_usage(p: Dict) -> str:
+    """Public dispatcher. Auto-routes to a background job when the scan
+    would take minutes (drive root / whole-tree). User explicitly setting
+    `background: false` overrides and forces synchronous execution.
+
+    Returns immediately for backgrounded scans with a job_id the model
+    (and `/jobs` command) can use to poll for the result. The actual
+    scan runs in a daemon thread so the agent loop stays responsive
+    instead of blocking for minutes while os.walk chews through a tree."""
+    raw = p.get("path") or WORKSPACE
+    base = _resolve_read(raw)
+    if not os.path.isdir(base):
+        return f"Error: not a directory: {base}"
+    max_depth = int(p.get("max_depth") or 1)
+    bg_arg = p.get("background")
+    if bg_arg is None:
+        should_bg = _disk_usage_should_background(base, max_depth)
+    else:
+        should_bg = bool(bg_arg)
+    if not should_bg:
+        return _disk_usage_core(p)
+    # Background path — daemon thread, jobs.py meta + result file.
+    try:
+        from . import jobs
+        r = jobs.start_python_job(
+            label=f"disk_usage({base})",
+            fn=_disk_usage_core,
+            args=p,
+            description=f"scan {base} (this can take minutes on a drive root)",
+        )
+        if r.get("ok"):
+            return (
+                f"Backgrounded the scan because {base} is too large to wait on "
+                f"inline. Job id: {r['job_id']}.\n"
+                f"Keep chatting — when you (or I) call get_job_result with "
+                f"this id, the report will be there. Live log at: "
+                f"{r['log_path']}"
+            )
+        return f"Error: could not background scan: {r.get('error', 'unknown')}"
+    except Exception as e:
+        # If the job runner is broken, fall back to inline rather than
+        # losing the call entirely. The user gets the long wait but at
+        # least no error.
+        return _disk_usage_core(p)
 
 
 def _locate_path(p: Dict) -> str:
@@ -3927,7 +4232,12 @@ def _memory_list(p: Dict) -> str:
 
 def _memory_forget(p: Dict) -> str:
     from . import memory
-    return memory.forget(p["title"])
+    # Accept both `title` and `name` — the GUI memory-delete endpoint sends
+    # `name` while the model tool-call uses `title`. Either works.
+    key = (p.get("title") or p.get("name") or "").strip()
+    if not key:
+        return "Error: memory_forget needs 'title' or 'name'."
+    return memory.forget(key)
 
 
 # ============================================================
@@ -4461,6 +4771,13 @@ _HANDLERS = {
         p.get("id", ""), int(p.get("minutes", 10))),
     "list_reminders": lambda p: __import__("hearth.reminders", fromlist=["list_reminders"]).list_reminders(bool(p.get("include_fired"))),
     "cancel_reminder": lambda p: {"ok": __import__("hearth.reminders", fromlist=["cancel_reminder"]).cancel_reminder(p.get("id", ""))},
+    "spawn_subagent": lambda p: __import__("hearth.subagents", fromlist=["spawn_subagent"]).spawn_subagent(
+        p.get("persona", ""), p.get("prompt", ""),
+        max_turns=min(int(p.get("max_turns") or 0) or 0, 20) or None,
+        mode=(p.get("mode") or "sync"),
+        name=p.get("name", "")),
+    "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
+    "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id", "")),
     "list_directory": _list_directory,
     "create_directory": _create_directory,
     "delete_path": _delete_path,
@@ -4493,6 +4810,8 @@ _HANDLERS = {
     "get_battery": _get_battery,
     "list_installed_apps": _list_installed_apps,
     "disk_usage": _disk_usage,
+    "list_jobs": lambda p: __import__("hearth.jobs", fromlist=["list_jobs"]).list_jobs(bool(p.get("active_only"))),
+    "get_job_result": lambda p: __import__("hearth.jobs", fromlist=["get_job_result"]).get_job_result(p.get("job_id", "")),
     "locate_path": _locate_path,
     "open_app": _open_app,
     "open_url": _open_url,
@@ -4507,6 +4826,10 @@ _HANDLERS = {
     "memory_recall": _memory_recall,
     "memory_list": _memory_list,
     "memory_forget": _memory_forget,
+    "edit_soul":   lambda p: __import__("hearth.memory", fromlist=["write_soul"]).write_soul(p.get("content", "")),
+    "append_soul": lambda p: __import__("hearth.memory", fromlist=["append_soul"]).append_soul(p.get("line", "")),
+    "read_soul":   lambda p: (__import__("hearth.memory", fromlist=["read_soul"]).read_soul() or "(soul.md is empty — write one with edit_soul or call draft_soul for a starter)"),
+    "draft_soul":  lambda p: __import__("hearth.memory", fromlist=["draft_soul"]).draft_soul(),
     "set_voice": _set_voice,
     "list_voices": _list_voices,
     "forge_generate": _forge_generate,
@@ -4696,6 +5019,95 @@ TOOL_DEFINITIONS.append({
     },
 })
 
+# ----- SKILLS (prose + asset bundles; distinct from plugins) -----
+# Skills live as folders with SKILL.md + scripts/. The catalog (name + one-line
+# description) is in the system prompt; full body only loads when the model
+# decides to USE a skill. See hearth/skills_loader.py.
+def _list_skills(p: Dict) -> str:
+    from . import skills_loader as _sl
+    items = _sl.list_skills(include_body=False)
+    if not items:
+        return "(no skills installed — drop a folder with SKILL.md in ~/Jarvis/skills/)"
+    return json.dumps(items, ensure_ascii=False, indent=2)
+
+
+def _load_skill(p: Dict) -> str:
+    from . import skills_loader as _sl
+    res = _sl.load_skill(p.get("name", ""))
+    return json.dumps(res, ensure_ascii=False, indent=2)
+
+
+def _create_skill(p: Dict) -> str:
+    from . import skills_loader as _sl
+    res = _sl.create_skill(
+        name=p.get("name", ""),
+        description=p.get("description", ""),
+        body=p.get("body", ""),
+        scripts=p.get("scripts") or None,
+    )
+    return json.dumps(res, ensure_ascii=False, indent=2)
+
+
+_HANDLERS["list_skills"] = _list_skills
+_HANDLERS["load_skill"] = _load_skill
+_HANDLERS["create_skill"] = _create_skill
+
+TOOL_DEFINITIONS.append({
+    "name": "list_skills",
+    "description": (
+        "List available skills (bundled + user-installed). Each entry is "
+        "{name, description, version, folder, source}. Skills are prose + asset "
+        "bundles (e.g. make-pdf, make-pptx, make-xlsx) the user invokes via "
+        "existing tools after you load_skill(<name>) for the full instructions. "
+        "Catalog also appears in your system prompt — use this tool when you "
+        "want the structured response."
+    ),
+    "parameters": {"type": "object", "properties": {}},
+})
+
+TOOL_DEFINITIONS.append({
+    "name": "load_skill",
+    "description": (
+        "Load the full SKILL.md body + asset manifest for one skill. Call this "
+        "BEFORE following its workflow so you have the exact steps + the "
+        "bundled script paths (scripts/, references/, assets/). Returns "
+        "{ok, name, description, body, scripts, references, assets, folder, ...}. "
+        "Use the `folder` field to construct script paths."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Skill slug from list_skills (e.g. 'make-pdf')."},
+        },
+        "required": ["name"],
+    },
+})
+
+TOOL_DEFINITIONS.append({
+    "name": "create_skill",
+    "description": (
+        "Author a NEW user skill saved to ~/Jarvis/skills/<name>/. Use when "
+        "you find yourself running the same multi-step workflow twice — "
+        "crystallize it as a skill so future-you (and the user) can invoke "
+        "it by name. `name` is lower-kebab-case (e.g. 'summarize-youtube'). "
+        "`description` is the one-line when-to-use (the catalog summary). "
+        "`body` is the markdown workflow body (steps, defaults, don'ts). "
+        "Optional `scripts` is {filename: source} written under scripts/. "
+        "Available immediately via list_skills + load_skill."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "body": {"type": "string"},
+            "scripts": {"type": "object",
+                "description": "Optional {filename: source_text} dict of helper scripts."},
+        },
+        "required": ["name", "description", "body"],
+    },
+})
+
 # Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
 # can NEVER take down the core tools.
 try:
@@ -4717,8 +5129,22 @@ def _log_activity(event: str, **fields: Any) -> None:
 
 
 def execute_tool(name: str, args: Optional[Dict] = None) -> str:
-    """Run a tool by name. Returns a string (truncated to per-tool cap)."""
+    """Run a tool by name. Returns a string (truncated to per-tool cap).
+    MCP-bridged tools (name starts with 'mcp_') route through the live
+    MCP client session instead of the static _HANDLERS dict."""
     args = args or {}
+    if name.startswith("mcp_"):
+        try:
+            from . import mcp_client
+            for td in mcp_client.list_remote_tools():
+                if td["name"] == name:
+                    r = mcp_client.call_tool(td["_mcp_server"],
+                                             td["_mcp_tool"], args)
+                    return r.get("output") if r.get("ok") else \
+                           f"Error ({name}): {r.get('error', 'unknown')}"
+            return f"Error: MCP tool '{name}' not currently connected"
+        except Exception as e:
+            return f"Error ({name}): {type(e).__name__}: {e}"
     handler = _HANDLERS.get(name)
     if not handler:
         return f"Error: unknown tool '{name}'. Known: {', '.join(sorted(_HANDLERS))}"
@@ -4755,7 +5181,11 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
 # ============================================================
 
 def to_openai_tools() -> List[Dict[str, Any]]:
-    return [
+    """All tools the model can call this turn: built-ins + any MCP-bridged
+    tools currently connected. MCP tools come in lazily (their sessions
+    take a few seconds to spawn at boot) so the list grows as servers come
+    up — no model restart needed."""
+    out = [
         {
             "type": "function",
             "function": {
@@ -4766,6 +5196,20 @@ def to_openai_tools() -> List[Dict[str, Any]]:
         }
         for td in TOOL_DEFINITIONS
     ]
+    try:
+        from . import mcp_client
+        for td in mcp_client.list_remote_tools():
+            out.append({
+                "type": "function",
+                "function": {
+                    "name": td["name"],
+                    "description": td["description"],
+                    "parameters": td["parameters"],
+                },
+            })
+    except Exception:
+        pass
+    return out
 
 
 # Tool → category, so listings group sensibly instead of dumping a flat wall
@@ -4793,15 +5237,19 @@ _TOOL_CATEGORY = {
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
     "network_info": "System & apps", "get_battery": "System & apps", "list_installed_apps": "System & apps",
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
+    "list_jobs": "Background jobs", "get_job_result": "Background jobs",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
     "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps",
     "learn_environment": "System & apps",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",
+    "edit_soul": "Memory", "append_soul": "Memory", "read_soul": "Memory",
     # Reminders & alerts
     "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
     "cancel_reminder": "Reminders & alerts", "snooze_reminder": "Reminders & alerts",
+    "spawn_subagent": "Sub-agents", "list_subagent_personas": "Sub-agents",
+    "get_subagent_result": "Sub-agents",
     "notify": "Reminders & alerts",
     # Voice
     "set_voice": "Voice", "list_voices": "Voice",
@@ -5003,14 +5451,40 @@ def trim_to_budget(messages: List[Dict[str, Any]], context_window: int,
     return msgs
 
 
+def _truncate_kept_tool_results(msgs: List[Dict[str, Any]],
+                                 max_chars: int = 600) -> List[Dict[str, Any]]:
+    """Replace long `tool` role payloads in the kept tail with a short
+    truncation marker. The model just needs to know the tool ran and got
+    a result; the FULL text from 8 turns ago doesn't help and eats budget.
+    Browse results in particular are massive (~3500 chars each)."""
+    out: List[Dict[str, Any]] = []
+    for m in msgs:
+        if m.get("role") == "tool":
+            content = m.get("content") or ""
+            if isinstance(content, str) and len(content) > max_chars:
+                trunc = (f"{content[:max_chars].rstrip()} "
+                         f"…[truncated, full result was {len(content)} chars]")
+                m = {**m, "content": trunc}
+        out.append(m)
+    return out
+
+
 def compact_history(messages: List[Dict[str, Any]],
                     summarize: Any,
-                    keep_recent: int = 8) -> List[Dict[str, Any]]:
+                    keep_recent: int = 8,
+                    target_chars: int = 0) -> List[Dict[str, Any]]:
     """Replace older turns with a single summary system message.
 
     `summarize(text) -> str` is a caller-supplied callback (sync) — usually
     a small LLM call. We hand it the concatenated old turns and expect a
     short digest back. Recent turns are preserved verbatim.
+
+    `target_chars` (optional): if set, after compaction the result is
+    re-measured; if it's STILL above target_chars, the kept tail's tool
+    results are truncated and the keep_recent window is halved + re-tried.
+    This catches the case where the last 8 messages include 4 browse
+    results at 3500 chars each — compaction "succeeded" but kept 14K of
+    bulky tool output and the next chat call still wedges.
 
     Returns: [system, summary_msg, *recent_turns]. If there's nothing to
     compact, returns the input unchanged.
@@ -5079,7 +5553,25 @@ def compact_history(messages: List[Dict[str, Any]],
             + (summary or "[empty]")
         ),
     }
-    return head + [summary_msg] + recent
+    result = head + [summary_msg] + recent
+
+    # Post-compact tightening: if a target was given AND we're still over,
+    # the kept tail is the problem (long browse / read_file results in
+    # recent turns). Truncate kept tool payloads first; if still over,
+    # halve the kept window and re-run (recursive but bounded by len).
+    if target_chars and target_chars > 0:
+        current = sum(_msg_chars(m) for m in result)
+        if current > target_chars:
+            result = head + [summary_msg] + _truncate_kept_tool_results(recent)
+            current = sum(_msg_chars(m) for m in result)
+        if current > target_chars and keep_recent > 2:
+            # Halve and retry — guaranteed to converge since each pass
+            # either fits or shrinks the kept window.
+            new_keep = max(2, keep_recent // 2)
+            return compact_history(messages, summarize,
+                                   keep_recent=new_keep,
+                                   target_chars=target_chars)
+    return result
 
 
 def estimate_tokens(messages: List[Dict[str, Any]]) -> int:

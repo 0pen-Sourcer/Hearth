@@ -64,12 +64,19 @@ It's the project I'd want if I just got an RTX card and downloaded LM Studio. "C
 | Web search + fetch             |     ✅     |     ✅     |        ❌        |     ✅     |    ❌   |
 | **Drives a real browser (watch it click)** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Persistent fact memory         |     ✅     |   limited  |        ❌        |     ✅     |    ❌   |
+| **Self-curating memory (recall-count, archive, warm-back)** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Learns your machine (hardware · models · drives)** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| MCP bridge for LM Studio chat  |     ✅     |     ❌     |        ❌        |     ❌     |    ❌   |
+| MCP **server** (Hearth's tools in any MCP chat) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| MCP **client** (use OTHER MCP servers' tools)  | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Sub-agents** (fork focused workers, sync or background) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Auto-background long ops** (no 30-min spinner) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Migrate from Hermes / OpenClaw** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Action reminders** (fire a tool, not just a toast) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Renameable agent** (chat avatar + persona + folder) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Writes its own tools (local, self-improving)** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Personality / "Jarvis" vibe    |     ✅     |     ❌     |        ❌        |     ❌     |   ish  |
 
-The unique combo nobody else has: **voice loop + computer control + writes its own tools + local-only**.
+The unique combo nobody else has: **voice loop + computer control + writes its own tools + sub-agent fork + self-curating memory + MCP both directions + local-only**.
 
 ---
 
@@ -91,7 +98,7 @@ cd hearth
 .\hearth.bat
 ```
 
-**First-run onboarding** is a 6-step card overlay — pick a brain (local server or cloud key), tune voice, personalize, you're in.
+**First-run onboarding** is a 7-step card overlay — pick a brain (local server or cloud key), tune voice, personalize, optionally import memory from a previous agent (Hermes / OpenClaw — auto-skipped if neither is installed), you're in.
 
 Hearth auto-detects **LM Studio** (port 1234), **Ollama** (11434), or **llama.cpp** (8080) at boot — no env config needed. Or open **Settings → Chat brain** to plug in **Gemini / Grok / OpenAI / OpenRouter** with your API key. Cloud and local are first-class; switch any time without restarting.
 
@@ -121,6 +128,20 @@ Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 ---
 
 ## What Jarvis can actually do
+
+**Fork himself to do focused work in parallel — without freezing the chat.** Type *"summarize this PDF using the pdf_coordinator subagent"* and Hearth spawns N background workers, each chewing on a chunk, and a coordinator reduces them into a final summary. You keep chatting while they run; each one's completion arrives as a `<task-notification>` block in your next turn. Sub-agents come with personas (researcher, coder, archivist, librarian, summarizer, pdf_coordinator), tool-allowlist isolation (so an archivist can't write files), cost-class routing (cheap personas force local even when you're on Grok — fan-out of 50 chunks doesn't cost $5), and depth-3 fork-bomb protection. `/agent <slug> "<prompt>"` to dispatch from the CLI. Each subagent leaves a JSONL transcript at `~/Jarvis/subagents/<id>.jsonl` you can `read_file` for live progress.
+
+**Long ops don't freeze the agent.** Drive-root scans (`disk_usage('C:\')`), whole-tree walks, big find_file queries — they can take many minutes. Hearth auto-backgrounds them: the tool returns a `job_id` in milliseconds, the scan runs in a daemon thread, you keep chatting. `/jobs` lists what's running; `/jobs <id>` shows the result when done. Same pattern (via `hearth/jobs.py`) is available for any in-process Python task and any shell command you want to fire and forget.
+
+**Plug into other MCP servers, expose Hearth as one.** Both directions wired. Drop a standard `mcp.json` at `~/Jarvis/mcp.json` (Settings → MCP servers → Edit), point at the filesystem / git / postgres / whatever MCP server you like, and on next launch Hearth spawns them as child processes and surfaces every one of their tools as `mcp_<server>_<tool>` — the model can call them like any built-in. Other way: `python -m hearth.mcp_server` exposes Hearth's 72 tools to LM Studio / Claude Desktop / Cursor / anything MCP-aware. Hearth speaks the protocol in both directions.
+
+**Memory that curates itself.** Per-fact markdown files with regex-classified sub-categories. Each fact tracks `recall_count` + `last_recalled_at`. When a sub-category bucket exceeds a soft cap (~6000 chars), the coldest facts auto-archive (move to `_archive/`, never deleted). When the chat surfaces a topic, sibling facts in the same cluster get pulled in too — **including from archive, marked `(cold)`**. After 3 hits, an archived fact auto-promotes back to hot. Hot + cold + warm-back in one system. No other local-AI ships this combo.
+
+**Migrate from Hermes or OpenClaw in one command.** Coming from another agent? `python -m hearth.migrate --from hermes --apply` reads your `~/.hermes/memories/USER.md` + `MEMORY.md` (splits on `\n§\n`), maps each entry to a Hearth memory file, classifies it into the right sub-category. OpenClaw equivalent reads `~/.openclaw/workspace/MEMORY.md` H2 sections + `memory/YYYY-MM-DD*.md` daily notes. Optional flags: `--include-skills` parks SKILL.md dirs under `~/Jarvis/imported_skills/`; `--include-config` pulls the source agent's model/provider into `settings.json`. **API keys are never copied** (security boundary). `/migrate` slash + Settings → Behavior → Migrate panel + onboarding step 6 all surface it.
+
+**Action reminders that actually act.** `set_reminder` now takes an optional `action_tool` + `action_args`. *"At 9am tomorrow, run `web_search` on 'new gpu drivers' and remind me"* → at 9am the tool actually runs, its result is appended to the toast body. Plus: missed-reminder catchup on next launch (reminders set while Hearth was off fire as "while you were away"), snooze tool that resurrects fired one-shots, auto-prune of one-shots older than 30 days. Reminders panel in Settings → Behavior with per-reminder snooze + cancel buttons.
+
+**Rename the whole agent end-to-end.** Default is JARVIS. Hate it? Settings → Behavior → Agent name → "Cortana" → Rename. Triggers: chat avatar letter changes (J → C), persona signature updates, AND `~/Jarvis/` folder atomically renames to `~/Cortana/` (helper subprocess waits for the tray to exit, moves the dir, respawns with the new `JARVIS_WORKSPACE` env). Every memory, conversation, generated file comes along — nothing lost. CLI has `/name Cortana` for the persona swap (folder rename is GUI-only since it needs a tray restart). Onboarding step 5 asks during first-run.
 
 **Talk to him with real barge-in.** Voice in (faster-whisper), voice out (Kokoro), with parallel-mic barge-in: you start talking mid-response, his TTS dies instantly, the in-flight LLM call aborts, and recording starts. No "wait for him to finish" awkwardness. `/sleep` to silence him until you say the wake word, `/wake` to bring him back.
 
@@ -203,8 +224,10 @@ Emits JSONL events (user / thinking / tool_call / tool_result / assistant / done
                                                   ▼
                                     ┌───────────────────────┐
                                     │  hearth/tools.py      │
-                                    │  64 tools, sandboxed  │
+                                    │  72 tools, sandboxed  │
                                     │  + your own plugins   │
+                                    │  + remote MCP servers │
+                                    │  + spawn_subagent fork│
                                     └────────┬──────────────┘
                                              │
                               files · shell · web · apps · memory
