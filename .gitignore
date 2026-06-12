@@ -88,6 +88,8 @@ run.txt
 run2.txt
 run3.txt
 run4.txt
+run-*.txt
+run_*.txt
 # Personal diagnostic dumps the user pastes into chat for debugging
 book_log.txt
 hearth-server-log.txt

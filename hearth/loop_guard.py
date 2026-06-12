@@ -103,12 +103,22 @@ MUTATING_TOOLS = frozenset({
 
 
 def _is_failure(result: str) -> bool:
-    """Heuristic: did this tool result represent a failure the model should
-    react to? Conservative — a user *declining* is not a model failure."""
+    """Heuristic: did this tool result represent something the model should
+    treat as a failure of THIS call (and stop repeating)? Errors are
+    obvious failures; user declines are ALSO failures — repeating an
+    identical call the user just refused is a worse spiral than retrying
+    a real error (the model knows the user, the user already said no)."""
     if not isinstance(result, str):
         return False
     head = result.lstrip()[:60].lower()
-    return head.startswith("error") or head.startswith("[error")
+    if head.startswith("error") or head.startswith("[error"):
+        return True
+    # Decline markers emitted by hearth_cli.py / hearth/web.py around a
+    # rejected risky-tool call. Catching them here means the same-call
+    # repeat detector (FAILURE_WARN/STOP) kicks in after a couple of
+    # declines instead of letting the model loop forever.
+    return ("the user declined" in head
+            or "user declined this tool call" in head)
 
 
 @dataclass

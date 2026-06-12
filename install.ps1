@@ -194,6 +194,13 @@ if (-not $NoFileReaders) {
     } else {
         Write-OK "installed (read_file now handles PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF)"
     }
+    Write-Step "Installing skill deps (reportlab for make-pdf)"
+    & $venvPython -m pip install --quiet reportlab
+    if ($LASTEXITCODE -ne 0) {
+        Write-WarnX "reportlab failed - make-pdf skill will need pip install on first use."
+    } else {
+        Write-OK "installed (make-pdf / make-pptx / make-xlsx skills ready)"
+    }
 } else {
     Write-Skip "file-reader deps (-NoFileReaders passed)"
 }
