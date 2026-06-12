@@ -2922,11 +2922,11 @@ class JarvisCLI:
             sent.append(last_user or {"role": "user",
                                       "content": "Continue using the results above."})
 
-        # 5) Proactive memory (Hermes pattern): surface the saved facts most
-        # relevant to THIS turn — fenced + authoritative — appended to the system
-        # message so the model actually uses what it knows instead of ignoring the
-        # passive index or re-asking/disk-scanning. Adds zero tokens when nothing
-        # matches; bounded otherwise. See memory.recall_for_prompt.
+        # 5) Proactive memory: surface the saved facts most relevant to THIS
+        # turn — fenced + authoritative — appended to the system message so
+        # the model actually uses what it knows instead of ignoring the
+        # passive index or re-asking/disk-scanning. Adds zero tokens when
+        # nothing matches; bounded otherwise. See memory.recall_for_prompt.
         from hearth import memory as _mem
         last_user_text = next((m.get("content", "") for m in reversed(sent)
                                if m.get("role") == "user" and isinstance(m.get("content"), str)), "")

@@ -2,11 +2,24 @@
 
 All notable changes to Hearth land here. Format vaguely follows [Keep a Changelog](https://keepachangelog.com); we don't sweat strict semver pre-1.0.
 
-## [Unreleased] — *"self-improving + cloud-capable + tools-on-every-model"*
+## v0.7 — 2026-06-12
 
-Headline: Hearth can now **write its own tools** (local, private), runs against **any cloud model** as an optional flex, the agentic loop is bounded by a **principled loop-guard** (outcome-hash tiered detection, not a magic depth number) — and as of v0.6 round 7, **tool calls work on every modern open model family** via a multi-family parser, the **CLI has full feature parity with the GUI's model picker** (no restart on swap), and the builtin llama-cpp server is **guaranteed to free its port + VRAM** on Hearth exit no matter how Hearth dies.
+First public release.
 
-### v0.8 (current — sub-agents + MCP client + auto-background)
+- Local-first by default. Runs against any OpenAI-compatible local server (LM Studio, Ollama, vLLM, llama.cpp). Cloud is optional: paste a key in Settings → Chat brain to switch to Gemini, OpenAI, Grok, or OpenRouter without restart.
+- 82 tools: files, shell, web search + fetch, browser driving, screenshot + vision, voice in/out, memory, reminders, image + video generation, MCP both directions, and more.
+- **Skills** — ask for a PDF / slide deck / spreadsheet and Hearth picks the right format and style, builds the file, opens it. Drop your own skill folders into the workspace and they're invokable by name. The agent can author new skills itself when it notices a workflow it ran twice.
+- **Sub-agents** — fork focused workers in parallel (sync or background). Each has its own tool allowlist and a tightened system prompt. Background workers surface their results in chat the moment they finish — no "are you done?" nudging.
+- **Voice** — Kokoro TTS streams sentence-by-sentence; faster-whisper STT with mid-sentence interrupt; optional wake-word.
+- **Real browser driving** — Hearth opens Chrome / Brave / Edge and you watch it click. Stop button cancels at any time.
+- **Self-curating memory** — per-fact markdown files with hot / cold archive + warm-back on recall. Cross-title dedup catches when the same fact is being saved under different names.
+- **Renameable agent** — change the name in Settings; the chat avatar, persona, and workspace folder all update.
+- **Migrate** from Hermes or OpenClaw memory layouts (API keys are never copied).
+- **MCP both ways** — Hearth consumes other MCP servers (drop an mcp.json in your workspace) and exposes its own tools as one.
+- **Reminders that fire tools, not just toasts** — schedule a reminder that also runs `web_search` or any other tool when it pops.
+- **Builds its own tools** when it hits a capability gap (validated, sandboxed, persisted across restarts).
+
+Windows-first at v0.7. Mac/Linux PRs welcome.
 
 - **Sub-agent fork system (`hearth/subagents.py`)** — `spawn_subagent(persona, prompt, mode='sync'|'background', max_turns)` runs a scoped LLM loop with a tight tool allowlist, a tightened system prompt (skips the main persona), and optional memory-aware briefing (auto `memory_recall` injection). 6 personas shipped: `researcher`, `coder`, `archivist`, `librarian`, `summarizer`, `pdf_coordinator` (map-reduce orchestrator that fans out N summarizer children). Wildcard `allowed_tools: ['*']` inherits the parent's full toolset. Background mode returns immediately with an `agent_id`; the child's result auto-arrives as a `<task-notification>` user-role message in the parent's next turn (no polling). JSONL sidechain transcript at `~/Jarvis/subagents/<id>.jsonl`. Depth-3 fork-bomb guard. Cost-class routing (`cheap` forces local even when parent is on cloud — fan-out of 50 chunks stays free). Sync subagents inherit the parent's cancel signal; background ones survive Ctrl-C deliberately. `/agent` slash + `spawn_subagent` / `list_subagent_personas` / `get_subagent_result` tools.
 - **MCP client runtime (`hearth/mcp_client.py`)** — Hearth now ALSO consumes other MCP servers. Drop a standard `mcp.json` at `~/Jarvis/mcp.json` (Settings → MCP servers → Edit, or `/mcp edit`). On launch, each server spawns as a child subprocess via stdio; its tools surface as `mcp_<server>_<tool>` in `to_openai_tools()`, callable by the model like any built-in. Calls route through the live session; results bounce back to the chat. End-to-end tested with an in-repo echo+add server (`scripts/mcp_test_server.py`). `/mcp` slash for status / edit-config / run-as-server.
