@@ -1096,7 +1096,19 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     # memory_recall to load any body that looks relevant to the current turn.
     {
         "name": "memory_save",
-        "description": "Save a long-term memory. USE THIS whenever you learn a fact about the user, their setup, their preferences, or the projects they're working on that's worth remembering across conversations. The index updates automatically.",
+        "description": (
+            "Save a long-term memory. USE THIS whenever you learn a fact "
+            "about the user, their setup, their preferences, or projects "
+            "worth remembering across conversations. The index updates "
+            "automatically. "
+            "IMPORTANT: this tool returns a '[possible-dup]' warning when "
+            "the new title shares key words with an existing memory (e.g. "
+            "'Favorite color' vs 'Color I like'). When you see that "
+            "warning, do NOT just leave both. Decide: (a) if it's an "
+            "UPDATE to the existing fact, call memory_forget on the old "
+            "slug; (b) if it's genuinely separate, retry with force=true "
+            "to confirm + dismiss the warning. Don't proliferate."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -1109,6 +1121,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "description": {"type": "string", "description": "One-line hook (~140 chars). This is what shows up in the always-loaded index, so make it specific."},
                 "body": {"type": "string", "description": "The actual memory content. Markdown OK. Include reasons / how-to-apply when relevant."},
                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags."},
+                "force": {"type": "boolean", "description": "Set true on retry after you've reviewed a [possible-dup] warning and confirmed this is genuinely a NEW fact, not an update to the flagged sibling."},
             },
             "required": ["title", "type", "description"],
         },
@@ -4217,6 +4230,8 @@ def _memory_save(p: Dict) -> str:
         description=p.get("description", ""),
         body=p.get("body", ""),
         tags=p.get("tags") or [],
+        sub_category=p.get("sub_category"),
+        force=bool(p.get("force")),
     )
 
 

@@ -165,9 +165,72 @@ def _index_entry_for_slug(lines: List[str], slug: str) -> Optional[int]:
     return None
 
 
+# Title-similarity stopwords. Kept small + obvious; the goal is to catch
+# "Favorite color" ~ "Color I like" ~ "What hue I prefer" without
+# false-matching every memory title that contains "my" or "the".
+_TITLE_STOPWORDS = frozenset({
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "my", "your", "our", "his", "her", "their", "its",
+    "i", "you", "we", "they", "he", "she", "it",
+    "to", "of", "in", "on", "for", "with", "about", "and", "or", "but",
+    "this", "that", "these", "those", "as", "at", "by", "from",
+    "what", "when", "where", "why", "how", "which",
+    "do", "does", "did", "have", "has", "had", "will", "would", "should",
+    "can", "could", "may", "might", "shall",
+})
+
+
+def _significant_words(text: str) -> List[str]:
+    """Lowercase + stopword-filter + length>=3 tokens from text."""
+    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return [t for t in tokens
+            if len(t) >= 3 and t not in _TITLE_STOPWORDS]
+
+
+def find_similar_titles(new_title: str, min_shared: int = 1,
+                         exclude_slug: str = "") -> List[Dict[str, str]]:
+    """Scan the memory index for entries whose titles share >= min_shared
+    significant (non-stopword, length>=4) words with new_title. Returns
+    [{slug, title, description, shared_words: [...]}, ...] sorted by
+    overlap count desc. Used by save() to surface possible duplicates
+    BEFORE the model accidentally proliferates 'Favorite color',
+    'Color I like', 'Preferred hue' as separate facts.
+
+    Threshold defaults to 1 (single shared content word) because real
+    dupes tend to share exactly one topic noun (color, address, name)
+    with the rest being filler. Stopwords + length>=4 keep false-positives
+    down. exclude_slug skips the entry being updated so 'update Favorite
+    Color' doesn't flag itself.
+    """
+    new_words = set(w for w in _significant_words(new_title) if len(w) >= 4)
+    if len(new_words) < min_shared:
+        return []
+    matches: List[Dict[str, str]] = []
+    for ln in _read_index_lines():
+        # Index lines look like: "- [Title](slug.md) — description"
+        m = re.match(r"^\s*-\s*\[(.+?)\]\(([^)]+?)\.md\)\s*[—-]?\s*(.*)$", ln)
+        if not m:
+            continue
+        title, slug, desc = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+        if exclude_slug and slug == exclude_slug:
+            continue
+        ex_words = set(w for w in _significant_words(title) if len(w) >= 4)
+        shared = new_words & ex_words
+        if len(shared) >= min_shared:
+            matches.append({
+                "slug": slug,
+                "title": title,
+                "description": desc,
+                "shared_words": sorted(shared),
+            })
+    matches.sort(key=lambda x: -len(x["shared_words"]))
+    return matches
+
+
 def save(title: str, mtype: str, description: str, body: str = "",
          tags: Optional[List[str]] = None,
-         sub_category: Optional[str] = None) -> str:
+         sub_category: Optional[str] = None,
+         force: bool = False) -> str:
     """Write a memory file + add/update the index entry.
 
     The optional sub_category groups facts within a type for the v0.6 memory
@@ -185,6 +248,28 @@ def save(title: str, mtype: str, description: str, body: str = "",
     mtype = canonical
     slug = _slug(title)
     path = _path_for(title)
+    # Possible-duplicate check — surface BEFORE writing so the model can
+    # back out + edit the existing fact instead of creating a parallel
+    # 'Favorite color' / 'Color I like' / 'Preferred hue' triplet. We
+    # still write (don't silently drop data), but the response tells the
+    # model which existing entry looks like a sibling so it can clean up.
+    # Skipped when force=True (model has reviewed and decided it's
+    # genuinely separate) and when an entry for this exact slug already
+    # exists (that's a normal update, not a new dup).
+    dup_warning = ""
+    if not force and not os.path.isfile(path):
+        sims = find_similar_titles(title, exclude_slug=slug)
+        if sims:
+            top = sims[0]
+            others = (f" (+{len(sims)-1} more)" if len(sims) > 1 else "")
+            dup_warning = (
+                f"\n[possible-dup] '{title}' shares {len(top['shared_words'])} "
+                f"key word(s) ({', '.join(top['shared_words'])}) with existing "
+                f"memory '{top['title']}' ({top['slug']}){others}. If this is "
+                f"an UPDATE to that fact, call memory_forget('{top['slug']}') "
+                f"or edit_file the existing one. If it's genuinely separate, "
+                f"call memory_save again with force=True to dismiss this."
+            )
     tags = tags or []
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
@@ -237,6 +322,8 @@ def save(title: str, mtype: str, description: str, body: str = "",
     msg = f"{verb} memory: {slug} ({mtype})"
     if warn:
         msg += f"  [{warn}]"
+    if dup_warning:
+        msg += dup_warning
     # Eviction pass: if the (type, sub_category) bucket got too big,
     # archive the coldest facts. Coldness combines recall_count with
     # last_recalled_at. Archived facts stay readable + warmable via
