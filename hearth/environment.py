@@ -1,9 +1,9 @@
 """Auto-discover the user's machine and seed it into local memory.
 
-The whole point: a capable agent (like Claude) walks into a session already
-knowing the hardware, the installed models, and where files live — so it never
-flails with slow recursive disk scans. A small local model has none of that
-context. So at first run (and on demand via the `learn_environment` tool / the
+The whole point: the agent walks into a session already knowing the hardware,
+the installed models, and where files live — so it never flails with slow
+recursive disk scans. A small local model has none of that context by default.
+So at first run (and on demand via the `learn_environment` tool / the
 CLI `/learn` command) we detect the environment ONCE, fast, and write it to
 ~/Jarvis/memory/ as normal memory facts. After that the model just *knows*.
 

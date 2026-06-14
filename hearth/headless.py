@@ -604,8 +604,8 @@ async def run_once(
                         return f"[earlier conversation summary unavailable: {type(_e).__name__}]"
                 # PASSIVE FACT EXTRACTION — runs BEFORE compact so the
                 # extractor sees the FULL chunk that's about to be summarized
-                # into oblivion. Hermes-pattern: at every safe boundary
-                # (compact, end-of-session), do one cheap LLM pass over recent
+                # into oblivion. At every safe boundary (compact,
+                # end-of-session), do one cheap LLM pass over recent
                 # turns and persist durable facts into memory.save(). The user
                 # doesn't have to say "remember that" — facts get saved
                 # automatically, with a joke/quote/violence filter on the

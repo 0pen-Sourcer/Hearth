@@ -128,6 +128,81 @@ doc.build(story, onFirstPage=_paint_bg, onLaterPages=_paint_bg)
 print("out.pdf")
 ```
 
+## The polish layer — what separates "decent" from "wow"
+
+A plain table + a default-blue matplotlib chart reads as auto-generated. The
+four things below are what make a PDF look hand-designed. Do them by default
+on any report/brief/deck-style doc — don't wait to be asked.
+
+### 1. Charts must MATCH the design (never raw matplotlib)
+
+Raw matplotlib (blue bars, black spines, cramped rotated labels colliding
+with the bars) is the #1 "AI made this" tell. Theme every chart to the
+palette and size it to fill the column. **Horizontal bars** (`barh`) are the
+default for category names — they never overlap or get cut off like rotated
+vertical labels do.
+
+```python
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+ACCENT = "#1F3A5F"; MUTED = "#888888"
+labels = ["Python","C","C++","Java","C#","JavaScript","Visual Basic","SQL","R","Rust"]
+vals   = [18.96, 10.77, 8.03, 7.90, 4.85, 3.04, 2.80, 1.77, 1.69, 1.26]
+
+fig, ax = plt.subplots(figsize=(7.0, 3.6), dpi=200)
+ax.barh(labels[::-1], vals[::-1], color=ACCENT, height=0.66)   # barh = no label collisions
+ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+ax.spines["left"].set_color(MUTED);  ax.spines["bottom"].set_color(MUTED)
+ax.tick_params(colors="#333333", labelsize=9)
+for i, v in enumerate(vals[::-1]):                              # value labels ON the bars
+    ax.text(v + 0.2, i, f"{v:.1f}%", va="center", fontsize=8, color="#333333")
+ax.set_xlabel("TIOBE rating (%)", fontsize=9, color=MUTED)
+fig.tight_layout()
+fig.savefig("chart.png", dpi=200, bbox_inches="tight")         # bbox_inches='tight' = nothing cut off
+plt.close(fig)
+# Embed sized to the text column (A4 minus margins ≈ 6.3"):
+story.append(Image("chart.png", width=6.3*inch, height=3.24*inch))
+```
+
+Rules: theme bars to ACCENT, despine top+right, `bbox_inches="tight"`,
+label values on the bars, size to the column width. If vertical bars are a
+must, rotate 30° with `ha="right"` AND add bottom margin — but prefer `barh`.
+
+### 2. Stat callout cards (instant visual hierarchy)
+
+A row of big-number cards beats a paragraph for key figures. One `Table` row,
+each cell a tinted box with a huge accent number + small caption:
+
+```python
+def stat_card(big, small):
+    return Table([[Paragraph(big, H_STAT)], [Paragraph(small, CAP)]],
+                 colWidths=[58*mm], rowHeights=[14*mm, 8*mm])
+cards = Table([[stat_card("18.96%","Python share"), stat_card("#12","Rust rank"),
+               stat_card("20+","search engines")]], colWidths=[60*mm]*3)
+cards.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),HexColor("#F2F4F8")),
+    ("BOX",(0,0),(-1,-1),0,white),("INNERGRID",(0,0),(-1,-1),6,white),
+    ("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(0,0),(-1,-1),"CENTER")]))
+```
+(`H_STAT` = 26pt bold ACCENT; `CAP` = 8pt MUTED, centered.)
+
+### 3. Icons / section markers
+
+Pure-python (no Node): draw a small accent shape as a section marker via a
+1-cell `Table` with a colored `BACKGROUND` + the heading beside it, or a
+tiny `reportlab.graphics` Drawing (circle/check/arrow). For RICH icons when
+Node is present, render `react-icons` → PNG (see the make-pptx skill's icon
+pipeline) and `Image()` them at 14-18px. At minimum: a 4mm accent square
+before each H2 so sections scan visually instead of being a prose wall.
+
+### 4. Density — never ship a half-empty page
+
+If a chart leaves 50% of a page blank, you laid it out wrong. Fill it: put
+the callout cards next to the chart (two-column `Table`), or move the chart
+up beside the table. Balance content across pages. A page that's 30% ink and
+70% white looks unfinished. Aim for even, magazine-like density.
+
 ## Color recipes (riff on these — don't reuse one for everything)
 
 - **Dark + crimson** (chaos, gaming, lifestyle): `BG=#000000  ACCENT=#DC143C  BODY=#E8E8E8`
@@ -151,6 +226,11 @@ unambiguous, use it.
   HexColor() needs the `#`, so reportlab IS fine).
 - Don't accent-stripe card edges. Use background tints or shadows.
 - Don't underline headings — whitespace separates sections.
+- Don't drop a raw default-matplotlib chart (blue bars, black box-spines,
+  rotated labels overlapping the bars). Theme it to the palette + use `barh`
+  (see the polish layer above). An off-theme chart wrecks the whole doc.
+- Don't leave a page more than ~50% empty. Fill it or rebalance — a chart
+  floating in white space looks unfinished.
 
 ## Hard rules — DO
 

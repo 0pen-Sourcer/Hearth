@@ -251,7 +251,7 @@ def save(title: str, mtype: str, description: str, body: str = "",
 
     The optional sub_category groups facts within a type for the v0.6 memory
     graph view. If omitted, a regex classifier picks one based on the
-    description+body text (Hermes Holographic pattern, zero LLM cost). The
+    description+body text (regex-based, zero LLM cost). The
     sub_category goes BOTH in the frontmatter (for the graph viz) AND as a
     `cat:<name>` tag (so recall_for_prompt's existing keyword scorer can
     surface it without schema changes)."""
