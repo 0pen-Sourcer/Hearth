@@ -1,8 +1,8 @@
 """Interactive browser control — Hearth's "AI web browser".
 
-This is the robust version of what Claude Computer-Use / OpenAI Operator do:
-NOT moving your physical mouse (fragile), but driving a real controlled
-Chromium via Playwright — navigate, read the rendered page, click links/
+Drives a real controlled Chromium via Playwright rather than moving the
+physical mouse (which is fragile and steals focus) — navigate, read the
+rendered page, click links/
 buttons, fill fields. The session PERSISTS across tool calls, so the agent can
 do multi-step browsing (search → click result → read → click again).
 

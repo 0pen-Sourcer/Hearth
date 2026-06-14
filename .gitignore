@@ -30,7 +30,7 @@ logs/
 *.onnx
 *.bin
 
-# ---- Reference / scavenge repos (Ishant keeps these locally for inspiration) ----
+# ---- Local-only reference repos (kept beside the project, not part of it) ----
 # NOT ours to redistribute — these must NEVER be committed/published.
 clawdbot-main/
 openhuman-main/
@@ -103,7 +103,7 @@ bench/reports/
 bench/
 
 # ---- Internal working / strategy docs (NOT part of the public product) ----
-# Personal context, launch strategy, influencer lists, scavenge notes, internal
+# Personal context, launch strategy, and internal
 # QA prompts. These contain personal data and/or marketing strategy that should
 # never be public. The public docs are README / CONTRIBUTING / SECURITY / the
 # product docs under docs/ (ARCHITECTURE, USER_GUIDE, RUNBOOK, WAKE_WORD, SUPPORT).
