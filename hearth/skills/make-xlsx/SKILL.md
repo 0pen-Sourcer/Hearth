@@ -26,16 +26,17 @@ When you `write_file`, escape tabs literally in the `content` arg:
 
 ## Steps
 
-1. `write_file` the TSV to `<workspace>/generated/<slug>.tsv`.
+1. `write_file` the TSV to `<workspace>/.build/<slug>.tsv` (scratch).
 2. `run_command`:
    ```
    python <hearth>/skills/make-xlsx/scripts/build_xlsx.py \
-     --tsv <workspace>/generated/<slug>.tsv \
-     --out <workspace>/generated/<slug>.xlsx \
+     --tsv <workspace>/.build/<slug>.tsv \
+     --out <workspace>/XLSX/<slug>.xlsx \
      --sheet "<sheet name>"
    ```
 3. Script prints the output path on stdout.
 4. **Open it for them.** `run_command('powershell -Command "Invoke-Item ''<full path>''"')` so Excel pops it open.
+5. **Delete the TSV scratch** via `delete_path` on `<workspace>/.build/<slug>.tsv` after the .xlsx exists.
 
 ## Style defaults
 - Header row bold + freeze pane

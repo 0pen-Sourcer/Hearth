@@ -13,7 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/local--first-yes-success?style=for-the-badge" alt="Local-first">
   <img src="https://img.shields.io/badge/python-3.11%2B-yellow?style=for-the-badge" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/platform-Windows-blue?style=for-the-badge" alt="Windows">
+  <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20Mac%20%C2%B7%20Linux-blue?style=for-the-badge" alt="Windows, Mac, Linux">
 </p>
 
 <p align="center">
@@ -92,19 +92,30 @@ git clone https://github.com/0pen-sourcer/hearth.git
 cd hearth
 
 # 2. Install. Pick your LLM path:
-.\install.ps1                           # recommended: bring your own (LM Studio, Ollama, vLLM, llama.cpp, cloud)
-.\install.ps1 -BuiltinLLM cuda          # experimental: NVIDIA GPU - Hearth runs its OWN llama.cpp server
-.\install.ps1 -BuiltinLLM cpu           # experimental: no GPU - CPU-only built-in server
+.\install.ps1                           # bring your own server (LM Studio, Ollama, vLLM, llama.cpp, or a cloud key)
+.\install.ps1 -BuiltinLLM cuda          # NVIDIA GPU: Hearth bundles + runs its own llama.cpp server, no external app
+.\install.ps1 -BuiltinLLM cpu           # CPU-only: same, no GPU required
 
 # 3. Launch
 .\hearth.bat
 ```
 
+**Mac / Linux:** Hearth is Python — it runs on macOS and Linux too. The `.ps1` installer is Windows-only for now (it bootstraps a venv + installs deps); on Mac/Linux you can install the deps by hand:
+
+```bash
+git clone https://github.com/0pen-sourcer/hearth.git && cd hearth
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+chmod +x hearth.sh && ./hearth.sh
+```
+
+Tray icon + voice loop are wired for all 3 OSes. The bundled installer + .exe distribution are still Windows-first; PRs welcome to formalize a `.sh` installer and the Mac/Linux build path.
+
 **First-run onboarding** is a 7-step card overlay — pick a brain (local server or cloud key), tune voice, personalize, optionally import memory from a previous agent (Hermes / OpenClaw — auto-skipped if neither is installed), you're in.
 
 Hearth auto-detects **LM Studio** (port 1234), **Ollama** (11434), or **llama.cpp** (8080) at boot — no env config needed. Or open **Settings → Chat brain** to plug in **Gemini / Grok / OpenAI / OpenRouter** with your API key. Cloud and local are first-class; switch any time without restarting.
 
-> **Experimental: built-in llama.cpp server.** If you pass `-BuiltinLLM cuda` / `cpu` at install, Hearth bundles its own llama-cpp-python server, browses Hugging Face for a model that fits your VRAM, and runs it without LM Studio or Ollama. It works, but tool-call reliability on small models is still rough compared to LM Studio's chat template handling — recommended for v0.7. If you're launching today, use LM Studio with a tool-calling model (Harmonic-Hermes-9B is the gold standard).
+> **Built-in llama.cpp.** `-BuiltinLLM cuda` / `cpu` at install makes Hearth ship + run its own llama-cpp-python server with a tool-calling model auto-picked for your VRAM. If you'd rather use LM Studio or Ollama, skip the flag — Hearth detects them either way.
 
 Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 
@@ -137,7 +148,7 @@ Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 
 **Plug into other MCP servers, expose Hearth as one.** Drop a standard `mcp.json` in your workspace, point at any MCP server (filesystem, git, postgres, whatever), and Hearth surfaces those tools alongside its own. Going the other way, Hearth's own toolset is exposed to any MCP-aware client. Same protocol both directions.
 
-**Skills — say what you want, get a real document.** Ask for a deck, a brief, a spreadsheet, a one-pager — Hearth picks the right format, picks a style that fits the topic, builds the file, and opens it. PDFs, slide decks, Excel sheets. You can drop your own skill folders into the workspace and they're invokable by name on next launch.
+**Skills — say what you want, get a real document.** Ask for a deck, a brief, a spreadsheet, a one-pager — Hearth picks the right format, picks a style that fits the topic, writes a fresh build script tailored to YOUR request (no rigid template), runs it, and opens the result. PDFs land in `~/Jarvis/PDFs/`, decks in `~/Jarvis/PPTX/`, sheets in `~/Jarvis/XLSX/` — separated, not dumped in one pile. You can drop your own skill folders into the workspace and they're invokable by name on next launch.
 
 **Background workers that come back on their own.** Tell Hearth to research three things at once, or summarize a 500-page PDF while you keep chatting. It spawns the work in the background, names each worker, and surfaces the results in your chat the moment they're done — no "are you finished yet?" needed. Each worker has its own scoped toolset so a researcher can't write files and a summarizer can't run shell commands.
 

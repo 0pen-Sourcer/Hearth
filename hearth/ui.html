@@ -2455,7 +2455,7 @@
       <span class="brand-sub" id="brand-sub">· local</span>
     </div>
 
-    <div class="model-picker" title="LM Studio model">
+    <div class="model-picker" id="model-picker-tip" title="Active model">
       <span class="model-state" id="model-state"></span>
       <select id="model-select"><option value="">(no model loaded)</option></select>
       <button class="btn-mini danger" id="btn-eject" title="Unload model">
@@ -2692,20 +2692,18 @@
         <button id="btn-models-rescan" title="Rescan local model catalog (LM Studio, Ollama, HF cache, Downloads)" style="margin-left:8px;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);cursor:pointer;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         </button>
-        <button id="btn-models-download" title="Download a model — opens the download tray with progress for any in-flight transfers" style="margin-left:6px;position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);cursor:pointer;">
+        <button id="btn-models-download" title="Find + download a model from Hugging Face" style="margin-left:6px;position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);cursor:pointer;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          <span id="btn-models-download-badge" hidden style="position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;background:var(--accent);color:var(--bg-0);border-radius:9px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"></span>
+          <span id="btn-models-download-badge" hidden style="position:absolute;top:-3px;right:-3px;width:8px;height:8px;background:var(--accent);border-radius:50%;border:1.5px solid var(--bg-1);"></span>
         </button>
       </div>
       <div class="models-sub-nav">
         <button class="models-tab active" data-tab="mine">My Models <span class="count" id="tab-mine-n">0</span></button>
         <button class="models-tab" data-tab="discover">Discover</button>
-        <button class="models-tab" data-tab="picks">Quick picks <span class="count">3</span></button>
       </div>
       <div class="models-body">
         <div class="models-pane" data-pane="mine" id="models-pane-mine"></div>
         <div class="models-pane" data-pane="discover" id="models-pane-discover" hidden></div>
-        <div class="models-pane" data-pane="picks" id="models-pane-picks" hidden></div>
         <div class="progress-row" id="models-dl" hidden>
           <div class="label" id="models-dl-label"></div>
           <div class="progress-bar"><div id="models-dl-bar"></div></div>
@@ -2762,10 +2760,10 @@
         <div class="field">
           <div class="label">
             <div class="name">Where Hearth's AI lives</div>
-            <div class="hint" id="brain-where-hint">Local (LM Studio / Ollama / built-in). For full control, open the Models tab.</div>
+            <div class="hint" id="brain-where-hint">Local-first (LM Studio / Ollama / built-in). For full control, open the Models tab.</div>
           </div>
           <select id="setting-brain-mode">
-            <option value="local">On this PC (recommended)</option>
+            <option value="local">Local-first — on this PC (recommended)</option>
             <option value="gemini">Google — Gemini</option>
             <option value="openai">OpenAI — GPT</option>
             <option value="grok">xAI — Grok</option>
@@ -3243,7 +3241,7 @@
         <p class="ob-sub">A local-first AI that actually does things on your PC. I open apps, find files,
           read documents, browse the web, and never send a byte to the cloud unless you tell me to.
           A few quick steps and we're rolling.</p>
-        <div class="ob-tipline">Local stays the default. You can wire a cloud key on the next screen too.</div>
+        <div class="ob-tipline">Local stays the default. You can wire a cloud key on the next screen too. Not into the name <b>Jarvis</b>? Pick anything you like later in Settings → Behavior → Agent name (Cortana, Friday, Athena, anything) — the avatar, voice and folder all rename with it.</div>
       </div>
 
       <!-- ---- step 2: pick a brain ---- -->
@@ -3284,7 +3282,7 @@
         <div class="ob-section">
           <div class="ob-label">Pick a path</div>
           <select id="ob-brain-where" class="ob-select">
-            <option value="local">Stay local on this PC (default)</option>
+            <option value="local">Local-first — stay on this PC (default)</option>
             <option value="gemini">Cloud — Google Gemini</option>
             <option value="openai">Cloud — OpenAI GPT</option>
             <option value="grok">Cloud — xAI Grok</option>
@@ -4078,6 +4076,7 @@ function renderChat() {
     // bubble (under the "jarvis" header) instead of floating between the user
     // and assistant headers, where they visually look like they belong to YOU.
     const msgDiv = renderMessage(m);
+    if (!msgDiv) continue;  // silent synthetic message (auto-fold)
     body.appendChild(msgDiv);
     if (m.role === 'assistant' && Array.isArray(m.events)) {
       let thinkBuf = '';
@@ -4159,8 +4158,11 @@ async function pollSubagentCompletions() {
     // this prompt, so the model sees the results + responds — without
     // the user having to type "done?" or anything else.
     if (newCount > 0 && !STATE.streaming && activeConvo()) {
-      send('(synthesize from the subagent results above — they just arrived)',
-           '(auto: subagent results arrived)');
+      // Silent send — the synthetic prompt doesn't render in chat. The
+      // model just speaks (the assistant bubble appears) and folds the
+      // subagent results in naturally. No fake "user said" turn.
+      send('Subagents just returned with results — synthesize what they found and present it.',
+           null, { silent: true });
     }
   } catch {}
 }
@@ -4177,6 +4179,9 @@ function _agentInitial() {
 }
 
 function renderMessage(m) {
+  // Silent user turns (synthetic auto-fold prompts) stay in history for the
+  // LLM but never render — model just speaks, no fake "you" bubble.
+  if (m && m.silent) return null;
   const div = document.createElement('div');
   div.className = `msg ${m.role}`;
   const agentInit = _agentInitial();
@@ -4268,10 +4273,10 @@ function makeToolCard(name, args) {
   div.querySelector('.t-head').addEventListener('click', () => div.classList.toggle('open'));
   return { div, body: div.querySelector('.t-body'), ms: div.querySelector('.t-ms') };
 }
-// Subagent completion card — visually matches the regular tool pill
-// (chevron + name + meta + expandable body) so the chat doesn't have
-// two different completion UIs. The body holds the FULL agent result
-// text, not just a 200-char snippet; user can expand to read everything.
+// Subagent completion card — same shape as a tool pill. Body shows the
+// FULL agent result + a "tools used" footer so the user can audit what
+// the subagent actually did (web_search → which URLs, run_command →
+// which command, etc.).
 function makeSubagentCard(notif) {
   const div = document.createElement('div');
   div.className = 'tool subagent';
@@ -4281,21 +4286,34 @@ function makeSubagentCard(notif) {
   const elapsed = (typeof notif.elapsed_s === 'number')
     ? `${Math.round(notif.elapsed_s)}s`
     : '';
-  const headerArgs = label.trim() ? esc(label.trim()) : esc(status);
+  const tools = Array.isArray(notif.used_tools) ? notif.used_tools : [];
   div.innerHTML = `
     <div class="t-head">
       <svg class="t-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       <svg class="t-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       <span class="t-name">${esc(persona)}${esc(label)}</span>
-      <span class="t-args">${esc(status)}</span>
+      <span class="t-args">${esc(status)}${tools.length ? ` · ${tools.length} tool call${tools.length===1?'':'s'}` : ''}</span>
       <span class="t-ms">${esc(elapsed)}</span>
     </div>
     <div class="t-body"></div>
   `;
   const bodyEl = div.querySelector('.t-body');
-  // Full result text, not the truncated summary — user can scroll.
   bodyEl.textContent = notif.result_text || notif.summary || '(no output)';
-  // Default to open so the user sees the result without clicking.
+  // Tools-used footer — pulls out web_search queries, web_fetch URLs,
+  // and run_command first-args so the user can see exactly what the
+  // subagent did, not just the final answer.
+  if (tools.length) {
+    const sep = document.createElement('div');
+    sep.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);font-size:11px;color:var(--fg-faint);';
+    const items = tools.map(t => {
+      if (typeof t === 'string') return esc(t);
+      const name = t.name || 'tool';
+      const arg = t.args ? Object.values(t.args).find(v => typeof v === 'string') : '';
+      return arg ? `<b>${esc(name)}</b> · <span style="opacity:.8">${esc(String(arg).slice(0,80))}</span>` : `<b>${esc(name)}</b>`;
+    }).join('<br>');
+    sep.innerHTML = `<div style="margin-bottom:4px;color:var(--fg-dim);font-weight:600">tools used:</div>${items}`;
+    bodyEl.appendChild(sep);
+  }
   div.classList.add('open');
   div.querySelector('.t-head').addEventListener('click', () => div.classList.toggle('open'));
   return div;
@@ -4527,9 +4545,21 @@ async function refreshModels() {
         }
       }
     }
-    STATE.loadedModel = loadedModel || null;
-    sel.value = loadedModel ? loadedModel.id : (prev || '');
-    $('model-state').classList.toggle('loaded', !!loadedModel);
+    // Cloud brain: the user's picked model_id is authoritative. The
+    // refresh poll would otherwise overwrite their selection every 9s
+    // with whatever Grok's /v1/models lists first (typically grok-4.20).
+    const _CLOUD = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
+    const _prov  = (STATE.settings && STATE.settings.llm_provider || '').toLowerCase();
+    const _userPicked = STATE.settings && STATE.settings.llm_model;
+    if (_CLOUD.has(_prov) && _userPicked) {
+      STATE.loadedModel = { id: _userPicked, state: 'loaded' };
+      sel.value = _userPicked;
+      $('model-state').classList.add('loaded');
+    } else {
+      STATE.loadedModel = loadedModel || null;
+      sel.value = loadedModel ? loadedModel.id : (prev || '');
+      $('model-state').classList.toggle('loaded', !!loadedModel);
+    }
     updateStatus();
   } catch (e) { console.error('refreshModels', e); }
 }
@@ -4546,6 +4576,35 @@ $('model-select').addEventListener('change', async (e) => {
     ? id.slice('disk::'.length).split(/[\/\\]/).pop()
     : id;
   const prevLoaded = STATE.loadedModel;
+  // Cloud short-circuit: when the active brain is a cloud provider, the
+  // sticker dropdown should just switch the active model id — there is
+  // no local load to perform. Without this guard, the GUI fires
+  // /api/models/load (which used to trigger `lms load grok-4.3` and
+  // confused both the user and LM Studio). Now: zero-friction swap.
+  const _CLOUD = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
+  const _prov  = (STATE.settings && STATE.settings.llm_provider || '').toLowerCase();
+  if (_CLOUD.has(_prov)) {
+    STATE.loadedModel = { id: displayId, state: 'loaded' };
+    $('st-model').textContent = displayId.split(/[\/\\]/).pop();
+    $('model-state').classList.add('loaded');
+    $('model-state').classList.remove('loading');
+    try {
+      // Persist BOTH locally and remotely so the 9s refresh poller
+      // doesn't overwrite the user's pick with the provider's default.
+      STATE.settings = Object.assign({}, STATE.settings || {}, { llm_model: displayId });
+      await api('/api/settings', {
+        method: 'POST', headers: {'Content-Type':'antml/json'.replace('antml','application')},
+        body: JSON.stringify({ llm_model: displayId }),
+      });
+    } catch {}
+    // New model id may have a different context window (e.g. grok-4.3 = 1M
+    // vs grok-4.20 = 256K). Pull the live budget so the bottom-bar ctx
+    // pill updates immediately, not on the next chat turn.
+    try { await refreshCtxBudget(); } catch {}
+    setState('ready');
+    toast('Switched', `${displayId} (${_prov})`, 'ok', 1800);
+    return;
+  }
   $('model-state').classList.add('loading');
   $('model-state').classList.remove('loaded');
   // Cleaner labels — "starting server" was misleading when the server was
@@ -4719,26 +4778,26 @@ function setState(label) {
 function updateStatus() {
   if (STATE.loadedModel) {
     $('st-model').textContent = STATE.loadedModel.id.split(/[\/\\]/).pop();
-    // ctx pill — fall back to max_context_length when loaded length isn't
-    // exposed (some endpoints only set one). If both are missing, hold
-    // whatever was there rather than blanking; explicit reset only when
-    // there is genuinely no model loaded.
-    const ctx = STATE.loadedModel.loaded_context_length
-              || STATE.loadedModel.max_context_length;
-    if (ctx) {
-      $('st-ctx').textContent = (ctx >= 1024)
-        ? `${(ctx/1024).toFixed(0)}K`
-        : `${ctx}`;
-    }
-  } else if (STATE._ctxBudget && STATE._ctxBudget.total) {
-    // Cloud brain: no loadedModel object (that's local-only), but we DO
-    // have a context budget from /api/context-budget — show that so the
-    // user sees "200K" on Grok instead of a misleading "—" or "8K".
-    const ctx = STATE._ctxBudget.total;
+  }
+  // ctx pill — check the model's reported context FIRST, then fall back
+  // to /api/context-budget. The bug before: cloud brains set
+  // STATE.loadedModel without any *_context_length field, and the
+  // _ctxBudget fallback only ran when loadedModel was null — so the
+  // pill stayed blank. Now both code paths are evaluated.
+  let ctx = 0;
+  if (STATE.loadedModel) {
+    ctx = STATE.loadedModel.loaded_context_length
+       || STATE.loadedModel.max_context_length
+       || 0;
+  }
+  if (!ctx && STATE._ctxBudget && STATE._ctxBudget.total) {
+    ctx = STATE._ctxBudget.total;
+  }
+  if (ctx) {
     $('st-ctx').textContent = (ctx >= 1024)
       ? `${(ctx/1024).toFixed(0)}K`
       : `${ctx}`;
-  } else {
+  } else if (!STATE.loadedModel) {
     $('st-ctx').textContent = '—';
   }
 }
@@ -4872,11 +4931,14 @@ function regenerateFromMessage(assistantMsg) {
   send(lastUser.content, lastUser.displayContent || null);
 }
 
-async function send(forced = null, displayAs = null) {
+async function send(forced = null, displayAs = null, opts = {}) {
   // `forced` is the FULL prompt sent to the LLM (carries the path, the tool
   // instruction, etc.). `displayAs` is the OPTIONAL short version shown in
   // the chat bubble. Lets file uploads send "view_image at C:\...\foo.png"
   // to the model while the user just sees a clean "📎 foo.png" chip.
+  // `opts.silent=true` — don't render a user bubble at all (used by the
+  // subagent autofold: model just speaks, no fake "user" turn appears).
+  const _silent = !!opts.silent;
   let prompt = (forced ?? input.value).trim();
   // Weave pending attachments (from the attach button or clipboard paste)
   // into the prompt — the user's typed text comes first, then a hidden
@@ -4928,6 +4990,7 @@ async function send(forced = null, displayAs = null) {
   // into the chat surface.
   const userMsg = { role: 'user', content: prompt };
   if (displayAs && displayAs !== prompt) userMsg.displayContent = displayAs;
+  if (_silent) userMsg.silent = true;  // skip rendering this bubble
   c.messages.push(userMsg);
   touch(c);
 
@@ -4979,19 +5042,22 @@ async function send(forced = null, displayAs = null) {
   // Streaming TTS buffer
   let ttsBuffer = '';
   let ttsTimer = null;
-  // ANY clause break (period, question, exclam, comma, semicolon, colon) - so
-  // the first audio chunk plays as soon as the model finishes its first PHRASE
-  // (~25 chars), not its first full sentence (~40 chars + period). On a fast
-  // local model this cuts perceived "I stop talking - AI starts talking" by
-  // 1-2 full seconds. Subsequent chunks still ride this same loose threshold.
-  const FLUSH_AT_CLAUSE = /[.!?,;:](\s|$)/;
+  let ttsFirstFlushDone = false;  // first flush of this turn fires earlier
+  // ANY clause break (period, question, exclam, comma, semicolon, colon, dash).
+  // Plain commas + colons are common after short openers like "Got it," or
+  // "Okay," — so the first phrase speaks while the rest of the answer still
+  // streams. First flush has a lower char minimum (12) so the very first
+  // utterance hits speakers almost instantly; subsequent flushes use 25 so
+  // we don't shatter every long sentence into a stutter.
+  const FLUSH_AT_CLAUSE = /[.!?,;:—–-](\s|$)/;
   function maybeFlushTTS(force = false) {
     // TTS auto-streaming ONLY in voice mode. In chat view, users get the
     // per-message "speak" button instead - no surprise audio.
     if (!voiceModeOn) { ttsBuffer = ''; return; }
     if (!STATE.settings.voice_tts && !voiceModeOn) { ttsBuffer = ''; return; }
     if (!ttsBuffer) return;
-    if (force || (ttsBuffer.length >= 25 && FLUSH_AT_CLAUSE.test(ttsBuffer))) {
+    const minChars = ttsFirstFlushDone ? 25 : 12;
+    if (force || (ttsBuffer.length >= minChars && FLUSH_AT_CLAUSE.test(ttsBuffer))) {
       let cut = ttsBuffer.length;
       if (!force) {
         // Find LAST clause break in buffer so we don't cut mid-phrase
@@ -5003,7 +5069,10 @@ async function send(forced = null, displayAs = null) {
       }
       const chunk = ttsBuffer.slice(0, cut).trim();
       ttsBuffer = ttsBuffer.slice(cut);
-      if (chunk) speakText(chunk).catch(() => {});
+      if (chunk) {
+        speakText(chunk).catch(() => {});
+        ttsFirstFlushDone = true;
+      }
     }
   }
 
@@ -5107,7 +5176,7 @@ async function send(forced = null, displayAs = null) {
       assistantMsg.events.push({ kind: 'subagent_done',
         persona: ev.persona, name: ev.name, status: ev.status,
         summary: ev.summary, result_text: ev.result_text,
-        elapsed_s: ev.elapsed_s });
+        elapsed_s: ev.elapsed_s, used_tools: ev.used_tools || [] });
       return;
     }
 
@@ -6776,6 +6845,20 @@ async function refreshSettings() {
     // saves the rename in Settings.
     const _inp = document.getElementById('input');
     if (_inp) _inp.placeholder = `Message ${_agentName()}…`;
+    // Sync the sticker tooltip with the actual brain. "LM Studio model"
+    // hardcoded was misleading on cloud — switched users away from
+    // clicking the sticker thinking it'd swap their Grok model.
+    const _picker = document.getElementById('model-picker-tip');
+    if (_picker) {
+      const provLabel = {
+        local: 'Local model', lmstudio: 'LM Studio model', builtin: 'Built-in model',
+        grok: 'xAI / Grok model', xai: 'xAI / Grok model',
+        gemini: 'Gemini model', google: 'Gemini model',
+        openai: 'OpenAI model', anthropic: 'Anthropic model',
+        openrouter: 'OpenRouter model', custom: 'Custom-endpoint model',
+      }[(s.llm_provider || '').toLowerCase()] || 'Active model';
+      _picker.title = `${provLabel} — click to switch`;
+    }
     // Brain might have just changed — pull the live context budget so the
     // ring + bottom bar reflect the new brain immediately (Grok 200K vs
     // builtin 8K). Don't await — settings render shouldn't block on it.
@@ -8019,11 +8102,11 @@ async function renderServerSetup() {
     opts.innerHTML = `
       <div class="welcome-links">
         <a href="https://lmstudio.ai/" target="_blank" rel="noopener" class="welcome-link">
-          <b>LM Studio</b><span>Beginner-friendly desktop app. GUI + GPU. Recommended.</span></a>
+          <b>LM Studio</b><span>Beginner-friendly desktop app. GUI + GPU.</span></a>
         <a href="https://ollama.com/" target="_blank" rel="noopener" class="welcome-link">
-          <b>Ollama</b><span>Lightweight CLI. <code>ollama pull harmonic-hermes</code>.</span></a>
+          <b>Ollama</b><span>Lightweight CLI.</span></a>
       </div>
-      <div class="welcome-tip">Or make Hearth self-contained (no external apps): <code>pip install llama-cpp-python</code> in the venv and reload this page - Hearth will offer to download a model right here.</div>
+      <div class="welcome-tip">Already running a server? Hearth auto-detects it. Want to pick a model right here? Open the <b>Models</b> tab → <b>Discover</b> to browse Hugging Face and download one that fits your VRAM.</div>
     `;
   }
 }
@@ -8387,9 +8470,8 @@ async function refreshModelsView() {
   // Disk-count badge on the "My Models" tab
   $('tab-mine-n').textContent = (s.disk_models || []).length;
 
-  // Render all three panes (cheap — none has a network call beyond status)
+  // Render panes (cheap — none has a network call beyond status)
   modelsRenderMine();
-  modelsRenderPicks();
   if (_modelsState.tab === 'discover') modelsRenderDiscover();
 }
 
@@ -8419,7 +8501,6 @@ function _renderModelsHeader(s) {
 }
 function _renderModelsPanes(s) {
   modelsRenderMine();
-  modelsRenderPicks();
   if (_modelsState.tab === 'discover') modelsRenderDiscover();
 }
 
@@ -8533,6 +8614,11 @@ function modelsRenderMine() {
 }
 
 function modelsRenderPicks() {
+  // Quick Picks tab was removed. Function kept as a no-op so any cached
+  // callsite doesn't blow up. Use the Discover tab to browse models.
+  return;
+  // unreachable but preserved so the legacy renderer below doesn't error
+  // out on the missing pane container.
   const s = _modelsState.status || {};
   const pane = $('models-pane-picks');
   const picks = s.picks || [];
@@ -9030,7 +9116,9 @@ document.querySelectorAll('.models-tab').forEach(t => {
       } catch (e) { toast('Rescan failed', e.message, 'err'); }
     });
   }
-  // Download button — jump to Discover tab so user can pick a repo.
+  // Download button — jump to Discover tab so user can pick a repo. The
+  // badge dot only appears when there's an ACTIVE download in flight
+  // (the models-dl progress-row is visible) — never a constant decoration.
   const dlBtn = $('btn-models-download');
   if (dlBtn) {
     dlBtn.addEventListener('click', () => {
@@ -9041,6 +9129,15 @@ document.querySelectorAll('.models-tab').forEach(t => {
       const _inp = $('models-search');
       if (_inp) _inp.focus();
     });
+    // Sync the badge dot to the actual download-in-progress signal.
+    // Polls every 2s — cheap, and the only DOM read is `.hidden`.
+    setInterval(() => {
+      const badge = $('btn-models-download-badge');
+      const dlRow = $('models-dl');
+      if (!badge || !dlRow) return;
+      const active = !dlRow.hidden;
+      badge.hidden = !active;
+    }, 2000);
   }
 }
 

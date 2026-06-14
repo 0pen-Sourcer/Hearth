@@ -503,7 +503,10 @@ async def _run_subagent_async(
                 args = json.loads(tc.function.arguments or "{}")
             except Exception:
                 args = {}
-            used.append(name)
+            # Record name + args so the parent's completion card can show
+            # what each subagent actually did (web_search → which query,
+            # web_fetch → which URL, run_command → which cmd).
+            used.append({"name": name, "args": args})
             try:
                 result = execute_tool(name, args)
                 content = str(result) if result is not None else ""

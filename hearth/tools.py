@@ -1061,8 +1061,25 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "screenshot",
-        "description": "Capture the screen, save to workspace/screenshots/, return the path.",
-        "parameters": {"type": "object", "properties": {}},
+        "description": (
+            "Capture the screen, save to workspace/screenshots/, return "
+            "the path. When the user asks for a screenshot of a SPECIFIC "
+            "app/window, ALWAYS pass `delay_s: 3` (or up to 10) and tell "
+            "them in your reply 'switch to the window now, capturing in "
+            "Ns'. Without the delay, the screenshot captures Hearth "
+            "itself because the chat was in focus when they sent the "
+            "prompt. Skip the delay only when they explicitly want THIS "
+            "Hearth window captured (e.g. 'screenshot what you just did')."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "delay_s": {"type": "number", "description":
+                    "Seconds to wait before capturing (0-10). Use 3-5 "
+                    "when the user wants a different app captured so "
+                    "they can switch to it. Default 0 (immediate)."},
+            },
+        },
     },
     {
         "name": "view_image",
@@ -1097,17 +1114,26 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "memory_save",
         "description": (
-            "Save a long-term memory. USE THIS whenever you learn a fact "
-            "about the user, their setup, their preferences, or projects "
-            "worth remembering across conversations. The index updates "
-            "automatically. "
-            "IMPORTANT: this tool returns a '[possible-dup]' warning when "
-            "the new title shares key words with an existing memory (e.g. "
-            "'Favorite color' vs 'Color I like'). When you see that "
-            "warning, do NOT just leave both. Decide: (a) if it's an "
-            "UPDATE to the existing fact, call memory_forget on the old "
-            "slug; (b) if it's genuinely separate, retry with force=true "
-            "to confirm + dismiss the warning. Don't proliferate."
+            "Save a long-term memory. Use this when you learn a fact about "
+            "the user, their setup, their preferences, or projects worth "
+            "remembering across conversations. The index updates "
+            "automatically.\n\n"
+            "**HARD RULE — if the response contains a `[possible-dup]` "
+            "line, STOP and act on it before moving on.** That warning "
+            "means an existing memory shares topic words with this new "
+            "one. You MUST do exactly ONE of:\n"
+            "  (a) memory_forget(<flagged-slug>) THEN tell the user "
+            "      what you consolidated and why.\n"
+            "  (b) edit_file the existing memory in place to absorb the "
+            "      new fact (use the slug+path from the warning).\n"
+            "  (c) memory_save again with the SAME args plus "
+            "      `force=true` if the new fact is genuinely independent "
+            "      of the flagged one.\n"
+            "Do NOT just call memory_save a second time with the same "
+            "title (that produces an 'updated memory' which suppresses "
+            "the warning but leaves the sibling untouched — exactly the "
+            "proliferation the warning is preventing). Do NOT tell the "
+            "user 'Saved.' and leave the duplicate to rot."
         ),
         "parameters": {
             "type": "object",
@@ -4158,14 +4184,25 @@ def _screenshot(p: Dict) -> str:
         from PIL import ImageGrab  # type: ignore
     except ImportError:
         return "Error: needs Pillow. Run: pip install pillow"
+    # Optional delay so the user can switch to the window they want
+    # captured before the shutter fires. Without this, the screenshot
+    # almost always captures Hearth itself (the chat is in focus when
+    # they typed the prompt). Capped at 10s so the model can't stall
+    # the agent loop.
+    try:
+        delay = max(0.0, min(10.0, float(p.get("delay_s") or 0)))
+    except (TypeError, ValueError):
+        delay = 0.0
+    if delay > 0:
+        import time as _t
+        _t.sleep(delay)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = os.path.join(SHOTS_DIR, f"shot_{ts}.png")
     img = ImageGrab.grab()
     img.save(out)
-    # Strong directive in the tool result — small models drop the path and
-    # yield; making the next action obvious in the result text fixes that.
+    delay_note = (f" (waited {delay:.0f}s before capture)" if delay > 0 else "")
     return (
-        f"Saved: {out} ({img.size[0]}x{img.size[1]})\n"
+        f"Saved: {out} ({img.size[0]}x{img.size[1]}){delay_note}\n"
         f"NEXT STEP: if the user asked you to DESCRIBE / TELL THEM WHAT'S "
         f"ON the screen, call view_image with path='{out}' RIGHT NOW in "
         f"this same turn — don't stop here. If they asked you to SHOW or "
