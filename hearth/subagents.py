@@ -137,6 +137,34 @@ def drain_pending_notifications() -> List[Dict[str, Any]]:
         return out
 
 
+def enqueue_notification(*, source: str, name: str, status: str,
+                         result_text: str, summary: str = "",
+                         elapsed_s=None) -> Dict[str, Any]:
+    """Enqueue a completion notification from a NON-subagent background
+    source (e.g. a fired action-reminder) onto the same queue the chat
+    surfaces drain each turn. Lets any background producer surface its
+    result in chat as a <task-notification>, not just a toast.
+
+    `source` fills the persona slot ('reminder'), `name` the label
+    (the reminder text). `result_text` is the full tool output the model
+    relays; `summary` is the short heads-up the GUI idle banner shows."""
+    notif = {
+        "agent_id": "",
+        "persona": source,
+        "name": name or "",
+        "status": status,
+        "summary": (summary or result_text or "")[:200],
+        "result_text": result_text,
+        "transcript_path": "",
+        "elapsed_s": elapsed_s,
+        "turns": None,
+        "used_tools": [],
+    }
+    with _NOTIF_LOCK:
+        _PENDING_NOTIFICATIONS.append(notif)
+    return notif
+
+
 def list_subagent_activity(limit: int = 50) -> List[Dict[str, Any]]:
     """Browse recent subagent runs by reading the transcript directory.
     Each entry: {agent_id, persona, name, mtime, size_bytes, status}.

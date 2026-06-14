@@ -181,7 +181,7 @@ COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
 # hearth/loop_guard.py — outcome-hash based, not a magic per-tool count.)
 
 
-HEARTH_VERSION = "0.6.0"
+HEARTH_VERSION = "0.7.0-preview"
 HEARTH_REPO = "https://github.com/0pen-sourcer/hearth"
 
 
@@ -194,6 +194,22 @@ def _is_local_endpoint(base: str) -> bool:
         "localhost", "127.0.0.1", "0.0.0.0", "::1",
         "192.168.", "10.", "host.docker.internal",
     ))
+
+
+def _is_reasoning_param_error(e: Exception) -> bool:
+    """True when an API error looks like the model rejecting `reasoning_effort`
+    (unsupported field / invalid value), so the caller can retry without it.
+    Matches on the param name or a 400/invalid-request mentioning reasoning."""
+    msg = str(getattr(e, "message", "") or e).lower()
+    status = getattr(e, "status_code", None)
+    if "reasoning_effort" in msg or "reasoning effort" in msg:
+        return True
+    if (status == 400 or "invalid" in msg or "unsupported" in msg
+            or "unknown" in msg or "does not support" in msg) and "reasoning" in msg:
+        return True
+    return False
+
+
 VOICE_ON = os.getenv("JARVIS_VOICE_ON", "0") == "1"
 # Opt-in: also mirror conversation into LM Studio's threads folder so the
 # chat shows up in LM Studio's chat list. Writes to a dedicated file
@@ -431,6 +447,11 @@ class JarvisCLI:
         #   /think off → model skips reasoning entirely (no compute spent)
         # Default off. Set JARVIS_THINK=1 to start on.
         self.think_on = os.getenv("JARVIS_THINK", "0") == "1"
+        # Cloud reasoning models that 400 on `reasoning_effort` (e.g. plain
+        # grok-4, grok-3 — only grok-3-mini / grok-4.3+ expose it). Populated
+        # lazily the first time a model rejects the param, so we send it once,
+        # learn, and never pay a failed round-trip for that model again.
+        self._no_reasoning_effort: set[str] = set()
         # Most-recent image path the user/screenshot tool produced. Used
         # to auto-attach when the user references "the/that image".
         self.last_image_path: str = ""
@@ -2973,6 +2994,39 @@ class JarvisCLI:
                     sent[0] = {**sent[0], "content": sent[0]["content"] + "\n\n" + block}
         return sent
 
+    def _cloud_reasoning_effort(self) -> Optional[str]:
+        """The `reasoning_effort` value to send for the current cloud model,
+        or None to send nothing.
+
+        - /think ON  → None (reason at the provider's default).
+        - /think OFF → the provider's lowest setting so the model skips the
+          reasoning pass entirely. xAI/Gemini/OpenRouter accept "none";
+          OpenAI's o-series/gpt-5 bottom out at "minimal" (no "none").
+        - Model previously rejected the param → None (don't re-send)."""
+        model = (self.current_model or "").lower()
+        if model in self._no_reasoning_effort:
+            return None
+        if self.think_on:
+            return None
+        base = (LOCAL_API_BASE or "").lower()
+        if "openai.com" in base:
+            return "minimal"
+        return "none"
+
+    async def _open_stream(self, create_kwargs: Dict):
+        """Open the streaming completion. If a cloud model rejects
+        `reasoning_effort` with a 400 (plain grok-4, grok-3, etc. don't expose
+        it), drop the param, remember the model, and retry once so the turn
+        still goes through instead of dying on an unsupported-field error."""
+        try:
+            return await self.client.chat.completions.create(**create_kwargs)
+        except Exception as e:
+            if "reasoning_effort" in create_kwargs and _is_reasoning_param_error(e):
+                self._no_reasoning_effort.add((self.current_model or "").lower())
+                create_kwargs.pop("reasoning_effort", None)
+                return await self.client.chat.completions.create(**create_kwargs)
+            raise
+
     async def respond(self, depth: int = 0):  # noqa: C901  # see _looks_like_yield helper at module level
         if depth > MAX_TURNS:
             # Generous safety ceiling (the loop guard handles real spirals long
@@ -3059,7 +3113,16 @@ class JarvisCLI:
                 # cloud models stream reasoning via reasoning_content anyway.
                 if not self.think_on:
                     create_kwargs["stop"] = ["<think>", "<thinking>"]
-            stream = await self.client.chat.completions.create(**create_kwargs)
+            else:
+                # Cloud: actually disable reasoning at the API when /think is
+                # off — not just hide it. Without this the model (e.g. Grok)
+                # still runs a full reasoning pass server-side, so you pay the
+                # latency with zero visibility. `reasoning_effort` is the lever
+                # that reasoning-capable cloud models expose.
+                eff = self._cloud_reasoning_effort()
+                if eff is not None:
+                    create_kwargs["reasoning_effort"] = eff
+            stream = await self._open_stream(create_kwargs)
         except Exception as e:
             spinner_task.cancel()
             info = classify_api_error(e, _is_local)
@@ -3379,15 +3442,43 @@ class JarvisCLI:
                 args = json.loads(args_raw)
             except json.JSONDecodeError:
                 args = {}
-            # Args preview. Risky tools (run_command, write_file, etc.)
-            # ALWAYS show the full argument set so the user can audit what
-            # they're about to approve — a hidden ">D:\evil.bat" tail would
-            # be a security disaster. Non-risky tools still get a one-line
-            # truncated preview to keep scrollback tidy.
+            # Args preview. We dump the FULL argument set only when we're
+            # about to ASK you to approve — that's when a hidden ">D:\evil.bat"
+            # tail matters and you need to read it. When the call runs
+            # unprompted (auto-approve, an [a]lways grant, or a write inside
+            # the workspace), we show a tidy one-line preview cut with "…" —
+            # no 600-char code blob (e.g. create_plugin) dumped to the screen.
             preview_full = json.dumps(args, ensure_ascii=False)
             is_risky = name in RISKY_TOOLS
+
+            # Path-scoped auto-approval: for file-touching tools, a path arg
+            # that resolves inside the workspace sandbox runs without a prompt
+            # (prompting on every workspace edit is permission fatigue).
+            _path_safe = False
+            try:
+                _path_arg = args.get("path") if isinstance(args, dict) else None
+                if _path_arg and isinstance(_path_arg, str) and name in (
+                    "write_file", "edit_file", "create_directory", "delete_path", "move_path",
+                ):
+                    from hearth.tools import WORKSPACE as _WS
+                    try:
+                        _abs = os.path.abspath(os.path.expanduser(_path_arg))
+                        _path_safe = os.path.normpath(_abs).lower().startswith(
+                            os.path.normpath(_WS).lower())
+                    except Exception:
+                        _path_safe = False
+            except Exception:
+                _path_safe = False
+
+            # Will a [y/n/a/N] prompt actually fire? Only then do we need the
+            # full args on screen.
+            _will_prompt = (is_risky
+                            and not self.auto_approve
+                            and not _path_safe
+                            and self.tool_perms.get(name) not in ("always", "never"))
+
             print(f"{C_FRAME}╭─ {C_TOOL}⚡ {name}{C_FRAME} ─{C_RESET}")
-            if is_risky and len(preview_full) > 100:
+            if _will_prompt and len(preview_full) > 100:
                 # Pretty-print + word-wrap so the full args read cleanly on
                 # multiple lines before the [y/n/a/N] prompt.
                 try:
@@ -3406,25 +3497,6 @@ class JarvisCLI:
             # active so we don't deadlock with prompt_toolkit's stdin grab.
             denied = False
             decline_reason = ""
-            # Path-scoped auto-approval: for file-touching tools, if the path
-            # argument resolves inside the workspace sandbox, just run it —
-            # prompting on every workspace edit is permission fatigue.
-            # Out-of-workspace paths still require the [y/n/a/N] dialogue.
-            _path_safe = False
-            try:
-                _path_arg = args.get("path") if isinstance(args, dict) else None
-                if _path_arg and isinstance(_path_arg, str) and name in (
-                    "write_file", "edit_file", "create_directory", "delete_path", "move_path",
-                ):
-                    from hearth.tools import WORKSPACE as _WS
-                    try:
-                        _abs = os.path.abspath(os.path.expanduser(_path_arg))
-                        _path_safe = os.path.normpath(_abs).lower().startswith(
-                            os.path.normpath(_WS).lower())
-                    except Exception:
-                        _path_safe = False
-            except Exception:
-                _path_safe = False
 
             if (name in RISKY_TOOLS
                     and not self.auto_approve

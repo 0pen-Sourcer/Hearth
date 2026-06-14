@@ -335,6 +335,41 @@ def _cmd_scroll(page, args: dict) -> str:
     return _page_summary(page)
 
 
+def _cmd_key(page, args: dict) -> str:
+    """Press a keyboard key (or combo) on the page — the missing piece for
+    media controls and app shortcuts that aren't clickable buttons.
+    YouTube: 'f' fullscreen, 'k' or ' ' play/pause, 'm' mute, 't' theater,
+    'j'/'l' seek 10s, ArrowUp/Down volume. Also 'Escape', 'Control+L', etc.
+    Optional 'focus' (a selector/text) is clicked first so the keypress
+    lands on the right element — e.g. focus the video before 'f'."""
+    key = (args.get("key") or "").strip()
+    if not key:
+        return "browse_key needs a 'key' — e.g. 'f' for fullscreen, 'k' to play/pause."
+    focus = (args.get("focus") or "").strip()
+    try:
+        if focus:
+            try:
+                page.get_by_text(focus, exact=False).first.click(timeout=2500)
+            except Exception:
+                # Fall back to clicking the main <video> so shortcuts register.
+                try:
+                    page.locator("video").first.click(timeout=2500)
+                except Exception:
+                    pass
+        elif key.lower() == "f":
+            # Fullscreen only fires when the player has focus — click the
+            # video first so a bare browse_key('f') just works on YouTube.
+            try:
+                page.locator("video").first.click(timeout=2500)
+            except Exception:
+                pass
+        page.keyboard.press(key)
+        time.sleep(0.4)
+        return f"Pressed '{key}'."
+    except Exception as e:
+        return f"Couldn't press '{key}': {type(e).__name__}: {e}"
+
+
 def _cmd_type(page, args: dict) -> str:
     text = args.get("text") or ""
     label = (args.get("field") or "").strip()
@@ -371,6 +406,11 @@ def browse_scroll(args: dict) -> str:
 
 def browse_type(args: dict) -> str:
     code, res = _get_worker().call(_cmd_type, args)
+    return res
+
+
+def browse_key(args: dict) -> str:
+    code, res = _get_worker().call(_cmd_key, args)
     return res
 
 
