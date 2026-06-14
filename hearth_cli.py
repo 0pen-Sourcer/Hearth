@@ -2286,6 +2286,19 @@ class JarvisCLI:
     def _is_first_run(self) -> bool:
         """True if the user has essentially no memory yet — fresh install.
         Crude heuristic that avoids running the wizard every relaunch."""
+        # First: honor the GUI's onboarded flag. If the user already
+        # finished onboarding in the desktop app, don't make them sit
+        # through the CLI wizard on first CLI launch — that was the
+        # "double onboarding" pain.
+        try:
+            from hearth.tools import WORKSPACE
+            settings_path = os.path.join(WORKSPACE, "settings.json")
+            if os.path.isfile(settings_path):
+                with open(settings_path, "r", encoding="utf-8") as _sf:
+                    if json.load(_sf).get("onboarded"):
+                        return False
+        except Exception:
+            pass
         from hearth.tools import MEMORY_DIR
         idx = os.path.join(MEMORY_DIR, "MEMORY.md")
         if not os.path.exists(idx):
@@ -2347,6 +2360,20 @@ class JarvisCLI:
                     f.write("\n")
                 f.write("# Onboarding preferences (set by first-run wizard)\n")
                 f.write("\n".join(extra_rules) + "\n")
+
+        # Set the shared `onboarded` flag in settings.json so the GUI
+        # doesn't re-onboard if the user launches the desktop app later.
+        try:
+            settings_path = os.path.join(WORKSPACE, "settings.json")
+            cur: Dict = {}
+            if os.path.isfile(settings_path):
+                with open(settings_path, "r", encoding="utf-8") as _sf:
+                    cur = json.load(_sf) or {}
+            cur["onboarded"] = True
+            with open(settings_path, "w", encoding="utf-8") as _sf:
+                json.dump(cur, _sf, indent=2)
+        except Exception:
+            pass
 
     async def _maybe_run_onboarding(self) -> None:
         """First-run wizard. Asks ~5 quick questions, writes prefs to memory

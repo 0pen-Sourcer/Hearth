@@ -532,6 +532,21 @@ def _detect_loaded() -> Optional[Dict]:
 def _load_model(model_id: str) -> Dict:
     """Try REST first (POST /api/v0/models/load); fall back to `lms load`.
     Defensive — every branch returns a dict with `ok` and `error` or `via`."""
+    # Cloud short-circuit: if the active endpoint is a cloud provider
+    # (xai, openai, anthropic, gemini, openrouter), there is no local
+    # model to load — the model id rides on each /chat call to the
+    # provider. Anything that called us here is misrouted; return ok
+    # without calling LM Studio so we don't surface a confusing
+    # "lms ls" error.
+    try:
+        from urllib.parse import urlparse
+        _host = (urlparse(_active_base()).hostname or "").lower()
+        if _host not in ("localhost", "127.0.0.1", "::1", "0.0.0.0", ""):
+            return {"ok": True, "via": "cloud-noop",
+                    "note": f"endpoint {_host} is cloud — model '{model_id}' "
+                            f"is served by the provider, no local load."}
+    except Exception:
+        pass
     # 1) REST attempt (LM Studio v0 may or may not expose this)
     rest_resp = _http_post_json(f"{LM_STUDIO_V0}/models/load", {"model": model_id}, timeout=120)
     if isinstance(rest_resp, dict) and not rest_resp.get("error"):

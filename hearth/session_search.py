@@ -90,14 +90,25 @@ def _needs_reindex() -> bool:
             return True
         if _convo_mtime(path) > indexed[cid] + 0.5:
             return True
+    # Also re-index when the CLI flat history mtime moved past last index.
+    cli_path = os.path.join(os.path.dirname(CONVOS_DIR), "logs", "jarvis_history.json")
+    if os.path.isfile(cli_path):
+        last = indexed.get("cli-history", 0.0)
+        if _convo_mtime(cli_path) > last + 0.5:
+            return True
     return False
 
 
 def rebuild_index() -> int:
-    """Drop + rebuild the entire FTS5 index. Returns rows indexed."""
+    """Drop + rebuild the entire FTS5 index. Returns rows indexed.
+
+    Sources: GUI conversations at ~/Jarvis/conversations/*.json AND the
+    CLI's flat history at ~/Jarvis/logs/jarvis_history.json. Without the
+    CLI source, search_chats run from the GUI couldn't see rules/quirks
+    the user set in CLI sessions (and vice versa).
+    """
     if not os.path.isdir(CONVOS_DIR):
         os.makedirs(CONVOS_DIR, exist_ok=True)
-    # Wipe and recreate
     if os.path.isfile(INDEX_PATH):
         try:
             os.remove(INDEX_PATH)
@@ -105,6 +116,8 @@ def rebuild_index() -> int:
             pass
     conn = _connect()
     total = 0
+
+    # 1) GUI conversations — one file per chat thread.
     for fn in sorted(os.listdir(CONVOS_DIR)):
         if not fn.endswith(".json"):
             continue
@@ -130,6 +143,48 @@ def rebuild_index() -> int:
             "INSERT OR REPLACE INTO meta(conversation_id, indexed_mtime) VALUES (?, ?)",
             (cid, _convo_mtime(path)),
         )
+
+    # 2) CLI flat history — one big array of messages. Index it as a
+    # synthetic "cli-history" conversation so search_chats returns CLI
+    # turns alongside GUI ones.
+    cli_path = os.path.join(os.path.dirname(CONVOS_DIR), "logs", "jarvis_history.json")
+    if os.path.isfile(cli_path):
+        try:
+            with open(cli_path, "r", encoding="utf-8") as f:
+                cli_msgs = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            cli_msgs = []
+        if isinstance(cli_msgs, list):
+            cid = "cli-history"
+            title = "CLI session history"
+            mtime = _convo_mtime(cli_path)
+            for idx, msg in enumerate(cli_msgs):
+                if not isinstance(msg, dict):
+                    continue
+                raw = msg.get("content")
+                # CLI history mixes plain strings with multimodal/list
+                # payloads (image-attached turns, tool_calls). Coerce
+                # lists to a flat string of their text parts; ignore
+                # anything that doesn't yield text.
+                if isinstance(raw, list):
+                    parts = []
+                    for p in raw:
+                        if isinstance(p, dict) and isinstance(p.get("text"), str):
+                            parts.append(p["text"])
+                    raw = "\n".join(parts)
+                content = (raw or "").strip() if isinstance(raw, str) else ""
+                if not content:
+                    continue
+                conn.execute(
+                    "INSERT INTO messages(conversation_id, title, message_index, role, content, updated) VALUES (?,?,?,?,?,?)",
+                    (cid, title, idx, msg.get("role", "?"), content, float(mtime)),
+                )
+                total += 1
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(conversation_id, indexed_mtime) VALUES (?, ?)",
+                (cid, mtime),
+            )
+
     conn.commit()
     conn.close()
     return total

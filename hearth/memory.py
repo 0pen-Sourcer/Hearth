@@ -187,6 +187,19 @@ def _significant_words(text: str) -> List[str]:
             if len(t) >= 3 and t not in _TITLE_STOPWORDS]
 
 
+# 3-letter content words that ARE topic anchors even though they're
+# under the length>=4 threshold used by find_similar_titles. Without
+# this allowlist, "GPU specs" vs "GPU hardware" wouldn't trip the
+# duplicate check because the only shared word ("gpu") is 3 chars.
+_TITLE_TECH_TERMS = frozenset({
+    "gpu", "cpu", "ram", "ssd", "hdd", "nas", "usb",
+    "api", "pdf", "csv", "tsv", "url", "css", "sql", "ssh", "vpn",
+    "vps", "ide", "cli", "gui", "tui", "ttl",
+    "llm", "tts", "stt", "ocr", "vae", "lora", "moe",
+    "ios", "mac", "vim", "git", "npm", "pip",
+})
+
+
 def find_similar_titles(new_title: str, min_shared: int = 1,
                          exclude_slug: str = "") -> List[Dict[str, str]]:
     """Scan the memory index for entries whose titles share >= min_shared
@@ -202,7 +215,10 @@ def find_similar_titles(new_title: str, min_shared: int = 1,
     down. exclude_slug skips the entry being updated so 'update Favorite
     Color' doesn't flag itself.
     """
-    new_words = set(w for w in _significant_words(new_title) if len(w) >= 4)
+    def _keep(w: str) -> bool:
+        return len(w) >= 4 or w in _TITLE_TECH_TERMS
+
+    new_words = set(w for w in _significant_words(new_title) if _keep(w))
     if len(new_words) < min_shared:
         return []
     matches: List[Dict[str, str]] = []
@@ -214,7 +230,7 @@ def find_similar_titles(new_title: str, min_shared: int = 1,
         title, slug, desc = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
         if exclude_slug and slug == exclude_slug:
             continue
-        ex_words = set(w for w in _significant_words(title) if len(w) >= 4)
+        ex_words = set(w for w in _significant_words(title) if _keep(w))
         shared = new_words & ex_words
         if len(shared) >= min_shared:
             matches.append({

@@ -396,7 +396,8 @@ async def run_once(
                  status=notif.get("status"),
                  summary=notif.get("summary"),
                  result_text=notif.get("result_text"),
-                 elapsed_s=notif.get("elapsed_s"))
+                 elapsed_s=notif.get("elapsed_s"),
+                 used_tools=notif.get("used_tools") or [])
     except Exception:
         pass
     messages.append({"role": "user", "content": prompt})
@@ -829,7 +830,12 @@ async def run_once(
                     "open_app", "open_url", "open_in_browser",
                     "memory_forget", "extract_archive_file",
                     "create_plugin", "delete_plugin",
-                    "browse_click", "browse_type",
+                    # browse_click / browse_type / browse_scroll are NOT
+                    # listed — once the user has already approved the
+                    # initial `browse` call, every subsequent click/type/
+                    # scroll inside that same session shouldn't re-prompt.
+                    # Otherwise the agent stalls on page 1 waiting for
+                    # approval on every interaction.
                 }
                 if name in RISKY and permission_check is not None:
                     try:
