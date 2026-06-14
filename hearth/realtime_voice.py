@@ -78,6 +78,27 @@ def _build_recorder():
     suppressed at the callback layer instead of pausing the recorder
     (a paused recorder takes ~200ms to spin back up).
     """
+    # Pre-trust the silero VAD repo so torch.hub doesn't ask
+    # "trust this repo? (y/N)" on the console at startup and block
+    # voice mode forever (CLI question never gets an answer in a
+    # GUI-spawned subprocess). Idempotent — sets a flag in
+    # ~/.cache/torch/hub/trusted_list.
+    try:
+        import torch  # type: ignore
+        torch.hub.set_dir(os.path.expanduser(os.environ.get(
+            "TORCH_HOME", "~/.cache/torch")) + "/hub")
+        try:
+            torch.hub._validate_not_a_forked_repo = lambda *a, **k: True  # silent override
+        except Exception:
+            pass
+        try:
+            torch.hub.load("snakers4/silero-vad", "silero_vad",
+                            trust_repo=True, force_reload=False, verbose=False)
+        except Exception:
+            pass  # repo cached / offline / non-fatal
+    except ImportError:
+        pass
+
     from RealtimeSTT import AudioToTextRecorder
 
     model = os.environ.get("HEARTH_REALTIME_MODEL", "tiny.en")
