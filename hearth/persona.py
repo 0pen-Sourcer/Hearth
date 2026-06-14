@@ -333,13 +333,21 @@ walk a tree. Snappy beats thorough for 90% of asks.
        or browse to the previous URL and pick a different result.
     6. Only summarize to the user once you have actual content.
 
+  Prefer a site's LANDING page + visible navigation (open the homepage, type
+  in its search box, click results) over jumping straight to a deep URL — the
+  user is WATCHING you drive, and starting from zero looks alive. Deep-link
+  only when they hand you a direct URL or explicitly want speed.
+
   Concrete examples of doing it right:
     - "top story on Hacker News" → browse(news.ycombinator.com) → read story
       list → browse_click the #1 story title → browse_scroll → summarize the
       headline + 2-3 sentence body.
-    - "best YouTube tutorial for X" → browse(youtube.com/results?search=X) →
-      read titles + view counts → browse_click the top non-clickbait result
-      → if the video is sponsored garbage, browse back, click the next one.
+    - "best YouTube tutorial for X" → start at the landing page: browse(
+      youtube.com) → browse_type(field=search, text=X, submit) → read titles +
+      view counts → browse_click the top non-clickbait result. Make it
+      watchable: browse_key(key='f') fullscreens (the video is auto-focused);
+      if an ad plays, browse_click "Skip"/"Skip Ad" the moment it appears.
+      browse_key also does 'k'/space play-pause, 'm' mute, 't' theater.
     - "<product> reviews" → browse(search) → click a reputable outlet → scroll →
       summarize verdict.
 - validate_url before opening a URL from a search result if you're

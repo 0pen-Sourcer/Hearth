@@ -23,7 +23,7 @@
 ---
 
 <!-- demo.gif lives in docs/demo.gif when present; until the screencap is
-     recorded for v0.6, the README leads with the concrete claims below
+     recorded for v0.7-preview, the README leads with the concrete claims below
      instead of a broken-image placeholder. -->
 
 <p align="center">
@@ -123,20 +123,20 @@ Type, or `/voice on` to speak, or `/listen on` to listen. Say "bye" when done.
 
 | Interface | Launch | Status |
 |---|---|---|
-| **CLI** (voice + keyboard) | `.\hearth.bat` | **v0.6 daily driver.** Violet HEARTH banner on boot. Voice loop with mid-sentence interrupt, prompt_toolkit history, slash autocomplete. `/models disk \| picks \| hf \| get \| use \| stop` for full model control without leaving the terminal — and `/models use <n>` now live-retargets the running session, no restart. Persistent `[a]lways`/`[N]ever` decisions, context-usage footer. |
-| **Desktop app + Web UI** | `python -m hearth.tray --open` (or `Hearth.exe` from the release zip) | **v0.6 polished.** Single-instance lock (click the exe 5× → still one tray icon). Models tab with My Models / Discover / Quick picks sub-nav, inline load-config (GPU offload, ctx, KV cache, threads, flash attn) saved per-model. Settings sidebar with Chat brain / Voice / Behavior / About. File drop + paperclip attach. Realtime voice mode (silero VAD + faster-whisper, 0.3s endpoint, instant barge-in). Inline permission prompts. Cloud endpoint switcher in onboarding + Settings. Same backend as the CLI. |
+| **CLI** (voice + keyboard) | `.\hearth.bat` | **v0.7-preview — daily driver.** Violet HEARTH banner on boot. Voice loop with mid-sentence interrupt, prompt_toolkit history, slash autocomplete. `/models disk \| picks \| hf \| get \| use \| stop` for full model control without leaving the terminal — and `/models use <n>` now live-retargets the running session, no restart. Persistent `[a]lways`/`[N]ever` decisions, context-usage footer. |
+| **Desktop app + Web UI** | `python -m hearth.tray --open` (or `Hearth.exe` from the release zip) | **v0.7-preview — polished.** Single-instance lock (click the exe 5× → still one tray icon). Models tab with My Models / Discover / Quick picks sub-nav, inline load-config (GPU offload, ctx, KV cache, threads, flash attn) saved per-model. Settings sidebar with Chat brain / Voice / Behavior / About. File drop + paperclip attach. Realtime voice mode (silero VAD + faster-whisper, 0.3s endpoint, instant barge-in). Inline permission prompts. Cloud endpoint switcher in onboarding + Settings. Same backend as the CLI. |
 | **Bridge** (programmatic) | `python -m hearth.headless --prompt "..."` | Stable. JSONL events to stdout — drive Hearth from CI, scripts, other agents. |
 | **MCP server** (other LLM chat UIs) | `python -m hearth.mcp_server` | Stable. Exposes every built-in tool as a live tool-card inside any MCP-aware chat UI. |
 
 **Chat brain — pick anything OpenAI-compatible. Local-first, cloud-ready.**
 - **Local (recommended):** LM Studio, Ollama, vLLM, llama.cpp, LocalAI — anything OpenAI-compatible. Hearth auto-detects.
 - **Cloud (optional):** Gemini, Grok, OpenAI, OpenRouter via Settings → Chat brain. Paste a key, hit "Use this brain" — done. No restart, no re-onboarding.
-- **Experimental:** bundled llama-cpp-python server (`-BuiltinLLM cuda` / `cpu`) — works, but tool-call reliability lags LM Studio's. Track for v0.7.
+- **Experimental:** bundled llama-cpp-python server (`-BuiltinLLM cuda` / `cpu`) — works, but tool-call reliability lags LM Studio's. Experimental this release.
 - **Mix and match:** switch live mid-session. Voice mode, tools, memory, persona — all unchanged.
 
 **Tool calls work on every modern open model.** Hearth ships a multi-family parser ([hearth/tool_call_parser.py](hearth/tool_call_parser.py)) that recognizes Gemma 3/4's `<|toolcall>` syntax, Hermes / Qwen 2.5 / Qwen 3 ChatML, Llama 3.x `<|python_tag|>`, Mistral `[TOOL_CALLS]`, Phi 3/4, Granite, Cohere Command-R, and any model that emits generic `<function=NAME>` blocks. When the model speaks tool-call syntax that llama-cpp-python's server doesn't natively parse, Hearth catches it, normalizes the tool name (Gemma's `viewimage` → real `view_image`), strips the gibberish from the chat surface, and routes it through the regular tool executor. The same parser feeds the CLI, GUI, and bridge.
 
-**Mac / Linux:** Not officially supported in v0.6. Most of the codebase is cross-platform; what isn't is shell defaults, app-launching, and screenshot. PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+**Mac / Linux:** Not officially supported yet. Most of the codebase is cross-platform; what isn't is shell defaults, app-launching, and screenshot. PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
@@ -242,8 +242,8 @@ Emits JSONL events (user / thinking / tool_call / tool_result / assistant / done
                                                   │ stream + tool_calls
                                                   ▼
                                     ┌───────────────────────┐
-                                    │  hearth/tools.py (82) │
-                                    │  82 tools, sandboxed  │
+                                    │  hearth/tools.py      │
+                                    │  70+ tools, sandboxed │
                                     │  + your own plugins   │
                                     │  + remote MCP servers │
                                     │  + spawn_subagent fork│
@@ -375,7 +375,7 @@ The LLM does (via LM Studio / your inference server). Whisper is CPU-by-default 
 Writes are sandboxed to `~/Jarvis/` by default. Risky tools prompt you the first time per session. `JARVIS_AUTO_APPROVE=1` removes the prompts once you trust it.
 
 **Q: Mac / Linux?**
-Not yet (v0.6). The codebase is mostly portable — `tools.py` has Windows branches for app-launching and registry access that need POSIX equivalents. [Help wanted →](https://github.com/0pen-sourcer/hearth/labels/help%20wanted)
+Not yet. The codebase is mostly portable — `tools.py` has Windows branches for app-launching and registry access that need POSIX equivalents. [Help wanted →](https://github.com/0pen-sourcer/hearth/labels/help%20wanted)
 
 **Q: Does it work offline?**
 Everything except `web_search` / `web_fetch` works fully offline.
