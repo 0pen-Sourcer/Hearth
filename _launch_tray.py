@@ -15,6 +15,18 @@ from __future__ import annotations
 import os
 import sys
 
+# Frozen multi-entry: the built-in LLM server can't be launched as
+# `python -m llama_cpp.server` because in the bundle sys.executable is THIS
+# exe (entrypoint = tray), not a python interpreter. llmserver re-invokes the
+# exe with this sentinel; hand off to llama_cpp.server's CLI before anything
+# else (the parent already pipes our stdout/stderr to llamaserver.log).
+if "--hearth-run-llama-server" in sys.argv:
+    _i = sys.argv.index("--hearth-run-llama-server")
+    sys.argv = [sys.argv[0]] + sys.argv[_i + 1:]
+    from llama_cpp.server.__main__ import main as _llama_main
+    _llama_main()
+    raise SystemExit(0)
+
 # Redirect stdout/stderr to a log file when frozen + windowed.
 # Open in line-buffered append mode so we don't lose late writes.
 if getattr(sys, "frozen", False) and (sys.stderr is None or sys.stdout is None):

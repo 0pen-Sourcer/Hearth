@@ -3131,7 +3131,7 @@
             <div class="name">Inbound — Hearth as a SERVER</div>
             <div class="hint">
               Other MCP clients (LM Studio chat UI, Claude Desktop, Cursor, your own scripts) can
-              call into Hearth's 64 tools. The snippet below goes in their mcp.json.
+              call into Hearth's full tool set. The snippet below goes in their mcp.json.
             </div>
           </div>
           <button class="btn-mini" id="btn-mcp-snippet" style="min-width:140px;">Show config</button>
@@ -6581,7 +6581,7 @@ async function refreshMcpStatus() {
                        : b.state === 'error' ? 'var(--err)'
                        : 'var(--fg-faint)';
       const meta = b.state === 'connected'
-        ? `<span style="color:var(--fg-faint)">${b.tools || 0} tools · ${esc(b.transport || 'stdio')}</span>`
+        ? `<span style="color:var(--fg-faint)">${Array.isArray(b.tools) ? b.tools.length : (b.tools || 0)} tools · ${esc(b.transport || 'stdio')}</span>`
         : `<span style="color:${stateColor}">${esc(b.error || b.state)}</span>`;
       return `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;">
         <span style="color:${stateColor}">● ${esc(b.name)}</span>
@@ -7233,7 +7233,7 @@ async function refreshSettings() {
       showModal('Hearth as MCP server',
         `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
         `Paste this into the OTHER tool's mcp.json (LM Studio, Claude Desktop, Cursor, etc.). ` +
-        `Hearth's 64 tools become available there.</div>` +
+        `Hearth's full tool set becomes available there.</div>` +
         `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:auto;max-height:360px">${esc(snippet)}</pre>`,
         [{ label: 'Close', primary: true }]);
     };

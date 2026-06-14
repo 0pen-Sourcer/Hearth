@@ -499,19 +499,36 @@ def _list_models() -> List[Dict]:
     # generate_image / generate_video TOOLS once a chat model is selected.
     NON_CHAT_PATTERNS = ("imagine-image", "imagine-video", "imagine-audio",
                          "embedding", "embed-")
-    for i, m in enumerate(data.get("data", [])):
+    # Collect the chat-capable rows first, then flag the one the user actually
+    # picked (settings.llm_model) as "loaded" — NOT just index 0. The old
+    # "loaded if i==0" hardcode meant the topbar sticker reverted to the
+    # provider's first model on every poll, so a swap to grok-4.3 wouldn't
+    # stick. Fall back to the first row only if the saved pick isn't listed.
+    try:
+        _picked = (_load_settings().get("llm_model") or "").strip().lower()
+    except Exception:
+        _picked = ""
+    rows = []
+    for m in data.get("data", []):
         raw_id = m.get("id") or ""
         if any(p in raw_id.lower() for p in NON_CHAT_PATTERNS):
             continue
         # llama_cpp.server identifies models by the FULL --model path. Strip
         # to basename here so the topbar shows "model.gguf" not "C:\Users\...".
         clean_id = os.path.basename(raw_id.replace("\\", "/")) or raw_id
+        rows.append((clean_id, m))
+    _loaded_idx = 0
+    for idx, (cid, _m) in enumerate(rows):
+        if _picked and cid.lower() == _picked:
+            _loaded_idx = idx
+            break
+    for idx, (clean_id, m) in enumerate(rows):
         out.append({
             "id": clean_id,
             "type": "llm",
             "arch": "",
             "publisher": m.get("owned_by") or "",
-            "state": "loaded" if i == 0 else "",
+            "state": "loaded" if idx == _loaded_idx else "",
             "loaded_context_length": None,
             "max_context_length": None,
             "quantization": "",
@@ -836,6 +853,13 @@ def _save_settings(d: Dict) -> Dict:
     os.environ["JARVIS_TTS_DEVICE"] = cur.get("tts_device", "cpu")
     os.environ["JARVIS_VOICE_SPEED"] = str(cur.get("voice_speed", 1.5))
     os.environ["JARVIS_VOICE"]      = cur.get("voice_name", "am_michael")
+    # Keep the runtime chat model in sync with the saved pick. Without this a
+    # cloud model swap (grok-4.20 -> grok-4.3) saved to disk but the next
+    # /chat + the status poller still used the old LOCAL_MODEL, so the topbar
+    # reverted. Empty llm_model (local probe-picks) leaves LOCAL_MODEL unset.
+    _picked_model = (cur.get("llm_model") or "").strip()
+    if _picked_model:
+        os.environ["LOCAL_MODEL"] = _picked_model
     # Agent rename: hot-update the persona module's NAME constant so the
     # very next chat turn uses the new name in system prompt, signatures,
     # and tone rules — no restart needed. Folder rename happens via a

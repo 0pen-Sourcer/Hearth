@@ -776,8 +776,16 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     # back to a conservative min(4, hw_concurrency). On the user's 16-thread
     # Ryzen, that's a 4x prefill slowdown vs LM Studio. Audit finding.
     effective_threads = n_threads if (n_threads is not None and n_threads > 0) else (os.cpu_count() or 4)
+    # In a PyInstaller build sys.executable is Hearth.exe (entrypoint = tray),
+    # NOT a python interpreter — so `-m llama_cpp.server` gets handed to the
+    # tray's argparse and dies with "unrecognized arguments". Re-invoke the
+    # bundle with a sentinel the entrypoint catches and routes to
+    # llama_cpp.server. From source, sys.executable IS python, so use -m.
+    _launcher = ([sys.executable, "--hearth-run-llama-server"]
+                 if getattr(sys, "frozen", False)
+                 else [sys.executable, "-m", "llama_cpp.server"])
     cmd = [
-        sys.executable, "-m", "llama_cpp.server",
+        *_launcher,
         "--model", model_path,
         "--host", BUILTIN_HOST,
         "--port", str(port),
