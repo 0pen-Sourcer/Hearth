@@ -2,12 +2,12 @@
 
 All notable changes to Hearth land here. Format vaguely follows [Keep a Changelog](https://keepachangelog.com); we don't sweat strict semver pre-1.0.
 
-## v0.7 — 2026-06-12
+## v0.7-preview — 2026-06-14
 
 First public release.
 
 - Local-first by default. Runs against any OpenAI-compatible local server (LM Studio, Ollama, vLLM, llama.cpp). Cloud is optional: paste a key in Settings → Chat brain to switch to Gemini, OpenAI, Grok, or OpenRouter without restart.
-- 82 tools: files, shell, web search + fetch, browser driving, screenshot + vision, voice in/out, memory, reminders, image + video generation, MCP both directions, and more.
+- 70+ built-in tools: files, shell, web search + fetch, browser driving, screenshot + vision, voice in/out, memory, reminders, image + video generation, MCP both directions, and more.
 - **Skills** — ask for a PDF / slide deck / spreadsheet and Hearth picks the right format and style, builds the file, opens it. Drop your own skill folders into the workspace and they're invokable by name. The agent can author new skills itself when it notices a workflow it ran twice.
 - **Sub-agents** — fork focused workers in parallel (sync or background). Each has its own tool allowlist and a tightened system prompt. Background workers surface their results in chat the moment they finish — no "are you done?" nudging.
 - **Voice** — Kokoro TTS streams sentence-by-sentence; faster-whisper STT with mid-sentence interrupt; optional wake-word.
@@ -19,11 +19,11 @@ First public release.
 - **Reminders that fire tools, not just toasts** — schedule a reminder that also runs `web_search` or any other tool when it pops.
 - **Builds its own tools** when it hits a capability gap (validated, sandboxed, persisted across restarts).
 
-Windows-first at v0.7. Mac/Linux PRs welcome.
+Windows-first at v0.7-preview. Mac/Linux PRs welcome.
 
 - **Sub-agent fork system (`hearth/subagents.py`)** — `spawn_subagent(persona, prompt, mode='sync'|'background', max_turns)` runs a scoped LLM loop with a tight tool allowlist, a tightened system prompt (skips the main persona), and optional memory-aware briefing (auto `memory_recall` injection). 6 personas shipped: `researcher`, `coder`, `archivist`, `librarian`, `summarizer`, `pdf_coordinator` (map-reduce orchestrator that fans out N summarizer children). Wildcard `allowed_tools: ['*']` inherits the parent's full toolset. Background mode returns immediately with an `agent_id`; the child's result auto-arrives as a `<task-notification>` user-role message in the parent's next turn (no polling). JSONL sidechain transcript at `~/Jarvis/subagents/<id>.jsonl`. Depth-3 fork-bomb guard. Cost-class routing (`cheap` forces local even when parent is on cloud — fan-out of 50 chunks stays free). Sync subagents inherit the parent's cancel signal; background ones survive Ctrl-C deliberately. `/agent` slash + `spawn_subagent` / `list_subagent_personas` / `get_subagent_result` tools.
 - **MCP client runtime (`hearth/mcp_client.py`)** — Hearth now ALSO consumes other MCP servers. Drop a standard `mcp.json` at `~/Jarvis/mcp.json` (Settings → MCP servers → Edit, or `/mcp edit`). On launch, each server spawns as a child subprocess via stdio; its tools surface as `mcp_<server>_<tool>` in `to_openai_tools()`, callable by the model like any built-in. Calls route through the live session; results bounce back to the chat. End-to-end tested with an in-repo echo+add server (`scripts/mcp_test_server.py`). `/mcp` slash for status / edit-config / run-as-server.
-- **MCP server SyntaxError fix** — the dynamic tool factory was emitting `def _tool(title: Optional[str] = None, message: str):` (required-after-optional → SyntaxError). All 72 tools now register cleanly.
+- **MCP server SyntaxError fix** — the dynamic tool factory was emitting `def _tool(title: Optional[str] = None, message: str):` (required-after-optional → SyntaxError). All tools now register cleanly.
 - **Auto-background long ops (`hearth/jobs.py:start_python_job`)** — `disk_usage` on a drive root (`C:\`) or with `max_depth<=0` would block the agent loop for many minutes walking the whole tree. Now auto-routes through a daemon-thread job runner: returns a `job_id` in milliseconds, scan continues in background. `list_jobs` + `get_job_result` tools + `/jobs` slash. Same pattern available for any in-process Python work.
 - **Loop guard catches decline spirals** (`hearth/loop_guard.py:_is_failure`) — repeated user declines of the same tool call now count as failures for the same-call repeat detector. After 4 identical declines, the model gets a hard "stop retrying it — tell the user plainly what's wrong" directive instead of cycling.
 - **Compaction with target_chars** — `compact_history(target_chars=N)` retries with truncated kept tool results + halved keep_recent if the first pass still leaves you over budget. Stops the case where a kept tail of long tool results (browse / read_file) blew the budget right after a successful summary.

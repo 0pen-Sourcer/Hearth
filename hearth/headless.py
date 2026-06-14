@@ -71,6 +71,36 @@ def _is_local_endpoint(base: str) -> bool:
     b = (base or "").lower()
     return any(h in b for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1",
                                 "192.168.", "10.", "host.docker.internal"))
+
+
+# Cloud models that 400 on `reasoning_effort` (plain grok-4, grok-3 — only
+# grok-3-mini / grok-4.3+ expose it). Learned at runtime so we send it once,
+# remember the rejection, and don't pay a failed round-trip again.
+_NO_REASONING_EFFORT: set = set()
+
+
+def _is_reasoning_param_error(e: Exception) -> bool:
+    """True when an API error looks like the model rejecting `reasoning_effort`,
+    so the caller can transparently retry without it."""
+    msg = str(getattr(e, "message", "") or e).lower()
+    status = getattr(e, "status_code", None)
+    if "reasoning_effort" in msg or "reasoning effort" in msg:
+        return True
+    if (status == 400 or "invalid" in msg or "unsupported" in msg
+            or "unknown" in msg or "does not support" in msg) and "reasoning" in msg:
+        return True
+    return False
+
+
+def _cloud_reasoning_effort(base: str, think: bool, model: str):
+    """`reasoning_effort` value for a cloud model when /think is off (skip the
+    reasoning pass), or None to send nothing. /think on → None (default).
+    OpenAI bottoms out at "minimal"; xAI/Gemini/OpenRouter accept "none"."""
+    if think or (model or "").lower() in _NO_REASONING_EFFORT:
+        return None
+    return "minimal" if "openai.com" in (base or "").lower() else "none"
+
+
 DEFAULT_MAX_DEPTH = 40  # Bumped 20 → 40 after a live LM Studio PDF read hit
                         # the ceiling mid-task: Qwen 3.5 Harmonic 9B was
                         # doing legitimate map-reduce-by-hand on a 514-page
@@ -645,7 +675,25 @@ async def run_once(
                 kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": think}}
                 if not think:
                     kwargs["stop"] = ["<think>", "<thinking>"]
-            resp = await client.chat.completions.create(**kwargs)
+            else:
+                # Cloud: actually disable reasoning at the API when think is
+                # off, not just drop the reasoning_content. Otherwise the model
+                # reasons server-side and the latency is spent invisibly.
+                eff = _cloud_reasoning_effort(LOCAL_API_BASE, think, model)
+                if eff is not None:
+                    kwargs["reasoning_effort"] = eff
+            try:
+                resp = await client.chat.completions.create(**kwargs)
+            except Exception as _re:
+                # Model doesn't expose reasoning_effort (plain grok-4, grok-3):
+                # strip it, remember, retry once. Other errors fall through to
+                # the outer handler's classify/backoff machinery.
+                if "reasoning_effort" in kwargs and _is_reasoning_param_error(_re):
+                    _NO_REASONING_EFFORT.add((model or "").lower())
+                    kwargs.pop("reasoning_effort", None)
+                    resp = await client.chat.completions.create(**kwargs)
+                else:
+                    raise
         except Exception as e:
             info = classify_api_error(e, _is_local_endpoint(LOCAL_API_BASE))
             # Auto-retry retryable failures (rate_limit / timeout / server_error /

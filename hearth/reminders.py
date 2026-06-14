@@ -316,18 +316,15 @@ def desktop_notify(title: str, body: str) -> bool:
 
 
 def _run_action(action_tool: str, action_args: Dict) -> str:
-    """Execute a reminder's bound tool. Returns a short result snippet to
-    append to the toast body so the user sees what happened. Bounded so a
-    runaway tool result doesn't spill a full screen into a notification."""
+    """Execute a reminder's bound tool. Returns the FULL result text. The
+    caller truncates for the toast body but pushes the full text into chat
+    so the user actually sees what the action found, not a 240-char stub."""
     if not action_tool:
         return ""
     try:
         from . import execute_tool
         result = execute_tool(action_tool, action_args or {})
-        text = str(result) if result is not None else "(ok)"
-        if len(text) > 240:
-            text = text[:240].rstrip() + "..."
-        return text
+        return str(result) if result is not None else "(ok)"
     except Exception as e:
         return f"(action failed: {type(e).__name__}: {e})"
 
@@ -367,15 +364,35 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
     def _fire(r: Dict, missed: bool = False) -> None:
         body = r.get("what", "(empty)")
         action_tool = r.get("action_tool", "")
+        full_result = ""
         if action_tool:
-            tail = _run_action(action_tool, r.get("action_args") or {})
-            if tail:
+            full_result = _run_action(action_tool, r.get("action_args") or {})
+            if full_result:
+                tail = full_result[:240].rstrip()
+                if len(full_result) > 240:
+                    tail += "..."
                 body = f"{body}\n> {tail}"
         title = "Hearth - while you were away" if missed else "Hearth reminder"
         try:
             notify(title, body)
         except Exception:
             pass
+        # Push the FULL action result into the chat queue so it surfaces in
+        # the conversation on the next turn (or the GUI idle banner), not
+        # just the toast. Without this an action reminder runs invisibly —
+        # the tool fires but the user never sees what it found.
+        if action_tool and full_result:
+            try:
+                from . import subagents
+                subagents.enqueue_notification(
+                    source="reminder",
+                    name=r.get("what", "")[:60],
+                    status="completed",
+                    result_text=full_result,
+                    summary=f"reminder fired: {r.get('what', '')}"[:160],
+                )
+            except Exception:
+                pass
 
     def _advance_after_fire(r: Dict, now: datetime, now_iso: str) -> None:
         rec_s = r.get("recurring_seconds")

@@ -4951,10 +4951,16 @@ def _browse_scroll(p: Dict) -> str:
     return _b.browse_scroll(p)
 
 
+def _browse_key(p: Dict) -> str:
+    from . import browse as _b
+    return _b.browse_key(p)
+
+
 _HANDLERS["browse"] = _browse
 _HANDLERS["browse_click"] = _browse_click
 _HANDLERS["browse_type"] = _browse_type
 _HANDLERS["browse_scroll"] = _browse_scroll
+_HANDLERS["browse_key"] = _browse_key
 _HANDLERS["browse_close"] = _browse_close
 
 # The browser tools register ONLY when Playwright is installed (opt-in via
@@ -5018,6 +5024,26 @@ for _bt in (
                 "submit": {"type": "boolean", "description": "Press Enter after typing (e.g. to run a search)."},
             },
             "required": ["text"],
+        },
+    },
+    {
+        "name": "browse_key",
+        "description": (
+            "Press a keyboard key/shortcut on the current browser page — for media "
+            "controls and shortcuts that aren't clickable buttons. YouTube: key='f' "
+            "fullscreen, 'k' or ' ' play/pause, 'm' mute, 't' theater, 'j'/'l' seek "
+            "10s back/forward. Also 'Escape', 'ArrowUp'/'ArrowDown' volume, combos like "
+            "'Control+L'. To fullscreen a video just call browse_key with key='f' (the "
+            "video is auto-focused first). Optional focus= text/element to click before "
+            "the keypress lands."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Key or combo, e.g. 'f' (fullscreen), 'k' (play/pause), 'm' (mute), 'Control+L'."},
+                "focus": {"type": "string", "description": "Optional: text/element to click first so the keypress targets it."},
+            },
+            "required": ["key"],
         },
     },
     {
@@ -5283,7 +5309,7 @@ _TOOL_CATEGORY = {
     # Web & browser
     "web_search": "Web & browser", "web_fetch": "Web & browser", "validate_url": "Web & browser",
     "open_url": "Web & browser", "open_in_browser": "Web & browser", "list_browsers": "Web & browser",
-    "browse": "Web & browser", "browse_click": "Web & browser", "browse_type": "Web & browser", "browse_scroll": "Web & browser",
+    "browse": "Web & browser", "browse_click": "Web & browser", "browse_type": "Web & browser", "browse_scroll": "Web & browser", "browse_key": "Web & browser",
     "browse_close": "Web & browser",
     # System & apps
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
