@@ -4,6 +4,16 @@ import os
 import runpy
 import sys
 
+# Frozen multi-entry: the built-in LLM server re-invokes THIS exe with a
+# sentinel because sys.executable is the bundle, not python. Route it to
+# llama_cpp.server's CLI before anything else.
+if "--hearth-run-llama-server" in sys.argv:
+    _i = sys.argv.index("--hearth-run-llama-server")
+    sys.argv = [sys.argv[0]] + sys.argv[_i + 1:]
+    from llama_cpp.server.__main__ import main as _llama_main
+    _llama_main()
+    raise SystemExit(0)
+
 # Defensive null-stderr safety (only used if PyInstaller built with no console)
 if getattr(sys, "frozen", False) and (sys.stderr is None or sys.stdout is None):
     _log_dir = os.path.join(os.path.expanduser("~"), "Jarvis", "logs")
