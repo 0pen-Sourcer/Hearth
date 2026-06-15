@@ -1438,13 +1438,11 @@ def _filter_unavailable_tools() -> None:
     if sys.platform != "win32":
         drop.add("list_installed_apps")
 
-    # Forge / Stable-Diffusion image-gen tools are NICHE — they need a local
-    # Forge/SD WebUI install almost no one has, and their schemas cost ~600
-    # prompt tokens every turn. Off by default (cleaner toolset for normal
-    # users + less context pressure); opt in with HEARTH_ENABLE_FORGE=1.
-    # Nothing is deleted — the capability returns the moment the flag is set.
-    if os.environ.get("HEARTH_ENABLE_FORGE", "0") != "1":
-        drop.update({"forge_generate", "forge_status", "forge_shutdown"})
+    # NOTE: the Forge / SD-WebUI local-image tools used to be dropped here
+    # behind HEARTH_ENABLE_FORGE=1. They're now handled AFTER FORGE_DIR is
+    # auto-detected (see the forge section), so a detected install lights them
+    # up automatically. They're in _DEFERRED_TOOLS, so they cost ~0 prompt
+    # tokens until the model calls load_tools('image').
 
     if drop:
         TOOL_DEFINITIONS[:] = [t for t in TOOL_DEFINITIONS if t["name"] not in drop]
@@ -4416,6 +4414,39 @@ def _autodetect_forge_dir() -> str:
         _ld = _forge_launch_dir(c)
         if _ld:
             return _ld
+    # Bounded fallback scan (NOT a whole-drive glob): list the immediate
+    # children of each drive root + common parent folders, keep dirs whose name
+    # hints at an SD/Forge install, and validate them + their immediate children
+    # (catches nestings like F:\Forge_WebUI\sd-webui-forge-neo). One level of
+    # listing per location — fast, no deep recursion.
+    scan_parents = []
+    if sys.platform == "win32":
+        scan_parents = [f"{d}:\\" for d in "CDEFG"]
+    scan_parents += [home, os.path.join(home, "Documents"),
+                     os.path.join(home, "Downloads"), os.path.join(home, "Desktop")]
+    _hint = ("forge", "sd-webui", "stable-diffusion", "automatic1111", "a1111")
+    for parent in scan_parents:
+        try:
+            entries = os.listdir(parent)
+        except OSError:
+            continue
+        for name in entries:
+            if not any(h in name.lower() for h in _hint):
+                continue
+            sub = os.path.join(parent, name)
+            if not os.path.isdir(sub):
+                continue
+            _ld = _forge_launch_dir(sub)
+            if _ld:
+                return _ld
+            # one level deeper (the install often sits inside a wrapper folder)
+            try:
+                for inner in os.listdir(sub):
+                    _ld = _forge_launch_dir(os.path.join(sub, inner))
+                    if _ld:
+                        return _ld
+            except OSError:
+                pass
     return ""
 
 
@@ -4456,6 +4487,16 @@ def _looks_like_forge(path: str) -> bool:
 FORGE_DIR = _autodetect_forge_dir()
 FORGE_URL = os.environ.get("JARVIS_FORGE_URL", "http://127.0.0.1:7860")
 FORGE_BOOT_TIMEOUT = int(os.environ.get("JARVIS_FORGE_BOOT_TIMEOUT", "180"))
+
+# Light up the local Forge image-gen tools when an install is actually present
+# (or HEARTH_ENABLE_FORGE=1 forces them). They're deferred, so they don't bloat
+# the prompt — the model reveals them with load_tools('image') and the user's
+# local SD model (e.g. a Pony checkpoint) becomes usable. With no install and no
+# flag, drop them so a normal user's toolset stays clean.
+if not (os.environ.get("HEARTH_ENABLE_FORGE", "0") == "1"
+        or (FORGE_DIR and os.path.isdir(FORGE_DIR))):
+    TOOL_DEFINITIONS[:] = [t for t in TOOL_DEFINITIONS
+                           if t["name"] not in {"forge_generate", "forge_status", "forge_shutdown"}]
 
 # Track the subprocess so we can shut it down later. Module-level so it
 # survives across tool calls within a single Jarvis session.
@@ -5351,8 +5392,9 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
 # default on — worst case the model uses a niche tool slightly less often, never
 # a hard break. Opt out entirely with HEARTH_ALL_TOOLS=1 (loads every schema).
 _DEFERRED_TOOLS = {
-    # image / video generation
+    # image / video generation (cloud + local Forge when an install is present)
     "generate_image", "generate_video", "check_video_task", "list_generations",
+    "forge_generate", "forge_status", "forge_shutdown",
     # self-extending
     "create_plugin", "list_plugins", "delete_plugin", "create_skill",
     # soul / persona editing
