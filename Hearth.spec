@@ -143,6 +143,11 @@ if not LITE:
         DATAS += _llc_datas
         PW_BINARIES += _llc_bins
         HIDDEN += _llc_hidden + ["llama_cpp", "llama_cpp.server", "hearth.llmserver"]
+        # Belt-and-suspenders: collect_all can miss the lib/ DLLs (llama.dll,
+        # ggml*.dll) on some llama-cpp-python wheels. Force them in explicitly,
+        # preserving the llama_cpp/lib/ layout the loader expects.
+        from PyInstaller.utils.hooks import collect_dynamic_libs as _cdl
+        PW_BINARIES += _cdl("llama_cpp")
     except Exception:
         pass
 
