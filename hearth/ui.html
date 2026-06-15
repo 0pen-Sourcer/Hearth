@@ -8377,7 +8377,7 @@ function modelsCapTagsHTML(caps) {
 function modelsLoadConfigHTML(opts) {
   const o = opts || {};
   const maxCtx = o.maxCtx || 32768;
-  const defCtx = Math.min(o.defaultCtx || 8192, maxCtx);
+  const defCtx = Math.min(o.defaultCtx || (STATE.settings && STATE.settings.server_default_ctx) || 24576, maxCtx);
   return `
     <div class="ex-config">
       <div class="ex-row">
@@ -8644,7 +8644,7 @@ function modelsRenderMine() {
         <div class="model-expand" data-expand="${filenameId}">
           <div class="ex-head">Load configuration</div>
           <div class="ex-desc">Tune llama.cpp before booting. Saved per-model so you only set this once. "Use this" on the row always boots with these values.</div>
-          ${modelsLoadConfigHTML({ maxCtx: ctxGuess, defaultCtx: Math.min(8192, ctxGuess) })}
+          ${modelsLoadConfigHTML({ maxCtx: ctxGuess, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 24576, ctxGuess) })}
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${filenameId}">Cancel</button>
             <button class="model-action" data-apply-path="${esc(m.path)}" data-apply-id="${filenameId}">Save & use with these settings</button>
@@ -8697,7 +8697,7 @@ function modelsRenderPicks() {
         <div class="model-expand" data-expand="${rowId}">
           <div class="ex-head">Load configuration</div>
           <div class="ex-desc">Applied after download finishes.</div>
-          ${modelsLoadConfigHTML({ maxCtx: p.context, defaultCtx: Math.min(8192, p.context) })}
+          ${modelsLoadConfigHTML({ maxCtx: p.context, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 24576, p.context) })}
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
             <button class="model-action" data-apply-pick="${esc(p.id)}" data-apply-id="${rowId}">Download with this config</button>
@@ -8760,7 +8760,7 @@ async function modelsRenderDiscover() {
           <div class="ex-desc">Bigger Q = better quality but slower + more VRAM. Q4_K_M is the usual sweet spot.</div>
           <div class="ex-files" data-hf-files="${rowId}">Loading files…</div>
           <div class="ex-head" style="margin-top:14px">Load configuration</div>
-          ${modelsLoadConfigHTML({ maxCtx: 32768, defaultCtx: 8192 })}
+          ${modelsLoadConfigHTML({ maxCtx: 32768, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 24576, 32768) })}
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
             <button class="model-action" data-apply-hf-repo="${esc(it.hf_repo)}" data-apply-id="${rowId}" disabled>Download with this config</button>
