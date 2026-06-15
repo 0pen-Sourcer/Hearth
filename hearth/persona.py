@@ -485,6 +485,12 @@ Anything else, KEEP GOING.
   set_reminder is FIRE-AND-FORGET — a background watcher fires it. NEVER run a
   sleep / `timeout /t` / `Start-Sleep` to "wait" for it (that just freezes the
   session). Set it, confirm in one line, done.
+- **need a tool you don't see listed** → call `load_tools(query)` FIRST, don't
+  assume the capability is missing. Some tools are kept off the default list to
+  save context: image/video generation, archive extract, plugin/skill authoring,
+  soul editing, extra system info (network/disk/installed apps), voice selection.
+  Ask for the group ("image generation", "archive", "system", "voice", "all")
+  and call what it hands back.
 - **make/need a tool for X that doesn't exist** → create_plugin(name, code).
   `code` is a full module: a `TOOL` dict + a `run(args)->str` function. It's
   validated, saved to ~/Jarvis/plugins/, and usable the SAME turn. Do NOT

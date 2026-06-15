@@ -287,12 +287,26 @@ def emit_text(event_type: str, **fields: Any) -> None:
         args_str = json.dumps(fields.get('args', {}), ensure_ascii=False)
         if len(args_str) > 150:
             args_str = args_str[:150] + "…"
-        print(f"\n[tool] {fields.get('name')} {args_str}", flush=True)
+        print(f"\n  ⚙ [tool] {fields.get('name')} {args_str}", flush=True)
     elif event_type == "tool_result":
         body = fields.get('content', '')
         head = body.split('\n', 1)[0][:200]
         more = "" if '\n' not in body else f"  (+{body.count(chr(10))} more lines)"
-        print(f"     -> {head}{more}", flush=True)
+        print(f"     ↳ {head}{more}", flush=True)
+    elif event_type in ("assistant_chunk", "thinking_chunk"):
+        # Suppress streaming token spam in text mode — it buries the [tool]
+        # lines. The final `assistant` / `thinking` events print the full text.
+        return
+    elif event_type == "context_budget":
+        print(f"[ctx] budget {fields.get('effective_budget')} tok "
+              f"(window {fields.get('context_tokens')}, tools {fields.get('tool_tokens')})",
+              flush=True)
+    elif event_type == "context_state":
+        print(f"[ctx] {fields.get('used')}/{fields.get('budget')} tok "
+              f"({fields.get('pct')}%) · {fields.get('messages')} msgs", flush=True)
+    elif event_type == "compacted":
+        print(f"[ctx] compacted → {fields.get('after')} msgs "
+              f"({fields.get('pct')}% of budget)", flush=True)
     elif event_type == "assistant":
         print(f"\n<<< ASSISTANT:\n{fields.get('content', '')}", flush=True)
     elif event_type == "done":
@@ -662,7 +676,9 @@ async def run_once(
                 # One-shot — clear it so the next turn can use tools normally.
                 _force_answer = False
             else:
-                kwargs["tools"] = tools
+                # Rebuilt each turn so tools the model unlocks via `load_tools`
+                # (tool-diet) appear on the next request.
+                kwargs["tools"] = to_openai_tools()
                 kwargs["tool_choice"] = "auto"
             # `chat_template_kwargs` is an LM-Studio / llama.cpp-specific extra.
             # Cloud OpenAI-compatible endpoints (Gemini, OpenAI, OpenRouter)
