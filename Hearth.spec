@@ -16,6 +16,12 @@
 import os
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
+# HEARTH_LITE=1 builds a slim bundle (~0.8 GB) WITHOUT the built-in CUDA
+# llama.cpp server + nvidia CUDA wheels (~1.7 GB). Lite users run LM Studio /
+# Ollama / a cloud key (the recommended path anyway). Default build keeps the
+# self-contained server. Usage:  set HEARTH_LITE=1 && build.bat
+LITE = bool(os.environ.get("HEARTH_LITE"))
+
 block_cipher = None
 
 REPO_ROOT = os.path.abspath(SPECPATH)
@@ -34,6 +40,13 @@ DATAS = [
     # Bat launcher that opens the CLI exe inside the bundled WT (renamed
     # to Hearth-cli.bat in the final bundle)
     (os.path.join(REPO_ROOT, "dist_cli_launcher.bat"), "."),
+    # v0.7 skills + subagent personas — SKILL.md, scripts/*.py, assets. These
+    # are data (not imported modules), so PyInstaller's module analysis misses
+    # them entirely. Without this the packaged app ships ZERO skills — the
+    # model finds nothing, recreates a crippled version, and all the bundled
+    # make-pdf/pptx/xlsx work never reaches the user.
+    (os.path.join(REPO_ROOT, "hearth", "skills"), os.path.join("hearth", "skills")),
+    (os.path.join(REPO_ROOT, "hearth", "subagents"), os.path.join("hearth", "subagents")),
 ]
 if os.path.isdir(os.path.join(REPO_ROOT, "assets")):
     DATAS.append((os.path.join(REPO_ROOT, "assets"), "assets"))
@@ -50,7 +63,7 @@ if os.path.isdir(_wt_dir):
 #   - kokoro_onnx  → config.json (TTS vocab)
 #   - faster_whisper → assets/*.onnx (Silero VAD model)
 for _pkg in ("kokoro_onnx", "espeakng_loader", "language_tags",
-             "faster_whisper", "onnxruntime"):
+             "faster_whisper", "onnxruntime", "matplotlib"):
     try:
         DATAS += collect_data_files(_pkg)
     except Exception:
@@ -68,6 +81,10 @@ HIDDEN = [
     "pypdf", "pypdfium2",  # pypdfium2 = PDF→VLM-OCR fallback for scanned pages
     "docx", "openpyxl", "pptx",
     "reportlab", "reportlab.pdfgen", "reportlab.platypus", "reportlab.lib", "reportlab.lib.pagesizes", "reportlab.lib.styles", "reportlab.lib.units", "reportlab.lib.colors",
+    # matplotlib — the skills' build scripts import it at runtime to render
+    # themed charts; static analysis can't see those, so force-include it
+    # (and use the Agg backend, no GUI toolkit).
+    "matplotlib", "matplotlib.backends.backend_agg",
     "psutil", "sounddevice", "numpy",
     "webview", "webview.platforms.edgechromium",
     "plyer", "plyer.platforms.win.notification",
@@ -119,14 +136,15 @@ except Exception:
 # to fit the user's VRAM. NOTE: this can balloon the bundle by 50-400 MB
 # depending on whether the user installed a CPU or CUDA wheel. Verified by
 # running the rebuilt exe -> Models tab -> "Use this" path.
-try:
-    from PyInstaller.utils.hooks import collect_all as _collect_all
-    _llc_datas, _llc_bins, _llc_hidden = _collect_all("llama_cpp")
-    DATAS += _llc_datas
-    PW_BINARIES += _llc_bins
-    HIDDEN += _llc_hidden + ["llama_cpp", "llama_cpp.server", "hearth.llmserver"]
-except Exception:
-    pass
+if not LITE:
+    try:
+        from PyInstaller.utils.hooks import collect_all as _collect_all
+        _llc_datas, _llc_bins, _llc_hidden = _collect_all("llama_cpp")
+        DATAS += _llc_datas
+        PW_BINARIES += _llc_bins
+        HIDDEN += _llc_hidden + ["llama_cpp", "llama_cpp.server", "hearth.llmserver"]
+    except Exception:
+        pass
 
 # CUDA runtime DLLs — bundle the nvidia-cuda-runtime-cu12 / nvidia-cublas-cu12 /
 # nvidia-cuda-nvrtc-cu12 pip wheels so llama.dll can find cudart64_12.dll +
@@ -135,7 +153,7 @@ except Exception:
 # the frozen exe (the "could not find module" loader error that bit the
 # user before round 4). hearth/__init__.py adds the wheel bin dirs to the
 # DLL path on import.
-for _pkg in ("nvidia.cuda_runtime", "nvidia.cublas", "nvidia.cuda_nvrtc"):
+for _pkg in (() if LITE else ("nvidia.cuda_runtime", "nvidia.cublas", "nvidia.cuda_nvrtc")):
     try:
         from PyInstaller.utils.hooks import collect_all as _collect_all
         _d, _b, _h = _collect_all(_pkg)
@@ -150,8 +168,8 @@ for _pkg in ("nvidia.cuda_runtime", "nvidia.cublas", "nvidia.cuda_nvrtc"):
 # DOES NOT bundle these and llama_cpp.server crashes with
 # ModuleNotFoundError without them. Collecting eagerly so PyInstaller's
 # tree-shaker can't drop them.
-for _pkg in ("fastapi", "uvicorn", "sse_starlette",
-             "pydantic_settings", "starlette_context"):
+for _pkg in (() if LITE else ("fastapi", "uvicorn", "sse_starlette",
+             "pydantic_settings", "starlette_context")):
     try:
         from PyInstaller.utils.hooks import collect_all as _collect_all
         _d, _b, _h = _collect_all(_pkg)
@@ -186,7 +204,7 @@ a_tray = Analysis(
     hiddenimports=HIDDEN + collect_submodules("hearth"),
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter", "tcl", "tk", "matplotlib", "scipy", "torch"],
+    excludes=["tkinter", "tcl", "tk", "scipy", "torch"],
     cipher=block_cipher,
     noarchive=False,
 )
@@ -213,7 +231,7 @@ a_cli = Analysis(
     binaries=PW_BINARIES,
     datas=DATAS,
     hiddenimports=HIDDEN + collect_submodules("hearth"),
-    excludes=["tkinter", "tcl", "tk", "matplotlib", "scipy", "torch"],
+    excludes=["tkinter", "tcl", "tk", "scipy", "torch"],
     cipher=block_cipher,
     noarchive=False,
 )
@@ -239,7 +257,7 @@ a_window = Analysis(
     binaries=PW_BINARIES,
     datas=DATAS,
     hiddenimports=HIDDEN + collect_submodules("hearth"),
-    excludes=["tkinter", "tcl", "tk", "matplotlib", "scipy", "torch"],
+    excludes=["tkinter", "tcl", "tk", "scipy", "torch"],
     cipher=block_cipher,
     noarchive=False,
 )

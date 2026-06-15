@@ -31,10 +31,51 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # CONFIG
 # ============================================================
 
-WORKSPACE = os.path.abspath(
-    os.environ.get("JARVIS_WORKSPACE")
-    or os.path.join(os.path.expanduser("~"), "Jarvis")
-)
+# Where Hearth keeps everything (memory, conversations, skills, settings).
+# Resolution order:
+#   1. JARVIS_WORKSPACE env  (rename feature + power users)
+#   2. pointer file ~/.hearth/workspace.txt  (so a user whose C: is full can
+#      put the workspace on D:/E: — written by onboarding / Settings)
+#   3. default ~/Jarvis
+# The pointer lives OUTSIDE the workspace (chicken-and-egg) so we can find the
+# workspace before we've loaded anything from it.
+_WORKSPACE_POINTER = os.path.join(os.path.expanduser("~"), ".hearth", "workspace.txt")
+
+
+def _resolve_workspace() -> str:
+    env = os.environ.get("JARVIS_WORKSPACE")
+    if env and env.strip():
+        return os.path.abspath(env.strip())
+    try:
+        if os.path.isfile(_WORKSPACE_POINTER):
+            p = open(_WORKSPACE_POINTER, encoding="utf-8").read().strip()
+            if p:
+                return os.path.abspath(p)
+    except OSError:
+        pass
+    return os.path.join(os.path.expanduser("~"), "Jarvis")
+
+
+def set_workspace_location(path: str) -> str:
+    """Point Hearth at a new workspace folder (e.g. on a drive with space).
+    Writes the pointer file + creates the dir. Returns the resolved path. The
+    caller should move existing files there and restart for it to take effect
+    everywhere (WORKSPACE is read at import across modules)."""
+    path = os.path.abspath(os.path.expanduser(path.strip()))
+    os.makedirs(path, exist_ok=True)
+    os.makedirs(os.path.dirname(_WORKSPACE_POINTER), exist_ok=True)
+    with open(_WORKSPACE_POINTER, "w", encoding="utf-8") as f:
+        f.write(path)
+    return path
+
+
+WORKSPACE = os.path.abspath(_resolve_workspace())
+# Propagate the resolved path into the env so every other module that does
+# `os.environ.get("JARVIS_WORKSPACE") or ~/Jarvis` (llmserver, mcp_client,
+# memory, jobs, web) aligns to the SAME workspace — including one chosen via
+# the pointer file, not just the env var. tools.py is imported first, so this
+# runs before those modules resolve their own WORKSPACE.
+os.environ["JARVIS_WORKSPACE"] = WORKSPACE
 SAFE_READ_ONLY = os.environ.get("JARVIS_LOCKDOWN", "").strip() in ("1", "true", "yes")
 
 # Extra writeable roots — paths the user has explicitly opted in to,
@@ -2965,6 +3006,8 @@ def _rewrite_python_invocation(cmd: str) -> str:
     # to cmd.exe. See the long note that used to live here.
     prefix = "& " if sys.platform == "win32" else ""
 
+    _frozen = getattr(sys, "frozen", False)
+
     def _rewrite_segment(seg: str) -> str:
         stripped = seg.lstrip()
         lead = seg[: len(seg) - len(stripped)]  # preserve leading whitespace
@@ -2974,8 +3017,22 @@ def _rewrite_python_invocation(cmd: str) -> str:
         first = parts[0].lower()
         rest = parts[1] if len(parts) > 1 else ""
         if first in ("pip", "pip3", "pip.exe"):
+            if _frozen:
+                # In the packaged app sys.executable is Hearth.exe, not python,
+                # and there's no pip. The libs the skills need are bundled, so
+                # tell the model to skip the install and just run its script.
+                return (f'{lead}Write-Output "[packaged build] pip is unavailable '
+                        f'here, but reportlab / python-pptx / matplotlib / '
+                        f'openpyxl / pypdfium2 are already bundled - skip the '
+                        f'install and run your build script directly."')
             return f'{lead}{prefix}"{sys.executable}" -m pip {rest}'.rstrip()
         if first in ("python", "python3", "py", "python.exe", "py.exe"):
+            if _frozen:
+                # sys.executable is the frozen exe (entrypoint = tray/cli), not a
+                # python interpreter, so `Hearth.exe script.py` would just launch
+                # the app. Route through the --hearth-run-python sentinel the
+                # bundle entrypoints catch and runpy with the bundled libraries.
+                return f'{lead}{prefix}"{sys.executable}" --hearth-run-python {rest}'.rstrip()
             return f'{lead}{prefix}"{sys.executable}" {rest}'.rstrip()
         return seg
 
@@ -4318,18 +4375,22 @@ def _autodetect_forge_dir() -> str:
     # Saved setting wins
     try:
         from pathlib import Path as _Path
-        settings_path = _Path(os.path.expanduser("~")) / "Jarvis" / "settings.json"
+        settings_path = _Path(SETTINGS_PATH)
         if settings_path.is_file():
             saved = json.loads(settings_path.read_text(encoding="utf-8"))
             saved_dir = (saved.get("forge_dir") or "").strip()
-            if saved_dir and _looks_like_forge(saved_dir):
-                return saved_dir
+            if saved_dir:
+                _ld = _forge_launch_dir(saved_dir)
+                if _ld:
+                    return _ld
     except Exception:
         pass
     # Env var next
     env_dir = (os.environ.get("JARVIS_FORGE_DIR") or "").strip()
-    if env_dir and _looks_like_forge(env_dir):
-        return env_dir
+    if env_dir:
+        _ld = _forge_launch_dir(env_dir)
+        if _ld:
+            return _ld
     # Common install locations
     home = os.path.expanduser("~")
     candidates = []
@@ -4352,23 +4413,44 @@ def _autodetect_forge_dir() -> str:
                             "/opt", "/usr/local"):
                 candidates.append(os.path.join(parent, name))
     for c in candidates:
-        if _looks_like_forge(c):
-            return c
+        _ld = _forge_launch_dir(c)
+        if _ld:
+            return _ld
+    return ""
+
+
+def _forge_launch_dir(path: str) -> str:
+    """Return the dir that actually contains webui.bat + modules/ (what we cd
+    into to launch Forge), or "" if `path` isn't a Forge/SD-WebUI install.
+
+    Accepts BOTH layouts:
+      - cloned repo: webui.bat + modules/ AT the top level
+      - one-click PACKAGE: run.bat at the top, the real webui.bat + modules/
+        inside a `webui/` subfolder  (this is why F:/Forge_WebUI was rejected)
+    """
+    if not path or not os.path.isdir(path):
+        return ""
+
+    def _qualifies(d: str) -> bool:
+        has_launcher = any(
+            os.path.isfile(os.path.join(d, f))
+            for f in ("webui.bat", "webui.sh", "webui-user.bat", "webui-user.sh", "launch.py")
+        )
+        return has_launcher and os.path.isdir(os.path.join(d, "modules"))
+
+    if _qualifies(path):
+        return path
+    sub = os.path.join(path, "webui")  # Forge one-click package nests it here
+    if _qualifies(sub):
+        return sub
     return ""
 
 
 def _looks_like_forge(path: str) -> bool:
-    """A folder qualifies as a Forge/SD-WebUI install if it has both a
-    launcher script AND a modules/ subdir. Two-check guards against
-    matching random folders named "webui"."""
-    if not path or not os.path.isdir(path):
-        return False
-    has_launcher = any(
-        os.path.isfile(os.path.join(path, f))
-        for f in ("webui.bat", "webui.sh", "webui-user.bat", "webui-user.sh", "launch.py")
-    )
-    has_modules = os.path.isdir(os.path.join(path, "modules"))
-    return has_launcher and has_modules
+    """True if `path` is (or contains, via a webui/ subdir) a Forge/SD-WebUI
+    install. Two-signal check (launcher + modules/) guards against matching a
+    random folder named "webui"."""
+    return _forge_launch_dir(path) != ""
 
 
 FORGE_DIR = _autodetect_forge_dir()

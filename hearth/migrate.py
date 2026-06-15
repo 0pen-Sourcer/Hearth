@@ -351,12 +351,14 @@ def main() -> int:
     skill_roots: List[Path] = []
 
     if args.source == "hermes":
-        home = _hermes_home()
-        if not home.is_dir():
-            print(f"no hermes home at {home}; set HERMES_HOME or pass --path "
-                  f"(point to a directory containing memories/USER.md)")
+        # --path wins; only fall back to ~/.hermes when no path was given.
+        # (The old order checked ~/.hermes existence FIRST and bailed before
+        # ever honoring --path.)
+        target_home = Path(args.path) if args.path else _hermes_home()
+        if not target_home.is_dir():
+            print(f"no hermes home at {target_home}; set HERMES_HOME or pass "
+                  f"--path (point to a directory containing memories/USER.md)")
             return 1
-        target_home = Path(args.path) if args.path else home
         for mtype, text in _collect_hermes(target_home):
             entries.append((mtype, "", text))
         skill_roots = [target_home / "skills"]
