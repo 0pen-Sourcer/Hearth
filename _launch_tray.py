@@ -23,8 +23,20 @@ import sys
 if "--hearth-run-llama-server" in sys.argv:
     _i = sys.argv.index("--hearth-run-llama-server")
     sys.argv = [sys.argv[0]] + sys.argv[_i + 1:]
-    from llama_cpp.server.__main__ import main as _llama_main
-    _llama_main()
+    try:
+        from llama_cpp.server.__main__ import main as _llama_main
+        _llama_main()
+    except Exception as _e:
+        # Don't pop a crash dialog — the parent reads stderr (→ llamaserver.log)
+        # and surfaces a clean "built-in server unavailable" message. Happens on
+        # a LITE build (llama_cpp not bundled) or a missing llama.dll.
+        try:
+            (sys.stderr or sys.__stdout__).write(
+                f"[hearth] built-in LLM server unavailable in this build "
+                f"(llama_cpp failed to load): {_e}\n")
+        except Exception:
+            pass
+        raise SystemExit(1)
     raise SystemExit(0)
 
 # Frozen python execution: the skills run `python build.py`, but sys.executable
