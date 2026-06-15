@@ -340,7 +340,10 @@ def autodetect_model() -> str:
     """Query the local server's /v1/models and pick the first non-embedding
     chat model. Falls back to LOCAL_MODEL if anything fails."""
     try:
-        with urllib.request.urlopen(f"{LOCAL_API_BASE}/models", timeout=2) as r:
+        _req = urllib.request.Request(
+            f"{LOCAL_API_BASE}/models",
+            headers={"Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
+        with urllib.request.urlopen(_req, timeout=2) as r:
             data = json.loads(r.read().decode())
         for m in data.get("data", []):
             mid = m.get("id", "")
@@ -750,7 +753,7 @@ class JarvisCLI:
         try:
             _req = urllib.request.Request(
                 f"{LOCAL_API_BASE}/models",
-                headers={"Authorization": f"Bearer {LOCAL_API_KEY}"})
+                headers={"Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
             with urllib.request.urlopen(_req, timeout=2) as r:
                 data = json.loads(r.read().decode())
             ids = [m.get("id", "") for m in data.get("data", [])]
@@ -764,10 +767,16 @@ class JarvisCLI:
         try:
             req = urllib.request.Request(
                 f"{LOCAL_API_BASE}/models",
-                headers={"Authorization": f"Bearer {LOCAL_API_KEY}"})
+                headers={"Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
             with urllib.request.urlopen(req, timeout=5) as r:
                 data = json.loads(r.read().decode())
-            ids = [m["id"] for m in data.get("data", [])]
+            # Hide non-chat models — xAI lists grok-imagine-image/-video etc.
+            # alongside chat models, but they 400 on /chat/completions (they're
+            # image/video endpoints). They only clutter the picker.
+            _NON_CHAT = ("imagine-image", "imagine-video", "imagine-audio",
+                         "embedding", "embed-", "-tts", "whisper")
+            ids = [m["id"] for m in data.get("data", [])
+                   if m.get("id") and not any(p in m["id"].lower() for p in _NON_CHAT)]
             self.last_model_list = ids
             print(f"\n{C_BRAND}Models on {LOCAL_API_BASE}:{C_RESET}")
             for i, m in enumerate(ids, 1):
@@ -1364,6 +1373,18 @@ class JarvisCLI:
 
             print(f"{C_OK}brain → {provider}{C_RESET}  "
                   f"{C_DIM}({url}{' · ' + model_hint if model_hint else ''}){C_RESET}")
+            # Re-detect the context window for the NEW brain. Without this the
+            # budget kept the previous model's value (e.g. a 32K local default),
+            # so a 1M-ctx cloud model like grok-4.3 got compacted at 32K. /model
+            # already does this; /brain didn't — this is that fix.
+            try:
+                from hearth.headless import resolve_context_tokens
+                _tok, _src = resolve_context_tokens(self.current_model)
+                if _tok and _tok > 1024:
+                    self.context_tokens = _tok
+                    print(f"{C_DIM}  context auto-set to {_tok:,} tokens ({_src}){C_RESET}")
+            except Exception:
+                pass
             # Friendly first-timer hints — tells the user what to DO next
             # depending on which "local" variant they picked.
             if provider == "lmstudio":
@@ -2474,11 +2495,12 @@ class JarvisCLI:
             _sync = _oai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
             _llm = _mx.make_openai_llm_call(_sync, self.current_model, max_tokens=600)
             _msgs = list(self.messages)
-            saved, _w = await asyncio.to_thread(
+            # Save SILENTLY — this runs fire-and-forget, so any print lands at a
+            # random time (mid-prompt) and is jarring in a terminal. Facts still
+            # persist; check them with /memory. (The GUI shows its own toast,
+            # where timing isn't an issue.)
+            await asyncio.to_thread(
                 _mx.extract_and_save, _msgs, _llm, recent_turns=4)
-            if saved:
-                print(f"\n{C_DIM}  ✎ remembered {len(saved)} fact(s): "
-                      f"{', '.join(f.get('title', '') for f in saved)}{C_RESET}")
         except Exception:
             pass
         finally:
