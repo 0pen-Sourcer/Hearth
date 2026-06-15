@@ -125,8 +125,20 @@ def set_device(device: str) -> str:
     return f"STT device -> {device}"
 
 
+def cuda_available() -> bool:
+    """True only if faster-whisper can ACTUALLY run on GPU right now — i.e. the
+    GPU build of ctranslate2 is installed AND a CUDA device is visible. A plain
+    CPU ctranslate2 wheel reports 0 devices even on a machine with an RTX card,
+    so this reflects 'usable today', not 'has a GPU'."""
+    try:
+        import ctranslate2  # type: ignore
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
+
+
 def _try_load_model():
-    global _model, _last_load_error
+    global _model, _last_load_error, DEVICE, COMPUTE_TYPE
     if _model is not None:
         return _model
     with _load_lock:
@@ -137,23 +149,39 @@ def _try_load_model():
         except ImportError as e:
             _last_load_error = f"faster-whisper not installed: {e}"
             return None
+        # Store models inside the workspace so the user's HF cache stays out of
+        # their home dir clutter. Falls back to default cache.
+        download_root = os.path.join(VOICES_DIR, "whisper")
+        os.makedirs(download_root, exist_ok=True)
+        # Device pick: an explicit JARVIS_STT_DEVICE wins; otherwise auto-detect
+        # CUDA so a GPU box isn't silently stuck on slow CPU whisper (the ~10s
+        # latency). GPU → float16 (fast); CPU → int8 (CPU-friendly).
+        _explicit = os.environ.get("JARVIS_STT_DEVICE")
+        if _explicit:
+            _device_now = _explicit.strip().lower()
+        elif cuda_available():
+            _device_now = "cuda"
+        else:
+            _device_now = "cpu"
+        _compute = "float16" if _device_now == "cuda" else COMPUTE_TYPE
         try:
-            # Store models inside the workspace so the user's HF cache stays
-            # out of their home dir clutter. Falls back to default cache.
-            download_root = os.path.join(VOICES_DIR, "whisper")
-            os.makedirs(download_root, exist_ok=True)
-            # Re-read env at load time so a runtime device flip from the GUI
-            # (which only updates env + DEVICE) actually takes effect on the
-            # next reload, even if Python import-time DEVICE was different.
-            _device_now = os.environ.get("JARVIS_STT_DEVICE", DEVICE)
-            _model = WhisperModel(
-                MODEL_SIZE,
-                device=_device_now,
-                compute_type=COMPUTE_TYPE,
-                download_root=download_root,
-            )
+            _model = WhisperModel(MODEL_SIZE, device=_device_now,
+                                  compute_type=_compute, download_root=download_root)
+            DEVICE, COMPUTE_TYPE = _device_now, _compute
             _last_load_error = None
         except Exception as e:
+            # GPU load can fail mid-flight (missing cuDNN, VRAM pressure). Fall
+            # back to CPU rather than leaving voice dead.
+            if _device_now == "cuda":
+                try:
+                    _model = WhisperModel(MODEL_SIZE, device="cpu",
+                                          compute_type="int8", download_root=download_root)
+                    DEVICE, COMPUTE_TYPE = "cpu", "int8"
+                    _last_load_error = (f"GPU whisper failed ({type(e).__name__}); "
+                                        f"fell back to CPU.")
+                    return _model
+                except Exception as e2:
+                    e = e2
             _last_load_error = f"whisper load failed: {type(e).__name__}: {e}"
             return None
     return _model
@@ -192,6 +220,7 @@ def status() -> dict:
         "model_size": MODEL_SIZE,
         "device": DEVICE,
         "compute_type": COMPUTE_TYPE,
+        "cuda_available": cuda_available(),
         "faster_whisper_installed": have_fw,
         "sounddevice_installed": have_sd,
         "numpy_installed": have_np,

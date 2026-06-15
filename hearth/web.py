@@ -1386,6 +1386,29 @@ class HearthHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/voice/device":
+            # One-click STT device flip (the onboarding "switch to GPU" CTA).
+            # Flips it live + eager-loads so a missing-CUDA failure surfaces now
+            # rather than on the first /listen. Full persistence happens when the
+            # user saves Settings; this is the immediate in-session switch.
+            body = self._read_json()
+            dev = (body.get("device") or "").strip().lower()
+            if dev not in ("cpu", "cuda"):
+                return self._send_json(400, {"ok": False, "error": "device must be cpu or cuda"})
+            try:
+                from . import listen as _listen
+                if dev == "cuda" and not _listen.cuda_available():
+                    return self._send_json(200, {
+                        "ok": False, "device": _listen.DEVICE,
+                        "error": "No usable CUDA device — the GPU build of "
+                                 "ctranslate2 isn't installed. Staying on CPU."})
+                _listen.set_device(dev)
+                loaded = _listen._try_load_model() is not None
+                return self._send_json(200, {
+                    "ok": loaded, "device": _listen.DEVICE,
+                    "error": _listen._last_load_error})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/reminders/snooze":
             try:
                 from . import reminders as _r

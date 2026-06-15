@@ -9714,8 +9714,27 @@ async function obLoadVoiceStatus() {
     else if (tts) { cls = 'is-warn'; txt = 'Speakers ready, mic not set up — install faster-whisper.'; }
     else if (stt) { cls = 'is-warn'; txt = 'Mic ready, speakers not set up — install kokoro-onnx.'; }
     else { cls = 'is-warn'; txt = 'Voice isn\'t available yet. You can install it any time from Settings.'; }
+    // GPU vs CPU note: speech-to-text on CPU is the ~10s-latency culprit. Tell
+    // the user which they're on; a GPU machine on CPU mode gets a one-click flip.
+    let gpuNote = '';
+    if (stt && v.stt) {
+      const onGpu = v.stt.device === 'cuda';
+      const canGpu = !!v.stt.cuda_available;
+      if (onGpu) gpuNote = ' Running on your GPU — fast.';
+      else if (canGpu) gpuNote = ' Your GPU can run this much faster — <a href="#" id="ob-voice-gpu">switch to GPU</a>.';
+      else gpuNote = ' Running on CPU (transcription may lag a few seconds).';
+    }
     row.className = 'ob-status-row ' + cls;
-    row.innerHTML = `<span class="ob-dot"></span><span>${esc(txt)}</span>`;
+    row.innerHTML = `<span class="ob-dot"></span><span>${esc(txt)}${gpuNote}</span>`;
+    const gpuLink = document.getElementById('ob-voice-gpu');
+    if (gpuLink) gpuLink.onclick = async (e) => {
+      e.preventDefault();
+      gpuLink.textContent = 'switching…';
+      try {
+        await api('/api/voice/device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: 'cuda' }) });
+        obLoadVoiceStatus();
+      } catch { gpuLink.textContent = 'switch failed'; }
+    };
   } catch {
     row.className = 'ob-status-row is-warn';
     row.innerHTML = '<span class="ob-dot"></span><span>Could not check voice status.</span>';
