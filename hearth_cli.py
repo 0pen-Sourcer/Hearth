@@ -429,6 +429,24 @@ class JarvisCLI:
         # check it via set_parent_cancel_check. Set with .set(), cleared
         # at the start of each new user turn.
         self._respond_cancel = threading.Event()
+        # Ctrl-C handling: during a response, set the cancel flag (the stream
+        # loop bails cleanly) instead of raising KeyboardInterrupt — a raise
+        # escapes asyncio.run and kills the whole app (the "Ctrl-C closes
+        # Hearth" bug). At the prompt (not responding), behave normally so the
+        # user can still interrupt/exit. prompt_toolkit owns SIGINT while it's
+        # reading input and restores ours after, so the two don't clash.
+        self._responding = False
+
+        def _on_sigint(_sig, _frm):
+            if getattr(self, "_responding", False):
+                self._respond_cancel.set()
+            else:
+                raise KeyboardInterrupt
+        try:
+            import signal as _signal
+            _signal.signal(_signal.SIGINT, _on_sigint)
+        except Exception:
+            pass
         if not self._context_pinned:
             # Single source of truth — same helper the GUI/bridge use. Has
             # per-provider fallback (Grok 200K, Gemini 200K, Claude 200K,
@@ -1596,8 +1614,19 @@ class JarvisCLI:
                     print(f"{C_OK}context auto-detected: {detected} tokens ({src}){C_RESET}")
                 else:
                     print(f"{C_ERR}could not detect ctx — endpoint didn't expose loaded_context_length{C_RESET}")
-            elif len(parts) >= 2 and parts[1].isdigit():
-                requested = int(parts[1])
+            elif len(parts) >= 2:
+                # Accept 20480, "32k", "1M", "1.5m", "128K" — not just bare digits.
+                _raw = parts[1].lower().replace(",", "").strip()
+                _mult = 1
+                if _raw.endswith("k"):
+                    _mult, _raw = 1000, _raw[:-1]
+                elif _raw.endswith("m"):
+                    _mult, _raw = 1_000_000, _raw[:-1]
+                try:
+                    requested = int(float(_raw) * _mult)
+                except ValueError:
+                    print(f"{C_ERR}usage: /context <number> (e.g. 20480, 32k, 1M) or /context auto{C_RESET}")
+                    return True
                 if requested > _CTX_MAX:
                     print(f"{C_ERR}context {requested:,} is above the 1M ceiling — capping to {_CTX_MAX:,}.{C_RESET}")
                     print(f"{C_DIM}  no real model accepts >1M tokens. If you wanted N thousand, drop the extra zeros.{C_RESET}")
@@ -1610,7 +1639,7 @@ class JarvisCLI:
                 print(f"{C_OK}context window → {self.context_tokens:,} tokens (pinned){C_RESET}")
             else:
                 print(f"  current: {self.context_tokens:,} tokens ({'pinned' if self._context_pinned else 'auto-detected'})")
-                print(f"  usage:   /context <number>   (e.g. /context 20480; capped at {_CTX_MAX:,})")
+                print(f"  usage:   /context <number>   (e.g. 20480, 32k, 1M; capped at {_CTX_MAX:,})")
                 print(f"           /context auto       (re-detect via per-provider table + endpoint probe)")
             return True
         if low == "/listen" or low.startswith("/listen "):
@@ -1669,7 +1698,11 @@ class JarvisCLI:
                 self.messages.append({"role": "user", "content": expanded})
                 if self.voice_on:
                     voice.stop()
-                await self.respond()
+                self._responding = True
+                try:
+                    await self.respond()
+                finally:
+                    self._responding = False
                 asyncio.create_task(self._maybe_extract_facts())
             else:
                 print(f"{C_DIM}(nothing heard){C_RESET}")
@@ -2837,6 +2870,7 @@ class JarvisCLI:
             # stream loop checks it between chunks and bails cleanly
             # without killing the CLI. A second Ctrl-C inside 1s
             # falls through to the outer "exit?" handler.
+            self._responding = True
             try:
                 await self.respond()
                 asyncio.create_task(self._maybe_extract_facts())
@@ -2846,6 +2880,8 @@ class JarvisCLI:
                 # Give the stream + any tool a beat to notice + clean up
                 await asyncio.sleep(0.2)
                 last_interrupt = time.time()
+            finally:
+                self._responding = False
 
     def _extract_facts_to_memory(self, transcript: str) -> int:
         """Before summarizing, ask the LLM to surface durable facts from the
@@ -3242,6 +3278,9 @@ class JarvisCLI:
                 # must produce text. One-shot — clear so tools return next turn.
                 self._force_answer = False
             else:
+                # Rebuilt each turn so tools unlocked via `load_tools`
+                # (tool-diet) show up on the next request.
+                self.openai_tools = to_openai_tools()
                 create_kwargs["tools"] = self.openai_tools
                 create_kwargs["tool_choice"] = "auto"
             # Thinking gate:
