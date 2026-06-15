@@ -1590,6 +1590,7 @@ class JarvisCLI:
                 if self.voice_on:
                     voice.stop()
                 await self.respond()
+                asyncio.create_task(self._maybe_extract_facts())
             else:
                 print(f"{C_DIM}(nothing heard){C_RESET}")
             return True
@@ -2391,10 +2392,46 @@ class JarvisCLI:
                 with open(settings_path, "r", encoding="utf-8") as _sf:
                     cur = json.load(_sf) or {}
             cur["onboarded"] = True
+            # Agent rename from the wizard — persist + apply to this session so
+            # the persona signature / banner use the new name from message #1.
+            _agent = (answers.get("agent_name") or "").strip()
+            if _agent and _agent.lower() != "jarvis":
+                cur["agent_name"] = _agent
+                os.environ["HEARTH_PERSONA_NAME"] = _agent
+                try:
+                    from hearth import persona as _p
+                    _p.NAME = _agent
+                except Exception:
+                    pass
             with open(settings_path, "w", encoding="utf-8") as _sf:
                 json.dump(cur, _sf, indent=2)
         except Exception:
             pass
+
+    async def _maybe_extract_facts(self) -> None:
+        """Passive memory extraction at the end of a turn — auto-saves durable
+        facts (name, preferences, projects, deadlines) WITHOUT the user saying
+        'remember that', matching the GUI/headless behavior the CLI was missing.
+        Fire-and-forget (zero added latency), guarded against overlapping runs,
+        silent on failure. The extractor itself filters jokes/quotes + dedupes."""
+        if getattr(self, "_extracting", False):
+            return
+        self._extracting = True
+        try:
+            from hearth import memory_extract as _mx
+            import openai as _oai
+            _sync = _oai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+            _llm = _mx.make_openai_llm_call(_sync, self.current_model, max_tokens=600)
+            _msgs = list(self.messages)
+            saved, _w = await asyncio.to_thread(
+                _mx.extract_and_save, _msgs, _llm, recent_turns=4)
+            if saved:
+                print(f"\n{C_DIM}  ✎ remembered {len(saved)} fact(s): "
+                      f"{', '.join(f.get('title', '') for f in saved)}{C_RESET}")
+        except Exception:
+            pass
+        finally:
+            self._extracting = False
 
     async def _maybe_run_onboarding(self) -> None:
         """First-run wizard. Asks ~5 quick questions, writes prefs to memory
@@ -2410,6 +2447,31 @@ class JarvisCLI:
               f"{C_DIM}~60 seconds. Helps me be useful to you specifically.{C_RESET}")
         print(f"{C_DIM}  press Enter to skip a question; Ctrl-C any time to skip the rest{C_RESET}")
         print()
+
+        # WHERE to keep files — ask BEFORE anything writes to disk, so a user
+        # whose C: drive is full (or who just wants it elsewhere) can put the
+        # workspace on another drive. Skip if already chosen (pointer exists).
+        try:
+            from hearth.tools import _WORKSPACE_POINTER, set_workspace_location, WORKSPACE as _CUR_WS
+            if not os.path.isfile(_WORKSPACE_POINTER) and not os.environ.get("JARVIS_WORKSPACE"):
+                loc = input(
+                    f"  {C_TOOL}Where should I keep my files — memory, documents, models?{C_RESET}\n"
+                    f"  {C_DIM}Enter for default ({_CUR_WS}), or a path on another drive "
+                    f"like D:\\Hearth{C_RESET}\n  > "
+                ).strip()
+                if loc and os.path.abspath(os.path.expanduser(loc)) != os.path.abspath(_CUR_WS):
+                    new = set_workspace_location(loc)
+                    print(f"\n  {C_OK}Workspace set to {new}.{C_RESET}")
+                    print(f"  {C_DIM}Close and reopen Hearth once to use it — then we'll "
+                          f"finish setup there. (Move that folder anytime; just update "
+                          f"this location to match.){C_RESET}\n")
+                    raise SystemExit(0)
+        except SystemExit:
+            raise
+        except (KeyboardInterrupt, EOFError):
+            print()
+        except Exception:
+            pass
 
         # Learn the machine FIRST — hardware, installed models, drive map — so the
         # model walks in with real context (and never wastes 2 minutes disk-scanning
@@ -2428,6 +2490,9 @@ class JarvisCLI:
         answers: Dict[str, str] = {}
         try:
             answers["name"] = ask("What should I call you?")
+            answers["agent_name"] = ask(
+                "And what would you like to call ME? (Enter to stay JARVIS)"
+            )
             answers["role"] = ask(
                 "Briefly, what do you do? (e.g. 'student', 'web dev', 'streamer', 'designer')"
             )
@@ -2687,6 +2752,7 @@ class JarvisCLI:
             # falls through to the outer "exit?" handler.
             try:
                 await self.respond()
+                asyncio.create_task(self._maybe_extract_facts())
             except KeyboardInterrupt:
                 self._respond_cancel.set()
                 print(f"\n{C_DIM}● cancelling…{C_RESET}")

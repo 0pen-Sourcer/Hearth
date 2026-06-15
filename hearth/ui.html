@@ -2747,7 +2747,7 @@
           <div class="settings-side-footer">
             <div class="avatar"></div>
             <div>
-              <div class="who">0pen-sourcer</div>
+              <div class="who">JARVIS</div>
               <div class="who-sub">Hearth · MIT</div>
             </div>
           </div>
@@ -4053,6 +4053,37 @@ function updateChatHeader() {
   hdr.hidden = false;
 }
 
+// After a restart, no context_state event has fired yet, so the ring ignored
+// the tokens an existing chat already uses (showed 0% / hidden). Estimate
+// usage from the loaded history (~4 chars/token) against the effective budget
+// so the ring is right on load; live context_state events still override it
+// during a turn with the exact backend count.
+async function _updateCtxRingFromHistory() {
+  const c = activeConvo();
+  const wrap = document.getElementById('ctx-ring-wrap');
+  const ring = document.getElementById('ctx-ring');
+  const pct  = document.getElementById('ctx-ring-pct');
+  if (!c || !wrap || !ring || !pct) return;
+  let b = STATE._ctxBudget;
+  if (!b || !b.effective) {
+    try {
+      const r = await api('/api/context-budget');
+      b = STATE._ctxBudget = { total: r.total, tools: r.tools, effective: r.effective, source: r.source };
+    } catch { return; }
+  }
+  const eff = (b && (b.effective || b.total)) || 0;
+  if (!eff) return;
+  const chars = (c.messages || []).reduce((s, m) => s + ((m.content || '').length), 0);
+  const used = Math.round(chars / 4);
+  const p = Math.max(0, Math.min(100, Math.round(100 * used / eff)));
+  const shouldShow = p >= 70 || wrap.classList.contains('compacting');
+  wrap.hidden = !shouldShow;
+  ring.style.setProperty('--ctx-deg', (p * 3.6).toFixed(1) + 'deg');
+  pct.textContent = p + '%';
+  wrap.classList.toggle('warn', p >= 70 && p < 90);
+  wrap.classList.toggle('hot', p >= 90);
+}
+
 function renderChat() {
   const body = $('chat-body');
   body.innerHTML = '';
@@ -4122,6 +4153,7 @@ function renderChat() {
     }
   }
   body.scrollTop = body.scrollHeight;
+  _updateCtxRingFromHistory();  // reflect existing chat's usage on load/switch
 }
 
 function emptyState() {
@@ -4754,7 +4786,12 @@ async function refreshState() {
   try {
     const s = await api('/api/state');
     $('st-model').textContent = s.model ? s.model.id.split(/[\/\\]/).pop() : '—';
-    $('st-ctx').textContent = s.model?.loaded_context_length ? `${(s.model.loaded_context_length/1024).toFixed(0)}K` : '—';
+    // Only set ctx from a LOADED LOCAL model here. On cloud there's no
+    // loaded_context_length, so resetting to '—' would fight refreshCtxBudget
+    // (which sets the real cloud window) — that ping-pong was the flicker.
+    if (s.model && s.model.loaded_context_length) {
+      $('st-ctx').textContent = `${(s.model.loaded_context_length / 1024).toFixed(0)}K`;
+    }
     $('st-tools').textContent = s.tools ?? '—';
     $('st-mem').textContent = s.memories ?? '—';
     $('nav-mem-count').textContent = s.memories ?? '';
@@ -6844,6 +6881,9 @@ async function refreshSettings() {
     // saves the rename in Settings.
     const _inp = document.getElementById('input');
     if (_inp) _inp.placeholder = `Message ${_agentName()}…`;
+    // Footer chip shows the agent name, not a hardcoded handle.
+    const _sf = document.querySelector('.settings-side-footer .who');
+    if (_sf) _sf.textContent = _agentName();
     // Sync the sticker tooltip with the actual brain. "LM Studio model"
     // hardcoded was misleading on cloud — switched users away from
     // clicking the sticker thinking it'd swap their Grok model.
@@ -7221,12 +7261,17 @@ async function refreshSettings() {
     };
     const mcpSnippetBtn = $('btn-mcp-snippet');
     if (mcpSnippetBtn) mcpSnippetBtn.onclick = () => {
-      const repo = (STATE.workspace || '').replace(/\\/g, '/');
+      // Use the real interpreter + full script path the backend reports, so
+      // the config doesn't depend on bare `python` being on PATH or `-m`
+      // resolving the package from an unknown cwd (mcp_server.py adds its own
+      // parent to sys.path, so the absolute-path invocation works anywhere).
+      const py = STATE.python_exe || "python";
+      const srv = STATE.mcp_server_path || "-m hearth.mcp_server";
       const snippet = JSON.stringify({
         mcpServers: {
           hearth: {
-            command: "python",
-            args: ["-m", "hearth.mcp_server"]
+            command: py,
+            args: [srv]
           }
         }
       }, null, 2);
