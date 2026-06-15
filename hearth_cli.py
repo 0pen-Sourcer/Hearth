@@ -748,7 +748,10 @@ class JarvisCLI:
         """Return (chat_model_ids, reachable) for the local /v1/models endpoint.
         Used at boot to distinguish 'server down' from 'no model loaded'."""
         try:
-            with urllib.request.urlopen(f"{LOCAL_API_BASE}/models", timeout=2) as r:
+            _req = urllib.request.Request(
+                f"{LOCAL_API_BASE}/models",
+                headers={"Authorization": f"Bearer {LOCAL_API_KEY}"})
+            with urllib.request.urlopen(_req, timeout=2) as r:
                 data = json.loads(r.read().decode())
             ids = [m.get("id", "") for m in data.get("data", [])]
             chat = [m for m in ids if m and "embed" not in m.lower()]
@@ -759,7 +762,9 @@ class JarvisCLI:
     # -- Slash commands -----------------------------------------------------
     async def fetch_models(self):
         try:
-            req = urllib.request.Request(f"{LOCAL_API_BASE}/models")
+            req = urllib.request.Request(
+                f"{LOCAL_API_BASE}/models",
+                headers={"Authorization": f"Bearer {LOCAL_API_KEY}"})
             with urllib.request.urlopen(req, timeout=5) as r:
                 data = json.loads(r.read().decode())
             ids = [m["id"] for m in data.get("data", [])]
@@ -1069,6 +1074,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/rules{C_RESET}                 show rules.md path")
             print(f"  {C_TOOL}/name [NewName]{C_RESET}        show / set agent name (JARVIS, Cortana, Friday…)")
             print(f"  {C_TOOL}/migrate <hermes|openclaw>{C_RESET}  import memory/skills/config from another agent")
+            print(f"  {C_TOOL}/import-memory [file]{C_RESET}      pull your memory out of ChatGPT/Claude (paste reply to a file, then import)")
             print(f"  {C_TOOL}/jobs [all|<id>|kill <id>]{C_RESET}    background jobs (disk_usage / start_job / etc.)")
             print(f"  {C_TOOL}/mcp [edit|config|run]{C_RESET}     Model Context Protocol — Hearth as server / configure outbound")
             print(f"  {C_TOOL}/agent [<slug> \"<prompt>\"]{C_RESET}  list personas / spawn a sub-agent synchronously")
@@ -1436,6 +1442,51 @@ class JarvisCLI:
                 print(f"{C_DIM}  extra writeable:{C_RESET}")
                 for p in extras:
                     print(f"    {p}")
+            return True
+        if low in ("/import-memory", "/import") or low.startswith("/import-memory ") or low.startswith("/import "):
+            parts = cmd.split(None, 1)
+            if len(parts) < 2:
+                # No file given — show the user how to pull their memory out of
+                # another AI and import it. File-based on purpose: pasting a
+                # multi-line dump into Windows Terminal only sends line 1.
+                print(f"{C_TOOL}Import your memory from ChatGPT / Claude / any AI:{C_RESET}")
+                print(f"  {C_DIM}1.{C_RESET} Paste this into that AI:")
+                print(f'     {C_DIM}"List everything you know or remember about me as plain'
+                      f' bullet points\n      — name, work, preferences, projects, important dates,'
+                      f' people.\n      One fact per line, no preamble."{C_RESET}')
+                print(f"  {C_DIM}2.{C_RESET} Save its reply into a text file (e.g. {C_TOOL}dump.txt{C_RESET}).")
+                print(f"  {C_DIM}3.{C_RESET} Run:  {C_TOOL}/import-memory dump.txt{C_RESET}")
+                return True
+            path = os.path.expanduser(parts[1].strip().strip('"').strip("'"))
+            if not os.path.isfile(path):
+                print(f"{C_ERR}no file at {path}{C_RESET}")
+                return True
+            try:
+                text = open(path, encoding="utf-8", errors="replace").read().strip()
+            except OSError as e:
+                print(f"{C_ERR}couldn't read it: {e}{C_RESET}")
+                return True
+            if not text:
+                print(f"{C_DIM}that file is empty.{C_RESET}")
+                return True
+            print(f"{C_DIM}  importing {len(text)} chars through the fact extractor (with dedup)...{C_RESET}")
+            try:
+                from hearth import memory_extract as _mx
+                import openai as _oai
+                _sync = _oai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+                _llm = _mx.make_openai_llm_call(_sync, self.current_model, max_tokens=900)
+                _msgs = [{"role": "user",
+                          "content": "Here is everything another AI remembered about me — "
+                                     "save the durable facts:\n\n" + text}]
+                saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=1)
+                if saved:
+                    print(f"{C_OK}  imported {len(saved)} memory(ies):{C_RESET}")
+                    for f in saved:
+                        print(f"    • {f.get('title', '')}")
+                else:
+                    print(f"{C_DIM}  nothing new saved (already known, or no durable facts found).{C_RESET}")
+            except Exception as e:
+                print(f"{C_ERR}  import failed: {type(e).__name__}: {e}{C_RESET}")
             return True
         if low == "/allowed":
             from hearth import tools as _t
@@ -2526,6 +2577,12 @@ class JarvisCLI:
         print(f"  {C_OK}saved.{C_RESET}  "
               f"{C_DIM}/rules to view; memory_save to add more; "
               f"~/Jarvis/rules.md to edit by hand.{C_RESET}")
+        print()
+        # Offer importing memory from another AI — most people already have
+        # years of context in ChatGPT/Claude. /import-memory walks them through it.
+        print(f"  {C_TOOL}Already use ChatGPT or Claude?{C_RESET}  "
+              f"{C_DIM}Run {C_RESET}{C_TOOL}/import-memory{C_RESET}{C_DIM} anytime — it gives you a "
+              f"prompt to\n  paste into that AI, then pulls your facts in here.{C_RESET}")
         print()
 
         # Migrate prompt — only shown when a prior agent install is detected.
