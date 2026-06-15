@@ -27,6 +27,23 @@ if "--hearth-run-llama-server" in sys.argv:
     _llama_main()
     raise SystemExit(0)
 
+# Frozen python execution: the skills run `python build.py`, but sys.executable
+# is THIS exe, not a python interpreter. The rewriter re-invokes us with this
+# sentinel; runpy the script with the bundled libraries so the build scripts
+# actually run in the packaged app.
+if "--hearth-run-python" in sys.argv:
+    _i = sys.argv.index("--hearth-run-python")
+    _rest = sys.argv[_i + 1:]
+    import runpy
+    if _rest and _rest[0] == "-c":
+        _code = _rest[1] if len(_rest) > 1 else ""
+        sys.argv = ["-c"] + _rest[2:]
+        exec(compile(_code, "<string>", "exec"), {"__name__": "__main__"})
+    elif _rest:
+        sys.argv = list(_rest)
+        runpy.run_path(_rest[0], run_name="__main__")
+    raise SystemExit(0)
+
 # Redirect stdout/stderr to a log file when frozen + windowed.
 # Open in line-buffered append mode so we don't lose late writes.
 if getattr(sys, "frozen", False) and (sys.stderr is None or sys.stdout is None):
