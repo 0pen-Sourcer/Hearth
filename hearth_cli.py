@@ -1011,9 +1011,17 @@ class JarvisCLI:
                 print(f"{C_ERR}{type(e).__name__}: {e}{C_RESET}")
             return
 
-        # No subcommand — overview
+        # No subcommand — overview. Cache the status (which disk-scans + probes
+        # the endpoint) for 8s so hitting /models repeatedly is instant instead
+        # of re-scanning every time — same idea the GUI uses.
         try:
-            s = llmserver.status(LOCAL_API_BASE)
+            _now = time.time()
+            _c = getattr(self, "_status_cache", None)
+            if _c and (_now - _c[0]) < 8:
+                s = _c[1]
+            else:
+                s = llmserver.status(LOCAL_API_BASE)
+                self._status_cache = (_now, s)
         except Exception as e:
             print(f"{C_ERR}Could not fetch status: {e}{C_RESET}")
             await self.fetch_models()
