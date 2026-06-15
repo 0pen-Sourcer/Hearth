@@ -69,6 +69,19 @@ for _pkg in ("kokoro_onnx", "espeakng_loader", "language_tags",
     except Exception:
         pass
 
+# webrtcvad (pulled in by RealtimeSTT's VAD) ships package metadata that's read
+# at runtime; the frozen app needs it copied or import fails. Doing it HERE in
+# the repo's spec means no one has to hand-edit the venv's PyInstaller hook
+# (that edit is non-reproducible — gone on every reinstall).
+try:
+    from PyInstaller.utils.hooks import copy_metadata as _copy_metadata
+    try:
+        DATAS += _copy_metadata("webrtcvad")
+    except Exception:
+        DATAS += _copy_metadata("webrtcvad-wheels")  # the wheels-packaged fork
+except Exception:
+    pass
+
 # Optional deps pulled in via runtime detection — be explicit so PyInstaller
 # doesn't drop them during static analysis
 HIDDEN = [
