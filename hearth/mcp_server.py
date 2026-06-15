@@ -32,6 +32,15 @@ _PARENT = os.path.dirname(_HERE)
 if _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 
+# MCP over stdio uses STDOUT for the JSON-RPC protocol — it must contain
+# nothing but protocol messages. ANY stray print to stdout (from this module
+# OR anything it imports: a banner, a warning, a debug line) corrupts the
+# stream and the client (Claude Desktop / LM Studio) silently fails to handshake.
+# So route stdout to stderr for ALL of import + setup, and restore the real
+# stdout only right before mcp.run() takes over the transport.
+_REAL_STDOUT = sys.stdout
+sys.stdout = sys.stderr
+
 try:
     from mcp.server.fastmcp import FastMCP, Image  # type: ignore
 except ImportError:
@@ -177,4 +186,6 @@ if __name__ == "__main__":
     print(f"[Jarvis MCP] workspace: {WORKSPACE}", file=sys.stderr)
     print(f"[Jarvis MCP] activity log: {ACTIVITY_LOG}", file=sys.stderr)
     _log_activity("server_start", tools=len(TOOL_DEFINITIONS), workspace=WORKSPACE)
+    # Hand the pristine stdout back for the JSON-RPC stdio transport.
+    sys.stdout = _REAL_STDOUT
     mcp.run()
