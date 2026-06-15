@@ -1342,6 +1342,50 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {
                 "ok": rc == 0, "rc": rc, "log": buf.getvalue(),
             })
+        if path == "/api/memory/import":
+            # Paste a memory dump from ChatGPT/Claude/any AI → run it through the
+            # same fact extractor (with dedup) the CLI's /import-memory uses, so
+            # the GUI has parity. Synchronous; one short LLM call.
+            body = self._read_json()
+            text = (body.get("text") or "").strip()
+            if not text:
+                return self._send_json(400, {"ok": False, "error": "no text"})
+            try:
+                from . import memory_extract as _mx
+                import openai as _oai
+                _key = os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
+                # Resolve the active model: saved pick → env → loaded probe.
+                _model = (_load_settings().get("llm_model") or "").strip() \
+                    or os.environ.get("LOCAL_MODEL", "").strip()
+                if not _model:
+                    try:
+                        import urllib.request as _ur
+                        _req = _ur.Request(
+                            f"{LM_STUDIO_V0}/models",
+                            headers={"Authorization": f"Bearer {_key}"})
+                        with _ur.urlopen(_req, timeout=3) as r:
+                            for m in json.loads(r.read().decode()).get("data", []):
+                                if m.get("state") == "loaded" and m.get("type") in ("llm", "vlm"):
+                                    _model = m.get("id"); break
+                    except Exception:
+                        pass
+                if not _model:
+                    return self._send_json(200, {
+                        "ok": False,
+                        "error": "no model loaded — load a model first, then import."})
+                _sync = _oai.OpenAI(api_key=_key, base_url=LOCAL_API_BASE)
+                _llm = _mx.make_openai_llm_call(_sync, _model, max_tokens=900)
+                _msgs = [{"role": "user",
+                          "content": "Here is everything another AI remembered about me — "
+                                     "save the durable facts:\n\n" + text}]
+                saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=1)
+                return self._send_json(200, {
+                    "ok": True,
+                    "saved": [f.get("title", "") for f in (saved or [])],
+                    "count": len(saved or []),
+                })
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/reminders/snooze":
             try:
                 from . import reminders as _r
@@ -1826,6 +1870,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             "memories": len(_memory_index()),
             "workspace": WORKSPACE,
             "lms_cli": bool(_find_lms_cli()),
+            # For the "Hearth as MCP server" snippet — the real interpreter +
+            # full script path so the config doesn't rely on bare `python` being
+            # on PATH or on `-m` resolving the package from some unknown cwd.
+            "python_exe": sys.executable,
+            "mcp_server_path": os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py"),
+            "frozen": bool(getattr(sys, "frozen", False)),
         })
 
     def _send_memory_one(self, name: str) -> None:

@@ -3417,6 +3417,25 @@
         <h1 class="ob-title">Bring your old agent's memory along?</h1>
         <p class="ob-sub" id="ob-migrate-sub">Looking for Hermes / OpenClaw installs…</p>
         <div class="ob-choices" id="ob-migrate-choices" style="margin-top:18px"></div>
+        <details class="ob-import-ai" style="margin-top:16px">
+          <summary style="cursor:pointer;font-size:13px;color:var(--accent-2);font-weight:600">
+            …or paste your memory from ChatGPT / Claude</summary>
+          <div style="margin-top:10px">
+            <p class="ob-sub" style="font-size:12px;margin-bottom:8px">
+              Ask the other AI: <i>"List everything you know about me as plain bullet
+              points — name, work, preferences, projects, dates, people. One fact per
+              line, no preamble."</i> Then paste its reply here.</p>
+            <textarea id="ob-import-text" rows="6"
+              placeholder="Paste the bullet list here…"
+              style="width:100%;box-sizing:border-box;resize:vertical;background:var(--bg-0);
+                     border:1px solid var(--bg-3);border-radius:8px;color:var(--fg);
+                     padding:10px;font-size:12px;font-family:inherit"></textarea>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+              <button class="ob-btn" id="ob-import-btn" type="button">Import facts</button>
+              <span id="ob-import-status" style="font-size:12px;color:var(--fg-faint)"></span>
+            </div>
+          </div>
+        </details>
         <div class="ob-tipline">
           API keys are <b>never</b> copied. Memory files import as Hearth memories;
           skills get parked under <code>~/Jarvis/imported_skills/</code> for later.
@@ -9478,12 +9497,10 @@ async function _obProbeMigrate() {
     const sub = document.getElementById('ob-migrate-sub');
     const box = document.getElementById('ob-migrate-choices');
     if (!choices.length) {
-      _obSkipMigrate = true;
-      if (sub) sub.textContent = 'No prior agent install detected — skipping ahead.';
-      // Auto-advance after a beat so the user sees the message briefly
-      setTimeout(() => {
-        if (obStep === 6 && _obSkipMigrate) { obStep = 7; obRender(); }
-      }, 800);
+      // No Hermes/OpenClaw install — but the ChatGPT/Claude paste import below
+      // is still useful, so stay on this step instead of auto-advancing.
+      _obSkipMigrate = false;
+      if (sub) sub.textContent = "No prior agent install found — but you can still paste your memory from ChatGPT or Claude below.";
       return;
     }
     if (sub) sub.textContent = 'Found a prior agent install. Want me to pull its memory into Hearth?';
@@ -9557,7 +9574,43 @@ function obRender() {
   if (obStep === 3) obWireCloudStep();
   if (obStep === 4) obLoadVoiceStatus();
   if (obStep === 5) setTimeout(() => $('ob-name').focus(), 80);
-  if (obStep === 6) _obProbeMigrate();
+  if (obStep === 6) { _obProbeMigrate(); _obWireImport(); }
+}
+
+// Wire the "paste your ChatGPT/Claude memory" box on the migrate step (step 6).
+// POSTs the pasted dump to /api/memory/import, which runs it through the same
+// fact extractor + dedup the CLI's /import-memory uses.
+let _obImportWired = false;
+function _obWireImport() {
+  if (_obImportWired) return;
+  const btn = document.getElementById('ob-import-btn');
+  const txt = document.getElementById('ob-import-text');
+  const status = document.getElementById('ob-import-status');
+  if (!btn || !txt) return;
+  _obImportWired = true;
+  btn.onclick = async () => {
+    const body = (txt.value || '').trim();
+    if (!body) { if (status) status.textContent = 'paste something first.'; return; }
+    btn.disabled = true;
+    if (status) status.textContent = 'importing through the extractor…';
+    try {
+      const r = await api('/api/memory/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: body }) });
+      if (r && r.ok) {
+        if (r.count > 0) {
+          if (status) status.textContent = `saved ${r.count} memory${r.count === 1 ? '' : 'ies'}: ${(r.saved || []).join(', ')}`;
+          txt.value = '';
+        } else {
+          if (status) status.textContent = 'nothing new saved (already known, or no durable facts found).';
+        }
+      } else {
+        if (status) status.textContent = (r && r.error) ? r.error : 'import failed.';
+      }
+    } catch (e) {
+      if (status) status.textContent = 'import failed: ' + (e && e.message ? e.message : e);
+    } finally {
+      btn.disabled = false;
+    }
+  };
 }
 
 function obWireCloudStep() {

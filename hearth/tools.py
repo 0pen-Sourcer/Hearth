@@ -5341,6 +5341,118 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
 
 
 # ============================================================
+# TOOL DIET — defer niche tool SCHEMAS off the default prompt
+# ============================================================
+# Every handler still EXISTS and still RUNS if called by name — deferring only
+# hides a tool's schema from the per-turn `tools` list to cut prompt overhead
+# (~130 tokens/tool). The model rediscovers deferred tools via the always-on
+# `load_tools` meta-tool; and because execute_tool dispatches purely by name, a
+# model that calls a deferred tool directly still works. So this is safe to
+# default on — worst case the model uses a niche tool slightly less often, never
+# a hard break. Opt out entirely with HEARTH_ALL_TOOLS=1 (loads every schema).
+_DEFERRED_TOOLS = {
+    # image / video generation
+    "generate_image", "generate_video", "check_video_task", "list_generations",
+    # self-extending
+    "create_plugin", "list_plugins", "delete_plugin", "create_skill",
+    # soul / persona editing
+    "edit_soul", "append_soul", "read_soul", "draft_soul",
+    # archive
+    "list_archive", "extract_archive_file",
+    # extra system info (system_info covers the common case)
+    "network_info", "disk_usage", "list_installed_apps", "learn_environment",
+    "list_models",
+    # reminders niche (set/list/cancel stay core)
+    "snooze_reminder", "study_reminder",
+    # voice selection (the UI handles voice; rare as a tool call)
+    "set_voice", "list_voices",
+    # browser niche (browse/click/type/scroll stay core)
+    "browse_key", "browse_close",
+    # duplicate job controls (start_job/list_jobs/get_job_result stay core)
+    "job_kill", "job_list", "job_status", "job_wait",
+    # single-purpose utilities / demos
+    "color_hex2rgb", "text_encoder_tool", "entity_graph_extractor",
+    "website_status_tool", "tic_tac_toe",
+    "end_session",
+}
+_unlocked_tools: "set[str]" = set()
+_TOOL_DIET = os.environ.get("HEARTH_ALL_TOOLS", "") not in ("1", "true", "yes")
+
+_LOAD_TOOLS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "load_tools",
+        "description": (
+            "Reveal extra built-in tools that aren't loaded by default (kept off "
+            "to save context). Call this with a short query naming what you need, "
+            "then call the tool it returns. Groups available on demand: "
+            "'image generation' (forge_*), 'plugins' (write your own tools), "
+            "'soul' (edit your persona), 'archive' (list/extract zips), "
+            "'system' (network/disk/installed apps/battery), 'voice' (pick a "
+            "voice), 'end_session'. Pass 'all' to load everything."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "What kind of tool you need — a keyword, a group name, or 'all'."},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+
+def _tool_active(name: str) -> bool:
+    if not _TOOL_DIET:
+        return True
+    return (name not in _DEFERRED_TOOLS) or (name in _unlocked_tools)
+
+
+def _any_tool_still_deferred() -> bool:
+    return any(n in _DEFERRED_TOOLS and n not in _unlocked_tools
+               for n in (t["name"] for t in TOOL_DEFINITIONS))
+
+
+def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
+    """Move deferred tools matching `query` (name / category / description
+    substring, or 'all') into the active set so their schemas ship next turn.
+    Returns the full tool-defs that matched."""
+    q = (query or "").strip().lower()
+    toks = [w for w in q.replace("-", " ").replace("/", " ").split() if w]
+    matched: "List[Dict[str, Any]]" = []
+    for td in TOOL_DEFINITIONS:
+        n = td["name"]
+        if n not in _DEFERRED_TOOLS:
+            continue
+        cat = _TOOL_CATEGORY.get(n, "").lower()
+        hay = f"{n.lower()} {cat} {td['description'].lower()}"
+        # 'all'/empty → everything; else match if any query word (or its
+        # singular) appears in the tool's name/category/description.
+        hit = (not toks) or q == "all" or any(
+            (w in hay) or (w.rstrip("s") in hay) for w in toks)
+        if hit:
+            _unlocked_tools.add(n)
+            matched.append(td)
+    return matched
+
+
+def _h_load_tools(p: "Dict[str, Any]") -> str:
+    matched = unlock_tools(p.get("query", ""))
+    if not matched:
+        return ("No extra tools matched that. Groups you can ask for: image "
+                "generation, plugins, soul, archive, system, voice, end_session "
+                "(or 'all').")
+    lines = ["Loaded these tools — you can call them now:"]
+    for td in matched:
+        props = ", ".join((td["parameters"].get("properties") or {}).keys())
+        lines.append(f"- {td['name']}({props}): {td['description']}")
+    return "\n".join(lines)
+
+
+_HANDLERS["load_tools"] = _h_load_tools
+
+
+# ============================================================
 # PROVIDER FORMAT CONVERTERS
 # ============================================================
 
@@ -5359,7 +5471,12 @@ def to_openai_tools() -> List[Dict[str, Any]]:
             },
         }
         for td in TOOL_DEFINITIONS
+        if _tool_active(td["name"])
     ]
+    # Discovery meta-tool: only ship it while something is still deferred, so it
+    # vanishes once the model has unlocked everything (or HEARTH_ALL_TOOLS=1).
+    if _TOOL_DIET and _any_tool_still_deferred():
+        out.append(_LOAD_TOOLS_SCHEMA)
     try:
         from . import mcp_client
         for td in mcp_client.list_remote_tools():
@@ -5421,8 +5538,8 @@ _TOOL_CATEGORY = {
     "create_plugin": "Self-extending (plugins)", "list_plugins": "Self-extending (plugins)",
     "delete_plugin": "Self-extending (plugins)",
     # Image generation
-    "forge_generate": "Image generation", "forge_status": "Image generation",
-    "forge_shutdown": "Image generation",
+    "generate_image": "Image generation", "generate_video": "Image generation",
+    "check_video_task": "Image generation", "list_generations": "Image generation",
     # Session
     "end_session": "Session",
 }
