@@ -224,10 +224,16 @@ def peek_pending_notifications() -> List[Dict[str, Any]]:
 
 
 def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
-    """Render one notification dict as a <task-notification> XML block.
-    Models treat this as a tagged user input and respond to its 'result'
-    contents on the next turn."""
+    """Render one notification dict as a <task-notification> block, led by an
+    explicit SYSTEM-event banner so the model never mistakes it for the user
+    speaking (it's a background subagent YOU spawned reporting back — the user
+    did not type this). Inject it with role 'system' where the chat template
+    allows; the banner makes the provenance unmistakable either way."""
     return (
+        f"[SYSTEM NOTIFICATION — automated background event, NOT a message from "
+        f"the user. A subagent you dispatched earlier has finished; its result "
+        f"is below. Continue the user's original task with it; do not thank the "
+        f"user for it or treat it as a new user request.]\n"
         f"<task-notification>\n"
         f"  <agent-id>{notif.get('agent_id', '')}</agent-id>\n"
         f"  <persona>{notif.get('persona', '')}</persona>\n"
