@@ -3151,10 +3151,19 @@
           <div class="name">Currently talking to</div>
           <div class="hint" id="setting-endpoint">…</div>
         </div></div>
-        <div class="field"><div class="label">
-          <div class="name">Hearth lives at</div>
-          <div class="hint" id="setting-workspace">…</div>
-        </div></div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Hearth lives at</div>
+            <div class="hint" id="setting-workspace">…</div>
+            <div class="hint" style="margin-top:2px">Move everything — memory, chats, models — to another folder or drive (e.g. if C: is full). Restarts Hearth.</div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
+            <input type="text" id="setting-ws-path" placeholder="D:\Hearth" style="flex:1; min-width:160px;"/>
+            <button type="button" class="btn-mini" id="btn-ws-relocate" title="Move the whole workspace to this path + restart">
+              Move
+            </button>
+          </div>
+        </div>
         <div class="field"><div class="label">
           <div class="name">LM Studio <code>lms</code> command</div>
           <div class="hint" id="setting-lms">…</div>
@@ -7222,6 +7231,39 @@ async function refreshSettings() {
               toast('Rename failed', r.error || 'unknown error', 'err', 9000);
             }
           } catch (e) { toast('Rename failed', e.message, 'err', 9000); }
+        }},
+      ]);
+    };
+    // Workspace relocate — move the whole workspace to another folder/drive.
+    // Same move-and-restart dance as rename, to an arbitrary path. Confirm
+    // since it physically moves files + restarts.
+    const wsRelocateBtn = $('btn-ws-relocate');
+    if (wsRelocateBtn) wsRelocateBtn.onclick = async () => {
+      const input = document.getElementById('setting-ws-path');
+      if (!input) return;
+      const newPath = (input.value || '').trim();
+      if (!newPath) { toast('Pick a path', 'Enter a folder like D:\\Hearth', 'warn'); return; }
+      showModal(`Move Hearth to ${newPath}?`,
+        `This will:\n` +
+        `  • Move the entire workspace (memory, chats, models, files) there\n` +
+        `  • Remember the new location for future launches\n` +
+        `  • Restart the tray (~10s; reopen the window after)\n\n` +
+        `Nothing is lost — everything moves with it. Make sure the drive has space.`, [
+        { label: 'Cancel' },
+        { label: 'Move it', kind: 'danger', onclick: async () => {
+          try {
+            toast('Moving…', 'Stopping tray + relocating workspace', 'info', 8000);
+            const r = await api('/api/workspace/relocate', {
+              method: 'POST', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({ path: newPath }),
+            });
+            if (r.ok) {
+              toast('Moved', `Now at ${r.new_workspace}. Tray restarting…`, 'ok', 6000);
+              setTimeout(() => window.location.reload(), 3500);
+            } else {
+              toast('Move failed', r.error || 'unknown error', 'err', 9000);
+            }
+          } catch (e) { toast('Move failed', e.message, 'err', 9000); }
         }},
       ]);
     };
