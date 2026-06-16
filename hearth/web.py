@@ -1291,6 +1291,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._reveal_in_folder()
         if path == "/api/agent/rename":
             return self._rename_agent()
+        if path == "/api/workspace/relocate":
+            return self._relocate_workspace()
         if path == "/api/models/load":
             body = self._read_json()
             mid = (body.get("id") or "").strip()
@@ -2095,6 +2097,102 @@ class HearthHandler(BaseHTTPRequestHandler):
         return self._send_json(200, {
             "ok": True,
             "name": new_name,
+            "old_workspace": cur_ws,
+            "new_workspace": new_ws,
+            "restarting_in_ms": 1500,
+        })
+
+    def _relocate_workspace(self) -> None:
+        """Move the whole Hearth workspace to a user-chosen path (e.g. another
+        drive). Same move-and-restart dance as _rename_agent, but to an
+        arbitrary location AND it writes the ~/.hearth pointer so the new
+        location persists across cold launches (not just this respawn)."""
+        body = self._read_json()
+        raw = (body.get("path") or "").strip().strip('"').strip("'")
+        if not raw:
+            return self._send_json(400, {"error": "missing path"})
+        cur_ws = os.path.realpath(WORKSPACE)
+        new_ws = os.path.abspath(os.path.expanduser(raw))
+        if os.path.realpath(new_ws) == cur_ws:
+            return self._send_json(400, {"error": "that's already where Hearth lives"})
+        # Moving INTO the target: it must not be an existing non-empty folder.
+        if os.path.isdir(new_ws) and os.listdir(new_ws):
+            return self._send_json(409, {"error": f"target exists and isn't empty: {new_ws}"})
+        parent = os.path.dirname(new_ws.rstrip("\\/")) or new_ws
+        if not os.path.isdir(parent):
+            return self._send_json(400, {"error": f"parent folder doesn't exist: {parent}"})
+        # Free the builtin server's file handles in WORKSPACE so the move works.
+        try:
+            from . import llmserver as _ls
+            if _ls._proc is not None and _ls._proc.poll() is None:
+                _ls.stop_builtin()
+        except Exception:
+            pass
+        pointer = os.path.join(os.path.expanduser("~"), ".hearth", "workspace.txt")
+
+        def _do_relocate():
+            import time as _t
+            _t.sleep(1.5)  # let the HTTP response reach the browser
+            here = os.path.dirname(os.path.abspath(__file__))
+            repo_root = os.path.dirname(here)
+            venv_pyw = os.path.join(repo_root, ".venv", "Scripts", "pythonw.exe")
+            venv_py  = os.path.join(repo_root, ".venv", "Scripts", "python.exe")
+            py = venv_pyw if os.path.isfile(venv_pyw) else (
+                 venv_py  if os.path.isfile(venv_py)  else sys.executable)
+            our_pid = os.getpid()
+            helper = (
+                "import os, sys, time, shutil, subprocess\n"
+                f"old={cur_ws!r}\n"
+                f"new={new_ws!r}\n"
+                f"pointer={pointer!r}\n"
+                f"pid={our_pid}\n"
+                "for _ in range(200):\n"
+                "    try:\n"
+                "        if sys.platform == 'win32':\n"
+                "            import ctypes\n"
+                "            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)\n"
+                "            if not h: break\n"
+                "            ctypes.windll.kernel32.CloseHandle(h)\n"
+                "        else:\n"
+                "            os.kill(pid, 0)\n"
+                "    except Exception:\n"
+                "        break\n"
+                "    time.sleep(0.1)\n"
+                "time.sleep(0.5)\n"
+                "try:\n"
+                "    os.makedirs(os.path.dirname(new) or new, exist_ok=True)\n"
+                "    try:\n"
+                "        os.rename(old, new)\n"
+                "    except OSError:\n"
+                "        shutil.copytree(old, new); shutil.rmtree(old, ignore_errors=True)\n"
+                "    os.makedirs(os.path.dirname(pointer), exist_ok=True)\n"
+                "    open(pointer, 'w', encoding='utf-8').write(new)\n"
+                "except Exception as e:\n"
+                "    print('relocate failed:', e); sys.exit(1)\n"
+                "env = os.environ.copy()\n"
+                "env['JARVIS_WORKSPACE'] = new\n"
+                "flags = 0\n"
+                "if sys.platform == 'win32':\n"
+                "    flags = 0x08000000 | subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008\n"
+                f"subprocess.Popen([{py!r}, '-m', 'hearth.tray', '--open'],\n"
+                "                 env=env, creationflags=flags, close_fds=True)\n"
+            )
+            try:
+                flags = 0
+                if sys.platform == "win32":
+                    flags = (0x08000000
+                             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                             | 0x00000008)
+                subprocess.Popen([py, "-c", helper],
+                                 creationflags=flags, close_fds=True)
+            except Exception:
+                pass
+            _t.sleep(0.3)
+            os._exit(0)
+
+        threading.Thread(target=_do_relocate, daemon=True).start()
+        return self._send_json(200, {
+            "ok": True,
             "old_workspace": cur_ws,
             "new_workspace": new_ws,
             "restarting_in_ms": 1500,
