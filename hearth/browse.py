@@ -138,6 +138,26 @@ class _BrowserWorker(threading.Thread):
             # render at full width when the user maximizes the browser.
             self._page = self._browser.new_page(no_viewport=True)
             self._page.set_default_timeout(20000)
+            # Pull the controlled window to the foreground so the user actually
+            # SEES it drive instead of hunting for it on the taskbar. Playwright
+            # opens Chrome un-activated; bring_to_front() handles the tab, and a
+            # Win32 SetForegroundWindow fallback handles the OS-level activation.
+            if not headless:
+                try:
+                    self._page.bring_to_front()
+                except Exception:
+                    pass
+                if os.name == "nt":
+                    try:
+                        import ctypes
+                        time.sleep(0.4)  # let the window appear + title settle
+                        _t = self._page.title() or ""
+                        hwnd = ctypes.windll.user32.FindWindowW(None, f"{_t} - Google Chrome")
+                        if hwnd:
+                            ctypes.windll.user32.ShowWindow(hwnd, 9)      # SW_RESTORE
+                            ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    except Exception:
+                        pass
             # Inject a visible cursor that follows the mouse — Playwright moves
             # the real mouse during clicks but draws no cursor, so without this
             # you can't SEE it drive. Runs on every navigation. Harmless headless.
