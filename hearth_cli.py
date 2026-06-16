@@ -2869,6 +2869,16 @@ class JarvisCLI:
             _sa.set_parent_cancel_check(self._respond_cancel.is_set)
         except Exception:
             pass
+        # Reminder watcher — fire desktop notifications for due reminders,
+        # including catch-up for any that came due while Hearth was closed.
+        # The GUI starts this; the CLI never did, so reminders set in the CLI
+        # (e.g. study reminders) were saved but NOTHING ever fired them. This is
+        # why notifications never appeared in CLI-only use.
+        try:
+            from hearth import reminders as _rem
+            _rem.start_watcher(_rem.desktop_notify)
+        except Exception:
+            pass
         await self._maybe_run_onboarding()
 
         last_interrupt = 0.0
@@ -4032,6 +4042,19 @@ if __name__ == "__main__":
     # without hiding real errors.
     import logging as _logging
     _logging.getLogger("asyncio").setLevel(_logging.CRITICAL)
+    # The asyncio-logger silence above covers the loop's own exception handler,
+    # but a background subagent runs in a thread via asyncio.run(); when its
+    # httpx/openai client is garbage-collected AFTER that loop closes, the
+    # transport's __del__ raises "Event loop is closed" — which Python reports
+    # through sys.unraisablehook, NOT the asyncio logger. That's the ugly
+    # traceback users saw every time a subagent finished. Swallow just that one.
+    _orig_unraisable = sys.unraisablehook
+    def _quiet_unraisable(args):  # noqa: ANN001
+        exc = getattr(args, "exc_value", None)
+        if isinstance(exc, RuntimeError) and "Event loop is closed" in str(exc):
+            return
+        _orig_unraisable(args)
+    sys.unraisablehook = _quiet_unraisable
     # Top-level exit handling: Ctrl-C anywhere (even mid-tool-call) should
     # surface as a clean exit, not the full asyncio traceback the user was
     # seeing when run_command got stuck on a daemon batch file.
