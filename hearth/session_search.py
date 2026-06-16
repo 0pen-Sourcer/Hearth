@@ -96,6 +96,11 @@ def _needs_reindex() -> bool:
         last = indexed.get("cli-history", 0.0)
         if _convo_mtime(cli_path) > last + 0.5:
             return True
+    # And when the never-pruned CLI transcript grew.
+    tx_path = os.path.join(os.path.dirname(CONVOS_DIR), "logs", "cli_transcript.jsonl")
+    if os.path.isfile(tx_path):
+        if _convo_mtime(tx_path) > indexed.get("cli-transcript", 0.0) + 0.5:
+            return True
     return False
 
 
@@ -184,6 +189,39 @@ def rebuild_index() -> int:
                 "INSERT OR REPLACE INTO meta(conversation_id, indexed_mtime) VALUES (?, ?)",
                 (cid, mtime),
             )
+
+    # 3) Append-only CLI transcript (never pruned). jarvis_history.json above is
+    # the working context and gets trimmed to fit the model window; this JSONL
+    # keeps the FULL back-and-forth so old turns stay searchable.
+    tx_path = os.path.join(os.path.dirname(CONVOS_DIR), "logs", "cli_transcript.jsonl")
+    if os.path.isfile(tx_path):
+        cid = "cli-transcript"
+        title = "CLI transcript (full)"
+        mtime = _convo_mtime(tx_path)
+        try:
+            with open(tx_path, "r", encoding="utf-8") as f:
+                for idx, line in enumerate(f):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    content = (rec.get("content") or "").strip()
+                    if not content:
+                        continue
+                    conn.execute(
+                        "INSERT INTO messages(conversation_id, title, message_index, role, content, updated) VALUES (?,?,?,?,?,?)",
+                        (cid, title, idx, rec.get("role", "?"), content, float(mtime)),
+                    )
+                    total += 1
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(conversation_id, indexed_mtime) VALUES (?, ?)",
+                (cid, mtime),
+            )
+        except OSError:
+            pass
 
     conn.commit()
     conn.close()
