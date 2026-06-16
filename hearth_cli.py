@@ -2662,6 +2662,25 @@ class JarvisCLI:
         def ask(prompt: str) -> str:
             return input(f"  {C_TOOL}{prompt}{C_RESET}\n  > ").strip()
 
+        # Brain choice — parity with the GUI's local-vs-cloud onboarding step.
+        # Reuses the /brain command so key storage + endpoint switch + context
+        # re-detect all happen through one code path. Default stays local.
+        try:
+            cur = "cloud" if not _is_local_endpoint(LOCAL_API_BASE) else "local"
+            print(f"  {C_TOOL}Which brain should I run on?{C_RESET}")
+            print(f"  {C_DIM}    Enter = local ({self.current_model} via {LOCAL_API_BASE}, "
+                  f"currently {cur}). Or pick a cloud model.{C_RESET}")
+            brain = ask("Enter for local, or: grok / gemini / openai / openrouter").lower()
+            if brain in ("grok", "gemini", "openai", "openrouter"):
+                key = ask(f"Paste your {brain} API key (saved locally, asked once)")
+                if key:
+                    await self.handle_command(f"/brain {brain} {key}")
+                else:
+                    print(f"  {C_DIM}no key — staying local. Switch anytime with /brain {brain} <key>.{C_RESET}")
+            print()
+        except (KeyboardInterrupt, EOFError):
+            print()
+
         answers: Dict[str, str] = {}
         try:
             answers["name"] = ask("What should I call you?")
