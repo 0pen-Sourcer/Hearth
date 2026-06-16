@@ -5422,6 +5422,54 @@ TOOL_DEFINITIONS.append({
     },
 })
 
+TOOL_DEFINITIONS.append({
+    "name": "read_pdf_large",
+    "description": (
+        "Map-reduce summarize a VERY large PDF (hundreds of pages) that won't "
+        "fit any single context. Splits the PDF into page windows, summarizes "
+        "each window with a cheap local LLM call, then reduces the per-chunk "
+        "summaries into one structured overview (themes, key points, "
+        "per-section bullets). Use this — not read_file — when the user asks to "
+        "'summarize this whole book/report'. Extracted text + chunk summaries "
+        "are cached so a re-ask is instant. mode='background' returns a job_id "
+        "immediately and writes the summary to <pdf>_summary.md (overnight use "
+        "case); poll get_job_result(job_id) or read the file when done."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "PDF path. Absolute or relative to workspace."},
+            "mode": {"type": "string", "enum": ["map_reduce", "background"],
+                     "description": "'map_reduce' (default, blocks until done) or 'background' (returns a job_id)."},
+            "chunk_pages": {"type": "integer", "description": "Pages per window. Default 12."},
+            "focus": {"type": "string", "description": "Optional topic to emphasize (e.g. 'the war years', 'financials')."},
+        },
+        "required": ["path"],
+    },
+})
+
+
+def _read_pdf_large(p: Dict) -> str:
+    path = (p.get("path") or "").strip()
+    if not path:
+        return "Error: read_pdf_large needs a 'path'."
+    try:
+        path = _resolve_read(path)
+    except PermissionError as e:
+        return f"Error: {e}"
+    chunk_pages = _coerce_int(p.get("chunk_pages"), 12) or 12
+    focus = (p.get("focus") or "").strip()
+    mode = (p.get("mode") or "map_reduce").strip().lower()
+    from . import pdf_mapreduce as _pmr
+    if mode == "background":
+        return json.dumps(_pmr.run_in_background(path, chunk_pages=chunk_pages,
+                                                 focus=focus),
+                          ensure_ascii=False, default=str)
+    return _pmr.run_map_reduce(path, chunk_pages=chunk_pages, focus=focus)
+
+
+_HANDLERS["read_pdf_large"] = _read_pdf_large
+
 # Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
 # can NEVER take down the core tools.
 try:
@@ -5514,6 +5562,9 @@ _DEFERRED_TOOLS = {
     "edit_soul", "append_soul", "read_soul", "draft_soul",
     # archive
     "list_archive", "extract_archive_file",
+    # large-PDF map-reduce (niche; rediscovered via load_tools when the user
+    # asks to summarize a whole book)
+    "read_pdf_large",
     # extra system info (system_info covers the common case)
     "network_info", "disk_usage", "list_installed_apps", "learn_environment",
     "list_models",
@@ -5664,6 +5715,7 @@ _TOOL_CATEGORY = {
     "create_directory": "Files & docs", "delete_path": "Files & docs", "move_path": "Files & docs",
     "find_file": "Files & docs", "grep_search": "Files & docs", "glob_files": "Files & docs",
     "locate_path": "Files & docs", "list_archive": "Files & docs", "extract_archive_file": "Files & docs",
+    "read_pdf_large": "Files & docs",
     # Web & browser
     "web_search": "Web & browser", "web_fetch": "Web & browser", "validate_url": "Web & browser",
     "open_url": "Web & browser", "open_in_browser": "Web & browser", "list_browsers": "Web & browser",
