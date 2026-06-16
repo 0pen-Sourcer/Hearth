@@ -454,7 +454,7 @@ async def run_once(
     # drops the user turn ("No user query found in messages"). Tool schemas ride
     # every prompt, so reserve them + output. trim_to_budget structurally keeps a
     # surviving user turn, so no extra invariant is needed.
-    from .tools import trim_to_budget, estimate_tokens, CHARS_PER_TOKEN, compact_history
+    from .tools import trim_to_budget, estimate_tokens, CHARS_PER_TOKEN, compact_history, dedup_tool_results
     # Single source of truth — see resolve_context_tokens() above. Same call
     # is reused by the /api/context-budget endpoint so the GUI ring + bottom
     # bar agree with what the chat path actually uses.
@@ -570,6 +570,10 @@ async def run_once(
         #      which is why "websearch then question later" → "hey what's up?"
         #      (the user's history got truncated to nothing because the bridge
         #      never actually summarized, it just dropped messages).
+        # Cheap pre-pass every turn: collapse repeated identical tool dumps. No
+        # LLM call — often shrinks context enough to avoid the lossy summarize
+        # compaction entirely. Safe: keeps the newest copy + tool_call pairing.
+        messages[:] = dedup_tool_results(messages)
         _est = estimate_tokens(messages)
         _pct = int(_est * 100 / max(1, _budget))
         # Emit context state on every turn so the GUI can render a footer chip
