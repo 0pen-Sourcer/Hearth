@@ -4502,6 +4502,45 @@ if not (os.environ.get("HEARTH_ENABLE_FORGE", "0") == "1"
 # survives across tool calls within a single Jarvis session.
 _forge_proc: Optional[subprocess.Popen] = None
 
+# Auto-deload: Forge holds the whole SDXL checkpoint in VRAM (~6.5 GB) the entire
+# time it's up. After a stretch with no generation we shut it down so the GPU
+# isn't hoarded — the LLM (or the desktop) gets its VRAM back. Each
+# forge_generate bumps the timer; a daemon watcher kills Forge once idle.
+_forge_last_used: float = 0.0
+_forge_idle_timeout: int = int(os.environ.get("JARVIS_FORGE_IDLE_TIMEOUT", "300"))
+_forge_idle_watcher_on: bool = False
+
+
+def _start_forge_idle_watcher() -> None:
+    """Spawn (once) a daemon that shuts Forge down after _forge_idle_timeout
+    seconds without a generation. Set JARVIS_FORGE_IDLE_TIMEOUT=0 to disable."""
+    global _forge_idle_watcher_on
+    if _forge_idle_watcher_on or _forge_idle_timeout <= 0:
+        return
+    import threading as _threading
+    _forge_idle_watcher_on = True
+
+    def _watch():
+        global _forge_idle_watcher_on
+        import time as _t
+        while True:
+            _t.sleep(20)
+            # Nothing to guard if we don't manage a live Forge process.
+            if _forge_proc is None or _forge_proc.poll() is not None:
+                _forge_idle_watcher_on = False
+                return
+            if _forge_last_used and (_t.time() - _forge_last_used) > _forge_idle_timeout:
+                try:
+                    _forge_shutdown({})
+                    _log_activity("forge_idle_shutdown",
+                                  {"idle_s": int(_t.time() - _forge_last_used)})
+                except Exception:
+                    pass
+                _forge_idle_watcher_on = False
+                return
+
+    _threading.Thread(target=_watch, daemon=True, name="forge-idle").start()
+
 
 def _forge_reachable(timeout: float = 1.5) -> bool:
     try:
@@ -4546,9 +4585,21 @@ def _boot_forge() -> str:
         webui_bat = os.path.join(FORGE_DIR, "webui-user.bat")
     if not os.path.isfile(webui_bat):
         return f"Error: no webui.bat or webui-user.bat in {FORGE_DIR}"
+    # Forge/A1111's --listen is a NO-ARGUMENT flag (it binds 0.0.0.0); the host
+    # and port come from --server-name / --port. Passing "--listen=127.0.0.1"
+    # makes launch.py abort ("argument --listen: ignored explicit argument").
+    # 127.0.0.1:7860 is already Forge's default, so we only add overrides when
+    # FORGE_URL points somewhere non-default.
+    from urllib.parse import urlparse as _urlparse
+    _fu = _urlparse(FORGE_URL)
+    forge_args = ["cmd", "/c", webui_bat, "--api"]
+    if _fu.port and _fu.port != 7860:
+        forge_args += ["--port", str(_fu.port)]
+    if _fu.hostname and _fu.hostname not in ("127.0.0.1", "localhost"):
+        forge_args += ["--server-name", _fu.hostname]
     try:
         _forge_proc = subprocess.Popen(
-            ["cmd", "/c", webui_bat, "--api", "--listen=127.0.0.1"],
+            forge_args,
             cwd=FORGE_DIR,
             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
             stdin=subprocess.DEVNULL,
@@ -4573,6 +4624,21 @@ def _try_release_llm_vram() -> str:
     POST with body {"loaded": false}, but the exact shape varies by build.
     We try both shapes; failure is non-fatal (Forge can also coexist if
     you have enough VRAM headroom)."""
+    # Most reliable: LM Studio's own CLI (`lms unload --all`). The REST unload
+    # endpoints aren't exposed on every build, but the CLI ships with LM Studio
+    # and actually frees the VRAM. Try it first, on PATH or the default install.
+    import shutil as _shutil
+    lms = _shutil.which("lms") or os.path.expanduser(
+        os.path.join("~", ".lmstudio", "bin", "lms.exe"))
+    if lms and os.path.isfile(lms):
+        try:
+            subprocess.run([lms, "unload", "--all"], timeout=20,
+                           capture_output=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return "unloaded via lms CLI"
+        except Exception:
+            pass
+
     base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
     native = base.replace("/v1", "/api/v0")
     candidates = [
@@ -4651,6 +4717,11 @@ def _forge_generate(p: Dict) -> str:
     boot_err = _boot_forge()
     if boot_err:
         return boot_err
+    # Mark active + start the idle watcher so Forge auto-deloads its VRAM once
+    # we stop generating (bumped again after the image lands below).
+    global _forge_last_used
+    _forge_last_used = time.time()
+    _start_forge_idle_watcher()
 
     # 3) txt2img
     body = json.dumps({
@@ -4688,11 +4759,16 @@ def _forge_generate(p: Dict) -> str:
     except Exception as e:
         return f"Error: failed to decode/save image: {e}"
 
+    # Restart the idle countdown from completion of this generation.
+    _forge_last_used = time.time()
+    _idle_note = (f"auto-frees VRAM after {_forge_idle_timeout//60} min idle"
+                  if _forge_idle_timeout > 0 else
+                  "auto-deload off — call forge_shutdown to free VRAM")
     return (
         f"Saved: {out_path}\n"
         f"prompt: {positive}\n"
         f"seed: {payload.get('info', '')[:200]}\n"
-        f"(VRAM: {vram_msg}. Forge is still running — call forge_shutdown to free VRAM.)"
+        f"(VRAM: {vram_msg}. Forge stays up for follow-ups; {_idle_note}.)"
     )
 
 
@@ -5392,9 +5468,13 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
 # default on — worst case the model uses a niche tool slightly less often, never
 # a hard break. Opt out entirely with HEARTH_ALL_TOOLS=1 (loads every schema).
 _DEFERRED_TOOLS = {
-    # image / video generation (cloud + local Forge when an install is present)
+    # image / video generation (cloud). forge_generate is intentionally NOT
+    # deferred: when a local Forge install is detected it surfaces directly so
+    # weaker local models can do local image gen without the load_tools hop
+    # (they tend to spiral instead of discovering deferred tools). Its
+    # secondary controls stay deferred.
     "generate_image", "generate_video", "check_video_task", "list_generations",
-    "forge_generate", "forge_status", "forge_shutdown",
+    "forge_status", "forge_shutdown",
     # self-extending
     "create_plugin", "list_plugins", "delete_plugin", "create_skill",
     # soul / persona editing

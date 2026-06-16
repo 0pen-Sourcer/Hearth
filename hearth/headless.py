@@ -54,7 +54,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from . import system_prompt, execute_tool, to_openai_tools
+from . import system_prompt, execute_tool, to_openai_tools, TOOL_DEFINITIONS
 from .loop_guard import ToolLoopGuard, MAX_TURNS
 from .errors import classify_api_error
 
