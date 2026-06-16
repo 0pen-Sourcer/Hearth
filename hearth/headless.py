@@ -432,9 +432,19 @@ async def run_once(
     try:
         from . import subagents as _sa
         pending = _sa.drain_pending_notifications()
+        # Insert each completion as a SYSTEM event (NOT user — a background
+        # subagent reporting back isn't the user talking) immediately BEFORE the
+        # last user message, so provenance is correct AND the sequence still
+        # ends on the user's turn (strict local chat templates require that).
+        _ins = len(messages)
+        for _i in range(len(messages) - 1, -1, -1):
+            if messages[_i].get("role") == "user":
+                _ins = _i
+                break
         for notif in pending:
             xml = _sa.format_notification_as_user_message(notif)
-            messages.append({"role": "user", "content": xml})
+            messages.insert(_ins, {"role": "system", "content": xml})
+            _ins += 1
             emit("subagent_done", agent_id=notif.get("agent_id"),
                  persona=notif.get("persona"), name=notif.get("name"),
                  status=notif.get("status"),
