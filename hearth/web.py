@@ -1272,6 +1272,10 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.send_error(404, "not found")
 
     def do_POST(self) -> None:
+        # Hoisted: the brain-switch branch reassigns LOCAL_API_BASE, and other
+        # branches (e.g. /api/memory/import) read it — so the global must be
+        # declared before any use in this function, not mid-body.
+        global LOCAL_API_BASE
         path = urllib.parse.urlparse(self.path).path
         if path == "/chat":
             return self._stream_chat()
@@ -1622,7 +1626,6 @@ class HearthHandler(BaseHTTPRequestHandler):
             provider = (body.get("provider") or "").strip()
             if not url:
                 return self._send_json(400, {"ok": False, "error": "url required"})
-            global LOCAL_API_BASE
             LOCAL_API_BASE = url
             _hl.LOCAL_API_BASE = url
             if key:
