@@ -93,6 +93,7 @@ class _BrowserWorker(threading.Thread):
         self.err: Optional[str] = None
         self._pw = None
         self._browser = None
+        self._context = None
         self._page = None
 
     def run(self) -> None:
@@ -123,20 +124,40 @@ class _BrowserWorker(threading.Thread):
                 x, y, w, h = win.split(",")
                 args += [f"--window-position={x},{y}", f"--window-size={w},{h}"]
             self._pw = sync_playwright().start()
-            # Prefer the user's REAL Chrome (channel="chrome"): it has the
-            # proprietary codecs (H.264/AAC) YouTube needs — Playwright's bundled
-            # Chromium ("Chrome for Testing") lacks them, so videos error out —
-            # and it's less aggressively bot-flagged. Fall back to bundled.
-            common = dict(headless=headless, slow_mo=slowmo, args=args)
+            # DEDICATED, PERSISTENT Hearth Chrome profile. It lives in its own
+            # user-data-dir (separate from the user's everyday Chrome) so it
+            # NEVER hits Chrome's "profile already open in another window" lock.
+            # The user logs into YouTube / Google / etc. ONCE here and it sticks
+            # — which also stops the logged-out interruptions (YouTube "are you
+            # still watching?", survey + ad prompts) that the agent can't see and
+            # the user has to manually barge-in to clear. channel="chrome" keeps
+            # the proprietary codecs (H.264/AAC) YouTube needs. Override the dir
+            # with HEARTH_BROWSE_PROFILE_DIR.
+            prof_dir = os.getenv("HEARTH_BROWSE_PROFILE_DIR") or os.path.join(
+                os.environ.get("JARVIS_WORKSPACE") or os.path.expanduser("~/Jarvis"),
+                ".browser_profile")
+            self._browser = None
+            self._context = None
+            ctx_common = dict(headless=headless, slow_mo=slowmo, args=args, no_viewport=True)
             try:
-                self._browser = self._pw.chromium.launch(channel="chrome", **common)
+                self._context = self._pw.chromium.launch_persistent_context(
+                    prof_dir, channel="chrome", **ctx_common)
             except Exception:
-                self._browser = self._pw.chromium.launch(**common)
-            # no_viewport=True lets the page resize to match the actual maximized
-            # window instead of being pinned to Playwright's default 1280x720.
-            # Combined with --start-maximized above, this is what makes pages
-            # render at full width when the user maximizes the browser.
-            self._page = self._browser.new_page(no_viewport=True)
+                try:
+                    self._context = self._pw.chromium.launch_persistent_context(
+                        prof_dir, **ctx_common)
+                except Exception:
+                    # Last resort: ephemeral (throwaway) profile so browse still works.
+                    common = dict(headless=headless, slow_mo=slowmo, args=args)
+                    try:
+                        self._browser = self._pw.chromium.launch(channel="chrome", **common)
+                    except Exception:
+                        self._browser = self._pw.chromium.launch(**common)
+            if self._context is not None:
+                self._page = (self._context.pages[0] if self._context.pages
+                              else self._context.new_page())
+            else:
+                self._page = self._browser.new_page(no_viewport=True)
             self._page.set_default_timeout(20000)
             # Pull the controlled window to the foreground so the user actually
             # SEES it drive instead of hunting for it on the taskbar. Playwright
@@ -183,7 +204,11 @@ class _BrowserWorker(threading.Thread):
             except Exception as e:
                 rq.put(("err", f"{type(e).__name__}: {e}"))
         try:
-            self._browser.close()
+            # Persistent profile uses a context (no separate browser handle).
+            if self._context is not None:
+                self._context.close()
+            elif self._browser is not None:
+                self._browser.close()
             self._pw.stop()
         except Exception:
             pass
