@@ -14,7 +14,15 @@ whole point — full design control, no "every PDF looks the same".
 
 ## The pipeline (every time)
 
-1. **Decide the design.** Read the user's request. Pick:
+1. **Decide the design. Aim high — a designed page, not a dumped table.**
+   The baseline is a piece that looks *designed*: a clear title block, sectioned
+   content with accent headers, and elements that earn the space — stat callout
+   cards, a small palette-themed chart, a tinted sidebar, an icon row, or a
+   two-column split. A single plain table stranded on a half-empty page is a
+   FAIL, even for a "simple" ask — fill the page with structure or shrink the
+   page. Match the effort to the best PDF you know you can make, every time,
+   even on a thin topic (turn 3 rows into cards, add a short intro + a "key
+   takeaways" strip). Then pick:
    - background color (white? black? cream? navy?)
    - heading color (accent)
    - body text color (must contrast the background)
@@ -39,15 +47,27 @@ whole point — full design control, no "every PDF looks the same".
    footer collides with a rule. Run the bundled checker (load_skill gave you
    this skill's folder):
    `run_command python <skill-folder>/scripts/qa_check.py <workspace>/PDFs/<slug>.pdf`
-   It prints per-page fill % and flags ORPHAN / blank pages. If it says
-   **FIX NEEDED**, EDIT the build script (reduce spaceAfter, trim a sentence,
-   shrink a block, or merge a short section), rebuild ONCE, and re-run the
-   checker until it says OK. If you are vision-capable, ALSO `view_image` the
-   flagged page (render it with pypdfium2 first) to catch overlaps/collisions
-   the fill-check can't see — that's how the footer-on-the-rule bug gets
-   caught. NEVER present a PDF with an unresolved orphan page or a reported
-   collision, and never claim a file is done before qa_check has run on the
-   REAL output path.
+   It prints per-page fill % and flags ORPHAN / blank pages + big mid-page
+   gaps. If it says **FIX NEEDED**, EDIT the build script (reduce spaceAfter,
+   trim a sentence, shrink a block, or merge a short section), rebuild ONCE, and
+   re-run the checker until it says OK. The classic failure this catches: ONE
+   card or section spilling onto an otherwise-blank trailing page (a 90%-empty
+   page 2). That is NOT done — pull it back onto page 1 (tighten spacing, fewer
+   columns, or commit to a real second page of content), then re-check.
+   **Then LOOK AT IT — not optional.** Render the PDF to a PNG with pypdfium2
+   and `view_image` EVERY page (not just page 1 — the orphan hides on the last
+   one). The fill-checker is blind to color, contrast, theme, and collisions;
+   the only way to know what a page looks like is to look at the pixels.
+   **Anti-hallucination rule (hard):** be as detailed and verbose as the user
+   likes when you describe the result — match their preference — but only claim
+   what you ACTUALLY VERIFIED by viewing it. Writing `colors.dark` in the script
+   does NOT mean it rendered dark; claiming "sleek dark cyberpunk theme" about a
+   render you never opened is a lie, and the user WILL open the file and see a
+   plain white table. If you didn't view it, describe only the CONTENT you put
+   in (sections, facts) — never the visual styling you didn't confirm. Over-
+   claiming what you didn't check is the one unforgivable move here.
+   NEVER present a PDF with an unresolved orphan page, a reported collision, a
+   big empty gap, or a look you haven't verified with your own eyes.
 6. **Open it for them.** Cross-platform recipe — append this to the
    end of your build script so it runs in one shot, no second
    `run_command`:
