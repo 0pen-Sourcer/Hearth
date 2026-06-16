@@ -153,6 +153,11 @@ HISTORY_FILE = os.path.join(WORKSPACE, "logs", "jarvis_history.json")
 # model window — which silently destroyed old turns. This file preserves the
 # full back-and-forth for search_chats / recall, independent of context limits.
 CLI_TRANSCRIPT = os.path.join(WORKSPACE, "logs", "cli_transcript.jsonl")
+# Sentinel the input-read returns when a BACKGROUND subagent finished while we
+# were waiting for the user to type — the loop then auto-continues the task
+# instead of sitting idle until the user hits enter. Null bytes so it can never
+# collide with real typed input.
+_AUTO_CONTINUE = "\x00__hearth_auto_continue__\x00"
 # Persistent per-tool permissions ([a]lways / [N]ever) so you don't have to
 # re-approve browse_click/run_command/etc on every restart. Stored next to
 # memory in the workspace so it survives across CLI/GUI/bridge sessions.
@@ -763,7 +768,12 @@ class JarvisCLI:
             else "ready, off" if v_status["ready"]
             else "no engine — see /voice"
         )
+        try:
+            from hearth.persona import NAME as _AGENT_NAME
+        except Exception:
+            _AGENT_NAME = "JARVIS"
         rows = [
+            ("agent",     f"{_AGENT_NAME}"),
             ("model",     f"{self.current_model}"),
             ("endpoint",  f"{LOCAL_API_BASE}"),
             ("context",   f"{self.context_tokens} tokens, compact @ {int(COMPACT_AT*100)}%"),
@@ -791,7 +801,7 @@ class JarvisCLI:
         # Connectivity + model sanity. A fresh user should instantly know
         # whether to go start LM Studio, load a model, or just start chatting.
         if not _is_local_endpoint(LOCAL_API_BASE):
-            print(f"{C_OK}● online{C_RESET}{C_DIM}  ·  cloud: {self.current_model}  ·  /help for commands{C_RESET}\n")
+            print(f"{C_OK}● {_AGENT_NAME} online{C_RESET}{C_DIM}  ·  brain: {self.current_model} (cloud)  ·  /help for commands{C_RESET}\n")
         else:
             chat_models, reachable = self._probe_local_models()
             if not reachable:
@@ -2244,9 +2254,18 @@ class JarvisCLI:
         v_on = "♪" if self.voice_on and voice.is_available() else " "
         l_on = " 🎙" if self.listen_continuous else ""
         multi = "  multi" if self.multiline_mode else ""
+        # Lead with the agent's name (JARVIS) — it's who the user is talking to;
+        # the model id rides along, dimmer, for transparency.
+        an = getattr(self, "_agent_name", "")
+        if not an:
+            try:
+                from hearth.persona import NAME as an
+            except Exception:
+                an = "JARVIS"
+            self._agent_name = an
         # Compose status line then prompt symbol on next visual chunk
         return (
-            f"{C_DIM}┌─ {self.current_model} {C_RESET}"
+            f"{C_DIM}┌─ {C_RESET}{C_BOT}{an}{C_RESET}{C_DIM} · {self.current_model} {C_RESET}"
             f"{bar} {C_DIM}{pct}%  {v_on}{l_on}{multi}{C_RESET}\n"
             f"{C_USER}❯ {C_RESET}"
         )
@@ -2402,6 +2421,84 @@ class JarvisCLI:
             try:
                 heard = listen_task.result()
                 # Echo what we heard so the user has visual confirmation
+                sys.stdout.write(f"{C_DIM}🎙 {C_RESET}{heard}\n")
+                sys.stdout.flush()
+                return heard
+            except Exception:
+                return ""
+        return ""
+
+    async def _read_next(self) -> str:
+        """Read the next turn's trigger: race typed input against (a) the STT
+        queue when listening, and (b) the background-subagent-done event. If a
+        background subagent finishes first, return _AUTO_CONTINUE so the loop
+        picks up the result WITHOUT waiting for the user to type — the parent
+        keeps working on its own, like a real agent should."""
+        tasks: dict = {}
+        prompt_task = asyncio.create_task(self._read_input())
+        tasks[prompt_task] = "prompt"
+        stt_task = None
+        if self.listen_continuous:
+            stt_task = asyncio.create_task(self._stt_queue.get())
+            tasks[stt_task] = "stt"
+        evt = getattr(self, "_subagent_done_evt", None)
+        evt_task = asyncio.create_task(evt.wait()) if evt is not None else None
+        if evt_task is not None:
+            tasks[evt_task] = "evt"
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+        def _cancel(*ts):
+            for t in ts:
+                if t is not None and not t.done():
+                    t.cancel()
+
+        async def _drain(*ts):
+            for t in ts:
+                if t is None:
+                    continue
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        # Subagent-done won the race — but DON'T interrupt if the user is
+        # mid-typing (that would overlap their line, defeating parallel work).
+        # Auto-continue ONLY when the input buffer is empty (truly idle). If
+        # they're typing, defer: keep their prompt alive; the notification stays
+        # queued and surfaces when they submit.
+        if evt_task is not None and evt_task in done and prompt_task not in done:
+            typing = False
+            try:
+                app = getattr(self.pt_session, "app", None) if self.pt_session else None
+                if app is not None and (app.current_buffer.text or "").strip():
+                    typing = True
+            except Exception:
+                typing = False
+            if evt is not None:
+                evt.clear()
+            if not typing:
+                _cancel(prompt_task, stt_task, evt_task)
+                await _drain(prompt_task, stt_task, evt_task)
+                return _AUTO_CONTINUE
+            # User is typing — let them finish; ignore this wake.
+            _cancel(stt_task, evt_task)
+            await _drain(stt_task, evt_task)
+            try:
+                return await prompt_task
+            except Exception:
+                return ""
+
+        # Otherwise: typed input > STT. Cancel the losers.
+        _cancel(prompt_task, stt_task, evt_task)
+        await _drain(*(t for t in (prompt_task, stt_task, evt_task) if t not in done))
+        if prompt_task in done:
+            try:
+                return prompt_task.result()
+            except Exception:
+                return ""
+        if stt_task is not None and stt_task in done:
+            try:
+                heard = stt_task.result()
                 sys.stdout.write(f"{C_DIM}🎙 {C_RESET}{heard}\n")
                 sys.stdout.flush()
                 return heard
@@ -2867,6 +2964,20 @@ class JarvisCLI:
         try:
             from hearth import subagents as _sa
             _sa.set_parent_cancel_check(self._respond_cancel.is_set)
+            # Auto-continue: when a BACKGROUND subagent finishes, signal the
+            # input-wait so the parent picks up the result immediately instead
+            # of idling until the user types. The completion cb runs in the
+            # subagent's worker thread, so hop back onto this loop thread-safely.
+            self._subagent_done_evt = asyncio.Event()
+            _loop = asyncio.get_running_loop()
+
+            def _on_bg_subagent_done(agent_id, result):
+                _sa._default_completion_cb(agent_id, result)  # keep enqueue + toast
+                try:
+                    _loop.call_soon_threadsafe(self._subagent_done_evt.set)
+                except Exception:
+                    pass
+            _sa.set_background_completion_callback(_on_bg_subagent_done)
         except Exception:
             pass
         # Reminder watcher — fire desktop notifications for due reminders,
@@ -2888,10 +2999,10 @@ class JarvisCLI:
                 print(f"{C_DIM}● session ended.{C_RESET}")
                 sys.exit(0)
             try:
-                if self.listen_continuous:
-                    user_input = (await self._read_input_or_listen()).strip()
-                else:
-                    user_input = (await self._read_input()).strip()
+                # _read_next races typed input vs STT (if listening) vs a
+                # background-subagent-done signal, so a finished subagent
+                # auto-continues the task without the user having to type.
+                _raw_input = await self._read_next()
             except KeyboardInterrupt:
                 # Two ctrl+c within 2s = exit. Single ctrl+c = abandon line.
                 now = time.time()
@@ -2907,6 +3018,25 @@ class JarvisCLI:
                 print(f"\n{C_DIM}● bye.{C_RESET}")
                 self.save_history()
                 sys.exit(0)
+            if _raw_input == _AUTO_CONTINUE:
+                # A background subagent finished while we were idle. Only act if
+                # there's actually a pending notification (guard spurious wakes).
+                try:
+                    from hearth import subagents as _sa
+                    if not _sa.peek_pending_notifications():
+                        continue
+                except Exception:
+                    continue
+                print(f"{C_DIM}● subagent finished — continuing automatically{C_RESET}")
+                # Synthetic user trigger. The drain below injects the
+                # <task-notification> as a SYSTEM message; this user-role line is
+                # what makes the model continue (and keeps the sequence ending on
+                # a user turn for strict local chat templates).
+                user_input = ("A background task you started just finished — its "
+                              "result is in the system notification above. Continue "
+                              "the original task with it now; don't wait for me.")
+            else:
+                user_input = _raw_input.strip()
             if not user_input:
                 continue
             # Strip lone surrogate chars before any string ops — Windows
