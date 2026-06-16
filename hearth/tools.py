@@ -4510,6 +4510,10 @@ _forge_proc: Optional[subprocess.Popen] = None
 _forge_last_used: float = 0.0
 _forge_idle_timeout: int = int(os.environ.get("JARVIS_FORGE_IDLE_TIMEOUT", "300"))
 _forge_idle_watcher_on: bool = False
+# When the active brain is Hearth's builtin llama.cpp server (not LM Studio),
+# it can't JIT-unload — so to free VRAM for Forge we fully STOP it and remember
+# what it was running, then restart it from this snapshot when Forge shuts down.
+_builtin_paused: "Optional[Dict[str, Any]]" = None
 
 
 def _start_forge_idle_watcher() -> None:
@@ -4625,6 +4629,19 @@ def _try_release_llm_vram() -> str:
     POST with body {"loaded": false}, but the exact shape varies by build.
     We try both shapes; failure is non-fatal (Forge can also coexist if
     you have enough VRAM headroom)."""
+    # Builtin llama.cpp server: it holds the model in VRAM and can't JIT-unload,
+    # so stop it outright and snapshot what it was running for restore later
+    # (done in _forge_shutdown). This is the builtin half of the VRAM dance.
+    global _builtin_paused
+    try:
+        from . import llmserver as _ls
+        if _ls._proc is not None and _ls._proc.poll() is None:
+            _builtin_paused = dict(_ls._proc_info or {})
+            _ls.stop_builtin()
+            return "stopped builtin LLM server (restored after image gen)"
+    except Exception:
+        _builtin_paused = None
+
     # Most reliable: LM Studio's own CLI (`lms unload --all`). The REST unload
     # endpoints aren't exposed on every build, but the CLI ships with LM Studio
     # and actually frees the VRAM. Try it first, on PATH or the default install.
@@ -4690,6 +4707,21 @@ def _forge_shutdown(p: Dict) -> str:
                 msgs.append("requested forge api shutdown")
         except Exception:
             msgs.append("no jarvis-managed forge to kill, and API kill failed")
+
+    # Restore the builtin LLM server if we paused it to free VRAM for Forge.
+    global _builtin_paused
+    if _builtin_paused:
+        mp = _builtin_paused.get("model_path")
+        if mp and os.path.exists(mp):
+            try:
+                from . import llmserver as _ls
+                _ls.start_builtin(mp, port=_builtin_paused.get("port"),
+                                  ctx=int(_builtin_paused.get("ctx") or 24576))
+                msgs.append("restored builtin LLM server")
+            except Exception as e:
+                msgs.append(f"builtin restore failed: {type(e).__name__}")
+        _builtin_paused = None
+
     return "; ".join(msgs) or "nothing to do"
 
 
@@ -5873,6 +5905,35 @@ def _truncate_kept_tool_results(msgs: List[Dict[str, Any]],
     return out
 
 
+def dedup_tool_results(messages: List[Dict[str, Any]],
+                       min_chars: int = 200) -> List[Dict[str, Any]]:
+    """Cheap pre-pass: replace OLDER duplicate tool outputs with a back-reference
+    so an identical big result (e.g. the same browse/read_file dump repeated
+    across turns) isn't stored — and later summarized — N times. The most-recent
+    copy is kept verbatim. This only rewrites the `content` of `tool` messages;
+    it never drops a message or touches tool_call_id, so tool_call/tool_result
+    pairing stays valid. Returns a NEW list (never mutates the input). Runs
+    without an LLM call, so it can shrink context before compaction even fires.
+    """
+    import hashlib as _hl
+    out = [dict(m) for m in messages]
+    seen: set = set()
+    for i in range(len(out) - 1, -1, -1):   # newest first -> the newest copy wins
+        m = out[i]
+        if m.get("role") != "tool":
+            continue
+        c = m.get("content")
+        if not isinstance(c, str) or len(c) < min_chars:
+            continue
+        h = _hl.md5(c.encode("utf-8", "replace")).hexdigest()[:12]
+        if h in seen:
+            out[i] = {**m, "content":
+                      "[Duplicate tool output — identical to a more recent call; omitted to save context.]"}
+        else:
+            seen.add(h)
+    return out
+
+
 def compact_history(messages: List[Dict[str, Any]],
                     summarize: Any,
                     keep_recent: int = 8,
@@ -5895,6 +5956,10 @@ def compact_history(messages: List[Dict[str, Any]],
     """
     if len(messages) <= keep_recent + 2:
         return list(messages)
+
+    # Cheap pre-pass: collapse repeated identical tool dumps before we spend an
+    # LLM call summarizing them. Often the single biggest token sink.
+    messages = dedup_tool_results(messages)
 
     # split: leading system + everything-up-to-keep_recent + recent tail
     head: List[Dict[str, Any]] = []
