@@ -146,10 +146,18 @@ class _BrowserWorker(threading.Thread):
             self._browser = None
             self._context = None
             ctx_common = dict(headless=headless, slow_mo=slowmo, args=args, no_viewport=True)
-            try:
-                self._context = self._pw.chromium.launch_persistent_context(
-                    prof_dir, channel="chrome", **ctx_common)
-            except Exception:
+            # Browser fallback chain: real Chrome -> Edge (preinstalled on every
+            # Windows 10/11, also Chromium + has the codecs) -> Playwright's
+            # bundled Chromium. Edge means users with no Chrome still get a real
+            # browser without a `playwright install` step.
+            for _channel in ("chrome", "msedge"):
+                try:
+                    self._context = self._pw.chromium.launch_persistent_context(
+                        prof_dir, channel=_channel, **ctx_common)
+                    break
+                except Exception:
+                    continue
+            if self._context is None:
                 try:
                     self._context = self._pw.chromium.launch_persistent_context(
                         prof_dir, **ctx_common)
