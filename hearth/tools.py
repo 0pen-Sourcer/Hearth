@@ -5905,6 +5905,13 @@ def _truncate_kept_tool_results(msgs: List[Dict[str, Any]],
     return out
 
 
+# Marker on a compaction summary message. Doubles as the recovery key: the NEXT
+# compaction recognizes a prior summary by this prefix and folds it in instead of
+# re-summarizing it (which drifts into summary-of-a-summary). Single source of
+# truth — if this text drifts, iterative recovery silently breaks.
+_SUMMARY_PREFIX = "Earlier-conversation summary (compacted to save context):"
+
+
 def dedup_tool_results(messages: List[Dict[str, Any]],
                        min_chars: int = 200) -> List[Dict[str, Any]]:
     """Cheap pre-pass: replace OLDER duplicate tool outputs with a back-reference
@@ -5995,6 +6002,20 @@ def compact_history(messages: List[Dict[str, Any]],
     while recent and recent[0].get("role") == "tool":
         to_compact.append(recent.pop(0))
 
+    # Iterative summary: if a PRIOR compaction summary is among the turns we're
+    # about to fold away, pull it out and feed it to the summarizer as
+    # established context rather than re-summarizing a summary (which drifts).
+    prev_summary = ""
+    _kept_to_compact: List[Dict[str, Any]] = []
+    for m in to_compact:
+        c = m.get("content")
+        if (m.get("role") == "system" and isinstance(c, str)
+                and c.startswith(_SUMMARY_PREFIX)):
+            prev_summary = c[len(_SUMMARY_PREFIX):].lstrip(" :\n")
+        else:
+            _kept_to_compact.append(m)
+    to_compact = _kept_to_compact
+
     transcript_parts = []
     for m in to_compact:
         role = m.get("role", "?")
@@ -6010,6 +6031,9 @@ def compact_history(messages: List[Dict[str, Any]],
                 pass
 
     transcript = "\n".join(transcript_parts)
+    if prev_summary:
+        transcript = ("PREVIOUS SUMMARY:\n" + prev_summary
+                      + "\n\n---\nNEWER TURNS TO FOLD IN:\n" + transcript)
     try:
         summary = summarize(transcript)
     except Exception as e:
@@ -6017,10 +6041,7 @@ def compact_history(messages: List[Dict[str, Any]],
 
     summary_msg = {
         "role": "system",
-        "content": (
-            "Earlier-conversation summary (compacted to save context):\n"
-            + (summary or "[empty]")
-        ),
+        "content": _SUMMARY_PREFIX + "\n" + (summary or "[empty]"),
     }
     result = head + [summary_msg] + recent
 
