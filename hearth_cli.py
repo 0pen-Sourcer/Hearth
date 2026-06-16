@@ -148,6 +148,11 @@ if LOCAL_API_KEY and LOCAL_API_KEY != "jarvis-local":
 if _S_MODEL:
     os.environ.setdefault("LOCAL_MODEL", LOCAL_MODEL)
 HISTORY_FILE = os.path.join(WORKSPACE, "logs", "jarvis_history.json")
+# Append-only, never-pruned transcript of the CLI. jarvis_history.json doubles
+# as the working context and gets pruned/compacted (and overwritten) to fit the
+# model window — which silently destroyed old turns. This file preserves the
+# full back-and-forth for search_chats / recall, independent of context limits.
+CLI_TRANSCRIPT = os.path.join(WORKSPACE, "logs", "cli_transcript.jsonl")
 # Persistent per-tool permissions ([a]lways / [N]ever) so you don't have to
 # re-approve browse_click/run_command/etc on every restart. Stored next to
 # memory in the workspace so it survives across CLI/GUI/bridge sessions.
@@ -600,6 +605,14 @@ class JarvisCLI:
             except Exception:
                 self.messages = []
 
+        # Seed the transcript-dedup set from whatever we just loaded so those
+        # turns (already on disk in the transcript from prior sessions) don't get
+        # re-appended. Only genuinely-new turns this session get written.
+        self._transcript_seen = {
+            self._transcript_key(m) for m in self.messages
+            if m.get("role") in ("user", "assistant")
+        }
+
         # Always rebuild the system message so rules.md + memory index are live.
         to = getattr(self, "think_on", False)
         if self.messages and self.messages[0].get("role") == "system":
@@ -621,12 +634,60 @@ class JarvisCLI:
             else:
                 break
 
+    @staticmethod
+    def _transcript_key(msg: dict) -> str:
+        """Stable identity for a message (role + content), so the append-only
+        transcript dedups across saves/restarts without mutating the message
+        dicts that get sent to the API."""
+        import hashlib
+        c = msg.get("content")
+        if not isinstance(c, str):
+            c = json.dumps(c, ensure_ascii=False, default=str)
+        return hashlib.md5(f"{msg.get('role')}\x00{c}".encode("utf-8", "replace")).hexdigest()
+
+    def _append_transcript(self):
+        """Append any new user/assistant turns to the never-pruned transcript.
+        Robust to history pruning/compaction (which mutates self.messages) —
+        identity is content-based, not index-based."""
+        seen = getattr(self, "_transcript_seen", None)
+        if seen is None:
+            seen = self._transcript_seen = set()
+        new = []
+        for m in self.messages:
+            if m.get("role") not in ("user", "assistant"):
+                continue
+            c = m.get("content")
+            if not c or (isinstance(c, str) and not c.strip()):
+                continue
+            k = self._transcript_key(m)
+            if k in seen:
+                continue
+            seen.add(k)
+            new.append(m)
+        if not new:
+            return
+        try:
+            os.makedirs(os.path.dirname(CLI_TRANSCRIPT), exist_ok=True)
+            with open(CLI_TRANSCRIPT, "a", encoding="utf-8") as f:
+                for m in new:
+                    c = m.get("content")
+                    if not isinstance(c, str):
+                        c = json.dumps(c, ensure_ascii=False, default=str)
+                    f.write(json.dumps(
+                        {"ts": time.time(), "role": m.get("role"), "content": c},
+                        ensure_ascii=False) + "\n")
+        except Exception:
+            pass  # transcript is best-effort; never break the turn over it
+
     def save_history(self):
         """Always saves to ~/Jarvis/logs/jarvis_history.json (local, safe).
         If JARVIS_LMSTUDIO_SYNC=1, also mirrors into a DEDICATED file under
         ~/.lmstudio/conversations/ so the chat shows up in LM Studio's UI.
         Never writes to your existing LM Studio threads — only the dedicated
         jarvis_cli.conversation.json file."""
+        # Flush new turns to the never-pruned transcript BEFORE we overwrite the
+        # (prunable) working-context file, so search/recall keeps the full record.
+        self._append_transcript()
         try:
             os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
             with open(HISTORY_FILE, "w", encoding="utf-8") as f:
