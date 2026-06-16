@@ -3472,6 +3472,7 @@
       <div class="ob-buttons">
         <button class="ob-btn ghost" id="ob-skip">Skip setup</button>
         <button class="ob-btn" id="ob-back" hidden>Back</button>
+        <button class="ob-btn ghost" id="ob-skip-step" title="Skip just this step — leave it at the default, keep going">Skip this</button>
         <button class="ob-btn primary" id="ob-next">Continue</button>
       </div>
     </div>
@@ -9610,6 +9611,8 @@ function obRender() {
   });
   $('ob-step-meta').textContent = `Step ${obStep} of ${OB_TOTAL_STEPS}`;
   $('ob-back').hidden = (obStep === 1);
+  // "Skip this" is meaningless on the final "all set" card — hide it there.
+  const _skipStep = $('ob-skip-step'); if (_skipStep) _skipStep.hidden = (obStep === OB_TOTAL_STEPS);
   $('ob-next').textContent = (obStep === OB_TOTAL_STEPS) ? 'Finish' : 'Continue';
   // Lazy-load each step's content when it becomes visible
   if (obStep === 2) obLoadBrains();
@@ -10009,6 +10012,14 @@ $('ob-next').addEventListener('click', async () => {
   await obFinish(false);
 });
 $('ob-back').addEventListener('click', () => { if (obStep > 1) { obStep--; obRender(); } });
+// Per-step skip — leave THIS card at its default and move on, without
+// abandoning the whole wizard. (Continue and Skip both just advance since
+// answers are only committed at obFinish; this button makes the liberty
+// explicit so users know any single step is optional.)
+$('ob-skip-step').addEventListener('click', () => {
+  if (obStep < OB_TOTAL_STEPS) { obStep++; obRender(); }
+  else obFinish(false);
+});
 $('ob-skip').addEventListener('click', () => obFinish(true));
 document.addEventListener('keydown', (e) => {
   if (!$('onboard').classList.contains('open')) return;
