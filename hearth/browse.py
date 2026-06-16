@@ -60,6 +60,9 @@ _CURSOR_JS = r"""
       + 'box-shadow:0 0 12px #7c5cff;opacity:.85;'
       + 'transition:left .45s ease, top .45s ease, opacity .2s';
     (document.body || document.documentElement).appendChild(c);
+    // Auto-fade if the agent doesn't act soon after load; a glide pops it back.
+    if (window.__hearthCursorFade) clearTimeout(window.__hearthCursorFade);
+    window.__hearthCursorFade = setTimeout(() => { c.style.opacity = '0'; }, 3000);
   };
   if (document.readyState !== 'loading') add();
   else document.addEventListener('DOMContentLoaded', add);
@@ -75,10 +78,14 @@ _CURSOR_GLIDE_JS = r"""
 ([x, y]) => {
   const c = document.getElementById('__hearth_cursor');
   if (!c) return;
-  c.style.opacity = '1';
-  c.style.transition = 'left .45s ease, top .45s ease, opacity .2s';
+  c.style.opacity = '1';   // pop back in for this action
+  c.style.transition = 'left .45s ease, top .45s ease, opacity .4s';
   c.style.left = x + 'px';
   c.style.top = y + 'px';
+  // Fade the dot out once the agent stops acting (idle); the next glide pops
+  // it back. Keeps the screen clean while the user reads, signals when active.
+  if (window.__hearthCursorFade) clearTimeout(window.__hearthCursorFade);
+  window.__hearthCursorFade = setTimeout(() => { c.style.opacity = '0'; }, 2500);
 }
 """
 
