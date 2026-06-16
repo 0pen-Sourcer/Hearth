@@ -3255,8 +3255,21 @@ def _run_command(p: Dict) -> str:
             r = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True,
                                timeout=timeout, creationflags=_NO_WINDOW)
         else:
-            r = subprocess.run(shlex.split(cmd), cwd=cwd, capture_output=True,
-                               timeout=timeout)
+            # POSIX (Linux/macOS). shlex.split + no shell means pipes,
+            # redirects, &&, ;, globs, command-substitution etc. silently
+            # fail (the operators get passed as literal argv to the first
+            # program). Windows routes through PowerShell which handles all
+            # of that — match the behavior here by detecting shell
+            # metacharacters and routing through a real shell when present.
+            _shell_meta = ("|", ">", "<", "&", ";", "$(", "`", "*", "?",
+                           "(", ")", "{", "}", "~", "\n")
+            if any(tok in cmd for tok in _shell_meta):
+                _sh = shutil.which("bash") or "/bin/sh"
+                r = subprocess.run([_sh, "-c", cmd], cwd=cwd,
+                                   capture_output=True, timeout=timeout)
+            else:
+                r = subprocess.run(shlex.split(cmd), cwd=cwd,
+                                   capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return f"Error: '{cmd}' timed out after {timeout}s."
     except Exception as e:
@@ -3708,11 +3721,96 @@ def _locate_path(p: Dict) -> str:
     return "\n".join(out)
 
 
+def _list_installed_apps_posix(flt: str, limit: int) -> str:
+    """POSIX equivalent of the Windows registry scan. Returns the same shape
+    as the Windows path: one `name version  —  publisher` line per app
+    (version/publisher are usually unknown off-Windows, left blank)."""
+    seen = set()
+    apps: List[tuple] = []
+
+    def _add(name: str, ver: str = "", pub: str = ""):
+        name = (name or "").strip()
+        if not name:
+            return
+        key = (name.lower(), ver)
+        if key in seen:
+            return
+        seen.add(key)
+        if flt and flt not in name.lower():
+            return
+        apps.append((name, ver, pub))
+
+    try:
+        if sys.platform == "darwin":
+            # macOS: *.app bundles live in /Applications + ~/Applications
+            for root in ("/Applications", os.path.expanduser("~/Applications"),
+                         "/System/Applications"):
+                if not os.path.isdir(root):
+                    continue
+                try:
+                    for entry in os.listdir(root):
+                        if entry.lower().endswith(".app"):
+                            _add(entry[:-4])
+                except OSError:
+                    continue
+        else:
+            # Linux: parse Name= from *.desktop files in the XDG dirs.
+            desk_dirs = [
+                "/usr/share/applications",
+                "/usr/local/share/applications",
+                os.path.expanduser("~/.local/share/applications"),
+                "/var/lib/flatpak/exports/share/applications",
+                os.path.expanduser("~/.local/share/flatpak/exports/share/applications"),
+                "/var/lib/snapd/desktop/applications",
+            ]
+            for root in desk_dirs:
+                if not os.path.isdir(root):
+                    continue
+                try:
+                    files = os.listdir(root)
+                except OSError:
+                    continue
+                for fn in files:
+                    if not fn.endswith(".desktop"):
+                        continue
+                    name = ""
+                    try:
+                        with open(os.path.join(root, fn), "r",
+                                  encoding="utf-8", errors="replace") as fh:
+                            for ln in fh:
+                                # First top-level Name= line (skip Name[xx]=)
+                                if ln.startswith("Name=") and not name:
+                                    name = ln[5:].strip()
+                                    break
+                    except OSError:
+                        continue
+                    _add(name or os.path.splitext(fn)[0])
+            # Also fold in flatpak's own list when available (catches apps
+            # whose .desktop export dirs aren't standard).
+            fp = shutil.which("flatpak")
+            if fp:
+                try:
+                    r = subprocess.run(
+                        [fp, "list", "--app", "--columns=name"],
+                        capture_output=True, text=True, timeout=8)
+                    for ln in (r.stdout or "").splitlines():
+                        _add(ln.strip())
+                except Exception:
+                    pass
+    except Exception as e:
+        return f"Error: {e}"
+
+    apps.sort(key=lambda a: a[0].lower())
+    apps = apps[:limit]
+    out = [f"{n} {v}  —  {pub}" for n, v, pub in apps]
+    return "\n".join(out) if out else "(none)"
+
+
 def _list_installed_apps(p: Dict) -> str:
-    if sys.platform != "win32":
-        return "Error: Windows-only (uses registry)."
     flt = (p.get("name_filter") or "").lower()
     limit = int(p.get("limit") or 50)
+    if sys.platform != "win32":
+        return _list_installed_apps_posix(flt, limit)
     try:
         import winreg
     except ImportError:
@@ -3926,12 +4024,70 @@ def _open_app(p: Dict) -> str:
             )
         return msg
 
-    # Unix
+    # macOS
+    if sys.platform == "darwin":
+        cand_path = os.path.expanduser(canonical)
+        # File / folder / URL → `open` figures out the default handler.
+        if os.path.exists(cand_path):
+            try:
+                subprocess.Popen(["open", cand_path])
+                return f"opened: {cand_path}"
+            except Exception as e:
+                return f"Error: open failed: {e}"
+        if canonical.startswith(("http://", "https://", "file://")):
+            try:
+                subprocess.Popen(["open", canonical])
+                return f"opened url: {canonical}"
+            except Exception as e:
+                return f"Error: open failed: {e}"
+        # Named app → `open -a <name>` resolves the .app bundle by name.
+        try:
+            r = subprocess.run(["open", "-a", canonical],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                return f"launched: {canonical}"
+        except Exception:
+            pass
+        # Last resort: a CLI binary on PATH.
+        full = shutil.which(canonical)
+        if full:
+            try:
+                subprocess.Popen([full])
+                return f"launched: {full}"
+            except Exception as e:
+                return f"Error: {e}"
+        return (f"Error: could not find or launch '{name}' on macOS. "
+                f"Tried `open <path>`, `open -a <name>`, and PATH. "
+                f"If it's a web service, call open_in_browser instead.")
+
+    # Linux (and other POSIX)
+    cand_path = os.path.expanduser(canonical)
+    # Files / folders / URLs → xdg-open uses the desktop default handler.
+    if os.path.exists(cand_path) or canonical.startswith(
+            ("http://", "https://", "file://")):
+        target = cand_path if os.path.exists(cand_path) else canonical
+        opener = shutil.which("xdg-open")
+        if opener:
+            try:
+                subprocess.Popen([opener, target],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                return f"opened: {target}"
+            except Exception as e:
+                return f"Error: xdg-open failed: {e}"
+        # No xdg-open and it's a real file we can't hand off — fall through.
+    # Named app → try the binary on PATH and detach it.
     full = shutil.which(canonical)
-    if not full:
-        return f"Error: '{canonical}' not found in PATH."
-    subprocess.Popen([full])
-    return f"launched: {full}"
+    if full:
+        try:
+            subprocess.Popen([full], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+            return f"launched: {full}"
+        except Exception as e:
+            return f"Error: {e}"
+    return (f"Error: could not find or launch '{name}' on this system. "
+            f"Tried xdg-open and PATH. If it's a web service, call "
+            f"open_in_browser with the canonical URL instead.")
 
 
 # --------------------------------------------------------------------------
@@ -4238,11 +4394,33 @@ def _view_image(p: Dict) -> str:
     return f"__JARVIS_IMAGE__ {path} ({size} bytes, {ext[1:]})"
 
 
+def _screenshot_posix_cli(out: str) -> Optional[str]:
+    """Capture the screen by shelling out to a native tool. Used as a Linux
+    fallback when PIL.ImageGrab isn't available (it has no X11/Wayland
+    backend on Linux). Tries Wayland (grim) then X11 (scrot,
+    gnome-screenshot, spectacle, maim). Returns the path on success, None if
+    no tool worked. Each tool writes directly to `out`."""
+    attempts = [
+        ("grim", [out]),                       # Wayland
+        ("scrot", [out]),                      # X11
+        ("gnome-screenshot", ["-f", out]),     # GNOME (X11/Wayland)
+        ("spectacle", ["-b", "-n", "-o", out]),  # KDE
+        ("maim", [out]),                       # X11
+    ]
+    for tool, args in attempts:
+        exe = shutil.which(tool)
+        if not exe:
+            continue
+        try:
+            r = subprocess.run([exe] + args, capture_output=True, timeout=20)
+            if r.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 0:
+                return out
+        except Exception:
+            continue
+    return None
+
+
 def _screenshot(p: Dict) -> str:
-    try:
-        from PIL import ImageGrab  # type: ignore
-    except ImportError:
-        return "Error: needs Pillow. Run: pip install pillow"
     # Optional delay so the user can switch to the window they want
     # captured before the shutter fires. Without this, the screenshot
     # almost always captures Hearth itself (the chat is in focus when
@@ -4257,17 +4435,68 @@ def _screenshot(p: Dict) -> str:
         _t.sleep(delay)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = os.path.join(SHOTS_DIR, f"shot_{ts}.png")
-    img = ImageGrab.grab()
-    img.save(out)
+    # Primary path: PIL.ImageGrab (works on Windows + macOS; on Linux it has
+    # no backend and raises). On any failure, fall back to a native CLI
+    # capture tool (grim/scrot/gnome-screenshot/...) on Linux.
+    img = None
+    try:
+        from PIL import ImageGrab  # type: ignore
+        img = ImageGrab.grab()
+        img.save(out)
+    except Exception as e:
+        if sys.platform == "win32":
+            if isinstance(e, ImportError):
+                return "Error: needs Pillow. Run: pip install pillow"
+            return f"Error: {e}"
+        captured = _screenshot_posix_cli(out)
+        if not captured:
+            return ("Error: screenshot failed. Install Pillow "
+                    "(pip install pillow) or a native tool: grim (Wayland), "
+                    "scrot / gnome-screenshot / spectacle / maim (X11).")
+        img = None  # size unknown from CLI capture
     delay_note = (f" (waited {delay:.0f}s before capture)" if delay > 0 else "")
+    size_note = f" ({img.size[0]}x{img.size[1]})" if img is not None else ""
     return (
-        f"Saved: {out} ({img.size[0]}x{img.size[1]}){delay_note}\n"
+        f"Saved: {out}{size_note}{delay_note}\n"
         f"NEXT STEP: if the user asked you to DESCRIBE / TELL THEM WHAT'S "
         f"ON the screen, call view_image with path='{out}' RIGHT NOW in "
         f"this same turn — don't stop here. If they asked you to SHOW or "
         f"OPEN the screenshot in their gallery, call open_app with that "
         f"path instead. Only stop if they only asked you to CAPTURE."
     )
+
+
+def _clipboard_posix_read_cmd() -> Optional[list]:
+    """Pick the right clipboard-read command for this POSIX desktop.
+    macOS uses pbpaste; Linux prefers Wayland (wl-paste) then X11
+    (xclip / xsel). Returns argv list or None if no tool is installed."""
+    if sys.platform == "darwin":
+        if shutil.which("pbpaste"):
+            return ["pbpaste"]
+        return None
+    # Linux / other
+    if shutil.which("wl-paste"):
+        return ["wl-paste", "--no-newline"]
+    if shutil.which("xclip"):
+        return ["xclip", "-selection", "clipboard", "-o"]
+    if shutil.which("xsel"):
+        return ["xsel", "--clipboard", "--output"]
+    return None
+
+
+def _clipboard_posix_write_cmd() -> Optional[list]:
+    """Pick the right clipboard-write command for this POSIX desktop."""
+    if sys.platform == "darwin":
+        if shutil.which("pbcopy"):
+            return ["pbcopy"]
+        return None
+    if shutil.which("wl-copy"):
+        return ["wl-copy"]
+    if shutil.which("xclip"):
+        return ["xclip", "-selection", "clipboard"]
+    if shutil.which("xsel"):
+        return ["xsel", "--clipboard", "--input"]
+    return None
 
 
 def _clipboard_read(p: Dict) -> str:
@@ -4281,6 +4510,15 @@ def _clipboard_read(p: Dict) -> str:
             return r.stdout.rstrip("\r\n") or "(empty)"
         except Exception as e:
             return f"Error: {e}"
+    # macOS / Linux: native clipboard CLI first (robust headless/Wayland).
+    cmd = _clipboard_posix_read_cmd()
+    if cmd:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            return r.stdout.rstrip("\r\n") or "(empty)"
+        except Exception as e:
+            return f"Error: {e}"
+    # Fallback: tkinter (brittle headless/Wayland, but works on plain X11).
     try:
         from tkinter import Tk
         root = Tk()
@@ -4289,7 +4527,8 @@ def _clipboard_read(p: Dict) -> str:
         root.destroy()
         return text or "(empty)"
     except Exception as e:
-        return f"Error: {e}"
+        return (f"Error: {e} (no clipboard tool found — install "
+                f"wl-clipboard or xclip on Linux)")
 
 
 def _clipboard_write(p: Dict) -> str:
@@ -4301,6 +4540,16 @@ def _clipboard_write(p: Dict) -> str:
             return f"Copied ({len(text)} chars)" if r.returncode == 0 else "Error: clip failed"
         except Exception as e:
             return f"Error: {e}"
+    # macOS / Linux: native clipboard CLI first.
+    cmd = _clipboard_posix_write_cmd()
+    if cmd:
+        try:
+            r = subprocess.run(cmd, input=text, text=True, timeout=5)
+            return (f"Copied ({len(text)} chars)" if r.returncode == 0
+                    else f"Error: {cmd[0]} failed")
+        except Exception as e:
+            return f"Error: {e}"
+    # Fallback: tkinter.
     try:
         from tkinter import Tk
         root = Tk()
@@ -4311,7 +4560,8 @@ def _clipboard_write(p: Dict) -> str:
         root.destroy()
         return f"Copied ({len(text)} chars)"
     except Exception as e:
-        return f"Error: {e}"
+        return (f"Error: {e} (no clipboard tool found — install "
+                f"wl-clipboard or xclip on Linux)")
 
 
 # ============================================================
