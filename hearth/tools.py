@@ -4417,8 +4417,9 @@ def _autodetect_forge_dir() -> str:
     # Bounded fallback scan (NOT a whole-drive glob): list the immediate
     # children of each drive root + common parent folders, keep dirs whose name
     # hints at an SD/Forge install, and validate them + their immediate children
-    # (catches nestings like F:\Forge_WebUI\sd-webui-forge-neo). One level of
-    # listing per location — fast, no deep recursion.
+    # (catches nestings like <drive>:\<wrapper>\sd-webui-forge inside a folder
+    # whose own name isn't a launcher). One level of listing per location —
+    # fast, no deep recursion.
     scan_parents = []
     if sys.platform == "win32":
         scan_parents = [f"{d}:\\" for d in "CDEFG"]
@@ -4457,7 +4458,7 @@ def _forge_launch_dir(path: str) -> str:
     Accepts BOTH layouts:
       - cloned repo: webui.bat + modules/ AT the top level
       - one-click PACKAGE: run.bat at the top, the real webui.bat + modules/
-        inside a `webui/` subfolder  (this is why F:/Forge_WebUI was rejected)
+        inside a `webui/` subfolder  (a top-level wrapper dir is otherwise rejected)
     """
     if not path or not os.path.isdir(path):
         return ""
