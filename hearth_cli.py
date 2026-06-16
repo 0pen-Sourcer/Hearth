@@ -2947,7 +2947,12 @@ class JarvisCLI:
                 from hearth import subagents as _sa
                 for notif in _sa.drain_pending_notifications():
                     xml = _sa.format_notification_as_user_message(notif)
-                    self.messages.append({"role": "user", "content": xml})
+                    # role=system, NOT user — a background subagent reporting
+                    # back is a system event, not the user talking. It's
+                    # immediately followed by the user's real prompt below, so
+                    # the message sequence still ends on a user turn (keeps
+                    # LM Studio's Jinja happy).
+                    self.messages.append({"role": "system", "content": xml})
                     print(f"{C_DIM}● subagent done: "
                           f"{notif.get('persona', '?')} "
                           f"({notif.get('status', '?')}){C_RESET}")
