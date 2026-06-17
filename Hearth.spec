@@ -112,6 +112,7 @@ HIDDEN = [
     "hearth.tool_call_parser",    # multi-family tool-call parser
     "hearth.skills_loader",       # v0.7 skills layer
     "hearth.skills_install",      # v0.7 skill install-from-GitHub flywheel
+    "hearth.email_tools",         # v0.7 IMAP/SMTP email (stdlib, opt-in)
     "hearth.subagents",           # v0.7 sub-agent fork system
     "hearth.mcp_client",          # v0.7 outbound MCP client
     "hearth.migrate",             # Hermes/OpenClaw import path

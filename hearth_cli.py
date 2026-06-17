@@ -291,6 +291,8 @@ RISKY_TOOLS = {
     "create_directory", "run_command", "open_app", "open_url",
     "open_in_browser",
     "memory_forget",
+    # Reads private mail / sends mail — gate both.
+    "read_inbox", "send_email",
     # Writes + registers executable Python as a new tool — gate it.
     "create_plugin", "delete_plugin",
     # Browser actions can submit forms / click "buy" — gate the action ones.

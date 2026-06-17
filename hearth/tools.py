@@ -637,26 +637,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
-        "name": "summarize_file",
-        "description": (
-            "Read a file (any format read_file supports — PDF, DOCX, XLSX, "
-            "PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, plain text) and return "
-            "its content WRAPPED in a 'summarize this' directive, capped to "
-            "fit even small contexts. Use this when the user says 'summarize "
-            "X', 'tldr that file', 'what's the gist of'. After this returns, "
-            "produce the summary IN YOUR REPLY (3-5 bullets, ~50 words each). "
-            "Don't call read_file separately — summarize_file already read it."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path. Absolute or relative to workspace."},
-                "max_chars": {"type": "integer", "description": "Cap content size after extraction. Default 6000."},
-            },
-            "required": ["path"],
-        },
-    },
-    {
         "name": "extract_archive_file",
         "description": (
             "Pull ONE file out of an archive into the workspace, without "
@@ -1072,15 +1052,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
-        "name": "validate_url",
-        "description": "Probe a URL with a HEAD/GET request — confirms it's reachable and returns status code, content-type, redirect target, and response time. Use this BEFORE open_in_browser when you want to verify a URL from a search result actually works.",
-        "parameters": {
-            "type": "object",
-            "properties": {"url": {"type": "string"}},
-            "required": ["url"],
-        },
-    },
-    {
         "name": "open_in_browser",
         "description": "Open a URL in a SPECIFIC browser (and optional profile) — the user SEES it in their own browser, and it stays open. Like open_url but for a named browser. Use for 'open/watch/play X in Brave/Chrome'. Browsers detected from PATH + registry; if the user has a preferred browser in memory, use it, else ask once.",
         "parameters": {
@@ -1139,7 +1110,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "clipboard_read",
-        "description": "Read current clipboard text.",
+        "description": "Read the clipboard. Returns copied TEXT directly; a copied IMAGE is saved to a temp file and the path returned (then call view_image on it — handles 'I copied a screenshot, what is it?'); copied FILE(S) return their paths.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
@@ -4501,13 +4472,37 @@ def _clipboard_posix_write_cmd() -> Optional[list]:
 
 def _clipboard_read(p: Dict) -> str:
     if sys.platform == "win32":
+        # Text first; then a copied IMAGE (save to a temp PNG, hand back a path
+        # view_image can read — enables "I copied a screenshot, what is it?");
+        # then copied FILE(S) → return their paths. Empty if none.
+        import tempfile as _tf, time as _tm
+        img_path = os.path.join(_tf.gettempdir(),
+                                f"hearth_clip_{int(_tm.time())}.png").replace("\\", "/")
+        ps = (
+            "$t = Get-Clipboard -Raw -ErrorAction SilentlyContinue; "
+            "if ($t) { 'TEXT'; $t } else { "
+            "$i = Get-Clipboard -Format Image -ErrorAction SilentlyContinue; "
+            f"if ($i) {{ $i.Save('{img_path}'); 'IMAGE:{img_path}' }} else {{ "
+            "$f = Get-Clipboard -Format FileDropList -ErrorAction SilentlyContinue; "
+            "if ($f) { 'FILES'; $f } else { 'EMPTY' } } }"
+        )
         try:
             r = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
-                capture_output=True, text=True, timeout=5,
+                ["powershell", "-NoProfile", "-STA", "-Command", ps],
+                capture_output=True, text=True, timeout=8,
                 creationflags=_NO_WINDOW,
             )
-            return r.stdout.rstrip("\r\n") or "(empty)"
+            out = (r.stdout or "").strip()
+            if out.startswith("TEXT"):
+                return out[4:].strip() or "(empty)"
+            if out.startswith("IMAGE:"):
+                path = out[len("IMAGE:"):].strip().splitlines()[0].strip()
+                return (f"[clipboard holds an IMAGE — saved to {path}. "
+                        f"Call view_image on that path to see it.]")
+            if out.startswith("FILES"):
+                files = out[len("FILES"):].strip()
+                return f"[clipboard holds file(s):]\n{files}" if files else "(empty)"
+            return "(empty)"
         except Exception as e:
             return f"Error: {e}"
     # macOS / Linux: native clipboard CLI first (robust headless/Wayland).
@@ -5353,7 +5348,6 @@ _HANDLERS = {
     "locate_path": _locate_path,
     "open_app": _open_app,
     "open_url": _open_url,
-    "validate_url": _validate_url,
     "open_in_browser": _open_in_browser,
     "list_browsers": _list_browsers,
     "screenshot": _screenshot,
@@ -5732,6 +5726,68 @@ TOOL_DEFINITIONS.append({
     },
 })
 
+def _read_inbox(p: Dict) -> str:
+    from . import email_tools as _e
+    res = _e.read_inbox(limit=p.get("limit", 10),
+                        unread_only=bool(p.get("unread_only")),
+                        folder=p.get("folder") or "INBOX",
+                        with_body=bool(p.get("with_body")))
+    return json.dumps(res, ensure_ascii=False, indent=2)
+
+
+def _send_email(p: Dict) -> str:
+    from . import email_tools as _e
+    res = _e.send_email(to=p.get("to", ""), subject=p.get("subject", ""),
+                        body=p.get("body", ""), cc=p.get("cc", ""),
+                        reply_to=p.get("reply_to", ""))
+    return json.dumps(res, ensure_ascii=False, indent=2)
+
+
+_HANDLERS["read_inbox"] = _read_inbox
+_HANDLERS["send_email"] = _send_email
+
+TOOL_DEFINITIONS.append({
+    "name": "read_inbox",
+    "description": (
+        "Read recent email from the user's configured mailbox (IMAP, read-only). "
+        "Returns {from, subject, date, date_iso, body?} per message, newest first. "
+        "Set unread_only=true for just unread, with_body=true to include the text "
+        "body (truncated). Requires the user to have set up email (app password) — "
+        "if not, the result explains how. Don't guess the user's address."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "description": "How many recent messages (1-50, default 10)."},
+            "unread_only": {"type": "boolean", "description": "Only unread messages."},
+            "folder": {"type": "string", "description": "Mailbox folder (default INBOX)."},
+            "with_body": {"type": "boolean", "description": "Include the (truncated) plain-text body."},
+        },
+    },
+})
+
+TOOL_DEFINITIONS.append({
+    "name": "send_email",
+    "description": (
+        "Send a plain-text email from the user's configured address (SMTP). "
+        "Confirm the recipient, subject, and body with the user before sending "
+        "unless they were explicit. Requires email setup (app password); if not "
+        "configured the result explains how. This actually sends mail — treat it "
+        "like any outward action."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "to": {"type": "string", "description": "Recipient address(es), comma-separated."},
+            "subject": {"type": "string"},
+            "body": {"type": "string"},
+            "cc": {"type": "string", "description": "Optional CC, comma-separated."},
+            "reply_to": {"type": "string", "description": "Optional Reply-To."},
+        },
+        "required": ["to", "subject", "body"],
+    },
+})
+
 TOOL_DEFINITIONS.append({
     "name": "read_pdf_large",
     "description": (
@@ -5889,6 +5945,9 @@ _DEFERRED_TOOLS = {
     # single-purpose utilities / demos
     "color_hex2rgb", "text_encoder_tool", "entity_graph_extractor",
     "website_status_tool", "tic_tac_toe",
+    # email (opt-in, needs an app password) — surfaces via load_tools when the
+    # user mentions email, so it never clutters the default tool list
+    "read_inbox", "send_email",
     "end_session",
 }
 _unlocked_tools: "set[str]" = set()
@@ -6015,19 +6074,19 @@ def to_openai_tools() -> List[Dict[str, Any]]:
 # plugins) fall into "Custom / plugins".
 _CATEGORY_ORDER = [
     "Files & docs", "Web & browser", "System & apps", "Memory",
-    "Reminders & alerts", "Voice", "Self-extending (plugins)",
+    "Reminders & alerts", "Email", "Voice", "Self-extending (plugins)",
     "Image generation", "Session",
 ]
 _TOOL_CATEGORY = {
     # Files & docs
     "read_file": "Files & docs", "write_file": "Files & docs", "edit_file": "Files & docs",
-    "summarize_file": "Files & docs", "list_directory": "Files & docs",
+    "list_directory": "Files & docs",
     "create_directory": "Files & docs", "delete_path": "Files & docs", "move_path": "Files & docs",
     "find_file": "Files & docs", "grep_search": "Files & docs", "glob_files": "Files & docs",
     "locate_path": "Files & docs", "list_archive": "Files & docs", "extract_archive_file": "Files & docs",
     "read_pdf_large": "Files & docs",
     # Web & browser
-    "web_search": "Web & browser", "web_fetch": "Web & browser", "validate_url": "Web & browser",
+    "web_search": "Web & browser", "web_fetch": "Web & browser",
     "open_url": "Web & browser", "open_in_browser": "Web & browser", "list_browsers": "Web & browser",
     "browse": "Web & browser", "browse_click": "Web & browser", "browse_type": "Web & browser", "browse_scroll": "Web & browser", "browse_key": "Web & browser",
     "browse_close": "Web & browser",
@@ -6055,6 +6114,7 @@ _TOOL_CATEGORY = {
     "create_plugin": "Self-extending (plugins)", "list_plugins": "Self-extending (plugins)",
     "delete_plugin": "Self-extending (plugins)",
     "install_skill": "Self-extending (plugins)",
+    "read_inbox": "Email", "send_email": "Email",
     # Image generation
     "generate_image": "Image generation", "generate_video": "Image generation",
     "check_video_task": "Image generation", "list_generations": "Image generation",

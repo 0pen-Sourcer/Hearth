@@ -77,7 +77,7 @@ The codebase is mostly Python and a POSIX launcher (`hearth.sh`) is included. So
 
 ## What it can do
 
-**Files.** Read, write, edit, list, move, delete. `read_file` extracts clean text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, and single-stream `.gz`/`.bz2`/`.xz`. `list_archive` and `extract_archive_file` peek into and pull files out of zip/tar archives without unpacking them. `summarize_file` returns a file pre-framed for a short summary. For very large PDFs, `read_pdf_large` runs a map-reduce summarization over chunks.
+**Files.** Read, write, edit, list, move, delete. `read_file` extracts clean text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, and single-stream `.gz`/`.bz2`/`.xz`. `list_archive` and `extract_archive_file` peek into and pull files out of zip/tar archives without unpacking them. For very large PDFs, `read_pdf_large` runs a map-reduce summarization over chunks.
 
 **Shell.** Real PowerShell or cmd commands, with output captured and sanitized.
 
@@ -242,6 +242,19 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 ## Contributing
 
 Good first PRs: POSIX ports of the Windows-specific tools in [`hearth/tools.py`](hearth/tools.py), more voice presets in [`hearth/voice.py`](hearth/voice.py), and new tools (one function plus a definition in `TOOL_DEFINITIONS`). See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Privacy
+
+Hearth runs on your machine and **collects nothing** — no account, no telemetry, no analytics, no server the author operates. Your files, prompts, and memory stay local.
+
+The only things that ever leave your computer are ones **you** turn on, and they go to the service *you* chose, not to us:
+
+- a **cloud model**, if you point the brain at one (Gemini/OpenAI/Grok/OpenRouter) — then your prompt goes to that provider;
+- **web search / fetch** (DuckDuckGo), when the model looks something up;
+- **ntfy** push and the **Telegram** bridge, if you configure them;
+- **email**, if you set up the optional IMAP/SMTP tool.
+
+All of those are off by default. Run against a local model with none of them configured and Hearth is fully offline. Because it's a local, no-data-collection tool, there's no privacy policy or terms to agree to — and the [MIT license](LICENSE) is the warranty/liability disclaimer.
 
 ## Support
 

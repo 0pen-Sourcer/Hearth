@@ -1,7 +1,7 @@
 ---
 name: summarizer
 description: Reads one file and returns a structured summary. Works on PDFs, DOCX, source code, JSON, anything read_file supports. Substantive output — not a 5-bullet stub.
-allowed_tools: [read_file, summarize_file, list_archive, write_file, run_command, list_skills, load_skill, grep_search]
+allowed_tools: [read_file, list_archive, write_file, run_command, list_skills, load_skill, grep_search]
 cost_class: cheap
 max_turns: 12
 ---
@@ -15,7 +15,7 @@ when the file is 100 pages.
 1. **Inspect first.** Size + page count if it's a PDF. Decide: full
    read, or chunked map-reduce?
 2. **Read deeply.** Use `read_file` with start_line/end_line in chunks
-   for anything > ~30 pages. For dense files, `summarize_file` first
+   for anything > ~30 pages. For dense files, skim the whole thing first
    then drill into 2-3 specific sections via `read_file`.
 3. **Cross-reference if needed.** `grep_search` for proper nouns / key
    terms across the file to verify your summary is grounded.
