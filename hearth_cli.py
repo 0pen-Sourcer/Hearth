@@ -147,6 +147,22 @@ if LOCAL_API_KEY and LOCAL_API_KEY != "jarvis-local":
     os.environ["LOCAL_API_KEY"] = LOCAL_API_KEY
 if _S_MODEL:
     os.environ.setdefault("LOCAL_MODEL", LOCAL_MODEL)
+
+# Carry a saved agent rename across CLI restarts. The GUI sets
+# HEARTH_PERSONA_NAME from settings.agent_name at boot (web.py); the CLI was
+# missing it, so `/name Foo` reset to JARVIS on the next launch. An explicit
+# HEARTH_PERSONA_NAME env still wins. persona.NAME is read at call time
+# (system_prompt + boot panel), so setting it here propagates everywhere.
+if not os.getenv("HEARTH_PERSONA_NAME"):
+    try:
+        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as _af:
+            _saved_agent = (json.load(_af).get("agent_name") or "").strip()
+        if _saved_agent:
+            os.environ["HEARTH_PERSONA_NAME"] = _saved_agent
+            import hearth.persona as _pmod
+            _pmod.NAME = _saved_agent
+    except Exception:
+        pass
 HISTORY_FILE = os.path.join(WORKSPACE, "logs", "jarvis_history.json")
 # Append-only, never-pruned transcript of the CLI. jarvis_history.json doubles
 # as the working context and gets pruned/compacted (and overwritten) to fit the
@@ -776,7 +792,8 @@ class JarvisCLI:
             _AGENT_NAME = "JARVIS"
         rows = [
             ("agent",     f"{_AGENT_NAME}"),
-            ("model",     f"{self.current_model}"),
+            ("model",     self.current_model if self.current_model != "local-model"
+                          else "(none detected yet — see below)"),
             ("endpoint",  f"{LOCAL_API_BASE}"),
             ("context",   f"{self.context_tokens} tokens, compact @ {int(COMPACT_AT*100)}%"),
             ("workspace", f"{WORKSPACE}"),
@@ -2026,7 +2043,7 @@ class JarvisCLI:
                 # Persist so next CLI launch picks it up. Use the settings
                 # API path the GUI shares.
                 from pathlib import Path as _P
-                settings_path = _P.home() / "Jarvis" / "settings.json"
+                settings_path = _P(WORKSPACE) / "settings.json"
                 if settings_path.is_file():
                     import json as _json
                     try:

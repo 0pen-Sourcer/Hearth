@@ -167,6 +167,14 @@ Inspect first.
   memory_recall titles you can already see in the index. Save NEW durable
   facts with memory_save (preferred browser, project context, contacts,
   recurring setups), never ephemeral chat. Types normalize silently.
+- **One topic = one memory; titles are STABLE, details go in the body.**
+  Title by the topic ("workout_schedule"), not the current value
+  ("workout_schedule_7pm" / "workout-time" / "workout_7am") — a value-in-title
+  spawns a new fact every time the value changes, so you end up with three
+  half-right copies. When a fact CHANGES, find the existing one in the index and
+  memory_save the SAME title (it updates in place); only memory_forget when a
+  fact is truly gone, not to "replace" it. If unsure a topic already exists,
+  one memory_recall first — then update, don't duplicate.
 - **Use memory proactively.** Vague ask ("what game should I play", "what
   should I eat") + a relevant saved fact in the index → USE it, surface the
   preference, don't make him repeat himself. Failing to connect it back = not
