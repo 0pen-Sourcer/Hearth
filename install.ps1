@@ -49,7 +49,7 @@ param(
     [switch]$NoFileReaders,
     [switch]$NoDesktop,
     [switch]$Browser,
-    [string]$BuiltinLLM = '',   # 'cuda' / 'cpu' / '' (off). EXPERIMENTAL: installs llama-cpp-python so Hearth runs its own LLM server. Tool-call reliability lags LM Studio's in v0.6 - BYO is recommended for daily use.
+    [string]$BuiltinLLM = '',   # 'cuda' / 'cpu' / '' (off). EXPERIMENTAL: installs llama-cpp-python so Hearth runs its own LLM server. Tool-call reliability still lags a dedicated runner like LM Studio - BYO is recommended for daily use.
     [ValidateSet('cpu','gpu','ask')][string]$VoiceDevice = 'ask',
     [switch]$NoRealtimeVoice
 )
@@ -187,19 +187,19 @@ if (-not $NoMCP) {
 }
 
 if (-not $NoFileReaders) {
-    Write-Step "Installing file-reader deps (pypdf, pypdfium2, python-docx, openpyxl, python-pptx)"
-    & $venvPython -m pip install --quiet pypdf pypdfium2 python-docx openpyxl python-pptx
+    Write-Step "Installing file-reader deps (pypdf, pypdfium2, python-docx, openpyxl, python-pptx, pymupdf)"
+    & $venvPython -m pip install --quiet pypdf pypdfium2 python-docx openpyxl python-pptx pymupdf
     if ($LASTEXITCODE -ne 0) {
         Write-WarnX "file-reader deps failed - PDF/DOCX/XLSX/PPTX won't be readable until installed. Re-run with -NoFileReaders to silence."
     } else {
-        Write-OK "installed (read_file now handles PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF)"
+        Write-OK "installed (read_file handles PDF/DOCX/XLSX/PPTX/EPUB/IPYNB/CSV/JSON/HTML/RTF; pdf-tools skill ready)"
     }
-    Write-Step "Installing skill deps (reportlab for make-pdf)"
-    & $venvPython -m pip install --quiet reportlab
+    Write-Step "Installing skill deps (reportlab, matplotlib, pyfiglet)"
+    & $venvPython -m pip install --quiet reportlab matplotlib pyfiglet
     if ($LASTEXITCODE -ne 0) {
-        Write-WarnX "reportlab failed - make-pdf skill will need pip install on first use."
+        Write-WarnX "skill deps failed - make-pdf/pptx/ascii will need pip install on first use."
     } else {
-        Write-OK "installed (make-pdf / make-pptx / make-xlsx skills ready)"
+        Write-OK "installed (make-pdf / make-pptx / make-xlsx / make-ascii skills ready)"
     }
 } else {
     Write-Skip "file-reader deps (-NoFileReaders passed)"

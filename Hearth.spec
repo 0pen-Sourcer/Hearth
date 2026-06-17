@@ -92,6 +92,8 @@ HIDDEN = [
     "kokoro_onnx",
     "faster_whisper",
     "pypdf", "pypdfium2",  # pypdfium2 = PDF→VLM-OCR fallback for scanned pages
+    "fitz", "pymupdf",     # pdf-tools skill (split/merge/search) — model-written scripts import fitz
+    "pyfiglet",            # make-ascii banners — imported only by skill scripts, so force-include
     "docx", "openpyxl", "pptx",
     "reportlab", "reportlab.pdfgen", "reportlab.platypus", "reportlab.lib", "reportlab.lib.pagesizes", "reportlab.lib.styles", "reportlab.lib.units", "reportlab.lib.colors",
     # matplotlib — the skills' build scripts import it at runtime to render
@@ -201,6 +203,21 @@ for _pkg in (() if LITE else ("fastapi", "uvicorn", "sse_starlette",
 # data files, the silero ONNX model is missing at runtime and the recorder
 # silently falls back to webrtc VAD (laggier endpoint).
 for _pkg in ("RealtimeSTT", "silero_vad"):
+    try:
+        from PyInstaller.utils.hooks import collect_all as _collect_all
+        _d, _b, _h = _collect_all(_pkg)
+        DATAS += _d
+        PW_BINARIES += _b
+        HIDDEN += _h
+    except Exception:
+        pass
+
+# Skill deps that ship binaries / data files and are imported ONLY by
+# model-written skill scripts (so static analysis never sees them):
+#   - pymupdf (fitz): compiled mupdf binaries — pdf-tools split/merge/search.
+#   - pyfiglet: .flf font data files — make-ascii banners.
+# Bare hiddenimports aren't enough; collect_all pulls the binaries + fonts.
+for _pkg in ("pymupdf", "pyfiglet"):
     try:
         from PyInstaller.utils.hooks import collect_all as _collect_all
         _d, _b, _h = _collect_all(_pkg)
