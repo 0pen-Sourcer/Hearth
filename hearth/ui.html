@@ -3243,10 +3243,35 @@
           </div>
         </div>
 
-        <div class="field">
+        <!-- ntfy push -->
+        <div class="field" style="align-items:flex-start;">
           <div class="label">
-            <div class="name">Also available</div>
-            <div class="hint"><b>ntfy</b> for reminder push (set <code>HEARTH_NTFY_TOPIC</code>), and an <b>experimental WhatsApp</b> bridge (unofficial, ban risk — spare number only). Full guide: docs/PHONE.md.</div>
+            <div class="name">ntfy push (reminders)</div>
+            <div class="hint">One-way: reminders push to your phone via <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color:var(--accent-2)">ntfy</a>. Pick a long, random topic, subscribe to it in the ntfy app, and put it here.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
+            <input type="text" id="bridge-ntfy-topic" placeholder="topic, e.g. hearth-7f3a9c2" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn-mini" id="bridge-ntfy-save">Save</button>
+              <span id="bridge-ntfy-status" style="font-size:11px;color:var(--fg-faint)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- WhatsApp (experimental) -->
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">WhatsApp <span style="color:var(--warn,#e0a020);font-size:11px;font-weight:400">· experimental</span></div>
+            <div class="hint">Unofficial link to a real account — Meta can ban the number for automation, so <b>use a spare number, not your main</b>. Needs <code>pip install neonize</code>; pairing is a QR shown when you run it.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
+            <input type="text" id="bridge-wa-nums" placeholder="allowed numbers (digits, country code, comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--fg-faint)"><input type="checkbox" id="bridge-wa-self"> also answer my own self-chat</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn-mini" id="bridge-wa-save">Save</button>
+              <span id="bridge-wa-status" style="font-size:11px;color:var(--fg-faint)"></span>
+            </div>
+            <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.whatsapp_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.whatsapp_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
           </div>
         </div>
         </div><!-- /pane connect -->
@@ -3595,7 +3620,7 @@
         <p class="ob-sub">Type whatever you'd ask a friend. I do real things — open apps, read
           files, browse the web, control your PC. The more specific you are, the better.</p>
         <div class="ob-tipline">Type <code>/help</code> any time for slash commands, <code>/tools</code> for the full tool list, or just talk.</div>
-        <div class="ob-tipline" style="margin-top:8px">📱 Want me on your phone? <b>Settings → Reach from phone</b> — Telegram or Discord, ~3 min. 🧩 Add community skills in the <b>Skills</b> tab.</div>
+        <div class="ob-tipline" style="margin-top:8px">Want me on your phone? <b>Settings → Reach from phone</b> (Telegram or Discord). Add community skills in the <b>Skills</b> tab.</div>
       </div>
     </div>
 
@@ -7744,6 +7769,10 @@ async function refreshSettings() {
       const dcTok = $('bridge-dc-token'), dcIds = $('bridge-dc-ids');
       if (tgTok && b.telegram) { tgTok.value = b.telegram.config.bot_token || ''; tgIds.value = (b.telegram.config.allowed_chat_ids || []).join(', '); }
       if (dcTok && b.discord) { dcTok.value = b.discord.config.bot_token || ''; dcIds.value = (b.discord.config.allowed_user_ids || []).join(', '); }
+      const waN = $('bridge-wa-nums'), waS = $('bridge-wa-self');
+      if (waN && b.whatsapp) { waN.value = (b.whatsapp.config.allowed_numbers || []).join(', '); if (waS) waS.checked = !!b.whatsapp.config.allow_self_chat; }
+      const ntT = $('bridge-ntfy-topic');
+      if (ntT) ntT.value = (s.ntfy_topic || '');
     } catch {}
     const _saveBridge = async (channel, tokenEl, idsEl, idsKey, statusEl) => {
       const token = (tokenEl.value || '').trim();
@@ -7759,6 +7788,25 @@ async function refreshSettings() {
     if (tgSave) tgSave.onclick = () => _saveBridge('telegram', $('bridge-tg-token'), $('bridge-tg-ids'), 'allowed_chat_ids', $('bridge-tg-status'));
     const dcSave = $('bridge-dc-save');
     if (dcSave) dcSave.onclick = () => _saveBridge('discord', $('bridge-dc-token'), $('bridge-dc-ids'), 'allowed_user_ids', $('bridge-dc-status'));
+    const waSave = $('bridge-wa-save');
+    if (waSave) waSave.onclick = async () => {
+      const nums = ($('bridge-wa-nums').value || '').split(',').map(x => x.trim().replace(/^\+/, '')).filter(Boolean);
+      const config = { allowed_numbers: nums, allow_self_chat: !!$('bridge-wa-self').checked };
+      const st = $('bridge-wa-status');
+      try {
+        const r = await api('/api/bridges/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'whatsapp', config }) });
+        if (st) { st.style.color = r && r.ok ? 'var(--ok,#5fd28a)' : 'var(--err)'; st.textContent = r && r.ok ? '✓ saved — pip install neonize, then run the command' : ((r && r.error) || 'save failed'); }
+      } catch (e) { if (st) st.textContent = 'failed: ' + (e.message || e); }
+    };
+    const ntSave = $('bridge-ntfy-save');
+    if (ntSave) ntSave.onclick = async () => {
+      const topic = ($('bridge-ntfy-topic').value || '').trim();
+      const st = $('bridge-ntfy-status');
+      try {
+        await saveSetting('ntfy_topic', topic);
+        if (st) { st.style.color = 'var(--ok,#5fd28a)'; st.textContent = topic ? '✓ saved — reminders will push to this topic' : 'cleared'; }
+      } catch (e) { if (st) st.textContent = 'failed: ' + (e.message || e); }
+    };
     $$('[data-copycmd]').forEach(btn => {
       btn.onclick = async () => {
         try { await navigator.clipboard.writeText(btn.dataset.copycmd); } catch {}
