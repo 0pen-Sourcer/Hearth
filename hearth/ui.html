@@ -3147,6 +3147,20 @@
           </div>
           <button class="btn-mini" id="btn-replay-onboard">Re-run onboarding</button>
         </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Updates</div>
+            <div class="hint">Check GitHub for a newer release. <span id="update-status"></span></div>
+          </div>
+          <button class="btn-mini" id="btn-update-check">Check for updates</button>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Start Hearth at login</div>
+            <div class="hint">Auto-launch the tray when you sign in to Windows, so reminders fire even before you open Hearth. <span id="autostart-status"></span></div>
+          </div>
+          <button class="btn-mini" id="btn-autostart-toggle">…</button>
+        </div>
         <div class="field"><div class="label">
           <div class="name">Currently talking to</div>
           <div class="hint" id="setting-endpoint">…</div>
@@ -6975,9 +6989,13 @@ async function refreshSettings() {
           forgeInput.value = r.path;
           await saveSetting('forge_dir', r.path);
           toast('Forge found', r.path, 'ok', 4500);
+        } else if ((forgeInput.value || '').trim()) {
+          // Auto-scan found nothing new, but a path is already configured —
+          // don't alarm the user into thinking Forge is missing.
+          toast('Keeping your Forge path', forgeInput.value.trim(), 'info', 4500);
         } else {
-          toast('No Forge install found',
-            'Checked common paths under C:/D:/E: drives. Paste a custom path manually.',
+          toast('No Forge auto-detected',
+            'Paste the full path to your sd-webui-forge folder (the one with webui.bat + a modules/ subfolder).',
             'warn', 7000);
         }
       } catch (e) { toast('Detect failed', e.message, 'err'); }
@@ -7273,6 +7291,60 @@ async function refreshSettings() {
       obStep = 1; obState = { brain: '', voice: '' };
       obShow();
     };
+    // Update check — opt-in, never auto-installs. Mirrors the CLI /update.
+    const updateBtn = $('btn-update-check');
+    if (updateBtn) updateBtn.onclick = async () => {
+      const status = $('update-status');
+      updateBtn.disabled = true;
+      if (status) status.textContent = 'checking…';
+      try {
+        const r = await api('/api/update/check', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+        if (!r || !r.ok) { if (status) status.textContent = 'check failed: ' + ((r && r.error) || 'unknown'); return; }
+        if (!r.available) { if (status) status.textContent = "you're on the latest (v" + (r.current||'') + ")"; return; }
+        if (status) status.textContent = '';
+        showModal('Update available: ' + r.latest,
+          'You have v' + r.current + '. ' + (r.url || '') + '\n\n' + (r.notes || '').slice(0, 400) +
+          '\n\nInstall now? (git checkout: pulls + asks you to restart. Packaged build: opens the release page.)', [
+          { label: 'Later' },
+          { label: 'Install', kind: 'danger', onclick: async () => {
+            try {
+              const a = await api('/api/update/apply', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+              toast('Update', (a && a.result) || 'done', 'ok', 9000);
+            } catch (e) { toast('Update failed', e.message, 'err', 9000); }
+          }},
+        ]);
+      } catch (e) {
+        if (status) status.textContent = 'check failed: ' + (e.message || e);
+      } finally {
+        updateBtn.disabled = false;
+      }
+    };
+
+    // Start-at-login toggle — flips the Startup-folder shortcut (same entry as
+    // Task Manager > Startup). Keeps the tray (and its reminder watcher) alive
+    // across reboots so reminders fire even before you open Hearth.
+    const autostartBtn = $('btn-autostart-toggle');
+    function paintAutostart(on) {
+      if (!autostartBtn) return;
+      autostartBtn.textContent = on ? 'On — turn off' : 'Off — turn on';
+      const s = $('autostart-status');
+      if (s) s.textContent = on ? '(enabled)' : '(disabled)';
+    }
+    if (autostartBtn) {
+      // initial state
+      api('/api/autostart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
+        .then(r => { if (r && r.ok) paintAutostart(!!r.enabled); }).catch(()=>{});
+      autostartBtn.onclick = async () => {
+        autostartBtn.disabled = true;
+        const want = autostartBtn.textContent.indexOf('turn on') >= 0; // "Off — turn on" => enabling
+        try {
+          const r = await api('/api/autostart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ enabled: want }) });
+          if (r && r.ok) { paintAutostart(!!r.enabled); toast('Start at login', r.enabled ? 'Hearth will launch when you sign in.' : 'Auto-launch turned off.', 'ok', 5000); }
+          else { toast('Start at login', (r && r.error) || 'failed', 'err', 6000); }
+        } catch (e) { toast('Start at login', e.message || e, 'err', 6000); }
+        finally { autostartBtn.disabled = false; }
+      };
+    }
 
     // MCP pane wiring — edit mcp.json + show client snippet. Live bridge
     // status comes from /api/mcp/status; rendered into #mcp-status-box.

@@ -182,6 +182,64 @@ def uninstall() -> int:
     return 0
 
 
+def _startup_lnk_path() -> Optional[str]:
+    _, startup = _windows_paths()
+    return os.path.join(startup, "Hearth.lnk") if startup else None
+
+
+def is_autostart_enabled() -> bool:
+    """True if the tray is set to launch at login (Startup-folder shortcut present)."""
+    p = _startup_lnk_path()
+    return bool(p and os.path.isfile(p))
+
+
+def set_autostart(enabled: bool) -> bool:
+    """Toggle launch-at-login for the tray. Returns the resulting on/off state.
+
+    Mirrors the target resolution in install(): prefer the packaged Hearth.exe,
+    fall back to the dev venv `pythonw -m hearth.tray`. Disabling just removes the
+    Startup-folder shortcut (this is the same entry Task Manager > Startup shows).
+    """
+    p = _startup_lnk_path()
+    if not p:
+        return False
+    if not enabled:
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except OSError:
+            pass
+        # legacy name, just in case
+        legacy = os.path.join(os.path.dirname(p), "Hearth (tray).lnk")
+        try:
+            if os.path.isfile(legacy):
+                os.remove(legacy)
+        except OSError:
+            pass
+        return False
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(here)
+    pythonw = os.path.join(repo_root, ".venv", "Scripts", "pythonw.exe")
+    if not os.path.isfile(pythonw):
+        pythonw = os.path.join(repo_root, ".venv", "Scripts", "python.exe")
+    icon_path = os.path.join(repo_root, "assets", "icon.ico")
+    if not os.path.isfile(icon_path):
+        icon_path = None
+    packaged = os.path.join(repo_root, "dist", "Hearth", "Hearth.exe")
+    if os.path.isfile(packaged):
+        target, t_args, t_wd, t_pythonw = packaged, "", os.path.dirname(packaged), False
+        icon_path = packaged
+    else:
+        target, t_args, t_wd, t_pythonw = pythonw, "-m hearth.tray", repo_root, True
+    _make_shortcut(
+        target_path=target, args=t_args, lnk_path=p, icon_path=icon_path,
+        description="Hearth -- auto-starts at login", working_dir=t_wd,
+        pythonw=t_pythonw,
+    )
+    return is_autostart_enabled()
+
+
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m hearth.install_shortcuts",

@@ -1392,6 +1392,33 @@ class HearthHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/update/check":
+            try:
+                from . import updater
+                # Keep in sync with hearth_cli.HEARTH_VERSION + Hearth.iss.
+                return self._send_json(200, updater.check_for_update("0.7.0-preview"))
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/update/apply":
+            try:
+                from . import updater
+                return self._send_json(200, {"ok": True, "result": updater.apply_update()})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/autostart":
+            # Toggle launch-at-login for the tray. POST {enabled: bool} to set;
+            # POST {} (no key) just reports the current state. Mirrors the entry
+            # in Task Manager > Startup.
+            body = self._read_json()
+            try:
+                from . import install_shortcuts as _sh
+                if "enabled" in body:
+                    state = _sh.set_autostart(bool(body.get("enabled")))
+                else:
+                    state = _sh.is_autostart_enabled()
+                return self._send_json(200, {"ok": True, "enabled": state})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/voice/device":
             # One-click STT device flip (the onboarding "switch to GPU" CTA).
             # Flips it live + eager-loads so a missing-CUDA failure surfaces now
