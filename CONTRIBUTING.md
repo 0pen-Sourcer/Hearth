@@ -1,4 +1,4 @@
-?# Contributing to Hearth
+# Contributing to Hearth
 
 Hearth started as one person's tool and got opened up to the world because the gap between "your model can chat" and "your model can run your machine" is too big to leave unfilled. The faster Hearth generalizes beyond one developer's setup, the better it gets for everyone — so PRs are welcome and triaged seriously.
 
@@ -39,6 +39,10 @@ The pattern is: one function in [`hearth/tools.py`](hearth/tools.py) (`_my_tool(
 
 `/listen on` works but doesn't filter for a wake word. Adding `JARVIS_WAKE_WORD=hey jarvis` (and a fast keyword-spotting layer like Porcupine or [openWakeWord](https://github.com/dscripka/openWakeWord)) would make ambient mode shippable for people whose mic picks up TV.
 
+### 5. Share a skill (no code needed)
+
+The highest-leverage contribution isn't even to this repo. A skill is a folder with a `SKILL.md` that teaches Hearth a workflow — see [docs/SKILLS.md](docs/SKILLS.md). Write one that does something useful on a real PC ("archive last month's screenshots", "set up a new Python project"), push it to a repo, and add it to the community index, [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills). Anyone installs it with `/skill install <you>/<repo>`. The more good skills exist, the more reasons there are to run Hearth.
+
 ## What we won't merge
 
 - New backends (cloud APIs) that change the "local-first" promise. Cloud opt-in is fine, default-on isn't.
@@ -66,7 +70,7 @@ Smoke test that nothing's broken:
 
 ```powershell
 python -c "import hearth; print(len(hearth.TOOL_DEFINITIONS), 'tools loaded')"
-# should print: 38 tools loaded (or more if you've added one)
+# should print: 92 tools loaded (or more if you've added one)
 ```
 
 ## Code style
