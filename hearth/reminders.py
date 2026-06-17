@@ -300,6 +300,16 @@ def _push_phone(title: str, body: str) -> bool:
     topic = (_os.environ.get("HEARTH_NTFY_TOPIC")
              or _os.environ.get("JARVIS_NTFY_TOPIC") or "").strip()
     if not topic:
+        # Fall back to the topic saved from the GUI (Settings -> Reach from phone),
+        # which writes settings.json rather than an env var.
+        try:
+            import json as _json
+            from .tools import WORKSPACE as _WS
+            with open(_os.path.join(_WS, "settings.json"), encoding="utf-8") as _sf:
+                topic = (_json.load(_sf).get("ntfy_topic") or "").strip()
+        except Exception:
+            topic = ""
+    if not topic:
         return False
     server = (_os.environ.get("HEARTH_NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
     try:
