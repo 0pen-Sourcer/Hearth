@@ -1,2 +1,49 @@
-pymupdf>=1.24
-pyfiglet>=1.0
+# Hearth dependencies.
+#
+# The recommended install is .\install.ps1 (it tiers these into required vs
+# optional groups and handles the special cases below). This file is the
+# plain-pip fallback: `pip install -r requirements.txt` pulls the core plus the
+# common optional features (file readers, document skills, voice, MCP).
+#
+# NOT included here (need special install flags — see install.ps1):
+#   - llama-cpp-python  (built-in LLM server; needs --extra-index-url for CUDA/CPU wheels)
+#   - playwright browsers (after installing playwright, run: python -m playwright install chromium)
+
+# ---- Core (required) ----
+openai>=1.0
+prompt_toolkit>=3.0
+psutil
+pillow
+truststore
+plyer
+
+# ---- File readers (read_file extracts text from these formats) ----
+pypdf
+pypdfium2
+python-docx
+openpyxl
+python-pptx
+pymupdf>=1.24          # pdf-tools skill: split / merge / search / extract
+
+# ---- Document + media skills ----
+reportlab              # make-pdf
+matplotlib             # charts in make-pdf / make-pptx
+pyfiglet>=1.0          # make-ascii banners
+
+# ---- Voice (optional: TTS + STT) ----
+kokoro-onnx
+sounddevice
+numpy
+faster-whisper
+
+# ---- MCP interop (optional: expose/consume MCP tools) ----
+mcp
+
+# ---- Browser control (optional) ----
+# After install, fetch the browser engine: python -m playwright install chromium
+playwright
+
+# ---- Desktop app (optional) ----
+pywebview
+pystray
+pywin32; sys_platform == "win32"

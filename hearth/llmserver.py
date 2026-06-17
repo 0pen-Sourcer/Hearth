@@ -1029,7 +1029,7 @@ def search_huggingface(query: str, limit: int = 12) -> List[Dict[str, Any]]:
            f"search={urllib.parse.quote(query.strip() + ' gguf')}"
            f"&filter=gguf&sort=downloads&direction=-1&limit={limit}")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.6"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
         with urllib.request.urlopen(req, timeout=8) as r:
             models = json.loads(r.read().decode("utf-8"))
     except Exception as e:
@@ -1203,7 +1203,7 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
         return []
     try:
         url = f"https://huggingface.co/api/models/{urllib.parse.quote(repo, safe='/')}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.6"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
         with urllib.request.urlopen(req, timeout=8) as r:
             info = json.loads(r.read().decode("utf-8"))
     except Exception as e:
@@ -1265,7 +1265,7 @@ def download_from_hf_repo(repo: str, filename: str,
     url = f"https://huggingface.co/{repo}/resolve/main/{filename}"
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.6 (HF-download)"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7 (HF-download)"})
         with urllib.request.urlopen(req, timeout=30) as r:
             total = int(r.headers.get("Content-Length") or 0)
             done = 0
