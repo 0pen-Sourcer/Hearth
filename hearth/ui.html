@@ -2662,7 +2662,7 @@
         <span class="sub">workflows Hearth can run — install more, or share your own</span>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin:0 4px 10px;">
-        <input type="text" id="skill-install-src" placeholder="install from GitHub:  owner/repo   (or a github URL / local path)" style="flex:1;min-width:0;" />
+        <input type="text" id="skill-install-src" placeholder="install from GitHub:  owner/repo   (or a github URL / local path)" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 12px;font-size:13px;outline:none;" />
         <button class="btn-mini" id="btn-skill-install">Install</button>
       </div>
       <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
@@ -6760,13 +6760,18 @@ async function refreshSkills() {
         </div>`;
     }).join('');
     box.querySelectorAll('button[data-skrm]').forEach(b => {
-      b.onclick = async () => {
+      b.onclick = () => {
         const name = b.dataset.skrm;
-        try {
-          const r = await api('/api/skills/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
-          if (r && r.ok) { toast('Removed', name, 'ok', 2500); refreshSkills(); }
-          else { toast('Remove failed', (r && r.error) || 'unknown', 'err'); }
-        } catch (e) { toast('Remove failed', e.message, 'err'); }
+        showModal('Remove "' + name + '"?', 'It moves to skills/_trash (recoverable), not a hard delete. Restore by moving the folder back.', [
+          { label: 'Cancel' },
+          { label: 'Remove', kind: 'danger', onclick: async () => {
+            try {
+              const r = await api('/api/skills/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
+              if (r && r.ok) { toast('Removed', name + ' → trash', 'ok', 3000); refreshSkills(); }
+              else { toast('Remove failed', (r && r.error) || 'unknown', 'err'); }
+            } catch (e) { toast('Remove failed', e.message, 'err'); }
+          }},
+        ]);
       };
     });
   } catch (e) {
