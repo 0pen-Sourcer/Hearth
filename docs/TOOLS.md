@@ -1,8 +1,8 @@
 # Tools
 
-Hearth gives the model **92 tools** to operate your machine. Everything runs locally; the only outbound calls are web searches the model itself makes. Risky tools (shell, file writes, app launch, browser control) prompt for `[y/n/a/N]` permission in the CLI before they run.
+Hearth gives the model **93 tools** to operate your machine. Everything runs locally; the only outbound calls are web searches the model itself makes. Risky tools (shell, file writes, app launch, browser control) prompt for `[y/n/a/N]` permission in the CLI before they run.
 
-To keep the prompt small, **52** core tools load by default and **40** niche ones (marked †) stay behind a `load_tools` meta-tool the model calls on demand. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **53** core tools load by default and **40** niche ones (marked †) stay behind a `load_tools` meta-tool the model calls on demand. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`) — don't edit by hand._
 
@@ -49,6 +49,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `clipboard_read` | Read the clipboard |
 | `clipboard_write` | Write text to the clipboard |
 | `disk_usage` † | Find the biggest folders and files under a path |
+| `focus_window` | Bring an ALREADY-OPEN window to the front / focus it, by a substring of its title (e.g |
 | `get_time` | Current local datetime, weekday, timezone offset |
 | `learn_environment` † | Re-scan this machine (GPU/VRAM, RAM, installed models, top-level drive map) and refresh it into long-term memory |
 | `list_installed_apps` † | Installed applications (Windows registry uninstall keys) |
