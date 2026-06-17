@@ -1049,6 +1049,12 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"items": items})
             except Exception as e:
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/skills":
+            try:
+                from . import skills_loader as _sl
+                return self._send_json(200, {"items": _sl.list_skills()})
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/migrate/probe":
             # Report which sources have data on disk so the UI can grey out
             # buttons for ones that aren't installed. Cheap stat-only call.
@@ -1403,6 +1409,35 @@ class HearthHandler(BaseHTTPRequestHandler):
             try:
                 from . import updater
                 return self._send_json(200, {"ok": True, "result": updater.apply_update()})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/skills/inspect":
+            # Phase 1: fetch + parse a skill, return its manifest for the
+            # confirm dialog. Does NOT install.
+            body = self._read_json()
+            try:
+                from . import skills_install as _si
+                m = _si.inspect_source((body.get("source") or "").strip())
+                m.pop("_staged", None)  # internal temp path — don't leak to the UI
+                return self._send_json(200, m)
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/skills/install":
+            # Phase 2: install after the user confirmed the manifest in the UI.
+            body = self._read_json()
+            try:
+                from . import skills_install as _si
+                res = _si.install_skill((body.get("source") or "").strip(),
+                                        consent=lambda _m: True,
+                                        force=bool(body.get("force")))
+                return self._send_json(200, res)
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/skills/remove":
+            body = self._read_json()
+            try:
+                from . import skills_install as _si
+                return self._send_json(200, _si.uninstall_skill((body.get("name") or "").strip()))
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/autostart":
