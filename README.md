@@ -89,7 +89,9 @@ The codebase is mostly Python and a POSIX launcher (`hearth.sh`) is included. So
 
 **Memory.** Per-fact markdown files that persist across sessions. The index is always loaded and the facts most relevant to your message are folded into context automatically. Memory self-curates: each fact tracks how often it's recalled, cold facts archive automatically (never deleted) when a category grows too large, and an archived fact warms back to active storage once it's recalled enough. When you save something that overlaps an existing fact, Hearth notices and decides whether to update or add.
 
-**Reminders.** One-shot or recurring, set in natural language ("in 25 minutes", "every weekday at 9am"). A reminder can also fire a tool when it pops (for example, run a web search and include the result in the toast). Reminders that came due while Hearth was closed fire on next launch.
+**Reminders.** One-shot or recurring, set in natural language ("in 25 minutes", "every weekday at 9am"). A reminder can also fire a tool when it pops (for example, run a web search and include the result in the toast). Reminders that came due while Hearth was closed surface on next launch — in the CLI they print into the chat, since Windows often suppresses the toast. Set an [ntfy](https://ntfy.sh) topic and reminders also push to your phone, so they reach you even when the PC is asleep.
+
+**Phone.** Reach Hearth from your phone through a Telegram bot — bot token only, no OAuth and no public server to host. Message the bot and it runs the same agent loop as the CLI, replies (long answers chunked), and sends back any file it produced. An allowlist of chat IDs is the only gate, so it answers you and nobody else. Opt-in; setup is in [docs/PHONE.md](docs/PHONE.md).
 
 **Skills.** Ask for a document and Hearth picks the format, writes a build script tailored to the request, runs it, and opens the result. Built-in skills cover PDFs, slide decks (PPTX), spreadsheets (XLSX), diagrams (SVG/HTML), and ASCII art; a PDF-tools skill splits and merges PDFs. Generated files are sorted into per-type folders in the workspace. You can drop your own skill folders into the workspace and invoke them by name, and the assistant can author a new skill when it notices a repeated workflow.
 
@@ -176,6 +178,7 @@ Reads default to your whole disk (the assistant needs to know your machine). Wri
 | `HEARTH_PERSONA_NAME` | `JARVIS` | Assistant name |
 | `HEARTH_PERSONA` | (none) | Tone overlay: `bro` / `chill` / `professional` / `formal` |
 | `HEARTH_ALL_TOOLS` | `0` | `1` = load every tool up front instead of on demand |
+| `HEARTH_NTFY_TOPIC` | (none) | [ntfy](https://ntfy.sh) topic to push reminders to your phone |
 
 `HEARTH_*` and `JARVIS_*` prefixes are interchangeable.
 
@@ -237,6 +240,10 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 ## Contributing
 
 Good first PRs: POSIX ports of the Windows-specific tools in [`hearth/tools.py`](hearth/tools.py), more voice presets in [`hearth/voice.py`](hearth/voice.py), and new tools (one function plus a definition in `TOOL_DEFINITIONS`). See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Support
+
+Hearth is free and MIT-licensed, built by one developer. If it's useful to you, a ⭐ is the biggest help — it's how other people find the project. If you'd like to go further, sponsorship options are in [docs/SUPPORT.md](docs/SUPPORT.md).
 
 ## License
 
