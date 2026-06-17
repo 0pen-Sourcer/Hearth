@@ -5800,6 +5800,78 @@ TOOL_DEFINITIONS.append({
     },
 })
 
+def _focus_window(p: Dict) -> str:
+    """Bring an already-open window to the front by (partial) title match.
+    Like open_app, but for windows that are ALREADY open — raise/focus them."""
+    name = (p.get("name") or "").strip()
+    if not name:
+        return "Error: window name required (a substring of the window title)."
+    if sys.platform != "win32":
+        return "focus_window is Windows-only right now."
+    try:
+        import win32con
+        import win32gui
+    except Exception:
+        return "focus_window needs pywin32 (pip install pywin32)."
+    matches: List = []
+    titles: List[str] = []
+
+    def _cb(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd):
+            t = win32gui.GetWindowText(hwnd)
+            if t:
+                titles.append(t)
+                if name.lower() in t.lower():
+                    matches.append((hwnd, t))
+
+    try:
+        win32gui.EnumWindows(_cb, None)
+    except Exception as e:
+        return f"Error enumerating windows: {e}"
+    if not matches:
+        sample = ", ".join(sorted({t for t in titles if t})[:12])
+        return (f"No open window matching '{name}'. Open windows: {sample or '(none)'}")
+    hwnd, title = matches[0]
+    try:
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # un-minimize if needed
+    except Exception:
+        pass
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        # Foreground-lock fallback: float it to top briefly, then release.
+        try:
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                                  win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+            win32gui.SetWindowPos(hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                                  win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+            win32gui.BringWindowToTop(hwnd)
+        except Exception:
+            pass
+    extra = f" ({len(matches)} matched; brought the first)" if len(matches) > 1 else ""
+    return f"Brought '{title}' to the front.{extra}"
+
+
+_HANDLERS["focus_window"] = _focus_window
+
+TOOL_DEFINITIONS.append({
+    "name": "focus_window",
+    "description": (
+        "Bring an ALREADY-OPEN window to the front / focus it, by a substring of "
+        "its title (e.g. 'Spotify', 'chrome', 'notepad', 'Elden Ring'). Use when "
+        "the user says 'switch to / bring up / show me / pull up X' and X is "
+        "already running — this raises the existing window instead of launching a "
+        "new one (that's open_app). Returns the windows it sees if none match."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Substring of the target window's title."},
+        },
+        "required": ["name"],
+    },
+})
+
 TOOL_DEFINITIONS.append({
     "name": "read_pdf_large",
     "description": (
@@ -6106,6 +6178,7 @@ _TOOL_CATEGORY = {
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
     "network_info": "System & apps", "get_battery": "System & apps", "list_installed_apps": "System & apps",
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
+    "focus_window": "System & apps",
     "list_jobs": "Background jobs", "get_job_result": "Background jobs",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
     "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps",
