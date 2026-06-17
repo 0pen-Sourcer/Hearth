@@ -2494,6 +2494,11 @@
           Memory
           <span class="count" id="nav-mem-count"></span>
         </button>
+        <button class="nav-btn" data-view="reminders">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          Reminders
+          <span class="count" id="nav-rem-count"></span>
+        </button>
         <button class="nav-btn" data-view="files">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           Files
@@ -2624,6 +2629,24 @@
         <svg id="mem-graph-svg" preserveAspectRatio="xMidYMid meet"></svg>
         <div id="mem-graph-tip" class="graph-tip" hidden></div>
         <div class="graph-help">drag nodes · hover for fact · click to open</div>
+      </div>
+    </section>
+
+    <!-- REMINDERS -->
+    <section class="view" id="view-reminders">
+      <div class="view-head">
+        <h2>Reminders</h2>
+        <span class="sub">one-shot &amp; recurring — set them in chat</span>
+      </div>
+      <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
+        Set via chat: <i>"remind me to leave in 30 min"</i> or
+        <i>"every Monday 9am, run web_search on new GPU benchmarks"</i>.
+        Action reminders run a tool when they fire (not just a toast).
+        Missed reminders catch up on next launch — and push to your phone if you
+        set an ntfy topic (see <b>Settings → About</b> / docs/PHONE.md).
+      </div>
+      <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 190px);padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--fg-dim);margin:0 4px;">
+        loading reminders…
       </div>
     </section>
 
@@ -2952,19 +2975,12 @@
           </div>
         </div>
 
-        <div class="field" style="align-items:flex-start;">
+        <div class="field">
           <div class="label">
             <div class="name">Reminders</div>
-            <div class="hint">
-              Set via chat: <i>"remind me to leave in 30 min"</i> or
-              <i>"every Monday 9am, run web_search on new GPU benchmarks"</i>.
-              Action reminders run a tool when they fire (not just a toast).
-              Missed reminders catch up on next launch.
-            </div>
+            <div class="hint">Now have their own <b>Reminders</b> tab in the left sidebar — view, snooze, and cancel them there.</div>
           </div>
-          <div id="reminders-box" style="min-width:300px;flex:1;padding:10px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--fg-dim);max-height:340px;overflow-y:auto;">
-            loading reminders…
-          </div>
+          <button type="button" class="btn-mini" id="btn-go-reminders">Open Reminders</button>
         </div>
 
         <!-- Toast quiet-mode: user-controlled noise level for popups -->
@@ -2997,7 +3013,7 @@
         <!-- Keyboard shortcuts cheatsheet — grid table of shortcut chips. -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Keyboard shortcuts</h4>
         <div class="kbd-grid">
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>6</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>7</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>N</kbd></div><div class="kbd-desc">new chat</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>L</kbd></div><div class="kbd-desc">focus chat input</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>K</kbd></div><div class="kbd-desc">focus model picker</div></div>
@@ -3444,10 +3460,12 @@
           <summary style="cursor:pointer;font-size:13px;color:var(--accent-2);font-weight:600">
             …or paste your memory from ChatGPT / Claude</summary>
           <div style="margin-top:10px">
-            <p class="ob-sub" style="font-size:12px;margin-bottom:8px">
-              Ask the other AI: <i>"List everything you know about me as plain bullet
-              points — name, work, preferences, projects, dates, people. One fact per
-              line, no preamble."</i> Then paste its reply here.</p>
+            <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>Step 1.</b> Copy this and send it to ChatGPT / Claude:</p>
+            <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:12px">
+              <div id="ob-import-prompt" style="flex:1;background:var(--bg-0);border:1px solid var(--bg-3);border-radius:8px;padding:9px 11px;font-size:12px;color:var(--fg-dim);font-style:italic;line-height:1.5">List everything you know or remember about me as plain bullet points — name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
+              <button class="ob-btn" id="ob-import-copy" type="button" style="white-space:nowrap">Copy</button>
+            </div>
+            <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>Step 2.</b> Paste its reply here and click Import:</p>
             <textarea id="ob-import-text" rows="6"
               placeholder="Paste the bullet list here…"
               style="width:100%;box-sizing:border-box;resize:vertical;background:var(--bg-0);
@@ -3457,6 +3475,8 @@
               <button class="ob-btn" id="ob-import-btn" type="button">Import facts</button>
               <span id="ob-import-status" style="font-size:12px;color:var(--fg-faint)"></span>
             </div>
+            <p class="ob-sub" style="font-size:11px;margin-top:8px;color:var(--fg-faint)">
+              Importing is optional — if you'd rather skip it, just hit <b>Continue</b> below.</p>
           </div>
         </details>
         <div class="ob-tipline">
@@ -3486,7 +3506,6 @@
       <div class="ob-buttons">
         <button class="ob-btn ghost" id="ob-skip">Skip setup</button>
         <button class="ob-btn" id="ob-back" hidden>Back</button>
-        <button class="ob-btn ghost" id="ob-skip-step" title="Skip just this step — leave it at the default, keep going">Skip this</button>
         <button class="ob-btn primary" id="ob-next">Continue</button>
       </div>
     </div>
@@ -4634,6 +4653,11 @@ async function refreshModels() {
       sel.value = loadedModel ? loadedModel.id : (prev || '');
       $('model-state').classList.toggle('loaded', !!loadedModel);
     }
+    // Eject frees LOCAL VRAM — it's meaningless for a cloud brain (nothing to
+    // unload) and pointless with nothing loaded. Only show it for a loaded
+    // local model.
+    const _ejectBtn = document.getElementById('btn-eject');
+    if (_ejectBtn) _ejectBtn.hidden = _CLOUD.has(_prov) || !STATE.loadedModel;
     updateStatus();
   } catch (e) { console.error('refreshModels', e); }
 }
@@ -4951,6 +4975,7 @@ function showView(name) {
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
   if (name === 'memory') refreshMemory();
+  if (name === 'reminders') refreshReminders();
   if (name === 'files') refreshFiles(STATE.filePath || '');
   if (name === 'logs') { refreshLogs(); startLogsAutoRefresh(); }
   else { stopLogsAutoRefresh(); }
@@ -6576,6 +6601,9 @@ async function refreshReminders() {
   try {
     const r = await api('/api/reminders');
     const items = (r && r.items) || [];
+    const remCount = document.getElementById('nav-rem-count');
+    const pending = items.filter(x => !x.fired).length;
+    if (remCount) remCount.textContent = pending ? String(pending) : '';
     if (!items.length) {
       box.innerHTML = '<span style="opacity:0.6">no reminders set — just ask me</span>';
       return;
@@ -7179,6 +7207,18 @@ async function refreshSettings() {
             } else {
               toast('Switched brain', 'Next message uses ' + (body.provider === 'local' ? 'your local server' : body.provider), 'ok');
             }
+            // Optimistically sync STATE.settings so the very next refreshModels
+            // sees the new provider (and gates the eject button) without waiting
+            // for a poll. Switching to local also clears the sticker so a cloud
+            // model (e.g. grok-4.3) doesn't linger as the "active model" — it
+            // repopulates with the real local model, or stays empty if none.
+            STATE.settings = Object.assign({}, STATE.settings || {},
+              { llm_provider: body.provider, llm_url: body.url, llm_model: body.model });
+            if (body.provider === 'local') {
+              STATE.loadedModel = null;
+              const _ms = document.getElementById('model-select'); if (_ms) _ms.value = '';
+              const _st = document.getElementById('st-model'); if (_st) _st.textContent = '—';
+            }
             refreshModels(); refreshState();
             // Refresh brand-sub label so the "Hearth · local" / "· Grok"
             // header updates immediately without waiting for next settings poll.
@@ -7202,6 +7242,8 @@ async function refreshSettings() {
     }
     const goModelsBtn = $('btn-go-models');
     if (goModelsBtn) goModelsBtn.onclick = () => showView('models');
+    const goRemBtn = $('btn-go-reminders');
+    if (goRemBtn) goRemBtn.onclick = () => showView('reminders');
     const editRulesBtn = $('btn-edit-rules');
     if (editRulesBtn) editRulesBtn.onclick = async () => {
       try {
@@ -9683,8 +9725,6 @@ function obRender() {
   });
   $('ob-step-meta').textContent = `Step ${obStep} of ${OB_TOTAL_STEPS}`;
   $('ob-back').hidden = (obStep === 1);
-  // "Skip this" is meaningless on the final "all set" card — hide it there.
-  const _skipStep = $('ob-skip-step'); if (_skipStep) _skipStep.hidden = (obStep === OB_TOTAL_STEPS);
   $('ob-next').textContent = (obStep === OB_TOTAL_STEPS) ? 'Finish' : 'Continue';
   // Lazy-load each step's content when it becomes visible
   if (obStep === 2) obLoadBrains();
@@ -9703,21 +9743,43 @@ function _obWireImport() {
   const btn = document.getElementById('ob-import-btn');
   const txt = document.getElementById('ob-import-text');
   const status = document.getElementById('ob-import-status');
+  const copyBtn = document.getElementById('ob-import-copy');
+  const promptEl = document.getElementById('ob-import-prompt');
   if (!btn || !txt) return;
   _obImportWired = true;
+  // Step 1: one-click copy of the extraction prompt (you shouldn't have to
+  // hand-select it).
+  if (copyBtn && promptEl) {
+    copyBtn.onclick = async () => {
+      const t = (promptEl.textContent || '').trim();
+      try {
+        await navigator.clipboard.writeText(t);
+      } catch {
+        // Fallback for environments without the async clipboard API.
+        const ta = document.createElement('textarea');
+        ta.value = t; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch {}
+        document.body.removeChild(ta);
+      }
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = 'Copied ✓';
+      setTimeout(() => { copyBtn.textContent = prev; }, 1500);
+    };
+  }
+  // Step 2: import the pasted reply, then make it unmistakable that Continue is next.
   btn.onclick = async () => {
     const body = (txt.value || '').trim();
-    if (!body) { if (status) status.textContent = 'paste something first.'; return; }
+    if (!body) { if (status) status.textContent = 'paste the AI’s reply above first.'; return; }
     btn.disabled = true;
-    if (status) status.textContent = 'importing through the extractor…';
+    if (status) { status.style.color = 'var(--fg-faint)'; status.textContent = 'importing through the extractor…'; }
     try {
       const r = await api('/api/memory/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: body }) });
       if (r && r.ok) {
         if (r.count > 0) {
-          if (status) status.textContent = `saved ${r.count} memory${r.count === 1 ? '' : 'ies'}: ${(r.saved || []).join(', ')}`;
+          if (status) { status.style.color = 'var(--ok, #5fd28a)'; status.textContent = `✓ saved ${r.count} memor${r.count === 1 ? 'y' : 'ies'} — click Continue →`; }
           txt.value = '';
         } else {
-          if (status) status.textContent = 'nothing new saved (already known, or no durable facts found).';
+          if (status) status.textContent = 'nothing new saved (already known, or no durable facts found). You can Continue.';
         }
       } else {
         if (status) status.textContent = (r && r.error) ? r.error : 'import failed.';
@@ -10084,14 +10146,6 @@ $('ob-next').addEventListener('click', async () => {
   await obFinish(false);
 });
 $('ob-back').addEventListener('click', () => { if (obStep > 1) { obStep--; obRender(); } });
-// Per-step skip — leave THIS card at its default and move on, without
-// abandoning the whole wizard. (Continue and Skip both just advance since
-// answers are only committed at obFinish; this button makes the liberty
-// explicit so users know any single step is optional.)
-$('ob-skip-step').addEventListener('click', () => {
-  if (obStep < OB_TOTAL_STEPS) { obStep++; obRender(); }
-  else obFinish(false);
-});
 $('ob-skip').addEventListener('click', () => obFinish(true));
 document.addEventListener('keydown', (e) => {
   if (!$('onboard').classList.contains('open')) return;
@@ -10131,21 +10185,23 @@ $('ob-name').addEventListener('keydown', e => { if (e.key === 'Enter') saveOnboa
 
 // Global keyboard shortcuts — documented in Settings → Behavior →
 // Keyboard shortcuts. Modifier is Ctrl on Win/Linux, Cmd on Mac.
-// Tab-switch uses Ctrl+1..6 matching sidebar order.
+// Tab-switch uses Ctrl+<n> matching the actual sidebar order (computed from the
+// DOM, so inserting/reordering tabs can't desync the shortcuts).
+const navOrder = () => [...document.querySelectorAll('.nav-btn[data-view]')].map(b => b.dataset.view);
 window.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
   // Don't hijack when the user is typing in a text field (except Ctrl+L /
   // Ctrl+N which we still want everywhere).
   const inText = ['INPUT', 'TEXTAREA'].includes((e.target.tagName || ''));
-  const keyMap = {
-    '1': 'chat', '2': 'memory', '3': 'files',
-    '4': 'logs', '5': 'models', '6': 'settings',
-  };
-  if (e.key in keyMap && !inText) {
-    e.preventDefault();
-    try { showView(keyMap[e.key]); } catch {}
-    return;
+  const n = parseInt(e.key, 10);
+  if (!inText && n >= 1) {
+    const order = navOrder();
+    if (n <= order.length) {
+      e.preventDefault();
+      try { showView(order[n - 1]); } catch {}
+      return;
+    }
   }
   if (e.key.toLowerCase() === 'n' && !inText) {
     e.preventDefault();
@@ -10171,13 +10227,9 @@ window.addEventListener('keydown', (e) => {
   }
 });
 // Show shortcut hint on tab hover so users can discover without reading docs.
-const TAB_SHORTCUTS = {
-  chat: 'Ctrl+1', memory: 'Ctrl+2', files: 'Ctrl+3',
-  logs: 'Ctrl+4', models: 'Ctrl+5', settings: 'Ctrl+6',
-};
-document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
-  const v = btn.dataset.view;
-  if (TAB_SHORTCUTS[v]) btn.title = TAB_SHORTCUTS[v];
+// Numbered from the live DOM order so it always matches the keydown handler.
+document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
+  btn.title = `Ctrl+${i + 1}`;
 });
 
 (async function boot() {
