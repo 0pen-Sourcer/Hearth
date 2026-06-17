@@ -4892,10 +4892,29 @@ async function refreshGpu() {
 // ============================================================
 // STATUS BAR
 // ============================================================
+// Map the LIVE endpoint URL -> provider {key,label}. This is the source of
+// truth for the brain label, because env vars (e.g. grok.ps1) can override the
+// endpoint without touching settings.llm_provider — which is why the label
+// could read "local" while actually talking to Grok.
+function providerFromEndpoint(url) {
+  const u = (url || '').toLowerCase();
+  if (!u || u.includes('localhost') || u.includes('127.0.0.1') || u.includes('0.0.0.0'))
+    return { key: 'local', label: 'local' };
+  if (u.includes('api.x.ai')) return { key: 'grok', label: 'xAI Grok' };
+  if (u.includes('generativelanguage.googleapis')) return { key: 'gemini', label: 'Gemini' };
+  if (u.includes('api.openai.com')) return { key: 'openai', label: 'OpenAI' };
+  if (u.includes('openrouter.ai')) return { key: 'openrouter', label: 'OpenRouter' };
+  return { key: 'custom', label: 'cloud' };
+}
 async function refreshState() {
   try {
     const s = await api('/api/state');
     $('st-model').textContent = s.model ? s.model.id.split(/[\/\\]/).pop() : '—';
+    // Honest brain label from the LIVE endpoint (not the stale saved setting).
+    STATE.endpoint = s.endpoint || '';
+    const _pf = providerFromEndpoint(s.endpoint || '');
+    const _bsub = document.getElementById('brand-sub');
+    if (_bsub) _bsub.textContent = '· ' + _pf.label;
     // Only set ctx from a LOADED LOCAL model here. On cloud there's no
     // loaded_context_length, so resetting to '—' would fight refreshCtxBudget
     // (which sets the real cloud window) — that ping-pong was the flicker.
@@ -7139,17 +7158,8 @@ async function refreshSettings() {
     // ring + bottom bar reflect the new brain immediately (Grok 200K vs
     // builtin 8K). Don't await — settings render shouldn't block on it.
     refreshCtxBudget();
-    // Brand-sub label reflects the actual brain (was always hardcoded "· local"
-    // even when the user was on Grok/Gemini — user noticed). One source of truth.
-    const brandSub = document.getElementById('brand-sub');
-    if (brandSub) {
-      const provLabel = {
-        local: 'local', lmstudio: 'LM Studio', builtin: 'built-in',
-        grok: 'xAI Grok', gemini: 'Gemini', openai: 'OpenAI',
-        openrouter: 'OpenRouter', custom: 'custom',
-      }[s.llm_provider || 'local'] || (s.llm_provider || 'local');
-      brandSub.textContent = '· ' + provLabel;
-    }
+    // Brand-sub label is owned by refreshState (derived from the LIVE endpoint,
+    // so it's honest even when settings.llm_provider is stale/inconsistent).
     $$('.switch').forEach(sw => {
       const k = sw.dataset.key;
       sw.classList.toggle('on', !!s[k]);
@@ -7311,9 +7321,14 @@ async function refreshSettings() {
         openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator — gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-3.5-sonnet</code>.', sample: 'anthropic/claude-3.5-sonnet' },
         custom:     { url: '', hint: 'Any OpenAI-compatible server. You set the URL.', modelHint: 'Use whatever model id your server exposes.', sample: '' },
       };
-      const prov = s.llm_provider || 'local';
+      // Reflect the LIVE endpoint (STATE.endpoint, set by refreshState), not just
+      // the saved provider — they can drift (a past /brain left llm_url=Grok
+      // while llm_provider stayed "local"). The live endpoint is the truth.
+      const liveProv = providerFromEndpoint(STATE.endpoint || s.llm_url || '').key;
+      const prov = (s.llm_provider && s.llm_provider !== 'local') ? s.llm_provider
+                   : (liveProv !== 'local' ? liveProv : (s.llm_provider || 'local'));
       brainMode.value = prov;
-      llmUrl.value = s.llm_url || PRESETS[prov].url;
+      llmUrl.value = s.llm_url || (STATE.endpoint && !STATE.endpoint.includes('localhost') ? STATE.endpoint : '') || (PRESETS[prov] && PRESETS[prov].url) || '';
       llmKey.value = s.llm_key || '';
       llmMdl.value = s.llm_model || '';
       function applyMode(v) {
