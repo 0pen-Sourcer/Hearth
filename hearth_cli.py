@@ -1318,7 +1318,29 @@ class JarvisCLI:
                 print((f"{C_OK}removed {arg}{C_RESET}" if res.get("ok")
                        else f"{C_ERR}{res.get('error')}{C_RESET}"))
                 return True
-            print(f"{C_DIM}usage: /skill [list | install <src> | remove <name>]{C_RESET}")
+            if sub in ("new", "create", "scaffold"):
+                if not arg:
+                    print(f"{C_DIM}usage: {C_RESET}{C_TOOL}/skill new <name>{C_RESET}{C_DIM} (lower-kebab-case){C_RESET}")
+                    return True
+                slug = arg.split()[0]
+                body = (
+                    "# " + slug.replace("-", " ").title() + "\n\n"
+                    "Describe WHEN to use this and the exact steps. Example:\n\n"
+                    "1. `list_directory` on the target folder.\n"
+                    "2. Decide what to do with each item.\n"
+                    "3. Use existing tools (run_command, write_file, move_path...) to do it.\n"
+                    "4. Report what changed.\n\n"
+                    "Drop any helper scripts in this skill's scripts/ folder and "
+                    "reference them by path.\n")
+                res = _sl.create_skill(name=slug,
+                    description="TODO: one-line when-to-use (edit me)", body=body)
+                if res.get("ok"):
+                    print(f"{C_OK}scaffolded{C_RESET} {C_DIM}→ {res['folder']}\\SKILL.md{C_RESET}")
+                    print(f"  {C_DIM}edit the description + steps, then it's live. Share it: push to GitHub, others run /skill install <you>/<repo>{C_RESET}")
+                else:
+                    print(f"{C_ERR}{res.get('error')}{C_RESET}")
+                return True
+            print(f"{C_DIM}usage: /skill [list | install <src> | new <name> | remove <name>]{C_RESET}")
             return True
         if low == "/about":
             kind = "local" if _is_local_endpoint(LOCAL_API_BASE) else "cloud"

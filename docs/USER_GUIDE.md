@@ -103,6 +103,7 @@ The desktop app and browser share one backend (`hearth/web.py`) and one HTML fil
 /migrate <hermes|openclaw>     import memory from another agent (dry-run)
 /migrate <src> apply           write the import
 /phone                         phone-reach status (Telegram + ntfy) + setup pointer
+/skill [install <src>]         list / install / scaffold / remove shareable skills
 /update                        check GitHub for a newer release + install
 /exit  /quit                   close
 ```
@@ -173,6 +174,23 @@ Two opt-in, no-OAuth features (full setup in [PHONE.md](PHONE.md)):
 ## Start at login
 
 The tray app can auto-launch when you sign in to Windows, so reminders fire even before you open Hearth. Toggle it in **Settings → About → Start Hearth at login** (it flips the same Startup-folder entry that Task Manager > Startup shows), or pass `--no-autostart` to `python -m hearth.install_shortcuts` to skip it at install time.
+
+---
+
+## Skills (and sharing them)
+
+A skill is a folder with a `SKILL.md` that teaches Hearth a workflow. The model sees a one-line summary of each installed skill and loads the full steps only when it uses one, so you can have many installed cheaply. Built-ins cover documents (PDF/PPTX/XLSX/diagrams/ASCII) and PDF split/merge.
+
+The part that grows the app: **skills are shareable.**
+
+```
+/skill                       list installed skills
+/skill install <owner/repo>  install from GitHub (or a github URL, or ./local-path)
+/skill new <name>            scaffold your own under ~/Jarvis/skills/
+/skill remove <name>         uninstall one you added
+```
+
+Install shows you what a skill declares (its tools, any scripts it ships) and warns if it can run shell commands before anything is written; the scripts only ever run through the normal command-permission prompt. To share one you wrote, push its folder to GitHub — others install it with one line. Full guide + the community index: [SKILLS.md](SKILLS.md).
 
 ---
 
