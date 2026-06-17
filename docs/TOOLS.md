@@ -2,7 +2,7 @@
 
 Hearth gives the model **92 tools** to operate your machine. Everything runs locally; the only outbound calls are web searches the model itself makes. Risky tools (shell, file writes, app launch, browser control) prompt for `[y/n/a/N]` permission in the CLI before they run.
 
-To keep the prompt small, **54** core tools load by default and **38** niche ones (marked †) stay behind a `load_tools` meta-tool the model calls on demand. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **52** core tools load by default and **40** niche ones (marked †) stay behind a `load_tools` meta-tool the model calls on demand. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`) — don't edit by hand._
 
@@ -24,7 +24,6 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `move_path` | Move or rename inside the workspace |
 | `read_file` | Smart file reader |
 | `read_pdf_large` † | Map-reduce summarize a VERY large PDF (hundreds of pages) that won't fit any single context |
-| `summarize_file` | Read a file (any format read_file supports — PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, plain text) and return its content WRAPPED in a 'summari… |
 | `write_file` | Create a NEW file inside the workspace |
 
 ## Web & browser
@@ -40,7 +39,6 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `list_browsers` | List installed browsers detected on this machine |
 | `open_in_browser` | Open a URL in a SPECIFIC browser (and optional profile) — the user SEES it in their own browser, and it stays open |
 | `open_url` | Open a URL in the user's DEFAULT browser (their login, fullscreen) |
-| `validate_url` | Probe a URL with a HEAD/GET request — confirms it's reachable and returns status code, content-type, redirect target, and response time |
 | `web_fetch` | Fetch a URL and return its readable text (HTML stripped) to YOU |
 | `web_search` | Free DuckDuckGo HTML search |
 
@@ -48,7 +46,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 
 | Tool | What it does |
 |---|---|
-| `clipboard_read` | Read current clipboard text |
+| `clipboard_read` | Read the clipboard |
 | `clipboard_write` | Write text to the clipboard |
 | `disk_usage` † | Find the biggest folders and files under a path |
 | `get_time` | Current local datetime, weekday, timezone offset |
@@ -86,6 +84,13 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `notify` | Pop a desktop notification (Windows toast) RIGHT NOW |
 | `set_reminder` | Schedule a future desktop notification, optionally with a TOOL CALL that runs at the same moment (an 'action reminder') |
 | `snooze_reminder` † | Push a reminder's due time forward by N minutes (default 10) |
+
+## Email
+
+| Tool | What it does |
+|---|---|
+| `read_inbox` † | Read recent email from the user's configured mailbox (IMAP, read-only) |
+| `send_email` † | Send a plain-text email from the user's configured address (SMTP) |
 
 ## Voice
 

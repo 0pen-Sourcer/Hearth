@@ -1,7 +1,7 @@
 ---
 name: coder
 description: Edits / writes / runs code in a scoped task. Use for "fix this bug", "add this feature to that file", "convert X to Y" — anything bounded that benefits from a focused loop with file + shell access.
-allowed_tools: [read_file, write_file, edit_file, glob_files, grep_files, run_command, list_directory, summarize_file, list_skills, load_skill]
+allowed_tools: [read_file, write_file, edit_file, glob_files, grep_files, run_command, list_directory, list_skills, load_skill]
 cost_class: standard
 max_turns: 25
 ---

@@ -921,6 +921,7 @@ async def run_once(
                     "open_app", "open_url", "open_in_browser",
                     "memory_forget", "extract_archive_file",
                     "create_plugin", "delete_plugin",
+                    "read_inbox", "send_email",
                     # browse_click / browse_type / browse_scroll are NOT
                     # listed — once the user has already approved the
                     # initial `browse` call, every subsequent click/type/
