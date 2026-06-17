@@ -2499,6 +2499,11 @@
           Reminders
           <span class="count" id="nav-rem-count"></span>
         </button>
+        <button class="nav-btn" data-view="skills">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+          Skills
+          <span class="count" id="nav-skill-count"></span>
+        </button>
         <button class="nav-btn" data-view="files">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           Files
@@ -2647,6 +2652,25 @@
       </div>
       <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 190px);padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--fg-dim);margin:0 4px;">
         loading reminders…
+      </div>
+    </section>
+
+    <!-- SKILLS -->
+    <section class="view" id="view-skills">
+      <div class="view-head">
+        <h2>Skills</h2>
+        <span class="sub">workflows Hearth can run — install more, or share your own</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin:0 4px 10px;">
+        <input type="text" id="skill-install-src" placeholder="install from GitHub:  owner/repo   (or a github URL / local path)" style="flex:1;min-width:0;" />
+        <button class="btn-mini" id="btn-skill-install">Install</button>
+      </div>
+      <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
+        A skill is a folder with a SKILL.md. Install shows you what it can do before anything lands; its scripts only run through the normal permission prompt. Browse the community index:
+        <a href="https://github.com/0pen-sourcer/awesome-hearth-skills" target="_blank" rel="noopener" style="color:var(--accent-2)">awesome-hearth-skills</a>.
+      </div>
+      <div id="skills-box" style="overflow-y:auto;max-height:calc(100vh - 230px);margin:0 4px;">
+        loading skills…
       </div>
     </section>
 
@@ -3013,7 +3037,7 @@
         <!-- Keyboard shortcuts cheatsheet — grid table of shortcut chips. -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Keyboard shortcuts</h4>
         <div class="kbd-grid">
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>7</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>8</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>N</kbd></div><div class="kbd-desc">new chat</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>L</kbd></div><div class="kbd-desc">focus chat input</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>K</kbd></div><div class="kbd-desc">focus model picker</div></div>
@@ -4976,6 +5000,7 @@ function showView(name) {
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
   if (name === 'memory') refreshMemory();
   if (name === 'reminders') refreshReminders();
+  if (name === 'skills') refreshSkills();
   if (name === 'files') refreshFiles(STATE.filePath || '');
   if (name === 'logs') { refreshLogs(); startLogsAutoRefresh(); }
   else { stopLogsAutoRefresh(); }
@@ -6668,6 +6693,80 @@ async function refreshReminders() {
             refreshReminders();
           } else { toast('Cancel failed', rr.error || 'unknown', 'err'); }
         } catch (e) { toast('Cancel failed', e.message, 'err'); }
+      };
+    });
+  } catch (e) {
+    box.innerHTML = '<span style="opacity:0.6">load failed: ' + esc(e.message) + '</span>';
+  }
+}
+
+async function refreshSkills() {
+  const box = document.getElementById('skills-box');
+  if (!box) return;
+  // Wire the install control once. Two-phase: inspect -> confirm modal -> install.
+  const srcInput = document.getElementById('skill-install-src');
+  const instBtn = document.getElementById('btn-skill-install');
+  if (instBtn && !instBtn._wired) {
+    instBtn._wired = true;
+    const doInstall = async () => {
+      const src = (srcInput.value || '').trim();
+      if (!src) { toast('Paste a skill source', 'owner/repo, a github URL, or a local path', 'warn'); return; }
+      instBtn.disabled = true; instBtn.textContent = 'Inspecting…';
+      try {
+        const m = await api('/api/skills/inspect', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source: src }) });
+        if (!m || !m.ok) { toast('Could not read that skill', (m && m.error) || 'unknown', 'err', 7000); return; }
+        const lines = [m.description || '(no description)'];
+        if (m.scripts && m.scripts.length) lines.push('\nShips scripts: ' + m.scripts.join(', '));
+        if (m.risky_tools && m.risky_tools.length) lines.push('Uses: ' + m.risky_tools.join(', '));
+        if (m.risky) lines.push('\n⚠ This skill can run shell commands / modify files. Only install if you trust the source.');
+        if (m.already_installed) lines.push('\n(overwrites the "' + m.name + '" skill you already have)');
+        showModal('Install ' + m.name + (m.version ? ' v' + m.version : '') + '?', lines.join('\n'), [
+          { label: 'Cancel' },
+          { label: 'Install', kind: m.risky ? 'danger' : 'primary', onclick: async () => {
+            try {
+              const r = await api('/api/skills/install', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source: src, force: true }) });
+              if (r && r.ok) { toast('Installed', m.name, 'ok', 4000); srcInput.value = ''; refreshSkills(); }
+              else { toast('Install failed', (r && r.error) || 'unknown', 'err', 7000); }
+            } catch (e) { toast('Install failed', e.message, 'err', 7000); }
+          }},
+        ]);
+      } catch (e) { toast('Inspect failed', e.message, 'err', 7000); }
+      finally { instBtn.disabled = false; instBtn.textContent = 'Install'; }
+    };
+    instBtn.onclick = doInstall;
+    srcInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doInstall(); } });
+  }
+  try {
+    const r = await api('/api/skills');
+    const items = (r && r.items) || [];
+    const cnt = document.getElementById('nav-skill-count');
+    const userN = items.filter(s => s.source === 'user').length;
+    if (cnt) cnt.textContent = userN ? String(userN) : '';
+    if (!items.length) { box.innerHTML = '<span style="opacity:0.6">no skills yet — install one above</span>'; return; }
+    box.innerHTML = items.map(s => {
+      const isUser = s.source === 'user';
+      const badge = isUser
+        ? '<span style="background:var(--ok);color:var(--bg-0);padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px">installed</span>'
+        : '<span style="background:var(--bg-3);color:var(--fg-dim);padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px">bundled</span>';
+      const ver = s.version ? ' <span style="color:var(--fg-faint);font-size:11px">v' + esc(s.version) + '</span>' : '';
+      const rm = isUser ? `<button class="btn-mini danger" data-skrm="${esc(s.name)}" title="Uninstall">×</button>` : '';
+      return `
+        <div style="padding:9px 0;border-bottom:1px solid var(--border-faint);display:flex;justify-content:space-between;gap:10px;align-items:start">
+          <div style="flex:1;min-width:0">
+            <div style="color:var(--fg);font-weight:500">${esc(s.name)}${ver}${badge}</div>
+            <div style="color:var(--fg-faint);font-size:12px;margin-top:2px">${esc(s.description || '')}</div>
+          </div>
+          <div style="flex-shrink:0">${rm}</div>
+        </div>`;
+    }).join('');
+    box.querySelectorAll('button[data-skrm]').forEach(b => {
+      b.onclick = async () => {
+        const name = b.dataset.skrm;
+        try {
+          const r = await api('/api/skills/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
+          if (r && r.ok) { toast('Removed', name, 'ok', 2500); refreshSkills(); }
+          else { toast('Remove failed', (r && r.error) || 'unknown', 'err'); }
+        } catch (e) { toast('Remove failed', e.message, 'err'); }
       };
     });
   } catch (e) {
