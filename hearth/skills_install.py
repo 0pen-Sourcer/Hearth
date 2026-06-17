@@ -217,13 +217,22 @@ def install_skill(source: str, *,
 
 def uninstall_skill(name: str) -> Dict[str, Any]:
     """Remove a user-installed skill. Bundled skills can't be removed (they're
-    part of the app); a same-named user skill shadowing one is removable."""
+    part of the app); a same-named user skill shadowing one is removable.
+
+    SOFT delete: the folder is MOVED to skills/_trash/<name>_<timestamp> rather
+    than hard-deleted, so an accidental remove is recoverable (rmtree bypasses
+    the Recycle Bin — a hard delete here is unrecoverable)."""
+    import time as _time
     slug = (name or "").strip().lower()
     dest = _sl._USER_SKILLS_DIR / slug
     if not dest.is_dir():
         return {"ok": False, "error": f"no user-installed skill named '{slug}'"}
+    trash = _sl._USER_SKILLS_DIR / "_trash"
     try:
-        shutil.rmtree(dest)
-    except OSError as e:
+        trash.mkdir(parents=True, exist_ok=True)
+        grave = trash / f"{slug}_{int(_time.time())}"
+        shutil.move(str(dest), str(grave))
+    except Exception as e:
         return {"ok": False, "error": f"remove failed: {e}"}
-    return {"ok": True, "name": slug, "removed": str(dest)}
+    return {"ok": True, "name": slug, "trashed_to": str(grave),
+            "note": "moved to skills/_trash — restore by moving it back"}
