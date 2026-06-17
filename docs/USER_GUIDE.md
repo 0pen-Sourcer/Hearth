@@ -102,6 +102,8 @@ The desktop app and browser share one backend (`hearth/web.py`) and one HTML fil
 /mcp run                       run Hearth as an MCP server in this terminal
 /migrate <hermes|openclaw>     import memory from another agent (dry-run)
 /migrate <src> apply           write the import
+/phone                         phone-reach status (Telegram + ntfy) + setup pointer
+/update                        check GitHub for a newer release + install
 /exit  /quit                   close
 ```
 
@@ -151,11 +153,26 @@ Natural-language parser. All of these work:
 | `2026-05-30 14:30` | ISO direct |
 | `9pm` | today 21:00 (rolls to tomorrow if past) |
 
-When the time hits: Windows toast notification (via plyer / win10toast), **plus voice readout** if TTS is enabled.
+When the time hits: Windows toast notification (via plyer / win10toast), **plus voice readout** if TTS is enabled. In the CLI the reminder also prints into the chat — Windows often suppresses the toast (Focus Assist / notification settings), so a reminder that came due while you were away still shows up the moment you're back at the terminal. Set an [ntfy](https://ntfy.sh) topic (see below) and it pushes to your phone too.
 
 Storage: `~/Jarvis/reminders.json`. Edit by hand if you want.
 
 Tools: `set_reminder`, `list_reminders`, `cancel_reminder`.
+
+---
+
+## Reach it from your phone
+
+Two opt-in, no-OAuth features (full setup in [PHONE.md](PHONE.md)):
+
+- **Telegram bridge** — text a private bot from anywhere; it runs the full agent on your PC and texts back, files included. A chat-id allowlist is the only gate. Run `python -m hearth.telegram_bridge`; check status with `/phone`.
+- **ntfy push** — pick a random topic name, subscribe in the ntfy phone app, set `HEARTH_NTFY_TOPIC`, and reminders push to your phone even when the PC is asleep.
+
+---
+
+## Start at login
+
+The tray app can auto-launch when you sign in to Windows, so reminders fire even before you open Hearth. Toggle it in **Settings → About → Start Hearth at login** (it flips the same Startup-folder entry that Task Manager > Startup shows), or pass `--no-autostart` to `python -m hearth.install_shortcuts` to skip it at install time.
 
 ---
 
