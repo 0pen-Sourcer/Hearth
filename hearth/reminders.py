@@ -320,6 +320,60 @@ def _push_phone(title: str, body: str) -> bool:
         return False
 
 
+_APP_ID = "Hearth.Assistant"
+_identity_ready = False
+
+
+def _find_icon() -> Optional[str]:
+    """Locate Hearth's .ico, both in a PyInstaller bundle and from source."""
+    import sys
+    cands = []
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        exe_dir = os.path.dirname(sys.executable)
+        cands += [os.path.join(base, "assets", "icon.ico"),
+                  os.path.join(exe_dir, "assets", "icon.ico"),
+                  os.path.join(exe_dir, "_internal", "assets", "icon.ico")]
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands += [os.path.join(os.path.dirname(here), "assets", "icon.ico"),
+              os.path.join(here, "assets", "icon.ico")]
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _ensure_app_identity() -> Optional[str]:
+    """Give toasts a real identity so Windows shows 'Hearth' + the flame icon
+    instead of 'Hearth.exe' with a blank tile. Sets an explicit
+    AppUserModelID for this process and registers it under HKCU with a display
+    name + icon. Best-effort, runs once; returns the icon path (for backends
+    that take one directly). Cached so repeated reminders don't re-register."""
+    global _identity_ready
+    icon = _find_icon()
+    if _identity_ready:
+        return icon
+    _identity_ready = True
+    import sys
+    if sys.platform != "win32":
+        return icon
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(_APP_ID)
+    except Exception:
+        pass
+    try:
+        import winreg
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                              r"Software\Classes\AppUserModelId\\" + _APP_ID) as k:
+            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "Hearth")
+            if icon:
+                winreg.SetValueEx(k, "IconUri", 0, winreg.REG_SZ, icon)
+    except Exception:
+        pass
+    return icon
+
+
 def desktop_notify(title: str, body: str) -> bool:
     """Pop a desktop notification now. Tries plyer (cross-platform) then
     win10toast (Windows), falling back to stdout + TTS. Also pushes to the
@@ -327,15 +381,20 @@ def desktop_notify(title: str, body: str) -> bool:
     the PC is off). Returns True if a real DESKTOP toast fired. Shared by the
     reminder watcher AND the `notify` tool."""
     _push_phone(title, body)  # best-effort phone push alongside the desktop toast
+    icon = _ensure_app_identity()
     try:
         from plyer import notification  # type: ignore
-        notification.notify(title=title, message=body, app_name="Hearth", timeout=10)
+        kw = {"title": title, "message": body, "app_name": "Hearth", "timeout": 10}
+        if icon:
+            kw["app_icon"] = icon
+        notification.notify(**kw)
         return True
     except Exception:
         pass
     try:
         from win10toast import ToastNotifier  # type: ignore
-        ToastNotifier().show_toast(title, body, duration=8, threaded=True)
+        ToastNotifier().show_toast(title, body, duration=8, threaded=True,
+                                   icon_path=icon or None)
         return True
     except Exception:
         pass
