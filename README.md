@@ -77,7 +77,7 @@ The codebase is mostly Python and a POSIX launcher (`hearth.sh`) is included. So
 
 ## What it can do
 
-**Files.** Read, write, edit, list, move, delete. `read_file` extracts clean text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, and single-stream `.gz`/`.bz2`/`.xz`. `list_archive` and `extract_archive_file` peek into and pull files out of zip/tar archives without unpacking them. For very large PDFs, `read_pdf_large` runs a map-reduce summarization over chunks.
+**Files.** Read, write, edit, list, move, delete. `read_file` extracts clean text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, and single-stream `.gz`/`.bz2`/`.xz`. It peeks into and pulls files out of zip/tar archives without unpacking them, and can summarize very large PDFs — hundreds of pages that don't fit in context — by working through them in chunks.
 
 **Shell.** Real PowerShell or cmd commands, with output captured and sanitized.
 
