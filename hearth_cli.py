@@ -1199,10 +1199,37 @@ class JarvisCLI:
             print(f"  {C_TOOL}/disallow <path>{C_RESET}       revoke an /allow")
             print(f"  {C_TOOL}/allowed{C_RESET}               list paths Jarvis can write to")
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
+            print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
             print(f"  {C_TOOL}/exit{C_RESET}                  quit (or just say bye)")
             print()
             print(f"  {C_DIM}@<path>{C_RESET}                attach a file inline in your prompt")
             print(f"  {C_DIM}Esc+Enter{C_RESET}              insert newline (paste multi-line works)")
+            return True
+        if low == "/update" or low.startswith("/update "):
+            try:
+                from hearth import updater
+                print(f"{C_DIM}checking for updates…{C_RESET}")
+                r = updater.check_for_update(HEARTH_VERSION)
+                if not r.get("ok"):
+                    print(f"{C_ERR}update check failed: {r.get('error')}{C_RESET}")
+                    return True
+                if not r.get("available"):
+                    note = r.get("note", "")
+                    print(f"{C_OK}You're on the latest{C_RESET} {C_DIM}(v{HEARTH_VERSION}{'; ' + note if note else ''}){C_RESET}")
+                    return True
+                print(f"\n{C_BOT}Update available:{C_RESET} {C_TOOL}{r['latest']}{C_RESET}  "
+                      f"{C_DIM}(you have v{HEARTH_VERSION}){C_RESET}")
+                if r.get("url"):
+                    print(f"  {C_DIM}{r['url']}{C_RESET}")
+                if r.get("notes"):
+                    print(f"{C_DIM}{r['notes'][:300]}{C_RESET}")
+                ans = (await self._read_choice(f"  {C_TOOL}Install now?{C_RESET} [y/N] ")).strip().lower()
+                if ans.startswith("y"):
+                    print(f"{C_DIM}{updater.apply_update()}{C_RESET}")
+                else:
+                    print(f"{C_DIM}skipped. run /update anytime.{C_RESET}")
+            except Exception as e:
+                print(f"{C_ERR}update unavailable: {type(e).__name__}: {e}{C_RESET}")
             return True
         if low == "/about":
             kind = "local" if _is_local_endpoint(LOCAL_API_BASE) else "cloud"
@@ -2987,7 +3014,22 @@ class JarvisCLI:
         # why notifications never appeared in CLI-only use.
         try:
             from hearth import reminders as _rem
-            _rem.start_watcher(_rem.desktop_notify)
+
+            def _reminder_fire(title, body):
+                # ALWAYS print into the terminal — Windows silently suppresses OS
+                # toasts (Focus Assist / notification settings), so a missed
+                # reminder caught up at a late PC-boot showed nothing. Printing
+                # here guarantees you SEE "while you were away..." in the chat.
+                # Still also fire the OS toast + ntfy phone push via desktop_notify.
+                try:
+                    print(f"\n{C_BOT}\U0001f514 {title}{C_RESET}  {C_DIM}{body}{C_RESET}")
+                except Exception:
+                    pass
+                try:
+                    _rem.desktop_notify(title, body)
+                except Exception:
+                    pass
+            _rem.start_watcher(_reminder_fire)
         except Exception:
             pass
         await self._maybe_run_onboarding()
