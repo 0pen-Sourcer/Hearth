@@ -1069,6 +1069,25 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"items": _sl.list_skills()})
             except Exception as e:
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/bridges":
+            # Which phone bridges are configured (for the Connect pane).
+            import json as _j
+            base = os.path.join(os.path.expanduser("~"), ".hearth")
+            out = {}
+            for ch, fn in {"telegram": "phone_bridge.json", "discord": "discord_bridge.json",
+                           "whatsapp": "whatsapp_bridge.json"}.items():
+                cfg = {}
+                try:
+                    with open(os.path.join(base, fn), encoding="utf-8") as f:
+                        cfg = _j.load(f) or {}
+                except Exception:
+                    cfg = {}
+                if ch == "whatsapp":
+                    configured = bool(cfg.get("allowed_numbers") or cfg.get("allow_self_chat"))
+                else:
+                    configured = bool((cfg.get("bot_token") or "").strip())
+                out[ch] = {"configured": configured, "config": cfg}
+            return self._send_json(200, {"bridges": out})
         if path == "/api/migrate/probe":
             # Report which sources have data on disk so the UI can grey out
             # buttons for ones that aren't installed. Cheap stat-only call.
@@ -1452,6 +1471,24 @@ class HearthHandler(BaseHTTPRequestHandler):
             try:
                 from . import skills_install as _si
                 return self._send_json(200, _si.uninstall_skill((body.get("name") or "").strip()))
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/bridges/config":
+            # Save a phone-bridge config (~/.hearth/<file>.json) from the GUI so
+            # users don't hand-edit JSON. Channel -> file map below.
+            body = self._read_json()
+            ch = (body.get("channel") or "").strip().lower()
+            fn = {"telegram": "phone_bridge.json", "discord": "discord_bridge.json",
+                  "whatsapp": "whatsapp_bridge.json"}.get(ch)
+            if not fn:
+                return self._send_json(400, {"ok": False, "error": "unknown channel"})
+            import json as _j
+            base = os.path.join(os.path.expanduser("~"), ".hearth")
+            try:
+                os.makedirs(base, exist_ok=True)
+                with open(os.path.join(base, fn), "w", encoding="utf-8") as f:
+                    _j.dump(dict(body.get("config") or {}), f, indent=2)
+                return self._send_json(200, {"ok": True})
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/autostart":
