@@ -2999,6 +2999,24 @@
           </div>
         </div>
 
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">Import memory from ChatGPT / Claude</div>
+            <div class="hint">Paste what another AI knows about you — Hearth saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
+            <div style="display:flex;align-items:flex-start;gap:6px;">
+              <div id="set-import-prompt" style="flex:1;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points — name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
+              <button type="button" class="btn-mini" id="set-import-copy">Copy</button>
+            </div>
+            <textarea id="set-import-text" rows="4" placeholder="Paste the AI's reply here…" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12px;resize:vertical;outline:none;"></textarea>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button type="button" class="btn-mini" id="set-import-btn">Import facts</button>
+              <span id="set-import-status" style="font-size:11px;color:var(--fg-faint)"></span>
+            </div>
+          </div>
+        </div>
+
         <div class="field">
           <div class="label">
             <div class="name">Reminders</div>
@@ -3090,8 +3108,8 @@
 
         <div class="field">
           <div class="label">
-            <div class="name">Default context window</div>
-            <div class="hint">Used for newly loaded models that don't have a saved config yet. Higher = more memory headroom but more KV cache VRAM.</div>
+            <div class="name">Default context window <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
+            <div class="hint">Only applies when Hearth runs its <strong>own</strong> llama.cpp server and loads a GGUF that has no saved config yet. LM Studio / Ollama / cloud brains set their own context — this is ignored for them. Higher = more headroom but more KV-cache VRAM.</div>
           </div>
           <select id="setting-server-ctx">
             <option value="8192">8K (too small)</option>
@@ -7157,14 +7175,20 @@ async function refreshSettings() {
           'dml':  'DmlExecutionProvider',
         };
         for (const opt of ttsDev.options) {
+          // Capture the base label ONCE so re-opening Settings rebuilds from it
+          // instead of appending "(not installed)" every time (the triple-spam
+          // bug). Always reset, then re-decorate from current install state.
+          if (!opt.dataset.base) opt.dataset.base = opt.text;
           const need = providerMap[opt.value];
           if (need && !installed.has(need)) {
             const wheel = opt.dataset.needs || '';
-            // Compact label so the option doesn't stretch the dropdown.
-            // Full install command lives in title (hover tooltip).
-            opt.text = `${opt.text} (not installed)`;
+            opt.text = `${opt.dataset.base} (not installed)`;
             opt.title = `Install: pip install ${wheel}`;
             opt.disabled = true;
+          } else {
+            opt.text = opt.dataset.base;
+            opt.title = '';
+            opt.disabled = false;
           }
         }
       } catch {}
@@ -7567,6 +7591,36 @@ async function refreshSettings() {
     refreshMcpStatus().catch(() => {});
     // Reminders panel in the Behavior pane.
     refreshReminders().catch(() => {});
+
+    // Import memory from ChatGPT/Claude — Behavior pane (parity with onboarding).
+    const setImpCopy = document.getElementById('set-import-copy');
+    const setImpPrompt = document.getElementById('set-import-prompt');
+    const setImpBtn = document.getElementById('set-import-btn');
+    const setImpText = document.getElementById('set-import-text');
+    const setImpStatus = document.getElementById('set-import-status');
+    if (setImpCopy && setImpPrompt) {
+      setImpCopy.onclick = async () => {
+        try { await navigator.clipboard.writeText((setImpPrompt.textContent || '').trim()); } catch {}
+        const prev = setImpCopy.textContent; setImpCopy.textContent = 'Copied ✓';
+        setTimeout(() => { setImpCopy.textContent = prev; }, 1500);
+      };
+    }
+    if (setImpBtn && setImpText) {
+      setImpBtn.onclick = async () => {
+        const body = (setImpText.value || '').trim();
+        if (!body) { if (setImpStatus) setImpStatus.textContent = 'paste the reply first.'; return; }
+        setImpBtn.disabled = true;
+        if (setImpStatus) { setImpStatus.style.color = 'var(--fg-faint)'; setImpStatus.textContent = 'importing…'; }
+        try {
+          const r = await api('/api/memory/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: body }) });
+          if (r && r.ok) {
+            if (setImpStatus) { setImpStatus.style.color = 'var(--ok, #5fd28a)'; setImpStatus.textContent = r.count > 0 ? `✓ saved ${r.count} memor${r.count === 1 ? 'y' : 'ies'}` : 'nothing new (already known)'; }
+            if (r.count > 0) setImpText.value = '';
+          } else if (setImpStatus) { setImpStatus.textContent = (r && r.error) || 'import failed'; }
+        } catch (e) { if (setImpStatus) setImpStatus.textContent = 'failed: ' + (e.message || e); }
+        finally { setImpBtn.disabled = false; }
+      };
+    }
 
     // Migrate-from-another-agent — Behavior pane. Disable buttons for
     // sources we don't see on disk. Dry-run + Import both go through
