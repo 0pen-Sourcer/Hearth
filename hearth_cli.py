@@ -1201,6 +1201,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
             print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
             print(f"  {C_TOOL}/phone{C_RESET}                 reach Hearth from your phone (Telegram + ntfy status)")
+            print(f"  {C_TOOL}/skill [install <src>]{C_RESET}  list / install / remove shareable skills (GitHub or local)")
             print(f"  {C_TOOL}/exit{C_RESET}                  quit (or just say bye)")
             print()
             print(f"  {C_DIM}@<path>{C_RESET}                attach a file inline in your prompt")
@@ -1259,6 +1260,65 @@ class JarvisCLI:
             else:
                 print(f"\n  {C_DIM}config:{C_RESET} {cfg_path}")
             print(f"  {C_DIM}full setup guide:{C_RESET} docs/PHONE.md")
+            return True
+        if low == "/skill" or low.startswith("/skill ") or low == "/skills" or low.startswith("/skills "):
+            from hearth import skills_loader as _sl
+            parts = cmd.split(None, 2)
+            sub = parts[1].lower() if len(parts) > 1 else "list"
+            arg = parts[2].strip() if len(parts) > 2 else ""
+            if sub in ("list", "ls", ""):
+                items = _sl.list_skills()
+                if not items:
+                    print(f"{C_DIM}no skills yet. Add one: {C_RESET}{C_TOOL}/skill install <github-url|owner/repo>{C_RESET}")
+                    return True
+                print(f"\n{C_BRAND}Skills{C_RESET} {C_DIM}({len(items)}){C_RESET}")
+                for s in items:
+                    tag = C_DIM + "bundled" + C_RESET if s.get("source") == "bundled" else C_OK + "installed" + C_RESET
+                    print(f"  {C_TOOL}{s['name']}{C_RESET}  {C_DIM}{(s.get('description') or '')[:70]}{C_RESET}  [{tag}]")
+                print(f"\n  {C_DIM}add:{C_RESET} /skill install <owner/repo>   {C_DIM}remove:{C_RESET} /skill remove <name>")
+                return True
+            if sub in ("install", "add", "get"):
+                if not arg:
+                    print(f"{C_DIM}usage: {C_RESET}{C_TOOL}/skill install <owner/repo | github-url | ./path>{C_RESET}")
+                    return True
+                from hearth import skills_install as _si
+                print(f"{C_DIM}fetching + inspecting {arg}…{C_RESET}")
+                m = _si.inspect_source(arg)
+                if not m.get("ok"):
+                    print(f"{C_ERR}{m.get('error')}{C_RESET}")
+                    return True
+                print(f"\n  {C_BRAND}{m['name']}{C_RESET} {C_DIM}v{m.get('version') or '?'}{C_RESET}"
+                      + (f"  {C_DIM}by {m['author']}{C_RESET}" if m.get('author') else ""))
+                print(f"  {m.get('description','')}")
+                if m.get("scripts"):
+                    print(f"  {C_TOOL}ships scripts:{C_RESET} {', '.join(m['scripts'])}")
+                if m.get("risky_tools"):
+                    print(f"  {C_ERR}uses risky tools:{C_RESET} {', '.join(m['risky_tools'])}")
+                if m.get("risky"):
+                    print(f"  {C_ERR}⚠ This skill can run shell commands / modify files. Only install ones you trust.{C_RESET}")
+                if m.get("already_installed"):
+                    print(f"  {C_DIM}(a skill named '{m['name']}' is already installed — this will overwrite it){C_RESET}")
+                ans = (await self._read_choice(f"  {C_TOOL}Install {m['name']}?{C_RESET} [y/N] ")).strip().lower()
+                if not ans.startswith("y"):
+                    print(f"{C_DIM}skipped.{C_RESET}")
+                    return True
+                res = _si.install_from_staged(m, force=True)
+                if res.get("ok"):
+                    print(f"{C_OK}installed{C_RESET} {C_DIM}→ {res['folder']}{C_RESET}")
+                    print(f"  {C_DIM}use it: just ask, or the model can load_skill('{m['name']}'){C_RESET}")
+                else:
+                    print(f"{C_ERR}{res.get('error')}{C_RESET}")
+                return True
+            if sub in ("remove", "rm", "uninstall", "delete"):
+                if not arg:
+                    print(f"{C_DIM}usage: {C_RESET}{C_TOOL}/skill remove <name>{C_RESET}")
+                    return True
+                from hearth import skills_install as _si
+                res = _si.uninstall_skill(arg)
+                print((f"{C_OK}removed {arg}{C_RESET}" if res.get("ok")
+                       else f"{C_ERR}{res.get('error')}{C_RESET}"))
+                return True
+            print(f"{C_DIM}usage: /skill [list | install <src> | remove <name>]{C_RESET}")
             return True
         if low == "/about":
             kind = "local" if _is_local_endpoint(LOCAL_API_BASE) else "cloud"

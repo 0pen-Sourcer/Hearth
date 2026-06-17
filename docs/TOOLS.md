@@ -1,8 +1,8 @@
 # Tools
 
-Hearth gives the model **91 tools** to operate your machine. Everything runs locally; the only outbound calls are web searches the model itself makes. Risky tools (shell, file writes, app launch, browser control) prompt for `[y/n/a/N]` permission in the CLI before they run.
+Hearth gives the model **92 tools** to operate your machine. Everything runs locally; the only outbound calls are web searches the model itself makes. Risky tools (shell, file writes, app launch, browser control) prompt for `[y/n/a/N]` permission in the CLI before they run.
 
-To keep the prompt small, **53** core tools load by default and **38** niche ones (marked †) stay behind a `load_tools` meta-tool the model calls on demand. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **54** core tools load by default and **38** niche ones (marked †) stay behind a `load_tools` meta-tool the model calls on demand. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`) — don't edit by hand._
 
@@ -100,6 +100,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 |---|---|
 | `create_plugin` † | Write a NEW local tool (plugin) for yourself when no existing tool fits a capability the user needs — then use it immediately and forever after |
 | `delete_plugin` † | Delete an installed plugin by name (removes its file + unregisters the tool) |
+| `install_skill` | Install a shareable skill from a GitHub repo or a local folder into ~/Jarvis/skills/ |
 | `list_plugins` † | List the self-authored/installed plugins in ~/Jarvis/plugins/ (name, status, description) |
 
 ## Image generation

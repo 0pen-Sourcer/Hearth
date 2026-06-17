@@ -5672,6 +5672,66 @@ TOOL_DEFINITIONS.append({
     },
 })
 
+def _install_skill(p: Dict) -> str:
+    from . import skills_install as _si
+    source = (p.get("source") or "").strip()
+    if not source:
+        return json.dumps({"ok": False, "error":
+            "source required: a GitHub repo (owner/repo[/subdir][@ref]) or a local folder path"})
+    if not p.get("confirm"):
+        # Phase 1: fetch + inspect, disclose what it can do, DO NOT install.
+        m = _si.inspect_source(source)
+        if not m.get("ok"):
+            return json.dumps(m, ensure_ascii=False)
+        keep = ("name", "description", "version", "author", "declared_tools",
+                "risky_tools", "scripts", "ships_code", "risky",
+                "already_installed", "shadows_bundled")
+        out = {k: m[k] for k in keep if k in m}
+        out["ok"] = True
+        out["action_required"] = (
+            "Show the user the skill's name + what it does, and tell them it "
+            + ("SHIPS SCRIPTS and can run shell commands / modify files (its "
+               "scripts execute via run_command, which still prompts you)."
+               if m.get("risky") else "uses only safe tools.")
+            + " Install ONLY after the user agrees, by calling install_skill "
+              "again with confirm=true.")
+        return json.dumps(out, ensure_ascii=False, indent=2)
+    # Phase 2: user confirmed -> install (re-fetches; placing files is harmless
+    # until the skill is actually run, and running its scripts is gated by
+    # run_command's own permission prompt).
+    res = _si.install_skill(source, consent=lambda _m: True, force=bool(p.get("force")))
+    return json.dumps(res, ensure_ascii=False, indent=2)
+
+
+_HANDLERS["install_skill"] = _install_skill
+
+TOOL_DEFINITIONS.append({
+    "name": "install_skill",
+    "description": (
+        "Install a shareable skill from a GitHub repo or a local folder into "
+        "~/Jarvis/skills/. Source forms: 'owner/repo', 'owner/repo@branch', "
+        "'owner/repo/subdir', a full github.com URL, or a local path. "
+        "TWO-PHASE for safety: call first WITHOUT confirm to fetch + inspect — "
+        "you get {name, description, scripts, risky_tools, risky}. Relay that to "
+        "the user (especially if `risky` — it ships scripts that run shell "
+        "commands), and only after they agree, call again with confirm=true to "
+        "install. Use when the user pastes a skill link or asks to add a skill. "
+        "After install, call load_skill(name) to use it."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string", "description":
+                "GitHub repo (owner/repo[/subdir][@ref]), a github.com URL, or a local folder path."},
+            "confirm": {"type": "boolean", "description":
+                "false/omitted = inspect only (disclose, no install). true = install (after the user agreed)."},
+            "force": {"type": "boolean", "description":
+                "Overwrite if a skill with the same name is already installed."},
+        },
+        "required": ["source"],
+    },
+})
+
 TOOL_DEFINITIONS.append({
     "name": "read_pdf_large",
     "description": (
@@ -5994,6 +6054,7 @@ _TOOL_CATEGORY = {
     # Self-extending
     "create_plugin": "Self-extending (plugins)", "list_plugins": "Self-extending (plugins)",
     "delete_plugin": "Self-extending (plugins)",
+    "install_skill": "Self-extending (plugins)",
     # Image generation
     "generate_image": "Image generation", "generate_video": "Image generation",
     "check_video_task": "Image generation", "list_generations": "Image generation",
