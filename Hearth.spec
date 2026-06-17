@@ -216,8 +216,11 @@ for _pkg in ("RealtimeSTT", "silero_vad"):
 # model-written skill scripts (so static analysis never sees them):
 #   - pymupdf (fitz): compiled mupdf binaries — pdf-tools split/merge/search.
 #   - pyfiglet: .flf font data files — make-ascii banners.
+#   - matplotlib: mpl-data (fonts + matplotlibrc) — make-pdf/make-pptx charts.
+#     A bare hiddenimport bundles the package but NOT mpl-data, so import
+#     fails at runtime ("Could not find the matplotlib data files").
 # Bare hiddenimports aren't enough; collect_all pulls the binaries + fonts.
-for _pkg in ("pymupdf", "pyfiglet"):
+for _pkg in ("pymupdf", "pyfiglet", "matplotlib"):
     try:
         from PyInstaller.utils.hooks import collect_all as _collect_all
         _d, _b, _h = _collect_all(_pkg)
@@ -313,6 +316,24 @@ exe_window = EXE(
     icon=ICON_PATH,
     onefile=False,
 )
+
+# LITE: torch here is the CPU build and llama_cpp is dropped, so the ~900 MB of
+# nvidia CUDA wheels that a hook (ctranslate2 / leftover site-packages) drags in
+# are dead weight — nothing in a LITE bundle loads them. Strip every nvidia/*
+# entry from each Analysis's binaries + datas. The FULL build keeps them: its
+# bundled CUDA llama.cpp server needs cudart/cublas/nvrtc at runtime.
+if LITE:
+    def _strip_nvidia(toc):
+        kept = []
+        for entry in toc:
+            parts = entry[0].lower().replace("\\", "/").split("/")
+            if "nvidia" in parts:
+                continue
+            kept.append(entry)
+        return kept
+    for _a in (a_tray, a_cli, a_window):
+        _a.binaries = _strip_nvidia(_a.binaries)
+        _a.datas = _strip_nvidia(_a.datas)
 
 # Collect all three into one folder so the user gets one drop-in dist/
 coll = COLLECT(
