@@ -2787,6 +2787,10 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/><polyline points="22 4 12 14.01 9 11.01"/><path d="M2 12h6"/><path d="M16 12h6"/></svg>
             <span>MCP servers</span>
           </button>
+          <button class="settings-side-btn" data-st="connect">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M12 18h.01"/></svg>
+            <span>Reach from phone</span>
+          </button>
           <button class="settings-side-btn" data-st="about">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
             <span>About</span>
@@ -3196,6 +3200,56 @@
           <button class="btn-mini" id="btn-mcp-snippet" style="min-width:140px;">Show config</button>
         </div>
         </div><!-- /pane mcp -->
+
+        <div class="settings-pane" data-st="connect" hidden>
+        <h3>Reach Hearth from your phone</h3>
+        <p class="settings-sub" style="color:var(--fg-faint);font-size:12px;margin:-4px 0 14px;">
+          Message Hearth from your phone and it runs the full agent on this PC, then
+          replies. Set the token + your id here, then run the one command shown.
+          Official channels (Telegram, Discord) have no ban risk — prefer them.
+        </p>
+
+        <!-- Telegram -->
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">Telegram <span style="color:var(--ok);font-size:11px;font-weight:400">· recommended</span></div>
+            <div class="hint">@BotFather → /newbot → copy the token. Then message the bot once and find your chat id (or just run it — it logs incoming ids).</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
+            <input type="password" id="bridge-tg-token" placeholder="bot token (123456:ABC…)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="text" id="bridge-tg-ids" placeholder="allowed chat ids (comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn-mini" id="bridge-tg-save">Save</button>
+              <span id="bridge-tg-status" style="font-size:11px;color:var(--fg-faint)"></span>
+            </div>
+            <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.telegram_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.telegram_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
+          </div>
+        </div>
+
+        <!-- Discord -->
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">Discord <span style="color:var(--ok);font-size:11px;font-weight:400">· recommended</span></div>
+            <div class="hint">discord.com/developers → New Application → Bot → copy token + enable MESSAGE CONTENT INTENT. Your user id: Discord → Advanced → Developer Mode → right-click your name → Copy User ID. Needs <code>pip install discord.py</code>.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
+            <input type="password" id="bridge-dc-token" placeholder="bot token" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="text" id="bridge-dc-ids" placeholder="allowed user ids (comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn-mini" id="bridge-dc-save">Save</button>
+              <span id="bridge-dc-status" style="font-size:11px;color:var(--fg-faint)"></span>
+            </div>
+            <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.discord_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.discord_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="label">
+            <div class="name">Also available</div>
+            <div class="hint"><b>ntfy</b> for reminder push (set <code>HEARTH_NTFY_TOPIC</code>), and an <b>experimental WhatsApp</b> bridge (unofficial, ban risk — spare number only). Full guide: docs/PHONE.md.</div>
+          </div>
+        </div>
+        </div><!-- /pane connect -->
 
         <div class="settings-pane" data-st="about" hidden>
         <h3>About</h3>
@@ -7680,6 +7734,36 @@ async function refreshSettings() {
         finally { setImpBtn.disabled = false; }
       };
     }
+
+    // Connect (phone bridges) pane — load saved config + wire save/copy.
+    try {
+      const br = await api('/api/bridges');
+      const b = (br && br.bridges) || {};
+      const tgTok = $('bridge-tg-token'), tgIds = $('bridge-tg-ids');
+      const dcTok = $('bridge-dc-token'), dcIds = $('bridge-dc-ids');
+      if (tgTok && b.telegram) { tgTok.value = b.telegram.config.bot_token || ''; tgIds.value = (b.telegram.config.allowed_chat_ids || []).join(', '); }
+      if (dcTok && b.discord) { dcTok.value = b.discord.config.bot_token || ''; dcIds.value = (b.discord.config.allowed_user_ids || []).join(', '); }
+    } catch {}
+    const _saveBridge = async (channel, tokenEl, idsEl, idsKey, statusEl) => {
+      const token = (tokenEl.value || '').trim();
+      if (!token) { if (statusEl) statusEl.textContent = 'token required'; return; }
+      const ids = (idsEl.value || '').split(',').map(x => parseInt(x.trim(), 10)).filter(n => !isNaN(n));
+      const config = { bot_token: token, [idsKey]: ids };
+      try {
+        const r = await api('/api/bridges/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, config }) });
+        if (statusEl) { statusEl.style.color = r && r.ok ? 'var(--ok,#5fd28a)' : 'var(--err)'; statusEl.textContent = r && r.ok ? '✓ saved — now run the command below' : ((r && r.error) || 'save failed'); }
+      } catch (e) { if (statusEl) statusEl.textContent = 'failed: ' + (e.message || e); }
+    };
+    const tgSave = $('bridge-tg-save');
+    if (tgSave) tgSave.onclick = () => _saveBridge('telegram', $('bridge-tg-token'), $('bridge-tg-ids'), 'allowed_chat_ids', $('bridge-tg-status'));
+    const dcSave = $('bridge-dc-save');
+    if (dcSave) dcSave.onclick = () => _saveBridge('discord', $('bridge-dc-token'), $('bridge-dc-ids'), 'allowed_user_ids', $('bridge-dc-status'));
+    $$('[data-copycmd]').forEach(btn => {
+      btn.onclick = async () => {
+        try { await navigator.clipboard.writeText(btn.dataset.copycmd); } catch {}
+        const p = btn.textContent; btn.textContent = 'copied ✓'; setTimeout(() => { btn.textContent = p; }, 1200);
+      };
+    });
 
     // Migrate-from-another-agent — Behavior pane. Disable buttons for
     // sources we don't see on disk. Dry-run + Import both go through
