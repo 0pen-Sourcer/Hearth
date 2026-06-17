@@ -1,14 +1,18 @@
 # Reach Hearth from your phone
 
-Two independent, opt-in features:
+Opt-in features:
 
 1. **Telegram bridge** — two-way chat with Hearth from anywhere. Text the bot, it
-   runs the full agent on your PC and texts back (files included).
+   runs the full agent on your PC and texts back (files included). *Recommended* —
+   official API, nothing to break.
 2. **ntfy push** — one-way reminder notifications to your phone, so a reminder
    reaches you even when the PC is asleep or you're away from it.
+3. **WhatsApp bridge** — two-way chat over WhatsApp. *Experimental* — works, but
+   it's an unofficial link to a real account (ban risk; use a spare number). See
+   the caveats in its section before using it.
 
-Neither uses OAuth, neither needs a public server or a port forwarded, and
-neither sends your data anywhere except the service you set up yourself.
+None use OAuth, none need a public server or a port forwarded, and none send your
+data anywhere except the service you set up yourself.
 
 ---
 
@@ -84,3 +88,50 @@ server instead of the public one, set `HEARTH_NTFY_SERVER` to its base URL.
 The reminder text is sent to the ntfy server you choose. The topic name is the
 only thing protecting it, so make it long and random — anyone who knows the topic
 can read messages posted to it. Self-host ntfy if you want full control.
+
+---
+
+## 3. WhatsApp bridge (two-way, experimental)
+
+Chat with Hearth over WhatsApp. It links a WhatsApp account as a companion device
+(the same "Linked Devices" mechanism as WhatsApp Web) using [`neonize`](https://pypi.org/project/neonize/)
+— pure Python, **no Node, no Chromium**. You scan a QR once; the session persists.
+
+> ⚠ **Read before using.** WhatsApp has no bot API for personal accounts, so this
+> drives a *real* account through an unofficial protocol. Meta can flag a number
+> for automation — for occasional personal use behind an allowlist the risk is
+> low but **not zero, so use a spare / secondary number, not your primary.** It
+> can also break when WhatsApp changes their protocol (then `pip install -U
+> neonize` and re-pair). **Telegram is the recommended channel** — official and
+> ban-free. Use WhatsApp only if you specifically need it.
+
+### Setup
+
+1. `pip install neonize` (pulls in `segno` for the QR). It's an optional,
+   experimental dependency — not installed by default. WhatsApp is currently a
+   **run-from-source** feature — start it from a clone, not the packaged .exe.
+2. Create `~/.hearth/whatsapp_bridge.json`:
+
+   ```json
+   {
+     "allowed_numbers": ["<your number, digits only, country code, no +>"],
+     "allow_self_chat": true,
+     "ntfy_topic": ""
+   }
+   ```
+
+   `allowed_numbers` is who may talk to it (you). `allow_self_chat` lets you
+   message the linked number's own chat.
+3. Point it at a brain (same `LOCAL_API_BASE` / `LOCAL_API_KEY` / `LOCAL_MODEL`
+   env the CLI uses), then run:
+
+   ```powershell
+   python -m hearth.whatsapp_bridge
+   ```
+
+4. Scan the QR it prints: WhatsApp → **Settings → Linked Devices → Link a Device**.
+   The session is saved under `~/.hearth/whatsapp/` and survives restarts.
+
+Like the Telegram bridge it's single-owner: the allowlist is the gate and tool
+calls auto-approve (you're the owner). Group messages are ignored. Check status
+anytime with `/phone`.
