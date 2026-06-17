@@ -1274,10 +1274,22 @@ class JarvisCLI:
                      else f"{C_DIM}not set up{C_RESET}"))
             print(f"  {C_BOT}ntfy push{C_RESET} (reminders): "
                   + (f"{C_OK}topic set{C_RESET}" if ntfy else f"{C_DIM}not set up{C_RESET}"))
+            wa_cfg = {}
+            try:
+                with open(os.path.join(os.path.expanduser("~"), ".hearth", "whatsapp_bridge.json"), encoding="utf-8") as _wf:
+                    wa_cfg = _json.load(_wf) or {}
+            except Exception:
+                wa_cfg = {}
+            wa_on = bool(wa_cfg.get("allowed_numbers") or wa_cfg.get("allow_self_chat"))
+            print(f"  {C_BOT}WhatsApp bridge{C_RESET} (two-way, {C_WARN}experimental{C_RESET}): "
+                  + (f"{C_OK}configured{C_RESET}" if wa_on else f"{C_DIM}not set up{C_RESET}")
+                  + f"  {C_DIM}— unofficial; use a spare number{C_RESET}")
             if tok:
-                print(f"\n  {C_DIM}start it:{C_RESET} python -m hearth.telegram_bridge")
+                print(f"\n  {C_DIM}start Telegram:{C_RESET} python -m hearth.telegram_bridge")
             else:
-                print(f"\n  {C_DIM}config:{C_RESET} {cfg_path}")
+                print(f"\n  {C_DIM}Telegram config:{C_RESET} {cfg_path}")
+            if wa_on:
+                print(f"  {C_DIM}start WhatsApp:{C_RESET} python -m hearth.whatsapp_bridge")
             print(f"  {C_DIM}full setup guide:{C_RESET} docs/PHONE.md")
             return True
         if low == "/skill" or low.startswith("/skill ") or low == "/skills" or low.startswith("/skills "):
