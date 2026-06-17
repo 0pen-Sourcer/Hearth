@@ -19,7 +19,7 @@ First public release. Windows-first; macOS/Linux support is partial.
 - Tool-call parser that recognizes Gemma, Hermes, Qwen 2.5/3, Llama 3.x, Mistral, Phi, Granite, and Cohere Command-R formats plus a generic `<function=NAME>` form.
 
 ### Tools and capabilities
-- File read/write/edit/list/move/delete. `read_file` extracts text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, and `.gz`/`.bz2`/`.xz`. Archive inspect/extract without unpacking. `summarize_file` for short summaries. `read_pdf_large` for map-reduce summarization of large PDFs.
+- File read/write/edit/list/move/delete. `read_file` extracts text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, and `.gz`/`.bz2`/`.xz`. Archive inspect/extract without unpacking. `read_pdf_large` for map-reduce summarization of large PDFs.
 - Shell command execution (PowerShell / cmd) with captured, sanitized output.
 - App, file, folder, and URL launching with one tool.
 - Real browser driving (Chrome / Brave / Edge): open a page, list clickable elements, click, type, scroll, with a persistent session across calls.

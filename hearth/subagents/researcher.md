@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Research subagent. Answers a focused question by searching the web, fetching multiple sources, and writing a substantive synthesis with citations — not a 5-bullet stub.
-allowed_tools: [web_search, web_fetch, browse, browse_close, read_file, summarize_file, memory_recall, write_file, run_command, list_skills, load_skill]
+allowed_tools: [web_search, web_fetch, browse, browse_close, read_file, memory_recall, write_file, run_command, list_skills, load_skill]
 cost_class: standard
 max_turns: 25
 ---
