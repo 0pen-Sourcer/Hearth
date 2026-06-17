@@ -1200,6 +1200,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/allowed{C_RESET}               list paths Jarvis can write to")
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
             print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
+            print(f"  {C_TOOL}/phone{C_RESET}                 reach Hearth from your phone (Telegram + ntfy status)")
             print(f"  {C_TOOL}/exit{C_RESET}                  quit (or just say bye)")
             print()
             print(f"  {C_DIM}@<path>{C_RESET}                attach a file inline in your prompt")
@@ -1230,6 +1231,34 @@ class JarvisCLI:
                     print(f"{C_DIM}skipped. run /update anytime.{C_RESET}")
             except Exception as e:
                 print(f"{C_ERR}update unavailable: {type(e).__name__}: {e}{C_RESET}")
+            return True
+        if low == "/phone":
+            # Discoverability for the two opt-in phone features. Full setup in
+            # docs/PHONE.md; here we just report config status + next steps.
+            import json as _json
+            cfg_path = os.path.join(os.path.expanduser("~"), ".hearth", "phone_bridge.json")
+            cfg = {}
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as _f:
+                    cfg = _json.load(_f) or {}
+            except Exception:
+                cfg = {}
+            tok = bool((cfg.get("bot_token") or "").strip())
+            ids = cfg.get("allowed_chat_ids") or []
+            ntfy = (cfg.get("ntfy_topic") or os.environ.get("HEARTH_NTFY_TOPIC")
+                    or os.environ.get("JARVIS_NTFY_TOPIC") or "").strip()
+            print(f"\n{C_BRAND}Reach Hearth from your phone{C_RESET}  {C_DIM}(both opt-in, no OAuth){C_RESET}")
+            print(f"  {C_BOT}Telegram bridge{C_RESET} (two-way): "
+                  + (f"{C_OK}configured{C_RESET} {C_DIM}({len(ids)} allowed chat id"
+                     f"{'s' if len(ids) != 1 else ''}){C_RESET}" if tok
+                     else f"{C_DIM}not set up{C_RESET}"))
+            print(f"  {C_BOT}ntfy push{C_RESET} (reminders): "
+                  + (f"{C_OK}topic set{C_RESET}" if ntfy else f"{C_DIM}not set up{C_RESET}"))
+            if tok:
+                print(f"\n  {C_DIM}start it:{C_RESET} python -m hearth.telegram_bridge")
+            else:
+                print(f"\n  {C_DIM}config:{C_RESET} {cfg_path}")
+            print(f"  {C_DIM}full setup guide:{C_RESET} docs/PHONE.md")
             return True
         if low == "/about":
             kind = "local" if _is_local_endpoint(LOCAL_API_BASE) else "cloud"
