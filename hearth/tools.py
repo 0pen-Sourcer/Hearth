@@ -4401,9 +4401,21 @@ def _screenshot(p: Dict) -> str:
         delay = max(0.0, min(10.0, float(p.get("delay_s") or 0)))
     except (TypeError, ValueError):
         delay = 0.0
-    if delay > 0:
-        import time as _t
-        _t.sleep(delay)
+    # Show an on-screen cue (purple dots + "capturing screen") so the user knows
+    # the shutter is coming — especially during a delay while they switch windows.
+    # It auto-removes before the grab, so it never appears in the shot. Best-effort.
+    import time as _t
+    cue = delay if delay > 0 else 0.5  # always give at least a brief flash
+    try:
+        from . import capture_overlay
+        capture_overlay.flash(cue)
+    except Exception:
+        pass
+    _t.sleep(cue)         # wait out the delay (or the brief cue when delay==0)
+    # The cue fades to fully transparent by the end of `cue`; this extra settle
+    # guarantees it's off-screen + destroyed before we grab, so it's never in
+    # the shot.
+    _t.sleep(0.35)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = os.path.join(SHOTS_DIR, f"shot_{ts}.png")
     # Primary path: PIL.ImageGrab (works on Windows + macOS; on Linux it has
