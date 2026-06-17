@@ -1014,6 +1014,20 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/conversations":
             return self._send_json(200, {"conversations": _list_convos()})
+        if path == "/api/conversations/search":
+            # Full-text search across all past chats (FTS5). Returns the matching
+            # conversation + a highlighted snippet so the sidebar can jump to it.
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("q", [""])[0].strip()
+            if not q:
+                return self._send_json(200, {"results": []})
+            try:
+                from . import session_search
+                matches = session_search.search(q, limit=12)
+                return self._send_json(200, {"results": [
+                    {"conversation_id": m.conversation_id, "title": m.title,
+                     "role": m.role, "snippet": m.snippet} for m in matches]})
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
         if path.startswith("/api/conversations/"):
             cid = urllib.parse.unquote(path[len("/api/conversations/"):])
             data = _load_convo(cid)

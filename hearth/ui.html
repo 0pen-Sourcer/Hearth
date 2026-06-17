@@ -2479,9 +2479,12 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
         New chat
       </button>
+      <input type="text" id="convo-search" placeholder="Search chats…"
+             style="width:100%;margin-top:8px;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:7px 10px;font-size:12px;outline:none;" />
     </div>
 
     <div class="convo-list" id="convo-list"></div>
+    <div class="convo-list" id="convo-search-results" hidden></div>
 
     <div class="side-section">
       <div class="nav">
@@ -2644,11 +2647,9 @@
         <span class="sub">one-shot &amp; recurring — set them in chat</span>
       </div>
       <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
-        Set via chat: <i>"remind me to leave in 30 min"</i> or
-        <i>"every Monday 9am, run web_search on new GPU benchmarks"</i>.
-        Action reminders run a tool when they fire (not just a toast).
-        Missed reminders catch up on next launch — and push to your phone if you
-        set an ntfy topic (see <b>Settings → About</b> / docs/PHONE.md).
+        Just ask in chat — <i>"remind me to leave in 30 min"</i>, or
+        <i>"every Monday 9am, search for new GPU benchmarks"</i> (those run a tool, not just a toast).
+        Missed ones catch up next launch.
       </div>
       <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 190px);padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--fg-dim);margin:0 4px;">
         loading reminders…
@@ -5026,6 +5027,49 @@ function showView(name) {
   if (name === 'settings') refreshSettings();
 }
 $$('.nav-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+
+// Chat search — full-text across all past chats (FTS5). Debounced; results
+// replace the convo list while typing, click jumps to that chat.
+(function wireConvoSearch() {
+  const box = $('convo-search');
+  const results = $('convo-search-results');
+  const list = $('convo-list');
+  if (!box || !results || !list) return;
+  let timer = null;
+  box.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = box.value.trim();
+    if (!q) { results.hidden = true; results.innerHTML = ''; list.hidden = false; return; }
+    timer = setTimeout(async () => {
+      try {
+        const r = await api('/api/conversations/search?q=' + encodeURIComponent(q));
+        const items = (r && r.results) || [];
+        list.hidden = true; results.hidden = false;
+        if (!items.length) {
+          results.innerHTML = `<div style="padding:14px 12px;color:var(--fg-faint);font-size:11px;text-align:center">No matches for "${esc(q)}"</div>`;
+          return;
+        }
+        results.innerHTML = '';
+        for (const m of items) {
+          const snip = esc(m.snippet || '').split('[[').join('<b style="color:var(--accent-2)">').split(']]').join('</b>');
+          const row = document.createElement('div');
+          row.className = 'convo';
+          row.innerHTML = `<div style="display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden;">
+            <span class="title-text" style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.title || 'Untitled')}</span>
+            <span style="font-size:11px;color:var(--fg-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${snip}</span></div>`;
+          row.addEventListener('click', () => {
+            box.value = ''; results.hidden = true; results.innerHTML = ''; list.hidden = false;
+            try { setActiveId(m.conversation_id); renderConvoList(); renderChat(); showView('chat'); } catch {}
+          });
+          results.appendChild(row);
+        }
+      } catch (e) {
+        list.hidden = true; results.hidden = false;
+        results.innerHTML = `<div style="padding:14px 12px;color:var(--fg-faint);font-size:11px">search failed: ${esc(e.message || e)}</div>`;
+      }
+    }, 250);
+  });
+})();
 
 // ============================================================
 // CHAT — send with full history
