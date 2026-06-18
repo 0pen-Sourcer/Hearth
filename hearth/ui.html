@@ -6984,7 +6984,7 @@ async function refreshServerCard() {
     const usingCloud = (s.llm_provider && s.llm_provider !== 'local');
     let stateText, stateClass;
     if (running) { stateText = 'running (built-in)'; stateClass = 'running'; }
-    else if (r.external_running) { stateText = 'LM Studio on port'; stateClass = 'running'; }
+    else if (r.external_running) { stateText = 'external server'; stateClass = 'running'; }
     else if (usingCloud) { stateText = `cloud brain · ${providerLabel}`; stateClass = 'running'; }
     else { stateText = 'stopped'; stateClass = 'stopped'; }
     $('server-st-state').textContent = stateText;
@@ -9064,7 +9064,7 @@ async function refreshModelsView() {
   // brain. Confused everyone.
   if (usingCloud) head.innerHTML = '<span class="server-pill is-on">Cloud brain &middot; ' + esc(cloudLabel) + (settingsSnapshot.llm_model ? ' &middot; ' + esc(settingsSnapshot.llm_model) : '') + '</span><span class="server-pill-note">Local models below are for switching brains.</span>';
   else if (isBuiltin) head.innerHTML = '<span class="server-pill is-on">Built-in server &middot; ' + esc(s.builtin_url || '') + (s.builtin_model ? ' &middot; ' + esc((s.builtin_model || '').split(/[\\/]/).pop()) : '') + '</span>';
-  else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; LM Studio / Ollama' + (s.external_model_id ? ' &middot; ' + esc(s.external_model_id) : '') + '</span>';
+  else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; ' + (s.external_model_id ? esc(s.external_model_id) : 'OpenAI-compatible API on this PC') + '</span>';
   else head.innerHTML = '<span class="server-pill is-off">No brain active &middot; pick a model below</span>';
 
   // Disk-count badge on the "My Models" tab
@@ -9098,7 +9098,7 @@ function _renderModelsHeader(s) {
   // brain. Confused everyone.
   if (usingCloud) head.innerHTML = '<span class="server-pill is-on">Cloud brain &middot; ' + esc(cloudLabel) + (settingsSnapshot.llm_model ? ' &middot; ' + esc(settingsSnapshot.llm_model) : '') + '</span><span class="server-pill-note">Local models below are for switching brains.</span>';
   else if (isBuiltin) head.innerHTML = '<span class="server-pill is-on">Built-in server &middot; ' + esc(s.builtin_url || '') + (s.builtin_model ? ' &middot; ' + esc((s.builtin_model || '').split(/[\\/]/).pop()) : '') + '</span>';
-  else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; LM Studio / Ollama' + (s.external_model_id ? ' &middot; ' + esc(s.external_model_id) : '') + '</span>';
+  else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; ' + (s.external_model_id ? esc(s.external_model_id) : 'OpenAI-compatible API on this PC') + '</span>';
   else head.innerHTML = '<span class="server-pill is-off">No brain active &middot; pick a model below</span>';
   $('tab-mine-n').textContent = (s.disk_models || []).length;
 }
