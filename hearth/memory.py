@@ -372,6 +372,78 @@ def forget(title: str) -> str:
     return f"forgot: {slug}"
 
 
+def _curate_base(title: str) -> str:
+    """A topic key for a title with volatile value-tokens stripped, so
+    'workout_schedule_7am' and 'workout_schedule_7pm' collapse to the same
+    base ('schedule workout') and read as one topic."""
+    words = _significant_words(title)
+    base = [w for w in words if not re.fullmatch(r"\d+|\d{1,2}(am|pm)|am|pm", w)]
+    return " ".join(sorted(set(base)))
+
+
+def curate(apply: bool = False) -> Dict[str, Any]:
+    """Find clusters of same-topic memories (titles that match once volatile
+    value-tokens like times/numbers are stripped) — the duplicate-fact problem.
+    Dry-run by default: returns the clusters. With apply=True, keep the newest
+    of each cluster and ARCHIVE the rest (moved to _archive/, recoverable — never
+    hard-deleted). Conservative on purpose: only same-base clusters merge, so
+    distinct facts that merely share a word are left alone."""
+    files = [f for f in os.listdir(MEM_DIR)
+             if f.endswith(".md") and f != "MEMORY.md"] if os.path.isdir(MEM_DIR) else []
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for fn in files:
+        path = os.path.join(MEM_DIR, fn)
+        try:
+            fm, _ = _read_body(path)
+        except Exception:
+            fm = {}
+        title = fm.get("title") or fn[:-3].replace("-", " ").replace("_", " ")
+        base = _curate_base(title)
+        if not base:
+            continue
+        try:
+            st = os.path.getmtime(path)
+        except OSError:
+            st = 0.0
+        groups.setdefault(base, []).append(
+            {"slug": fn[:-3], "fn": fn, "title": title,
+             "updated": fm.get("updated", ""), "mtime": st})
+    clusters = [g for g in groups.values() if len(g) > 1]
+    archived: List[str] = []
+    out_clusters = []
+    for g in clusters:
+        g.sort(key=lambda r: (r["updated"], r["mtime"]), reverse=True)  # newest first
+        keep, drop = g[0], g[1:]
+        out_clusters.append({"kept": keep["slug"], "dups": [r["slug"] for r in drop]})
+        for r in drop:
+            if apply:
+                src = os.path.join(MEM_DIR, r["fn"])
+                dst = os.path.join(_ARCHIVE_DIR, r["fn"])
+                try:
+                    os.makedirs(_ARCHIVE_DIR, exist_ok=True)
+                    if os.path.exists(dst):
+                        os.remove(dst)
+                    os.rename(src, dst)
+                    archived.append(r["slug"])
+                except OSError:
+                    continue
+            else:
+                archived.append(r["slug"])
+    if apply and archived:
+        lines = _read_index_lines()
+        aset = set(archived)
+        keep_lines = []
+        for ln in lines:
+            m = re.match(r"^- \[[^\]]+\]\(([^)]+)\.md\)", ln)
+            slug = m.group(1) if m else None
+            if slug and slug in aset:
+                continue
+            keep_lines.append(ln)
+        _write_index_lines(keep_lines)
+    return {"applied": apply, "clusters": out_clusters,
+            "archived" if apply else "would_archive": archived}
+
+
 def list_index() -> str:
     lines = _read_index_lines()
     if not lines:
