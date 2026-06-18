@@ -5800,14 +5800,77 @@ TOOL_DEFINITIONS.append({
     },
 })
 
+def _focus_window_macos(name: str) -> str:
+    """Raise a macOS app/window by name via AppleScript. Matches against
+    running application names (substring, case-insensitive)."""
+    list_script = 'tell application "System Events" to get name of (processes where background only is false)'
+    try:
+        r = subprocess.run(["osascript", "-e", list_script],
+                           capture_output=True, text=True, timeout=10)
+    except FileNotFoundError:
+        return "focus_window needs osascript (it ships with macOS — are you on macOS?)."
+    except Exception as e:
+        return f"Error listing windows: {e}"
+    apps = [a.strip() for a in (r.stdout or "").split(",") if a.strip()]
+    match = next((a for a in apps if name.lower() in a.lower()), None)
+    if not match:
+        sample = ", ".join(sorted(apps)[:12])
+        return f"No open app matching '{name}'. Open apps: {sample or '(none)'}"
+    try:
+        subprocess.run(["osascript", "-e", f'tell application "{match}" to activate'],
+                       capture_output=True, text=True, timeout=10)
+    except Exception as e:
+        return f"Error focusing '{match}': {e}"
+    return f"Brought '{match}' to the front."
+
+
+def _focus_window_linux(name: str) -> str:
+    """Raise an X11 window by title substring. Prefers wmctrl (-a does a
+    substring activate); falls back to xdotool. Tells the user what to install
+    if neither is present (common on minimal/Wayland setups)."""
+    wmctrl = shutil.which("wmctrl")
+    if wmctrl:
+        # List first so we can report matches / give a useful miss message.
+        try:
+            lst = subprocess.run([wmctrl, "-l"], capture_output=True, text=True, timeout=10)
+        except Exception as e:
+            return f"Error listing windows: {e}"
+        rows = [ln for ln in (lst.stdout or "").splitlines() if ln.strip()]
+        titles = [" ".join(ln.split(None, 3)[3:]) for ln in rows if len(ln.split(None, 3)) >= 4]
+        if not any(name.lower() in t.lower() for t in titles):
+            sample = ", ".join(sorted({t for t in titles if t})[:12])
+            return f"No open window matching '{name}'. Open windows: {sample or '(none)'}"
+        try:
+            subprocess.run([wmctrl, "-a", name], capture_output=True, text=True, timeout=10)
+        except Exception as e:
+            return f"Error focusing '{name}': {e}"
+        return f"Brought a window matching '{name}' to the front."
+    xdotool = shutil.which("xdotool")
+    if xdotool:
+        try:
+            r = subprocess.run([xdotool, "search", "--name", name, "windowactivate"],
+                               capture_output=True, text=True, timeout=10)
+        except Exception as e:
+            return f"Error focusing '{name}': {e}"
+        if r.returncode != 0:
+            return f"No open window matching '{name}' (via xdotool)."
+        return f"Brought a window matching '{name}' to the front."
+    return ("focus_window needs wmctrl or xdotool on Linux. Install with "
+            "'sudo apt install wmctrl' (Debian/Ubuntu/Mint) or your distro's "
+            "package manager. (Note: window raising is X11-only — it won't work "
+            "under a pure Wayland session.)")
+
+
 def _focus_window(p: Dict) -> str:
     """Bring an already-open window to the front by (partial) title match.
     Like open_app, but for windows that are ALREADY open — raise/focus them."""
     name = (p.get("name") or "").strip()
     if not name:
         return "Error: window name required (a substring of the window title)."
+    if sys.platform == "darwin":
+        return _focus_window_macos(name)
     if sys.platform != "win32":
-        return "focus_window is Windows-only right now."
+        return _focus_window_linux(name)
     try:
         import win32con
         import win32gui
