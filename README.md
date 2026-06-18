@@ -60,7 +60,7 @@ Hearth ships a tool-call parser that recognizes the formats emitted by Gemma, He
 
 ### macOS / Linux
 
-The codebase is mostly Python and a POSIX launcher (`hearth.sh`) is included. Some tools (app launching, screenshots, a few system queries) have partial POSIX branches but are not fully ported, and the installer and packaged build are Windows-only for now. Treat non-Windows as experimental. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Hearth runs from source on macOS and Linux — the CLI and web UI work, and most tools (shell, files, screenshots, app launching, window focus, clipboard, web search, reminders, notifications) have native POSIX paths. The one-click installer and packaged build are Windows-only for now; everywhere else you clone and run with Python. See **[docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md)** for the exact steps. Treat non-Windows as experimental — it runs, but hasn't had Windows' mileage. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
