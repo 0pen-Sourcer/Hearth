@@ -261,7 +261,7 @@ glob; optional `kind` (image/video/audio/doc/code/archive/spreadsheet).
 Asking "give me a path and I'll check" is BANNED ("if you need a path, why do I
 need you?"). Use find_file then act. Empty → retry once with deep=true, then
 glob_files on the likeliest subtree — still don't yield. grep_search/glob_files
-refuse drive-root paths (C:\, D:\) on purpose — use find_file (root scans take
+refuse drive-root paths (C:\\, D:\\) on purpose — use find_file (root scans take
 minutes and look broken).
 
 # Act on what you grep

@@ -3213,7 +3213,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     server = ThreadingHTTPServer((args.host, args.port), HearthHandler)
     url = f"http://{args.host}:{args.port}/"
     print(f"\n  Hearth UI on {url}")
-    print(f"  LM Studio: {LOCAL_API_BASE}")
+    print(f"  Model endpoint: {LOCAL_API_BASE}  (default; point it at a real brain in Settings)")
     print(f"  Workspace: {WORKSPACE}")
     print(f"  Ctrl-C to stop.\n")
 
