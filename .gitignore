@@ -146,3 +146,7 @@ awesome-hearth-skills/
 MicrosoftEdgeWebView2Setup.exe
 Hearth-Setup-*.exe
 Output/
+
+# Test build output (parallel to dist/ build/)
+dist_test/
+build_test/
