@@ -2,14 +2,15 @@
 
 Opt-in features:
 
-1. **Telegram bridge** — two-way chat with Hearth from anywhere. Text the bot, it
-   runs the full agent on your PC and texts back (files included). *Recommended* —
+1. **Telegram bridge** — two-way chat from anywhere. Text the bot, it runs the
+   full agent on your PC and texts back (files included). *Recommended* —
    official API, nothing to break.
-2. **ntfy push** — one-way reminder notifications to your phone, so a reminder
-   reaches you even when the PC is asleep or you're away from it.
-3. **WhatsApp bridge** — two-way chat over WhatsApp. *Experimental* — works, but
-   it's an unofficial link to a real account (ban risk; use a spare number). See
-   the caveats in its section before using it.
+2. **Discord bridge** — two-way chat via a Discord bot (DM it or @mention it).
+   Also official + ban-free; good if you live in Discord.
+3. **ntfy push** — one-way reminder notifications to your phone, so a reminder
+   reaches you even when the PC is asleep.
+4. **WhatsApp bridge** — two-way over WhatsApp. *Experimental* — an unofficial
+   link to a real account (ban risk; spare number only). See its section first.
 
 None use OAuth, none need a public server or a port forwarded, and none send your
 data anywhere except the service you set up yourself.
@@ -61,6 +62,38 @@ answered — everyone else is ignored.
 
 ---
 
+## 1b. Discord bridge (two-way, official)
+
+DM a Discord bot (or @mention it in a server) and it relays to Hearth, which
+replies with the answer + any file it produced. Official bot API — no ban risk,
+nothing that breaks on a protocol change.
+
+### Setup (~3 minutes)
+
+1. `pip install discord.py` (optional dep, off by default).
+2. At <https://discord.com/developers/applications> → New Application → **Bot**,
+   copy the token, and under **Privileged Gateway Intents** enable
+   **MESSAGE CONTENT INTENT** (needed to read message text).
+3. Invite the bot to a server you own, or just DM it.
+4. Get your numeric user id: Discord Settings → Advanced → Developer Mode on,
+   then right-click your name → Copy User ID.
+5. Create `~/.hearth/discord_bridge.json`:
+
+   ```json
+   {"bot_token": "...", "allowed_user_ids": [123456789], "ntfy_topic": ""}
+   ```
+
+6. Point it at a brain (same env as the CLI) and run:
+
+   ```powershell
+   python -m hearth.discord_bridge
+   ```
+
+Only `allowed_user_ids` are answered. In a server it responds when @mentioned; in
+a DM it always responds. Run status: `/phone`.
+
+---
+
 ## 2. ntfy push (reminders to your phone)
 
 [ntfy.sh](https://ntfy.sh) is a free, no-account push service. Pick a hard-to-guess
@@ -98,12 +131,14 @@ Chat with Hearth over WhatsApp. It links a WhatsApp account as a companion devic
 — pure Python, **no Node, no Chromium**. You scan a QR once; the session persists.
 
 > ⚠ **Read before using.** WhatsApp has no bot API for personal accounts, so this
-> drives a *real* account through an unofficial protocol. Meta can flag a number
-> for automation — for occasional personal use behind an allowlist the risk is
-> low but **not zero, so use a spare / secondary number, not your primary.** It
-> can also break when WhatsApp changes their protocol (then `pip install -U
-> neonize` and re-pair). **Telegram is the recommended channel** — official and
-> ban-free. Use WhatsApp only if you specifically need it.
+> drives a *real* account through an unofficial protocol. Meta's anti-automation
+> ML watches for "too-perfect bot" patterns (instant replies, zero typing delay,
+> 24/7 presence) and **can ban the number** — for occasional personal use behind
+> an allowlist the risk is low but **not zero, so use a spare / secondary number,
+> not your primary.** It can also break when WhatsApp changes their protocol
+> (then `pip install -U neonize` and re-pair). **Telegram is the recommended
+> channel** — official, ban-free, and you'll be able to test it in a minute. Use
+> WhatsApp only if you specifically need it and have a number you can risk.
 
 ### Setup
 
