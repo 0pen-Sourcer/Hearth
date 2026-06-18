@@ -48,6 +48,11 @@ pywebview
 pystray
 pywin32; sys_platform == "win32"
 
+# ---- Discord bridge (optional) ----
+# Two-way chat via a Discord bot (official API, no ban risk). Off by default;
+# `pip install discord.py` to enable, then `python -m hearth.discord_bridge`.
+# discord.py
+
 # ---- WhatsApp bridge (optional, experimental) ----
 # Pure-Python WhatsApp-Web link (no Node/Chromium), pulls in segno for the QR.
 # Unofficial protocol — use a spare number (see docs/PHONE.md). Off by default;
