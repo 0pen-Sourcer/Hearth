@@ -1868,10 +1868,32 @@ class HearthHandler(BaseHTTPRequestHandler):
             # said "Built-in server" even after the user switched to Grok.
             try:
                 _saved = _load_settings()
+                # Per-provider key vault so switching brains never destroys a
+                # key. Before this, moving to a keyless local model overwrote
+                # llm_key with "" and the user's Grok/OpenAI key was gone — they
+                # had to re-paste it every time they came back. Now each
+                # provider's key is remembered under provider_keys[<provider>].
+                _vault = dict(_saved.get("provider_keys") or {})
+                _old_provider = (_saved.get("llm_provider") or "").strip().lower()
+                _old_key = (_saved.get("llm_key") or "").strip()
+                if _old_provider and _old_key:
+                    _vault[_old_provider] = _old_key  # bank the outgoing key
+                _new_provider = (provider or _saved.get("llm_provider", "")).strip().lower()
+                # Use the supplied key, else recover this provider's banked key.
+                _eff_key = key or _vault.get(_new_provider, "")
+                if _new_provider and _eff_key:
+                    _vault[_new_provider] = _eff_key
+                _saved["provider_keys"] = _vault
                 _saved["llm_provider"] = provider or _saved.get("llm_provider", "")
                 _saved["llm_url"] = url
-                _saved["llm_key"] = key
+                _saved["llm_key"] = _eff_key
                 _saved["llm_model"] = model
+                # If we recovered a banked key (none was supplied this switch),
+                # push it to the live runtime so the very next chat authenticates
+                # instead of using the "not-needed" placeholder set above.
+                if _eff_key and not key:
+                    _hl.LOCAL_API_KEY = _eff_key
+                    os.environ["LOCAL_API_KEY"] = _eff_key
                 # If user moved to a non-local provider, stop preferring the
                 # built-in autoboot — saves them the 8-15s "why is it loading
                 # a model I'm not even using" surprise on next launch.

@@ -7915,7 +7915,7 @@ async function refreshSettings() {
     const ctxSel = $('setting-server-ctx');
     const idleSel = $('setting-server-idle');
     const portInput = $('setting-server-port');
-    if (ctxSel)  { ctxSel.value  = String(s.server_default_ctx || 8192);
+    if (ctxSel)  { ctxSel.value  = String(s.server_default_ctx || 24576);
       ctxSel.onchange  = (e) => saveSetting('server_default_ctx', parseInt(e.target.value, 10)); }
     if (idleSel) { idleSel.value = String(s.server_idle_min ?? 15);
       idleSel.onchange = (e) => saveSetting('server_idle_min', parseInt(e.target.value, 10)); }
