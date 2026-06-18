@@ -4916,7 +4916,13 @@ $('model-select').addEventListener('change', async (e) => {
 
 $('btn-eject').addEventListener('click', async () => {
   if (!STATE.loadedModel) return;
-  showModal(`Unload ${STATE.loadedModel.id}?`, 'Frees VRAM. You can pick another model from the dropdown afterward.', [
+  // Cloud brains use NO local VRAM, so "Frees VRAM" is a lie for them.
+  const _ejIsCloud = providerFromEndpoint(STATE.endpoint || (STATE.settings && STATE.settings.llm_url) || '').key !== 'local';
+  const _ejTitle = _ejIsCloud ? `Disconnect ${STATE.loadedModel.id}?` : `Unload ${STATE.loadedModel.id}?`;
+  const _ejBody = _ejIsCloud
+    ? 'Disconnects this cloud brain (it uses no local VRAM). You can pick another model from the dropdown afterward.'
+    : 'Frees VRAM. You can pick another model from the dropdown afterward.';
+  showModal(_ejTitle, _ejBody, [
     { label: 'Cancel' },
     { label: 'Unload', kind: 'primary', onclick: async () => {
       // Clear local state SYNCHRONOUSLY so the topbar pill stops lying

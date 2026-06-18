@@ -15,6 +15,21 @@
 #define MyAppPublisher "0pen-sourcer"
 #define MyAppExeName "Hearth.exe"
 
+; --- Edition parameters (override on the iscc command line) ---
+; FULL (default):  iscc /DSrcDir=dist_test\Hearth Hearth.iss
+; LITE:            iscc /DSrcDir=dist_lite\Hearth /DEditionSuffix=-Lite /DEditionLabel=" Lite" Hearth.iss
+; LITE drops the bundled CUDA llama.cpp server (~1.8 GB smaller); LITE users
+; bring their own model server (LM Studio / Ollama) or a cloud key.
+#ifndef SrcDir
+  #define SrcDir "dist\Hearth"
+#endif
+#ifndef EditionSuffix
+  #define EditionSuffix ""
+#endif
+#ifndef EditionLabel
+  #define EditionLabel ""
+#endif
+
 [Setup]
 AppId={{B7E2B6A4-1C9F-4F3D-9A6E-7E5C2F0A1D34}
 AppName={#MyAppName}
@@ -25,7 +40,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=Output
-OutputBaseFilename=Hearth-Setup-v{#MyAppVersion}
+OutputBaseFilename=Hearth-Setup{#EditionSuffix}-v{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -39,8 +54,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-; The whole built bundle. Run build.bat first so dist\Hearth\ exists.
-Source: "dist\Hearth\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; The whole built bundle (SrcDir is overridable: dist\Hearth, dist_test\Hearth, dist_lite\Hearth).
+Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; OPTIONAL: drop Microsoft's tiny (~2 MB) "MicrosoftEdgeWebView2Setup.exe"
 ; (Evergreen Bootstrapper) next to this .iss to bundle the WebView2 installer.
 ; If it's not here, the [Run] step below is simply skipped.
