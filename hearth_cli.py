@@ -1281,6 +1281,15 @@ class JarvisCLI:
             except Exception:
                 wa_cfg = {}
             wa_on = bool(wa_cfg.get("allowed_numbers") or wa_cfg.get("allow_self_chat"))
+            dc_cfg = {}
+            try:
+                with open(os.path.join(os.path.expanduser("~"), ".hearth", "discord_bridge.json"), encoding="utf-8") as _df:
+                    dc_cfg = _json.load(_df) or {}
+            except Exception:
+                dc_cfg = {}
+            dc_on = bool((dc_cfg.get("bot_token") or "").strip())
+            print(f"  {C_BOT}Discord bridge{C_RESET} (two-way, official): "
+                  + (f"{C_OK}configured{C_RESET}" if dc_on else f"{C_DIM}not set up{C_RESET}"))
             print(f"  {C_BOT}WhatsApp bridge{C_RESET} (two-way, {C_WARN}experimental{C_RESET}): "
                   + (f"{C_OK}configured{C_RESET}" if wa_on else f"{C_DIM}not set up{C_RESET}")
                   + f"  {C_DIM}— unofficial; use a spare number{C_RESET}")
@@ -1288,6 +1297,8 @@ class JarvisCLI:
                 print(f"\n  {C_DIM}start Telegram:{C_RESET} python -m hearth.telegram_bridge")
             else:
                 print(f"\n  {C_DIM}Telegram config:{C_RESET} {cfg_path}")
+            if dc_on:
+                print(f"  {C_DIM}start Discord:{C_RESET}  python -m hearth.discord_bridge")
             if wa_on:
                 print(f"  {C_DIM}start WhatsApp:{C_RESET} python -m hearth.whatsapp_bridge")
             print(f"  {C_DIM}full setup guide:{C_RESET} docs/PHONE.md")
