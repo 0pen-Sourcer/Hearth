@@ -124,6 +124,22 @@ _CANCEL = threading.Event()
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 os.makedirs(CONVOS_DIR, exist_ok=True)
 
+# Phone-bridge subprocesses started from the GUI Connect pane (so the user
+# clicks "Start" instead of running `python -m hearth.X_bridge`). Tracked by
+# channel; each is the standalone bridge module run in its own process so it can
+# block on its gateway/poll loop without touching the web server.
+_BRIDGE_PROCS: dict = {}
+_BRIDGE_MODULES = {
+    "telegram": "hearth.telegram_bridge",
+    "discord": "hearth.discord_bridge",
+    "whatsapp": "hearth.whatsapp_bridge",
+}
+
+
+def _bridge_running(ch: str) -> bool:
+    p = _BRIDGE_PROCS.get(ch)
+    return bool(p and p.poll() is None)
+
 
 def _convo_path(cid: str) -> str:
     # Sanitize id to a safe filename. UI sends `c_<rand>` style ids.
@@ -1086,7 +1102,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                     configured = bool(cfg.get("allowed_numbers") or cfg.get("allow_self_chat"))
                 else:
                     configured = bool((cfg.get("bot_token") or "").strip())
-                out[ch] = {"configured": configured, "config": cfg}
+                out[ch] = {"configured": configured, "config": cfg, "running": _bridge_running(ch)}
             return self._send_json(200, {"bridges": out})
         if path == "/api/migrate/probe":
             # Report which sources have data on disk so the UI can grey out
@@ -1473,6 +1489,45 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, _si.uninstall_skill((body.get("name") or "").strip()))
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/bridges/start":
+            # Launch a configured bridge as its own process so the bot comes
+            # ONLINE without the user running a terminal command.
+            body = self._read_json()
+            ch = (body.get("channel") or "").strip().lower()
+            mod = _BRIDGE_MODULES.get(ch)
+            if not mod:
+                return self._send_json(400, {"ok": False, "error": "unknown channel"})
+            if _bridge_running(ch):
+                return self._send_json(200, {"ok": True, "running": True, "note": "already running"})
+            try:
+                args = [sys.executable, "-m", mod]
+                if getattr(sys, "frozen", False):
+                    # In the packaged app sys.executable is Hearth.exe; the
+                    # sentinel runs the bundled interpreter.
+                    args = [sys.executable, "--hearth-run-python", "-m", mod]
+                p = subprocess.Popen(args, creationflags=_NO_WINDOW,
+                                     cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                _BRIDGE_PROCS[ch] = p
+                import time as _t
+                _t.sleep(1.6)  # let it fail-fast on a bad token/missing dep
+                running = p.poll() is None
+                return self._send_json(200, {
+                    "ok": running, "running": running,
+                    "error": None if running else
+                    "the bridge exited right away — check the token/config (and that the dep is installed for Discord/WhatsApp)"})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/bridges/stop":
+            body = self._read_json()
+            ch = (body.get("channel") or "").strip().lower()
+            p = _BRIDGE_PROCS.get(ch)
+            try:
+                if p and p.poll() is None:
+                    p.terminate()
+            except Exception:
+                pass
+            _BRIDGE_PROCS.pop(ch, None)
+            return self._send_json(200, {"ok": True, "running": False})
         if path == "/api/bridges/config":
             # Save a phone-bridge config (~/.hearth/<file>.json) from the GUI so
             # users don't hand-edit JSON. Channel -> file map below.
