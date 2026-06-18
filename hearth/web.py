@@ -43,7 +43,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import system_prompt, TOOL_DEFINITIONS, memory, execute_tool
 from .headless import run_once
@@ -139,6 +139,68 @@ _BRIDGE_MODULES = {
 def _bridge_running(ch: str) -> bool:
     p = _BRIDGE_PROCS.get(ch)
     return bool(p and p.poll() is None)
+
+
+def _bridge_config(ch: str) -> dict:
+    """Read a bridge's saved config from ~/.hearth, {} if none."""
+    fn = {"telegram": "phone_bridge.json", "discord": "discord_bridge.json",
+          "whatsapp": "whatsapp_bridge.json"}.get(ch)
+    if not fn:
+        return {}
+    try:
+        with open(os.path.join(os.path.expanduser("~"), ".hearth", fn), encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _bridge_configured(ch: str, cfg: Optional[dict] = None) -> bool:
+    cfg = cfg if cfg is not None else _bridge_config(ch)
+    if ch == "whatsapp":
+        return bool(cfg.get("allowed_numbers") or cfg.get("allow_self_chat"))
+    return bool((cfg.get("bot_token") or "").strip())
+
+
+def _spawn_bridge(ch: str) -> Tuple[bool, Optional[str]]:
+    """Launch a bridge as its own process. Returns (running, error)."""
+    mod = _BRIDGE_MODULES.get(ch)
+    if not mod:
+        return False, "unknown channel"
+    if _bridge_running(ch):
+        return True, None
+    args = [sys.executable, "-m", mod]
+    if getattr(sys, "frozen", False):
+        # In the packaged app sys.executable is Hearth.exe; the sentinel
+        # runs the bundled interpreter against the module.
+        args = [sys.executable, "--hearth-run-python", "-m", mod]
+    p = subprocess.Popen(args, creationflags=_NO_WINDOW,
+                         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    _BRIDGE_PROCS[ch] = p
+    import time as _t
+    _t.sleep(1.6)  # let it fail-fast on a bad token / missing dep
+    running = p.poll() is None
+    return running, (None if running else
+                     "the bridge exited right away — check the token/config "
+                     "(and that the dep is installed for Discord/WhatsApp)")
+
+
+def _autostart_bridges() -> None:
+    """On launch, bring any configured bridge ONLINE so the user never has to
+    flip a Start toggle each session. A bridge is auto-started when it has a
+    saved config AND `autostart` isn't explicitly turned off. Best-effort and
+    silent — a bad token just leaves that one channel offline."""
+    for ch in _BRIDGE_MODULES:
+        try:
+            cfg = _bridge_config(ch)
+            if not _bridge_configured(ch, cfg):
+                continue
+            if cfg.get("autostart") is False:
+                continue
+            running, err = _spawn_bridge(ch)
+            if not running and err:
+                print(f"[hearth] {ch} bridge auto-start skipped: {err}", file=sys.stderr)
+        except Exception as e:
+            print(f"[hearth] {ch} bridge auto-start error: {type(e).__name__}: {e}", file=sys.stderr)
 
 
 def _convo_path(cid: str) -> str:
@@ -1494,27 +1556,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             # ONLINE without the user running a terminal command.
             body = self._read_json()
             ch = (body.get("channel") or "").strip().lower()
-            mod = _BRIDGE_MODULES.get(ch)
-            if not mod:
+            if ch not in _BRIDGE_MODULES:
                 return self._send_json(400, {"ok": False, "error": "unknown channel"})
             if _bridge_running(ch):
                 return self._send_json(200, {"ok": True, "running": True, "note": "already running"})
             try:
-                args = [sys.executable, "-m", mod]
-                if getattr(sys, "frozen", False):
-                    # In the packaged app sys.executable is Hearth.exe; the
-                    # sentinel runs the bundled interpreter.
-                    args = [sys.executable, "--hearth-run-python", "-m", mod]
-                p = subprocess.Popen(args, creationflags=_NO_WINDOW,
-                                     cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                _BRIDGE_PROCS[ch] = p
-                import time as _t
-                _t.sleep(1.6)  # let it fail-fast on a bad token/missing dep
-                running = p.poll() is None
-                return self._send_json(200, {
-                    "ok": running, "running": running,
-                    "error": None if running else
-                    "the bridge exited right away — check the token/config (and that the dep is installed for Discord/WhatsApp)"})
+                running, err = _spawn_bridge(ch)
+                return self._send_json(200, {"ok": running, "running": running, "error": err})
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/bridges/stop":
@@ -3103,6 +3151,10 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     _start_reminder_watcher()
     _maybe_learn_environment_async()
     _auto_boot_preferred_model_async()
+    # Bring configured phone bridges (Discord/Telegram/WhatsApp) online so the
+    # user doesn't have to flip a Start toggle every session. Backgrounded
+    # because each spawn waits ~1.6s to fail-fast on a bad token.
+    threading.Thread(target=_autostart_bridges, daemon=True).start()
     # MCP client: spawn the servers configured in ~/Jarvis/mcp.json and
     # register their tools. Each server runs in its own subprocess; their
     # tools surface as 'mcp_<server>_<tool>' in to_openai_tools(). Safe
