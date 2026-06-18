@@ -6175,6 +6175,48 @@ _HANDLERS["load_tools"] = _h_load_tools
 
 
 # ============================================================
+# WORKSPACE-PATH NORMALIZATION
+# ============================================================
+# Tool descriptions are authored with the default "~/Jarvis/..." workspace.
+# But the user can rename the agent (folder becomes ~/<NewName>/) or relocate
+# the workspace entirely (D:\Hearth, etc.). If we shipped the literal "~/Jarvis"
+# to the model after a rename, we'd be handing it a path that doesn't exist —
+# exactly the kind of stale spec that makes a model hallucinate about its own
+# environment. Rewrite every description (and nested param description) to the
+# REAL workspace path once, at import, so the model always knows where it lives.
+
+def _workspace_display() -> str:
+    """The workspace as the model should see it: ~/<name> when under the home
+    dir, else the absolute path. Forward slashes (tilde-style, expanduser-safe)."""
+    home = os.path.expanduser("~")
+    ws = WORKSPACE
+    try:
+        if os.path.commonpath([os.path.normcase(ws), os.path.normcase(home)]) == os.path.normcase(home):
+            return "~/" + os.path.relpath(ws, home).replace(os.sep, "/")
+    except Exception:
+        pass
+    return ws.replace(os.sep, "/")
+
+
+def _normalize_tool_workspace_paths() -> None:
+    disp = _workspace_display()
+    if disp == "~/Jarvis":
+        return  # default workspace — descriptions already correct, no-op
+    def _fix(s):
+        return s.replace("~/Jarvis", disp) if isinstance(s, str) else s
+    for td in TOOL_DEFINITIONS:
+        if isinstance(td.get("description"), str):
+            td["description"] = _fix(td["description"])
+        props = (td.get("parameters") or {}).get("properties") or {}
+        for p in props.values():
+            if isinstance(p, dict) and isinstance(p.get("description"), str):
+                p["description"] = _fix(p["description"])
+
+
+_normalize_tool_workspace_paths()
+
+
+# ============================================================
 # PROVIDER FORMAT CONVERTERS
 # ============================================================
 
