@@ -555,4 +555,21 @@ Your toolbelt: {tool_names}.
     if _overlay_key in _OVERLAYS:
         parts.append(_OVERLAYS[_overlay_key])
 
-    return "\n".join(parts)
+    prompt = "\n".join(parts)
+    # Normalize any hardcoded "~/Jarvis" path references to the REAL workspace.
+    # The {workspace} interpolations above already use the live path; this
+    # catches descriptive lines like "~/Jarvis/soul.md" so a renamed (~/Cortana)
+    # or relocated (D:\Hearth) workspace never leaves the model with a path that
+    # doesn't exist on disk.
+    import os as _os
+    _home = _os.path.expanduser("~")
+    try:
+        if _os.path.normcase(workspace).startswith(_os.path.normcase(_home)):
+            _ws_disp = "~/" + _os.path.relpath(workspace, _home).replace(_os.sep, "/")
+        else:
+            _ws_disp = workspace.replace(_os.sep, "/")
+    except Exception:
+        _ws_disp = "~/Jarvis"
+    if _ws_disp != "~/Jarvis":
+        prompt = prompt.replace("~/Jarvis", _ws_disp)
+    return prompt
