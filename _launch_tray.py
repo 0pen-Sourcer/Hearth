@@ -72,13 +72,34 @@ if "--hearth-run-python" in sys.argv:
     _i = sys.argv.index("--hearth-run-python")
     _rest = sys.argv[_i + 1:]
     import runpy
-    if _rest and _rest[0] == "-c":
-        _code = _rest[1] if len(_rest) > 1 else ""
-        sys.argv = ["-c"] + _rest[2:]
-        exec(compile(_code, "<string>", "exec"), {"__name__": "__main__"})
-    elif _rest:
-        sys.argv = list(_rest)
-        runpy.run_path(_rest[0], run_name="__main__")
+    try:
+        if _rest and _rest[0] == "-c":
+            _code = _rest[1] if len(_rest) > 1 else ""
+            sys.argv = ["-c"] + _rest[2:]
+            exec(compile(_code, "<string>", "exec"), {"__name__": "__main__"})
+        elif _rest and _rest[0] == "-m":
+            # `-m <module>` — used by the phone-bridge spawns
+            # (hearth.discord_bridge / telegram_bridge / whatsapp_bridge).
+            # MUST use run_module, not run_path, or runpy tries to open a file
+            # literally named "-m" and dies with "can't find __main__ module".
+            _mod = _rest[1] if len(_rest) > 1 else ""
+            sys.argv = [_mod] + _rest[2:]
+            runpy.run_module(_mod, run_name="__main__", alter_sys=True)
+        elif _rest:
+            sys.argv = list(_rest)
+            runpy.run_path(_rest[0], run_name="__main__")
+    except SystemExit:
+        raise
+    except BaseException as _e:
+        # Never pop a Windows "unhandled exception" dialog — that dialog also
+        # keeps the process alive, which makes the parent's poll() think the
+        # bridge is "online" when it actually crashed. Log + exit non-zero so
+        # the GUI reports the failure honestly.
+        try:
+            (sys.stderr or sys.__stdout__).write(f"[hearth] --hearth-run-python failed: {type(_e).__name__}: {_e}\n")
+        except Exception:
+            pass
+        raise SystemExit(1)
     raise SystemExit(0)
 
 # Redirect stdout/stderr to a log file when frozen + windowed.

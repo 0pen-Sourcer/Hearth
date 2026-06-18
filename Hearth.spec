@@ -231,6 +231,22 @@ for _pkg in ("RealtimeSTT", "silero_vad"):
     except Exception:
         pass
 
+# Phone bridges (optional). Each is imported lazily inside its bridge module,
+# so static analysis never sees them. The GUI spawns them via the
+# `--hearth-run-python -m hearth.<x>_bridge` sentinel — without collecting the
+# package the frozen bridge dies on import. Discord = discord.py; WhatsApp =
+# neonize (+ segno for the QR). Telegram is pure-stdlib (urllib), nothing to add.
+# Missing packages are skipped (the try/except), so a venv without one is fine.
+for _pkg in ("discord", "neonize", "segno"):
+    try:
+        from PyInstaller.utils.hooks import collect_all as _collect_all
+        _d, _b, _h = _collect_all(_pkg)
+        DATAS += _d
+        PW_BINARIES += _b
+        HIDDEN += _h
+    except Exception:
+        pass
+
 # Skill deps that ship binaries / data files and are imported ONLY by
 # model-written skill scripts (so static analysis never sees them):
 #   - pymupdf (fitz): compiled mupdf binaries — pdf-tools split/merge/search.
