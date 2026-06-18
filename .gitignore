@@ -138,3 +138,11 @@ Timelines of History*.pdf
 jarvis-file-gen-reference.pdf
 # YouTube transcripts / competitor research notes — local context only
 Network_chuck*.md
+
+# community index repo — separate GitHub project, prepared locally for pushing
+awesome-hearth-skills/
+
+# Installer build artifacts (not ours to commit / huge)
+MicrosoftEdgeWebView2Setup.exe
+Hearth-Setup-*.exe
+Output/
