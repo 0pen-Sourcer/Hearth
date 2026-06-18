@@ -3004,21 +3004,19 @@
           </div>
         </div>
 
-        <div class="field" style="align-items:flex-start;">
-          <div class="label">
+        <div class="field" style="flex-direction:column;align-items:stretch;">
+          <div class="label" style="margin-bottom:8px;">
             <div class="name">Import memory from ChatGPT / Claude</div>
             <div class="hint">Paste what another AI knows about you — Hearth saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
-            <div style="display:flex;align-items:flex-start;gap:6px;">
-              <div id="set-import-prompt" style="flex:1;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points — name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
-              <button type="button" class="btn-mini" id="set-import-copy">Copy</button>
-            </div>
-            <textarea id="set-import-text" rows="4" placeholder="Paste the AI's reply here…" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12px;resize:vertical;outline:none;"></textarea>
-            <div style="display:flex;align-items:center;gap:8px;">
-              <button type="button" class="btn-mini" id="set-import-btn">Import facts</button>
-              <span id="set-import-status" style="font-size:11px;color:var(--fg-faint)"></span>
-            </div>
+          <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;">
+            <div id="set-import-prompt" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points — name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
+            <button type="button" class="btn-mini" id="set-import-copy">Copy</button>
+          </div>
+          <textarea id="set-import-text" rows="4" placeholder="Paste the AI's reply here…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12px;resize:vertical;outline:none;"></textarea>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <button type="button" class="btn-mini" id="set-import-btn">Import facts</button>
+            <span id="set-import-status" style="font-size:11px;color:var(--fg-faint)"></span>
           </div>
         </div>
 
@@ -9051,7 +9049,10 @@ async function refreshModelsView() {
   const isBuiltin = s.builtin_running;
   const isExt = s.external_running;
   let settingsSnapshot = STATE.settings || {};
-  const provider = settingsSnapshot.llm_provider || 'local';
+  const _liveP = providerFromEndpoint(STATE.endpoint || settingsSnapshot.llm_url || '');
+  const provider = (settingsSnapshot.llm_provider && settingsSnapshot.llm_provider !== 'local')
+                   ? settingsSnapshot.llm_provider
+                   : (_liveP.key !== 'local' ? _liveP.key : 'local');
   const usingCloud = provider !== 'local';
   const cloudLabel = {
     gemini: 'Gemini', openai: 'OpenAI', grok: 'Grok',
@@ -9082,7 +9083,10 @@ function _renderModelsHeader(s) {
   const isBuiltin = s.builtin_running;
   const isExt = s.external_running;
   const settingsSnapshot = STATE.settings || {};
-  const provider = settingsSnapshot.llm_provider || 'local';
+  const _liveP = providerFromEndpoint(STATE.endpoint || settingsSnapshot.llm_url || '');
+  const provider = (settingsSnapshot.llm_provider && settingsSnapshot.llm_provider !== 'local')
+                   ? settingsSnapshot.llm_provider
+                   : (_liveP.key !== 'local' ? _liveP.key : 'local');
   const usingCloud = provider !== 'local';
   const cloudLabel = {
     gemini: 'Gemini', openai: 'OpenAI', grok: 'Grok',
