@@ -1196,6 +1196,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/tokens{C_RESET}                context usage estimate")
             print(f"  {C_TOOL}/compact{C_RESET}               summarize old turns now")
             print(f"  {C_TOOL}/mem{C_RESET}                   show memory index")
+            print(f"  {C_TOOL}/curate [apply]{C_RESET}        find + merge duplicate-topic memories (archive older)")
             print(f"  {C_TOOL}/rules{C_RESET}                 show rules.md path")
             print(f"  {C_TOOL}/name [NewName]{C_RESET}        show / set agent name (JARVIS, Cortana, Friday…)")
             print(f"  {C_TOOL}/migrate <hermes|openclaw>{C_RESET}  import memory/skills/config from another agent")
@@ -2014,6 +2015,27 @@ class JarvisCLI:
             n_after = len(self.messages)
             print(f"{C_OK}Compacted: {n_before} → {n_after} messages.{C_RESET}")
             self.save_history()
+            return True
+        if low == "/curate" or low.startswith("/curate "):
+            # /curate         — dry-run: list duplicate-topic memory clusters
+            # /curate apply   — keep newest of each, archive the rest (recoverable)
+            from hearth import memory as _mem
+            do_apply = low.startswith("/curate ") and "apply" in low
+            res = _mem.curate(apply=do_apply)
+            clusters = res.get("clusters", [])
+            if not clusters:
+                print(f"{C_OK}memory's clean{C_RESET} {C_DIM}— no duplicate-topic clusters found.{C_RESET}")
+                return True
+            print(f"\n{C_BRAND}Duplicate-topic memories{C_RESET} {C_DIM}({len(clusters)} cluster"
+                  f"{'s' if len(clusters) != 1 else ''}){C_RESET}")
+            for c in clusters:
+                print(f"  {C_OK}keep{C_RESET} {c['kept']}  {C_DIM}· dup(s): {', '.join(c['dups'])}{C_RESET}")
+            if do_apply:
+                print(f"\n{C_OK}archived {len(res.get('archived', []))} dup(s){C_RESET} "
+                      f"{C_DIM}→ memory/_archive (recoverable). Kept the newest of each.{C_RESET}")
+            else:
+                print(f"\n  {C_DIM}dry run. Run {C_RESET}{C_TOOL}/curate apply{C_RESET}{C_DIM} to "
+                      f"archive the older dups (kept newest; recoverable from _archive).{C_RESET}")
             return True
         if low == "/mem" or low.startswith("/mem "):
             # /mem            — flat index (legacy)

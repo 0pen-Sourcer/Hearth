@@ -251,6 +251,17 @@ def extract_and_save(
         except Exception as e:
             warnings.append(f"save failed for '{title}': {type(e).__name__}: {e}")
 
+    # Auto-curate: whenever new facts landed (the only time fresh dups can
+    # appear), silently merge same-topic duplicates so memory self-maintains —
+    # no manual /curate needed. Conservative + non-destructive (archives the
+    # older copies, recoverable). Best-effort; never breaks the extraction.
+    if saved:
+        try:
+            from . import memory as _memory
+            _memory.curate(apply=True)
+        except Exception:
+            pass
+
     return saved, warnings
 
 
