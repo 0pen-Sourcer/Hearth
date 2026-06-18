@@ -150,3 +150,6 @@ Output/
 # Test build output (parallel to dist/ build/)
 dist_test/
 build_test/
+
+# Website scratch: Claude Design brief, promo video project (node_modules!), landing drafts
+site/
