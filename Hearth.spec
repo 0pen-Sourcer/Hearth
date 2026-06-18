@@ -146,6 +146,23 @@ try:
 except Exception:
     pass
 
+# pythonnet + clr_loader power pywebview's Windows (EdgeChromium/winforms)
+# backend. collect_all is REQUIRED — without Python.Runtime.dll + the clr_loader
+# .NET shim + their data, the frozen GUI dies with "Failed to resolve
+# Python.Runtime.Loader.Initialize" (the crash a fresh machine hits). The window
+# also falls back to the browser at runtime if this still can't init, but bundle
+# it so the NATIVE window works when the machine has .NET.
+for _pkg in ("pythonnet", "clr_loader"):
+    try:
+        from PyInstaller.utils.hooks import collect_all as _collect_all
+        _d, _b, _h = _collect_all(_pkg)
+        DATAS += _d
+        PW_BINARIES += _b
+        HIDDEN += _h
+    except Exception:
+        pass
+HIDDEN += ["clr", "pythonnet", "clr_loader", "clr_loader.netfx", "clr_loader.ffi"]
+
 # Built-in LLM server (optional dep). Bundle llama-cpp-python so the PACKAGED
 # Hearth.exe can run its own OpenAI-compatible server with no LM Studio / no
 # Ollama / no extra installs - the "self-contained" story. We do NOT bundle a
