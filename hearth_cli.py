@@ -2928,10 +2928,11 @@ class JarvisCLI:
         try:
             from hearth.tools import _WORKSPACE_POINTER, set_workspace_location, WORKSPACE as _CUR_WS
             if not os.path.isfile(_WORKSPACE_POINTER) and not os.environ.get("JARVIS_WORKSPACE"):
+                _path_eg = "like D:\\Hearth" if os.name == "nt" else "like ~/hearth or /mnt/disk/hearth"
                 loc = input(
                     f"  {C_TOOL}Where should I keep my files — memory, documents, models?{C_RESET}\n"
                     f"  {C_DIM}Enter for default ({_CUR_WS}), or a path on another drive "
-                    f"like D:\\Hearth{C_RESET}\n  > "
+                    f"{_path_eg}{C_RESET}\n  > "
                 ).strip()
                 if loc and os.path.abspath(os.path.expanduser(loc)) != os.path.abspath(_CUR_WS):
                     new = set_workspace_location(loc)
