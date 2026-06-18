@@ -3220,6 +3220,7 @@
             <input type="text" id="bridge-tg-ids" placeholder="allowed chat ids (comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bridge-tg-save">Save</button>
+              <button class="btn-mini" id="bridge-tg-toggle">Start</button>
               <span id="bridge-tg-status" style="font-size:11px;color:var(--fg-faint)"></span>
             </div>
             <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.telegram_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.telegram_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
@@ -3237,6 +3238,7 @@
             <input type="text" id="bridge-dc-ids" placeholder="allowed user ids (comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bridge-dc-save">Save</button>
+              <button class="btn-mini" id="bridge-dc-toggle">Start</button>
               <span id="bridge-dc-status" style="font-size:11px;color:var(--fg-faint)"></span>
             </div>
             <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.discord_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.discord_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
@@ -3269,6 +3271,7 @@
             <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--fg-faint)"><input type="checkbox" id="bridge-wa-self"> also answer my own self-chat</label>
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bridge-wa-save">Save</button>
+              <button class="btn-mini" id="bridge-wa-toggle">Start</button>
               <span id="bridge-wa-status" style="font-size:11px;color:var(--fg-faint)"></span>
             </div>
             <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.whatsapp_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.whatsapp_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
@@ -7773,7 +7776,33 @@ async function refreshSettings() {
       if (waN && b.whatsapp) { waN.value = (b.whatsapp.config.allowed_numbers || []).join(', '); if (waS) waS.checked = !!b.whatsapp.config.allow_self_chat; }
       const ntT = $('bridge-ntfy-topic');
       if (ntT) ntT.value = (s.ntfy_topic || '');
+      // Reflect running state on the Start/Stop toggles.
+      for (const ch of ['telegram', 'discord', 'whatsapp']) {
+        const short = ch === 'telegram' ? 'tg' : ch === 'discord' ? 'dc' : 'wa';
+        const btn = $('bridge-' + short + '-toggle');
+        if (btn) _paintBridgeToggle(btn, ch, !!(b[ch] && b[ch].running));
+      }
     } catch {}
+    function _paintBridgeToggle(btn, ch, running) {
+      btn.textContent = running ? '■ Stop' : 'Start';
+      btn.style.color = running ? 'var(--ok,#5fd28a)' : '';
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const stEl = $('bridge-' + (ch === 'telegram' ? 'tg' : ch === 'discord' ? 'dc' : 'wa') + '-status');
+        try {
+          const r = await api('/api/bridges/' + (running ? 'stop' : 'start'),
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: ch }) });
+          const nowRunning = !!(r && r.running);
+          _paintBridgeToggle(btn, ch, nowRunning);
+          if (stEl) {
+            if (running) { stEl.style.color = 'var(--fg-faint)'; stEl.textContent = 'stopped'; }
+            else if (nowRunning) { stEl.style.color = 'var(--ok,#5fd28a)'; stEl.textContent = '● online — message the bot'; }
+            else { stEl.style.color = 'var(--err)'; stEl.textContent = (r && r.error) || 'failed to start'; }
+          }
+        } catch (e) { if (stEl) stEl.textContent = 'failed: ' + (e.message || e); }
+        finally { btn.disabled = false; }
+      };
+    }
     const _saveBridge = async (channel, tokenEl, idsEl, idsKey, statusEl) => {
       const token = (tokenEl.value || '').trim();
       if (!token) { if (statusEl) statusEl.textContent = 'token required'; return; }
