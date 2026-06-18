@@ -10,6 +10,28 @@ import sys
 if "--hearth-run-llama-server" in sys.argv:
     _i = sys.argv.index("--hearth-run-llama-server")
     sys.argv = [sys.argv[0]] + sys.argv[_i + 1:]
+    # Frozen-app DLL path: bundled CUDA runtime lives under _MEIPASS/nvidia/*/bin,
+    # not next to llama.dll, so ctypes can't resolve ggml-cuda.dll's deps. Put
+    # the CUDA + llama lib dirs on the DLL search path before importing llama_cpp.
+    try:
+        _base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        _dll_dirs = [os.path.join(_base, "llama_cpp", "lib")]
+        _nv = os.path.join(_base, "nvidia")
+        if os.path.isdir(_nv):
+            for _s in os.listdir(_nv):
+                _b = os.path.join(_nv, _s, "bin")
+                if os.path.isdir(_b):
+                    _dll_dirs.append(_b)
+        for _d in _dll_dirs:
+            if os.path.isdir(_d):
+                try:
+                    os.add_dll_directory(_d)
+                except Exception:
+                    pass
+                if _d not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
+    except Exception:
+        pass
     try:
         from llama_cpp.server.__main__ import main as _llama_main
         _llama_main()
