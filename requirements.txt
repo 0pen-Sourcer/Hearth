@@ -47,6 +47,18 @@ playwright
 pywebview
 pystray
 pywin32; sys_platform == "win32"
+# Native-window backends for the GUI on each OS:
+#  - Windows: uses Edge WebView2 (bundled by the installer) via pythonnet.
+#  - macOS:   uses the system WebKit via pyobjc (pip-installable, below).
+#  - Linux:   uses Qt WebEngine via pip (below). The GTK backend is an
+#             alternative but needs system packages (PyGObject +
+#             gir1.2-webkit2-4.0) that pip can't install. If neither backend
+#             is present, Hearth falls back to opening the UI in your browser.
+pyobjc-framework-WebKit; sys_platform == "darwin"
+pythonnet; sys_platform == "win32"
+clr-loader; sys_platform == "win32"
+# Linux native window (optional — uncomment if you want a real window vs browser):
+# pyqtwebengine; sys_platform == "linux"
 
 # ---- Discord bridge (optional) ----
 # Two-way chat via a Discord bot (official API, no ban risk). Off by default;
