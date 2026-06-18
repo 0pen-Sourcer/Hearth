@@ -53,13 +53,27 @@ if "--hearth-run-python" in sys.argv:
     _i = sys.argv.index("--hearth-run-python")
     _rest = sys.argv[_i + 1:]
     import runpy
-    if _rest and _rest[0] == "-c":
-        _code = _rest[1] if len(_rest) > 1 else ""
-        sys.argv = ["-c"] + _rest[2:]
-        exec(compile(_code, "<string>", "exec"), {"__name__": "__main__"})
-    elif _rest:
-        sys.argv = list(_rest)
-        runpy.run_path(_rest[0], run_name="__main__")
+    try:
+        if _rest and _rest[0] == "-c":
+            _code = _rest[1] if len(_rest) > 1 else ""
+            sys.argv = ["-c"] + _rest[2:]
+            exec(compile(_code, "<string>", "exec"), {"__name__": "__main__"})
+        elif _rest and _rest[0] == "-m":
+            # `-m <module>` (phone bridges) needs run_module, not run_path.
+            _mod = _rest[1] if len(_rest) > 1 else ""
+            sys.argv = [_mod] + _rest[2:]
+            runpy.run_module(_mod, run_name="__main__", alter_sys=True)
+        elif _rest:
+            sys.argv = list(_rest)
+            runpy.run_path(_rest[0], run_name="__main__")
+    except SystemExit:
+        raise
+    except BaseException as _e:
+        try:
+            (sys.stderr or sys.__stdout__).write(f"[hearth] --hearth-run-python failed: {type(_e).__name__}: {_e}\n")
+        except Exception:
+            pass
+        raise SystemExit(1)
     raise SystemExit(0)
 
 # Defensive null-stderr safety (only used if PyInstaller built with no console)
