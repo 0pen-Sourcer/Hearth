@@ -6,9 +6,10 @@ way they do on Windows. A few Windows-specific conveniences (desktop shortcuts,
 Start-Menu app launching, the registry app list) either fall back to a POSIX
 equivalent or are skipped; nothing crashes when they're unavailable.
 
-> Status: macOS/Linux is **experimental** — it runs, but it hasn't had the same
-> mileage as Windows. If something breaks, please open an issue with the error
-> and your OS/distro.
+> Status: the CLI, web UI, tools, and skills are verified running on Linux
+> (Mint 22 / Ubuntu 24.04). macOS shares the same POSIX code paths but has had
+> less testing. If something breaks, please open an issue with the error and
+> your OS/distro.
 
 ## Requirements
 
