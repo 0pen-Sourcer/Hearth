@@ -57,16 +57,34 @@ def main(argv: Optional[list] = None) -> int:
         background_color="#0a0a0c",
         text_select=True, confirm_close=False,
     )
+    def _browser_fallback(err: Exception) -> int:
+        # The native window backend failed — most often the pythonnet/.NET
+        # loader ("Failed to resolve Python.Runtime.Loader.Initialize") or a
+        # missing WebView2 runtime on a fresh machine. The web UI is identical,
+        # so open it in the default browser instead of hard-crashing. The tray
+        # process keeps serving it at args.url.
+        print(f"[desktop] native window unavailable ({type(err).__name__}: {err}); "
+              f"opening the web UI in your browser instead: {args.url}")
+        try:
+            webbrowser.open(args.url)
+        except Exception:
+            pass
+        return 0
+
     webview.create_window("Hearth", url=args.url, **kwargs)
     try:
         if icon_path:
             webview.start(gui=None, debug=False, icon=icon_path)
         else:
             webview.start(gui=None, debug=False)
-    except (TypeError, Exception):
-        # Old pywebview without icon kwarg, OR icon is the wrong format —
-        # just start without it rather than crashing.
-        webview.start(gui=None, debug=False)
+    except TypeError:
+        # Old pywebview without the icon kwarg — retry once without it.
+        try:
+            webview.start(gui=None, debug=False)
+        except Exception as e:
+            return _browser_fallback(e)
+    except Exception as e:
+        return _browser_fallback(e)
     return 0
 
 
