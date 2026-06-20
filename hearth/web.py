@@ -316,6 +316,12 @@ def _make_permission_check(emit_fn):
     wires up the extend-workspace callback used by tools._resolve_write so
     out-of-workspace writes prompt the user instead of silently raising."""
     def _check(name: str, args: Dict) -> str:
+        # YOLO mode: auto-approve everything, no prompt. Opt-in via Settings.
+        try:
+            if _load_settings().get("yolo"):
+                return "allow"
+        except Exception:
+            pass
         if name in _always_allow: return "allow"
         if name in _always_deny:  return "deny"
         req_id = f"perm_{int(time.time()*1000)}_{name}"

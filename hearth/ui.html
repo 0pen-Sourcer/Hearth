@@ -3849,6 +3849,43 @@ function showModal(title, body, actions = []) {
   $('modal').classList.add('open');
 }
 
+// Interactive tool-permissions panel: per-tool remove (un-set an "always") +
+// a YOLO auto-approve toggle. Replaces the old text-only /perms dump.
+async function showPermsModal() {
+  let p;
+  try { p = await api('/api/permissions'); }
+  catch (e) { toast('Perms error', e.message, 'err'); return; }
+  const yolo = !!(STATE.settings && STATE.settings.yolo);
+  const post = (b) => api('/api/permission/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+  const row = (n) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border)">
+      <span style="font-family:var(--mono);font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis">${esc(n)}</span>
+      <button data-perm-rm="${esc(n)}" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);cursor:pointer;padding:3px 11px;font-size:12px;flex-shrink:0">remove</button>
+    </div>`;
+  const none = '<div style="color:var(--fg-dim);font-size:13px;padding:4px 2px">(none)</div>';
+  const allowed = (p.always_allow || []).map(row).join('') || none;
+  const denied = (p.always_deny || []).map(row).join('') || none;
+  const html = `
+    <label style="display:flex;align-items:center;gap:10px;padding:10px 0;margin-bottom:6px;border-bottom:1px solid var(--border)">
+      <input type="checkbox" id="perm-yolo" ${yolo ? 'checked' : ''} style="width:16px;height:16px">
+      <span style="font-size:13px"><b>YOLO mode</b> — auto-approve every tool, no prompts ever. <span style="color:#ff5c5c">Risky: it can run/delete/move without asking.</span></span>
+    </label>
+    <div style="font-weight:600;font-size:13px;margin:10px 0 2px;color:var(--fg)">Always allowed</div>${allowed}
+    <div style="font-weight:600;font-size:13px;margin:14px 0 2px;color:var(--fg)">Always denied</div>${denied}`;
+  showModal('Tool permissions', html, [
+    { label: 'Clear all', kind: 'danger', onclick: async () => { await post({}); toast('Permissions cleared', '', 'ok'); } },
+    { label: 'Close' },
+  ]);
+  document.querySelectorAll('#modal-body [data-perm-rm]').forEach(b => {
+    b.onclick = async () => { await post({ name: b.dataset.permRm }); showPermsModal(); };
+  });
+  const y = document.getElementById('perm-yolo');
+  if (y) y.onchange = async () => {
+    await saveSetting('yolo', y.checked);
+    if (STATE.settings) STATE.settings.yolo = y.checked;
+    toast(y.checked ? 'YOLO on — tools auto-run' : 'YOLO off — prompts back', '', y.checked ? 'warn' : 'ok');
+  };
+}
+
 // Permission modal - used when the bridge fires permission_request.
 // Buttons: Allow (just this once) · Always · Deny · Never.
 function showPermissionModal(reqId, toolName, argsStr) {
@@ -6121,24 +6158,11 @@ async function handleSlash(raw) {
       return true;
     case '/perms': {
       if (arg === 'clear') {
-        await api('/api/permission/clear', { method: 'POST' });
+        await api('/api/permission/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         toast('Permissions reset', '', 'ok');
         return true;
       }
-      try {
-        const p = await api('/api/permissions');
-        const body =
-          'Allowed (always):\n  ' + (p.always_allow.join('\n  ') || '(none)') + '\n\n' +
-          'Denied (never):\n  ' + (p.always_deny.join('\n  ') || '(none)') + '\n\n' +
-          'Pending requests: ' + (p.pending.length || 0);
-        showModal('Tool permissions (session)', body, [
-          { label: 'Reset', kind: 'danger', onclick: async () => {
-            await api('/api/permission/clear', { method: 'POST' });
-            toast('Reset', '', 'ok');
-          }},
-          { label: 'Close' },
-        ]);
-      } catch (e) { toast('Perms error', e.message, 'err'); }
+      await showPermsModal();
       return true;
     }
     case '/tools':
