@@ -1165,6 +1165,78 @@ def append_soul(line: str) -> str:
     return write_soul(new)
 
 
+# ---------------------------------------------------------------------------
+# profile.md — the USER-model layer (distinct from soul = the AGENT's identity).
+# Small, always-on "who this user is + how they want replies". Auto-filled by
+# the extractor (preferences route here), so a fresh user gets the good default
+# persona and per-user tone/format prefs live HERE, not baked into the base.
+# ---------------------------------------------------------------------------
+
+PROFILE_PATH = os.path.join(WORKSPACE, "profile.md")
+PROFILE_MAX_CHARS = int(os.environ.get("JARVIS_PROFILE_MAX_CHARS", "1500"))
+_PROFILE_HEADER = "# Profile — who the user is + how they want replies"
+
+
+def read_profile() -> str:
+    """profile.md content (stripped) or '' if missing. No auto-create, so a
+    fresh user with no profile adds ZERO prompt overhead (mirrors read_soul)."""
+    try:
+        if not os.path.isfile(PROFILE_PATH):
+            return ""
+        with open(PROFILE_PATH, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def upsert_profile_line(line: str) -> str:
+    """Add/refresh one user-preference line in profile.md. Substring-dedups so
+    re-stating a known pref doesn't duplicate; when over cap, the oldest pref
+    drops. This is the always-on layer the extractor routes `preference` to."""
+    line = (line or "").strip().lstrip("-").strip()
+    if not line:
+        return "Error: empty line"
+    existing = read_profile()
+    prefs = [l.strip()[1:].strip() for l in existing.splitlines()
+             if l.strip().startswith("-")]
+    low = line.lower()
+    # drop any existing pref on the same topic (each is a near-substring of the other)
+    prefs = [p for p in prefs if not (low in p.lower() or p.lower() in low)]
+    prefs.append(line)
+    def _render(ps):
+        return _PROFILE_HEADER + "\n\n" + "\n".join("- " + p for p in ps)
+    body = _render(prefs)
+    while len(body) > PROFILE_MAX_CHARS and len(prefs) > 1:
+        prefs.pop(0)  # shed oldest
+        body = _render(prefs)
+    try:
+        os.makedirs(WORKSPACE, exist_ok=True)
+        with open(PROFILE_PATH, "w", encoding="utf-8") as f:
+            f.write(body + "\n")
+    except OSError as e:
+        return f"Error: could not write profile.md: {e}"
+    return f"profile updated ({len(prefs)} prefs)"
+
+
+def append_rule(line: str) -> str:
+    """Append a standing user order to rules.md (the highest-authority layer).
+    Substring-dedups. The extractor routes `rule` here ('always X' / 'never Y')."""
+    line = (line or "").strip().lstrip("-").strip()
+    if not line:
+        return "Error: empty line"
+    ensure_rules_exist()
+    existing = read_rules()
+    if line.lower() in existing.lower():
+        return "rule already present"
+    try:
+        sep = "" if (not existing or existing.endswith("\n")) else "\n"
+        with open(RULES_PATH, "a", encoding="utf-8") as f:
+            f.write(sep + "- " + line + "\n")
+    except OSError as e:
+        return f"Error: could not write rules.md: {e}"
+    return "rule added"
+
+
 def draft_soul() -> str:
     """Propose a starter soul.md by reading what's already known about the
     user from memory + house rules. Does NOT write — returns the draft as
