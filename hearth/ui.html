@@ -2457,7 +2457,7 @@
     <div class="model-picker" id="model-picker-tip" title="Active model">
       <span class="model-state" id="model-state"></span>
       <select id="model-select"><option value="">(no model loaded)</option></select>
-      <button class="btn-mini danger" id="btn-eject" title="Unload model">
+      <button class="btn-mini danger" id="btn-eject" title="Unload model" hidden>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3l8 9H4z"/><path d="M4 21h16"/></svg>
         eject
       </button>
@@ -4061,9 +4061,114 @@ const STATE = {
   settings: {},
   conversations: [],   // [{id, title, messages:[{role, content}], created, updated}]
   activeId: null,
+  // ---- SINGLE SOURCE OF TRUTH for everything the user reads about the brain ----
+  // Every display (sticker model text, dropdown value, online dot, eject button,
+  // brand subtitle, bottom-bar `model`/`ctx` pills, the context ring + tooltip)
+  // derives from STATE.brain. Nothing else writes those DOM nodes directly.
+  // refreshState / refreshModels / refreshCtxBudget / swap handlers all update
+  // STATE.brain then call applyBrainState() once, so the five places can never
+  // disagree (the "ctx says X, ring says Y, sticker still shows old grok" bug).
+  brain: {
+    kind: 'local',        // 'local' | 'cloud'
+    providerKey: 'local', // grok|gemini|openai|openrouter|custom|local
+    providerLabel: 'local',
+    modelId: '',          // full id (may include a path); '' when nothing active
+    modelName: '-',       // basename for display
+    loaded: false,        // is a model actually active/loaded right now
+    busy: false,          // mid-load/eject/swap → show the loading pulse, suppress polls clobbering
+    ctxTotal: 0,          // REAL context window of the ACTIVE model (tokens)
+    ctxEffective: 0,      // ctxTotal minus tool-schema overhead (chat-usable)
+    ctxTools: 0,          // tool-schema overhead (tokens)
+    ctxSource: '',        // where ctxTotal came from (probe/env/default/provider)
+  },
+  memCount: null,         // canonical memory count → st-mem + nav-mem-count
 };
 // Conversations persist server-side at ~/Jarvis/conversations/{id}.json
 // Local STATE.conversations is the in-memory list cache.
+
+// One short cloud-provider set, used everywhere (was re-declared 3×).
+const CLOUD_PROVIDERS = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
+
+// Format a token count for the bottom-bar `ctx` pill: 32768 → "32K", 977000 → "977K".
+function fmtCtxPill(n) {
+  if (!n) return '-';
+  return (n >= 1024) ? `${Math.round(n/1024)}K` : `${n}`;
+}
+
+// Decide local vs cloud from BOTH the saved provider AND the live endpoint URL.
+// They can drift (a stale provider=local while the URL points at api.x.ai); the
+// live endpoint is the tiebreaker so a cloud brain never shows a local "loaded"
+// model or the eject button, and vice-versa.
+function deriveBrainKind() {
+  const provSetting = ((STATE.settings && STATE.settings.llm_provider) || '').toLowerCase();
+  const liveProv = providerFromEndpoint(STATE.endpoint || (STATE.settings && STATE.settings.llm_url) || '');
+  const isCloud = CLOUD_PROVIDERS.has(provSetting) || liveProv.key !== 'local';
+  return {
+    kind: isCloud ? 'cloud' : 'local',
+    providerKey: isCloud ? (CLOUD_PROVIDERS.has(provSetting) ? provSetting : liveProv.key) : 'local',
+    providerLabel: liveProv.label,
+  };
+}
+
+// THE one function that paints brain-derived UI. Idempotent: safe to call from
+// any refresh path. Reads STATE.brain + STATE.memCount, writes every display.
+function applyBrainState() {
+  const b = STATE.brain;
+  const $$id = (id) => document.getElementById(id);
+
+  // Sticker: online dot + dropdown value.
+  const dot = $$id('model-state');
+  if (dot) {
+    dot.classList.toggle('loaded', b.loaded && !b.busy);
+    dot.classList.toggle('loading', !!b.busy);
+  }
+  const sel = $$id('model-select');
+  if (sel && !b.busy) {
+    const want = b.modelId || '';
+    // Only set if the option exists (or empty) — avoids blanking the dropdown
+    // while refreshModels is mid-rebuild.
+    if (!want || Array.from(sel.options).some(o => o.value === want)) {
+      if (sel.value !== want) sel.value = want;
+    }
+  }
+
+  // Eject only makes sense for a LOCAL, currently-loaded model (frees VRAM).
+  // Cloud brains use no local VRAM → no eject affordance at all.
+  const ej = $$id('btn-eject');
+  if (ej) ej.hidden = (b.kind === 'cloud') || !b.loaded;
+
+  // Brand subtitle: "· local" / "· xAI Grok" / "· Gemini" …
+  const bsub = $$id('brand-sub');
+  if (bsub && !b.busy) bsub.textContent = '· ' + (b.providerLabel || b.kind);
+
+  // Bottom-bar `model` pill.
+  const stModel = $$id('st-model');
+  if (stModel) stModel.textContent = b.loaded ? (b.modelName || '-') : '-';
+
+  // Bottom-bar `ctx` pill — the REAL window of the active model.
+  const stCtx = $$id('st-ctx');
+  if (stCtx) stCtx.textContent = b.loaded && b.ctxTotal ? fmtCtxPill(b.ctxTotal) : '-';
+
+  // Context-ring tooltip (the ring's % is driven live by chat events; here we
+  // keep the hover-explanation in sync with the active model's real budget).
+  const wrap = $$id('ctx-ring-wrap');
+  if (wrap && b.ctxTotal) {
+    const f = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
+    wrap.title = `model context: ${f(b.ctxTotal)} total = ${f(b.ctxEffective || b.ctxTotal)} effective + ${f(b.ctxTools || 0)} tool schemas\n` +
+                 `source: ${b.ctxSource || '?'}`;
+  }
+
+  // Memory count — one number, two badges.
+  const memTxt = (STATE.memCount == null) ? '-' : String(STATE.memCount);
+  const stMem = $$id('st-mem'); if (stMem) stMem.textContent = memTxt;
+  const navMem = $$id('nav-mem-count'); if (navMem) navMem.textContent = (STATE.memCount == null ? '' : String(STATE.memCount));
+}
+
+// Keep STATE.memCount + both badges in sync from any source (poll, delete, import).
+function setMemCount(n) {
+  if (typeof n === 'number' && !Number.isNaN(n)) STATE.memCount = n;
+  applyBrainState();
+}
 
 async function loadConversations() {
   try {
@@ -4792,27 +4897,51 @@ async function refreshModels() {
         }
       }
     }
-    // Cloud brain: the user's picked model_id is authoritative. The
-    // refresh poll would otherwise overwrite their selection every 9s
-    // with whatever Grok's /v1/models lists first (typically grok-4.20).
-    const _CLOUD = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
-    const _prov  = (STATE.settings && STATE.settings.llm_provider || '').toLowerCase();
-    const _userPicked = STATE.settings && STATE.settings.llm_model;
-    if (_CLOUD.has(_prov) && _userPicked) {
-      STATE.loadedModel = { id: _userPicked, state: 'loaded' };
-      sel.value = _userPicked;
-      $('model-state').classList.add('loaded');
+    // Mid-swap/eject? The handler owns the truth; don't let a 9s poll repaint
+    // a stale value (the "cloud grok-4.3 lingers" / flicker bug).
+    if (STATE.brain.busy) return;
+
+    // Cloud brain: the user's picked model_id is authoritative. The refresh
+    // poll would otherwise overwrite their selection every 9s with whatever
+    // the provider's /v1/models lists first (typically grok-4.20).
+    const kind = deriveBrainKind();
+    const _isCloud = kind.kind === 'cloud';
+    const _userPicked = (STATE.settings && STATE.settings.llm_model) || '';
+
+    STATE.brain.kind = kind.kind;
+    STATE.brain.providerKey = kind.providerKey;
+    STATE.brain.providerLabel = kind.providerLabel;
+
+    if (_isCloud) {
+      // Make sure the picked cloud model is a selectable option even if the
+      // provider's /v1/models list didn't include it (custom/aliased ids),
+      // so the sticker can actually show it.
+      if (_userPicked && !Array.from(sel.options).some(o => o.value === _userPicked)) {
+        const opt = document.createElement('option');
+        opt.value = _userPicked;
+        opt.textContent = _userPicked.split(/[\/\\]/).pop() + '   ● active';
+        sel.insertBefore(opt, sel.firstChild);
+      }
+      STATE.brain.modelId = _userPicked;
+      STATE.brain.modelName = _userPicked ? _userPicked.split(/[\/\\]/).pop() : '-';
+      STATE.brain.loaded = !!_userPicked;
+      // ctxTotal for cloud is owned by refreshCtxBudget (don't zero it here).
+      STATE.loadedModel = _userPicked ? { id: _userPicked, state: 'loaded' } : null;
     } else {
+      STATE.brain.modelId = loadedModel ? loadedModel.id : '';
+      STATE.brain.modelName = loadedModel ? loadedModel.id.split(/[\/\\]/).pop() : '-';
+      STATE.brain.loaded = !!loadedModel;
+      if (loadedModel && (loadedModel.loaded_context_length || loadedModel.max_context_length)) {
+        STATE.brain.ctxTotal = loadedModel.loaded_context_length || loadedModel.max_context_length;
+        STATE.brain.ctxSource = 'loaded model';
+      } else if (!loadedModel) {
+        STATE.brain.ctxTotal = 0;
+        STATE.brain.ctxEffective = 0;
+      }
       STATE.loadedModel = loadedModel || null;
-      sel.value = loadedModel ? loadedModel.id : (prev || '');
-      $('model-state').classList.toggle('loaded', !!loadedModel);
     }
-    // Eject frees LOCAL VRAM - it's meaningless for a cloud brain (nothing to
-    // unload) and pointless with nothing loaded. Only show it for a loaded
-    // local model.
-    const _ejectBtn = document.getElementById('btn-eject');
-    if (_ejectBtn) _ejectBtn.hidden = _CLOUD.has(_prov) || !STATE.loadedModel;
-    updateStatus();
+    // Repaint dropdown selection + sticker + eject + ctx from one place.
+    applyBrainState();
   } catch (e) { console.error('refreshModels', e); }
 }
 
@@ -4833,13 +4962,16 @@ $('model-select').addEventListener('change', async (e) => {
   // no local load to perform. Without this guard, the GUI fires
   // /api/models/load (which used to trigger `lms load grok-4.3` and
   // confused both the user and LM Studio). Now: zero-friction swap.
-  const _CLOUD = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
   const _prov  = (STATE.settings && STATE.settings.llm_provider || '').toLowerCase();
-  if (_CLOUD.has(_prov)) {
+  if (CLOUD_PROVIDERS.has(_prov) || deriveBrainKind().kind === 'cloud') {
+    // Lock so the 9s poll can't repaint a stale model while we swap.
+    STATE.brain.busy = true;
+    STATE.brain.kind = 'cloud';
+    STATE.brain.modelId = displayId;
+    STATE.brain.modelName = displayId.split(/[\/\\]/).pop();
+    STATE.brain.loaded = true;
     STATE.loadedModel = { id: displayId, state: 'loaded' };
-    $('st-model').textContent = displayId.split(/[\/\\]/).pop();
-    $('model-state').classList.add('loaded');
-    $('model-state').classList.remove('loading');
+    applyBrainState();
     try {
       // Persist BOTH locally and remotely so the 9s refresh poller
       // doesn't overwrite the user's pick with the provider's default.
@@ -4849,16 +4981,18 @@ $('model-select').addEventListener('change', async (e) => {
         body: JSON.stringify({ llm_model: displayId }),
       });
     } catch {}
+    STATE.brain.busy = false;
     // New model id may have a different context window (e.g. grok-4.3 = 1M
     // vs grok-4.20 = 256K). Pull the live budget so the bottom-bar ctx
-    // pill updates immediately, not on the next chat turn.
+    // pill + ring tooltip update immediately, not on the next chat turn.
     try { await refreshCtxBudget(); } catch {}
+    applyBrainState();
     setState('ready');
-    toast('Switched', `${displayId} (${_prov})`, 'ok', 1800);
+    toast('Switched', `${displayId} (${_prov || 'cloud'})`, 'ok', 1800);
     return;
   }
-  $('model-state').classList.add('loading');
-  $('model-state').classList.remove('loaded');
+  STATE.brain.busy = true;
+  applyBrainState();  // shows the loading pulse on the dot
   // Cleaner labels - "starting server" was misleading when the server was
   // already running (e.g. swapping models). Phase actually visible in the
   // sticker bar now ("loading weights · 45%"), so the pill just narrates.
@@ -4895,9 +5029,12 @@ $('model-select').addEventListener('change', async (e) => {
     }
     if (r && r.ok) {
       setState('ready');
-      STATE.loadedModel = { id: displayId, state: 'loaded' };
-      $('st-model').textContent = displayId.split(/[\/\\]/).pop();
-      $('model-state').classList.add('loaded');
+      STATE.brain.kind = 'local';
+      STATE.brain.modelId = displayId;
+      STATE.brain.modelName = displayId.split(/[\/\\]/).pop();
+      STATE.brain.loaded = true;
+      if (plannedCtx) { STATE.brain.ctxTotal = plannedCtx; STATE.brain.ctxSource = 'loaded model'; }
+      STATE.loadedModel = { id: displayId, state: 'loaded', loaded_context_length: plannedCtx || undefined };
       const ctxNote = plannedCtx ? ` at ${(plannedCtx/1024).toFixed(0)}K ctx` : '';
       toast('Model loaded', displayId + ctxNote, 'ok');
       // Hard warning: anything < 16K with our persona+tools (~18K) will
@@ -4915,8 +5052,11 @@ $('model-select').addEventListener('change', async (e) => {
       // Brief pause on "ready" so the user catches the success state
       setTimeout(() => setState('idle'), 800);
     } else {
+      // Restore the previous active model in the single source of truth.
+      STATE.brain.loaded = !!prevLoaded;
+      STATE.brain.modelId = prevLoaded ? prevLoaded.id : '';
+      STATE.brain.modelName = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
       STATE.loadedModel = prevLoaded || null;
-      $('st-model').textContent = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
       setState('idle');
       // Special case: VRAM refusal. Give a longer, friendlier toast so
       // the user knows what to do - generic "Load failed" isn't
@@ -4933,50 +5073,62 @@ $('model-select').addEventListener('change', async (e) => {
       }
     }
   } catch (err) {
+    STATE.brain.loaded = !!prevLoaded;
+    STATE.brain.modelId = prevLoaded ? prevLoaded.id : '';
+    STATE.brain.modelName = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
     STATE.loadedModel = prevLoaded || null;
-    $('st-model').textContent = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
     setState('idle');
     toast('Load failed', err.message, 'err', 7000);
   } finally {
-    $('model-state').classList.remove('loading');
+    STATE.brain.busy = false;
+    applyBrainState();
     await refreshModels();
     await refreshState();
   }
 });
 
 $('btn-eject').addEventListener('click', async () => {
-  if (!STATE.loadedModel) return;
-  // Cloud brains use NO local VRAM, so "Frees VRAM" is a lie for them.
-  const _ejIsCloud = providerFromEndpoint(STATE.endpoint || (STATE.settings && STATE.settings.llm_url) || '').key !== 'local';
-  const _ejTitle = _ejIsCloud ? `Disconnect ${STATE.loadedModel.id}?` : `Unload ${STATE.loadedModel.id}?`;
-  const _ejBody = _ejIsCloud
-    ? 'Disconnects this cloud brain (it uses no local VRAM). You can pick another model from the dropdown afterward.'
-    : 'Frees VRAM. You can pick another model from the dropdown afterward.';
-  showModal(_ejTitle, _ejBody, [
+  // Eject is hidden for cloud brains (no local VRAM to free) and when nothing
+  // is loaded — applyBrainState enforces that. Guard anyway.
+  if (!STATE.brain.loaded || STATE.brain.kind === 'cloud') return;
+  showModal(`Unload ${STATE.brain.modelName}?`,
+    'Frees VRAM. You can pick another model from the dropdown afterward.', [
     { label: 'Cancel' },
     { label: 'Unload', kind: 'primary', onclick: async () => {
-      // Clear local state SYNCHRONOUSLY so the topbar pill stops lying
-      // about "● loaded" before the backend even returns. Audit caught
-      // this as a 4-9s stale-badge window - the previous code fired
-      // refreshModels() unawaited on a 4s cached endpoint.
+      // Clear the single source of truth SYNCHRONOUSLY so the sticker stops
+      // lying about "● loaded" before the backend even returns.
       const prevLoaded = STATE.loadedModel;
+      const prevBrain = Object.assign({}, STATE.brain);
+      STATE.brain.busy = true;
+      STATE.brain.loaded = false;
+      STATE.brain.modelId = '';
+      STATE.brain.modelName = '-';
+      STATE.brain.ctxTotal = 0;
+      STATE.brain.ctxEffective = 0;
       STATE.loadedModel = null;
-      $('model-state').classList.remove('loaded');
-      $('st-model').textContent = '-';
-      $('model-select').value = '';
+      applyBrainState();
+      // Eject means a fresh context — clear the ring so a 90% from the
+      // previous model doesn't linger.
+      const _wrap = document.getElementById('ctx-ring-wrap');
+      if (_wrap) { _wrap.hidden = true; _wrap.classList.remove('hot','warn','compacting'); }
       setState('ejecting…');
       try {
         const r = await api('/api/models/eject', { method: 'POST' });
         if (!r.ok) {
-          // Backend rejected; restore optimistic clear.
+          // Backend rejected; restore.
+          STATE.brain = prevBrain;
           STATE.loadedModel = prevLoaded;
-          $('model-state').classList.add('loaded');
-          $('st-model').textContent = (prevLoaded.id || '').split(/[\/\\]/).pop();
         }
         toast(r.ok ? 'Unloaded' : 'Eject failed', r.error || '', r.ok ? 'ok' : 'err');
-      } catch (e) { toast('Eject failed', e.message, 'err'); }
+      } catch (e) {
+        STATE.brain = prevBrain;
+        STATE.loadedModel = prevLoaded;
+        toast('Eject failed', e.message, 'err');
+      }
       finally {
+        STATE.brain.busy = false;
         setState('idle');
+        applyBrainState();
         // Await both refreshes so the dropdown rebuilds with the actual
         // server state before any subsequent user click can fire.
         await refreshModels();
@@ -5026,21 +5178,50 @@ function providerFromEndpoint(url) {
 async function refreshState() {
   try {
     const s = await api('/api/state');
-    $('st-model').textContent = s.model ? s.model.id.split(/[\/\\]/).pop() : '-';
-    // Honest brain label from the LIVE endpoint (not the stale saved setting).
+    // Live endpoint is the source of truth for local-vs-cloud + the brand label.
     STATE.endpoint = s.endpoint || '';
-    const _pf = providerFromEndpoint(s.endpoint || '');
-    const _bsub = document.getElementById('brand-sub');
-    if (_bsub) _bsub.textContent = '· ' + _pf.label;
-    // Only set ctx from a LOADED LOCAL model here. On cloud there's no
-    // loaded_context_length, so resetting to '-' would fight refreshCtxBudget
-    // (which sets the real cloud window) - that ping-pong was the flicker.
-    if (s.model && s.model.loaded_context_length) {
-      $('st-ctx').textContent = `${(s.model.loaded_context_length / 1024).toFixed(0)}K`;
+    const kind = deriveBrainKind();
+
+    // Don't clobber the brain while a load/eject/swap is mid-flight — the
+    // handler owns the truth then and the 9s poll would flash a stale value.
+    if (!STATE.brain.busy) {
+      STATE.brain.kind = kind.kind;
+      STATE.brain.providerKey = kind.providerKey;
+      STATE.brain.providerLabel = kind.providerLabel;
+
+      if (kind.kind === 'cloud') {
+        // Cloud: the user's picked model id is authoritative (the server's
+        // /api/state model row reflects whatever the provider lists first).
+        const picked = (STATE.settings && STATE.settings.llm_model) || (s.model && s.model.id) || '';
+        STATE.brain.modelId = picked;
+        STATE.brain.modelName = picked ? picked.split(/[\/\\]/).pop() : '-';
+        STATE.brain.loaded = !!picked;
+        // ctxTotal for cloud comes from /api/context-budget (resolve_context_tokens) —
+        // refreshCtxBudget() fills it; leave whatever it set (don't zero it here).
+      } else {
+        const m = s.model || null;
+        STATE.brain.modelId = m ? m.id : '';
+        STATE.brain.modelName = m ? m.id.split(/[\/\\]/).pop() : '-';
+        STATE.brain.loaded = !!m;
+        // Local loaded models report their real loaded context — that is the truth.
+        if (m && m.loaded_context_length) {
+          STATE.brain.ctxTotal = m.loaded_context_length;
+          STATE.brain.ctxSource = 'loaded model';
+        } else if (!m) {
+          STATE.brain.ctxTotal = 0;
+          STATE.brain.ctxEffective = 0;
+        }
+      }
+      // Mirror into the legacy STATE.loadedModel so the rest of the code (chat
+      // path, swap guards) that still reads it stays consistent.
+      STATE.loadedModel = STATE.brain.loaded
+        ? { id: STATE.brain.modelId, state: 'loaded', loaded_context_length: STATE.brain.ctxTotal || undefined }
+        : null;
     }
+
     $('st-tools').textContent = s.tools ?? '-';
-    $('st-mem').textContent = s.memories ?? '-';
-    $('nav-mem-count').textContent = s.memories ?? '';
+    if (typeof s.memories === 'number') STATE.memCount = s.memories;
+    applyBrainState();
   } catch {}
 }
 function setState(label) {
@@ -5057,31 +5238,11 @@ function setState(label) {
     ds.classList.toggle('wave', wantWave);
   }
 }
+// Back-compat shim: every old caller of updateStatus() now just repaints from
+// the single source of truth. The model/ctx derivation lives in refreshState +
+// refreshCtxBudget; this only re-renders.
 function updateStatus() {
-  if (STATE.loadedModel) {
-    $('st-model').textContent = STATE.loadedModel.id.split(/[\/\\]/).pop();
-  }
-  // ctx pill - check the model's reported context FIRST, then fall back
-  // to /api/context-budget. The bug before: cloud brains set
-  // STATE.loadedModel without any *_context_length field, and the
-  // _ctxBudget fallback only ran when loadedModel was null - so the
-  // pill stayed blank. Now both code paths are evaluated.
-  let ctx = 0;
-  if (STATE.loadedModel) {
-    ctx = STATE.loadedModel.loaded_context_length
-       || STATE.loadedModel.max_context_length
-       || 0;
-  }
-  if (!ctx && STATE._ctxBudget && STATE._ctxBudget.total) {
-    ctx = STATE._ctxBudget.total;
-  }
-  if (ctx) {
-    $('st-ctx').textContent = (ctx >= 1024)
-      ? `${(ctx/1024).toFixed(0)}K`
-      : `${ctx}`;
-  } else if (!STATE.loadedModel) {
-    $('st-ctx').textContent = '-';
-  }
+  applyBrainState();
 }
 
 // Fetch the current brain's context window so the ring + bottom bar update
@@ -5091,20 +5252,21 @@ async function refreshCtxBudget() {
   try {
     const b = await api('/api/context-budget');
     if (!b || !b.total) return;
+    // Keep the legacy stash for the chat-event tooltip path.
     STATE._ctxBudget = {
       total: b.total, tools: b.tools,
       effective: b.effective, source: b.source,
     };
-    updateStatus();  // re-render bottom bar with the new ctx
-    // Update the tooltip on the ring so users get the why even without
-    // sending a message yet. The percentage stays at whatever last fired
-    // (no chat = 0%, hidden anyway since shouldShow is gated at >=70%).
-    const wrap = document.getElementById('ctx-ring-wrap');
-    if (wrap) {
-      const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
-      wrap.title = `model context: ${fmt(b.total)} total = ${fmt(b.effective)} effective + ${fmt(b.tools)} tool schemas\n` +
-                   `source: ${b.source}`;
-    }
+    // Feed the single source of truth. For a LOCAL loaded model the real
+    // loaded_context_length (set by refreshState) is the truth — don't let
+    // the resolver's default override it. For cloud (no loaded local ctx),
+    // the budget endpoint IS the truth (e.g. grok-4.3 = ~1M).
+    const localLoadedCtx = (STATE.brain.kind === 'local' && STATE.brain.loaded) ? STATE.brain.ctxTotal : 0;
+    STATE.brain.ctxTotal = localLoadedCtx || b.total;
+    STATE.brain.ctxEffective = b.effective;
+    STATE.brain.ctxTools = b.tools;
+    STATE.brain.ctxSource = localLoadedCtx ? (STATE.brain.ctxSource || 'loaded model') : b.source;
+    applyBrainState();  // repaint ctx pill + ring tooltip from one place
   } catch {}
 }
 
@@ -5770,12 +5932,20 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'context_budget') {
-      // Stash for tooltip context - shows users where the budget came from
-      // (env override, endpoint probe, default 32K, per-provider 200K, etc).
+      // This is the MOST authoritative ctx source: the budget the chat path
+      // actually resolved for THIS turn. Feed the single source of truth so
+      // the bottom-bar ctx pill + ring tooltip match what the model really used.
       STATE._ctxBudget = {
         total: ev.context_tokens, tools: ev.tool_tokens,
         effective: ev.effective_budget, source: ev.source,
       };
+      if (ev.context_tokens) {
+        STATE.brain.ctxTotal = ev.context_tokens;
+        STATE.brain.ctxEffective = ev.effective_budget;
+        STATE.brain.ctxTools = ev.tool_tokens;
+        STATE.brain.ctxSource = ev.source;
+        applyBrainState();
+      }
       return;
     }
     if (ev.type === 'context_state') {
@@ -6262,6 +6432,9 @@ async function refreshMemory() {
   try {
     const { memories } = await api('/api/memory');
     memCache = memories;
+    // This is the authoritative memory list — keep the count badges in sync
+    // immediately (delete/import call this), not just on the next /api/state poll.
+    setMemCount(Array.isArray(memories) ? memories.length : STATE.memCount);
     // Render the active view (graph is default). Earlier this only ever
     // called renderMem() which only renders the LIST pane; switching to
     // the tree/graph tab then required a click to populate the data.
@@ -7495,7 +7668,16 @@ async function refreshSettings() {
         if (!llmMdl.value && p.sample) llmMdl.placeholder = 'e.g. ' + p.sample;
       }
       applyMode(prov);
-      brainMode.onchange = (e) => applyMode(e.target.value);
+      brainMode.onchange = (e) => {
+        const v = e.target.value;
+        // A user-initiated provider switch resets the endpoint to that
+        // provider's default, so a previous provider's URL (e.g. a cloud URL
+        // left over from Grok) never carries into the new mode. Custom keeps
+        // whatever the user typed. (applyMode on first LOAD must NOT do this -
+        // it would clobber a saved custom-local URL like Ollama on :11434.)
+        if (v !== 'custom') llmUrl.value = (PRESETS[v] || PRESETS.local).url;
+        applyMode(v);
+      };
 
       llmApply.onclick = async () => {
         const body = {
@@ -7539,6 +7721,8 @@ async function refreshSettings() {
                 toast('Switched to local · LM Studio', 'Detected LM Studio on ' + body.url + ' - preferred over built-in', 'ok', 5000);
               } else if (r.local_probe.kind === 'builtin') {
                 toast('Switched to local · built-in', 'Connected to Hearth\'s built-in server', 'ok', 4000);
+              } else if (r.local_probe.kind === 'remote') {
+                toast('That URL is not local', body.url + ' is a remote/cloud endpoint, not a local server. Pick the matching cloud provider above, or set a localhost URL.', 'warn', 9000);
               } else {
                 toast('Switched to local · nothing serving', 'Nothing on ' + body.url + '. Start LM Studio or boot a model in the Models tab.', 'warn', 8000);
               }
@@ -7552,12 +7736,30 @@ async function refreshSettings() {
             // repopulates with the real local model, or stays empty if none.
             STATE.settings = Object.assign({}, STATE.settings || {},
               { llm_provider: body.provider, llm_url: body.url, llm_model: body.model });
-            if (body.provider === 'local') {
-              STATE.loadedModel = null;
-              const _ms = document.getElementById('model-select'); if (_ms) _ms.value = '';
-              const _st = document.getElementById('st-model'); if (_st) _st.textContent = '-';
-            }
-            refreshModels(); refreshState();
+            // Endpoint just changed — keep STATE.endpoint in step so deriveBrainKind
+            // reads the new provider immediately (don't wait for the refreshState poll).
+            STATE.endpoint = body.url || STATE.endpoint;
+            // Reset the brain to a clean slate for the new provider so a stale
+            // model (e.g. cloud grok-4.3) can never linger after switching.
+            // refreshState/refreshModels below repopulate the real active model.
+            STATE.brain.busy = false;
+            STATE.brain.loaded = false;
+            STATE.brain.modelId = body.model || '';
+            STATE.brain.modelName = body.model ? body.model.split(/[\/\\]/).pop() : '-';
+            STATE.brain.ctxTotal = 0;
+            STATE.brain.ctxEffective = 0;
+            STATE.loadedModel = null;
+            const _k = deriveBrainKind();
+            STATE.brain.kind = _k.kind;
+            STATE.brain.providerKey = _k.providerKey;
+            STATE.brain.providerLabel = _k.providerLabel;
+            // For cloud, the picked model IS the active one.
+            if (_k.kind === 'cloud' && body.model) { STATE.brain.loaded = true; STATE.loadedModel = { id: body.model, state: 'loaded' }; }
+            // Reset the ring so the previous brain's % doesn't carry over.
+            const _rw = document.getElementById('ctx-ring-wrap');
+            if (_rw) { _rw.hidden = true; _rw.classList.remove('hot','warn','compacting'); }
+            applyBrainState();
+            refreshModels(); refreshState(); refreshCtxBudget().catch(() => {});
             // Refresh brand-sub label so the "Hearth · local" / "· Grok"
             // header updates immediately without waiting for next settings poll.
             refreshSettings().catch(() => {});
@@ -9517,10 +9719,17 @@ function modelsWireRowClicks(pane) {
         // landed. Clearing forces refreshModelsView to do a single fresh
         // paint with the post-stop state.
         _modelsState.status = null;
+        // Stopping the local server means no model is active. Clear the single
+        // source of truth + ring so the sticker/ctx/ring all reset together.
         STATE.loadedModel = null;
-        $('st-model').textContent = '-';
-        $('st-ctx').textContent = '-';
-        $('model-state').classList.remove('loaded');
+        STATE.brain.loaded = false;
+        STATE.brain.modelId = '';
+        STATE.brain.modelName = '-';
+        STATE.brain.ctxTotal = 0;
+        STATE.brain.ctxEffective = 0;
+        applyBrainState();
+        const _rw = document.getElementById('ctx-ring-wrap');
+        if (_rw) { _rw.hidden = true; _rw.classList.remove('hot','warn','compacting'); }
         refreshModels(); refreshState();
         await refreshModelsView();
       } catch (err) { toast('Stop failed', err.message, 'err'); }
@@ -9846,29 +10055,72 @@ document.querySelectorAll('.models-tab').forEach(t => {
       } catch (e) { toast('Rescan failed', e.message, 'err'); }
     });
   }
-  // Download button - jump to Discover tab so user can pick a repo. The
-  // badge dot only appears when there's an ACTIVE download in flight
-  // (the models-dl progress-row is visible) - never a constant decoration.
+  // Download button - toggle the downloads overlay (active HF downloads with
+  // %/speed/ETA). It does NOT jump to Discover anymore; the overlay carries a
+  // "Browse Hugging Face" button for that, so the icon means "downloads".
   const dlBtn = $('btn-models-download');
   if (dlBtn) {
-    dlBtn.addEventListener('click', () => {
-      document.querySelectorAll('.models-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === 'discover'));
-      document.querySelectorAll('.models-pane').forEach(p => { p.hidden = (p.dataset.pane !== 'discover'); });
-      _modelsState.tab = 'discover';
-      modelsRenderDiscover();
-      const _inp = $('models-search');
-      if (_inp) _inp.focus();
-    });
-    // Sync the badge dot to the actual download-in-progress signal.
-    // Polls every 2s - cheap, and the only DOM read is `.hidden`.
-    setInterval(() => {
-      const badge = $('btn-models-download-badge');
-      const dlRow = $('models-dl');
-      if (!badge || !dlRow) return;
-      const active = !dlRow.hidden;
-      badge.hidden = !active;
-    }, 2000);
+    dlBtn.addEventListener('click', (e) => { e.stopPropagation(); dlToggle(); });
   }
+}
+
+// ---- Downloads overlay: active Hugging Face downloads (%, speed, ETA) ----
+const _dls = {};   // id -> {name, pct, done, total, speed, eta, status}
+let _dlOpen = false;
+function _fmtGB(b) { return ((b || 0) / 1e9).toFixed(2) + ' GB'; }
+function _fmtSpeed(bps) { if (!bps || bps <= 0) return '--'; return bps > 1e6 ? (bps / 1e6).toFixed(1) + ' MB/s' : (bps / 1e3).toFixed(0) + ' KB/s'; }
+function _fmtETA(s) { if (!isFinite(s) || s <= 0) return '--'; s = Math.round(s); const m = Math.floor(s / 60), ss = s % 60; return m ? m + 'm ' + ss + 's' : ss + 's'; }
+function dlActiveCount() { return Object.values(_dls).filter(d => d.status === 'downloading').length; }
+function dlSyncBadge() { const b = $('btn-models-download-badge'); if (b) b.hidden = dlActiveCount() === 0; }
+function dlUpsert(id, patch) {
+  const d = _dls[id] || (_dls[id] = { name: id, status: 'downloading', pct: 0 });
+  Object.assign(d, patch);
+  dlSyncBadge();
+  if (_dlOpen) dlRender();
+}
+function dlToggle(force) {
+  _dlOpen = (force === undefined) ? !_dlOpen : force;
+  let ov = $('downloads-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'downloads-overlay';
+    ov.style.cssText = 'position:fixed;top:112px;right:34px;width:368px;max-height:64vh;overflow:auto;background:var(--bg-1);border:1px solid var(--border);border-radius:12px;box-shadow:0 26px 64px rgba(0,0,0,0.62);padding:14px 16px;z-index:9999;display:none;';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', (e) => {
+      if (e.target.dataset && e.target.dataset.act === 'discover') {
+        dlToggle(false);
+        document.querySelectorAll('.models-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === 'discover'));
+        document.querySelectorAll('.models-pane').forEach(p => { p.hidden = (p.dataset.pane !== 'discover'); });
+        _modelsState.tab = 'discover'; modelsRenderDiscover();
+      }
+    });
+    // click-away closes
+    document.addEventListener('click', (e) => {
+      if (!_dlOpen) return;
+      if (e.target.closest('#downloads-overlay') || e.target.closest('#btn-models-download')) return;
+      dlToggle(false);
+    });
+  }
+  ov.style.display = _dlOpen ? 'block' : 'none';
+  if (_dlOpen) dlRender();
+}
+function dlRender() {
+  const ov = $('downloads-overlay'); if (!ov) return;
+  const list = Object.entries(_dls);
+  const rows = list.length ? list.map(([id, d]) => {
+    const pctTxt = d.status === 'done' ? '✓ done' : d.status === 'error' ? 'failed' : d.pct + '%';
+    const barCol = d.status === 'error' ? '#ff5c5c' : 'linear-gradient(90deg, var(--accent), #a78bfa)';
+    const meta = d.total ? (_fmtGB(d.done) + ' / ' + _fmtGB(d.total) + (d.status === 'downloading' ? '  ·  ' + _fmtSpeed(d.speed) + '  ·  ETA ' + _fmtETA(d.eta) : '')) : '';
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:6px">
+        <span style="color:var(--fg);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span>
+        <span style="color:${d.status === 'done' ? 'var(--ok,#7dd3a8)' : 'var(--fg-dim)'};flex-shrink:0">${pctTxt}</span>
+      </div>
+      <div style="height:7px;background:var(--bg-0);border-radius:4px;overflow:hidden;border:1px solid var(--border)"><div style="height:100%;width:${d.pct}%;background:${barCol};border-radius:4px"></div></div>
+      <div style="font-size:11.5px;color:var(--fg-faint,#5a5a66);margin-top:5px;font-family:var(--mono)">${meta}</div>
+    </div>`;
+  }).join('') : '<div style="color:var(--fg-dim);font-size:13px;padding:6px 0 14px">No downloads yet.</div>';
+  ov.innerHTML = `<div style="font-weight:700;font-size:15px;color:var(--fg);margin-bottom:12px">Downloads</div>${rows}<button data-act="discover" style="width:100%;padding:9px 0;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">Browse Hugging Face &rarr;</button>`;
 }
 
 async function modelsHFSearch(query) {
@@ -9926,7 +10178,7 @@ async function modelsLoadHFFiles(repo, idx) {
 
 async function modelsDownloadPick(pickId, loadCfg) {
   const dl = $('models-dl');
-  dl.hidden = false;
+  dlToggle(true);  // progress shows in the downloads overlay, not the model list
   const bar = $('models-dl-bar'), label = $('models-dl-label'), detail = $('models-dl-detail');
   bar.style.width = '0%';
   label.textContent = 'Connecting to Hugging Face...';
@@ -9945,7 +10197,7 @@ async function modelsDownloadPick(pickId, loadCfg) {
 
 async function modelsDownloadHF(repo, filename, loadCfg) {
   const dl = $('models-dl');
-  dl.hidden = false;
+  dlToggle(true);  // progress shows in the downloads overlay, not the model list
   const bar = $('models-dl-bar'), label = $('models-dl-label'), detail = $('models-dl-detail');
   bar.style.width = '0%';
   label.textContent = 'Downloading ' + filename + '...';
@@ -9963,10 +10215,13 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
 }
 
 async function streamDownload(res, bar, label, detail, filenameHint) {
+  const id = filenameHint || ('download-' + Date.now());
+  dlUpsert(id, { name: filenameHint || 'Downloading', status: 'downloading', pct: 0 });
   const reader = res.body.getReader();
   const dec = new TextDecoder('utf-8');
   let buf = '';
   let modelPath = null;
+  let lastT = performance.now(), lastB = 0;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -9979,13 +10234,20 @@ async function streamDownload(res, bar, label, detail, filenameHint) {
       let ev; try { ev = JSON.parse(line); } catch { continue; }
       if (ev.type === 'progress') {
         const pct = ev.total ? Math.min(100, Math.floor(100 * ev.done / ev.total)) : 0;
-        bar.style.width = pct + '%';
-        label.textContent = (filenameHint || 'Downloading') + ' - ' + pct + '%';
-        detail.textContent = (ev.done / 1e9).toFixed(2) + ' GB of ' + (ev.total / 1e9).toFixed(2) + ' GB';
+        // speed + ETA computed from byte deltas over wall-clock (backend sends bytes only)
+        const now = performance.now(), dt = (now - lastT) / 1000;
+        const cur = _dls[id] || {};
+        let speed = cur.speed || 0, eta = cur.eta || 0;
+        if (dt >= 0.5) { speed = (ev.done - lastB) / dt; eta = (ev.total && speed > 0) ? (ev.total - ev.done) / speed : 0; lastT = now; lastB = ev.done; }
+        dlUpsert(id, { pct, done: ev.done, total: ev.total, speed, eta, status: 'downloading' });
+        if (bar) bar.style.width = pct + '%';
+        if (label) label.textContent = (filenameHint || 'Downloading') + ' - ' + pct + '%';
+        if (detail) detail.textContent = _fmtGB(ev.done) + ' of ' + _fmtGB(ev.total);
       } else if (ev.type === 'done') {
-        if (!ev.ok) { label.textContent = 'Download failed'; detail.textContent = ev.error || ''; return null; }
+        if (!ev.ok) { dlUpsert(id, { status: 'error' }); if (label) label.textContent = 'Download failed'; if (detail) detail.textContent = ev.error || ''; return null; }
         modelPath = ev.path;
-        bar.style.width = '100%';
+        dlUpsert(id, { pct: 100, status: 'done' });
+        if (bar) bar.style.width = '100%';
       }
     }
   }
@@ -10809,6 +11071,9 @@ async function pollAnnouncements() {
   // the user was on Grok.
   await refreshSettings();
   await Promise.all([refreshModels(), refreshState(), refreshGpu()]);
+  // Pull the real context window now so the bottom-bar ctx pill + ring tooltip
+  // are correct on first paint (don't wait for the first chat turn).
+  refreshCtxBudget().catch(() => {});
 
   // If a builtin autoboot is already in flight when the GUI opens, kick the
   // sticker progress bar so the user sees it instead of an empty pill.
