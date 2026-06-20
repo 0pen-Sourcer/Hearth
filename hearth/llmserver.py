@@ -469,6 +469,42 @@ def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
     return out
 
 
+def _download_with_resume(url, dest, tmp,
+                          on_progress: Optional[Callable[[int, int], None]] = None,
+                          ua: str = "Hearth/0.7 (HF-download)") -> int:
+    """Stream `url` into `tmp`, RESUMING from an existing .part via an HTTP Range
+    request so a closed/interrupted download continues instead of restarting
+    from zero (matters a lot on slow/metered links). Atomic rename to `dest` on
+    completion. The caller LEAVES the .part on failure so the next attempt
+    resumes. Returns total bytes written."""
+    resume_from = tmp.stat().st_size if tmp.exists() else 0
+    headers = {"User-Agent": ua}
+    if resume_from:
+        headers["Range"] = f"bytes={resume_from}-"
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        status = getattr(r, "status", 200) or 200
+        clen = int(r.headers.get("Content-Length") or 0)
+        if resume_from and status == 206:          # server honored the range
+            total, mode, done = resume_from + clen, "ab", resume_from
+        else:                                       # 200 / no range -> clean restart
+            total, mode, done = clen, "wb", 0
+        with open(tmp, mode) as f:
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                if on_progress:
+                    try:
+                        on_progress(done, total)
+                    except Exception:
+                        pass
+    tmp.rename(dest)
+    return done
+
+
 def download_model(pick_id: str,
                    on_progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
     """Download a curated pick from Hugging Face into ~/Jarvis/models/.
@@ -512,30 +548,10 @@ def download_model(pick_id: str,
 
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.5 (HF-download)"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            total = int(r.headers.get("Content-Length") or 0)
-            done = 0
-            with open(tmp, "wb") as f:
-                while True:
-                    chunk = r.read(256 * 1024)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    done += len(chunk)
-                    if on_progress:
-                        try:
-                            on_progress(done, total)
-                        except Exception:
-                            pass
-        tmp.rename(dest)
+        done = _download_with_resume(url, dest, tmp, on_progress)
         return {"ok": True, "path": str(dest), "bytes": done}
     except Exception as e:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
+        # Keep the .part so the next attempt RESUMES instead of restarting.
         return {"ok": False, "error": f"download failed: {type(e).__name__}: {e}"}
 
 
@@ -1280,30 +1296,10 @@ def download_from_hf_repo(repo: str, filename: str,
     url = f"https://huggingface.co/{repo}/resolve/main/{filename}"
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7 (HF-download)"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            total = int(r.headers.get("Content-Length") or 0)
-            done = 0
-            with open(tmp, "wb") as f:
-                while True:
-                    chunk = r.read(256 * 1024)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    done += len(chunk)
-                    if on_progress:
-                        try:
-                            on_progress(done, total)
-                        except Exception:
-                            pass
-        tmp.rename(dest)
+        done = _download_with_resume(url, dest, tmp, on_progress)
         return {"ok": True, "path": str(dest), "bytes": done}
     except Exception as e:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
+        # Keep the .part so the next attempt RESUMES instead of restarting.
         return {"ok": False, "error": f"download failed: {type(e).__name__}: {e}"}
 
 
