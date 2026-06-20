@@ -6145,7 +6145,19 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
             return f"Error ({name}): {type(e).__name__}: {e}"
     handler = _HANDLERS.get(name)
     if not handler:
-        return f"Error: unknown tool '{name}'. Known: {', '.join(sorted(_HANDLERS))}"
+        # Weak local models mangle tool names or reach for a tool they can't
+        # see, then spiral into run_command python-import hacks. Recover them:
+        # fuzzy-suggest the real name + tell them to call it directly / use
+        # load_tools — never dump 90+ names (that just floods a small ctx).
+        import difflib
+        near = difflib.get_close_matches(name, list(_HANDLERS), n=3, cutoff=0.55)
+        if near:
+            return (f"Error: there is no tool named '{name}'. Did you mean: "
+                    f"{', '.join(near)}? Call the correct tool DIRECTLY by name — "
+                    f"do NOT try to import or run a tool via run_command.")
+        return (f"Error: there is no tool named '{name}'. Do NOT invent tools or "
+                f"import them with run_command. If you need a capability you don't "
+                f"see, call load_tools(\"<what you need>\") to discover it, then use it.")
     _log_activity("call", tool=name, args=args)
     t0 = datetime.now()
     try:
@@ -6205,16 +6217,13 @@ _DEFERRED_TOOLS = {
     "network_info", "disk_usage", "list_installed_apps", "learn_environment",
     "list_models",
     # reminders niche (set/list/cancel stay core)
-    "snooze_reminder", "study_reminder",
+    "snooze_reminder",
     # voice selection (the UI handles voice; rare as a tool call)
     "set_voice", "list_voices",
     # browser niche (browse/click/type/scroll stay core)
     "browse_key", "browse_close",
     # duplicate job controls (start_job/list_jobs/get_job_result stay core)
     "job_kill", "job_list", "job_status", "job_wait",
-    # single-purpose utilities / demos
-    "color_hex2rgb", "text_encoder_tool", "entity_graph_extractor",
-    "website_status_tool", "tic_tac_toe",
     # email (opt-in, needs an app password) — surfaces via load_tools when the
     # user mentions email, so it never clutters the default tool list
     "read_inbox", "send_email",
@@ -6249,6 +6258,11 @@ _LOAD_TOOLS_SCHEMA = {
 
 def _tool_active(name: str) -> bool:
     if not _TOOL_DIET:
+        return True
+    # A user's OWN plugins are always active — they authored them on purpose, so
+    # hiding them behind load_tools just makes the model flail (it tries to
+    # run_command-import a tool it can't see). Only niche BUILT-INS get deferred.
+    if name in _loaded_plugins:
         return True
     return (name not in _DEFERRED_TOOLS) or (name in _unlocked_tools)
 
