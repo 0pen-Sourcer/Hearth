@@ -442,6 +442,18 @@ def _http_post_json(url: str, body: Dict, timeout: float = 30,
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _active_base() -> str:
+    """The endpoint the chat is ACTUALLY routed to right now.
+
+    Single source of truth for "where do requests go". Mirrors the live
+    module global (updated atomically by every brain-switch / start / stop /
+    eject path) and falls back to the env var, then the LM Studio default.
+    Used to decide local-vs-cloud behavior consistently across /chat,
+    _load_model, _eject_model, and /api/state so they never disagree."""
+    return (LOCAL_API_BASE or os.getenv("LOCAL_API_BASE")
+            or "http://localhost:1234/v1")
+
+
 def _models_probe_endpoint() -> str:
     """Where should the chat-model dropdown look?
 
@@ -705,7 +717,8 @@ def _eject_model() -> Dict:
     # doesn't exist for llama_cpp.server.
     builtin_url = (llmserver._proc_info or {}).get("url") if llmserver._proc is not None else None
     if builtin_url and llmserver._proc.poll() is None and LOCAL_API_BASE == builtin_url:
-        result = llmserver.stop_builtin()
+        result = llmserver.stop_builtin()  # already invalidates the status cache
+        _models_cache["ts"] = 0
         _models_cache["data"] = None
         # Revert endpoint back to the user's configured default so the next
         # message doesn't hit a dead URL.
@@ -716,6 +729,17 @@ def _eject_model() -> Dict:
         LOCAL_API_BASE = new_base
         _hl.LOCAL_API_BASE = new_base
         os.environ["LOCAL_API_BASE"] = new_base
+        # Eject means "stop AND stop wanting this": clear preferred_model so
+        # the next launch's autoboot doesn't silently re-load what the user
+        # just ejected. (Mirrors /api/llmserver/stop.) Without this, the
+        # builtin would resurrect itself on the next start and /api/state
+        # would re-report a model the user thought they killed.
+        try:
+            if settings.get("preferred_model"):
+                settings["preferred_model"] = ""
+                _save_settings(settings)
+        except Exception:
+            pass
         return {"ok": bool(result.get("ok")), "via": "builtin-stop",
                 "freed_vram": True, **result}
 
@@ -725,7 +749,12 @@ def _eject_model() -> Dict:
     mid = loaded["id"]
     r = _http_post_json(f"{LM_STUDIO_V0}/models/unload", {"model": mid}, timeout=60)
     if r and not r.get("error"):
+        _models_cache["ts"] = 0
         _models_cache["data"] = None
+        # LM Studio eject doesn't flip our builtin flag, so the status cache
+        # key is unchanged — invalidate explicitly or the Models tab keeps
+        # showing the ejected model as "loaded" for up to the 8s TTL.
+        llmserver.invalidate_status_cache()
         return {"ok": True, "via": "rest"}
     lms = _find_lms_cli()
     if not lms:
@@ -734,7 +763,9 @@ def _eject_model() -> Dict:
         proc = subprocess.run([lms, "unload", "--all"],
                               capture_output=True, text=True, timeout=60,
                               creationflags=_NO_WINDOW)
+        _models_cache["ts"] = 0
         _models_cache["data"] = None
+        llmserver.invalidate_status_cache()
         return {"ok": proc.returncode == 0, "via": "lms-cli",
                 "stdout": proc.stdout.strip(), "stderr": proc.stderr.strip()}
     except Exception as e:
@@ -1864,6 +1895,26 @@ class HearthHandler(BaseHTTPRequestHandler):
             provider = (body.get("provider") or "").strip()
             if not url:
                 return self._send_json(400, {"ok": False, "error": "url required"})
+            # Reconcile provider with the URL. A cloud URL must carry its cloud
+            # provider - never "local". Otherwise the saved state drifts into
+            # provider=local + url=api.x.ai, which makes Hearth treat a cloud
+            # endpoint as a local server (chats silently hit the cloud, the
+            # eject button shows for a "loaded" cloud model, etc.).
+            def _provider_from_url(u: str) -> str:
+                u = (u or "").lower()
+                if not u or "localhost" in u or "127.0.0.1" in u or "0.0.0.0" in u:
+                    return "local"
+                if "api.x.ai" in u: return "grok"
+                if "generativelanguage.googleapis" in u: return "gemini"
+                if "api.openai.com" in u: return "openai"
+                if "openrouter.ai" in u: return "openrouter"
+                return ""  # unknown host: leave provider as the caller set it
+            _detected = _provider_from_url(url)
+            if _detected == "local" and provider and provider != "local":
+                # a local URL with a cloud provider label is also inconsistent
+                provider = "local"
+            elif _detected and _detected != "local" and (not provider or provider == "local"):
+                provider = _detected
             LOCAL_API_BASE = url
             _hl.LOCAL_API_BASE = url
             if key:
@@ -1940,6 +1991,15 @@ class HearthHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             _models_cache["ts"] = 0  # force the next /api/models to repopulate
+            # Bust the llmserver status cache too — a brain switch changes the
+            # authoritative active endpoint/provider, and we want the very next
+            # /api/llmserver/status + /api/state poll to reflect it instead of
+            # serving a snapshot from before the switch (up to 8s stale).
+            try:
+                from . import llmserver as _ls_inval
+                _ls_inval.invalidate_status_cache()
+            except Exception:
+                pass
             # For local: probe the URL so the apply doesn't silently succeed
             # when nothing's listening. Empty chat responses on first send
             # had no surface explanation otherwise. Three outcomes:
@@ -1950,7 +2010,21 @@ class HearthHandler(BaseHTTPRequestHandler):
             if (provider or "").lower() == "local":
                 try:
                     from . import llmserver as _ls
-                    if _ls.external_server_running(url, timeout=1.0, api_key=key or None):
+                    import urllib.parse as _up
+                    _host = (_up.urlparse(url).hostname or "").lower()
+                    _is_localhost = (
+                        _host in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+                        or _host.startswith("192.168.")
+                        or _host.startswith("10.")
+                        or _host.endswith(".local")
+                    )
+                    if not _is_localhost:
+                        # provider=local but the URL points at a public host
+                        # (e.g. a cloud URL left over from a previous provider).
+                        # It may well answer /v1/models, but it is NOT a local
+                        # server - never call it LM Studio.
+                        local_probe = {"reachable": True, "kind": "remote"}
+                    elif _ls.external_server_running(url, timeout=1.0, api_key=key or None):
                         # Distinguish LM Studio from our own builtin — the
                         # builtin is recognizable via the PID we track.
                         is_ours = (_ls._proc is not None and _ls._proc.poll() is None
@@ -2035,6 +2109,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 _models_cache["ts"] = 0  # force /api/models to repopulate
+                llmserver.invalidate_status_cache()  # instant-fresh status/state
                 # Sticky default: remember the model the user just picked so
                 # the NEXT launch auto-boots it (see _auto_boot_preferred_model_async).
                 # Setting persists in ~/Jarvis/settings.json as preferred_model.
@@ -2149,9 +2224,46 @@ class HearthHandler(BaseHTTPRequestHandler):
 
     def _send_state(self) -> None:
         loaded = _detect_loaded()
+        # ONE coherent truth about the active brain. endpoint/provider/context
+        # are all derived from the SAME live state the chat path uses, so the
+        # frontend never sees /api/state disagree with /api/models or
+        # /api/llmserver/status.
+        endpoint = _active_base()
+        settings = _load_settings()
+        provider = (settings.get("llm_provider") or "").strip().lower() or "local"
+        # Active context window for the ring. Priority:
+        #   1) builtin's REAL launched n_ctx (authoritative — it's what the
+        #      server was actually started with, set in _proc_info by
+        #      start_builtin), so the ring matches the running server even if
+        #      the saved server_default_ctx differs.
+        #   2) resolve_context_tokens() — LM Studio loaded_context_length or
+        #      the cloud model's window (same helper /api/context-budget uses,
+        #      so the two endpoints agree).
+        context_window = None
+        context_source = None
+        try:
+            from . import llmserver as _ls
+            if (_ls._proc is not None and _ls._proc.poll() is None
+                    and (_ls._proc_info or {}).get("url") == endpoint):
+                context_window = (_ls._proc_info or {}).get("ctx")
+                context_source = "builtin-n_ctx"
+        except Exception:
+            pass
+        if not context_window:
+            try:
+                from . import headless as _hl
+                model_id = (loaded or {}).get("id") or (settings.get("llm_model") or "")
+                context_window, context_source = _hl.resolve_context_tokens(model_id)
+            except Exception:
+                context_window, context_source = None, None
         self._send_json(200, {
             "model": loaded,
-            "endpoint": LOCAL_API_BASE,
+            "endpoint": endpoint,
+            "provider": provider,
+            # Active context window so the GUI ring is accurate the instant a
+            # brain/model swap lands — no waiting for the next chat turn's SSE.
+            "context": context_window,
+            "context_source": context_source,
             "tools": len(TOOL_DEFINITIONS),
             "memories": len(_memory_index()),
             "workspace": WORKSPACE,
@@ -3113,7 +3225,7 @@ def _auto_boot_preferred_model_async() -> None:
             # for models without a saved cfg. User clarified: floor logic
             # was wrong because it ignored per-model VRAM realities.
             if "ctx" not in cfg:
-                cfg["ctx"] = int(s.get("server_default_ctx", 24576))
+                cfg["ctx"] = int(settings.get("server_default_ctx", 24576))
             print(f"  [hearth.web] auto-booting {pick['filename']} "
                   f"({pick.get('size_gb','?')} GB, ctx={cfg.get('ctx')})…", flush=True)
             r = llmserver.start_builtin(pick["path"], **cfg)
