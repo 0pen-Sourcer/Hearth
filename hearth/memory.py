@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from .tools import WORKSPACE
@@ -42,6 +42,12 @@ _SUBCAT_CHAR_CAP = int(os.environ.get("JARVIS_MEM_SUBCAT_CAP", "6000"))
 # promotes back into the hot store. Three hits = "user keeps coming back
 # to this topic, stop hiding it".
 _PROMOTE_THRESHOLD = 3
+# Temporal decay: facts the extractor flags as time-sensitive get an
+# `expires_at`. After it passes they auto-archive (unless still being recalled
+# — see expire_stale). "in class 12" is seasonal, "left earbud died" transient,
+# name/birthday/hardware are durable (no expiry). Tuneable via env.
+_SEASONAL_DAYS = int(os.environ.get("JARVIS_MEM_SEASONAL_DAYS", "300"))
+_TRANSIENT_DAYS = int(os.environ.get("JARVIS_MEM_TRANSIENT_DAYS", "21"))
 INDEX_PATH = os.path.join(MEM_DIR, "MEMORY.md")
 RULES_PATH = os.path.join(WORKSPACE, "rules.md")
 
@@ -246,7 +252,9 @@ def find_similar_titles(new_title: str, min_shared: int = 1,
 def save(title: str, mtype: str, description: str, body: str = "",
          tags: Optional[List[str]] = None,
          sub_category: Optional[str] = None,
-         force: bool = False) -> str:
+         force: bool = False,
+         volatility: str = "durable",
+         supersedes: Optional[str] = None) -> str:
     """Write a memory file + add/update the index entry.
 
     The optional sub_category groups facts within a type for the v0.6 memory
@@ -317,6 +325,16 @@ def save(title: str, mtype: str, description: str, body: str = "",
         front.append(f"sub_category: {sub_category}")
     if tags:
         front.append(f"tags: [{', '.join(tags)}]")
+    # Temporal decay: time-sensitive facts carry an expires_at so expire_stale
+    # can archive them once they age out. Durable facts (name, hardware) never
+    # expire. Only stamp on a NEW file or when volatility is explicitly set, so
+    # a recall-count bump (which calls save indirectly) never resets the clock.
+    _vol = (volatility or "durable").strip().lower()
+    if _vol in ("seasonal", "transient"):
+        front.append(f"volatility: {_vol}")
+        _days = _TRANSIENT_DAYS if _vol == "transient" else _SEASONAL_DAYS
+        _exp = (datetime.now() + timedelta(days=_days)).isoformat(timespec="seconds")
+        front.append(f"expires_at: {_exp}")
     front.append(f"updated: {datetime.now().isoformat(timespec='seconds')}")
     front.append("---")
     content = "\n".join(front) + "\n\n" + body.strip() + "\n"
@@ -349,6 +367,16 @@ def save(title: str, mtype: str, description: str, body: str = "",
             archived = _evict_if_over_cap(mtype, sub_category, protect_slug=slug)
             if archived:
                 msg += f"  [archived {len(archived)} cold: {', '.join(archived[:3])}{'...' if len(archived) > 3 else ''}]"
+        except Exception:
+            pass
+    # Supersede: this fact replaces an earlier one the user moved on from
+    # ("now in college" replaces "in class 12"). Archive the old one so the
+    # model never serves stale info, but keep it recoverable.
+    if supersedes:
+        try:
+            old = _supersede(str(supersedes), slug)
+            if old:
+                msg += f"  [superseded: {old}]"
         except Exception:
             pass
     return msg
@@ -488,6 +516,7 @@ def _rewrite_frontmatter(path: str, fm: Dict[str, str], body: str) -> None:
     recall-count bumper; cheap to call per-pick because most chats touch
     only 1-2 memories per turn."""
     order = ["name", "type", "description", "sub_category", "tags",
+             "volatility", "expires_at", "superseded_by", "archived_reason",
              "recall_count", "last_recalled_at", "updated"]
     lines = ["---"]
     for k in order:
@@ -650,6 +679,119 @@ def _evict_if_over_cap(mtype: str, sub_category: str,
                 continue
             keep.append(ln)
         _write_index_lines(keep)
+    return archived
+
+
+def _archive_file(fn: str, extra_fm: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """Move one fact file from MEM_DIR to _archive/ (optionally stamping extra
+    frontmatter like superseded_by / archived_reason) and drop its index line.
+    Returns the slug, or None. Recoverable: sibling-pull/recall can warm it
+    back. Shared by eviction, supersede, and expiry."""
+    src = os.path.join(MEM_DIR, fn)
+    if not os.path.isfile(src):
+        return None
+    os.makedirs(_ARCHIVE_DIR, exist_ok=True)
+    if extra_fm:
+        try:
+            fm, body = _read_body(src)
+            fm.update(extra_fm)
+            _rewrite_frontmatter(src, fm, body)
+        except OSError:
+            pass
+    dst = os.path.join(_ARCHIVE_DIR, fn)
+    try:
+        if os.path.exists(dst):
+            os.remove(dst)
+        os.rename(src, dst)
+    except OSError:
+        return None
+    slug = fn[:-3] if fn.endswith(".md") else fn
+    lines = _read_index_lines()
+    keep = [ln for ln in lines
+            if not re.match(rf"^- \[[^\]]+\]\({re.escape(slug)}\.md\)", ln)]
+    if len(keep) != len(lines):
+        _write_index_lines(keep)
+    return slug
+
+
+def _supersede(topic: str, new_slug: str) -> Optional[str]:
+    """Archive the single existing hot fact that best matches `topic` (the old
+    fact a newer one replaces — e.g. 'school grade' when 'now in college'
+    arrives). Stamped superseded_by so the lineage is auditable."""
+    topic = (topic or "").strip()
+    if not topic:
+        return None
+    cands = find_similar_titles(topic, exclude_slug=new_slug)
+    if not cands:
+        return None
+    return _archive_file(cands[0]["slug"] + ".md", {"superseded_by": new_slug})
+
+
+_EXPIRY_STAMP = os.path.join(MEM_DIR, ".last_expiry")
+
+
+def expire_stale(now: Optional[datetime] = None, *, once_per_day: bool = False) -> List[str]:
+    """Archive facts whose expires_at has passed — UNLESS they're clearly still
+    in use (recalled >= _PROMOTE_THRESHOLD times and recently), in which case
+    renew one more period. Pure filesystem walk, no LLM, no daemon: keeps the
+    active bank small + current over months of use without churn. Nothing is
+    deleted (everything goes to _archive/, recoverable)."""
+    now = now or datetime.now()
+    if once_per_day:
+        try:
+            if os.path.isfile(_EXPIRY_STAMP):
+                age = now.timestamp() - os.path.getmtime(_EXPIRY_STAMP)
+                if age < 86400:
+                    return []
+        except OSError:
+            pass
+    archived: List[str] = []
+    if not os.path.isdir(MEM_DIR):
+        return archived
+    for fn in os.listdir(MEM_DIR):
+        if not fn.endswith(".md") or fn == "MEMORY.md":
+            continue
+        full = os.path.join(MEM_DIR, fn)
+        if not os.path.isfile(full):
+            continue
+        try:
+            fm, body = _read_body(full)
+        except OSError:
+            continue
+        exp = fm.get("expires_at")
+        if not exp:
+            continue
+        try:
+            if datetime.fromisoformat(exp) > now:
+                continue
+        except (ValueError, TypeError):
+            continue
+        # Expired. Renew if the user clearly still references it.
+        try:
+            n = int(fm.get("recall_count", "0") or "0")
+        except ValueError:
+            n = 0
+        recent = False
+        lr = fm.get("last_recalled_at")
+        if lr:
+            try:
+                recent = (now - datetime.fromisoformat(lr)).days <= 60
+            except (ValueError, TypeError):
+                pass
+        if n >= _PROMOTE_THRESHOLD and recent:
+            vol = (fm.get("volatility") or "seasonal").lower()
+            days = _TRANSIENT_DAYS if vol == "transient" else _SEASONAL_DAYS
+            fm["expires_at"] = (now + timedelta(days=days)).isoformat(timespec="seconds")
+            _rewrite_frontmatter(full, fm, body)
+            continue
+        s = _archive_file(fn, {"archived_reason": "expired"})
+        if s:
+            archived.append(s)
+    try:
+        with open(_EXPIRY_STAMP, "w", encoding="utf-8") as f:
+            f.write(now.isoformat(timespec="seconds"))
+    except OSError:
+        pass
     return archived
 
 

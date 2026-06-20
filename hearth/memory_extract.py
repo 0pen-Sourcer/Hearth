@@ -89,18 +89,34 @@ Return a JSON array. Each fact is an object with these exact keys:
   - "description": ONE concise sentence summarizing the fact.
   - "body": 1-3 sentences with the specifics + WHY it matters going forward.
   - "confidence": integer 1-5. Score it honestly. Anything <=3 will be DROPPED.
+  - "volatility": how long this stays true — JUDGE it:
+      "durable"  = identity/permanent: name, birthday, hardware they own, lasting
+        preferences ("hates cilantro"), relationships.
+      "seasonal" = true NOW but changes on a life cadence: school grade/year
+        ("in class 12"), current job/title, current city, "currently playing X",
+        active project, what they're learning. These EXPIRE (~1 year).
+      "transient" = breaks/annoyances/short plans ("left earbud died", "wifi
+        flaky", "picking up the game Friday"). Useful ~2 weeks.
+    When unsure between durable and seasonal, pick SEASONAL — a durable fact that
+    goes stale (still thinking they're "in class 12" two years later) is far worse.
+  - "supersedes" (optional): if this fact REPLACES an earlier one because the
+    user moved on ("now in college" replaces "in class 12"; "switched to Linux"
+    replaces "on Windows"), put the OLD fact's topic in 3-5 words ("school
+    grade", "primary OS"). Omit if it replaces nothing.
 
 If you find NOTHING worth saving, return: []
 
 # Examples
 GOOD (will save):
-  {"title": "primary-gpu", "category": "user", "description": "User runs a mid-range NVIDIA GPU with ~8 GB VRAM.", "body": "Local LLMs need to fit in 8 GB. Surfaced when sizing model picks.", "confidence": 5}
+  {"title": "primary-gpu", "category": "user", "description": "User runs a mid-range NVIDIA GPU with ~8 GB VRAM.", "body": "Local LLMs need to fit in 8 GB. Surfaced when sizing model picks.", "confidence": 5, "volatility": "durable"}
 
-  {"title": "broken-earbud", "category": "user", "description": "One side of the user's wireless earbuds stopped working.", "body": "Minor annoyance — they may repair or replace. Worth bringing up the next time audio comes up.", "confidence": 4}
+  {"title": "current-grade", "category": "user", "description": "User is currently in class 12 (final year of school).", "body": "School grade — changes yearly; re-confirm rather than assume next year.", "confidence": 4, "volatility": "seasonal"}
 
-  {"title": "upcoming-game-release", "category": "user", "description": "User excited about a specific game launching this week.", "body": "Game launch they're looking forward to — ask how it went afterwards.", "confidence": 4}
+  {"title": "broken-earbud", "category": "user", "description": "One side of the user's wireless earbuds stopped working.", "body": "Minor annoyance — they may repair or replace. Worth bringing up next time audio comes up.", "confidence": 4, "volatility": "transient"}
 
-  {"title": "side-project-deadline", "category": "project", "description": "Side project has a hard ship date this month.", "body": "Avoid blocking on related work. Star-farm or release is the win condition.", "confidence": 5}
+  {"title": "current-os", "category": "user", "description": "User switched their main machine to Linux Mint.", "body": "Tailor shell/commands to Linux now.", "confidence": 5, "volatility": "seasonal", "supersedes": "primary OS"}
+
+  {"title": "side-project-deadline", "category": "project", "description": "Side project has a hard ship date this month.", "body": "Avoid blocking on related work. Star-farm or release is the win condition.", "confidence": 5, "volatility": "seasonal"}
 
 BAD (will NOT save — extractor must filter these):
   {"title": "likes-breaking-bad", "category": "user", "description": "User likes kids who cook Heisenberg's Blue.", ...}  # joke / quote — DROP
@@ -225,6 +241,13 @@ def extract_and_save(
         except (TypeError, ValueError):
             conf = 0
 
+        # Volatility judged by the extractor; default seasonal (safer than
+        # durable — a stale "still in class 12" is worse than a re-confirm).
+        vol = str(f.get("volatility") or "seasonal").strip().lower()
+        if vol not in ("durable", "seasonal", "transient"):
+            vol = "seasonal"
+        supersedes = str(f.get("supersedes") or "").strip() or None
+
         if not title or not desc:
             continue
         if category not in ALLOWED_CATEGORIES:
@@ -243,6 +266,8 @@ def extract_and_save(
                 description=desc,
                 body=body or desc,
                 tags=["auto-extracted"],
+                volatility=vol,
+                supersedes=supersedes,
             )
             saved.append(
                 {"title": title, "category": category, "description": desc,
@@ -261,6 +286,18 @@ def extract_and_save(
             _memory.curate(apply=True)
         except Exception:
             pass
+
+    # Temporal sweep: once a day, archive facts whose expires_at has passed
+    # (unless still actively recalled). Pure filesystem walk, no LLM — keeps the
+    # bank current over months without ever asking the model. Runs regardless of
+    # whether new facts landed this pass (staleness is time-driven, not save-driven).
+    try:
+        from . import memory as _memory
+        expired = _memory.expire_stale(once_per_day=True)
+        if expired:
+            warnings.append(f"archived {len(expired)} stale: {', '.join(expired[:3])}")
+    except Exception:
+        pass
 
     return saved, warnings
 
