@@ -27,6 +27,24 @@ import os
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "discord_bridge.json")
 _DISCORD_MAX = 2000  # Discord's hard per-message character cap
+_LOG_PATH = os.path.join(os.path.expanduser("~"), "Jarvis", "logs", "discord_bridge.log")
+
+
+def _log(msg: str) -> None:
+    """Print AND append to a log file. The bridge is usually spawned windowless
+    by the GUI, so a file is the only way to see why it did or didn't respond."""
+    line = "[discord] " + msg
+    try:
+        print(line, flush=True)
+    except Exception:
+        pass
+    try:
+        import time as _t
+        os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
+        with open(_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(_t.strftime("%H:%M:%S ") + line + "\n")
+    except Exception:
+        pass
 
 
 def _load_config() -> dict:
@@ -86,46 +104,78 @@ def run() -> None:
     try:
         import discord
     except Exception as e:
-        print(f"[discord] discord.py not available: {e}\n  pip install discord.py")
+        _log(f"discord.py not available: {e} (pip install discord.py)")
         return
     cfg = _load_config()
     token = (cfg.get("bot_token") or "").strip()
     if not token:
-        print(f"[discord] no bot_token in {CONFIG_PATH} — see the module docstring.")
+        _log(f"no bot_token in {CONFIG_PATH}")
         return
     allowed = set(int(x) for x in (cfg.get("allowed_user_ids") or []))
     if not allowed:
-        print("[discord] WARNING: allowed_user_ids is empty — I'll log incoming "
-              "user ids but answer nobody. Add yours to the config.")
+        _log("WARNING: allowed_user_ids is empty - I'll log incoming ids but answer nobody.")
     if cfg.get("ntfy_topic"):
         os.environ.setdefault("HEARTH_NTFY_TOPIC", cfg["ntfy_topic"])
+    # Brain: the GUI sets LOCAL_API_BASE in the env it spawns us with. If we were
+    # started directly (no env), load the saved brain from settings.json so the
+    # bridge talks to the same model the app does (e.g. Grok), not the localhost
+    # default. Without this a directly-run bridge answered from the wrong brain.
+    if not os.environ.get("LOCAL_API_BASE"):
+        try:
+            from .tools import WORKSPACE
+            with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
+                _s = json.load(f)
+            if _s.get("llm_url"):
+                os.environ["LOCAL_API_BASE"] = _s["llm_url"]
+            if _s.get("llm_key"):
+                os.environ["LOCAL_API_KEY"] = _s["llm_key"]
+            if _s.get("llm_model"):
+                os.environ["LOCAL_MODEL"] = _s["llm_model"]
+            _log(f"brain from settings: {_s.get('llm_url') or 'localhost default'} model={_s.get('llm_model') or '?'}")
+        except Exception as e:
+            _log(f"no saved brain loaded ({type(e).__name__}); using localhost default")
 
+    # IMPORTANT: do NOT request the privileged message_content intent. Discord
+    # delivers message text for DMs and for messages that @mention the bot even
+    # without it - which are exactly our two response cases - so the bridge works
+    # with ZERO dev-portal setup. Requesting it while it's OFF in the portal
+    # instead crashes the bot on connect (PrivilegedIntentsRequired), which is
+    # what made "@mention does nothing" happen.
     intents = discord.Intents.default()
-    intents.message_content = True  # privileged — must be enabled in the dev portal
     client = discord.Client(intents=intents)
     histories: dict = {}
 
     @client.event
     async def on_ready():
-        print(f"[discord] bridge up as {client.user} — DM it or @mention it. Ctrl-C to stop.")
+        _log(f"bridge ONLINE as {client.user}. DM it or @mention it.")
 
     @client.event
     async def on_message(message):
         if message.author == client.user:
             return
         uid = message.author.id
+        is_dm = message.guild is None
+        mentioned = client.user in message.mentions
+        # Diagnostic line — visible when the bridge runs in a terminal. Makes
+        # "it just doesn't respond" debuggable (who messaged, did we get text).
+        _log(f"msg uid={uid} dm={is_dm} mentioned={mentioned} content_len={len(message.content or '')}")
         if uid not in allowed:
-            print(f"[discord] ignored message from user id {uid} "
-                  f"(add it to allowed_user_ids to enable).")
+            _log(f"ignored: uid {uid} not in allowed_user_ids {sorted(allowed)}")
             return
         # In a guild channel, only respond when mentioned; in a DM, always.
-        is_dm = message.guild is None
-        if not is_dm and client.user not in message.mentions:
+        if not is_dm and not mentioned:
             return
-        text = message.content
-        if client.user in message.mentions:
+        text = message.content or ""
+        if mentioned:
             text = text.replace(f"<@{client.user.id}>", "").replace(f"<@!{client.user.id}>", "").strip()
         if not text:
+            # Mentions and DMs deliver text without any intent, so an empty body
+            # here is rare (an attachment-only message, say). Nudge gently.
+            _log("empty body after mention strip - nothing to act on")
+            try:
+                await message.channel.send("Got your ping, but no text to act on. Type your request right after the mention.")
+            except Exception:
+                pass
             return
         hist = histories.setdefault(uid, [])
         try:
@@ -147,12 +197,11 @@ def run() -> None:
             except Exception:
                 pass
 
-    print("[discord] starting — connecting to Discord gateway…")
+    _log("starting - connecting to Discord gateway")
     try:
         client.run(token)
     except Exception as e:
-        print(f"[discord] failed: {type(e).__name__}: {e}\n"
-              "  (check the token, and that MESSAGE CONTENT INTENT is enabled in the dev portal)")
+        _log(f"failed to connect: {type(e).__name__}: {e} (is the bot token valid? is another copy already using it?)")
 
 
 if __name__ == "__main__":

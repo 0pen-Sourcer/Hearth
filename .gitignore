@@ -151,5 +151,15 @@ Output/
 dist_test/
 build_test/
 
+# Lite build output (HEARTH_LITE=1 — built from the same spec)
+dist_lite/
+build_lite/
+
+# local scratch for verifying generated decks/pdfs
+out_pptx_check/
+
+# runtime broadcast feed (written at runtime, not source)
+announcements.json
+
 # Website scratch: Claude Design brief, promo video project (node_modules!), landing drafts
 site/

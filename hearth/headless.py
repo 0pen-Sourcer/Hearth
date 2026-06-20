@@ -936,12 +936,25 @@ async def run_once(
                             decision = await decision
                     except Exception:
                         decision = "deny"
-                    if decision in ("deny", "never"):
-                        tool_result = (
-                            f"The user declined this tool call ('{decision}'). "
-                            f"Move on or pick a non-risky alternative. Don't "
-                            f"retry the same call."
-                        )
+                    if decision in ("deny", "never", "timeout"):
+                        if decision == "timeout":
+                            tool_result = (
+                                f"This tool call was NOT executed - the user did "
+                                f"not respond to the approval prompt in time. "
+                                f"NOTHING ran. No file was created, written, moved, "
+                                f"or changed. Do NOT say it succeeded or that any "
+                                f"file/output was produced. Tell the user it is "
+                                f"still waiting on their approval, then stop."
+                            )
+                        else:
+                            tool_result = (
+                                f"This tool call was NOT executed - the user "
+                                f"declined it. NOTHING ran. No file was created, "
+                                f"written, moved, or changed. Do NOT claim it "
+                                f"succeeded or that any file/output exists. Move on "
+                                f"or pick a non-risky alternative. Don't retry the "
+                                f"same call."
+                            )
                         # Run the decline through the loop guard so a
                         # second identical retry trips FAILURE_WARN and
                         # a fourth trips FAILURE_STOP. Without this the
