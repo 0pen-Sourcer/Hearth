@@ -3763,6 +3763,18 @@ function renderMD(src) {
     const safeU = /^https?:\/\//.test(u) ? u : '#';
     return `<a href="${safeU}" target="_blank" rel="noreferrer">${t}</a>`;
   });
+  // GitHub-flavored tables:  | h | h |  /  |---|---|  /  | a | b |
+  // (run before lists/paragraphs; cells already have inline md applied)
+  html = html.replace(
+    /(?:^|\n)([ \t]*\|.+\|[ \t]*\n[ \t]*\|[ \t:|-]+\|[ \t]*\n(?:[ \t]*\|.+\|[ \t]*(?:\n|$))+)/g,
+    (_, block) => {
+      const rows = block.trim().split('\n').filter(r => r.trim());
+      const cells = r => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+      const tdS = 'border:1px solid var(--border);padding:5px 10px;text-align:left;vertical-align:top';
+      const th = cells(rows[0]).map(c => `<th style="${tdS};background:var(--bg-2);font-weight:600">${c}</th>`).join('');
+      const trs = rows.slice(2).map(r => `<tr>${cells(r).map(c => `<td style="${tdS}">${c}</td>`).join('')}</tr>`).join('');
+      return `\n<table style="border-collapse:collapse;margin:8px 0;font-size:13px;max-width:100%"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>\n`;
+    });
   // Unordered list items - group consecutive into <ul>
   html = html.replace(/(?:^|\n)((?:[-*]\s.+(?:\n|$))+)/g, (_, block) => {
     const items = block.trim().split('\n').map(li =>
@@ -3781,7 +3793,7 @@ function renderMD(src) {
   html = html.split(/\n{2,}/).map(block => {
     const b = block.trim();
     if (!b) return '';
-    if (/^<(h\d|ul|ol|blockquote|pre|\x00)/.test(b)) return b;
+    if (/^<(h\d|ul|ol|table|blockquote|pre|\x00)/.test(b)) return b;
     return `<p>${b.replace(/\n/g, '<br>')}</p>`;
   }).join('\n');
   // Re-insert inline code (escaped)
