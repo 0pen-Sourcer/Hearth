@@ -1864,12 +1864,25 @@ class HearthHandler(BaseHTTPRequestHandler):
             ok = _resolve_permission(rid, dec)
             return self._send_json(200 if ok else 404, {"ok": ok})
         if path == "/api/permission/clear":
-            # User wants to reset always_allow / always_deny — also wipe disk so
-            # they don't come back on restart.
-            _always_allow.clear()
-            _always_deny.clear()
+            # Reset always_allow / always_deny — also wipe disk so they don't come
+            # back on restart. With {"name": "<tool>"} remove just that one rule
+            # (so a user can un-set a single "always", not only nuke them all).
+            # With {"name": "<tool>", "decision": "always"|"never"} set one
+            # directly from the permissions panel.
+            body = self._read_json() or {}
+            nm = (body.get("name") or "").strip()
+            dec = (body.get("decision") or "").strip()
+            if nm:
+                _always_allow.discard(nm)
+                _always_deny.discard(nm)
+                if dec == "always": _always_allow.add(nm)
+                elif dec == "never": _always_deny.add(nm)
+            else:
+                _always_allow.clear()
+                _always_deny.clear()
             _save_perms_to_disk()
-            return self._send_json(200, {"ok": True})
+            return self._send_json(200, {"ok": True,
+                "always_allow": sorted(_always_allow), "always_deny": sorted(_always_deny)})
         if path == "/api/ask":
             # Response to an ask_user_request event. Body shape:
             # { id, choice, other? }. `other=true` means the user picked the
