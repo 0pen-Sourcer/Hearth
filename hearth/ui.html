@@ -9506,8 +9506,15 @@ function modelsRenderMine() {
     }
     const caps = modelsCapTags(m.filename, []);
     const filenameId = 'row-' + Math.random().toString(36).slice(2, 9);
-    const ctxGuess = /qwen[ -]?2.5|qwen3/.test(m.filename.toLowerCase()) ? 32768 :
-                     /llama-3|gemma|mistral|hermes/.test(m.filename.toLowerCase()) ? 8192 : 4096;
+    // Per-family context ceiling for the load-config dropdown. Modern models
+    // (Qwen 2.5/3, Hermes, Mistral/Mixtral, Llama 3) train at 32K+, so they must
+    // NOT be capped at 8192 — that silently clamped the user's saved 24K/32K down
+    // (the demo model's filename contains "hermes"). Gemma 2 is genuinely 8K.
+    // Hearth's own prompt (persona + tool schemas) is ~16-17K tokens, so NEVER
+    // offer a load context below 24K or the user can't chat before compaction.
+    // Known 32K+ families go to 32K; everything else floors at 24K.
+    const _fn = m.filename.toLowerCase();
+    const ctxGuess = /qwen[ -]?2.5|qwen3|hermes|mistral|mixtral|llama-?3|yi-|deepseek/.test(_fn) ? 32768 : 24576;
     // One primary button only - "Use this" boots with the SAVED (or default)
     // load config. Click the row to reveal the load-config panel; the same
     // button down there says "Use with these settings" so the difference is
