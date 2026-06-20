@@ -1013,9 +1013,24 @@ def stop_builtin() -> Dict[str, Any]:
     _proc = None
     _proc_info = {}
     # Invalidate the status cache so the next GUI poll reflects the stop
-    # instantly instead of waiting for the 3s TTL.
-    _status_cache["data"] = None
+    # instantly instead of waiting for the 8s TTL.
+    invalidate_status_cache()
     return {"ok": True, "was_running": True}
+
+
+def invalidate_status_cache() -> None:
+    """Force the next status() call to rebuild from scratch.
+
+    The status cache keys on (api_base, builtin_running), so a builtin
+    start/stop already busts it implicitly. But state changes that DON'T
+    flip those — an LM Studio REST eject, a cloud↔local brain switch where
+    the new api_base happens to match a previously-cached key — would let a
+    stale snapshot survive up to _STATUS_TTL_SECONDS. Callers in web.py
+    (eject, brain-switch, start) call this so the very next /api/llmserver/
+    status and /api/state reflect reality immediately, not up to 8s late."""
+    _status_cache["data"] = None
+    _status_cache["ts"] = 0
+    _status_cache["key"] = None
 
 
 def search_huggingface(query: str, limit: int = 12) -> List[Dict[str, Any]]:
