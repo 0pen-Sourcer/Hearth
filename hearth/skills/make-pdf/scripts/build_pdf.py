@@ -25,7 +25,8 @@ def _import_reportlab():
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
         from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-                                         Preformatted, Image, PageBreak)
+                                         Preformatted, Image, PageBreak,
+                                         Table, TableStyle)
         from reportlab.lib import colors
         return locals()
     except ImportError as e:
@@ -53,7 +54,8 @@ _DEFAULT_STYLE = {
 }
 
 
-def _md_to_flowables(md_text: str, R: dict, base_dir: Path, style: dict):
+def _md_to_flowables(md_text: str, R: dict, base_dir: Path, style: dict,
+                     content_width: float = 451.0):
     styles = R["getSampleStyleSheet"]()
     colors = R["colors"]
     accent = colors.HexColor(style["accent"])
@@ -81,9 +83,63 @@ def _md_to_flowables(md_text: str, R: dict, base_dir: Path, style: dict):
         "bullet", parent=body, leftIndent=22, bulletIndent=8,
         spaceAfter=4, bulletFontName=font_bold,
         bulletFontSize=style["body_size"])
+    cell = R["ParagraphStyle"](
+        "cell", parent=body, fontSize=max(8, style["body_size"] - 1),
+        leading=max(10, style["leading"] - 3), spaceAfter=0, spaceBefore=0)
+    cell_h = R["ParagraphStyle"]("cellh", parent=cell, fontName=font_bold,
+                                 textColor=colors.white)
     flow = []
     in_code = False
     code_buf = []
+    table_buf = []
+
+    def _flush_table():
+        nonlocal table_buf
+        rows = table_buf
+        table_buf = []
+        # need a header + a |---| separator row to treat it as a table
+        if len(rows) < 2 or not re.match(r"^\|?[\s:|-]+\|?$", rows[1]):
+            for r in rows:  # not a real table -> render as plain lines
+                flow.append(R["Paragraph"](_md_inline(r, style), body))
+            return
+        def _cells(r):
+            return [c.strip() for c in r.strip().strip("|").split("|")]
+        header = _cells(rows[0])
+        data = [_cells(r) for r in rows[2:]]
+        ncol = len(header)
+        grid = [[R["Paragraph"](_md_inline(c, style), cell_h) for c in header]]
+        for d in data:
+            d = (d + [""] * ncol)[:ncol]
+            grid.append([R["Paragraph"](_md_inline(c, style), cell) for c in d])
+        # column widths weighted by content length, normalized so the table
+        # ALWAYS fits content_width (this is what stops the right-edge overflow).
+        weights = [max(1, max((len(g[i].text) for g in grid), default=1))
+                   for i in range(ncol)]
+        tot = float(sum(weights)) or 1.0
+        # Floor each column at half of an even share so a short-header column
+        # isn't crushed to one character per line; distribute the rest by
+        # content length. Always sums to content_width (so it still fits).
+        min_frac = 0.5 / ncol
+        free = 1.0 - min_frac * ncol
+        col_w = [content_width * (min_frac + free * (w / tot)) for w in weights]
+        t = R["Table"](grid, colWidths=col_w, hAlign="LEFT", repeatRows=1)
+        accent_c = colors.HexColor(style["accent"])
+        t.setStyle(R["TableStyle"]([
+            ("BACKGROUND", (0, 0), (-1, 0), accent_c),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#f3f0fb")]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor(style["rule_color"])),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        flow.append(R["Spacer"](1, 4))
+        flow.append(t)
+        flow.append(R["Spacer"](1, 8))
+
     for raw in md_text.splitlines():
         line = raw.rstrip()
         if line.startswith("```"):
@@ -99,6 +155,12 @@ def _md_to_flowables(md_text: str, R: dict, base_dir: Path, style: dict):
         if in_code:
             code_buf.append(raw)
             continue
+        # Markdown table rows buffer until the block ends, then render fitted.
+        if line.strip().startswith("|") and line.strip().endswith("|"):
+            table_buf.append(line.strip())
+            continue
+        if table_buf:
+            _flush_table()
         if not line.strip():
             flow.append(R["Spacer"](1, 6))
             continue
@@ -127,6 +189,8 @@ def _md_to_flowables(md_text: str, R: dict, base_dir: Path, style: dict):
             flow.append(R["Paragraph"](_md_inline(line, style), body))
     if code_buf:
         flow.append(R["Preformatted"]("\n".join(code_buf), styles["Code"]))
+    if table_buf:
+        _flush_table()
     return flow
 
 
@@ -245,10 +309,12 @@ def main() -> int:
             spaceAfter=18, alignment=1,
             textColor=R["colors"].HexColor(style["accent"]))
         flow.append(R["Paragraph"](args.title, title_style))
-    flow.extend(_md_to_flowables(md, R, src.parent, style))
+    _pagesize = _resolve_pagesize(args.page, R)
+    _content_width = _pagesize[0] - 2 * R["inch"]   # page width minus L+R margins
+    flow.extend(_md_to_flowables(md, R, src.parent, style, _content_width))
 
     doc = R["SimpleDocTemplate"](
-        str(out), pagesize=_resolve_pagesize(args.page, R),
+        str(out), pagesize=_pagesize,
         leftMargin=R["inch"], rightMargin=R["inch"],
         topMargin=R["inch"], bottomMargin=R["inch"],
         title=args.title or out.stem,
