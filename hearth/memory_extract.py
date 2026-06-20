@@ -103,6 +103,17 @@ Return a JSON array. Each fact is an object with these exact keys:
     user moved on ("now in college" replaces "in class 12"; "switched to Linux"
     replaces "on Windows"), put the OLD fact's topic in 3-5 words ("school
     grade", "primary OS"). Omit if it replaces nothing.
+  - "layer": WHERE this belongs (default "fact"):
+      "fact"       = something about them or their world → searchable memory.
+      "preference" = how they want REPLIES / recurring needs ("prefers terse
+        answers", "wants tables for data", "low-code, explain simply",
+        "always uses uv not pip") → the always-on user profile.
+      "rule"       = an explicit STANDING ORDER they gave ("always answer in
+        English", "never run tests before commits") → house rules.
+    Corrections like "stop doing X", "too verbose", "I hate when you Y", "just
+    give me the answer" are "preference" (or "rule" if phrased as a standing
+    order) — NOT facts. Most things are "fact"; use preference/rule only for
+    how-you-should-behave signals.
 
 If you find NOTHING worth saving, return: []
 
@@ -247,14 +258,38 @@ def extract_and_save(
         if vol not in ("durable", "seasonal", "transient"):
             vol = "seasonal"
         supersedes = str(f.get("supersedes") or "").strip() or None
+        layer = str(f.get("layer") or "fact").strip().lower()
 
-        if not title or not desc:
-            continue
-        if category not in ALLOWED_CATEGORIES:
-            warnings.append(f"dropped '{title}': bad category {category!r}")
+        if not desc:
             continue
         if conf < confidence_floor:
             # Quietly drop — this is the joke-fact gate
+            continue
+
+        # Route by layer: behavior signals shape REPLIES, so they go to the
+        # always-on profile / house rules — not buried in the searchable bank.
+        if layer == "preference":
+            try:
+                _memory.upsert_profile_line(desc)
+                saved.append({"title": title or "preference", "category": "profile",
+                              "description": desc, "confidence": conf})
+            except Exception as e:
+                warnings.append(f"profile upsert failed: {type(e).__name__}: {e}")
+            continue
+        if layer == "rule":
+            try:
+                _memory.append_rule(desc)
+                saved.append({"title": title or "rule", "category": "rule",
+                              "description": desc, "confidence": conf})
+            except Exception as e:
+                warnings.append(f"rule add failed: {type(e).__name__}: {e}")
+            continue
+
+        # Fact path → searchable memory bank.
+        if not title:
+            continue
+        if category not in ALLOWED_CATEGORIES:
+            warnings.append(f"dropped '{title}': bad category {category!r}")
             continue
         if skip_known and _fact_already_known(title):
             continue
@@ -282,7 +317,6 @@ def extract_and_save(
     # older copies, recoverable). Best-effort; never breaks the extraction.
     if saved:
         try:
-            from . import memory as _memory
             _memory.curate(apply=True)
         except Exception:
             pass
@@ -292,7 +326,6 @@ def extract_and_save(
     # bank current over months without ever asking the model. Runs regardless of
     # whether new facts landed this pass (staleness is time-driven, not save-driven).
     try:
-        from . import memory as _memory
         expired = _memory.expire_stale(once_per_day=True)
         if expired:
             warnings.append(f"archived {len(expired)} stale: {', '.join(expired[:3])}")
