@@ -325,7 +325,10 @@ def _make_permission_check(emit_fn):
             try:
                 decision = _permission_queues[req_id].get(timeout=180.0)
             except _queue.Empty:
-                decision = "deny"
+                # No click in time. This is NOT a decline - the user just didn't
+                # answer. Report it distinctly so the model can't read a silent
+                # timeout as "approved" and claim the action happened.
+                decision = "timeout"
         finally:
             _permission_queues.pop(req_id, None)
         if decision == "always": _always_allow.add(name); _save_perms_to_disk(); return "allow"
@@ -1520,6 +1523,23 @@ class HearthHandler(BaseHTTPRequestHandler):
             try:
                 from . import updater
                 return self._send_json(200, {"ok": True, "result": updater.apply_update()})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/announcements/check":
+            # Poll the broadcast feed for announcements this build hasn't shown.
+            try:
+                from . import announcements as _ann
+                return self._send_json(200, {"items": _ann.fetch_new()})
+            except Exception as e:
+                return self._send_json(200, {"items": [], "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/announcements/publish":
+            # Author-side: append to the local announcements.json (then push it).
+            body = self._read_json()
+            try:
+                from . import announcements as _ann
+                return self._send_json(200, _ann.publish(
+                    body.get("title") or "", body.get("body") or "",
+                    body.get("kind") or "info"))
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/skills/inspect":

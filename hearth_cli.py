@@ -1,4 +1,4 @@
-"""J.A.R.V.I.S. — local-only personal AI CLI.
+"""J.A.R.V.I.S. - local-only personal AI CLI.
 
 Runs against any OpenAI-compatible local server (LM Studio, Ollama with the
 OpenAI compat layer, llama.cpp, vLLM, etc.). No paid APIs. No cloud.
@@ -84,7 +84,7 @@ except ImportError as e:
 # also drives the CLI. Same source of truth, no env-var duplication.
 def _read_settings_endpoint():
     """Return (url, key, model, provider) from settings.json or all None.
-    `provider` (when present) drives the brain_keys.json fallback below —
+    `provider` (when present) drives the brain_keys.json fallback below -
     settings.json stores the URL + provider name; the actual API key for
     cloud providers lives in brain_keys.json (the /brain command writes
     it there). Without reading both, restarts lose cloud auth."""
@@ -127,7 +127,7 @@ LOCAL_MODEL = os.getenv("LOCAL_MODEL") or _S_MODEL or "local-model"
 # Cloud endpoints need a real key. Resolution order:
 #   1. LOCAL_API_KEY env (explicit override)
 #   2. OPENAI_API_KEY env (legacy compat)
-#   3. settings.json llm_key (rare — most cloud users have this empty)
+#   3. settings.json llm_key (rare - most cloud users have this empty)
 #   4. brain_keys.json[<provider>].key (where /brain saves it)
 #   5. "jarvis-local" dummy (local servers ignore the field)
 # Step 4 is what was missing before: restarting on a cloud brain would
@@ -140,7 +140,7 @@ LOCAL_API_KEY = (os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY")
 # Propagate resolved values into os.environ so downstream modules
 # (hearth.imagine reads os.environ["LOCAL_API_BASE"] at call time)
 # see them. Only set LOCAL_API_KEY in env when we have a real key
-# (not the dummy) — writing "jarvis-local" over a brain_keys.json
+# (not the dummy) - writing "jarvis-local" over a brain_keys.json
 # entry would re-introduce the auth-fail regression.
 os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
 if LOCAL_API_KEY and LOCAL_API_KEY != "jarvis-local":
@@ -166,11 +166,11 @@ if not os.getenv("HEARTH_PERSONA_NAME"):
 HISTORY_FILE = os.path.join(WORKSPACE, "logs", "jarvis_history.json")
 # Append-only, never-pruned transcript of the CLI. jarvis_history.json doubles
 # as the working context and gets pruned/compacted (and overwritten) to fit the
-# model window — which silently destroyed old turns. This file preserves the
+# model window - which silently destroyed old turns. This file preserves the
 # full back-and-forth for search_chats / recall, independent of context limits.
 CLI_TRANSCRIPT = os.path.join(WORKSPACE, "logs", "cli_transcript.jsonl")
 # Sentinel the input-read returns when a BACKGROUND subagent finished while we
-# were waiting for the user to type — the loop then auto-continues the task
+# were waiting for the user to type - the loop then auto-continues the task
 # instead of sitting idle until the user hits enter. Null bytes so it can never
 # collide with real typed input.
 _AUTO_CONTINUE = "\x00__hearth_auto_continue__\x00"
@@ -204,7 +204,7 @@ RESERVED_OUTPUT = int(os.getenv("JARVIS_RESERVED_OUTPUT", "2048"))
 # 75% of window, leaving room for the next turn.
 COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
 # (Tool-loop control + malformed-markup stripping now live in
-# hearth/loop_guard.py — outcome-hash based, not a magic per-tool count.)
+# hearth/loop_guard.py - outcome-hash based, not a magic per-tool count.)
 
 
 HEARTH_VERSION = "0.7.0-preview"
@@ -239,7 +239,7 @@ def _is_reasoning_param_error(e: Exception) -> bool:
 VOICE_ON = os.getenv("JARVIS_VOICE_ON", "0") == "1"
 # Opt-in: also mirror conversation into LM Studio's threads folder so the
 # chat shows up in LM Studio's chat list. Writes to a dedicated file
-# (jarvis_cli.conversation.json) — does NOT touch your other threads.
+# (jarvis_cli.conversation.json) - does NOT touch your other threads.
 LMSTUDIO_SYNC = os.getenv("JARVIS_LMSTUDIO_SYNC", "0") == "1"
 LMSTUDIO_SYNC_PATH = os.path.expanduser(
     r"~/.lmstudio/conversations/jarvis_cli.conversation.json"
@@ -248,7 +248,7 @@ LMSTUDIO_SYNC_PATH = os.path.expanduser(
 # ---- ANSI palette ---------------------------------------------------------
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
-# Brand gradient — Hearth's violet → lavender → soft-rose theme. Matches the
+# Brand gradient - Hearth's violet → lavender → soft-rose theme. Matches the
 # GUI's --accent (#8b5cf6 → #a78bfa) so the CLI feels like the same product.
 GRAD = ["\033[38;5;99m",  "\033[38;5;141m", "\033[38;5;177m",
         "\033[38;5;183m", "\033[38;5;219m", "\033[38;5;225m"]
@@ -267,7 +267,7 @@ _LOW_LATENCY_DIRECTIVE = (
     "\n\n# LOW-LATENCY MODE (active)\n"
     "Reasoning is OFF. Do NOT output `<think>` or `<thinking>` blocks.\n"
     "Skip internal deliberation. Answer DIRECTLY in plain text.\n"
-    "If the question needs careful thought, think SILENTLY — never emit it.\n"
+    "If the question needs careful thought, think SILENTLY - never emit it.\n"
 )
 
 
@@ -275,10 +275,10 @@ _LOW_LATENCY_DIRECTIVE = (
 # and markdown sound terrible read aloud and add latency. This flips the model
 # into a terse, conversational Jarvis register for the duration.
 _VOICE_MODE_DIRECTIVE = (
-    "\n\n# VOICE MODE — your reply will be SPOKEN ALOUD.\n"
+    "\n\n# VOICE MODE - your reply will be SPOKEN ALOUD.\n"
     "Talk like Jarvis to Tony, not a chatbot reading an essay:\n"
     "- ONE or TWO short sentences. No paragraphs, no bullet lists, no headers.\n"
-    "- NEVER speak file paths, URLs, hashes, code, or markdown — they sound awful. "
+    "- NEVER speak file paths, URLs, hashes, code, or markdown - they sound awful. "
     "Say 'saved it to your workspace', not the full path. Say 'opened the trailer', "
     "not the link.\n"
     "- If there's a lot of detail, give the one-line headline and OFFER the rest "
@@ -307,15 +307,15 @@ RISKY_TOOLS = {
     "create_directory", "run_command", "open_app", "open_url",
     "open_in_browser",
     "memory_forget",
-    # Reads private mail / sends mail — gate both.
+    # Reads private mail / sends mail - gate both.
     "read_inbox", "send_email",
-    # Writes + registers executable Python as a new tool — gate it.
+    # Writes + registers executable Python as a new tool - gate it.
     "create_plugin", "delete_plugin",
-    # Browser actions can submit forms / click "buy" — gate the action ones.
+    # Browser actions can submit forms / click "buy" - gate the action ones.
     "browse_click", "browse_type",
-    # Slow / scanning tools — also gated so the user can deny full-drive scans.
+    # Slow / scanning tools - also gated so the user can deny full-drive scans.
     "disk_usage",
-    # VRAM-eating heavy ops — generation can take minutes and shuts down LLM
+    # VRAM-eating heavy ops - generation can take minutes and shuts down LLM
     "forge_generate", "forge_shutdown",
 }
 
@@ -333,7 +333,7 @@ def _sanitize(text: str) -> str:
 # Phrases that indicate the model is announcing an action without taking it.
 # Catches the most common Qwen/Gemma yield patterns. Case-insensitive,
 # substring match against the assistant's content. Used by the anti-yield
-# wrapper in JarvisCLI.respond() — see _yielded_this_turn handling.
+# wrapper in JarvisCLI.respond() - see _yielded_this_turn handling.
 _YIELD_TRIGGERS = (
     "i'll search", "i'll check", "i'll look", "i'll find",
     "i'll open", "i'll run", "i'll fetch", "i'll grab",
@@ -350,7 +350,7 @@ _YIELD_TRIGGERS = (
 
 def _looks_like_yield(text: str) -> bool:
     """True if the assistant message announces an action but didn't call
-    a tool to do it. Conservative — only fires on clear-cut patterns to
+    a tool to do it. Conservative - only fires on clear-cut patterns to
     avoid nudging legitimate "I'll add that to memory" type responses.
     """
     if not text:
@@ -387,8 +387,8 @@ def autodetect_context(model_id: str) -> Optional[int]:
     """Ask LM Studio for the loaded context length of the active model.
 
     LM Studio exposes two endpoints with different richness:
-      1. /v1/models      — OpenAI-compatible, sometimes thin
-      2. /api/v0/models  — native, almost always has loaded_context_length
+      1. /v1/models      - OpenAI-compatible, sometimes thin
+      2. /api/v0/models  - native, almost always has loaded_context_length
 
     We probe both. Falls back to /api/v0/models/{id} (single-model detail)
     if the list endpoint omits the field. Returns None on total miss.
@@ -442,7 +442,7 @@ class JarvisCLI:
         self.active_chat_file: str = ""
         self.voice_on = VOICE_ON
         self.last_model_list: List[str] = []
-        # Live context size — auto-detected from LM Studio if not pinned
+        # Live context size - auto-detected from LM Studio if not pinned
         self.context_tokens = CONTEXT_TOKENS
         # Continuous voice-input listener (faster-whisper). When True, the
         # main loop races typed input against STT transcripts via this queue.
@@ -458,7 +458,7 @@ class JarvisCLI:
         # at the start of each new user turn.
         self._respond_cancel = threading.Event()
         # Ctrl-C handling: during a response, set the cancel flag (the stream
-        # loop bails cleanly) instead of raising KeyboardInterrupt — a raise
+        # loop bails cleanly) instead of raising KeyboardInterrupt - a raise
         # escapes asyncio.run and kills the whole app (the "Ctrl-C closes
         # Hearth" bug). At the prompt (not responding), behave normally so the
         # user can still interrupt/exit. prompt_toolkit owns SIGINT while it's
@@ -476,7 +476,7 @@ class JarvisCLI:
         except Exception:
             pass
         if not self._context_pinned:
-            # Single source of truth — same helper the GUI/bridge use. Has
+            # Single source of truth - same helper the GUI/bridge use. Has
             # per-provider fallback (Grok 200K, Gemini 200K, Claude 200K,
             # GPT-4o 128K, etc.) for cloud endpoints that don't expose
             # loaded_context_length via /v1/models. Bare autodetect_context
@@ -497,14 +497,14 @@ class JarvisCLI:
         # Default off. Set JARVIS_THINK=1 to start on.
         self.think_on = os.getenv("JARVIS_THINK", "0") == "1"
         # Cloud reasoning models that 400 on `reasoning_effort` (e.g. plain
-        # grok-4, grok-3 — only grok-3-mini / grok-4.3+ expose it). Populated
+        # grok-4, grok-3 - only grok-3-mini / grok-4.3+ expose it). Populated
         # lazily the first time a model rejects the param, so we send it once,
         # learn, and never pay a failed round-trip for that model again.
         self._no_reasoning_effort: set[str] = set()
         # Most-recent image path the user/screenshot tool produced. Used
         # to auto-attach when the user references "the/that image".
         self.last_image_path: str = ""
-        # Per-tool permissions ([a]lways / [N]ever) — loaded from disk so they
+        # Per-tool permissions ([a]lways / [N]ever) - loaded from disk so they
         # survive restarts. Mutating choices write back via _save_persisted_perms.
         self.tool_perms: Dict[str, str] = _load_persisted_perms()
         # /sleep mode - Jarvis stays silent until the user says the wake word.
@@ -540,7 +540,7 @@ class JarvisCLI:
             @kb.add("enter")
             def _plain_enter(event):
                 """Enter: submit in single-line. In multi-line, normally
-                insert newline — but submit if the buffer is a single-line
+                insert newline - but submit if the buffer is a single-line
                 slash command so /multi (and other slash commands) still
                 work to toggle the mode."""
                 buf = event.current_buffer
@@ -560,7 +560,7 @@ class JarvisCLI:
                 mouse_support=False,
             )
         except Exception:
-            # No real console (piped, redirected, etc.) — fall back to input()
+            # No real console (piped, redirected, etc.) - fall back to input()
             self.pt_session = None
 
     # -- LM Studio thread bridge --------------------------------------------
@@ -670,7 +670,7 @@ class JarvisCLI:
 
     def _append_transcript(self):
         """Append any new user/assistant turns to the never-pruned transcript.
-        Robust to history pruning/compaction (which mutates self.messages) —
+        Robust to history pruning/compaction (which mutates self.messages) -
         identity is content-based, not index-based."""
         seen = getattr(self, "_transcript_seen", None)
         if seen is None:
@@ -706,7 +706,7 @@ class JarvisCLI:
         """Always saves to ~/Jarvis/logs/jarvis_history.json (local, safe).
         If JARVIS_LMSTUDIO_SYNC=1, also mirrors into a DEDICATED file under
         ~/.lmstudio/conversations/ so the chat shows up in LM Studio's UI.
-        Never writes to your existing LM Studio threads — only the dedicated
+        Never writes to your existing LM Studio threads - only the dedicated
         jarvis_cli.conversation.json file."""
         # Flush new turns to the never-pruned transcript BEFORE we overwrite the
         # (prunable) working-context file, so search/recall keeps the full record.
@@ -759,7 +759,7 @@ class JarvisCLI:
 
     # -- Boot screen --------------------------------------------------------
     def animate_intro(self):
-        # Boot banner — was JARVIS, now HEARTH (the framework).
+        # Boot banner - was JARVIS, now HEARTH (the framework).
         art = [
             "     █░█ █▀▀ ▄▀█ █▀█ ▀█▀ █░█     ",
             "     █▀█ ██▄ █▀█ █▀▄ ░█░ █▀█     ",
@@ -784,7 +784,7 @@ class JarvisCLI:
         v_label = (
             f"on ({v_status['engine']})" if self.voice_on and v_status["ready"]
             else "ready, off" if v_status["ready"]
-            else "no engine — see /voice"
+            else "no engine - see /voice"
         )
         try:
             from hearth.persona import NAME as _AGENT_NAME
@@ -793,7 +793,7 @@ class JarvisCLI:
         rows = [
             ("agent",     f"{_AGENT_NAME}"),
             ("model",     self.current_model if self.current_model != "local-model"
-                          else "(none detected yet — see below)"),
+                          else "(none detected yet - see below)"),
             ("endpoint",  f"{LOCAL_API_BASE}"),
             ("context",   f"{self.context_tokens} tokens, compact @ {int(COMPACT_AT*100)}%"),
             ("workspace", f"{WORKSPACE}"),
@@ -839,7 +839,7 @@ class JarvisCLI:
         warn = self._context_health_warning()
         if warn:
             overhead, headroom = warn
-            print(f"{C_WARN}⚠ context is tight{C_RESET}{C_DIM} — persona+tools use ~{overhead:,} of "
+            print(f"{C_WARN}⚠ context is tight{C_RESET}{C_DIM} - persona+tools use ~{overhead:,} of "
                   f"{self.context_tokens:,} tok, ~{max(0, headroom):,} left for chat+reply.{C_RESET}")
             print(f"{C_DIM}  Load this model at >=24K context in LM Studio for headroom (/context to check).{C_RESET}\n")
 
@@ -878,7 +878,7 @@ class JarvisCLI:
                 headers={"Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
             with urllib.request.urlopen(req, timeout=5) as r:
                 data = json.loads(r.read().decode())
-            # Hide non-chat models — xAI lists grok-imagine-image/-video etc.
+            # Hide non-chat models - xAI lists grok-imagine-image/-video etc.
             # alongside chat models, but they 400 on /chat/completions (they're
             # image/video endpoints). They only clutter the picker.
             _NON_CHAT = ("imagine-image", "imagine-video", "imagine-audio",
@@ -955,16 +955,16 @@ class JarvisCLI:
               f"{C_DIM}(model: {self.current_model}){C_RESET}")
 
     async def _cmd_models(self, raw: str) -> None:
-        """Full model picker/downloader — matches the GUI Models tab.
+        """Full model picker/downloader - matches the GUI Models tab.
 
         Subcommands:
-          /models                — overview: server, on-disk GGUFs, recommended picks
-          /models disk           — list every .gguf found on disk + LM Studio / HF cache
-          /models picks          — show recommended downloads (PC-aware)
-          /models hf <query>     — search Hugging Face for GGUF repos
-          /models get <pick-id>  — download a recommended pick + boot built-in server
-          /models use <path|n>   — boot built-in server with a disk model (n = number from /models disk)
-          /models stop           — stop the built-in server
+          /models                - overview: server, on-disk GGUFs, recommended picks
+          /models disk           - list every .gguf found on disk + LM Studio / HF cache
+          /models picks          - show recommended downloads (PC-aware)
+          /models hf <query>     - search Hugging Face for GGUF repos
+          /models get <pick-id>  - download a recommended pick + boot built-in server
+          /models use <path|n>   - boot built-in server with a disk model (n = number from /models disk)
+          /models stop           - stop the built-in server
         """
         from hearth import llmserver
         parts = raw.strip().split(None, 2)
@@ -1025,7 +1025,7 @@ class JarvisCLI:
             if not arg:
                 print(f"{C_ERR}Usage: /models get <pick-id>  (see /models picks){C_RESET}")
                 return
-            print(f"{C_DIM}Downloading + booting {arg} — this can take a while…{C_RESET}")
+            print(f"{C_DIM}Downloading + booting {arg} - this can take a while…{C_RESET}")
             def _cb(done: int, total: int) -> None:
                 if total > 0:
                     pct = int(100 * done / total)
@@ -1056,12 +1056,12 @@ class JarvisCLI:
                 print(f"{C_ERR}Usage: /models use <path>  or  /models use <n>  (n from /models disk){C_RESET}")
                 return
             path = arg
-            # 1) Numeric — index into disk cache
+            # 1) Numeric - index into disk cache
             if arg.isdigit():
                 cache = getattr(self, "_cli_disk_cache", None) or llmserver.scan_disk_for_models()
                 idx = int(arg) - 1
                 if not (0 <= idx < len(cache)):
-                    print(f"{C_ERR}Out of range — run /models disk to see the list.{C_RESET}")
+                    print(f"{C_ERR}Out of range - run /models disk to see the list.{C_RESET}")
                     return
                 path = cache[idx].get("path")
             elif not os.path.isfile(path):
@@ -1092,7 +1092,7 @@ class JarvisCLI:
                     except Exception:
                         pick = None
                     if pick:
-                        print(f"{C_DIM}'{arg}' isn't on disk — kicking download then boot…{C_RESET}")
+                        print(f"{C_DIM}'{arg}' isn't on disk - kicking download then boot…{C_RESET}")
                         try:
                             dl = llmserver.download_model(arg)
                             if not dl.get("ok"):
@@ -1119,9 +1119,9 @@ class JarvisCLI:
                 print(f"{C_ERR}{type(e).__name__}: {e}{C_RESET}")
             return
 
-        # No subcommand — overview. Cache the status (which disk-scans + probes
+        # No subcommand - overview. Cache the status (which disk-scans + probes
         # the endpoint) for 8s so hitting /models repeatedly is instant instead
-        # of re-scanning every time — same idea the GUI uses.
+        # of re-scanning every time - same idea the GUI uses.
         try:
             _now = time.time()
             _c = getattr(self, "_status_cache", None)
@@ -1152,7 +1152,7 @@ class JarvisCLI:
             for i, m in enumerate(disk[:6], 1):
                 print(f"  [{i}] {m.get('filename')}  {C_DIM}({m.get('size_gb')} GB · {m.get('source')}){C_RESET}")
             if len(disk) > 6:
-                print(f"  {C_DIM}…and {len(disk)-6} more — /models disk{C_RESET}")
+                print(f"  {C_DIM}…and {len(disk)-6} more - /models disk{C_RESET}")
             self._cli_disk_cache = disk
 
         rec_id = s.get("recommended_pick_id")
@@ -1167,7 +1167,7 @@ class JarvisCLI:
 
     async def handle_command(self, text: str) -> bool:
         # `global` MUST sit at the very top of this function, BEFORE any
-        # read of these names — Python parses the whole function body and
+        # read of these names - Python parses the whole function body and
         # raises SyntaxError "name 'X' is used prior to global declaration"
         # if a global decl appears anywhere AFTER a read. The /brain branch
         # below mutates these to flip the active brain. The /about and
@@ -1183,7 +1183,7 @@ class JarvisCLI:
             print(f"  {C_DIM}── Endpoint / model ─────────────────────────{C_RESET}")
             print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET})       switch brain: local / grok / gemini / openai / openrouter / custom")
             print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server, disk, picks")
-            print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop{C_RESET}  full picker. `use`/`get` retarget THIS session — no restart.")
+            print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop{C_RESET}  full picker. `use`/`get` retarget THIS session - no restart.")
             print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model on current server (alias: /load)")
             print(f"  {C_DIM}── Chat / context ───────────────────────────{C_RESET}")
             print(f"  {C_TOOL}/tools{C_RESET}                 list available tools")
@@ -1202,7 +1202,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/migrate <hermes|openclaw>{C_RESET}  import memory/skills/config from another agent")
             print(f"  {C_TOOL}/import-memory [file]{C_RESET}      pull your memory out of ChatGPT/Claude (paste reply to a file, then import)")
             print(f"  {C_TOOL}/jobs [all|<id>|kill <id>]{C_RESET}    background jobs (disk_usage / start_job / etc.)")
-            print(f"  {C_TOOL}/mcp [edit|config|run]{C_RESET}     Model Context Protocol — Hearth as server / configure outbound")
+            print(f"  {C_TOOL}/mcp [edit|config|run]{C_RESET}     Model Context Protocol - Hearth as server / configure outbound")
             print(f"  {C_TOOL}/agent [<slug> \"<prompt>\"]{C_RESET}  list personas / spawn a sub-agent synchronously")
             print(f"  {C_TOOL}/voice [on|off]{C_RESET}        TTS toggle (alias: /voices)")
             print(f"  {C_TOOL}/voice speed <n>{C_RESET}       TTS playback rate (e.g. 1.2)")
@@ -1293,7 +1293,7 @@ class JarvisCLI:
                   + (f"{C_OK}configured{C_RESET}" if dc_on else f"{C_DIM}not set up{C_RESET}"))
             print(f"  {C_BOT}WhatsApp bridge{C_RESET} (two-way, {C_WARN}experimental{C_RESET}): "
                   + (f"{C_OK}configured{C_RESET}" if wa_on else f"{C_DIM}not set up{C_RESET}")
-                  + f"  {C_DIM}— unofficial; use a spare number{C_RESET}")
+                  + f"  {C_DIM}- unofficial; use a spare number{C_RESET}")
             if tok:
                 print(f"\n  {C_DIM}start Telegram:{C_RESET} python -m hearth.telegram_bridge")
             else:
@@ -1340,7 +1340,7 @@ class JarvisCLI:
                 if m.get("risky"):
                     print(f"  {C_ERR}⚠ This skill can run shell commands / modify files. Only install ones you trust.{C_RESET}")
                 if m.get("already_installed"):
-                    print(f"  {C_DIM}(a skill named '{m['name']}' is already installed — this will overwrite it){C_RESET}")
+                    print(f"  {C_DIM}(a skill named '{m['name']}' is already installed - this will overwrite it){C_RESET}")
                 ans = (await self._read_choice(f"  {C_TOOL}Install {m['name']}?{C_RESET} [y/N] ")).strip().lower()
                 if not ans.startswith("y"):
                     print(f"{C_DIM}skipped.{C_RESET}")
@@ -1406,7 +1406,7 @@ class JarvisCLI:
             return True
         if low.startswith("/model ") or low.startswith("/load "):
             arg = cmd.split(None, 1)[1].strip().strip("[]")
-            # Guard against `/model use 1` / `/model use X` etc. — easy typos
+            # Guard against `/model use 1` / `/model use X` etc. - easy typos
             # because GUI users see `/models use` and reach for the singular.
             # Hint at the right command instead of saving garbage as a model id.
             if arg.lower().startswith("use ") or arg.lower() == "use":
@@ -1423,14 +1423,14 @@ class JarvisCLI:
                     self.current_model = self.last_model_list[idx]
                     print(f"{C_OK}model → {self.current_model}{C_RESET}")
                 else:
-                    print(f"{C_ERR}out of range — /models to see the list{C_RESET}")
+                    print(f"{C_ERR}out of range - /models to see the list{C_RESET}")
                     return True
             else:
                 # Validate against the current server's actual model list before
                 # accepting an id. Stops garbage like `/model use 1` from being
                 # silently saved as a model name and then 400'ing every chat.
                 # If the server is unreachable (cloud 401, etc.) and the user
-                # passed a string, accept it but warn — cloud endpoints often
+                # passed a string, accept it but warn - cloud endpoints often
                 # don't expose /v1/models even with a valid key.
                 if not self.last_model_list:
                     try:
@@ -1459,7 +1459,7 @@ class JarvisCLI:
                     self.context_tokens = tokens
                     print(f"{C_DIM}context auto-set to {tokens} tokens ({src}){C_RESET}")
             return True
-        # /endpoint is the natural-language alias for /brain — every cloud
+        # /endpoint is the natural-language alias for /brain - every cloud
         # model + every user I've watched reaches for "endpoint" first. Treat
         # them as the same command. Same with /provider.
         if low.startswith("/endpoint") or low.startswith("/provider"):
@@ -1478,7 +1478,7 @@ class JarvisCLI:
             # new one (`/brain grok <new-key>`); to wipe one, use
             # `/brain forget <provider>`.
             # (`global LOCAL_API_BASE / KEY / MODEL` already declared at the
-            # top of handle_command — Python requires it before any read.)
+            # top of handle_command - Python requires it before any read.)
             import json as _json
             keys_path = os.path.join(WORKSPACE, "brain_keys.json")
             settings_path = os.path.join(WORKSPACE, "settings.json")
@@ -1499,7 +1499,7 @@ class JarvisCLI:
 
             parts = cmd.split(None, 2)
             if len(parts) == 1:
-                # Just /brain — show current + how to switch + which keys are saved
+                # Just /brain - show current + how to switch + which keys are saved
                 provider_label = "cloud" if not _is_local_endpoint(LOCAL_API_BASE) else "local"
                 print(f"\n{C_BOT}Current brain:{C_RESET} {C_TOOL}{provider_label}{C_RESET}  "
                       f"{C_DIM}({self.current_model} via {LOCAL_API_BASE}){C_RESET}\n")
@@ -1542,7 +1542,7 @@ class JarvisCLI:
             # Three flavors of "local":
             #   - local     : whatever's at localhost:1234 (most permissive; LM Studio if up, builtin if booted, etc.)
             #   - lmstudio  : alias of local, but assumes LM Studio specifically. Hint message tells user what to load.
-            #   - builtin   : Hearth's bundled llama-cpp-python server. Doesn't START anything — `/models use <n>` does that.
+            #   - builtin   : Hearth's bundled llama-cpp-python server. Doesn't START anything - `/models use <n>` does that.
             # We route lmstudio + builtin through the same URL but the
             # confirmation print differs so first-timers know which one they
             # just picked. The conflict detection in llmserver.start_builtin
@@ -1654,7 +1654,7 @@ class JarvisCLI:
             # Re-detect the context window for the NEW brain. Without this the
             # budget kept the previous model's value (e.g. a 32K local default),
             # so a 1M-ctx cloud model like grok-4.3 got compacted at 32K. /model
-            # already does this; /brain didn't — this is that fix.
+            # already does this; /brain didn't - this is that fix.
             try:
                 from hearth.headless import resolve_context_tokens
                 _tok, _src = resolve_context_tokens(self.current_model)
@@ -1663,7 +1663,7 @@ class JarvisCLI:
                     print(f"{C_DIM}  context auto-set to {_tok:,} tokens ({_src}){C_RESET}")
             except Exception:
                 pass
-            # Friendly first-timer hints — tells the user what to DO next
+            # Friendly first-timer hints - tells the user what to DO next
             # depending on which "local" variant they picked.
             if provider == "lmstudio":
                 print(f"{C_DIM}  Expecting LM Studio at {url}. If you don't have LM Studio:{C_RESET}")
@@ -1675,9 +1675,9 @@ class JarvisCLI:
                 print(f"{C_DIM}    2. /models use <n>   → boot Hearth's llama.cpp server with that model{C_RESET}")
                 print(f"{C_DIM}    Notes:{C_RESET}")
                 print(f"{C_DIM}      • If LM Studio is running on port 1234, stop it first.{C_RESET}")
-                print(f"{C_DIM}      • Hearth re-uses any GGUFs you have in LM Studio's cache — no double-download.{C_RESET}")
+                print(f"{C_DIM}      • Hearth re-uses any GGUFs you have in LM Studio's cache - no double-download.{C_RESET}")
             elif provider != "local" and arg:
-                print(f"{C_DIM}(key saved — next time just type /brain {provider}){C_RESET}")
+                print(f"{C_DIM}(key saved - next time just type /brain {provider}){C_RESET}")
             return True
         if low == "/tools":
             cats = tools_by_category()
@@ -1711,7 +1711,7 @@ class JarvisCLI:
                 if 0 <= idx < len(self.all_chats_cache):
                     chosen = self.all_chats_cache[idx]
                 else:
-                    print(f"{C_ERR}out of range — /chats to see the list{C_RESET}")
+                    print(f"{C_ERR}out of range - /chats to see the list{C_RESET}")
                     return True
             else:
                 # partial name match (case-insensitive)
@@ -1745,13 +1745,13 @@ class JarvisCLI:
         if low in ("/import-memory", "/import") or low.startswith("/import-memory ") or low.startswith("/import "):
             parts = cmd.split(None, 1)
             if len(parts) < 2:
-                # No file given — show the user how to pull their memory out of
+                # No file given - show the user how to pull their memory out of
                 # another AI and import it. File-based on purpose: pasting a
                 # multi-line dump into Windows Terminal only sends line 1.
                 print(f"{C_TOOL}Import your memory from ChatGPT / Claude / any AI:{C_RESET}")
                 print(f"  {C_DIM}1.{C_RESET} Paste this into that AI:")
                 print(f'     {C_DIM}"List everything you know or remember about me as plain'
-                      f' bullet points\n      — name, work, preferences, projects, important dates,'
+                      f' bullet points\n      - name, work, preferences, projects, important dates,'
                       f' people.\n      One fact per line, no preamble."{C_RESET}')
                 print(f"  {C_DIM}2.{C_RESET} Save its reply into a text file (e.g. {C_TOOL}dump.txt{C_RESET}).")
                 print(f"  {C_DIM}3.{C_RESET} Run:  {C_TOOL}/import-memory dump.txt{C_RESET}")
@@ -1775,7 +1775,7 @@ class JarvisCLI:
                 _sync = _oai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
                 _llm = _mx.make_openai_llm_call(_sync, self.current_model, max_tokens=900)
                 _msgs = [{"role": "user",
-                          "content": "Here is everything another AI remembered about me — "
+                          "content": "Here is everything another AI remembered about me - "
                                      "save the durable facts:\n\n" + text}]
                 saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=1)
                 if saved:
@@ -1791,7 +1791,7 @@ class JarvisCLI:
             from hearth import tools as _t
             extras = _t.list_extra_workspaces()
             if not extras:
-                print(f"{C_DIM}(no extra paths — writes confined to {WORKSPACE}){C_RESET}")
+                print(f"{C_DIM}(no extra paths - writes confined to {WORKSPACE}){C_RESET}")
             else:
                 print(f"{C_DIM}main workspace:{C_RESET} {WORKSPACE}")
                 print(f"{C_DIM}extra writeable:{C_RESET}")
@@ -1847,7 +1847,7 @@ class JarvisCLI:
             return True
         if low.startswith("/context"):
             parts = cmd.split()
-            # Sanity ceiling — no real provider serves >1M ctx today; values
+            # Sanity ceiling - no real provider serves >1M ctx today; values
             # above this are almost certainly a typo (a transcript showed
             # /context 100000000000 being accepted silently, which made the
             # ring math nonsense and confused downstream trim logic).
@@ -1865,9 +1865,9 @@ class JarvisCLI:
                     self._context_pinned = False
                     print(f"{C_OK}context auto-detected: {detected} tokens ({src}){C_RESET}")
                 else:
-                    print(f"{C_ERR}could not detect ctx — endpoint didn't expose loaded_context_length{C_RESET}")
+                    print(f"{C_ERR}could not detect ctx - endpoint didn't expose loaded_context_length{C_RESET}")
             elif len(parts) >= 2:
-                # Accept 20480, "32k", "1M", "1.5m", "128K" — not just bare digits.
+                # Accept 20480, "32k", "1M", "1.5m", "128K" - not just bare digits.
                 _raw = parts[1].lower().replace(",", "").strip()
                 _mult = 1
                 if _raw.endswith("k"):
@@ -1880,11 +1880,11 @@ class JarvisCLI:
                     print(f"{C_ERR}usage: /context <number> (e.g. 20480, 32k, 1M) or /context auto{C_RESET}")
                     return True
                 if requested > _CTX_MAX:
-                    print(f"{C_ERR}context {requested:,} is above the 1M ceiling — capping to {_CTX_MAX:,}.{C_RESET}")
+                    print(f"{C_ERR}context {requested:,} is above the 1M ceiling - capping to {_CTX_MAX:,}.{C_RESET}")
                     print(f"{C_DIM}  no real model accepts >1M tokens. If you wanted N thousand, drop the extra zeros.{C_RESET}")
                     requested = _CTX_MAX
                 elif requested < _CTX_MIN:
-                    print(f"{C_ERR}context {requested} is below the {_CTX_MIN} floor — capping to {_CTX_MIN}.{C_RESET}")
+                    print(f"{C_ERR}context {requested} is below the {_CTX_MIN} floor - capping to {_CTX_MIN}.{C_RESET}")
                     requested = _CTX_MIN
                 self.context_tokens = requested
                 self._context_pinned = True
@@ -1898,7 +1898,7 @@ class JarvisCLI:
             parts = cmd.split()
             arg = parts[1].lower() if len(parts) > 1 else ""
             if arg in ("on", "1", "true", "start"):
-                # Continuous mode — background listener races with typed input
+                # Continuous mode - background listener races with typed input
                 if self.listen_continuous:
                     print(f"{C_DIM}already listening{C_RESET}")
                     return True
@@ -1921,7 +1921,7 @@ class JarvisCLI:
                     print(f"{C_ERR}{status_msg}{C_RESET}")
                 else:
                     self.listen_continuous = True
-                    print(f"{C_OK}listening: ON — talk any time. type to interrupt.{C_RESET}")
+                    print(f"{C_OK}listening: ON - talk any time. type to interrupt.{C_RESET}")
                 return True
             if arg in ("off", "0", "false", "stop"):
                 stt.stop_continuous()
@@ -1969,9 +1969,9 @@ class JarvisCLI:
                 # bare /think toggles
                 self.think_on = not self.think_on
             if self.think_on:
-                print(f"{C_OK}thinking: ON — model reasons, body shown inline{C_RESET}")
+                print(f"{C_OK}thinking: ON - model reasons, body shown inline{C_RESET}")
             else:
-                print(f"{C_OK}thinking: OFF — no reasoning compute, no <think> blocks{C_RESET}")
+                print(f"{C_OK}thinking: OFF - no reasoning compute, no <think> blocks{C_RESET}")
             return True
         if low == "/multi":
             self.multiline_mode = not self.multiline_mode
@@ -2001,7 +2001,7 @@ class JarvisCLI:
             if tool in self.tool_perms:
                 self.tool_perms.pop(tool)
                 _save_persisted_perms(self.tool_perms)
-                print(f"{C_OK}forgot {tool} — it'll ask again next time{C_RESET}")
+                print(f"{C_OK}forgot {tool} - it'll ask again next time{C_RESET}")
             elif tool:
                 print(f"{C_DIM}no saved permission for {tool} (try /perms){C_RESET}")
             else:
@@ -2017,14 +2017,14 @@ class JarvisCLI:
             self.save_history()
             return True
         if low == "/curate" or low.startswith("/curate "):
-            # /curate         — dry-run: list duplicate-topic memory clusters
-            # /curate apply   — keep newest of each, archive the rest (recoverable)
+            # /curate         - dry-run: list duplicate-topic memory clusters
+            # /curate apply   - keep newest of each, archive the rest (recoverable)
             from hearth import memory as _mem
             do_apply = low.startswith("/curate ") and "apply" in low
             res = _mem.curate(apply=do_apply)
             clusters = res.get("clusters", [])
             if not clusters:
-                print(f"{C_OK}memory's clean{C_RESET} {C_DIM}— no duplicate-topic clusters found.{C_RESET}")
+                print(f"{C_OK}memory's clean{C_RESET} {C_DIM}- no duplicate-topic clusters found.{C_RESET}")
                 return True
             print(f"\n{C_BRAND}Duplicate-topic memories{C_RESET} {C_DIM}({len(clusters)} cluster"
                   f"{'s' if len(clusters) != 1 else ''}){C_RESET}")
@@ -2038,9 +2038,9 @@ class JarvisCLI:
                       f"archive the older dups (kept newest; recoverable from _archive).{C_RESET}")
             return True
         if low == "/mem" or low.startswith("/mem "):
-            # /mem            — flat index (legacy)
-            # /mem tree       — ASCII tree (type → sub-category → fact)
-            # /mem map        — open the GUI memory tab in default browser
+            # /mem            - flat index (legacy)
+            # /mem tree       - ASCII tree (type → sub-category → fact)
+            # /mem map        - open the GUI memory tab in default browser
             parts = cmd.split(None, 1)
             sub = (parts[1].strip().lower() if len(parts) > 1 else "").split()[0] if len(parts) > 1 else ""
             if sub in ("tree", "t"):
@@ -2050,18 +2050,18 @@ class JarvisCLI:
             else:
                 idx = memory.list_index()
                 print(idx if idx else "(empty)")
-                print(f"\n{C_DIM}/mem tree — ASCII tree by category"
-                      f"  ·  /mem map — open visual graph in browser{C_RESET}")
+                print(f"\n{C_DIM}/mem tree - ASCII tree by category"
+                      f"  ·  /mem map - open visual graph in browser{C_RESET}")
             return True
         if low == "/rules":
             memory.ensure_rules_exist()
             print(f"  {memory.RULES_PATH}")
-            print(f"  {C_DIM}edit freely — Jarvis re-reads it every turn{C_RESET}")
+            print(f"  {C_DIM}edit freely - Jarvis re-reads it every turn{C_RESET}")
             return True
         if low == "/name" or low.startswith("/name "):
-            # /name             — show current agent name
-            # /name <new>       — rename the agent (persona only, no folder
-            #                     rename here — that's a GUI-only flow because
+            # /name             - show current agent name
+            # /name <new>       - rename the agent (persona only, no folder
+            #                     rename here - that's a GUI-only flow because
             #                     it requires a tray respawn). For CLI this
             #                     just hot-swaps the persona NAME constant +
             #                     persists to settings so the next launch
@@ -2102,7 +2102,7 @@ class JarvisCLI:
                 print(f"  {C_OK}I'm {new_name} now{C_RESET} "
                       f"{C_DIM}(was {old}){C_RESET}")
                 print(f"  {C_DIM}persona hot-swapped; next chat turn uses new name. "
-                      f"Workspace folder ~/{old} unchanged — use GUI to move it.{C_RESET}")
+                      f"Workspace folder ~/{old} unchanged - use GUI to move it.{C_RESET}")
             except Exception as e:
                 print(f"  {C_ERR}rename failed: {e}{C_RESET}")
             return True
@@ -2146,7 +2146,7 @@ class JarvisCLI:
             items = _jobs.list_jobs(active_only=active_only)
             if not items:
                 print(f"  {C_DIM}no {'active' if active_only else ''} jobs{C_RESET}")
-                print(f"  {C_DIM}(disk_usage on a drive root auto-backgrounds — "
+                print(f"  {C_DIM}(disk_usage on a drive root auto-backgrounds - "
                       f"check this after asking JARVIS to scan something){C_RESET}")
                 return True
             for j in items:
@@ -2456,7 +2456,7 @@ class JarvisCLI:
         v_on = "♪" if self.voice_on and voice.is_available() else " "
         l_on = " 🎙" if self.listen_continuous else ""
         multi = "  multi" if self.multiline_mode else ""
-        # Lead with the agent's name (JARVIS) — it's who the user is talking to;
+        # Lead with the agent's name (JARVIS) - it's who the user is talking to;
         # the model id rides along, dimmer, for transparency.
         an = getattr(self, "_agent_name", "")
         if not an:
@@ -2486,8 +2486,8 @@ class JarvisCLI:
         """Pull file/image attachments out of the user's text.
 
         Two ways to attach:
-          1. `@<path>` — explicit, anywhere in the message.
-          2. Bare absolute path that points to an existing image file —
+          1. `@<path>` - explicit, anywhere in the message.
+          2. Bare absolute path that points to an existing image file -
              auto-attached. Works for drag-drop in Windows terminals
              (which paste a quoted path).
 
@@ -2536,14 +2536,14 @@ class JarvisCLI:
                     text_parts.append(f"\n\n[attached file: {cand}]\n```\n{body}\n```")
                 except OSError:
                     text_parts.append(f"\n[could not read {cand}]")
-            # else: bare text-file path mentioned in a sentence — leave alone
+            # else: bare text-file path mentioned in a sentence - leave alone
 
         # Pass 1: explicit @<path> tokens (any file type, force inline)
         for tok in text.split():
             if tok.startswith("@") and len(tok) > 1:
                 _attach(tok[1:], force_image=True)
 
-        # Pass 2: bare absolute paths anywhere in the text — only attach
+        # Pass 2: bare absolute paths anywhere in the text - only attach
         # if they're images, since a chat sentence often references text
         # paths conversationally and we don't want to splice every one.
         for m in self._PATH_RE.finditer(text):
@@ -2583,7 +2583,7 @@ class JarvisCLI:
         self._ensure_pt_session()
         if self.pt_session is not None:
             try:
-                # prompt_async on the existing session — it temporarily
+                # prompt_async on the existing session - it temporarily
                 # takes the terminal back and releases it cleanly.
                 return await self.pt_session.prompt_async(ANSI(prompt))
             except (KeyboardInterrupt, EOFError):
@@ -2612,7 +2612,7 @@ class JarvisCLI:
                 await t
             except (asyncio.CancelledError, Exception):
                 pass
-        # If both finished simultaneously, prefer the typed input — user
+        # If both finished simultaneously, prefer the typed input - user
         # intent is clearer when they actually type.
         if prompt_task in done:
             try:
@@ -2634,7 +2634,7 @@ class JarvisCLI:
         """Read the next turn's trigger: race typed input against (a) the STT
         queue when listening, and (b) the background-subagent-done event. If a
         background subagent finishes first, return _AUTO_CONTINUE so the loop
-        picks up the result WITHOUT waiting for the user to type — the parent
+        picks up the result WITHOUT waiting for the user to type - the parent
         keeps working on its own, like a real agent should."""
         tasks: dict = {}
         prompt_task = asyncio.create_task(self._read_input())
@@ -2663,7 +2663,7 @@ class JarvisCLI:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-        # Subagent-done won the race — but DON'T interrupt if the user is
+        # Subagent-done won the race - but DON'T interrupt if the user is
         # mid-typing (that would overlap their line, defeating parallel work).
         # Auto-continue ONLY when the input buffer is empty (truly idle). If
         # they're typing, defer: keep their prompt alive; the notification stays
@@ -2682,7 +2682,7 @@ class JarvisCLI:
                 _cancel(prompt_task, stt_task, evt_task)
                 await _drain(prompt_task, stt_task, evt_task)
                 return _AUTO_CONTINUE
-            # User is typing — let them finish; ignore this wake.
+            # User is typing - let them finish; ignore this wake.
             _cancel(stt_task, evt_task)
             await _drain(stt_task, evt_task)
             try:
@@ -2718,7 +2718,7 @@ class JarvisCLI:
             Esc+Enter = submit). Useful for very long text.
         Plain input() fallback wrapped in a thread otherwise.
 
-        IMPORTANT: must use prompt_async() — prompt() calls asyncio.run()
+        IMPORTANT: must use prompt_async() - prompt() calls asyncio.run()
         internally and we're already inside the main event loop."""
         self._ensure_pt_session()
         prompt_str = self._footer_prompt()
@@ -2734,7 +2734,7 @@ class JarvisCLI:
         capabilities. Cached per model id so we don't probe every view_image.
 
         The signals (in priority order):
-          1. `type == "vlm"` field — explicit Vision-Language-Model marker.
+          1. `type == "vlm"` field - explicit Vision-Language-Model marker.
              This is the cleanest answer LM Studio gives us; Qwen3.5-9B has
              this even though its id doesn't contain "vl".
           2. "vision" / "image_input" in the `capabilities` array.
@@ -2748,7 +2748,7 @@ class JarvisCLI:
         result = False
         try:
             import urllib.request
-            # LOCAL_API_BASE is .../v1 — strip it to get the host
+            # LOCAL_API_BASE is .../v1 - strip it to get the host
             host = LOCAL_API_BASE.rsplit("/v1", 1)[0]
             with urllib.request.urlopen(f"{host}/api/v0/models", timeout=2) as r:
                 data = json.loads(r.read())
@@ -2763,7 +2763,7 @@ class JarvisCLI:
         except Exception:
             pass
         if not result:
-            # Fallback heuristic — useful when not on LM Studio (Ollama, vLLM)
+            # Fallback heuristic - useful when not on LM Studio (Ollama, vLLM)
             # or on cloud endpoints (Gemini/OpenAI/Anthropic) where the
             # /api/v0/models probe doesn't exist. These families are multimodal.
             mlc = mid.lower()
@@ -2779,11 +2779,11 @@ class JarvisCLI:
         return result
 
     def _is_first_run(self) -> bool:
-        """True if the user has essentially no memory yet — fresh install.
+        """True if the user has essentially no memory yet - fresh install.
         Crude heuristic that avoids running the wizard every relaunch."""
         # First: honor the GUI's onboarded flag. If the user already
         # finished onboarding in the desktop app, don't make them sit
-        # through the CLI wizard on first CLI launch — that was the
+        # through the CLI wizard on first CLI launch - that was the
         # "double onboarding" pain.
         try:
             from hearth.tools import WORKSPACE
@@ -2865,7 +2865,7 @@ class JarvisCLI:
                 with open(settings_path, "r", encoding="utf-8") as _sf:
                     cur = json.load(_sf) or {}
             cur["onboarded"] = True
-            # Agent rename from the wizard — persist + apply to this session so
+            # Agent rename from the wizard - persist + apply to this session so
             # the persona signature / banner use the new name from message #1.
             _agent = (answers.get("agent_name") or "").strip()
             if _agent and _agent.lower() != "jarvis":
@@ -2882,7 +2882,7 @@ class JarvisCLI:
             pass
 
     async def _maybe_extract_facts(self) -> None:
-        """Passive memory extraction at the end of a turn — auto-saves durable
+        """Passive memory extraction at the end of a turn - auto-saves durable
         facts (name, preferences, projects, deadlines) WITHOUT the user saying
         'remember that', matching the GUI/headless behavior the CLI was missing.
         Fire-and-forget (zero added latency), guarded against overlapping runs,
@@ -2896,7 +2896,7 @@ class JarvisCLI:
             _sync = _oai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
             _llm = _mx.make_openai_llm_call(_sync, self.current_model, max_tokens=600)
             _msgs = list(self.messages)
-            # Save SILENTLY — this runs fire-and-forget, so any print lands at a
+            # Save SILENTLY - this runs fire-and-forget, so any print lands at a
             # random time (mid-prompt) and is jarring in a terminal. Facts still
             # persist; check them with /memory. (The GUI shows its own toast,
             # where timing isn't an issue.)
@@ -2922,7 +2922,7 @@ class JarvisCLI:
         print(f"{C_DIM}  press Enter to skip a question; Ctrl-C any time to skip the rest{C_RESET}")
         print()
 
-        # WHERE to keep files — ask BEFORE anything writes to disk, so a user
+        # WHERE to keep files - ask BEFORE anything writes to disk, so a user
         # whose C: drive is full (or who just wants it elsewhere) can put the
         # workspace on another drive. Skip if already chosen (pointer exists).
         try:
@@ -2930,14 +2930,14 @@ class JarvisCLI:
             if not os.path.isfile(_WORKSPACE_POINTER) and not os.environ.get("JARVIS_WORKSPACE"):
                 _path_eg = "like D:\\Hearth" if os.name == "nt" else "like ~/hearth or /mnt/disk/hearth"
                 loc = input(
-                    f"  {C_TOOL}Where should I keep my files — memory, documents, models?{C_RESET}\n"
+                    f"  {C_TOOL}Where should I keep my files - memory, documents, models?{C_RESET}\n"
                     f"  {C_DIM}Enter for default ({_CUR_WS}), or a path on another drive "
                     f"{_path_eg}{C_RESET}\n  > "
                 ).strip()
                 if loc and os.path.abspath(os.path.expanduser(loc)) != os.path.abspath(_CUR_WS):
                     new = set_workspace_location(loc)
                     print(f"\n  {C_OK}Workspace set to {new}.{C_RESET}")
-                    print(f"  {C_DIM}Close and reopen Hearth once to use it — then we'll "
+                    print(f"  {C_DIM}Close and reopen Hearth once to use it - then we'll "
                           f"finish setup there. (Move that folder anytime; just update "
                           f"this location to match.){C_RESET}\n")
                     raise SystemExit(0)
@@ -2948,7 +2948,7 @@ class JarvisCLI:
         except Exception:
             pass
 
-        # Learn the machine FIRST — hardware, installed models, drive map — so the
+        # Learn the machine FIRST - hardware, installed models, drive map - so the
         # model walks in with real context (and never wastes 2 minutes disk-scanning
         # for things it could have just known). Same call backs the /learn command.
         print(f"  {C_DIM}getting to know your machine (hardware, models, drives)...{C_RESET}")
@@ -2962,7 +2962,7 @@ class JarvisCLI:
         def ask(prompt: str) -> str:
             return input(f"  {C_TOOL}{prompt}{C_RESET}\n  > ").strip()
 
-        # Brain choice — parity with the GUI's local-vs-cloud onboarding step.
+        # Brain choice - parity with the GUI's local-vs-cloud onboarding step.
         # Reuses the /brain command so key storage + endpoint switch + context
         # re-detect all happen through one code path. Default stays local.
         try:
@@ -2976,7 +2976,7 @@ class JarvisCLI:
                 if key:
                     await self.handle_command(f"/brain {brain} {key}")
                 else:
-                    print(f"  {C_DIM}no key — staying local. Switch anytime with /brain {brain} <key>.{C_RESET}")
+                    print(f"  {C_DIM}no key - staying local. Switch anytime with /brain {brain} <key>.{C_RESET}")
             print()
         except (KeyboardInterrupt, EOFError):
             print()
@@ -3021,14 +3021,14 @@ class JarvisCLI:
               f"{C_DIM}/rules to view; memory_save to add more; "
               f"~/Jarvis/rules.md to edit by hand.{C_RESET}")
         print()
-        # Offer importing memory from another AI — most people already have
+        # Offer importing memory from another AI - most people already have
         # years of context in ChatGPT/Claude. /import-memory walks them through it.
         print(f"  {C_TOOL}Already use ChatGPT or Claude?{C_RESET}  "
-              f"{C_DIM}Run {C_RESET}{C_TOOL}/import-memory{C_RESET}{C_DIM} anytime — it gives you a "
+              f"{C_DIM}Run {C_RESET}{C_TOOL}/import-memory{C_RESET}{C_DIM} anytime - it gives you a "
               f"prompt to\n  paste into that AI, then pulls your facts in here.{C_RESET}")
         print()
 
-        # Migrate prompt — only shown when a prior agent install is detected.
+        # Migrate prompt - only shown when a prior agent install is detected.
         # Mirrors the GUI onboarding step 6 logic so CLI users get parity.
         try:
             from hearth import migrate as _mig
@@ -3084,7 +3084,7 @@ class JarvisCLI:
             n = int(raw)
             if 1 <= n <= len(options):
                 return {"ok": True, "choice": options[n - 1], "other": False}
-        # Substring match — "y" picks "Yes", "first" picks "First option", etc.
+        # Substring match - "y" picks "Yes", "first" picks "First option", etc.
         low = raw.lower()
         matches = [o for o in options if o.lower() == low] \
                or [o for o in options if o.lower().startswith(low)] \
@@ -3144,7 +3144,7 @@ class JarvisCLI:
         # judges the user is wrapping up. We finish the current response,
         # then exit on the next loop iteration.
         self._exit_requested = False
-        # Register the CLI as the interactive surface for ask_user — the tool
+        # Register the CLI as the interactive surface for ask_user - the tool
         # handler bounces back to this loop via run_coroutine_threadsafe.
         try:
             from hearth.tools import set_ask_user_callback, set_extend_workspace_callback
@@ -3183,7 +3183,7 @@ class JarvisCLI:
             _sa.set_background_completion_callback(_on_bg_subagent_done)
         except Exception:
             pass
-        # Reminder watcher — fire desktop notifications for due reminders,
+        # Reminder watcher - fire desktop notifications for due reminders,
         # including catch-up for any that came due while Hearth was closed.
         # The GUI starts this; the CLI never did, so reminders set in the CLI
         # (e.g. study reminders) were saved but NOTHING ever fired them. This is
@@ -3192,13 +3192,24 @@ class JarvisCLI:
             from hearth import reminders as _rem
 
             def _reminder_fire(title, body):
-                # ALWAYS print into the terminal — Windows silently suppresses OS
+                # ALWAYS print into the terminal - Windows silently suppresses OS
                 # toasts (Focus Assist / notification settings), so a missed
                 # reminder caught up at a late PC-boot showed nothing. Printing
                 # here guarantees you SEE "while you were away..." in the chat.
-                # Still also fire the OS toast + ntfy phone push via desktop_notify.
                 try:
                     print(f"\n{C_BOT}\U0001f514 {title}{C_RESET}  {C_DIM}{body}{C_RESET}")
+                except Exception:
+                    pass
+                # Inject into the conversation so the reminder PERSISTS in history
+                # and the model actually knows it fired - without this it was a
+                # transient print that scrolled away on the next prompt redraw,
+                # and asking "do I have anything?" returned nothing because the
+                # model never saw it.
+                try:
+                    self.messages.append({
+                        "role": "user",
+                        "content": f"[Reminder fired at {title}] {body}",
+                    })
                 except Exception:
                     pass
                 try:
@@ -3245,19 +3256,19 @@ class JarvisCLI:
                         continue
                 except Exception:
                     continue
-                print(f"{C_DIM}● subagent finished — continuing automatically{C_RESET}")
+                print(f"{C_DIM}● subagent finished - continuing automatically{C_RESET}")
                 # Synthetic user trigger. The drain below injects the
                 # <task-notification> as a SYSTEM message; this user-role line is
                 # what makes the model continue (and keeps the sequence ending on
                 # a user turn for strict local chat templates).
-                user_input = ("A background task you started just finished — its "
+                user_input = ("A background task you started just finished - its "
                               "result is in the system notification above. Continue "
                               "the original task with it now; don't wait for me.")
             else:
                 user_input = _raw_input.strip()
             if not user_input:
                 continue
-            # Strip lone surrogate chars before any string ops — Windows
+            # Strip lone surrogate chars before any string ops - Windows
             # terminals occasionally emit them for emojis and they crash
             # the UTF-8 encoder downstream.
             user_input = _sanitize(user_input)
@@ -3282,10 +3293,10 @@ class JarvisCLI:
                     user_input = user_input[len(w):].lstrip(" ,:?!").lstrip()
                     self.sleep_mode = False
                     if not user_input:
-                        print(f"{C_DIM}(awake — what's up?){C_RESET}")
+                        print(f"{C_DIM}(awake - what's up?){C_RESET}")
                         continue
                 else:
-                    print(f"{C_DIM}(sleeping — say '{w}' or /wake){C_RESET}")
+                    print(f"{C_DIM}(sleeping - say '{w}' or /wake){C_RESET}")
                     continue
             # Drain background subagent completion notifications BEFORE
             # the user's new prompt so the model sees them in arrival
@@ -3295,7 +3306,7 @@ class JarvisCLI:
                 from hearth import subagents as _sa
                 for notif in _sa.drain_pending_notifications():
                     xml = _sa.format_notification_as_user_message(notif)
-                    # role=system, NOT user — a background subagent reporting
+                    # role=system, NOT user - a background subagent reporting
                     # back is a system event, not the user talking. It's
                     # immediately followed by the user's real prompt below, so
                     # the message sequence still ends on a user turn (keeps
@@ -3389,7 +3400,7 @@ class JarvisCLI:
         import os as _os
         mem_dir = memory.MEM_DIR
         if not _os.path.isdir(mem_dir):
-            print(f"{C_DIM}(no memory dir yet — first save creates it){C_RESET}")
+            print(f"{C_DIM}(no memory dir yet - first save creates it){C_RESET}")
             return
         # Build {type: {sub: [name, ...]}} from the same logic as the GUI
         tree: Dict[str, Dict[str, list]] = {}
@@ -3419,9 +3430,9 @@ class JarvisCLI:
             t = typ if typ in ("user", "feedback", "project", "reference") else "other"
             tree.setdefault(t, {}).setdefault(sub or "casual", []).append((name, desc))
         if not tree:
-            print(f"{C_DIM}(no memories yet — type something casual and JARVIS will start saving facts){C_RESET}")
+            print(f"{C_DIM}(no memories yet - type something casual and JARVIS will start saving facts){C_RESET}")
             return
-        # Render in canonical order — same as the GUI
+        # Render in canonical order - same as the GUI
         type_order = ["user", "project", "reference", "feedback", "other"]
         type_colors = {
             "user":      C_BOT,    # blue
@@ -3462,7 +3473,7 @@ class JarvisCLI:
         port and open that. The user gets the full visual graph without
         needing to switch to the GUI app."""
         import urllib.request, webbrowser, threading, time
-        # Probe the standard GUI port first — if it answers, just open it.
+        # Probe the standard GUI port first - if it answers, just open it.
         for port in (8765, 8766):
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=1):
@@ -3472,8 +3483,8 @@ class JarvisCLI:
                     return
             except Exception:
                 continue
-        # Nothing running — spawn the web backend in a background thread
-        print(f"{C_DIM}(no GUI server running — booting one on :8765 for you){C_RESET}")
+        # Nothing running - spawn the web backend in a background thread
+        print(f"{C_DIM}(no GUI server running - booting one on :8765 for you){C_RESET}")
         from hearth import web as _w
         try:
             threading.Thread(
@@ -3544,7 +3555,7 @@ class JarvisCLI:
             self.messages.insert(0, fresh_system_message(think_on=self.think_on, voice_on=self.voice_on))
 
         # The tool schemas (~6K tok for 46 tools) ride in EVERY prompt but are
-        # NOT in self.messages — so all budgeting must reserve room for them.
+        # NOT in self.messages - so all budgeting must reserve room for them.
         # Without this, a restored/long history "fits" the message budget while
         # the REAL prompt (messages + tool schemas + output) overflows the
         # model's context; LM Studio then drops the user turn and crashes with
@@ -3555,16 +3566,16 @@ class JarvisCLI:
             tool_tokens = 0
         effective_ctx = max(2048, self.context_tokens - tool_tokens)
 
-        # 2) Auto-compact at any SAFE boundary — i.e. not in the middle of an
+        # 2) Auto-compact at any SAFE boundary - i.e. not in the middle of an
         # in-flight tool chain. Safe = last message is a user turn, OR an
         # assistant text reply with no tool_calls (chain finished). Unsafe = the
         # last message is a `tool` reply or an assistant message with pending
-        # tool_calls — compacting then can break the tool_call_id pairing or
+        # tool_calls - compacting then can break the tool_call_id pairing or
         # strip the user query, crashing LM Studio's Jinja template with
         # "No user query found in messages.".
         # Older logic only allowed `last_role == 'user'`, which meant a long
         # tool chain that *finished* with an assistant answer never got
-        # compacted until the next user turn — and on the way there
+        # compacted until the next user turn - and on the way there
         # trim_to_budget would silently drop messages. That's why "compact at
         # 75%" wasn't firing in long sessions.
         est = estimate_tokens(self.messages)
@@ -3582,7 +3593,7 @@ class JarvisCLI:
             # target_chars = compact aggressively enough that the SUM of
             # head + summary + recent fits comfortably under the chat
             # budget. Without this, compact "succeeded" but the kept
-            # tail still held 4 huge browse results — server wedged.
+            # tail still held 4 huge browse results - server wedged.
             target_chars = max(2000, effective_ctx * CHARS_PER_TOKEN // 2)
             self.messages = compact_history(self.messages, self._summarize,
                                             keep_recent=8,
@@ -3603,7 +3614,7 @@ class JarvisCLI:
                                       "content": "Continue using the results above."})
 
         # 5) Proactive memory: surface the saved facts most relevant to THIS
-        # turn — fenced + authoritative — appended to the system message so
+        # turn - fenced + authoritative - appended to the system message so
         # the model actually uses what it knows instead of ignoring the
         # passive index or re-asking/disk-scanning. Adds zero tokens when
         # nothing matches; bounded otherwise. See memory.recall_for_prompt.
@@ -3611,7 +3622,7 @@ class JarvisCLI:
         last_user_text = next((m.get("content", "") for m in reversed(sent)
                                if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
         if sent and sent[0].get("role") == "system":
-            # Inject current local time so the model gets it for free —
+            # Inject current local time so the model gets it for free -
             # "what should I do?" / "good morning" / "remind me tomorrow"
             # all work without a get_time call. Mirrors headless.py for
             # CLI/GUI parity. ~50 chars cost per turn.
@@ -3663,12 +3674,12 @@ class JarvisCLI:
         if depth > MAX_TURNS:
             # Generous safety ceiling (the loop guard handles real spirals long
             # before this); reaching it means something genuinely runaway.
-            print(f"{C_DIM}● reached the turn limit — wrapping up{C_RESET}")
+            print(f"{C_DIM}● reached the turn limit - wrapping up{C_RESET}")
             return
 
         # Reset the anti-yield flag at the start of each new user turn so we
         # can nudge at most ONCE per user message. (Not at every recursive
-        # tool-chain depth — that would loop.)
+        # tool-chain depth - that would loop.)
         if depth == 0:
             self._yielded_this_turn = False
             # Tool-loop guard: outcome-hash based, tiered (skip dup / warn /
@@ -3679,12 +3690,12 @@ class JarvisCLI:
             # Cloud vision: image to attach as a user turn after this round of
             # tool calls (set by the view_image handler on cloud endpoints).
             self._pending_image_block = None
-            # Fresh cancel signal — clear any stale state from the prior turn.
+            # Fresh cancel signal - clear any stale state from the prior turn.
             self._respond_cancel.clear()
 
         send_messages = await asyncio.to_thread(self._prepare_context)
 
-        # Qwen3 `/no_think` injection — `chat_template_kwargs.enable_thinking=False`
+        # Qwen3 `/no_think` injection - `chat_template_kwargs.enable_thinking=False`
         # doesn't reliably suppress thinking through LM Studio's compat layer
         # (the flag gets passed but Qwen's chat template sometimes ignores it).
         # The Qwen3 chat template DOES honor an in-prompt `/no_think` directive
@@ -3702,7 +3713,7 @@ class JarvisCLI:
                     break
 
         # Spinner label honors /think state. "Thinking" only when the model
-        # is actually allowed to reason; otherwise "Working" — because the
+        # is actually allowed to reason; otherwise "Working" - because the
         # 5s spinner saying "Thinking" looked like the model was reasoning
         # even when reasoning was disabled, which was misleading.
         spinner_task = asyncio.create_task(
@@ -3718,7 +3729,7 @@ class JarvisCLI:
             }
             if getattr(self, "_force_answer", False):
                 # Spiral guard tripped last turn: withhold tools so the model
-                # must produce text. One-shot — clear so tools return next turn.
+                # must produce text. One-shot - clear so tools return next turn.
                 self._force_answer = False
             else:
                 # Rebuilt each turn so tools unlocked via `load_tools`
@@ -3728,7 +3739,7 @@ class JarvisCLI:
                 create_kwargs["tool_choice"] = "auto"
             # Thinking gate:
             #   - chat_template_kwargs.enable_thinking is the PROPER way for
-            #     Qwen3+ and other reasoning-aware models — flips the Jinja
+            #     Qwen3+ and other reasoning-aware models - flips the Jinja
             #     branch in the chat template so the model never enters the
             #     thinking phase at all.
             #   - stop=["<think>"] is a safety net for models that ignore
@@ -3736,7 +3747,7 @@ class JarvisCLI:
             #     happen to emit <think> tags via system prompt).
             # `chat_template_kwargs` is LM-Studio/llama.cpp-specific. Cloud
             # OpenAI-compat endpoints (Gemini, OpenAI, OpenRouter) reject
-            # unknown fields with a 400 — only send it to local servers.
+            # unknown fields with a 400 - only send it to local servers.
             _base = (LOCAL_API_BASE or "").lower()
             _is_local = any(h in _base for h in ("localhost", "127.0.0.1", "0.0.0.0",
                                                  "::1", "192.168.", "10.", "host.docker.internal"))
@@ -3744,13 +3755,13 @@ class JarvisCLI:
                 create_kwargs["extra_body"] = {
                     "chat_template_kwargs": {"enable_thinking": self.think_on}
                 }
-                # `stop` is local-only too — Grok rejects it outright, and
+                # `stop` is local-only too - Grok rejects it outright, and
                 # cloud models stream reasoning via reasoning_content anyway.
                 if not self.think_on:
                     create_kwargs["stop"] = ["<think>", "<thinking>"]
             else:
                 # Cloud: actually disable reasoning at the API when /think is
-                # off — not just hide it. Without this the model (e.g. Grok)
+                # off - not just hide it. Without this the model (e.g. Grok)
                 # still runs a full reasoning pass server-side, so you pay the
                 # latency with zero visibility. `reasoning_effort` is the lever
                 # that reasoning-capable cloud models expose.
@@ -3761,12 +3772,12 @@ class JarvisCLI:
         except Exception as e:
             spinner_task.cancel()
             info = classify_api_error(e, _is_local)
-            # One clean line — not the raw HTML/stack. (run.txt showed a raw 500
+            # One clean line - not the raw HTML/stack. (run.txt showed a raw 500
             # HTML wall cascading; this turns it into "the model server errored
-            # — try /compact or reload the model".)
+            # - try /compact or reload the model".)
             print(f"\n{C_ERR}● {info.hint}{C_RESET}")
             print(f"{C_DIM}({info.category}{' · retryable' if info.retryable else ''}) "
-                  f"Your message is preserved — resend or type to retry.{C_RESET}")
+                  f"Your message is preserved - resend or type to retry.{C_RESET}")
             # Keep the last user message in self.messages so a follow-up
             # turn naturally retries the same context, instead of silently
             # losing what they typed.
@@ -3776,7 +3787,7 @@ class JarvisCLI:
         content_captured = ""
         first = True
         in_think = False
-        # Streaming voice state — we flush sentences to TTS as they
+        # Streaming voice state - we flush sentences to TTS as they
         # complete during the delta loop, instead of waiting for the
         # whole turn. Audio kicks in ~1 sentence after text starts.
         speak_buffer = ""
@@ -3792,7 +3803,7 @@ class JarvisCLI:
             the user hears the reply STREAM in, not after the full turn.
             Previously the floor was 60 chars which meant short replies
             ('Hey bro. What's good?' = 21 chars) never spoke until
-            force_tail at end-of-turn — felt like a non-streaming voice."""
+            force_tail at end-of-turn - felt like a non-streaming voice."""
             nonlocal speak_cursor
             if not (self.voice_on and voice.is_available()):
                 return
@@ -3801,7 +3812,7 @@ class JarvisCLI:
                 return
             # Find the FIRST sentence boundary in the tail. Earlier code
             # looked at the LAST boundary, which batched multi-sentence
-            # chunks together — defeated streaming. Now: flush each
+            # chunks together - defeated streaming. Now: flush each
             # sentence as soon as its terminator arrives, but only if the
             # next char is whitespace OR end-of-tail (avoids cutting on
             # decimals like "v0.6" or filenames). force_tail flushes
@@ -3819,20 +3830,20 @@ class JarvisCLI:
             if force_tail:
                 cut = len(tail)
             if cut < 0:
-                return  # no boundary yet — wait for more chunks
+                return  # no boundary yet - wait for more chunks
             chunk = tail[:cut].strip()
             if not chunk:
                 return
             # Strip markdown noise that sounds awful as audio
             chunk = re.sub(r"`{1,3}[^`]*`{1,3}", "", chunk)
             chunk = re.sub(r"[#*_`]+", "", chunk).strip()
-            # Strip Windows file paths — Kokoro reads "C:\Users\you\file"
+            # Strip Windows file paths - Kokoro reads "C:\Users\you\file"
             # as "see colon users... ". Keep just the filename.
             chunk = re.sub(r"[A-Za-z]:[\\/](?:[^\s\\/]+[\\/])*([^\s\\/]+)", r"\1", chunk)
             # Long digit runs (timestamps like 20260521_233527) get pronounced
-            # as "twenty trillion two hundred sixty billion..." — gibberish.
+            # as "twenty trillion two hundred sixty billion..." - gibberish.
             chunk = re.sub(r"\b\d{8,}\b", "the file", chunk)
-            # Collapse runs of newlines — `\n\n` in source text otherwise
+            # Collapse runs of newlines - `\n\n` in source text otherwise
             # creates 4-5 second silent pauses between paragraphs in TTS.
             chunk = re.sub(r"\s*\n\s*\n\s*", ". ", chunk)
             chunk = re.sub(r"\s*\n\s*", " ", chunk)
@@ -3843,7 +3854,7 @@ class JarvisCLI:
         # Reasoning UI state: handles both inline <think>...</think> blocks
         # AND OpenAI's separate `reasoning_content` channel (LM Studio
         # streams reasoning models like Qwen3.5, DeepSeek-R1 this way).
-        # Auto-collapse by default — show "▶ thought for X.Xs" instead of
+        # Auto-collapse by default - show "▶ thought for X.Xs" instead of
         # the body. /think toggles inline display.
         reasoning_open = False
         reasoning_chars = 0
@@ -3875,7 +3886,7 @@ class JarvisCLI:
                 else:
                     # Erase the "▶ thinking…" line, replace with summary
                     sys.stdout.write(
-                        f"\r\033[K{C_DIM}▶ thought for {dt:.1f}s ({reasoning_chars}c) — /think to expand{C_RESET}\n{C_BOT}"
+                        f"\r\033[K{C_DIM}▶ thought for {dt:.1f}s ({reasoning_chars}c) - /think to expand{C_RESET}\n{C_BOT}"
                     )
                 sys.stdout.flush()
                 reasoning_open = False
@@ -3886,7 +3897,7 @@ class JarvisCLI:
             if self.think_on:
                 sys.stdout.write(C_DIM + text)
                 sys.stdout.flush()
-            # else: silently absorb — only the summary line shows
+            # else: silently absorb - only the summary line shows
 
         async for chunk in stream:
             # Ctrl-C during the stream sets _respond_cancel; bail cleanly
@@ -3907,7 +3918,7 @@ class JarvisCLI:
                 # so its CancelledError handler (which writes "\r\033[K")
                 # runs BEFORE we write our own content. Without this, the
                 # spinner's cleanup runs on the next event-loop tick and
-                # erases the first few characters of our streamed reply —
+                # erases the first few characters of our streamed reply -
                 # that's why responses after a tool call used to start
                 # missing the first word.
                 spinner_task.cancel()
@@ -3932,7 +3943,7 @@ class JarvisCLI:
             if reasoning:
                 _open_reasoning()
                 _stream_reasoning(reasoning)
-                # don't add to content_captured — reasoning isn't part of
+                # don't add to content_captured - reasoning isn't part of
                 # the assistant message we send back next turn
 
             if delta.content:
@@ -4041,7 +4052,7 @@ class JarvisCLI:
         self.messages.append(entry)
 
         # Voice already streamed sentence-by-sentence during the delta
-        # loop above — no end-of-turn speak needed.
+        # loop above - no end-of-turn speak needed.
 
         if not tool_calls_dict:
             # Anti-yield wrapper: if the model emitted an "I'll do X" style
@@ -4057,12 +4068,12 @@ class JarvisCLI:
                 and _looks_like_yield(content_captured)
             ):
                 self._yielded_this_turn = True
-                print(f"{C_DIM}(model announced an action without taking it — nudging){C_RESET}")
+                print(f"{C_DIM}(model announced an action without taking it - nudging){C_RESET}")
                 self.messages.append({
                     "role": "user",
                     "content": (
                         "You said you'd do that but you didn't actually call the tool. "
-                        "Don't narrate the intent — just call the tool. Right now, this turn."
+                        "Don't narrate the intent - just call the tool. Right now, this turn."
                     ),
                 })
                 await self.respond(depth + 1)
@@ -4078,10 +4089,10 @@ class JarvisCLI:
             except json.JSONDecodeError:
                 args = {}
             # Args preview. We dump the FULL argument set only when we're
-            # about to ASK you to approve — that's when a hidden ">D:\evil.bat"
+            # about to ASK you to approve - that's when a hidden ">D:\evil.bat"
             # tail matters and you need to read it. When the call runs
             # unprompted (auto-approve, an [a]lways grant, or a write inside
-            # the workspace), we show a tidy one-line preview cut with "…" —
+            # the workspace), we show a tidy one-line preview cut with "…" -
             # no 600-char code blob (e.g. create_plugin) dumped to the screen.
             preview_full = json.dumps(args, ensure_ascii=False)
             is_risky = name in RISKY_TOOLS
@@ -4128,7 +4139,7 @@ class JarvisCLI:
                     preview = preview[:100] + "…"
                 print(f"{C_FRAME}│ {C_DIM}{preview}{C_RESET}")
 
-            # Permission gate for risky tools — uses prompt_async if pt is
+            # Permission gate for risky tools - uses prompt_async if pt is
             # active so we don't deadlock with prompt_toolkit's stdin grab.
             denied = False
             decline_reason = ""
@@ -4163,7 +4174,7 @@ class JarvisCLI:
                         decline_reason = raw_choice.strip()
 
             # `result` is model-facing (firm directives ok). `display` is the
-            # clean one-liner shown on screen — internal control directives must
+            # clean one-liner shown on screen - internal control directives must
             # NEVER leak to the user as raw text.
             display = None
             skipped = False
@@ -4173,12 +4184,14 @@ class JarvisCLI:
                               f"\"{decline_reason}\". Follow that; don't retry the original call.")
                     display = f"declined -> {decline_reason[:60]}"
                 else:
-                    result = (f"The user declined '{name}'. Don't retry the same call — pick a "
-                              f"different approach, ask what they'd prefer, or answer without it.")
+                    result = (f"The user declined '{name}'. NOTHING ran - no file was created, "
+                              f"written, or changed. Do NOT claim it succeeded. Don't retry the "
+                              f"same call - pick a different approach, ask what they'd prefer, or "
+                              f"answer without it.")
                     display = "declined"
                 dt = 0.0
             elif (skip := self._loop_guard.before(name, args)) is not None:
-                # Identical MUTATING repeat — skip execution (no dup side effect).
+                # Identical MUTATING repeat - skip execution (no dup side effect).
                 result = skip.note
                 display = "skipped (duplicate call)"
                 dt = 0.0
@@ -4188,7 +4201,7 @@ class JarvisCLI:
                 # The user has already approved this specific call via the
                 # [y]es/[a]lways prompt above (or it's an always-allowed
                 # tool). Mark _approved so the inner destructive-pattern
-                # guard doesn't refuse it a SECOND time — the redundant
+                # guard doesn't refuse it a SECOND time - the redundant
                 # gate would make echo>file fail after user already said y.
                 _approved_args = dict(args, _approved=True) if isinstance(args, dict) else args
                 result = await asyncio.to_thread(execute_tool, name, _approved_args)
@@ -4261,17 +4274,17 @@ class JarvisCLI:
                                     # LM Studio VLMs accept the image inline in
                                     # the tool result (tested path).
                                     tool_msg["content"] = [
-                                        {"type": "text", "text": f"image loaded: {os.path.basename(img_path)} — look at it before describing"},
+                                        {"type": "text", "text": f"image loaded: {os.path.basename(img_path)} - look at it before describing"},
                                         image_block,
                                     ]
                                 else:
                                     # Cloud OpenAI-compat (Gemini/OpenAI) reject
-                                    # multimodal content in a TOOL message — it
+                                    # multimodal content in a TOOL message - it
                                     # has to ride a user turn. Ack here, attach
                                     # the image as a user message after the loop.
                                     tool_msg["content"] = (
                                         f"Screenshot captured ({os.path.basename(img_path)}). "
-                                        f"The image is attached in the next message — "
+                                        f"The image is attached in the next message - "
                                         f"look at it and answer."
                                     )
                                     self._pending_image_block = image_block
@@ -4279,12 +4292,12 @@ class JarvisCLI:
                             except OSError:
                                 pass
                         else:
-                            # Text-only model — replace marker with a clear
+                            # Text-only model - replace marker with a clear
                             # admission so model doesn't hallucinate or stall
                             tool_msg["content"] = (
                                 f"Image saved at {img_path}. "
                                 f"The currently-loaded model ({self.current_model}) "
-                                f"is NOT vision-capable — you cannot actually see this image. "
+                                f"is NOT vision-capable - you cannot actually see this image. "
                                 f"Do NOT describe what's in it (any description would be "
                                 f"made-up). Either: tell the user to switch to a vision "
                                 f"model (Gemma 3 vision, Qwen-VL, Llava, MiniCPM-V) and "
@@ -4311,7 +4324,7 @@ class JarvisCLI:
                     if _media_path and os.path.isfile(_media_path):
                         print(f"{C_FRAME}│ {C_OK}↳ saved:{C_RESET} {_media_path}")
                         # Open in the OS default viewer (image viewer / mp4 player).
-                        # Non-blocking — we don't want to lock up the CLI.
+                        # Non-blocking - we don't want to lock up the CLI.
                         try:
                             if sys.platform == "win32":
                                 os.startfile(_media_path)  # type: ignore[attr-defined]
@@ -4340,12 +4353,12 @@ class JarvisCLI:
 
         # Cloud vision: attach the captured image as a user turn now that all
         # tool results for this assistant turn are in place (keeps tool_call_id
-        # pairing intact — we must NOT inject this mid-loop).
+        # pairing intact - we must NOT inject this mid-loop).
         if getattr(self, "_pending_image_block", None) is not None:
             self.messages.append({
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Here is the screenshot you just captured — look at it and answer my question."},
+                    {"type": "text", "text": "Here is the screenshot you just captured - look at it and answer my question."},
                     self._pending_image_block,
                 ],
             })
@@ -4355,7 +4368,7 @@ class JarvisCLI:
         # tool results (valid ordering). The next respond() call withholds
         # tools (see create_kwargs gate), forcing a plain-text answer.
         if getattr(self, "_force_answer", False):
-            print(f"{C_DIM}● wrapping up — using what we have{C_RESET}")
+            print(f"{C_DIM}● wrapping up - using what we have{C_RESET}")
             self.messages.append({
                 "role": "user",
                 "content": (
@@ -4390,15 +4403,15 @@ if __name__ == "__main__":
     # Suppress the httpx/anyio cleanup spam that happens when the asyncio
     # loop closes before background openai clients finish their TLS
     # teardown. The spam looks like 30+ "Event loop is closed" tracebacks
-    # at the bottom of every session. It's purely cosmetic — the loop is
-    # closing because we asked it to — so hide that one ExceptionGroup
+    # at the bottom of every session. It's purely cosmetic - the loop is
+    # closing because we asked it to - so hide that one ExceptionGroup
     # without hiding real errors.
     import logging as _logging
     _logging.getLogger("asyncio").setLevel(_logging.CRITICAL)
     # The asyncio-logger silence above covers the loop's own exception handler,
     # but a background subagent runs in a thread via asyncio.run(); when its
     # httpx/openai client is garbage-collected AFTER that loop closes, the
-    # transport's __del__ raises "Event loop is closed" — which Python reports
+    # transport's __del__ raises "Event loop is closed" - which Python reports
     # through sys.unraisablehook, NOT the asyncio logger. That's the ugly
     # traceback users saw every time a subagent finished. Swallow just that one.
     _orig_unraisable = sys.unraisablehook

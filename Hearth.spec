@@ -31,6 +31,12 @@ if not os.path.isfile(ICON_PATH):
     if not os.path.isfile(ICON_PATH):
         ICON_PATH = None
 
+# Version resource so the exe reports "Hearth" (not "Hearth.exe"/"Python") in
+# Task Manager Startup, file properties, and toast attribution.
+VERSION_PATH = os.path.join(REPO_ROOT, "assets", "version_info.txt")
+if not os.path.isfile(VERSION_PATH):
+    VERSION_PATH = None
+
 # Datas: bundle ui.html, persona, anything in hearth/ that isn't a .py
 DATAS = [
     (os.path.join(REPO_ROOT, "hearth", "ui.html"), "hearth"),
@@ -295,6 +301,7 @@ exe_tray = EXE(
     console=False,         # GUI — no console window
     disable_windowed_traceback=False,
     icon=ICON_PATH,
+    version=VERSION_PATH,
     onefile=False,
 )
 
@@ -320,6 +327,7 @@ exe_cli = EXE(
     upx=False,
     console=True,          # CLI — keep the console
     icon=ICON_PATH,
+    version=VERSION_PATH,
     onefile=False,
 )
 
@@ -349,6 +357,7 @@ exe_window = EXE(
     upx=False,
     console=False,        # GUI subprocess — no console
     icon=ICON_PATH,
+    version=VERSION_PATH,
     onefile=False,
 )
 

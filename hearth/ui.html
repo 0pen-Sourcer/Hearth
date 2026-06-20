@@ -7,7 +7,7 @@
 <link rel="icon" type="image/png" href="/assets/icon.png">
 <style>
   /* ============================================================
-     PALETTE — cool charcoal with a single violet accent.
+     PALETTE - cool charcoal with a single violet accent.
      ============================================================ */
   :root {
     --bg-0: #0a0a0c;
@@ -66,7 +66,7 @@
   svg { display: inline-block; vertical-align: middle; flex-shrink: 0; }
 
   /* ============================================================
-     SHELL — 3 rows × 2 cols
+     SHELL - 3 rows × 2 cols
      ============================================================ */
   .app {
     display: grid;
@@ -357,7 +357,7 @@
     background: var(--bg-3); transform: translateY(-1px);
   }
 
-  /* Flat message rendering — no bubbles, no avatars */
+  /* Flat message rendering - no bubbles, no avatars */
   .msg {
     padding: 14px 0;
     border-top: 1px solid var(--border);
@@ -450,7 +450,7 @@
   }
   .msg .actions button:hover { color: var(--accent-2); border-color: var(--accent-line); }
 
-  /* Tool call card — clean, collapsible */
+  /* Tool call card - clean, collapsible */
   .tool {
     margin: 6px 0;
     background: var(--bg-2);
@@ -511,7 +511,7 @@
   }
   .tool.open .t-body { display: block; }
 
-  /* Thinking block — collapsible, single block per turn */
+  /* Thinking block - collapsible, single block per turn */
   .think {
     margin: 6px 0;
     background: rgba(192, 132, 252, 0.04);
@@ -535,7 +535,7 @@
   }
   .think.open .think-chev { transform: rotate(90deg); }
   .think-label { text-transform: lowercase; letter-spacing: 0.4px; }
-  /* Subtle dot — solid when active, hidden once thinking ends. The old
+  /* Subtle dot - solid when active, hidden once thinking ends. The old
      pulse animation was flagged as eye-sore. */
   .think-spinner {
     margin-left: auto;
@@ -603,7 +603,7 @@
   .input-row textarea:focus { border-color: var(--accent-line); }
   .input-row textarea::placeholder { color: var(--fg-faint); }
   /* Pinned chat title at the top of the chat pane. Always visible so the
-     user can SEE which conversation thread they're typing into — fixes the
+     user can SEE which conversation thread they're typing into - fixes the
      "I thought I was still in the MW4 chat but I was in a new one" trap. */
   .chat-header {
     display: flex;
@@ -619,7 +619,7 @@
   .chat-header-icon { opacity: 0.6; }
   .chat-header-title { color: var(--fg); font-weight: 600; max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat-header-meta  { color: var(--fg-faint); margin-left: auto; font-variant-numeric: tabular-nums; }
-  /* Context-usage ring — inline next to input controls. Conic-gradient
+  /* Context-usage ring - inline next to input controls. Conic-gradient
      fill shows ratio; percent rendered in the center. Subtle when empty,
      warns amber over 70%, red over 90%, violet pulse during compaction.
 
@@ -733,7 +733,7 @@
     color: #fff;
     background: linear-gradient(135deg, #8b5cf6, #a78bfa);
   }
-  /* Inline permission strip — sits right above the input. */
+  /* Inline permission strip - sits right above the input. */
   .perm-strip {
     margin: 0 16px 6px; padding: 10px 14px;
     background: linear-gradient(180deg, rgba(124,92,255,.10), rgba(124,92,255,.05));
@@ -753,7 +753,7 @@
   .perm-key b { color: var(--accent-2); margin-right: 6px; font-weight: 700; }
   .perm-key:hover { background: var(--bg-3); color: var(--fg); }
   .perm-hint { color: var(--fg-faint); font-style: italic; margin-left: auto; }
-  /* Welcome card — first-run intro inside the chat view. Friendly. Click-to-try. */
+  /* Welcome card - first-run intro inside the chat view. Friendly. Click-to-try. */
   .welcome-card {
     margin: 24px 20px 8px;
     padding: 22px;
@@ -811,7 +811,7 @@
   .welcome-link:hover { border-color: rgba(124,92,255,.55); background: rgba(124,92,255,.05); }
   .welcome-tip { margin-top: 10px; font-size: 11px; color: var(--fg-faint); font-style: italic; }
   /* ============================================================
-     MODELS — LM Studio-tier redesign (v0.6 round 5).
+     MODELS - LM Studio-tier redesign (v0.6 round 5).
      Layout: header → sub-nav tabs → sticky search → scrollable rows
      with click-to-expand rich detail (capability tags, quant picker,
      full llama.cpp load config). All in-app, no external HF trip.
@@ -876,7 +876,7 @@
   .models-section > .sec-head .sub { font-size: 11px; color: var(--fg-faint); }
   .models-section > .sec-body { padding: 8px; display: flex; flex-direction: column; gap: 4px; }
 
-  /* Row — table-shaped: source | name | size | quant | actions.
+  /* Row - table-shaped: source | name | size | quant | actions.
      Wraps a hidden expand panel that toggles open on click. */
   .model-row {
     display: flex; align-items: center; gap: 14px;
@@ -944,7 +944,7 @@
   .model-action.is-secondary:hover { color: var(--fg); border-color: var(--accent-2); }
   .model-action:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
-  /* Expand panel — opens inline under the row when clicked. Holds the full
+  /* Expand panel - opens inline under the row when clicked. Holds the full
      llama.cpp load config UI: GPU offload layers, ctx, KV quant, threads, flash. */
   .model-expand {
     width: 100%;
@@ -977,7 +977,7 @@
   .model-expand .ex-file:last-child { border-bottom: none; }
   .model-expand .ex-file:hover { background: var(--bg-2); }
   .model-expand .ex-file.selected { background: rgba(139,92,246,.08); border-color: var(--accent-line); }
-  /* Chevron on a click-anywhere row — rotates when row is open. Replaces
+  /* Chevron on a click-anywhere row - rotates when row is open. Replaces
      the old "Pick file" button so the whole row is the affordance. */
   .model-row.is-expandable { cursor: pointer; }
   .model-row.is-expandable:hover { background: var(--bg-2); }
@@ -999,7 +999,7 @@
     font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
     border: 1px solid var(--accent-line);
   }
-  /* Recommended chip: only on the Q4_K_M that fits — the "if you don't know,
+  /* Recommended chip: only on the Q4_K_M that fits - the "if you don't know,
      pick this" pointer for first-time users. Uses the accent gradient so it
      reads as the suggested action. */
   .model-expand .ex-file .ex-rec {
@@ -1014,7 +1014,7 @@
   .model-expand .ex-file[data-tier="partial"]  { border-left: 2px solid #f0b860; }
   .model-expand .ex-file[data-tier="overflow"] { border-left: 2px solid #e0786a; opacity: 0.6; }
 
-  /* HF "fetching files" spinner — small, accent-colored, matches the
+  /* HF "fetching files" spinner - small, accent-colored, matches the
      existing thinking-pulse keyframes so we have one visual language. */
   .hf-spinner {
     display: inline-block; width: 10px; height: 10px; border-radius: 50%;
@@ -1205,7 +1205,7 @@
   .tag.reference { background: rgba(192,132,252,0.10); color: var(--tool); }
   .tag.other     { background: var(--bg-3); color: var(--fg-faint); }
   /* Memory list row gets a left-border stripe matching its type. Makes
-     scanning the Memory tab a glance instead of a read — pick out
+     scanning the Memory tab a glance instead of a read - pick out
      "all the user-facts" or "all the project-facts" by color band. */
   .item[data-mem-type="user"]      { border-left: 3px solid var(--info); }
   .item[data-mem-type="feedback"]  { border-left: 3px solid var(--accent-2); }
@@ -1300,7 +1300,7 @@
     width: 10px; height: 10px;
     transition: transform 0.15s;
     opacity: 0.6;
-    /* Same convention as tree-type-chev — expanded points down, collapsed right. */
+    /* Same convention as tree-type-chev - expanded points down, collapsed right. */
     transform: rotate(90deg);
   }
   .tree-sub.collapsed .tree-sub-chev { transform: rotate(0deg); }
@@ -1333,7 +1333,7 @@
     max-width: 50%;
   }
 
-  /* Memory graph constellation — D3 force-directed render.
+  /* Memory graph constellation - D3 force-directed render.
      Dark backdrop, nodes glow violet (with their cluster's hue tint),
      edges are thin radial fades between sibling memories, hover surfaces
      the fact body in a floating tip. Looks like a star map of your mind. */
@@ -1367,7 +1367,7 @@
     pointer-events: none;
     backdrop-filter: blur(4px);
   }
-  /* Tooltip — floats next to whichever node the user is hovering. */
+  /* Tooltip - floats next to whichever node the user is hovering. */
   .graph-tip {
     position: absolute;
     pointer-events: none;
@@ -1396,7 +1396,7 @@
     color: var(--fg-dim);
     line-height: 1.4;
   }
-  /* D3 element-level styling — applied via attribute, not class */
+  /* D3 element-level styling - applied via attribute, not class */
   .graph-edge {
     stroke: rgba(139, 92, 246, 0.18);
     stroke-width: 1;
@@ -1426,7 +1426,7 @@
   .graph-node[data-type="reference"] { color: #c084fc; }
   .graph-node[data-type="feedback"]  { color: #a78bfa; }
   .graph-node[data-type="other"]     { color: #9ca3af; }
-  /* Search highlighting — matched nodes pulse and glow, neighbors stay
+  /* Search highlighting - matched nodes pulse and glow, neighbors stay
      readable, everything else dims so the connections leap out. */
   .graph-node.matched circle:first-child {
     r: 8;
@@ -1555,7 +1555,7 @@
   /* ============================================================
      SETTINGS view
      ============================================================ */
-  /* Settings shell — LM Studio-style left sub-nav + scrolling main panel. */
+  /* Settings shell - LM Studio-style left sub-nav + scrolling main panel. */
   .settings-shell {
     flex: 1; min-height: 0;
     display: flex;
@@ -1604,7 +1604,7 @@
   .settings.settings-main { padding: 24px 32px; }
   .settings-main .settings-pane h3:first-child { margin-top: 0; }
 
-  /* Author credit block — bottom of About pane. */
+  /* Author credit block - bottom of About pane. */
   .credit-block {
     margin-top: 28px;
     padding: 16px 18px;
@@ -1623,7 +1623,7 @@
   .credit-sub { color: var(--fg-faint); font-size: 12px; line-height: 1.5; }
   .credit-sub a { color: var(--accent-2); text-decoration: none; }
   .credit-sub a:hover { text-decoration: underline; }
-  /* Server status card — live PID / model / endpoint with action buttons.
+  /* Server status card - live PID / model / endpoint with action buttons.
      Sits at the top of the Server settings pane. */
   .server-card {
     padding: 14px 16px; margin-bottom: 20px;
@@ -1795,7 +1795,7 @@
     background: var(--accent);
     transform: scale(1.5);
   }
-  /* Model-loading dots — reuse the SAME thinking-pulse animation as the
+  /* Model-loading dots - reuse the SAME thinking-pulse animation as the
      in-chat assistant indicator so the user only ever learns one visual
      language. Was a separate one-off wave; consolidated v0.6 round 6 hotfix. */
   .dot-strip.wave .d {
@@ -1811,7 +1811,7 @@
   .dot-strip.wave .d:nth-child(8) { animation-delay: 0.49s; }
   .dot-strip.wave .d:nth-child(9) { animation-delay: 0.56s; }
   .dot-strip.wave .d:nth-child(10){ animation-delay: 0.63s; }
-  /* Range slider — re-skinned to the violet UI palette. Browser default
+  /* Range slider - re-skinned to the violet UI palette. Browser default
      (blue track + white thumb on Windows) was off-palette per user feedback. */
   input[type="range"] {
     -webkit-appearance: none;
@@ -1851,7 +1851,7 @@
     border-radius: 3px;
   }
 
-  /* Keyboard shortcut chip — proper key-cap look matching the violet UI. */
+  /* Keyboard shortcut chip - proper key-cap look matching the violet UI. */
   kbd {
     display: inline-block;
     background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
@@ -1867,7 +1867,7 @@
     min-width: 18px;
     text-align: center;
   }
-  /* Grid layout: two columns — chip stack on left, plain description right. */
+  /* Grid layout: two columns - chip stack on left, plain description right. */
   .kbd-grid {
     display: grid;
     grid-template-columns: minmax(120px, max-content) 1fr;
@@ -1911,7 +1911,7 @@
     background: #000;
   }
 
-  /* Lightbox overlay — full-screen, dark backdrop with violet glow, click
+  /* Lightbox overlay - full-screen, dark backdrop with violet glow, click
      background or press Esc to close. Shared by image and video media. */
   .lightbox {
     position: fixed;
@@ -2005,7 +2005,7 @@
     white-space: nowrap;
   }
 
-  /* Image/video generation placeholder — violet noise canvas that "cooks"
+  /* Image/video generation placeholder - violet noise canvas that "cooks"
      while we wait for the cloud provider to return the finished image.
      Pure CSS so there's nothing to load. Layered radial gradients that
      drift in opposite directions give the illusion of churning particles.
@@ -2037,7 +2037,7 @@
     animation: gen-drift 9s ease-in-out infinite alternate;
   }
   .gen-placeholder::after {
-    /* Static violet scrim — keeps the colors saturated even when the gradients
+    /* Static violet scrim - keeps the colors saturated even when the gradients
        drift to the edges of the visible area. */
     content: '';
     position: absolute;
@@ -2090,7 +2090,7 @@
     40%           { opacity: 1.0; transform: translateY(-3px); }
   }
 
-  /* Legacy 12-cube grid — kept for any other consumers but no longer used
+  /* Legacy 12-cube grid - kept for any other consumers but no longer used
      by the chat path. Safe to delete later if nothing else references it. */
   /* Chat-mode "thinking" indicator - a horizontal dot-grid wave that lives
      inside the empty assistant bubble until the first content chunk arrives. */
@@ -2202,8 +2202,8 @@
   }
 
   /* ============================================================
-     ONBOARDING — full-screen multi-step card overlay on first run.
-     Way friendlier than a single dropdown-stuffed modal — each step has
+     ONBOARDING - full-screen multi-step card overlay on first run.
+     Way friendlier than a single dropdown-stuffed modal - each step has
      a hero icon, headline, body, and a single primary action.
      ============================================================ */
   .ob-overlay {
@@ -2346,7 +2346,7 @@
   .ob-try:hover { color: var(--accent-2); border-color: var(--accent-line); background: var(--bg-3); }
 
   /* ============================================================
-     DROP OVERLAY — only visible when a file is being dragged in
+     DROP OVERLAY - only visible when a file is being dragged in
      ============================================================ */
   .drop-overlay {
     display: none;
@@ -2371,7 +2371,7 @@
   .drop-overlay .card .big { font-size: 32px; margin-bottom: 10px; color: var(--fg); }
 
   /* ============================================================
-     VOICE MODE — full-screen takeover
+     VOICE MODE - full-screen takeover
      ============================================================ */
   .voice-mode {
     display: none;
@@ -2465,7 +2465,7 @@
 
     <div class="top-spacer"></div>
 
-    <div class="gpu-chip" id="gpu-chip"><span class="k">gpu</span><span class="v">—</span></div>
+    <div class="gpu-chip" id="gpu-chip"><span class="k">gpu</span><span class="v">-</span></div>
 
     <button class="icon-btn" id="btn-voice-mode" title="Voice mode (full-screen)">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/><path d="M8 23h8"/></svg>
@@ -2534,23 +2534,23 @@
     <section class="view active" id="view-chat">
       <!-- First-run welcome card. Click a chip to fire the prompt. Auto-hides
            after the first message; comes back via /welcome. No emojis by
-           design — clean labels + hover does the visual work. -->
-      <!-- "Hey, I'm Jarvis" welcome card retired in v0.6 round 6 — the new
+           design - clean labels + hover does the visual work. -->
+      <!-- "Hey, I'm Jarvis" welcome card retired in v0.6 round 6 - the new
            onboarding overlay handles the same intro better and the chat view
            is now clean by default. Functions referencing it are kept as no-ops
            for backward compat (showWelcomeCard / hideWelcomeCard). -->
       <div class="welcome-card" id="welcome-card" hidden></div>
-      <!-- Chat header retired — user found it aesthetically distracting.
+      <!-- Chat header retired - user found it aesthetically distracting.
            Chat title stays visible in the sidebar (highlighted active chat),
            so the "which thread am I in" signal is preserved without the bar. -->
       <div class="chat-header" id="chat-header" hidden style="display:none;">
         <span class="chat-header-icon">💬</span>
-        <span class="chat-header-title" id="chat-header-title">—</span>
+        <span class="chat-header-title" id="chat-header-title">-</span>
         <span class="chat-header-meta" id="chat-header-meta"></span>
       </div>
       <div class="chat-body" id="chat-body"></div>
 
-      <!-- Inline permission strip — appears above the input when Jarvis wants
+      <!-- Inline permission strip - appears above the input when Jarvis wants
            to run a risky tool. Keyboard-driven (1=allow / 2=deny / 3=always /
            4=never), and the input below becomes a free-text "type what to do
            instead" field. No center modal, no mouse required. -->
@@ -2570,7 +2570,7 @@
         </div>
       </div>
 
-      <!-- Inline ask-user strip — appears above the input when Jarvis fires
+      <!-- Inline ask-user strip - appears above the input when Jarvis fires
            an ask_user tool call. Same surface as the permission strip so the
            user always looks in one place when Hearth needs input. Reuses the
            perm-strip CSS for visual continuity. -->
@@ -2621,7 +2621,7 @@
         <span class="sub" id="mem-sub">facts Jarvis remembers across sessions</span>
         <div class="grow"></div>
         <!-- View-mode toggle: List (flat search) vs Tree (grouped by sub-category).
-             Tree view is the v0.6 hero — same data, hierarchical render. -->
+             Tree view is the v0.6 hero - same data, hierarchical render. -->
         <!-- Order: Graph first (the hero view), then Tree, then List. -->
         <div class="mem-view-toggle">
           <button class="mem-view-btn active" data-mem-view="graph" title="Force-directed constellation graph">Graph</button>
@@ -2644,10 +2644,10 @@
     <section class="view" id="view-reminders">
       <div class="view-head">
         <h2>Reminders</h2>
-        <span class="sub">one-shot &amp; recurring — set them in chat</span>
+        <span class="sub">one-shot &amp; recurring - set them in chat</span>
       </div>
       <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
-        Just ask in chat — <i>"remind me to leave in 30 min"</i>, or
+        Just ask in chat - <i>"remind me to leave in 30 min"</i>, or
         <i>"every Monday 9am, search for new GPU benchmarks"</i> (those run a tool, not just a toast).
         Missed ones catch up next launch.
       </div>
@@ -2660,7 +2660,7 @@
     <section class="view" id="view-skills">
       <div class="view-head">
         <h2>Skills</h2>
-        <span class="sub">workflows Hearth can run — install more, or share your own</span>
+        <span class="sub">workflows Hearth can run - install more, or share your own</span>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin:0 4px 10px;">
         <input type="text" id="skill-install-src" placeholder="install from GitHub:  owner/repo   (or a github URL / local path)" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 12px;font-size:13px;outline:none;" />
@@ -2814,10 +2814,10 @@
             <div class="hint" id="brain-where-hint">Local-first (LM Studio / Ollama / built-in). For full control, open the Models tab.</div>
           </div>
           <select id="setting-brain-mode">
-            <option value="local">Local-first — on this PC (recommended)</option>
-            <option value="gemini">Google — Gemini</option>
-            <option value="openai">OpenAI — GPT</option>
-            <option value="grok">xAI — Grok</option>
+            <option value="local">Local-first - on this PC (recommended)</option>
+            <option value="gemini">Google - Gemini</option>
+            <option value="openai">OpenAI - GPT</option>
+            <option value="grok">xAI - Grok</option>
             <option value="openrouter">OpenRouter (any model)</option>
             <option value="custom">Other (custom URL)</option>
           </select>
@@ -2830,7 +2830,7 @@
           </div>
           <input type="password" id="setting-llm-key" placeholder="paste your key here" style="min-width:260px"/>
         </div>
-        <!-- Model picker retired from Settings — was causing source-of-truth
+        <!-- Model picker retired from Settings - was causing source-of-truth
              confusion (Settings said grok-4.3 while topbar showed grok-4.20-...).
              The topbar dropdown is the single source: it queries the live
              provider /v1/models and persists the pick. Settings is now just
@@ -2847,7 +2847,7 @@
         </div>
         <div class="field" id="brain-apply-row" hidden>
           <div class="label">
-            <div class="hint">When ready, switch to this brain — your next message will use it.</div>
+            <div class="hint">When ready, switch to this brain - your next message will use it.</div>
           </div>
           <button class="btn-mini" id="btn-llm-apply">Use this brain</button>
         </div>
@@ -2874,7 +2874,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Listen for my voice (auto)</div>
-            <div class="hint">Real-time mode uses silero VAD — just talk, no buttons. Falls back to press-to-talk if not installed.</div>
+            <div class="hint">Real-time mode uses silero VAD - just talk, no buttons. Falls back to press-to-talk if not installed.</div>
             <div class="voice-status" id="stt-status">checking…</div>
           </div>
           <div class="switch" data-key="voice_stt"></div>
@@ -2893,7 +2893,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Voice speed</div>
-            <div class="hint">1.5 is the new default — faster, less monotone. Slide higher if you want it snappier; lower if it's too quick to follow.</div>
+            <div class="hint">1.5 is the new default - faster, less monotone. Slide higher if you want it snappier; lower if it's too quick to follow.</div>
           </div>
           <div style="display:flex; align-items:center; gap:12px; min-width:240px;">
             <input id="setting-voice-speed" type="range" min="0.5" max="2.5" step="0.1" value="1.5" style="flex:1;">
@@ -2929,14 +2929,14 @@
         <h3>Behavior</h3>
 
         <!-- Agent identity: name + (later) personality. Renaming is a real
-             event — drives the chat avatar letter, the message label,
+             event - drives the chat avatar letter, the message label,
              persona prompt, AND the workspace folder. Two-step process:
              quick rename (instant, persona + avatar) and full rename
              (slow, also moves ~/Jarvis → ~/<NewName>). -->
         <div class="field">
           <div class="label">
             <div class="name">Agent name</div>
-            <div class="hint">What do you want to call me? Shows up everywhere — chat avatar, persona signature, workspace folder. Letters/digits/spaces only, 1-20 chars. Default: JARVIS.</div>
+            <div class="hint">What do you want to call me? Shows up everywhere - chat avatar, persona signature, workspace folder. Letters/digits/spaces only, 1-20 chars. Default: JARVIS.</div>
           </div>
           <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
             <input type="text" id="setting-agent-name" maxlength="20" pattern="[A-Za-z0-9 ]+" style="flex:1; min-width:160px;"/>
@@ -2949,7 +2949,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Show reasoning by default</div>
-            <div class="hint">For thinking models — exposes the internal scratchpad. Triples response time on some.</div>
+            <div class="hint">For thinking models - exposes the internal scratchpad. Triples response time on some.</div>
           </div>
           <div class="switch" data-key="think_default"></div>
         </div>
@@ -3007,10 +3007,10 @@
         <div class="field" style="flex-direction:column;align-items:stretch;">
           <div class="label" style="margin-bottom:8px;">
             <div class="name">Import memory from ChatGPT / Claude</div>
-            <div class="hint">Paste what another AI knows about you — Hearth saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
+            <div class="hint">Paste what another AI knows about you - Hearth saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
           </div>
           <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;">
-            <div id="set-import-prompt" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points — name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
+            <div id="set-import-prompt" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points - name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
             <button type="button" class="btn-mini" id="set-import-copy">Copy</button>
           </div>
           <textarea id="set-import-text" rows="4" placeholder="Paste the AI's reply here…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12px;resize:vertical;outline:none;"></textarea>
@@ -3023,7 +3023,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Reminders</div>
-            <div class="hint">Now have their own <b>Reminders</b> tab in the left sidebar — view, snooze, and cancel them there.</div>
+            <div class="hint">Now have their own <b>Reminders</b> tab in the left sidebar - view, snooze, and cancel them there.</div>
           </div>
           <button type="button" class="btn-mini" id="btn-go-reminders">Open Reminders</button>
         </div>
@@ -3040,7 +3040,7 @@
         <div class="field">
           <div class="label">
             <div class="name">"Context compacted" toast</div>
-            <div class="hint">Brief pop when compaction shrinks your context. The ring next to the input already changes color — toast is extra.</div>
+            <div class="hint">Brief pop when compaction shrinks your context. The ring next to the input already changes color - toast is extra.</div>
           </div>
           <div class="switch" data-key="toast_compacted"></div>
         </div>
@@ -3055,7 +3055,7 @@
           <div class="switch" data-key="keep_local_warm"></div>
         </div>
 
-        <!-- Keyboard shortcuts cheatsheet — grid table of shortcut chips. -->
+        <!-- Keyboard shortcuts cheatsheet - grid table of shortcut chips. -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Keyboard shortcuts</h4>
         <div class="kbd-grid">
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>8</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
@@ -3084,15 +3084,15 @@
           </div>
           <div class="server-card-row">
             <span class="k">PID</span>
-            <span class="v mono" id="server-st-pid">—</span>
+            <span class="v mono" id="server-st-pid">-</span>
           </div>
           <div class="server-card-row">
             <span class="k">Model</span>
-            <span class="v mono" id="server-st-model" style="word-break:break-all">—</span>
+            <span class="v mono" id="server-st-model" style="word-break:break-all">-</span>
           </div>
           <div class="server-card-row">
             <span class="k">Endpoint</span>
-            <span class="v mono" id="server-st-url">—</span>
+            <span class="v mono" id="server-st-url">-</span>
           </div>
           <div class="server-card-actions">
             <button class="btn-mini" id="btn-server-restart">Restart</button>
@@ -3104,7 +3104,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Auto-boot last model on launch</div>
-            <div class="hint">When you start Hearth, automatically load the last <strong>local GGUF</strong> you used into the built-in server. Saves the 15-30s "wait for me to click Use this" beat. Does NOT affect cloud brains (Grok / Gemini / OpenAI) — those just need the API key.</div>
+            <div class="hint">When you start Hearth, automatically load the last <strong>local GGUF</strong> you used into the built-in server. Saves the 15-30s "wait for me to click Use this" beat. Does NOT affect cloud brains (Grok / Gemini / OpenAI) - those just need the API key.</div>
           </div>
           <div class="switch" data-key="server_autoboot"></div>
         </div>
@@ -3112,11 +3112,11 @@
         <div class="field">
           <div class="label">
             <div class="name">Default context window <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
-            <div class="hint">Only applies when Hearth runs its <strong>own</strong> llama.cpp server and loads a GGUF that has no saved config yet. LM Studio / Ollama / cloud brains set their own context — this is ignored for them. Higher = more headroom but more KV-cache VRAM.</div>
+            <div class="hint">Only applies when Hearth runs its <strong>own</strong> llama.cpp server and loads a GGUF that has no saved config yet. LM Studio / Ollama / cloud brains set their own context - this is ignored for them. Higher = more headroom but more KV-cache VRAM.</div>
           </div>
           <select id="setting-server-ctx">
             <option value="8192">8K (too small)</option>
-            <option value="16384">16K (tight — no headroom for long chats)</option>
+            <option value="16384">16K (tight - no headroom for long chats)</option>
             <option value="24576" selected>24K (recommended)</option>
             <option value="32768">32K (comfortable)</option>
             <option value="65536">64K (uses noticeably more KV-cache VRAM)</option>
@@ -3154,7 +3154,7 @@
         <div class="settings-pane" data-st="mcp" hidden>
         <h3>MCP servers</h3>
         <p style="color:var(--fg-dim);font-size:13px;line-height:1.55;margin:0 0 18px 0">
-          Hearth speaks the <b>Model Context Protocol</b> — the open standard for letting one
+          Hearth speaks the <b>Model Context Protocol</b> - the open standard for letting one
           AI client talk to many tool servers. <b>Hearth itself is an MCP server</b> (point any
           MCP-compatible client at <code>hearth/mcp_server.py</code> to use Hearth's tools elsewhere).
           And below, you can wire <em>other</em> MCP servers <em>into</em> Hearth so their tools
@@ -3163,11 +3163,11 @@
 
         <div class="field">
           <div class="label">
-            <div class="name">Outbound — Hearth as a CLIENT</div>
+            <div class="name">Outbound - Hearth as a CLIENT</div>
             <div class="hint">
               Paste a standard mcp.json config. Each server runs as a subprocess; its tools join the
               Hearth tool list and are usable by every chat brain (local / cloud). Restart Hearth
-              after editing — bridge spin-up happens at launch.
+              after editing - bridge spin-up happens at launch.
             </div>
           </div>
           <button class="btn-mini" id="btn-mcp-edit" style="min-width:140px;">Edit mcp.json</button>
@@ -3189,7 +3189,7 @@
 
         <div class="field">
           <div class="label">
-            <div class="name">Inbound — Hearth as a SERVER</div>
+            <div class="name">Inbound - Hearth as a SERVER</div>
             <div class="hint">
               Other MCP clients (LM Studio chat UI, Claude Desktop, Cursor, your own scripts) can
               call into Hearth's full tool set. The snippet below goes in their mcp.json.
@@ -3203,15 +3203,16 @@
         <h3>Reach Hearth from your phone</h3>
         <p class="settings-sub" style="color:var(--fg-faint);font-size:12px;margin:-4px 0 14px;">
           Message Hearth from your phone and it runs the full agent on this PC, then
-          replies. Set the token + your id here, then run the one command shown.
-          Official channels (Telegram, Discord) have no ban risk — prefer them.
+          replies. Set the token and your id, then hit Save once. Hearth keeps the bot
+          running and starts it automatically every time it launches. No commands to run.
+          Official channels (Telegram, Discord) have no ban risk, so prefer them.
         </p>
 
         <!-- Telegram -->
         <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">Telegram <span style="color:var(--ok);font-size:11px;font-weight:400">· recommended</span></div>
-            <div class="hint">@BotFather → /newbot → copy the token. Then message the bot once and find your chat id (or just run it — it logs incoming ids).</div>
+            <div class="hint">@BotFather → /newbot → copy the token. Then message the bot once and find your chat id (or just run it - it logs incoming ids).</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
             <input type="password" id="bridge-tg-token" placeholder="bot token (123456:ABC…)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
@@ -3221,7 +3222,7 @@
               <button class="btn-mini" id="bridge-tg-toggle">Start</button>
               <span id="bridge-tg-status" style="font-size:11px;color:var(--fg-faint)"></span>
             </div>
-            <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.telegram_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.telegram_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
+            <div style="font-size:11px;color:var(--fg-faint)">Saved bots start automatically on launch. Use Start to bring it online right now.</div>
           </div>
         </div>
 
@@ -3229,7 +3230,7 @@
         <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">Discord <span style="color:var(--ok);font-size:11px;font-weight:400">· recommended</span></div>
-            <div class="hint">discord.com/developers → New Application → Bot → copy token + enable MESSAGE CONTENT INTENT. Your user id: Discord → Advanced → Developer Mode → right-click your name → Copy User ID. Needs <code>pip install discord.py</code>.</div>
+            <div class="hint">discord.com/developers, New Application, Bot, copy token and enable MESSAGE CONTENT INTENT. Your user id: Discord, Advanced, Developer Mode on, right-click your name, Copy User ID.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
             <input type="password" id="bridge-dc-token" placeholder="bot token" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
@@ -3239,7 +3240,7 @@
               <button class="btn-mini" id="bridge-dc-toggle">Start</button>
               <span id="bridge-dc-status" style="font-size:11px;color:var(--fg-faint)"></span>
             </div>
-            <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.discord_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.discord_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
+            <div style="font-size:11px;color:var(--fg-faint)">Saved bots start automatically on launch. Use Start to bring it online right now.</div>
           </div>
         </div>
 
@@ -3262,7 +3263,7 @@
         <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">WhatsApp <span style="color:var(--warn,#e0a020);font-size:11px;font-weight:400">· experimental</span></div>
-            <div class="hint">Unofficial link to a real account — Meta can ban the number for automation, so <b>use a spare number, not your main</b>. Needs <code>pip install neonize</code>; pairing is a QR shown when you run it.</div>
+            <div class="hint">Unofficial link to a real account. Meta can ban the number for automation, so <b>use a spare number, not your main</b>. Pairing shows a QR the first time it starts.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
             <input type="text" id="bridge-wa-nums" placeholder="allowed numbers (digits, country code, comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
@@ -3272,7 +3273,7 @@
               <button class="btn-mini" id="bridge-wa-toggle">Start</button>
               <span id="bridge-wa-status" style="font-size:11px;color:var(--fg-faint)"></span>
             </div>
-            <div style="font-size:11px;color:var(--fg-faint)">then run: <code>python -m hearth.whatsapp_bridge</code> <button class="btn-mini" data-copycmd="python -m hearth.whatsapp_bridge" style="padding:1px 7px;font-size:10px">copy</button></div>
+            <div style="font-size:11px;color:var(--fg-faint)">Saved bots start automatically on launch. Use Start to show the pairing QR now.</div>
           </div>
         </div>
         </div><!-- /pane connect -->
@@ -3293,6 +3294,20 @@
           </div>
           <button class="btn-mini" id="btn-update-check">Check for updates</button>
         </div>
+        <div class="field" id="broadcast-field" style="display:none; align-items:flex-start;">
+          <div class="label">
+            <div class="name">Broadcast to all builds <span style="color:var(--accent-2);font-size:11px;font-weight:400">· author</span></div>
+            <div class="hint">Writes an entry to announcements.json. Commit + push it and every Hearth build toasts it on next open.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
+            <input type="text" id="bc-title" placeholder="title, e.g. v0.8 is out" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <textarea id="bc-body" rows="2" placeholder="message shown to every user" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;resize:vertical;outline:none;font-family:inherit;"></textarea>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn-mini" id="bc-publish">Publish</button>
+              <span id="bc-status" style="font-size:11px;color:var(--fg-faint)"></span>
+            </div>
+          </div>
+        </div>
         <div class="field">
           <div class="label">
             <div class="name">Start Hearth at login</div>
@@ -3308,7 +3323,7 @@
           <div class="label">
             <div class="name">Hearth lives at</div>
             <div class="hint" id="setting-workspace">…</div>
-            <div class="hint" style="margin-top:2px">Move everything — memory, chats, models — to another folder or drive (e.g. if C: is full). Restarts Hearth.</div>
+            <div class="hint" style="margin-top:2px">Move everything - memory, chats, models - to another folder or drive (e.g. if C: is full). Restarts Hearth.</div>
           </div>
           <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
             <input type="text" id="setting-ws-path" placeholder="D:\Hearth" style="flex:1; min-width:160px;"/>
@@ -3346,10 +3361,10 @@
       <div class="d"></div><div class="d"></div><div class="d"></div><div class="d"></div><div class="d"></div>
       <div class="d"></div><div class="d"></div><div class="d"></div><div class="d"></div><div class="d"></div>
     </div>
-    <div class="item"><span class="k">model</span><span class="v" id="st-model">—</span></div>
-    <div class="item"><span class="k">ctx</span><span class="v" id="st-ctx">—</span></div>
-    <div class="item"><span class="k">tools</span><span class="v" id="st-tools">—</span></div>
-    <div class="item"><span class="k">mem</span><span class="v" id="st-mem">—</span></div>
+    <div class="item"><span class="k">model</span><span class="v" id="st-model">-</span></div>
+    <div class="item"><span class="k">ctx</span><span class="v" id="st-ctx">-</span></div>
+    <div class="item"><span class="k">tools</span><span class="v" id="st-tools">-</span></div>
+    <div class="item"><span class="k">mem</span><span class="v" id="st-mem">-</span></div>
     <!-- Loading-progress mini bar shown ONLY while a builtin spawn is in
          flight. Tracks llama_cpp.server's phases (loading_weights →
          initializing_backend → reserving_kv → starting_http → ready). -->
@@ -3402,7 +3417,7 @@
         <p class="ob-sub">A local-first AI that actually does things on your PC. I open apps, find files,
           read documents, browse the web, and never send a byte to the cloud unless you tell me to.
           A few quick steps and we're rolling.</p>
-        <div class="ob-tipline">Local stays the default. You can wire a cloud key on the next screen too. Not into the name <b>Jarvis</b>? Pick anything you like later in Settings → Behavior → Agent name (Cortana, Friday, Athena, anything) — the avatar, voice and folder all rename with it.</div>
+        <div class="ob-tipline">Local stays the default. You can wire a cloud key on the next screen too. Not into the name <b>Jarvis</b>? Pick anything you like later in Settings → Behavior → Agent name (Cortana, Friday, Athena, anything) - the avatar, voice and folder all rename with it.</div>
       </div>
 
       <!-- ---- step 2: pick a brain ---- -->
@@ -3421,7 +3436,7 @@
         <div class="ob-choices" id="ob-brain-choices" style="margin-top:18px"></div>
 
         <div class="ob-tipline" id="ob-brain-tip">
-          Don't have a model yet? Don't worry — the <b>Models</b> tab inside the app lets you download
+          Don't have a model yet? Don't worry - the <b>Models</b> tab inside the app lets you download
           one with a single click. You can skip this step and do it from there.
         </div>
       </div>
@@ -3434,20 +3449,20 @@
           </svg>
         </div>
         <h1 class="ob-title">Or use your favorite cloud brain.</h1>
-        <p class="ob-sub">Hearth is <b>local-first</b> — your PC stays the default. But if your
+        <p class="ob-sub">Hearth is <b>local-first</b> - your PC stays the default. But if your
           machine isn't powerful enough, or you'd rather pay for a smarter brain, or you just
-          want a backup when something breaks — <b>we've got you covered.</b> The same tools
+          want a backup when something breaks - <b>we've got you covered.</b> The same tools
           work pointed at <b>Gemini, OpenAI, Grok, OpenRouter</b> or any OpenAI-compatible URL.
           Bring your key, switch in one click. Nothing else changes.</p>
 
         <div class="ob-section">
           <div class="ob-label">Pick a path</div>
           <select id="ob-brain-where" class="ob-select">
-            <option value="local">Local-first — stay on this PC (default)</option>
-            <option value="gemini">Cloud — Google Gemini</option>
-            <option value="openai">Cloud — OpenAI GPT</option>
-            <option value="grok">Cloud — xAI Grok</option>
-            <option value="openrouter">Cloud — OpenRouter (100+ models)</option>
+            <option value="local">Local-first - stay on this PC (default)</option>
+            <option value="gemini">Cloud - Google Gemini</option>
+            <option value="openai">Cloud - OpenAI GPT</option>
+            <option value="grok">Cloud - xAI Grok</option>
+            <option value="openrouter">Cloud - OpenRouter (100+ models)</option>
           </select>
         </div>
         <div class="ob-section" id="ob-cloud-key-row" hidden>
@@ -3459,7 +3474,7 @@
           </div>
         </div>
 
-        <div class="ob-tipline">You can always change this later — Settings → Chat brain has the same dropdown.</div>
+        <div class="ob-tipline">You can always change this later - Settings → Chat brain has the same dropdown.</div>
       </div>
 
       <!-- ---- step 4: voice ---- -->
@@ -3479,7 +3494,7 @@
 
         <div class="ob-choices">
           <button class="ob-choice" data-voice="full">
-            <div class="ob-choice-title">Yes — talk + listen</div>
+            <div class="ob-choice-title">Yes - talk + listen</div>
             <div class="ob-choice-sub">Mic + speakers. Press the voice icon, then just talk.</div>
             <span class="ob-choice-badge">Recommended</span>
           </button>
@@ -3490,23 +3505,23 @@
         </div>
         <div class="ob-status-row" id="ob-voice-status"><span class="ob-dot"></span><span>checking voice…</span></div>
 
-        <!-- Voice picker — revealed only after the user picks "Yes". A small
+        <!-- Voice picker - revealed only after the user picks "Yes". A small
              curated set (6 Jarvis-leaning picks out of Kokoro's 54); the full
              list stays in Settings → Voice. Speed defaults to 1.5x because
              1.0 sounds like a turtle for daily-driver pace. The Test button
              actually speaks the chosen voice/speed combo so the user hears
-             it BEFORE committing — no surprises post-onboarding. -->
+             it BEFORE committing - no surprises post-onboarding. -->
         <div id="ob-voice-picker" hidden style="margin-top:18px; padding:14px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r);">
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:end;">
             <div>
               <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Voice</label>
               <select id="ob-voice-name" style="width:100%;">
-                <option value="am_michael">am_michael — American, calm Jarvis baseline</option>
-                <option value="bm_george">bm_george — British, deep, formal butler</option>
-                <option value="bm_fable">bm_fable — British, warmer, conversational</option>
-                <option value="am_fenrir">am_fenrir — American, gravelly, low</option>
-                <option value="am_onyx">am_onyx — American, smooth deep</option>
-                <option value="bm_daniel">bm_daniel — British, crisp, professional</option>
+                <option value="am_michael">am_michael - American, calm Jarvis baseline</option>
+                <option value="bm_george">bm_george - British, deep, formal butler</option>
+                <option value="bm_fable">bm_fable - British, warmer, conversational</option>
+                <option value="am_fenrir">am_fenrir - American, gravelly, low</option>
+                <option value="am_onyx">am_onyx - American, smooth deep</option>
+                <option value="bm_daniel">bm_daniel - British, crisp, professional</option>
               </select>
             </div>
             <div>
@@ -3530,7 +3545,7 @@
           </svg>
         </div>
         <h1 class="ob-title">Quick personal touch.</h1>
-        <p class="ob-sub">I'll use this to address you and match your style. Skip any field —
+        <p class="ob-sub">I'll use this to address you and match your style. Skip any field -
           you can always change these in Settings.</p>
 
         <div class="ob-section">
@@ -3540,7 +3555,7 @@
         <div class="ob-section">
           <div class="ob-label">What should you call me?</div>
           <input type="text" id="ob-agent-name" class="ob-input" maxlength="20" pattern="[A-Za-z0-9 ]+"
-                 placeholder="JARVIS (default) — try Cortana, Friday, Athena, anything">
+                 placeholder="JARVIS (default) - try Cortana, Friday, Athena, anything">
           <div style="font-size:11px;color:var(--fg-faint);margin-top:4px">
             Sets the chat avatar letter, persona signature, and workspace folder name (~/&lt;NewName&gt;/). Letters/digits/spaces, 1-20 chars.
           </div>
@@ -3548,10 +3563,10 @@
         <div class="ob-section">
           <div class="ob-label">How should I sound?</div>
           <select id="ob-tone" class="ob-select">
-            <option value="">Default — concise, a little dry</option>
-            <option value="casual">Casual — talk to me like a friend</option>
-            <option value="formal">Formal — efficient + butler-like</option>
-            <option value="brief">Brief — minimum words, maximum signal</option>
+            <option value="">Default - concise, a little dry</option>
+            <option value="casual">Casual - talk to me like a friend</option>
+            <option value="formal">Formal - efficient + butler-like</option>
+            <option value="brief">Brief - minimum words, maximum signal</option>
           </select>
         </div>
         <div class="ob-section">
@@ -3585,7 +3600,7 @@
           <div style="margin-top:10px">
             <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>Step 1.</b> Copy this and send it to ChatGPT / Claude:</p>
             <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:12px">
-              <div id="ob-import-prompt" style="flex:1;background:var(--bg-0);border:1px solid var(--bg-3);border-radius:8px;padding:9px 11px;font-size:12px;color:var(--fg-dim);font-style:italic;line-height:1.5">List everything you know or remember about me as plain bullet points — name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
+              <div id="ob-import-prompt" style="flex:1;background:var(--bg-0);border:1px solid var(--bg-3);border-radius:8px;padding:9px 11px;font-size:12px;color:var(--fg-dim);font-style:italic;line-height:1.5">List everything you know or remember about me as plain bullet points - name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
               <button class="ob-btn" id="ob-import-copy" type="button" style="white-space:nowrap">Copy</button>
             </div>
             <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>Step 2.</b> Paste its reply here and click Import:</p>
@@ -3599,7 +3614,7 @@
               <span id="ob-import-status" style="font-size:12px;color:var(--fg-faint)"></span>
             </div>
             <p class="ob-sub" style="font-size:11px;margin-top:8px;color:var(--fg-faint)">
-              Importing is optional — if you'd rather skip it, just hit <b>Continue</b> below.</p>
+              Importing is optional - if you'd rather skip it, just hit <b>Continue</b> below.</p>
           </div>
         </details>
         <div class="ob-tipline">
@@ -3618,7 +3633,7 @@
           </svg>
         </div>
         <h1 class="ob-title">You're all set.</h1>
-        <p class="ob-sub">Type whatever you'd ask a friend. I do real things — open apps, read
+        <p class="ob-sub">Type whatever you'd ask a friend. I do real things - open apps, read
           files, browse the web, control your PC. The more specific you are, the better.</p>
         <div class="ob-tipline">Type <code>/help</code> any time for slash commands, <code>/tools</code> for the full tool list, or just talk.</div>
         <div class="ob-tipline" style="margin-top:8px">Want me on your phone? <b>Settings → Reach from phone</b> (Telegram or Discord). Add community skills in the <b>Skills</b> tab.</div>
@@ -3661,7 +3676,7 @@
   <div class="voice-bottom-text">Esc to exit · type any time, your keyboard still works</div>
 </div>
 
-<!-- D3 v7 — vendored for the Memory tab's force-directed constellation
+<!-- D3 v7 - vendored for the Memory tab's force-directed constellation
      graph. Loaded as a separate <script> tag (not inlined) so the browser
      can cache the 273 KB across page reloads. MIT license. -->
 <script src="/assets/d3.v7.min.js"></script>
@@ -3685,13 +3700,13 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','
 // underlying assistantMsg.content stays untouched for replay / history.
 function stripGarbageToolCalls(s) {
   if (!s) return s;
-  // The opening / closing markers are slippery — different fine-tunes emit
+  // The opening / closing markers are slippery - different fine-tunes emit
   // `<|toolcall>`, `<|tool_call|>`, `<|toolcall|>`, etc. and the closing can
   // be `<tool_call|>` or `</tool_call>` or missing entirely (truncated
   // stream). Match each marker permissively + keep the inner-body match
   // non-greedy. Final fallback strips any orphaned open marker too.
   return s
-    // Gemma 4 leak family — opening `<|toolcall>` / `<|toolcall|>` / `<|tool_call|>`
+    // Gemma 4 leak family - opening `<|toolcall>` / `<|toolcall|>` / `<|tool_call|>`
     // through closing `<tool_call|>` / `</tool_call>` / `<|tool_call|>`. Non-greedy
     // inside; case-insensitive markers.
     .replace(/<\|tool[_ ]?call\|?>[\s\S]*?<\/?tool[_ ]?call\|?>/gi, '')
@@ -3707,7 +3722,7 @@ function stripGarbageToolCalls(s) {
     .replace(/<\|im_(start|end)\|>/gi, '')
     // Pipe-escaped quote tokens that leak when the chat template's quoting fails
     .replace(/<\|"\|>/g, '"')
-    // ORPHANED open markers (model truncated mid-tool-call) — strip from the
+    // ORPHANED open markers (model truncated mid-tool-call) - strip from the
     // open marker through end-of-string so the user doesn't see half a call.
     .replace(/<\|tool[_ ]?call\|?>[\s\S]*$/i, '')
     .replace(/<\|python_tag\|>[\s\S]*$/i, '');
@@ -3732,7 +3747,7 @@ function renderMD(src) {
   });
   // HTML-escape EVERYTHING else
   let html = esc(src);
-  // Headings (only at start of line, 1-3 #s — keep level visual but flat)
+  // Headings (only at start of line, 1-3 #s - keep level visual but flat)
   html = html.replace(/^###\s+(.+)$/gm, '<h4>$1</h4>');
   html = html.replace(/^##\s+(.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^#\s+(.+)$/gm, '<h2>$1</h2>');
@@ -3743,12 +3758,12 @@ function renderMD(src) {
   // Italic * * or _ _
   html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
   html = html.replace(/(?<!_)_([^_\n]+)_(?!_)/g, '<em>$1</em>');
-  // Markdown links [text](url) — keep external; basic safety check
+  // Markdown links [text](url) - keep external; basic safety check
   html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {
     const safeU = /^https?:\/\//.test(u) ? u : '#';
     return `<a href="${safeU}" target="_blank" rel="noreferrer">${t}</a>`;
   });
-  // Unordered list items — group consecutive into <ul>
+  // Unordered list items - group consecutive into <ul>
   html = html.replace(/(?:^|\n)((?:[-*]\s.+(?:\n|$))+)/g, (_, block) => {
     const items = block.trim().split('\n').map(li =>
       `<li>${li.replace(/^[-*]\s+/, '')}</li>`
@@ -3780,7 +3795,7 @@ function renderMD(src) {
   return html;
 }
 const fmtBytes = (n) => !n ? '0B' : n < 1024 ? `${n}B` : n < 1048576 ? `${(n/1024).toFixed(1)}KB` : n < 1073741824 ? `${(n/1048576).toFixed(1)}MB` : `${(n/1073741824).toFixed(2)}GB`;
-const fmtRel = (t) => { if (!t) return '—'; const d = Date.now()/1000 - t; return d < 60 ? `${d|0}s ago` : d < 3600 ? `${(d/60)|0}m ago` : d < 86400 ? `${(d/3600)|0}h ago` : `${(d/86400)|0}d ago`; };
+const fmtRel = (t) => { if (!t) return '-'; const d = Date.now()/1000 - t; return d < 60 ? `${d|0}s ago` : d < 3600 ? `${(d/60)|0}m ago` : d < 86400 ? `${(d/3600)|0}h ago` : `${(d/86400)|0}d ago`; };
 const uuid = () => 'c_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
 async function api(path, opts = {}) {
@@ -3822,7 +3837,7 @@ function showModal(title, body, actions = []) {
   $('modal').classList.add('open');
 }
 
-// Permission modal — used when the bridge fires permission_request.
+// Permission modal - used when the bridge fires permission_request.
 // Buttons: Allow (just this once) · Always · Deny · Never.
 function showPermissionModal(reqId, toolName, argsStr) {
   const decide = async (decision) => {
@@ -3868,7 +3883,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ============================================================
-// INLINE PERMISSION PROMPT — keyboard-driven, sits above the input.
+// INLINE PERMISSION PROMPT - keyboard-driven, sits above the input.
 // 1=Yes(once)  2=No  3=Always  4=Never  or type any text to deny + tell
 // Jarvis what to do instead. Replaces the old center modal entirely.
 // ============================================================
@@ -3982,7 +3997,7 @@ async function sendAskAnswer(choice, isOther) {
 }
 
 $('ask-close').addEventListener('click', () => {
-  // No clean "cancel" answer — send the first option as the safest default.
+  // No clean "cancel" answer - send the first option as the safest default.
   if (pendingAskOptions.length) sendAskAnswer(pendingAskOptions[0], false);
   else hideAskUser();
 });
@@ -4183,7 +4198,7 @@ function renderConvoRow(c) {
         renderConvoList();
         _animateTitleChange(c, target, old);
       } else {
-        // No-op (empty input or same title) — just rebuild the static row.
+        // No-op (empty input or same title) - just rebuild the static row.
         renderConvoList();
       }
     };
@@ -4215,7 +4230,7 @@ function renderConvoRow(c) {
 // Persist activeId across page reloads so the user lands back in the same
 // chat thread instead of whichever was last-touched. The previous behavior
 // (open the most-recently-updated chat) is what caused the "I restarted and
-// it didn't remember MW4" bug — it had silently opened a different thread.
+// it didn't remember MW4" bug - it had silently opened a different thread.
 function setActiveId(id) {
   STATE.activeId = id || null;
   try { localStorage.setItem('hearth.activeId', id || ''); } catch {}
@@ -4275,7 +4290,7 @@ function renderChat() {
   body.innerHTML = '';
   const c = activeConvo();
   updateChatHeader();
-  // Hide the ctx ring on every chat switch — it's only meaningful for the
+  // Hide the ctx ring on every chat switch - it's only meaningful for the
   // CURRENT chat's pressure. Without this, the ring would carry over a 90%
   // state from a long previous chat into a fresh empty one (the bug the
   // user reported as "I see the ring even though I haven't typed anything").
@@ -4372,13 +4387,13 @@ async function pollSubagentCompletions() {
     // Auto-fold: if any new completions arrived AND we're idle, fire a
     // chat call with an invisible synthetic prompt. The headless drain
     // injects the <task-notification> for each pending subagent ahead of
-    // this prompt, so the model sees the results + responds — without
+    // this prompt, so the model sees the results + responds - without
     // the user having to type "done?" or anything else.
     if (newCount > 0 && !STATE.streaming && activeConvo()) {
-      // Silent send — the synthetic prompt doesn't render in chat. The
+      // Silent send - the synthetic prompt doesn't render in chat. The
       // model just speaks (the assistant bubble appears) and folds the
       // subagent results in naturally. No fake "user said" turn.
-      send('Subagents just returned with results — synthesize what they found and present it.',
+      send('Subagents just returned with results - synthesize what they found and present it.',
            null, { silent: true });
     }
   } catch {}
@@ -4386,7 +4401,7 @@ async function pollSubagentCompletions() {
 
 function _agentName() {
   // Source of truth for the displayed agent name (avatar letter + label).
-  // Falls back to JARVIS if settings haven't loaded yet — same default the
+  // Falls back to JARVIS if settings haven't loaded yet - same default the
   // backend uses, so first render before settings load doesn't flicker.
   return (STATE.settings && STATE.settings.agent_name) || 'JARVIS';
 }
@@ -4397,7 +4412,7 @@ function _agentInitial() {
 
 function renderMessage(m) {
   // Silent user turns (synthetic auto-fold prompts) stay in history for the
-  // LLM but never render — model just speaks, no fake "you" bubble.
+  // LLM but never render - model just speaks, no fake "you" bubble.
   if (m && m.silent) return null;
   const div = document.createElement('div');
   div.className = `msg ${m.role}`;
@@ -4463,8 +4478,8 @@ function insertUnderAssistant(node, liveDiv) {
 }
 
 function makeToolCard(name, args) {
-  // Every tool — including browse / browse_click / browse_scroll / browse_type /
-  // browse_close — renders with the SAME card shape: header with name + args,
+  // Every tool - including browse / browse_click / browse_scroll / browse_type /
+  // browse_close - renders with the SAME card shape: header with name + args,
   // expandable body with the full result. The old browse-only "quiet" mode
   // was hiding the agent's actual reasoning from the user (open-source rule:
   // show the work). Browser-tool-specific labels (Browsing / Clicking / etc)
@@ -4490,7 +4505,7 @@ function makeToolCard(name, args) {
   div.querySelector('.t-head').addEventListener('click', () => div.classList.toggle('open'));
   return { div, body: div.querySelector('.t-body'), ms: div.querySelector('.t-ms') };
 }
-// Subagent completion card — same shape as a tool pill. Body shows the
+// Subagent completion card - same shape as a tool pill. Body shows the
 // FULL agent result + a "tools used" footer so the user can audit what
 // the subagent actually did (web_search → which URLs, run_command →
 // which command, etc.).
@@ -4516,7 +4531,7 @@ function makeSubagentCard(notif) {
   `;
   const bodyEl = div.querySelector('.t-body');
   bodyEl.textContent = notif.result_text || notif.summary || '(no output)';
-  // Tools-used footer — pulls out web_search queries, web_fetch URLs,
+  // Tools-used footer - pulls out web_search queries, web_fetch URLs,
   // and run_command first-args so the user can see exactly what the
   // subagent did, not just the final answer.
   if (tools.length) {
@@ -4537,7 +4552,7 @@ function makeSubagentCard(notif) {
 }
 
 function makeMediaBlock(kind, path) {
-  // Standalone media card — sits in the assistant's message stream (NOT
+  // Standalone media card - sits in the assistant's message stream (NOT
   // inside the tool card body). Survives re-render because it's keyed off
   // the assistant message's `events` array, not the live tool element.
   // - image: click = lightbox enlarge. Toolbar buttons: open, reveal in folder.
@@ -4548,11 +4563,20 @@ function makeMediaBlock(kind, path) {
   const fname = path.split(/[\\/]/).pop();
   if (kind === 'image') {
     const img = document.createElement('img');
-    img.src = fileUrl;
     img.className = 'gen-media-img';
     img.alt = fname;
     img.title = 'Click to enlarge · double-click to reveal in folder';
     img.style.cursor = 'zoom-in';
+    // Reveal: the image fades + sharpens in (blur->crisp) so it feels like it
+    // "develops" into the panel instead of popping. Honours reduced-motion.
+    img.style.opacity = '0';
+    img.style.filter = 'blur(16px)';
+    img.style.transform = 'scale(1.03)';
+    img.style.transition = 'opacity .7s ease, filter 1s ease, transform 1s ease';
+    img.addEventListener('load', () => {
+      requestAnimationFrame(() => { img.style.opacity = '1'; img.style.filter = 'blur(0)'; img.style.transform = 'none'; });
+    }, { once: true });
+    img.src = fileUrl;
     img.addEventListener('click', (e) => {
       e.preventDefault();
       openLightbox(fileUrl, 'image', path);
@@ -4570,11 +4594,17 @@ function makeMediaBlock(kind, path) {
     wrap.appendChild(img);
   } else {
     const vid = document.createElement('video');
-    vid.src = fileUrl;
     vid.controls = true;              // native play/pause/volume/seek
     vid.preload = 'metadata';         // load duration + first frame, not full video
     vid.className = 'gen-media-vid';
     vid.title = 'Double-click frame to reveal in folder';
+    vid.style.opacity = '0';
+    vid.style.filter = 'blur(16px)';
+    vid.style.transition = 'opacity .7s ease, filter 1s ease';
+    vid.addEventListener('loadeddata', () => {
+      requestAnimationFrame(() => { vid.style.opacity = '1'; vid.style.filter = 'blur(0)'; });
+    }, { once: true });
+    vid.src = fileUrl;
     vid.addEventListener('dblclick', async (e) => {
       e.preventDefault();
       try {
@@ -4662,7 +4692,7 @@ function closeLightbox() {
 }
 
 function makeThink(text) {
-  // Collapsible thinking block — header click toggles. Active streaming
+  // Collapsible thinking block - header click toggles. Active streaming
   // block has class "active" (gets removed on assistant_chunk arrival).
   const d = document.createElement('div');
   d.className = 'think';
@@ -4685,7 +4715,7 @@ function makeMeta(text, kind = '') {
 }
 
 // ============================================================
-// TOP BAR — models
+// TOP BAR - models
 // ============================================================
 async function refreshModels() {
   try {
@@ -4706,15 +4736,15 @@ async function refreshModels() {
     const loadedModel = models.find(m => m.state === 'loaded');
     const loadedId = loadedModel?.id || '';
     // Use the actively-loaded model's PATH if it's the builtin (id is the
-    // basename) — we match disk rows by filename so "● loaded" lines up.
+    // basename) - we match disk rows by filename so "● loaded" lines up.
     const loadedFilename = loadedId.split(/[\/\\]/).pop();
 
     if (!models.length && !disk.length) {
-      sel.innerHTML = '<option value="">(no model loaded — open Models tab)</option>';
+      sel.innerHTML = '<option value="">(no model loaded - open Models tab)</option>';
     } else {
       // 1) Loaded models from the running server (LM Studio / builtin). We
       //    prefer LM Studio's clean short id ("harmonic-hermes-9b") to the
-      //    GGUF filename when both are present — that's what the user picked
+      //    GGUF filename when both are present - that's what the user picked
       //    in LM Studio's UI, so it's what they expect to see here.
       const seenKeys = new Set();  // every key (path/filename/slug) we've already shown
       const normPath = p => (p || '').toLowerCase().replace(/[\/]/g, '\\');
@@ -4744,7 +4774,7 @@ async function refreshModels() {
         // "Qwen3.5-9B-Harmonic.Q4_K_M.gguf" via shared-token slug overlap.
         addKeys(m.path, m.id);
       }
-      // 2) Other disk models — swappable with one click. Skip anything LM
+      // 2) Other disk models - swappable with one click. Skip anything LM
       //    Studio already reported (matched by ANY of path/filename/slug).
       if (disk.length) {
         const remaining = disk.filter(dm => !anyKeyMatch(dm.path, dm.filename));
@@ -4777,7 +4807,7 @@ async function refreshModels() {
       sel.value = loadedModel ? loadedModel.id : (prev || '');
       $('model-state').classList.toggle('loaded', !!loadedModel);
     }
-    // Eject frees LOCAL VRAM — it's meaningless for a cloud brain (nothing to
+    // Eject frees LOCAL VRAM - it's meaningless for a cloud brain (nothing to
     // unload) and pointless with nothing loaded. Only show it for a loaded
     // local model.
     const _ejectBtn = document.getElementById('btn-eject');
@@ -4793,13 +4823,13 @@ $('model-select').addEventListener('change', async (e) => {
   if (loaded && loaded.id === id) return;
   // Honest staged progress: starting → loading → ready, with each step
   // visible in the bottom state pill + topbar dot. No optimistic-flip
-  // lies — the user sees the truth as it happens.
+  // lies - the user sees the truth as it happens.
   const displayId = id.startsWith('disk::')
     ? id.slice('disk::'.length).split(/[\/\\]/).pop()
     : id;
   const prevLoaded = STATE.loadedModel;
   // Cloud short-circuit: when the active brain is a cloud provider, the
-  // sticker dropdown should just switch the active model id — there is
+  // sticker dropdown should just switch the active model id - there is
   // no local load to perform. Without this guard, the GUI fires
   // /api/models/load (which used to trigger `lms load grok-4.3` and
   // confused both the user and LM Studio). Now: zero-friction swap.
@@ -4829,15 +4859,15 @@ $('model-select').addEventListener('change', async (e) => {
   }
   $('model-state').classList.add('loading');
   $('model-state').classList.remove('loaded');
-  // Cleaner labels — "starting server" was misleading when the server was
+  // Cleaner labels - "starting server" was misleading when the server was
   // already running (e.g. swapping models). Phase actually visible in the
   // sticker bar now ("loading weights · 45%"), so the pill just narrates.
   setState('loading model…');
-  // Kick off the live progress bar in the sticker — polls the builtin's
+  // Kick off the live progress bar in the sticker - polls the builtin's
   // phase markers (loading_weights → init → KV reserve → HTTP → ready).
   // Stops automatically when phase=='ready' or 'error'.
   startLoadProgress();
-  // ctx that's about to be used — surfaced in the loading pill + post-load
+  // ctx that's about to be used - surfaced in the loading pill + post-load
   // toast so the user can SEE if they're about to load at an undersized
   // value. Persona+tools alone need ~18K; anything < 16K silently OOMs
   // after a few turns ("Requested tokens (17900) exceed context window
@@ -4879,17 +4909,17 @@ $('model-select').addEventListener('change', async (e) => {
           'warn', 12000);
       }
       // Surface a non-blocking VRAM warning (model loaded but the math says
-      // it'll spill to CPU). User asked for warn-not-block — we never refuse
+      // it'll spill to CPU). User asked for warn-not-block - we never refuse
       // the load, just flag the trade-off.
       if (r.warning) toast('Heads up', r.warning, 'warn', 9000);
       // Brief pause on "ready" so the user catches the success state
       setTimeout(() => setState('idle'), 800);
     } else {
       STATE.loadedModel = prevLoaded || null;
-      $('st-model').textContent = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '—';
+      $('st-model').textContent = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
       setState('idle');
       // Special case: VRAM refusal. Give a longer, friendlier toast so
-      // the user knows what to do — generic "Load failed" isn't
+      // the user knows what to do - generic "Load failed" isn't
       // actionable for a memory exhaustion error.
       if (r && r.vram_needed_gb && r.vram_free_gb !== undefined) {
         toast(
@@ -4904,7 +4934,7 @@ $('model-select').addEventListener('change', async (e) => {
     }
   } catch (err) {
     STATE.loadedModel = prevLoaded || null;
-    $('st-model').textContent = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '—';
+    $('st-model').textContent = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
     setState('idle');
     toast('Load failed', err.message, 'err', 7000);
   } finally {
@@ -4927,12 +4957,12 @@ $('btn-eject').addEventListener('click', async () => {
     { label: 'Unload', kind: 'primary', onclick: async () => {
       // Clear local state SYNCHRONOUSLY so the topbar pill stops lying
       // about "● loaded" before the backend even returns. Audit caught
-      // this as a 4-9s stale-badge window — the previous code fired
+      // this as a 4-9s stale-badge window - the previous code fired
       // refreshModels() unawaited on a 4s cached endpoint.
       const prevLoaded = STATE.loadedModel;
       STATE.loadedModel = null;
       $('model-state').classList.remove('loaded');
-      $('st-model').textContent = '—';
+      $('st-model').textContent = '-';
       $('model-select').value = '';
       setState('ejecting…');
       try {
@@ -4963,7 +4993,7 @@ async function refreshGpu() {
   try {
     const g = await api('/api/gpu');
     if (!g.available || !g.gpus?.length) {
-      $('gpu-chip').innerHTML = `<span class="k">gpu</span><span class="v">—</span>`;
+      $('gpu-chip').innerHTML = `<span class="k">gpu</span><span class="v">-</span>`;
       return;
     }
     const gpu = g.gpus[0];
@@ -4981,7 +5011,7 @@ async function refreshGpu() {
 // ============================================================
 // Map the LIVE endpoint URL -> provider {key,label}. This is the source of
 // truth for the brain label, because env vars (e.g. grok.ps1) can override the
-// endpoint without touching settings.llm_provider — which is why the label
+// endpoint without touching settings.llm_provider - which is why the label
 // could read "local" while actually talking to Grok.
 function providerFromEndpoint(url) {
   const u = (url || '').toLowerCase();
@@ -4996,20 +5026,20 @@ function providerFromEndpoint(url) {
 async function refreshState() {
   try {
     const s = await api('/api/state');
-    $('st-model').textContent = s.model ? s.model.id.split(/[\/\\]/).pop() : '—';
+    $('st-model').textContent = s.model ? s.model.id.split(/[\/\\]/).pop() : '-';
     // Honest brain label from the LIVE endpoint (not the stale saved setting).
     STATE.endpoint = s.endpoint || '';
     const _pf = providerFromEndpoint(s.endpoint || '');
     const _bsub = document.getElementById('brand-sub');
     if (_bsub) _bsub.textContent = '· ' + _pf.label;
     // Only set ctx from a LOADED LOCAL model here. On cloud there's no
-    // loaded_context_length, so resetting to '—' would fight refreshCtxBudget
-    // (which sets the real cloud window) — that ping-pong was the flicker.
+    // loaded_context_length, so resetting to '-' would fight refreshCtxBudget
+    // (which sets the real cloud window) - that ping-pong was the flicker.
     if (s.model && s.model.loaded_context_length) {
       $('st-ctx').textContent = `${(s.model.loaded_context_length / 1024).toFixed(0)}K`;
     }
-    $('st-tools').textContent = s.tools ?? '—';
-    $('st-mem').textContent = s.memories ?? '—';
+    $('st-tools').textContent = s.tools ?? '-';
+    $('st-mem').textContent = s.memories ?? '-';
     $('nav-mem-count').textContent = s.memories ?? '';
   } catch {}
 }
@@ -5031,10 +5061,10 @@ function updateStatus() {
   if (STATE.loadedModel) {
     $('st-model').textContent = STATE.loadedModel.id.split(/[\/\\]/).pop();
   }
-  // ctx pill — check the model's reported context FIRST, then fall back
+  // ctx pill - check the model's reported context FIRST, then fall back
   // to /api/context-budget. The bug before: cloud brains set
   // STATE.loadedModel without any *_context_length field, and the
-  // _ctxBudget fallback only ran when loadedModel was null — so the
+  // _ctxBudget fallback only ran when loadedModel was null - so the
   // pill stayed blank. Now both code paths are evaluated.
   let ctx = 0;
   if (STATE.loadedModel) {
@@ -5050,7 +5080,7 @@ function updateStatus() {
       ? `${(ctx/1024).toFixed(0)}K`
       : `${ctx}`;
   } else if (!STATE.loadedModel) {
-    $('st-ctx').textContent = '—';
+    $('st-ctx').textContent = '-';
   }
 }
 
@@ -5078,7 +5108,7 @@ async function refreshCtxBudget() {
   } catch {}
 }
 
-// Status-bar dot strip — wave from center, smooth, only during assistant TTS.
+// Status-bar dot strip - wave from center, smooth, only during assistant TTS.
 const dots = $$('#dots .d');
 let dotsAnim = null;
 function startDots() {
@@ -5104,7 +5134,7 @@ function stopDots() {
 }
 
 // ============================================================
-// TTS GRID — same wave for the voice-mode 15x15 grid + status strip.
+// TTS GRID - same wave for the voice-mode 15x15 grid + status strip.
 // Activates ONLY while the assistant is producing text or TTS is playing.
 // ============================================================
 function startTTSGrid() {
@@ -5134,7 +5164,7 @@ function showView(name) {
 }
 $$('.nav-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
 
-// Chat search — full-text across all past chats (FTS5). Debounced; results
+// Chat search - full-text across all past chats (FTS5). Debounced; results
 // replace the convo list while typing, click jumps to that chat.
 (function wireConvoSearch() {
   const box = $('convo-search');
@@ -5178,7 +5208,7 @@ $$('.nav-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset
 })();
 
 // ============================================================
-// CHAT — send with full history
+// CHAT - send with full history
 // ============================================================
 const input = $('input');
 const sendBtn = $('btn-send');
@@ -5208,7 +5238,7 @@ thinkBtn.addEventListener('click', () => {
 
 // Regenerate: drop the assistant message the user is unhappy with (plus any
 // orphan tool messages after it) and re-send the LAST user message. Same
-// pipeline as a normal send — history is rebuilt without the rejected reply
+// pipeline as a normal send - history is rebuilt without the rejected reply
 // so the model gets a fresh shot at it.
 function regenerateFromMessage(assistantMsg) {
   const c = activeConvo();
@@ -5221,7 +5251,7 @@ function regenerateFromMessage(assistantMsg) {
   if (userIdx < 0) return;
   const lastUser = c.messages[userIdx];
   // Drop the rejected assistant + everything after (tool calls, etc.) AND
-  // the user msg too — send() will re-push it. Keep messages up to userIdx-1.
+  // the user msg too - send() will re-push it. Keep messages up to userIdx-1.
   c.messages = c.messages.slice(0, userIdx);
   touch(c);
   renderChat();
@@ -5233,18 +5263,18 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // instruction, etc.). `displayAs` is the OPTIONAL short version shown in
   // the chat bubble. Lets file uploads send "view_image at C:\...\foo.png"
   // to the model while the user just sees a clean "📎 foo.png" chip.
-  // `opts.silent=true` — don't render a user bubble at all (used by the
+  // `opts.silent=true` - don't render a user bubble at all (used by the
   // subagent autofold: model just speaks, no fake "user" turn appears).
   const _silent = !!opts.silent;
   let prompt = (forced ?? input.value).trim();
   // Weave pending attachments (from the attach button or clipboard paste)
-  // into the prompt — the user's typed text comes first, then a hidden
+  // into the prompt - the user's typed text comes first, then a hidden
   // line telling the model exactly which paths to read/view.
   const _attach = _pendingAttachments.slice();
   if (_attach.length && !forced) {
     const lines = _attach.map(a => a.isImage
-      ? `Attached image: "${a.path}" — call view_image on it if relevant to my message.`
-      : `Attached file: "${a.path}" — call read_file on it if relevant to my message.`);
+      ? `Attached image: "${a.path}" - call view_image on it if relevant to my message.`
+      : `Attached file: "${a.path}" - call read_file on it if relevant to my message.`);
     if (!prompt) prompt = '(see attachments)';
     prompt = `${prompt}\n\n${lines.join('\n')}`;
     if (!displayAs) {
@@ -5254,7 +5284,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
   }
   if (!prompt) return;
-  // Inline permission active — treat the typed text as "decline + do this instead":
+  // Inline permission active - treat the typed text as "decline + do this instead":
   // send a 'deny' for the pending tool, queue the text, and fire it after the
   // current turn finishes (handled in the 'done' event below).
   if (pendingPermId) {
@@ -5281,7 +5311,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   let c = activeConvo();
   if (!c) c = newConversation();
 
-  // Append user message — `content` is what the LLM sees, `displayContent`
+  // Append user message - `content` is what the LLM sees, `displayContent`
   // (when set) is what the chat bubble renders. Keeps file-upload prompts
   // from leaking "I just dropped an image at C:\...\foo.png. Call view_image..."
   // into the chat surface.
@@ -5291,19 +5321,19 @@ async function send(forced = null, displayAs = null, opts = {}) {
   c.messages.push(userMsg);
   touch(c);
 
-  // Build history (everything before this new prompt) — strip events,
+  // Build history (everything before this new prompt) - strip events,
   // keep only the OpenAI-shape role/content fields the backend expects.
   // Filter out empty assistant placeholders left behind by a streaming
   // session that died mid-response (the GUI persists those as `assistant`
   // with content=''). Some chat templates treat that as a stuck turn and
-  // refuse to generate the next response — looked to the user like "AI
+  // refuse to generate the next response - looked to the user like "AI
   // forgot the thread after restart". This makes the history always
   // well-formed before going to the LLM.
   const history = c.messages.slice(0, -1)
     .filter(m => !(m.role === 'assistant' && !(m.content || '').trim()))
     .map(m => ({ role: m.role, content: m.content || '' }));
 
-  // Open the placeholder assistant message NOW — it'll be filled by chunks.
+  // Open the placeholder assistant message NOW - it'll be filled by chunks.
   const assistantMsg = { role: 'assistant', content: '', events: [] };
   c.messages.push(assistantMsg);
 
@@ -5317,13 +5347,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // as soon as the first assistant_chunk arrives (liveContent.innerHTML = ...).
   if (liveContent) {
     // Clean 3-dot bounce instead of the 12-cube wave (was eye-sore per user
-    // feedback). Same DOM shape — overwritten on first assistant_chunk.
+    // feedback). Same DOM shape - overwritten on first assistant_chunk.
     liveContent.innerHTML =
       '<div class="dot-bounce"><span></span><span></span><span></span></div>';
   }
 
   input.value = ''; input.style.height = '42px';
-  // Wipe the attachment tray — the paths are now woven into the message.
+  // Wipe the attachment tray - the paths are now woven into the message.
   // If the user pasted/attached more during streaming, they'll show up on
   // the next send.
   _pendingAttachments = [];
@@ -5342,11 +5372,11 @@ async function send(forced = null, displayAs = null, opts = {}) {
   let ttsFirstFlushDone = false;  // first flush of this turn fires earlier
   // ANY clause break (period, question, exclam, comma, semicolon, colon, dash).
   // Plain commas + colons are common after short openers like "Got it," or
-  // "Okay," — so the first phrase speaks while the rest of the answer still
+  // "Okay," - so the first phrase speaks while the rest of the answer still
   // streams. First flush has a lower char minimum (12) so the very first
   // utterance hits speakers almost instantly; subsequent flushes use 25 so
   // we don't shatter every long sentence into a stutter.
-  const FLUSH_AT_CLAUSE = /[.!?,;:—–-](\s|$)/;
+  const FLUSH_AT_CLAUSE = /[.!?,;:-–-](\s|$)/;
   function maybeFlushTTS(force = false) {
     // TTS auto-streaming ONLY in voice mode. In chat view, users get the
     // per-message "speak" button instead - no surprise audio.
@@ -5409,7 +5439,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   } finally {
     STATE.streaming = false; setSendStop(false); currentAbort = null;
     // If the user typed a "do this instead" during a permission prompt, fire it
-    // now that the current turn is done. (No await — we want the finally to finish.)
+    // now that the current turn is done. (No await - we want the finally to finish.)
     if (pendingFollowup) {
       const t = pendingFollowup; pendingFollowup = null;
       setTimeout(() => send(t), 50);
@@ -5417,13 +5447,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
     stopTTSGrid();
     setState('idle');
     refreshState();
-    // Flush any TTS leftover (only if voice mode is on — chat auto-TTS removed)
+    // Flush any TTS leftover (only if voice mode is on - chat auto-TTS removed)
     if (voiceModeOn) maybeFlushTTS(true);
     // Persist final message
     touch(c);
     // Re-render so the message gets its persistent copy/speak buttons + tool cards stay
     renderChat();
-    // Title gen — fire on first user message AND retrigger after ~4 messages if still default-looking
+    // Title gen - fire on first user message AND retrigger after ~4 messages if still default-looking
     const isFirstReal = c.messages.filter(m => m.role === 'user').length === 1;
     const isShortDefault = !c.title || c.title === 'New chat' || c.title.length < 10;
     if (isFirstReal || (c.messages.length >= 6 && isShortDefault)) {
@@ -5455,10 +5485,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'slow_tool') {
       // Watchdog fires this when a tool takes >30s / >90s. Tell the user
-      // the loop didn't hang — it's a slow tool. They can hit Stop or wait.
+      // the loop didn't hang - it's a slow tool. They can hit Stop or wait.
       const sec = ev.elapsed_s || 0;
       const tip = ev.suggestion === 'stop'
-        ? 'Still running. Hit Stop if you want to bail — model can move it to a background subagent on the next turn.'
+        ? 'Still running. Hit Stop if you want to bail - model can move it to a background subagent on the next turn.'
         : 'Still running. Want to keep waiting, or hit Stop and ask the model to background it?';
       toast(`${ev.name} is taking ${sec}s`, tip, 'warn', 6000);
       return;
@@ -5535,7 +5565,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       insertUnderAssistant(pendingTool.div, live);
       setState(`calling ${ev.name}…`);
 
-      // Generation placeholder — animated violet noise canvas + rotating
+      // Generation placeholder - animated violet noise canvas + rotating
       // status text overlay. Why this and not "watch the image build":
       // cloud providers (Grok / OpenAI / Gemini) return the finished image
       // in ONE shot, no intermediate frames. So instead of faking
@@ -5552,21 +5582,32 @@ async function send(forced = null, displayAs = null, opts = {}) {
         // Rotating status BELOW the tool card so the tool card itself stays
         // a clean "prompt only" header. The finished image renders as its
         // own block below the status text when tool_result arrives.
-        const status = document.createElement('div');
-        status.className = 'gen-status';
-        status.style.cssText = 'margin:6px 0 10px 8px;font-size:12px;color:var(--fg-faint);font-style:italic;';
-        status.textContent = beats[0];
+        // A real "cooking" PANEL (violet churning canvas) where the media will
+        // appear, with the prompt-stage beats overlaid. The finished image
+        // crossfades into this exact spot on tool_result, so it "develops" in
+        // place instead of a line of text being replaced by a pop-in image.
+        const panel = document.createElement('div');
+        panel.className = 'gen-placeholder';
+        if (isVid) panel.style.aspectRatio = '16 / 9';
+        const noise = document.createElement('div');
+        noise.className = 'gen-noise';
+        const tip = document.createElement('div');
+        tip.className = 'gen-tip';
+        tip.textContent = beats[0];
+        panel.appendChild(noise);
+        panel.appendChild(tip);
         if (pendingTool && pendingTool.div && pendingTool.div.parentNode) {
-          pendingTool.div.parentNode.insertBefore(status, pendingTool.div.nextSibling);
+          pendingTool.div.parentNode.insertBefore(panel, pendingTool.div.nextSibling);
+          chatBody.scrollTop = chatBody.scrollHeight;
         }
         let idx = 0;
         const interval = setInterval(() => {
           idx = (idx + 1) % beats.length;
-          if (status.isConnected) status.textContent = beats[idx];
+          if (tip.isConnected) tip.textContent = beats[idx];
           else clearInterval(interval);
         }, 2400);
         pendingToolEvent._statusInterval = interval;
-        pendingToolEvent._statusNode = status;
+        pendingToolEvent._statusNode = panel;
       }
       // First-time hints for high-novelty tools.
       if (ev.name === 'browse') {
@@ -5584,17 +5625,19 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'tool_result') {
       if (pendingTool) {
-        // Stop the cycling status text if it was running (image/video gen).
+        // Stop the cycling beats, but keep the cooking panel on screen until the
+        // real media loads, then crossfade it out so the image develops in place.
+        let _genPanel = null;
         if (pendingToolEvent && pendingToolEvent._statusInterval) {
           clearInterval(pendingToolEvent._statusInterval);
           pendingToolEvent._statusInterval = null;
         }
         if (pendingToolEvent && pendingToolEvent._statusNode) {
-          try { pendingToolEvent._statusNode.remove(); } catch {}
+          _genPanel = pendingToolEvent._statusNode;
           pendingToolEvent._statusNode = null;
         }
         const raw = ev.content || '';
-        // Tool card body stays as TEXT — that way re-render after the
+        // Tool card body stays as TEXT - that way re-render after the
         // turn doesn't nuke any live <img> elements. Media render lives
         // separately, attached as a `kind: 'media'` event on the assistant
         // message AND rendered live below the tool card. Survives compact,
@@ -5604,15 +5647,36 @@ async function send(forced = null, displayAs = null, opts = {}) {
         // Detect media markers and surface them as a SEPARATE message-level
         // event + a live block under the tool card.
         const mediaRe = /__JARVIS_(IMAGE|VIDEO)__\s+([^\n]+?)(?:\s+\(\d+\s+bytes[^)]*\))?$/gim;
+        let _firstMedia = true;
         for (const m of [...raw.matchAll(mediaRe)]) {
           const kind = m[1].toLowerCase();
           const path = m[2].trim();
-          // Persist on the assistant message — re-render-safe.
+          // Persist on the assistant message - re-render-safe.
           assistantMsg.events.push({ kind: 'media', mediaKind: kind, path });
           // Live render NOW so the user sees it during the turn too. The
           // re-render later (renderMessage path) uses the same helper so
           // both paths produce identical DOM.
-          insertUnderAssistant(makeMediaBlock(kind, path), live);
+          const block = makeMediaBlock(kind, path);
+          if (_firstMedia && _genPanel && _genPanel.parentNode) {
+            // Drop the real media right where the cooking panel sits, then fade
+            // the panel out — the media's own blur-to-crisp reveal does the rest.
+            _genPanel.parentNode.insertBefore(block, _genPanel.nextSibling);
+            const _p = _genPanel;
+            _p.style.transition = 'opacity .5s ease';
+            requestAnimationFrame(() => { _p.style.opacity = '0'; });
+            setTimeout(() => { try { _p.remove(); } catch {} }, 540);
+            _firstMedia = false;
+          } else {
+            insertUnderAssistant(block, live);
+          }
+        }
+        // Generation returned no media (e.g. it failed) but a panel was up —
+        // don't leave it churning forever.
+        if (_genPanel && _genPanel.parentNode && _firstMedia) {
+          const _p = _genPanel;
+          _p.style.transition = 'opacity .4s ease';
+          requestAnimationFrame(() => { _p.style.opacity = '0'; });
+          setTimeout(() => { try { _p.remove(); } catch {} }, 440);
         }
         if (ev.ms != null) pendingTool.ms.textContent = `${ev.ms}ms`;
         if (pendingToolEvent) {
@@ -5642,7 +5706,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'assistant') {
-      // Canonical full message — fix up if chunks dropped anything
+      // Canonical full message - fix up if chunks dropped anything
       if (!assistantMsg.content && ev.content) {
         assistantMsg.content = ev.content;
         if (liveContent) liveContent.innerHTML = renderMD(stripGarbageToolCalls(ev.content));
@@ -5660,7 +5724,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'permission_request') {
-      // Inline strip above the input — keyboard-driven, no center modal.
+      // Inline strip above the input - keyboard-driven, no center modal.
       showInlinePermission(ev.id, ev.name, ev.args || {});
       return;
     }
@@ -5677,7 +5741,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // Only surface "done" line when something noteworthy happened (an
       // abnormal stop reason, or an error). The default `X step(s) · Yms`
       // footer was visually noisy + read as a system print on top of the
-      // assistant's prose — making the chat look engineering-y. Keep the
+      // assistant's prose - making the chat look engineering-y. Keep the
       // numbers in the message events for the activity log + debugging.
       assistantMsg.events.push({
         kind: 'done',
@@ -5694,7 +5758,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     if (ev.type === 'context_warning') {
       // Loud warning when the loaded model's ctx is too small for Hearth's
       // prompt overhead. Otherwise chats silently 500 with "Requested
-      // tokens exceed context window" — and the user has no idea why.
+      // tokens exceed context window" - and the user has no idea why.
       // Stays as an error toast (longer-lived than a regular toast).
       toast(
         `Context too small: ${ev.loaded_ctx} tokens`,
@@ -5706,7 +5770,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'context_budget') {
-      // Stash for tooltip context — shows users where the budget came from
+      // Stash for tooltip context - shows users where the budget came from
       // (env override, endpoint probe, default 32K, per-provider 200K, etc).
       STATE._ctxBudget = {
         total: ev.context_tokens, tools: ev.tool_tokens,
@@ -5733,7 +5797,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         pct.textContent = p + '%';
         // Build a tooltip that explains the math: chat usage / effective
         // budget (which is total_ctx minus tool-schema overhead). Without
-        // this, users wondered why a 1M-context Grok showed 200K — because
+        // this, users wondered why a 1M-context Grok showed 200K - because
         // ~9K is permanent tool-schema overhead the chat can't use.
         const b = STATE._ctxBudget || {};
         const total = b.total ? fmt(b.total) : '?';
@@ -5786,7 +5850,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         wrap.title = `context ${fmt(ev.used||0)} / ${fmt((ev.budget)||(ev.used||1))} · ${p}% (just compacted ✓)`;
         wrap.classList.remove('compacting', 'hot', 'warn');
         if (p >= 70) wrap.classList.add('warn');
-        // Brief toast so the user knows what just happened — the ring itself
+        // Brief toast so the user knows what just happened - the ring itself
         // doesn't shout "compacted", it just shrinks. Gated by Settings.
         if (!(STATE.settings && STATE.settings.toast_compacted === false)) {
           toast('Context compacted', `now ${p}%`, 'ok', 2200);
@@ -5800,7 +5864,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       assistantMsg.events.push({ kind: 'error', text: ev.message });
       // ALSO toast so the user can't miss it. The chat inline meta is small
       // and the user reported "no responses" when an auth failure was
-      // actually being rendered in red — they just didn't see it because
+      // actually being rendered in red - they just didn't see it because
       // they were on a different tab or the line scrolled away. Toast is
       // top-right and stays for 8s.
       toast(
@@ -5817,7 +5881,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   }
 }
 
-// Slash command parser — returns true if handled, false to fall through to normal chat.
+// Slash command parser - returns true if handled, false to fall through to normal chat.
 async function handleSlash(raw) {
   const [cmd, ...rest] = raw.trim().split(/\s+/);
   const arg = rest.join(' ').trim();
@@ -5865,7 +5929,7 @@ async function handleSlash(raw) {
         return true;
       }
       // Inject a "summarize this conversation, save facts to memory" prompt
-      // — let the model decide what's worth keeping.
+      // - let the model decide what's worth keeping.
       input.value = '';
       send(
         "Compact this conversation: summarize the older turns in 3-5 lines (so the gist survives) " +
@@ -5961,7 +6025,7 @@ async function handleSlash(raw) {
     case '/exit':
     case '/quit':   window.close(); return true;
     default:
-      return false;  // not a slash command we know — pass through to chat
+      return false;  // not a slash command we know - pass through to chat
   }
 }
 
@@ -6043,7 +6107,7 @@ $('btn-new-chat').addEventListener('click', () => {
 });
 
 // ============================================================
-// FILE DROP — only visible during drag
+// FILE DROP - only visible during drag
 // ============================================================
 let dragDepth = 0;
 document.addEventListener('dragenter', e => {
@@ -6062,12 +6126,12 @@ document.addEventListener('drop', async e => {
   const files = Array.from(e.dataTransfer?.files || []);
   for (const f of files) await uploadFile(f);
 });
-// Explicit attach button — guaranteed working path even if pywebview's
+// Explicit attach button - guaranteed working path even if pywebview's
 // HTML5 drop doesn't fire on a given Windows build.
 const _attachBtn = document.getElementById('btn-attach');
 const _fileInput = document.getElementById('file-input');
 const _attachTray = document.getElementById('attach-tray');
-// Pending attachments — each {name, path, isImage}. Stay queued until the
+// Pending attachments - each {name, path, isImage}. Stay queued until the
 // user sends a message; then woven into the LLM prompt with their text.
 let _pendingAttachments = [];
 
@@ -6082,7 +6146,7 @@ if (_attachBtn && _fileInput) {
 
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','bmp','tiff']);
 
-// Inline SVGs — keeping these out of the emoji set on purpose. Hearth's
+// Inline SVGs - keeping these out of the emoji set on purpose. Hearth's
 // UI uses no emojis anywhere; chips get small icon glyphs instead.
 const _ICON_FILE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 const _ICON_X = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
@@ -6131,7 +6195,7 @@ async function uploadFile(file) {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     const isImage = IMAGE_EXTS.has(ext);
     showView('chat');
-    // Queue as pending — silent. No toast, no auto-send.
+    // Queue as pending - silent. No toast, no auto-send.
     _pendingAttachments.push({ name: file.name, path: r.path, isImage });
     _renderAttachTray();
   } catch (e) {
@@ -6139,7 +6203,7 @@ async function uploadFile(file) {
   } finally { setState('idle'); }
 }
 
-// Clipboard paste — any file kind, not just images. PDFs/docs/binaries all
+// Clipboard paste - any file kind, not just images. PDFs/docs/binaries all
 // drop onto the chat input via Ctrl-V the same way.
 const _chatInputEl = document.getElementById('input');
 if (_chatInputEl) {
@@ -6186,7 +6250,7 @@ _wireDropTarget(_chatInputEl);
 _wireDropTarget(_attachTray);
 const _chatRow = _chatInputEl && _chatInputEl.closest('.row, .chat-input, .composer');
 _wireDropTarget(_chatRow);
-// Also accept drops anywhere over the chat view — large target so the user
+// Also accept drops anywhere over the chat view - large target so the user
 // doesn't have to aim at the tiny input bar.
 _wireDropTarget(document.getElementById('view-chat'));
 
@@ -6390,7 +6454,7 @@ function renderMemTree(filter) {
 // Why this exists: every other personal-AI project either has zero memory
 // visualization (Hermes/Jan/OpenClaw) or a static tree (OpenHuman). A
 // LIVE FORCE GRAPH where you see clusters self-organize is what makes
-// people screenshot. Same data as List/Tree views — different lens.
+// people screenshot. Same data as List/Tree views - different lens.
 let _memSimulation = null;   // active D3 force simulation (we kill it on view-switch)
 
 function renderMemGraph(filter) {
@@ -6405,7 +6469,7 @@ function renderMemGraph(filter) {
   const f = (filter || '').toLowerCase();
   // Always render the full graph. Search highlights matches + their
   // neighbors instead of removing the rest, so connections stay visible
-  // (the point of the graph view). The match set drives CSS classes —
+  // (the point of the graph view). The match set drives CSS classes -
   // CSS dims non-matches and brightens matches/neighbors.
   const items = memCache;
   if (!items.length) {
@@ -6426,7 +6490,7 @@ function renderMemGraph(filter) {
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
 
   // Build nodes + edges. Each memory = node. Edge = same sub_category.
-  // Cluster centers — laid out in a circle so user can SEE the 4 type families.
+  // Cluster centers - laid out in a circle so user can SEE the 4 type families.
   const TYPES = ['user', 'project', 'reference', 'feedback', 'other'];
   const typeOf = m => TYPES.includes(m.type) ? m.type : 'other';
   const subOf = m => (m.sub_category || '').trim() || 'casual';
@@ -6455,7 +6519,7 @@ function renderMemGraph(filter) {
     const grp = byBucket[k];
     if (grp.length < 2) continue;
     // Connect each node to every other in its sub-cluster (small clusters
-    // only — cap at 6 to keep edge count bounded for memory dirs with
+    // only - cap at 6 to keep edge count bounded for memory dirs with
     // 100+ facts)
     const cap = Math.min(grp.length, 6);
     for (let i = 0; i < cap; i++) {
@@ -6466,7 +6530,7 @@ function renderMemGraph(filter) {
   }
 
   const svgD3 = d3.select(svg);
-  // Inner <g> that gets transformed by zoom/pan — links + nodes live INSIDE
+  // Inner <g> that gets transformed by zoom/pan - links + nodes live INSIDE
   // this group so the whole scene moves together. d3.zoom() targets the SVG
   // and applies the transform to gZoom on every wheel/drag event.
   const gZoom = svgD3.append('g').attr('class', 'zoom-layer');
@@ -6724,7 +6788,7 @@ function fileIcon(f) {
 }
 
 // ============================================================
-// LOAD PROGRESS — live llama_cpp.server phase + percent in the sticker bar.
+// LOAD PROGRESS - live llama_cpp.server phase + percent in the sticker bar.
 // Poller runs while the bar is visible and stops on its own when the model
 // is fully loaded (or errors). Cheap: 500ms tick of a tiny JSON endpoint.
 // ============================================================
@@ -6773,7 +6837,7 @@ async function tickLoadProgress() {
     }
     showLoadProgress(r.phase, r.percent || 5, r.marker);
   } catch (e) {
-    // Network blip — keep ticking, the next poll usually recovers.
+    // Network blip - keep ticking, the next poll usually recovers.
   }
 }
 function startLoadProgress() {
@@ -6786,7 +6850,7 @@ function stopLoadProgress() {
 }
 
 // ============================================================
-// SERVER settings pane — live status card + actions
+// SERVER settings pane - live status card + actions
 // ============================================================
 async function refreshReminders() {
   const box = document.getElementById('reminders-box');
@@ -6798,7 +6862,7 @@ async function refreshReminders() {
     const pending = items.filter(x => !x.fired).length;
     if (remCount) remCount.textContent = pending ? String(pending) : '';
     if (!items.length) {
-      box.innerHTML = '<span style="opacity:0.6">no reminders set — just ask me</span>';
+      box.innerHTML = '<span style="opacity:0.6">no reminders set - just ask me</span>';
       return;
     }
     const fmtWhen = (iso) => {
@@ -6910,7 +6974,7 @@ async function refreshSkills() {
     const cnt = document.getElementById('nav-skill-count');
     const userN = items.filter(s => s.source === 'user').length;
     if (cnt) cnt.textContent = userN ? String(userN) : '';
-    if (!items.length) { box.innerHTML = '<span style="opacity:0.6">no skills yet — install one above</span>'; return; }
+    if (!items.length) { box.innerHTML = '<span style="opacity:0.6">no skills yet - install one above</span>'; return; }
     box.innerHTML = items.map(s => {
       const isUser = s.source === 'user';
       const badge = isUser
@@ -6953,7 +7017,7 @@ async function refreshMcpStatus() {
   try {
     const r = await api('/api/mcp/status');
     if (!r || !Array.isArray(r.bridges) || !r.bridges.length) {
-      box.innerHTML = '<span style="opacity:0.7">no bridges configured yet — click <b>Edit mcp.json</b> to wire some</span>';
+      box.innerHTML = '<span style="opacity:0.7">no bridges configured yet - click <b>Edit mcp.json</b> to wire some</span>';
       return;
     }
     const rows = r.bridges.map(b => {
@@ -6995,15 +7059,15 @@ async function refreshServerCard() {
     else { stateText = 'stopped'; stateClass = 'stopped'; }
     $('server-st-state').textContent = stateText;
     $('server-st-state').className = 'v ' + stateClass;
-    $('server-st-pid').textContent = r.builtin_pid ? `${r.builtin_pid}` : (usingCloud && !running && !r.external_running ? 'n/a (cloud)' : '—');
+    $('server-st-pid').textContent = r.builtin_pid ? `${r.builtin_pid}` : (usingCloud && !running && !r.external_running ? 'n/a (cloud)' : '-');
     // Model line: prefer builtin (we own it), then LM Studio's loaded model,
     // then the cloud model the user set in Settings → Chat brain.
     const modelText = r.builtin_model
       ? r.builtin_model.split(/[\/\\]/).pop()
-      : (r.external_model_id || s.llm_model || '—');
+      : (r.external_model_id || s.llm_model || '-');
     $('server-st-model').textContent = modelText;
     $('server-st-url').textContent = r.builtin_url
-      || (r.external_running ? 'http://127.0.0.1:1234/v1' : (s.llm_url || '—'));
+      || (r.external_running ? 'http://127.0.0.1:1234/v1' : (s.llm_url || '-'));
     // Disable Stop / Restart when there's no builtin to act on.
     const stopBtn = $('btn-server-stop');
     const restartBtn = $('btn-server-restart');
@@ -7060,7 +7124,7 @@ document.getElementById('btn-server-logs-tab')?.addEventListener('click', () => 
 });
 
 // ============================================================
-// LOGS view — Agent (Hearth tool calls) + Server (llama_cpp.server stdout)
+// LOGS view - Agent (Hearth tool calls) + Server (llama_cpp.server stdout)
 // ============================================================
 let LOGS_SOURCE = 'agent';        // 'agent' | 'server'
 let LOGS_TIMER = null;             // setInterval id while view is open
@@ -7078,7 +7142,7 @@ async function refreshAgentLog() {
     }
     for (const ev of events.reverse()) {
       const row = document.createElement('div'); row.className = 'log-row';
-      const t = ev.ts ? ev.ts.slice(11, 19) : '—';
+      const t = ev.ts ? ev.ts.slice(11, 19) : '-';
       const e = ev.event || '?';
       let det = ev.tool || ev.error || (ev.chars ? `${ev.chars}c` : '');
       if (ev.tool && ev.event === 'call') det += ' ' + JSON.stringify(ev.args || {}).slice(0, 100);
@@ -7108,7 +7172,7 @@ async function refreshServerLog() {
     }
     const pre = $('server-log');
     if (!r.exists) {
-      pre.innerHTML = '<span class="dim">No server log yet — the builtin llama-cpp server hasn\'t run this session. Load a model from the Models tab to start it.</span>';
+      pre.innerHTML = '<span class="dim">No server log yet - the builtin llama-cpp server hasn\'t run this session. Load a model from the Models tab to start it.</span>';
       LOGS_SERVER_LAST_LEN = 0;
       return;
     }
@@ -7148,7 +7212,7 @@ function setLogsSource(src) {
   $('log-list').hidden = src !== 'agent';
   $('server-log').hidden = src !== 'server';
   $('logs-sub').textContent = src === 'server'
-    ? 'raw llama_cpp.server output — loading, requests, errors'
+    ? 'raw llama_cpp.server output - loading, requests, errors'
     : 'every tool call, live';
   refreshLogs();
 }
@@ -7164,7 +7228,7 @@ $('btn-log-pause').addEventListener('click', () => {
 });
 
 // Auto-refresh server log every 1.5s while the Logs view is open AND showing
-// Server. Stops when the user navigates away — saves polling cost. Agent log
+// Server. Stops when the user navigates away - saves polling cost. Agent log
 // only refreshes on manual click since it's mostly static unless tool calls
 // are happening (the chat stream already covers live agent activity).
 function startLogsAutoRefresh() {
@@ -7195,7 +7259,7 @@ $('btn-log-download').addEventListener('click', async () => {
   } catch (e) { toast('Download failed', e.message, 'err'); }
 });
 $('btn-log-clear').addEventListener('click', () => {
-  // Honor whichever log the user is currently looking at — server vs agent.
+  // Honor whichever log the user is currently looking at - server vs agent.
   // Before this routing the button always wiped the AGENT log even when
   // the user was on the server view (user reported the cross-wire bug).
   const which = (typeof LOGS_SOURCE !== 'undefined' && LOGS_SOURCE === 'server') ? 'server' : 'agent';
@@ -7228,7 +7292,7 @@ async function refreshSettings() {
     const _sf = document.querySelector('.settings-side-footer .who');
     if (_sf) _sf.textContent = _agentName();
     // Sync the sticker tooltip with the actual brain. "LM Studio model"
-    // hardcoded was misleading on cloud — switched users away from
+    // hardcoded was misleading on cloud - switched users away from
     // clicking the sticker thinking it'd swap their Grok model.
     const _picker = document.getElementById('model-picker-tip');
     if (_picker) {
@@ -7239,11 +7303,11 @@ async function refreshSettings() {
         openai: 'OpenAI model', anthropic: 'Anthropic model',
         openrouter: 'OpenRouter model', custom: 'Custom-endpoint model',
       }[(s.llm_provider || '').toLowerCase()] || 'Active model';
-      _picker.title = `${provLabel} — click to switch`;
+      _picker.title = `${provLabel} - click to switch`;
     }
-    // Brain might have just changed — pull the live context budget so the
+    // Brain might have just changed - pull the live context budget so the
     // ring + bottom bar reflect the new brain immediately (Grok 200K vs
-    // builtin 8K). Don't await — settings render shouldn't block on it.
+    // builtin 8K). Don't await - settings render shouldn't block on it.
     refreshCtxBudget();
     // Brand-sub label is owned by refreshState (derived from the LIVE endpoint,
     // so it's honest even when settings.llm_provider is stale/inconsistent).
@@ -7251,9 +7315,9 @@ async function refreshSettings() {
       const k = sw.dataset.key;
       sw.classList.toggle('on', !!s[k]);
     });
-    // Agent name field — populated from current setting. The Rename button
+    // Agent name field - populated from current setting. The Rename button
     // triggers the full workspace rename (slow, restarts tray). Typing in
-    // the field without clicking Rename does nothing — that's intentional,
+    // the field without clicking Rename does nothing - that's intentional,
     // so a half-typed name doesn't apply mid-keystroke.
     const agentNameInput = document.getElementById('setting-agent-name');
     if (agentNameInput) {
@@ -7281,7 +7345,7 @@ async function refreshSettings() {
           await saveSetting('forge_dir', r.path);
           toast('Forge found', r.path, 'ok', 4500);
         } else if ((forgeInput.value || '').trim()) {
-          // Auto-scan found nothing new, but a path is already configured —
+          // Auto-scan found nothing new, but a path is already configured -
           // don't alarm the user into thinking Forge is missing.
           toast('Keeping your Forge path', forgeInput.value.trim(), 'info', 4500);
         } else {
@@ -7305,7 +7369,7 @@ async function refreshSettings() {
       // machine, and append a download hint so the user knows WHY it's grey
       // (and what to install). Without this, picking "GPU (CUDA)" with only
       // the CPU wheel installed used to silently fall back to CPU AND
-      // sometimes emit zero-audio frames — confused users into thinking TTS
+      // sometimes emit zero-audio frames - confused users into thinking TTS
       // was muted. (See voice.py `last_load_warning` path.)
       try {
         const vstat = await api('/api/voice/status');
@@ -7349,7 +7413,7 @@ async function refreshSettings() {
         } catch (err) { toast('TTS device', err.message, 'err'); }
       };
     }
-    // Voice speed slider — applies live, persists to settings.json
+    // Voice speed slider - applies live, persists to settings.json
     const speedInp = $('setting-voice-speed');
     const speedLbl = $('setting-voice-speed-label');
     if (speedInp) {
@@ -7387,7 +7451,7 @@ async function refreshSettings() {
       };
     }
 
-    // Chat brain — friendlier rebuild of the old LLM-endpoint block.
+    // Chat brain - friendlier rebuild of the old LLM-endpoint block.
     const brainMode = $('setting-brain-mode');
     const cloudFields = $('brain-cloud-fields');
     const modelField = $('brain-model-field');
@@ -7405,11 +7469,11 @@ async function refreshSettings() {
         gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: 'Try <code>gemini-2.5-flash</code>, <code>gemini-1.5-flash</code>, or <code>gemini-1.5-pro</code>.', sample: 'gemini-2.5-flash' },
         openai:     { url: 'https://api.openai.com/v1', hint: 'OpenAI GPT models.', modelHint: 'Try <code>gpt-4o-mini</code>, <code>gpt-4o</code>, or <code>o1-mini</code>.', sample: 'gpt-4o-mini' },
         grok:       { url: 'https://api.x.ai/v1', hint: 'xAI Grok models.', modelHint: 'Try <code>grok-2-1212</code> or <code>grok-beta</code>.', sample: 'grok-2-1212' },
-        openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator — gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-3.5-sonnet</code>.', sample: 'anthropic/claude-3.5-sonnet' },
+        openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator - gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-3.5-sonnet</code>.', sample: 'anthropic/claude-3.5-sonnet' },
         custom:     { url: '', hint: 'Any OpenAI-compatible server. You set the URL.', modelHint: 'Use whatever model id your server exposes.', sample: '' },
       };
       // Reflect the LIVE endpoint (STATE.endpoint, set by refreshState), not just
-      // the saved provider — they can drift (a past /brain left llm_url=Grok
+      // the saved provider - they can drift (a past /brain left llm_url=Grok
       // while llm_provider stayed "local"). The live endpoint is the truth.
       const liveProv = providerFromEndpoint(STATE.endpoint || s.llm_url || '').key;
       const prov = (s.llm_provider && s.llm_provider !== 'local') ? s.llm_provider
@@ -7467,12 +7531,12 @@ async function refreshSettings() {
             await saveSetting('llm_url', body.url);
             await saveSetting('llm_key', body.key);
             await saveSetting('llm_model', body.model);
-            // Honest toast — tell the user what's ACTUALLY serving, not
+            // Honest toast - tell the user what's ACTUALLY serving, not
             // just "Switched brain". For local: probe shows LM Studio vs
             // built-in vs nothing. Saves them from chatting into the void.
             if (body.provider === 'local' && r.local_probe) {
               if (r.local_probe.kind === 'lmstudio') {
-                toast('Switched to local · LM Studio', 'Detected LM Studio on ' + body.url + ' — preferred over built-in', 'ok', 5000);
+                toast('Switched to local · LM Studio', 'Detected LM Studio on ' + body.url + ' - preferred over built-in', 'ok', 5000);
               } else if (r.local_probe.kind === 'builtin') {
                 toast('Switched to local · built-in', 'Connected to Hearth\'s built-in server', 'ok', 4000);
               } else {
@@ -7484,14 +7548,14 @@ async function refreshSettings() {
             // Optimistically sync STATE.settings so the very next refreshModels
             // sees the new provider (and gates the eject button) without waiting
             // for a poll. Switching to local also clears the sticker so a cloud
-            // model (e.g. grok-4.3) doesn't linger as the "active model" — it
+            // model (e.g. grok-4.3) doesn't linger as the "active model" - it
             // repopulates with the real local model, or stays empty if none.
             STATE.settings = Object.assign({}, STATE.settings || {},
               { llm_provider: body.provider, llm_url: body.url, llm_model: body.model });
             if (body.provider === 'local') {
               STATE.loadedModel = null;
               const _ms = document.getElementById('model-select'); if (_ms) _ms.value = '';
-              const _st = document.getElementById('st-model'); if (_st) _st.textContent = '—';
+              const _st = document.getElementById('st-model'); if (_st) _st.textContent = '-';
             }
             refreshModels(); refreshState();
             // Refresh brand-sub label so the "Hearth · local" / "· Grok"
@@ -7525,7 +7589,7 @@ async function refreshSettings() {
         toast('Opening rules.md', r.ok ? 'Edit freely - re-read every turn.' : (r.error || 'failed'), r.ok ? 'ok' : 'err');
       } catch (e) { toast('Open failed', e.message, 'err'); }
     };
-    // Agent rename — full workspace move. Backend stops the tray,
+    // Agent rename - full workspace move. Backend stops the tray,
     // renames ~/Jarvis → ~/<NewName>, updates env, and restarts (~10s).
     // Confirm first since a rename mid-stream is destructive.
     const agentRenameBtn = $('btn-agent-rename');
@@ -7548,7 +7612,7 @@ async function refreshSettings() {
         `  • Change my name everywhere (chat avatar, persona, signature)\n` +
         `  • Rename workspace folder ~/${current} → ~/${newName}\n` +
         `  • Restart the tray (~10s, you'll need to reopen the window)\n\n` +
-        `All your memory, chats, generated files come along — nothing is lost.`, [
+        `All your memory, chats, generated files come along - nothing is lost.`, [
         { label: 'Cancel' },
         { label: `Rename to ${newName}`, kind: 'danger', onclick: async () => {
           try {
@@ -7559,7 +7623,7 @@ async function refreshSettings() {
             });
             if (r.ok) {
               toast('Renamed', `I'm ${newName} now. Tray restarting…`, 'ok', 6000);
-              // Backend kicks itself — wait a beat then reload the page so
+              // Backend kicks itself - wait a beat then reload the page so
               // the JS state picks up the new workspace path / avatar / etc.
               setTimeout(() => window.location.reload(), 3500);
             } else {
@@ -7569,7 +7633,7 @@ async function refreshSettings() {
         }},
       ]);
     };
-    // Workspace relocate — move the whole workspace to another folder/drive.
+    // Workspace relocate - move the whole workspace to another folder/drive.
     // Same move-and-restart dance as rename, to an arbitrary path. Confirm
     // since it physically moves files + restarts.
     const wsRelocateBtn = $('btn-ws-relocate');
@@ -7583,7 +7647,7 @@ async function refreshSettings() {
         `  • Move the entire workspace (memory, chats, models, files) there\n` +
         `  • Remember the new location for future launches\n` +
         `  • Restart the tray (~10s; reopen the window after)\n\n` +
-        `Nothing is lost — everything moves with it. Make sure the drive has space.`, [
+        `Nothing is lost - everything moves with it. Make sure the drive has space.`, [
         { label: 'Cancel' },
         { label: 'Move it', kind: 'danger', onclick: async () => {
           try {
@@ -7607,7 +7671,7 @@ async function refreshSettings() {
       obStep = 1; obState = { brain: '', voice: '' };
       obShow();
     };
-    // Update check — opt-in, never auto-installs. Mirrors the CLI /update.
+    // Update check - opt-in, never auto-installs. Mirrors the CLI /update.
     const updateBtn = $('btn-update-check');
     if (updateBtn) updateBtn.onclick = async () => {
       const status = $('update-status');
@@ -7636,13 +7700,36 @@ async function refreshSettings() {
       }
     };
 
-    // Start-at-login toggle — flips the Startup-folder shortcut (same entry as
+    // Broadcast panel: author/dev only. Revealed when running from source
+    // (frozen === false); end-users on the packaged build never see it.
+    (async () => {
+      try {
+        const s = await api('/api/state');
+        if (s && s.frozen === false) { const bf = $('broadcast-field'); if (bf) bf.style.display = ''; }
+      } catch {}
+    })();
+    const bcPublish = $('bc-publish');
+    if (bcPublish) bcPublish.onclick = async () => {
+      const t = ($('bc-title').value || '').trim();
+      const b = ($('bc-body').value || '').trim();
+      const st = $('bc-status');
+      if (!t && !b) { if (st) st.textContent = 'title or message required'; return; }
+      bcPublish.disabled = true;
+      try {
+        const r = await api('/api/announcements/publish', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title: t, body: b }) });
+        if (st) { st.style.color = r && r.ok ? 'var(--ok,#5fd28a)' : 'var(--err)'; st.textContent = r && r.ok ? 'written to announcements.json - commit + push to broadcast' : ((r && r.error) || 'failed'); }
+        if (r && r.ok) { $('bc-title').value = ''; $('bc-body').value = ''; }
+      } catch (e) { if (st) st.textContent = 'failed: ' + (e.message || e); }
+      finally { bcPublish.disabled = false; }
+    };
+
+    // Start-at-login toggle - flips the Startup-folder shortcut (same entry as
     // Task Manager > Startup). Keeps the tray (and its reminder watcher) alive
     // across reboots so reminders fire even before you open Hearth.
     const autostartBtn = $('btn-autostart-toggle');
     function paintAutostart(on) {
       if (!autostartBtn) return;
-      autostartBtn.textContent = on ? 'On — turn off' : 'Off — turn on';
+      autostartBtn.textContent = on ? 'On - turn off' : 'Off - turn on';
       const s = $('autostart-status');
       if (s) s.textContent = on ? '(enabled)' : '(disabled)';
     }
@@ -7652,7 +7739,7 @@ async function refreshSettings() {
         .then(r => { if (r && r.ok) paintAutostart(!!r.enabled); }).catch(()=>{});
       autostartBtn.onclick = async () => {
         autostartBtn.disabled = true;
-        const want = autostartBtn.textContent.indexOf('turn on') >= 0; // "Off — turn on" => enabling
+        const want = autostartBtn.textContent.indexOf('turn on') >= 0; // "Off - turn on" => enabling
         try {
           const r = await api('/api/autostart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ enabled: want }) });
           if (r && r.ok) { paintAutostart(!!r.enabled); toast('Start at login', r.enabled ? 'Hearth will launch when you sign in.' : 'Auto-launch turned off.', 'ok', 5000); }
@@ -7662,7 +7749,7 @@ async function refreshSettings() {
       };
     }
 
-    // MCP pane wiring — edit mcp.json + show client snippet. Live bridge
+    // MCP pane wiring - edit mcp.json + show client snippet. Live bridge
     // status comes from /api/mcp/status; rendered into #mcp-status-box.
     const mcpEditBtn = $('btn-mcp-edit');
     if (mcpEditBtn) mcpEditBtn.onclick = async () => {
@@ -7732,13 +7819,13 @@ async function refreshSettings() {
         `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:auto;max-height:360px">${esc(snippet)}</pre>`,
         [{ label: 'Close', primary: true }]);
     };
-    // Live bridge status — pulled when the MCP pane is opened. Polled
+    // Live bridge status - pulled when the MCP pane is opened. Polled
     // lightly while visible. No bridges yet → friendly placeholder.
     refreshMcpStatus().catch(() => {});
     // Reminders panel in the Behavior pane.
     refreshReminders().catch(() => {});
 
-    // Import memory from ChatGPT/Claude — Behavior pane (parity with onboarding).
+    // Import memory from ChatGPT/Claude - Behavior pane (parity with onboarding).
     const setImpCopy = document.getElementById('set-import-copy');
     const setImpPrompt = document.getElementById('set-import-prompt');
     const setImpBtn = document.getElementById('set-import-btn');
@@ -7768,7 +7855,7 @@ async function refreshSettings() {
       };
     }
 
-    // Connect (phone bridges) pane — load saved config + wire save/copy.
+    // Connect (phone bridges) pane - load saved config + wire save/copy.
     try {
       const br = await api('/api/bridges');
       const b = (br && br.bridges) || {};
@@ -7800,13 +7887,26 @@ async function refreshSettings() {
           _paintBridgeToggle(btn, ch, nowRunning);
           if (stEl) {
             if (running) { stEl.style.color = 'var(--fg-faint)'; stEl.textContent = 'stopped'; }
-            else if (nowRunning) { stEl.style.color = 'var(--ok,#5fd28a)'; stEl.textContent = '● online — message the bot'; }
+            else if (nowRunning) { stEl.style.color = 'var(--ok,#5fd28a)'; stEl.textContent = '● online · message the bot'; }
             else { stEl.style.color = 'var(--err)'; stEl.textContent = (r && r.error) || 'failed to start'; }
           }
         } catch (e) { if (stEl) stEl.textContent = 'failed: ' + (e.message || e); }
         finally { btn.disabled = false; }
       };
     }
+    // After config saves, bring the bot online immediately AND it'll auto-start
+    // on every future launch - the user never runs a command or clicks Start.
+    const _shortCh = (c) => c === 'telegram' ? 'tg' : c === 'discord' ? 'dc' : 'wa';
+    const _afterBridgeStart = (channel, sr) => {
+      const stEl = $('bridge-' + _shortCh(channel) + '-status');
+      const btn = $('bridge-' + _shortCh(channel) + '-toggle');
+      const running = !!(sr && sr.running);
+      if (btn) _paintBridgeToggle(btn, channel, running);
+      if (stEl) {
+        if (running) { stEl.style.color = 'var(--ok,#5fd28a)'; stEl.textContent = '● online · starts automatically from now on'; }
+        else { stEl.style.color = 'var(--err)'; stEl.textContent = (sr && sr.error) || 'saved, but it failed to start'; }
+      }
+    };
     const _saveBridge = async (channel, tokenEl, idsEl, idsKey, statusEl) => {
       const token = (tokenEl.value || '').trim();
       if (!token) { if (statusEl) statusEl.textContent = 'token required'; return; }
@@ -7814,7 +7914,10 @@ async function refreshSettings() {
       const config = { bot_token: token, [idsKey]: ids };
       try {
         const r = await api('/api/bridges/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, config }) });
-        if (statusEl) { statusEl.style.color = r && r.ok ? 'var(--ok,#5fd28a)' : 'var(--err)'; statusEl.textContent = r && r.ok ? '✓ saved — now run the command below' : ((r && r.error) || 'save failed'); }
+        if (!(r && r.ok)) { if (statusEl) { statusEl.style.color = 'var(--err)'; statusEl.textContent = (r && r.error) || 'save failed'; } return; }
+        if (statusEl) { statusEl.style.color = 'var(--fg-faint)'; statusEl.textContent = '✓ saved · starting…'; }
+        const sr = await api('/api/bridges/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }) });
+        _afterBridgeStart(channel, sr);
       } catch (e) { if (statusEl) statusEl.textContent = 'failed: ' + (e.message || e); }
     };
     const tgSave = $('bridge-tg-save');
@@ -7828,7 +7931,10 @@ async function refreshSettings() {
       const st = $('bridge-wa-status');
       try {
         const r = await api('/api/bridges/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'whatsapp', config }) });
-        if (st) { st.style.color = r && r.ok ? 'var(--ok,#5fd28a)' : 'var(--err)'; st.textContent = r && r.ok ? '✓ saved — pip install neonize, then run the command' : ((r && r.error) || 'save failed'); }
+        if (!(r && r.ok)) { if (st) { st.style.color = 'var(--err)'; st.textContent = (r && r.error) || 'save failed'; } return; }
+        if (st) { st.style.color = 'var(--fg-faint)'; st.textContent = '✓ saved · starting (scan the QR when it appears)…'; }
+        const sr = await api('/api/bridges/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'whatsapp' }) });
+        _afterBridgeStart('whatsapp', sr);
       } catch (e) { if (st) st.textContent = 'failed: ' + (e.message || e); }
     };
     const ntSave = $('bridge-ntfy-save');
@@ -7837,7 +7943,7 @@ async function refreshSettings() {
       const st = $('bridge-ntfy-status');
       try {
         await saveSetting('ntfy_topic', topic);
-        if (st) { st.style.color = 'var(--ok,#5fd28a)'; st.textContent = topic ? '✓ saved — reminders will push to this topic' : 'cleared'; }
+        if (st) { st.style.color = 'var(--ok,#5fd28a)'; st.textContent = topic ? '✓ saved - reminders will push to this topic' : 'cleared'; }
       } catch (e) { if (st) st.textContent = 'failed: ' + (e.message || e); }
     };
     $$('[data-copycmd]').forEach(btn => {
@@ -7847,7 +7953,7 @@ async function refreshSettings() {
       };
     });
 
-    // Migrate-from-another-agent — Behavior pane. Disable buttons for
+    // Migrate-from-another-agent - Behavior pane. Disable buttons for
     // sources we don't see on disk. Dry-run + Import both go through
     // /api/migrate/run and dump the migrator's stdout into a modal so
     // the user sees exactly what would happen / what happened.
@@ -7914,7 +8020,7 @@ async function refreshSettings() {
     const st = await api('/api/state');
     $('setting-endpoint').textContent = st.endpoint;
     $('setting-workspace').textContent = st.workspace;
-    $('setting-lms').textContent = st.lms_cli ? 'yes (model load works via CLI)' : 'no — model load needs LM Studio REST';
+    $('setting-lms').textContent = st.lms_cli ? 'yes (model load works via CLI)' : 'no - model load needs LM Studio REST';
 
     // ----- Server pane: live status + settings binding -----
     refreshServerCard();
@@ -7933,10 +8039,10 @@ async function refreshSettings() {
       const v = await api('/api/voice/status');
       const tts = v.tts || {}; const stt = v.stt || {};
       const ttsOK = tts.engine && tts.engine !== null;
-      $('tts-status').textContent = ttsOK ? `ready (${tts.engine})` : (tts.last_load_error || 'not available — pip install kokoro-onnx sounddevice numpy + drop voice models in ~/Jarvis/voices/');
+      $('tts-status').textContent = ttsOK ? `ready (${tts.engine})` : (tts.last_load_error || 'not available - pip install kokoro-onnx sounddevice numpy + drop voice models in ~/Jarvis/voices/');
       $('tts-status').className = 'voice-status ' + (ttsOK ? 'ok' : 'bad');
       const sttOK = stt.ready;
-      $('stt-status').textContent = sttOK ? `ready (whisper ${stt.model_size}, ${stt.device})` : (stt.last_load_error || 'not available — pip install faster-whisper sounddevice numpy');
+      $('stt-status').textContent = sttOK ? `ready (whisper ${stt.model_size}, ${stt.device})` : (stt.last_load_error || 'not available - pip install faster-whisper sounddevice numpy');
       $('stt-status').className = 'voice-status ' + (sttOK ? 'ok' : 'bad');
     } catch {}
 
@@ -7946,7 +8052,7 @@ async function refreshSettings() {
   } catch (e) { toast('Settings', e.message, 'err'); }
 }
 async function saveSetting(key, value) {
-  // Snapshot the prior provider BEFORE we mutate STATE.settings — needed to
+  // Snapshot the prior provider BEFORE we mutate STATE.settings - needed to
   // detect a cloud→local brain switch so we can show a "sweeping local
   // catalog" toast + refresh the Models tab.
   const _prevProv = (STATE.settings && STATE.settings.llm_provider || '').toLowerCase();
@@ -7961,7 +8067,7 @@ async function saveSetting(key, value) {
       const wasCloud = _CLOUD.has(_prevProv);
       const isCloudNow = _CLOUD.has(String(value || '').toLowerCase());
       if (wasCloud && !isCloudNow) {
-        toast('Sweeping local model catalog', 'One sec — checking LM Studio, Ollama, HF cache, Downloads.', 'ok', 4000);
+        toast('Sweeping local model catalog', 'One sec - checking LM Studio, Ollama, HF cache, Downloads.', 'ok', 4000);
         // Pull a fresh Models render so the scanning banner shows up.
         if (typeof refreshModelsView === 'function') refreshModelsView();
         // Poll until scanning clears, then refresh once more for the
@@ -8000,7 +8106,7 @@ $$('.switch').forEach(sw => {
 // edit it). Power users can read it via the /api/persona endpoint.
 
 // ============================================================
-// TTS — speak via backend (system speakers)
+// TTS - speak via backend (system speakers)
 // ============================================================
 async function speakText(text) {
   if (!text || !text.trim()) {
@@ -8092,7 +8198,7 @@ function stopBargeIn() {
 }
 
 // ============================================================
-// STT — record mic in browser, send raw PCM to backend
+// STT - record mic in browser, send raw PCM to backend
 // ============================================================
 let recorder = { stream: null, ctx: null, processor: null, source: null, samples: [], sr: 16000, recording: false };
 
@@ -8226,7 +8332,7 @@ async function micFinish() {
 $('btn-mic').addEventListener('click', micToggle);
 
 // ============================================================
-// VOICE MODE — full-screen overlay
+// VOICE MODE - full-screen overlay
 // ============================================================
 const VOICE_GRID_COLS = 15;
 const VOICE_GRID_ROWS = 15;
@@ -8242,41 +8348,56 @@ const voiceDots = $$('#voice-grid .d');
 let voiceModeOn = false;
 let voiceGridAnim = null;
 
-function startVoiceGridWave() {
-  if (voiceGridAnim) return;
-  const start = performance.now();
-  const cx = (VOICE_GRID_COLS - 1) / 2;
-  const cy = (VOICE_GRID_ROWS - 1) / 2;
-  // Pre-compute distance from center per dot
-  const distances = voiceDots.map((_, i) => {
-    const x = i % VOICE_GRID_COLS;
-    const y = Math.floor(i / VOICE_GRID_COLS);
-    return Math.hypot(x - cx, y - cy);
-  });
-  function frame(t) {
-    const elapsed = (t - start) / 1000;
-    voiceDots.forEach((d, i) => {
-      // Smooth, predictable: each dot's brightness is a sin wave that
-      // propagates OUTWARD from center.
-      const phase = Math.sin(elapsed * 1.8 - distances[i] * 0.55);
-      const hot = phase > 0.85;
-      const on = phase > 0.2;
-      d.classList.toggle('on', on && !hot);
-      d.classList.toggle('hot', hot);
-    });
-    voiceGridAnim = requestAnimationFrame(frame);
+// Continuous, AMPLITUDE-DRIVEN voice grid. Not a canned repeating pulse:
+//   - while the AI is speaking, a varied speech-like envelope (gated detuned
+//     sines) drives a center-out glow - quiet between "words", spreading as the
+//     voice swells, so it reads like it's actually talking.
+//   - while YOU speak, the live mic level drives it.
+//   - silent => only the center dot is lit.
+// (For a true TTS waveform we'd return audio to the browser + tap a WebAudio
+//  analyser - see docs/VOICE_UPGRADE_PLAN.md; this envelope is the safe version.)
+let voiceMicLevel = 0;
+let voiceLevel = 0;
+function _voiceGridFrame(t) {
+  const s = t / 1000;
+  let target = 0;
+  if (voiceSpeaking) {
+    const gate = Math.max(0, Math.sin(s * 2.1) * 0.5 + 0.5 - 0.12);     // natural pauses
+    const tex = (Math.sin(s * 12.7) * 0.5 + 0.5) * (Math.sin(s * 7.3 + 1.1) * 0.5 + 0.5); // texture
+    target = Math.min(1, 0.22 + gate * (0.55 + 0.45 * tex));
+  } else if (recorder.recording) {
+    target = Math.min(1, voiceMicLevel * 1.7);
   }
-  voiceGridAnim = requestAnimationFrame(frame);
+  // Asymmetric smoothing: snap up fast (attack), ease down (release).
+  voiceLevel += (target - voiceLevel) * (target > voiceLevel ? 0.4 : 0.12);
+  const cx = (VOICE_GRID_COLS - 1) / 2, cy = (VOICE_GRID_ROWS - 1) / 2;
+  const maxDist = Math.hypot(cx, cy);
+  const reach = voiceLevel * (maxDist + 0.8);
+  voiceDots.forEach((d, i) => {
+    const x = i % VOICE_GRID_COLS, y = Math.floor(i / VOICE_GRID_COLS);
+    const dist = Math.hypot(x - cx, y - cy);
+    const edge = reach - dist;
+    const on = dist < 0.7 || edge > -0.25;            // center always faintly lit
+    const hot = edge > 0.7 && voiceLevel > 0.28;       // bright at the leading edge
+    d.classList.toggle('on', on && !hot);
+    d.classList.toggle('hot', hot);
+  });
+  voiceGridAnim = requestAnimationFrame(_voiceGridFrame);
+}
+function startVoiceGridWave() {
+  if (!voiceGridAnim) voiceGridAnim = requestAnimationFrame(_voiceGridFrame);
 }
 function stopVoiceGridWave() {
+  // In voice mode the loop runs continuously (so it reacts to BOTH your mic and
+  // the AI's voice) - just let it rest on its own. Only fully stop on exit.
+  if (voiceModeOn) return;
   if (voiceGridAnim) cancelAnimationFrame(voiceGridAnim);
   voiceGridAnim = null;
-  // Settle into a quiet "rest" pattern — center single dot lit
+  voiceLevel = 0;
   voiceDots.forEach((d, i) => {
     d.classList.remove('on', 'hot');
-    const x = i % VOICE_GRID_COLS;
-    const y = Math.floor(i / VOICE_GRID_COLS);
-    if (Math.abs(x - 7) <= 0 && Math.abs(y - 7) <= 0) d.classList.add('on');
+    const x = i % VOICE_GRID_COLS, y = Math.floor(i / VOICE_GRID_COLS);
+    if (Math.hypot(x - (VOICE_GRID_COLS - 1) / 2, y - (VOICE_GRID_ROWS - 1) / 2) < 0.7) d.classList.add('on');
   });
 }
 
@@ -8284,7 +8405,7 @@ function enterVoiceMode() {
   voiceModeOn = true;
   $('voice-mode').classList.add('show');
   setVoiceStatus('tap mic to start talking');
-  stopVoiceGridWave();
+  startVoiceGridWave();  // continuous reactive loop (mic + AI voice)
   // Ensure a real conversation exists BEFORE the user starts talking, so the
   // voice exchange is recorded in the sidebar and persisted to ~/Jarvis/
   // conversations like any other chat. Without this, voice-mode messages
@@ -8296,7 +8417,7 @@ function enterVoiceMode() {
     persistConvo(c);
     renderConvoList();
   }
-  // Do NOT auto-start mic — user taps when ready (avoids accidental capture
+  // Do NOT auto-start mic - user taps when ready (avoids accidental capture
   // before they're set up, and mic stays off if they immediately exit)
 }
 function exitVoiceMode() {
@@ -8306,9 +8427,9 @@ function exitVoiceMode() {
   if (recorder.recording) stopRecording().catch(() => {});
   voiceDots.forEach(d => d.classList.remove('on', 'hot'));
 }
-// Used by the mic recorder — but we DO NOT animate the grid for user audio.
-// Grid only reacts to assistant speech now.
-function voiceUpdate(_level) { /* intentionally inert */ }
+// Fed by the mic recorder (peak 0..1) so the grid reacts to YOUR voice while
+// you talk, the same way it reacts to the AI's voice while it speaks.
+function voiceUpdate(level) { voiceMicLevel = level || 0; }
 
 function setVoiceStatus(s) { $('voice-status-text').textContent = s; }
 function setVoiceTranscript(s) { $('voice-transcript').textContent = s; }
@@ -8328,7 +8449,7 @@ async function voiceCycle() {
     if (micWatchdog) { clearInterval(micWatchdog); micWatchdog = null; }
     const text = await transcribe();
     if (!text) {
-      setVoiceStatus("didn't catch that — tap mic to retry");
+      setVoiceStatus("didn't catch that - tap mic to retry");
       return;
     }
     setVoiceTranscript(text);
@@ -8400,7 +8521,7 @@ $('voice-mic-toggle').addEventListener('click', () => {
   // listening continuously via silero VAD). Otherwise fall back to the
   // legacy press-to-talk cycle.
   if (rtVoiceActive) {
-    setVoiceStatus('Realtime listening on — just talk');
+    setVoiceStatus('Realtime listening on - just talk');
     return;
   }
   voiceCycle();
@@ -8638,7 +8759,7 @@ $('slash-menu').addEventListener('click', (e) => {
 });
 
 // ============================================================
-// WELCOME CARD — first-run "try one of these" experience.
+// WELCOME CARD - first-run "try one of these" experience.
 // Click a chip to fire the prompt; dismiss is per-browser (localStorage).
 // If no LLM server is reachable, also show LM Studio / Ollama setup links.
 // Bring it back any time with the /welcome slash command.
@@ -8656,7 +8777,7 @@ async function renderServerSetup() {
   // No-op now: welcome card just shows a link to the Models tab so it stays
   // clean. All picking / downloading / scanning lives in the Models view.
   return;
-  // (Legacy code below is dead — kept around briefly while we verify the new
+  // (Legacy code below is dead - kept around briefly while we verify the new
   // flow, will get cleaned in a follow-up.)
   // eslint-disable-next-line no-unreachable
   let s;
@@ -8869,11 +8990,11 @@ async function downloadCustomHF(repo, filename) {
 // user already has (LM Studio / Ollama / HF cache / Downloads) so no manual
 // copy needed, shows the per-PC recommendation, and embeds HF search inline.
 // ============================================================
-// ===== Models view v0.6 round 5 — sub-nav + table rows + inline load config =====
+// ===== Models view v0.6 round 5 - sub-nav + table rows + inline load config =====
 
 let _modelsState = { tab: 'mine', status: null, hfQuery: '', hfResults: [], hfCache: {}, starting: false };
 
-// Global "model is loading" lock — disables every Use-this / Apply button
+// Global "model is loading" lock - disables every Use-this / Apply button
 // across all panes while one start request is in flight. Without this the
 // user can click 4 different rows and the backend tries to spawn 4 servers
 // fighting over port 8765.
@@ -8882,7 +9003,7 @@ function modelsSetStartingLock(on, label) {
   document.querySelectorAll('#view-models button[data-use-path], #view-models button[data-apply-path], #view-models button[data-apply-pick], #view-models button[data-apply-hf-repo], #view-models button[data-pick]').forEach(b => {
     b.disabled = !!on;
   });
-  // Sticky banner inside the Models view body — one line, no toast spam.
+  // Sticky banner inside the Models view body - one line, no toast spam.
   let banner = document.getElementById('models-loading-banner');
   if (on) {
     if (!banner) {
@@ -8899,13 +9020,13 @@ function modelsSetStartingLock(on, label) {
   }
   // Drive the bottom-right state pill + dot-strip wave through setState so
   // background pollers can't race-overwrite our message. Keep it short ("loading")
-  // — the sticky banner above carries the model name already.
+  // - the sticky banner above carries the model name already.
   if (typeof setState === 'function') {
     setState(on ? 'loading' : 'idle');
   }
 }
 
-// Capability tags — driven ONLY by HuggingFace's own tags. We don't
+// Capability tags - driven ONLY by HuggingFace's own tags. We don't
 // pattern-match the model name (false positives + lying badges look worse
 // than no badges). If HF doesn't tag the repo, we render no chips for that
 // model. Truthful > smart.
@@ -9003,13 +9124,13 @@ function modelsReadLoadConfig(rootEl) {
       out[k] = el.classList.contains('on');
     }
   });
-  // Don't send placeholder zero for threads — treat 0 as auto.
+  // Don't send placeholder zero for threads - treat 0 as auto.
   if (out.n_threads === 0) out.n_threads = null;
   return out;
 }
 
 function modelsWireLoadConfig(rootEl) {
-  // Slider for n_gpu_layers — update label to show "All" when -1
+  // Slider for n_gpu_layers - update label to show "All" when -1
   const slider = rootEl.querySelector('input[data-cfg="n_gpu_layers"]');
   if (slider) {
     const upd = () => {
@@ -9046,11 +9167,11 @@ async function refreshModelsView() {
   }
   _modelsState.status = s;
 
-  // Server status pill — honest about all three brain modes:
+  // Server status pill - honest about all three brain modes:
   //   1. built-in (Hearth owns the server)
   //   2. external (LM Studio / Ollama on port 1234)
   //   3. cloud (Gemini / OpenAI / Grok / OpenRouter via Settings → Chat brain)
-  // The user reported confusion when on a cloud brain — Models tab looked
+  // The user reported confusion when on a cloud brain - Models tab looked
   // dead even though chat was working. This makes the truth visible at a glance.
   const isBuiltin = s.builtin_running;
   const isExt = s.external_running;
@@ -9076,7 +9197,7 @@ async function refreshModelsView() {
   // Disk-count badge on the "My Models" tab
   $('tab-mine-n').textContent = (s.disk_models || []).length;
 
-  // Render panes (cheap — none has a network call beyond status)
+  // Render panes (cheap - none has a network call beyond status)
   modelsRenderMine();
   if (_modelsState.tab === 'discover') modelsRenderDiscover();
 }
@@ -9118,7 +9239,7 @@ function modelsRenderMine() {
   const pane = $('models-pane-mine');
   const disk = s.disk_models || [];
   const isBuiltin = s.builtin_running;
-  // Scanning banner — when the user just switched brain cloud→local OR
+  // Scanning banner - when the user just switched brain cloud→local OR
   // hit Rescan, the disk scan runs in the background. Show that motion
   // is happening so they don't think the app froze.
   const scanBanner = s.scanning ? `
@@ -9132,7 +9253,7 @@ function modelsRenderMine() {
     pane.innerHTML = scanBanner + `
       <div class="models-empty">
         <div class="big">${s.scanning ? 'Scanning local model catalog…' : 'No models on this PC yet'}</div>
-        <div>${s.scanning ? 'One sec — Hearth is checking LM Studio, Ollama, HF cache, and Downloads.' : 'Use the <b>Discover</b> tab to search Hugging Face, or grab a <b>Quick pick</b>.<br>Hearth auto-detects models from LM Studio, Ollama, HF cache, and Downloads.'}</div>
+        <div>${s.scanning ? 'One sec - Hearth is checking LM Studio, Ollama, HF cache, and Downloads.' : 'Use the <b>Discover</b> tab to search Hugging Face, or grab a <b>Quick pick</b>.<br>Hearth auto-detects models from LM Studio, Ollama, HF cache, and Downloads.'}</div>
       </div>`;
     return;
   }
@@ -9140,7 +9261,7 @@ function modelsRenderMine() {
              '<div class="models-section"><div class="sec-head"><h3>On your machine</h3><span class="sub">' +
              disk.length + ' file' + (disk.length === 1 ? '' : 's') +
              ' &middot; pulled from LM Studio, HF cache, and Downloads</span></div><div class="sec-body">';
-  // Slug helper for fuzzy match — LM Studio short id ("harmonic-hermes-9b")
+  // Slug helper for fuzzy match - LM Studio short id ("harmonic-hermes-9b")
   // vs disk filename ("Qwen3.5-9B-Harmonic.Q4_K_M.gguf") share the "harmonic"
   // token but neither contains the other. Same logic as autoboot.
   const _slug = (s2) => (s2 || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -9159,7 +9280,7 @@ function modelsRenderMine() {
   const extPath = s.external_model_path || '';
   const extIdSlug = _slug(extId);
   for (const m of disk) {
-    // Disk row is "loaded" if ANY active server reports this exact file —
+    // Disk row is "loaded" if ANY active server reports this exact file -
     // builtin by path match, OR external (LM Studio / Ollama) by path / by
     // filename / by slug-share against its short id. Fixes the bug where
     // the LM Studio loaded model showed "Use this" instead of "Eject" in
@@ -9169,7 +9290,7 @@ function modelsRenderMine() {
     if (isBuiltin && s.builtin_model === m.path) {
       loaded = true; loadedVia = 'builtin';
     } else if (s.external_running) {
-      // Prefer the path — LM Studio's v0 API returns it on modern builds.
+      // Prefer the path - LM Studio's v0 API returns it on modern builds.
       // Only fall back to slug-share when the server didn't give us a path,
       // and require a LONGER shared run (8+) to avoid false positives like
       // "harmonic-hermes-9b" matching "Hermes-3-Llama-3.2-3B" via "hermes".
@@ -9185,7 +9306,7 @@ function modelsRenderMine() {
     const filenameId = 'row-' + Math.random().toString(36).slice(2, 9);
     const ctxGuess = /qwen[ -]?2.5|qwen3/.test(m.filename.toLowerCase()) ? 32768 :
                      /llama-3|gemma|mistral|hermes/.test(m.filename.toLowerCase()) ? 8192 : 4096;
-    // One primary button only — "Use this" boots with the SAVED (or default)
+    // One primary button only - "Use this" boots with the SAVED (or default)
     // load config. Click the row to reveal the load-config panel; the same
     // button down there says "Use with these settings" so the difference is
     // explicit: one is one-click, the other adopts your tuning first.
@@ -9203,7 +9324,7 @@ function modelsRenderMine() {
         ${loaded
           ? (loadedVia === 'builtin'
               ? '<button class="model-action is-secondary" data-stop="1">Eject</button>'
-              : '<button class="model-action is-secondary" disabled title="Eject from LM Studio itself — Hearth doesn\'t own this server">In use (LM Studio)</button>')
+              : '<button class="model-action is-secondary" disabled title="Eject from LM Studio itself - Hearth doesn\'t own this server">In use (LM Studio)</button>')
           : '<button class="model-action" data-use-path="' + esc(m.path) + '">Use this</button>'
         }
         <div class="model-expand" data-expand="${filenameId}">
@@ -9240,7 +9361,7 @@ function modelsRenderPicks() {
     <div class="models-section">
       <div class="sec-head">
         <h3>Quick picks</h3>
-        <span class="sub">Hand-curated GGUFs — one click downloads + boots them.</span>
+        <span class="sub">Hand-curated GGUFs - one click downloads + boots them.</span>
       </div>
       <div class="sec-body">`;
   for (const p of picks) {
@@ -9299,7 +9420,7 @@ async function modelsRenderDiscover() {
   }
   const subText = q
     ? `${list.length} repo${list.length === 1 ? '' : 's'} matching “${esc(q)}”`
-    : `Top ${list.length} most-downloaded GGUF repos — type in the search box to filter.`;
+    : `Top ${list.length} most-downloaded GGUF repos - type in the search box to filter.`;
   let html = `<div class="models-section">
     <div class="sec-head">
       <h3>${q ? 'Hugging Face results' : 'Popular GGUFs on Hugging Face'}</h3>
@@ -9314,7 +9435,7 @@ async function modelsRenderDiscover() {
       <div class="model-row is-expandable" data-row="${rowId}" data-hf-repo="${esc(it.hf_repo)}">
         <div class="model-info">
           <div class="model-name">${esc(it.hf_repo)}</div>
-          <div class="model-meta">${(it.downloads || 0).toLocaleString()} downloads · ${(it.tags || []).slice(0, 4).map(esc).join(' · ') || '—'}</div>
+          <div class="model-meta">${(it.downloads || 0).toLocaleString()} downloads · ${(it.tags || []).slice(0, 4).map(esc).join(' · ') || '-'}</div>
           ${modelsCapTagsHTML(caps)}
         </div>
         <!-- Click anywhere on the row to expand (modelsWireRowClicks handles
@@ -9341,7 +9462,7 @@ async function modelsRenderDiscover() {
 function modelsWireRowClicks(pane) {
   // Row click → toggle expand. Skip if click was on an action button.
   // Generic row toggle for disk/local rows. HF rows handle their own click
-  // below (with lazy-loading) so we EXCLUDE [data-hf-repo] here — otherwise
+  // below (with lazy-loading) so we EXCLUDE [data-hf-repo] here - otherwise
   // both handlers fire and the open-then-close cancels out (user sees the
   // card refuse to expand).
   pane.querySelectorAll('.model-row:not([data-hf-repo])').forEach(row => {
@@ -9350,7 +9471,7 @@ function modelsWireRowClicks(pane) {
       modelsToggleRow(row);
     });
   });
-  // "Use this" disk button — uses any saved per-model config automatically.
+  // "Use this" disk button - uses any saved per-model config automatically.
   pane.querySelectorAll('button[data-use-path]').forEach(b => {
     b.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -9391,14 +9512,14 @@ function modelsWireRowClicks(pane) {
         // CRITICAL: clear the cached status BEFORE refreshing the Models
         // tab. The stale-while-revalidate path was painting with the old
         // status (builtin_running=true) on the first paint and only
-        // updating after the network round-trip — so the user saw the
+        // updating after the network round-trip - so the user saw the
         // ejected row still flagged "running" until the second paint
         // landed. Clearing forces refreshModelsView to do a single fresh
         // paint with the post-stop state.
         _modelsState.status = null;
         STATE.loadedModel = null;
-        $('st-model').textContent = '—';
-        $('st-ctx').textContent = '—';
+        $('st-model').textContent = '-';
+        $('st-ctx').textContent = '-';
         $('model-state').classList.remove('loaded');
         refreshModels(); refreshState();
         await refreshModelsView();
@@ -9460,7 +9581,7 @@ function modelsWireRowClicks(pane) {
       modelsDownloadPick(b.dataset.applyPick, cfg);
     });
   });
-  // HF row interactions — both the "Pick file" button AND clicking the row
+  // HF row interactions - both the "Pick file" button AND clicking the row
   // body itself toggle expand + lazy-load the quant file list. The audit
   // caught this: previously only the button worked, and the row click was
   // a dead zone, leaving users wondering why nothing happened.
@@ -9511,7 +9632,7 @@ function modelsShowStartFailure(r, fname, origBody) {
       }
     },
   ];
-  // VRAM guardrail tripped — escape hatch that spills weights to system
+  // VRAM guardrail tripped - escape hatch that spills weights to system
   // RAM. Slow but works (10-30 tok/sec vs 50+ all-on-GPU).
   if (r.force_available && origBody) {
     actions.push({
@@ -9526,7 +9647,7 @@ function modelsShowStartFailure(r, fname, origBody) {
             body: JSON.stringify(forced),
           });
           if (r2.ok) {
-            toast('Server ready (RAM-spill mode)', fname + ' — expect slower tok/sec', 'ok', 6000);
+            toast('Server ready (RAM-spill mode)', fname + ' - expect slower tok/sec', 'ok', 6000);
             refreshModels(); refreshState();
             await refreshModelsView();
           } else {
@@ -9560,7 +9681,7 @@ function modelsToggleRow(row) {
 }
 
 function modelsCfgKey(p) {
-  // Mirror Python's os.path.normcase + abspath roughly — for matching the
+  // Mirror Python's os.path.normcase + abspath roughly - for matching the
   // backend's saved keys. Backend canonicalizes; here we just lowercase the
   // path on Windows (case-insensitive paths) so the lookup hits.
   return (p || '').toLowerCase();
@@ -9587,15 +9708,15 @@ function modelsRestoreSavedCfg(expandEl, modelPath) {
   if (flash) flash.classList.toggle('on', !!cfg.flash_attn);
 }
 
-// VRAM-fit SVG icons — NOT emojis. The backend's list_hf_files already
+// VRAM-fit SVG icons - NOT emojis. The backend's list_hf_files already
 // returns a `fit_tier` per file (good / partial / overflow / unknown);
 // we render the matching icon next to the size.
 const FIT_ICONS = {
-  // Thumb up — comfortable fit
+  // Thumb up - comfortable fit
   good:     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-2);vertical-align:-2px"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H7"/></svg>',
-  // Sliders — partial GPU offload
+  // Sliders - partial GPU offload
   partial:  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#f0b860;vertical-align:-2px"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
-  // Alert triangle — too big
+  // Alert triangle - too big
   overflow: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#e0786a;vertical-align:-2px"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   unknown:  '',
 };
@@ -9609,7 +9730,7 @@ async function modelsLoadHFFilesInline(row) {
   if (!box) return;
   if (box.dataset.loaded === '1') return;
   // Show the loading state with a real spinner so users don't think it
-  // hung — the old "Loading files…" string had no progress signal AND
+  // hung - the old "Loading files…" string had no progress signal AND
   // got stuck visible if the backend returned [{error: "..."}] (which
   // got filtered out, leaving an empty `files` list and a blank "No
   // .gguf files" message that looked like the loader).
@@ -9637,13 +9758,13 @@ async function modelsLoadHFFilesInline(row) {
         : '';
       const fitText = label ? ` <span class="ex-fit-label">· ${esc(label)}</span>` : '';
       // Quant tier chip (Q2..Q8/F16) gives a one-glance "how compressed" hint.
-      // Recommended chip flags the modal Q4_K_M that actually fits — saves the
+      // Recommended chip flags the modal Q4_K_M that actually fits - saves the
       // new user from guessing what "K_M" means.
       const qChip = f.quant_tier
         ? `<span class="ex-quant" title="quant level">${esc(f.quant_tier)}</span>`
         : '';
       const recChip = f.recommended
-        ? `<span class="ex-rec" title="balanced default — same quality as Q5 in practice, ~20% smaller">Recommended</span>`
+        ? `<span class="ex-rec" title="balanced default - same quality as Q5 in practice, ~20% smaller">Recommended</span>`
         : '';
       return `
         <div class="ex-file" data-fn="${esc(f.filename)}" data-tier="${tier}" title="${esc(f.fit_label || '')}">
@@ -9687,7 +9808,7 @@ document.querySelectorAll('.models-tab').forEach(t => {
   });
 });
 
-// Sticky search bar — typing kicks Discover tab + debounced search
+// Sticky search bar - typing kicks Discover tab + debounced search
 {
   let _searchDb = null;
   const inp = $('models-search');
@@ -9702,7 +9823,7 @@ document.querySelectorAll('.models-tab').forEach(t => {
       modelsRenderDiscover();
     }, 300);
   });
-  // Rescan button — force a fresh local catalog sweep + visible banner.
+  // Rescan button - force a fresh local catalog sweep + visible banner.
   const rescanBtn = $('btn-models-rescan');
   if (rescanBtn) {
     rescanBtn.addEventListener('click', async () => {
@@ -9725,9 +9846,9 @@ document.querySelectorAll('.models-tab').forEach(t => {
       } catch (e) { toast('Rescan failed', e.message, 'err'); }
     });
   }
-  // Download button — jump to Discover tab so user can pick a repo. The
+  // Download button - jump to Discover tab so user can pick a repo. The
   // badge dot only appears when there's an ACTIVE download in flight
-  // (the models-dl progress-row is visible) — never a constant decoration.
+  // (the models-dl progress-row is visible) - never a constant decoration.
   const dlBtn = $('btn-models-download');
   if (dlBtn) {
     dlBtn.addEventListener('click', () => {
@@ -9739,7 +9860,7 @@ document.querySelectorAll('.models-tab').forEach(t => {
       if (_inp) _inp.focus();
     });
     // Sync the badge dot to the actual download-in-progress signal.
-    // Polls every 2s — cheap, and the only DOM read is `.hidden`.
+    // Polls every 2s - cheap, and the only DOM read is `.hidden`.
     setInterval(() => {
       const badge = $('btn-models-download-badge');
       const dlRow = $('models-dl');
@@ -9873,7 +9994,7 @@ async function streamDownload(res, bar, label, detail, filenameHint) {
 
 async function startWithModel(modelPath, label, detail, loadCfg) {
   label.textContent = 'Starting server (loading model, 10-30s)...';
-  // Start the sticker progress bar too — same surface as the dropdown swap,
+  // Start the sticker progress bar too - same surface as the dropdown swap,
   // so the user sees "loading_weights 45%" anywhere in the GUI.
   startLoadProgress();
   const body = Object.assign({ model_path: modelPath }, loadCfg || {});
@@ -9884,7 +10005,7 @@ async function startWithModel(modelPath, label, detail, loadCfg) {
       body: JSON.stringify(body),
     });
     if (r && r.ok) {
-      // Server is live — flash "Ready" briefly then auto-dismiss the
+      // Server is live - flash "Ready" briefly then auto-dismiss the
       // progress row so it doesn't linger forever (was bug #4).
       label.textContent = 'Ready · server live at ' + r.url;
       toast('Server started', modelPath.split(/[\/\\]/).pop(), 'ok', 4500);
@@ -9997,7 +10118,7 @@ async function downloadAndStart(pickId) {
 }
 
 function hideWelcomeCard(remember) {
-  // No-op now — the welcome card was retired but this function lingers as a
+  // No-op now - the welcome card was retired but this function lingers as a
   // safe stub for any legacy caller (showView, send override, etc).
   const el = document.getElementById('welcome-card');
   if (el) el.hidden = true;
@@ -10007,7 +10128,7 @@ function hideWelcomeCard(remember) {
 // Welcome-card chips + dismiss + show-me-more retired (the new onboarding
 // overlay covers the same ground better, and the chat view stays clean
 // by default). Functions like showWelcomeCard / hideWelcomeCard remain as
-// no-ops so legacy /welcome calls don't crash — /welcome now re-opens the
+// no-ops so legacy /welcome calls don't crash - /welcome now re-opens the
 // onboarding overlay (see obShow / case '/welcome').
 
 // Hide the welcome card on the first real user message (it's done its job).
@@ -10022,7 +10143,7 @@ send = async function(forced = null) {
 // BOOT
 // ============================================================
 // ============================================================
-// ONBOARDING — multi-step card overlay on first launch.
+// ONBOARDING - multi-step card overlay on first launch.
 // ============================================================
 const OB_TOTAL_STEPS = 7;
 // Migrate step (6) self-detects whether any source agent is installed.
@@ -10043,10 +10164,10 @@ async function _obProbeMigrate() {
     const sub = document.getElementById('ob-migrate-sub');
     const box = document.getElementById('ob-migrate-choices');
     if (!choices.length) {
-      // No Hermes/OpenClaw install — but the ChatGPT/Claude paste import below
+      // No Hermes/OpenClaw install - but the ChatGPT/Claude paste import below
       // is still useful, so stay on this step instead of auto-advancing.
       _obSkipMigrate = false;
-      if (sub) sub.textContent = "No prior agent install found — but you can still paste your memory from ChatGPT or Claude below.";
+      if (sub) sub.textContent = "No prior agent install found - but you can still paste your memory from ChatGPT or Claude below.";
       return;
     }
     if (sub) sub.textContent = 'Found a prior agent install. Want me to pull its memory into Hearth?';
@@ -10086,7 +10207,7 @@ async function maybeOnboard() {
     const s = await api('/api/settings');
     // ONLY show on first run (no `onboarded` flag yet). We used to force-show
     // when no brain was attached, but that was firing on app boot before the
-    // builtin had a chance to come up — making the overlay pop up on top of
+    // builtin had a chance to come up - making the overlay pop up on top of
     // the Models tab when the user was already picking a brain. /welcome
     // re-opens it manually any time.
     if (!s.onboarded) {
@@ -10165,7 +10286,7 @@ function _obWireImport() {
       const r = await api('/api/memory/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: body }) });
       if (r && r.ok) {
         if (r.count > 0) {
-          if (status) { status.style.color = 'var(--ok, #5fd28a)'; status.textContent = `✓ saved ${r.count} memor${r.count === 1 ? 'y' : 'ies'} — click Continue →`; }
+          if (status) { status.style.color = 'var(--ok, #5fd28a)'; status.textContent = `✓ saved ${r.count} memor${r.count === 1 ? 'y' : 'ies'} - click Continue →`; }
           txt.value = '';
         } else {
           if (status) status.textContent = 'nothing new saved (already known, or no durable facts found). You can Continue.';
@@ -10215,7 +10336,7 @@ async function obLoadBrains() {
   if (builtin) {
     banner = `<div class="ob-status-row is-good"><span class="ob-dot"></span><span>Hearth's built-in LLM is already running. You're set.</span></div>`;
   } else if (external) {
-    banner = `<div class="ob-status-row is-good"><span class="ob-dot"></span><span>LM Studio / Ollama detected on this PC — you can use it as-is, or pick another model below.</span></div>`;
+    banner = `<div class="ob-status-row is-good"><span class="ob-dot"></span><span>LM Studio / Ollama detected on this PC - you can use it as-is, or pick another model below.</span></div>`;
   } else if (disk.length) {
     banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>Found ${disk.length} model file${disk.length === 1 ? '' : 's'} on your disk. Pick one to boot Hearth's built-in server.</span></div>`;
   } else {
@@ -10224,7 +10345,7 @@ async function obLoadBrains() {
   status.innerHTML = banner;
 
   blurb.textContent = (builtin || external)
-    ? 'Looks good — you already have a brain. Pick a different one if you want, or hit Continue.'
+    ? 'Looks good - you already have a brain. Pick a different one if you want, or hit Continue.'
     : 'I look in LM Studio, Ollama, HuggingFace cache, and Downloads automatically. Here\'s what I found:';
 
   // Choices: existing disk picks first (cap 3), then recommended (cap 1)
@@ -10232,7 +10353,7 @@ async function obLoadBrains() {
   for (const m of disk.slice(0, 3)) {
     slots.push({
       title: m.filename,
-      sub: `${m.source} · ${m.size_gb} GB — already on your disk, nothing to download`,
+      sub: `${m.source} · ${m.size_gb} GB - already on your disk, nothing to download`,
       data: { kind: 'disk', path: m.path },
     });
   }
@@ -10246,7 +10367,7 @@ async function obLoadBrains() {
     });
   }
   if (!slots.length) {
-    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>No options to show — open the Models tab after onboarding.</span></div>';
+    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>No options to show - open the Models tab after onboarding.</span></div>';
     return;
   }
   let html = '';
@@ -10277,10 +10398,10 @@ async function obLoadVoiceStatus() {
     const stt = v.stt && (v.stt.ready || v.stt.available);
     const rt  = v.realtime && v.realtime.available;
     let cls = 'is-good', txt = '';
-    if (tts && stt && rt) txt = 'Real-time voice ready — silero VAD + Kokoro speech.';
+    if (tts && stt && rt) txt = 'Real-time voice ready - silero VAD + Kokoro speech.';
     else if (tts && stt) txt = 'TTS + STT ready (press-to-talk).';
-    else if (tts) { cls = 'is-warn'; txt = 'Speakers ready, mic not set up — install faster-whisper.'; }
-    else if (stt) { cls = 'is-warn'; txt = 'Mic ready, speakers not set up — install kokoro-onnx.'; }
+    else if (tts) { cls = 'is-warn'; txt = 'Speakers ready, mic not set up - install faster-whisper.'; }
+    else if (stt) { cls = 'is-warn'; txt = 'Mic ready, speakers not set up - install kokoro-onnx.'; }
     else { cls = 'is-warn'; txt = 'Voice isn\'t available yet. You can install it any time from Settings.'; }
     // GPU vs CPU note: speech-to-text on CPU is the ~10s-latency culprit. Tell
     // the user which they're on; a GPU machine on CPU mode gets a one-click flip.
@@ -10288,8 +10409,8 @@ async function obLoadVoiceStatus() {
     if (stt && v.stt) {
       const onGpu = v.stt.device === 'cuda';
       const canGpu = !!v.stt.cuda_available;
-      if (onGpu) gpuNote = ' Running on your GPU — fast.';
-      else if (canGpu) gpuNote = ' Your GPU can run this much faster — <a href="#" id="ob-voice-gpu">switch to GPU</a>.';
+      if (onGpu) gpuNote = ' Running on your GPU - fast.';
+      else if (canGpu) gpuNote = ' Your GPU can run this much faster - <a href="#" id="ob-voice-gpu">switch to GPU</a>.';
       else gpuNote = ' Running on CPU (transcription may lag a few seconds).';
     }
     row.className = 'ob-status-row ' + cls;
@@ -10322,7 +10443,7 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
   });
 });
 
-// Onboarding voice picker — speed label tracking + Test button
+// Onboarding voice picker - speed label tracking + Test button
 (function setupOnboardingVoicePicker() {
   const speedInput = document.getElementById('ob-voice-speed');
   const speedLabel = document.getElementById('ob-voice-speed-label');
@@ -10341,7 +10462,7 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
     testBtn.disabled = true;
     try {
       // Save the pair first so /api/tts uses it (speak doesn't take per-call
-      // voice/speed in the current shape — it reads DEFAULT_VOICE/SPEED).
+      // voice/speed in the current shape - it reads DEFAULT_VOICE/SPEED).
       await api('/api/settings', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ voice_name: voice, voice_speed: speed }),
@@ -10351,9 +10472,9 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
         body: JSON.stringify({ text: "Right boss, this is me at " + speed.toFixed(1) + "x. If this feels right, lock it in." }),
       });
       if (r.ok) {
-        if (testMsg) testMsg.textContent = '✓ played — adjust and re-test if needed.';
+        if (testMsg) testMsg.textContent = '✓ played - adjust and re-test if needed.';
       } else {
-        if (testMsg) testMsg.textContent = '✗ playback failed — see Settings → Voice for details.';
+        if (testMsg) testMsg.textContent = '✗ playback failed - see Settings → Voice for details.';
       }
     } catch (e) {
       if (testMsg) testMsg.textContent = '✗ error: ' + (e.message || 'network');
@@ -10378,16 +10499,16 @@ async function obFinish(skipped) {
   const name = ($('ob-name').value || '').trim();
   const tone = $('ob-tone').value;
   const browser = $('ob-browser').value;
-  // Agent name — validate against the same regex /api/agent/rename uses
+  // Agent name - validate against the same regex /api/agent/rename uses
   // so an invalid value is caught here instead of failing the rename
   // silently after onboarding.
   let agentName = ($('ob-agent-name')?.value || '').trim();
   if (agentName && !/^[A-Za-z0-9 ]{1,20}$/.test(agentName)) {
-    toast('Agent name skipped', 'Must be 1-20 chars, letters/digits/spaces. Using JARVIS — change later in Settings.', 'warn', 6000);
+    toast('Agent name skipped', 'Must be 1-20 chars, letters/digits/spaces. Using JARVIS - change later in Settings.', 'warn', 6000);
     agentName = '';
   }
   const voiceOn = obState.voice === 'full';
-  // Onboarding voice picker — only persist these if the user actually picked
+  // Onboarding voice picker - only persist these if the user actually picked
   // "talk + listen" AND tweaked them (the Test button already saved a partial
   // commit, but obFinish is the authoritative save). Defaults are fine if
   // untouched: am_michael at 1.5x.
@@ -10417,7 +10538,7 @@ async function obFinish(skipped) {
     // If the user picked a non-default agent name during onboarding,
     // trigger the FULL rename (workspace folder + persona module +
     // env). Settings save already changed the in-memory persona name,
-    // but the workspace folder still needs to move. Background — no
+    // but the workspace folder still needs to move. Background - no
     // UI block. User sees the next chat already using the new name;
     // the folder rename happens via tray respawn behind the scenes.
     if (agentName && agentName !== 'JARVIS') {
@@ -10426,7 +10547,7 @@ async function obFinish(skipped) {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ new_name: agentName }),
         });
-        // Backend respawns the tray ~1.5s later — schedule a soft
+        // Backend respawns the tray ~1.5s later - schedule a soft
         // reload so the GUI picks up the new workspace path. The
         // success toast from the rename endpoint will follow.
         setTimeout(() => window.location.reload(), 4000);
@@ -10481,16 +10602,16 @@ async function obFinish(skipped) {
             body: JSON.stringify({ model_path: pick.path }),
           }).catch(() => {});
         } else if (pick.kind === 'pick' && pick.id) {
-          // Kick off the download in the background — Models tab tracks progress
+          // Kick off the download in the background - Models tab tracks progress
           api('/api/llmserver/download', {
             method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ id: pick.id }),
           }).catch(() => {});
-          toast('Downloading brain', 'Models tab shows the progress — chat works the moment it\'s done.', 'info', 7000);
+          toast('Downloading brain', 'Models tab shows the progress - chat works the moment it\'s done.', 'info', 7000);
         }
       } catch {}
     }
-    // Cloud entry — if user picked a cloud provider in step 3, switch the
+    // Cloud entry - if user picked a cloud provider in step 3, switch the
     // active endpoint right now so the first message uses it.
     try {
       const keyEl = $('ob-cloud-key');
@@ -10572,7 +10693,7 @@ $('ob-name').addEventListener('keydown', e => { if (e.key === 'Enter') saveOnboa
   img.src = '/assets/icon.png';
 })();
 
-// Global keyboard shortcuts — documented in Settings → Behavior →
+// Global keyboard shortcuts - documented in Settings → Behavior →
 // Keyboard shortcuts. Modifier is Ctrl on Win/Linux, Cmd on Mac.
 // Tab-switch uses Ctrl+<n> matching the actual sidebar order (computed from the
 // DOM, so inserting/reordering tabs can't desync the shortcuts).
@@ -10621,6 +10742,47 @@ document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
   btn.title = `Ctrl+${i + 1}`;
 });
 
+// On-open update prompt. Returning users see "Update available - install?" the
+// moment they open Hearth, not only if they dig into Settings. Fail-silent (no
+// network / GitHub down shows nothing). Skipped while first-run onboarding is up.
+async function promptUpdateIfAvailable() {
+  try {
+    const r = await api('/api/update/check', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    if (!r || !r.ok || !r.available) return;
+    const ob = $('onboard');
+    if (ob && ob.classList.contains('open')) return; // don't stack on the onboarding modal
+    showModal('Update available: ' + (r.latest || ''),
+      "You're on v" + (r.current || '') + '. A newer Hearth (' + (r.latest || '') + ') is out.\n\n' +
+      (r.notes ? r.notes.slice(0, 360) + '\n\n' : '') +
+      'Install now? (Source build pulls the update and asks you to restart; packaged build opens the release page.)', [
+      { label: 'Later' },
+      { label: 'Install now', kind: 'primary', onclick: async () => {
+        try {
+          const a = await api('/api/update/apply', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+          toast('Update', (a && a.result) || 'done', 'ok', 9000);
+        } catch (e) { toast('Update failed', e.message, 'err', 9000); }
+      }},
+    ]);
+  } catch {}
+}
+
+// Broadcast announcements: poll the feed and toast anything this build hasn't
+// shown yet (the author pushes them to announcements.json). Backend dedups, so
+// each fires once per machine. Staggered if several land at once.
+async function pollAnnouncements() {
+  try {
+    const r = await api('/api/announcements/check', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    const items = (r && r.items) || [];
+    items.forEach((a, i) => {
+      setTimeout(() => {
+        const kind = a.kind === 'warn' ? 'warn' : (a.kind === 'err' ? 'err' : 'ok');
+        // Display-only + escaped by toast(); cap length so a bad feed can't spam.
+        toast((a.title || 'Hearth').slice(0, 80), (a.body || '').slice(0, 280), kind, 13000);
+      }, i * 1300);
+    });
+  } catch {}
+}
+
 (async function boot() {
   await loadConversations();
   if (!STATE.conversations.length) {
@@ -10629,7 +10791,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
     // Restore the chat the user actually had open last time (if it still
     // exists), instead of always opening whichever was touched most recently.
     // The old behavior silently opened a different thread after restart and
-    // looked like "the AI forgot what we were talking about" — see the MW4
+    // looked like "the AI forgot what we were talking about" - see the MW4
     // amnesia case where the model had no context because the GUI had
     // quietly switched threads under the user.
     let saved = null;
@@ -10640,7 +10802,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
   renderConvoList();
   renderChat();
 
-  // Settings FIRST — refreshModels' pill logic depends on STATE.settings
+  // Settings FIRST - refreshModels' pill logic depends on STATE.settings
   // (specifically llm_provider) to know whether to render "Cloud brain" or
   // fall through to "External / Built-in / No brain". Without this, opening
   // Models in the first ~200ms after boot showed "pick a model" even when
@@ -10663,7 +10825,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
   setInterval(() => { if (STATE.view === 'logs') refreshLogs(); }, 6000);
   // Background-subagent push: poll every 3s. If a new completion shows
   // up, drop a violet heads-up banner in the chat body so the user sees
-  // it the moment work returns — no need to type "done?" to surface it.
+  // it the moment work returns - no need to type "done?" to surface it.
   // Already-seen agent_ids are tracked so each completion only renders
   // once; the actual context-injection still happens on the next user
   // turn via run_once's drain.
@@ -10672,10 +10834,14 @@ document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
   input.focus();
   setState('idle');
   maybeOnboard();
+  // Returning users: surface a waiting update right on open (2.5s in, so it
+  // doesn't race the onboarding modal or the first state refresh).
+  setTimeout(promptUpdateIfAvailable, 2500);
+  setTimeout(pollAnnouncements, 4500);
 
   // First-run welcome card: show only on an empty chat AND when not dismissed.
   // Also reappears for users who haven't seen it yet (after the existing onboard
-  // modal closes — they don't conflict, the modal is centered, this is inline).
+  // modal closes - they don't conflict, the modal is centered, this is inline).
   const _c = activeConvo();
   if (!_c || _c.messages.length === 0) showWelcomeCard(false);
 })();

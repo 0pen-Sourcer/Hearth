@@ -3868,31 +3868,56 @@ def _find_start_menu_lnk(query: str) -> Optional[str]:
     desktop-shortcut game launcher."""
     if sys.platform != "win32":
         return None
-    roots = [
-        os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
-        os.path.join(os.environ.get("PROGRAMDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
-        # Desktop shortcuts — primary location for game launchers
-        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"),
-        os.path.join(os.environ.get("PUBLIC", ""), "Desktop"),
-        # OneDrive-managed Desktop (Windows 10+ often redirects here)
-        os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "Desktop"),
-        os.path.join(os.environ.get("ONEDRIVE", ""), "Desktop"),
-    ]
+    import time as _t
+    deadline = _t.monotonic() + 2.0  # hard cap: never let app-launch hang
     q = query.lower().strip()
     fuzzy: Optional[str] = None
-    for root in roots:
+
+    def _scan_file(dirpath: str, fn: str):
+        nonlocal fuzzy
+        if not fn.lower().endswith(".lnk"):
+            return None
+        low = os.path.splitext(fn)[0].lower()
+        if low == q:
+            return os.path.join(dirpath, fn)
+        if fuzzy is None and q in low:
+            fuzzy = os.path.join(dirpath, fn)
+        return None
+
+    # Start Menu: shallow tree of shortcuts - safe to walk recursively.
+    start_menu = [
+        os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
+        os.path.join(os.environ.get("PROGRAMDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
+    ]
+    for root in start_menu:
         if not root or not os.path.isdir(root):
             continue
         for dirpath, _, filenames in os.walk(root):
+            if _t.monotonic() > deadline:
+                return fuzzy
             for fn in filenames:
-                if not fn.lower().endswith(".lnk"):
-                    continue
-                stem = os.path.splitext(fn)[0]
-                low = stem.lower()
-                if low == q:
-                    return os.path.join(dirpath, fn)
-                if fuzzy is None and q in low:
-                    fuzzy = os.path.join(dirpath, fn)
+                hit = _scan_file(dirpath, fn)
+                if hit:
+                    return hit
+    # Desktops: TOP LEVEL ONLY. A recursive os.walk here was the 29s hang -
+    # a Desktop with a big folder (downloads dump, a game dir) walks forever.
+    # Launcher shortcuts always sit at the Desktop root anyway.
+    desktops = [
+        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"),
+        os.path.join(os.environ.get("PUBLIC", ""), "Desktop"),
+        os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "Desktop"),
+        os.path.join(os.environ.get("ONEDRIVE", ""), "Desktop"),
+    ]
+    for root in desktops:
+        if not root or not os.path.isdir(root):
+            continue
+        try:
+            for fn in os.listdir(root):
+                hit = _scan_file(root, fn)
+                if hit:
+                    return hit
+        except OSError:
+            continue
     return fuzzy
 
 
@@ -5914,6 +5939,104 @@ def _focus_window(p: Dict) -> str:
     extra = f" ({len(matches)} matched; brought the first)" if len(matches) > 1 else ""
     return f"Brought '{title}' to the front.{extra}"
 
+
+def _send_to_phone(p: Dict) -> str:
+    """Push a message FROM this PC TO one of the user's connected channels
+    (Discord DM / Telegram / ntfy). Outbound counterpart to the bridges, which
+    only reply to incoming messages. Reads the saved bridge config in ~/.hearth."""
+    import json as _j
+    import urllib.request as _u
+    import urllib.parse as _up
+    channel = (p.get("channel") or "").strip().lower()
+    message = (p.get("message") or "").strip()
+    if not message:
+        return "Error: message is required."
+    base = os.path.join(os.path.expanduser("~"), ".hearth")
+
+    def _cfg(fn):
+        try:
+            with open(os.path.join(base, fn), encoding="utf-8") as f:
+                return _j.load(f) or {}
+        except Exception:
+            return {}
+
+    if channel == "telegram":
+        c = _cfg("phone_bridge.json")
+        tok = (c.get("bot_token") or "").strip()
+        ids = c.get("allowed_chat_ids") or []
+        if not tok or not ids:
+            return "Error: Telegram isn't set up (need a bot token + your chat id in Settings - Reach from phone)."
+        try:
+            data = _up.urlencode({"chat_id": ids[0], "text": message}).encode()
+            req = _u.Request(f"https://api.telegram.org/bot{tok}/sendMessage", data=data,
+                             headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Hearth"})
+            _u.urlopen(req, timeout=12)
+            return "Sent to your Telegram."
+        except Exception as e:
+            return f"Error sending to Telegram: {type(e).__name__}: {e}"
+
+    if channel == "discord":
+        c = _cfg("discord_bridge.json")
+        tok = (c.get("bot_token") or "").strip()
+        uids = c.get("allowed_user_ids") or []
+        if not tok or not uids:
+            return "Error: Discord isn't set up (need a bot token + your user id in Settings - Reach from phone)."
+        try:
+            h = {"Authorization": f"Bot {tok}", "Content-Type": "application/json", "User-Agent": "Hearth (https://github.com/0pen-sourcer/hearth, 0.7)"}
+            # Open (or reuse) a DM channel with the owner, then post.
+            dm_req = _u.Request("https://discord.com/api/v10/users/@me/channels",
+                                data=_j.dumps({"recipient_id": str(uids[0])}).encode(), headers=h)
+            chan = _j.loads(_u.urlopen(dm_req, timeout=12).read().decode())
+            msg_req = _u.Request(f"https://discord.com/api/v10/channels/{chan['id']}/messages",
+                                 data=_j.dumps({"content": message[:1900]}).encode(), headers=h)
+            _u.urlopen(msg_req, timeout=12)
+            return "Sent to your Discord (DM)."
+        except Exception as e:
+            return f"Error sending to Discord: {type(e).__name__}: {e}"
+
+    if channel == "ntfy":
+        topic = ""
+        try:
+            from . import reminders as _r  # reuses the configured ntfy topic
+            topic = _r._ntfy_topic() if hasattr(_r, "_ntfy_topic") else ""
+        except Exception:
+            topic = ""
+        topic = topic or os.environ.get("HEARTH_NTFY_TOPIC", "") or (_cfg("discord_bridge.json").get("ntfy_topic") or "")
+        if not topic:
+            return "Error: no ntfy topic set (Settings - Reach from phone - ntfy)."
+        try:
+            req = _u.Request(f"https://ntfy.sh/{topic}", data=message.encode("utf-8"),
+                             headers={"Title": "Hearth", "User-Agent": "Hearth"})
+            _u.urlopen(req, timeout=12)
+            return "Pushed to your phone via ntfy."
+        except Exception as e:
+            return f"Error pushing via ntfy: {type(e).__name__}: {e}"
+
+    return "Error: channel must be one of: discord, telegram, ntfy."
+
+
+_HANDLERS["send_to_phone"] = _send_to_phone
+
+TOOL_DEFINITIONS.append({
+    "name": "send_to_phone",
+    "description": (
+        "Push a message FROM this PC TO the user's phone on a connected channel. "
+        "Use when the user says 'send this to my Discord / Telegram', 'text me this', "
+        "'ping my phone', or wants a result delivered off the PC. Channels: 'discord' "
+        "(DMs the owner via the bot), 'telegram' (messages the owner), 'ntfy' (push "
+        "notification). The bridges must be set up in Settings - Reach from phone; if a "
+        "channel isn't configured this returns a clear error. This is OUTBOUND - the "
+        "bridges already handle INCOMING messages and reply on their own."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "channel": {"type": "string", "description": "discord | telegram | ntfy"},
+            "message": {"type": "string", "description": "The text to send."},
+        },
+        "required": ["channel", "message"],
+    },
+})
 
 _HANDLERS["focus_window"] = _focus_window
 
