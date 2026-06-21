@@ -573,11 +573,26 @@ class JarvisCLI:
                 else:
                     buf.insert_text("\n")
 
+            # Slash-command autocomplete (type-ahead). Only fires on words that
+            # start with '/', so normal prose is untouched. Big discoverability
+            # win — the command list is long and otherwise must be memorized.
+            try:
+                from prompt_toolkit.completion import WordCompleter
+                _slash = ["/help", "/brain", "/endpoint", "/models", "/model",
+                          "/tools", "/voice", "/listen", "/mem", "/log",
+                          "/compact", "/context", "/think", "/agent", "/jobs",
+                          "/mcp", "/migrate", "/name", "/allow", "/perms",
+                          "/clear", "/exit", "/skill", "/update", "/multi"]
+                _completer = WordCompleter(_slash, ignore_case=True, sentence=False)
+            except Exception:
+                _completer = None
             self.pt_session = PromptSession(
                 history=SafeFileHistory(hist_path),
                 key_bindings=kb,
                 enable_history_search=True,
                 mouse_support=False,
+                completer=_completer,
+                complete_while_typing=True,
             )
         except Exception:
             # No real console (piped, redirected, etc.) - fall back to input()
