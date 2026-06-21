@@ -263,6 +263,26 @@ C_ERR = "\033[1;31m"
 C_WARN = "\033[38;5;215m"
 C_ACCENT = C_BRAND
 
+# Terminal markdown rendering. We stream raw tokens live (fast), then re-render
+# the finished message once IF it contains markdown worth formatting (a table,
+# code fence, or heading) — so a table no longer prints as raw `| ... |` pipes.
+# Plain replies skip the re-render entirely, so they're untouched + instant.
+# Same idea as the GUI + Claude Code's terminal renderer.
+try:
+    from rich.console import Console as _RichConsole
+    from rich.markdown import Markdown as _RichMarkdown
+    _RICH = _RichConsole(force_terminal=True, soft_wrap=False)
+except Exception:
+    _RICH = None
+_MD_SIGNAL = re.compile(
+    r"(^|\n)[ \t]*\|.+\|[ \t]*\n[ \t]*\|?[ \t:|-]+\|"   # GFM table
+    r"|```"                                              # code fence
+    r"|(^|\n)#{1,6}[ \t]+\S"                             # heading
+    r"|\*\*\S",                                          # bold
+    re.M)
+def _has_md(t: str) -> bool:
+    return bool(_RICH and t and _MD_SIGNAL.search(t))
+
 _LOW_LATENCY_DIRECTIVE = (
     "\n\n# LOW-LATENCY MODE (active)\n"
     "Reasoning is OFF. Do NOT output `<think>` or `<thinking>` blocks.\n"
@@ -3785,6 +3805,12 @@ class JarvisCLI:
 
         tool_calls_dict: Dict[int, Dict] = {}
         content_captured = ""
+        # Count the PHYSICAL terminal lines we actually print for the reply, so
+        # the markdown re-render erases exactly those (recomputing from string
+        # width after the fact mis-counts when a reasoning/tool frame sat above).
+        _emit_lines = 0
+        _emit_col = 0
+        _term_w = max(getattr(_RICH, "width", 80) or 80, 20) if _RICH else 80
         first = True
         in_think = False
         # Streaming voice state - we flush sentences to TTS as they
@@ -3988,6 +4014,13 @@ class JarvisCLI:
                         content_captured += text
                         sys.stdout.write(C_BOT + text)
                         sys.stdout.flush()
+                        for _ch in text:  # track physical lines printed (for the re-render erase)
+                            if _ch == "\n":
+                                _emit_lines += 1; _emit_col = 0
+                            else:
+                                _emit_col += 1
+                                if _emit_col >= _term_w:
+                                    _emit_lines += 1; _emit_col = 0
                         # Track code-block state so we don't speak code
                         if "```" in text:
                             for _ in range(text.count("```")):
@@ -4020,7 +4053,23 @@ class JarvisCLI:
         # Flush any trailing speech that didn't end with a sentence boundary
         _maybe_flush_speech(force_tail=True)
 
-        sys.stdout.write(C_RESET + "\n")
+        if _has_md(content_captured):
+            # Erase the raw-streamed block (cursor up over its visual/wrapped
+            # height + clear) and re-render it as rich markdown so tables,
+            # headings, and code look right instead of raw pipes. Best-effort:
+            # any failure just drops a newline rather than corrupting output.
+            try:
+                # Erase exactly the lines we actually printed for this reply.
+                vlines = _emit_lines + (1 if _emit_col else 0)
+                sys.stdout.write(C_RESET)
+                if vlines:
+                    sys.stdout.write(f"\033[{vlines}F\033[J")
+                sys.stdout.flush()
+                _RICH.print(_RichMarkdown(content_captured, code_theme="monokai"))
+            except Exception:
+                sys.stdout.write(C_RESET + "\n")
+        else:
+            sys.stdout.write(C_RESET + "\n")
 
         if first:
             spinner_task.cancel()
