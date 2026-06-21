@@ -47,7 +47,7 @@ DEFAULT_KOKORO_VOICE = os.environ.get("JARVIS_VOICE", "am_michael")
 # 1.0 = Kokoro's natural rate. Voiceover testing kept this at 1.0 (anything
 # higher starts to sound rushed during long answers). Override per session
 # with /voice speed <n> or set JARVIS_VOICE_SPEED before launch.
-DEFAULT_SPEED = float(os.environ.get("JARVIS_VOICE_SPEED", "1.5"))
+DEFAULT_SPEED = float(os.environ.get("JARVIS_VOICE_SPEED", "1.0"))
 
 _engine: Optional[Tuple[str, object]] = None  # ("kokoro" | "piper", obj)
 _lock = threading.Lock()
