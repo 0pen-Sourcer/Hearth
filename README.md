@@ -1,5 +1,7 @@
 # Hearth
 
+> *You spun up a local model. It answers questions — but it can't touch your files, open your apps, or remember you. Now what? **This.***
+
 **A local-first personal AI for Windows.** It runs on any OpenAI-compatible local LLM (LM Studio, Ollama, a bundled llama.cpp server, or anything that speaks the OpenAI API) and actually operates your computer — files, shell, apps, browser, screenshots, voice. Reach it as a terminal CLI, a desktop/web app, or an MCP server.
 
 No account. No cloud required. No telemetry. The model and your data stay on your machine; the only thing that ever leaves is a web search, and only when you ask for one.
