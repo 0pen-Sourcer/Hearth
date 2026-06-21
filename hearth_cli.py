@@ -2451,9 +2451,12 @@ class JarvisCLI:
                 dt = time.time() - t0
                 d = dots[(i // 4) % len(dots)]
                 color = GRAD[i % len(GRAD)]
+                # After a couple seconds, surface the interrupt — esc/ctrl-c
+                # already cancel, but users never discover it without a hint.
+                hint = f"  {C_DIM}· esc to interrupt{C_RESET}" if dt > 2 else ""
                 sys.stdout.write(
                     f"\r{color}{frames[i % len(frames)]}{C_RESET} "
-                    f"{C_DIM}{label}{d:<3} {dt:.1f}s{C_RESET}"
+                    f"{C_DIM}{label}{d:<3} {dt:.1f}s{C_RESET}{hint}"
                 )
                 sys.stdout.flush()
                 i += 1
@@ -3677,18 +3680,33 @@ class JarvisCLI:
         return "none"
 
     async def _open_stream(self, create_kwargs: Dict):
-        """Open the streaming completion. If a cloud model rejects
-        `reasoning_effort` with a 400 (plain grok-4, grok-3, etc. don't expose
-        it), drop the param, remember the model, and retry once so the turn
-        still goes through instead of dying on an unsupported-field error."""
-        try:
-            return await self.client.chat.completions.create(**create_kwargs)
-        except Exception as e:
-            if "reasoning_effort" in create_kwargs and _is_reasoning_param_error(e):
-                self._no_reasoning_effort.add((self.current_model or "").lower())
-                create_kwargs.pop("reasoning_effort", None)
+        """Open the streaming completion, with two recoveries:
+        1. If a model 400s on `reasoning_effort` (plain grok-4/grok-3 etc. don't
+           expose it), drop the param and retry.
+        2. Retry transient/server errors with a short exponential backoff — a
+           local model server commonly drops the socket during a model reload or
+           KV-cache warmup, and a one-line "server errored" death there is a bad
+           experience. A hiccup becomes a brief pause instead of a dead turn."""
+        _is_local = ("localhost" in (LOCAL_API_BASE or "")
+                     or "127.0.0.1" in (LOCAL_API_BASE or ""))
+        for attempt in range(3):
+            try:
                 return await self.client.chat.completions.create(**create_kwargs)
-            raise
+            except Exception as e:
+                if "reasoning_effort" in create_kwargs and _is_reasoning_param_error(e):
+                    self._no_reasoning_effort.add((self.current_model or "").lower())
+                    create_kwargs.pop("reasoning_effort", None)
+                    continue  # immediate retry without the unsupported param
+                try:
+                    retryable = classify_api_error(e, _is_local).retryable
+                except Exception:
+                    retryable = False
+                if retryable and attempt < 2:
+                    delay = 0.5 * (2 ** attempt)
+                    print(f"{C_DIM}↻ server hiccup — retrying in {delay:.0f}s…{C_RESET}")
+                    await asyncio.sleep(delay)
+                    continue
+                raise
 
     async def respond(self, depth: int = 0):  # noqa: C901  # see _looks_like_yield helper at module level
         if depth > MAX_TURNS:
