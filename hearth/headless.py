@@ -339,6 +339,7 @@ async def run_once(
     history: Optional[List[Dict[str, Any]]] = None,
     permission_check=None,
     should_cancel=None,
+    supervised: bool = True,
 ) -> int:
     """Run a single prompt against the model. Returns process exit code.
 
@@ -1004,11 +1005,15 @@ async def run_once(
                     continue
 
                 t0 = time.time()
-                # Pass _approved=True since this branch only runs AFTER
-                # the permission check above said allow. Without it the
-                # destructive-pattern guard inside run_command would
-                # refuse a SECOND time even though the user just said yes.
-                _approved_args = dict(args, _approved=True) if isinstance(args, dict) else args
+                # Pass _approved=True since this branch only runs AFTER the
+                # permission check said allow — without it run_command's
+                # destructive guard would refuse again even though it's approved.
+                # EXCEPTION: unsupervised callers (phone bridges, where the user
+                # can't see a prompt) do NOT get _approved, so run_command's
+                # destructive-pattern guard still blocks rm/format/taskkill etc.
+                # from a remote message while benign commands still run.
+                _approved_args = (dict(args, _approved=True)
+                                  if (isinstance(args, dict) and supervised) else args)
                 # Watchdog: fire slow_tool events at 30s + 90s so the GUI
                 # can pop "this is taking a while — send to background?" —
                 # tells the user the loop didn't hang, just a slow tool.

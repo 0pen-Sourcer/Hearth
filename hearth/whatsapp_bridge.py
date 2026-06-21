@@ -96,7 +96,8 @@ async def _run(prompt: str, history: list) -> str:
 
     try:
         await headless.run_once(prompt, emit=emit, history=history,
-                                permission_check=lambda _n, _a: "allow")
+                                permission_check=lambda _n, _a: "allow",
+                                supervised=False)  # phone: destructive guard still fires
     except Exception as e:
         return f"(run failed: {type(e).__name__}: {e})"
     return "".join(parts).strip()

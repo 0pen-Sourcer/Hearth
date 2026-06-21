@@ -1261,6 +1261,31 @@ class HearthHandler(BaseHTTPRequestHandler):
             except ValueError:
                 n = 100
             return self._send_json(200, {"events": _tail_log(n)})
+        if path == "/api/phone-logs":
+            # Tail the phone-bridge logs so the user can SEE what's coming in
+            # from Discord/Telegram/WhatsApp — phone reach runs headless and
+            # the user (rightly) wants visibility into who messaged + what ran.
+            q = self._query()
+            try:
+                n = max(1, min(500, int(q.get("lines", "120"))))
+            except ValueError:
+                n = 120
+            logs_dir = os.path.join(WORKSPACE, "logs")
+            out = []
+            try:
+                for fn in sorted(os.listdir(logs_dir)):
+                    if fn.endswith("_bridge.log"):
+                        fp = os.path.join(logs_dir, fn)
+                        try:
+                            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                                for ln in f.read().splitlines():
+                                    if ln.strip():
+                                        out.append(ln)
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+            return self._send_json(200, {"lines": out[-n:]})
         if path == "/api/logs/download":
             return self._download_logs()
         if path == "/api/logs/server":
