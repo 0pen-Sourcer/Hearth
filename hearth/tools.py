@@ -3933,6 +3933,83 @@ def _windows_uwp_uri(canonical: str) -> Optional[str]:
     return uwp.get(canonical.lower())
 
 
+def _snapshot_windows() -> set:
+    """Visible top-level windows now, as platform-specific ids — so a launch's
+    new window can be detected and raised. Win32: HWNDs. Linux: wmctrl ids.
+    macOS: empty (its `open` already foregrounds)."""
+    if sys.platform == "win32":
+        try:
+            import win32gui
+        except Exception:
+            return set()
+        s = set()
+        def _cb(h, _):
+            try:
+                if win32gui.IsWindowVisible(h) and win32gui.GetWindowText(h):
+                    s.add(h)
+            except Exception:
+                pass
+        try:
+            win32gui.EnumWindows(_cb, None)
+        except Exception:
+            pass
+        return s
+    if sys.platform.startswith("linux"):
+        wm = shutil.which("wmctrl")
+        if not wm:
+            return set()
+        try:
+            out = subprocess.run([wm, "-l"], capture_output=True, text=True,
+                                 timeout=3).stdout
+            return {ln.split()[0] for ln in out.splitlines() if ln.strip()}
+        except Exception:
+            return set()
+    return set()
+
+
+def _bring_newest_to_front(before: set) -> None:
+    """After launching something, raise the newly-appeared window to the front —
+    Windows AND Linux open launched windows behind the active one. macOS `open`
+    already foregrounds, so this no-ops there. Best-effort + silent."""
+    if sys.platform == "darwin":
+        return
+    try:
+        import time as _t
+        _t.sleep(0.6)  # give the app's window time to spawn
+    except Exception:
+        pass
+    new = [w for w in _snapshot_windows() if w not in before]
+    if not new:
+        return
+    target = new[-1]
+    if sys.platform == "win32":
+        try:
+            import win32con
+            import win32gui
+        except Exception:
+            return
+        try:
+            win32gui.ShowWindow(target, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(target)
+        except Exception:
+            try:
+                win32gui.SetWindowPos(target, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+                win32gui.SetWindowPos(target, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+                win32gui.BringWindowToTop(target)
+            except Exception:
+                pass
+    elif sys.platform.startswith("linux"):
+        wm = shutil.which("wmctrl")
+        if wm:
+            try:
+                subprocess.run([wm, "-i", "-a", target], timeout=3,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+
 def _open_app(p: Dict) -> str:
     name = (p.get("name") or "").strip()
     if not name:
@@ -3958,17 +4035,22 @@ def _open_app(p: Dict) -> str:
     canonical = _COMMON_APP_ALIASES.get(canonical_attempt_first.lower(), canonical_attempt_first)
 
     if sys.platform == "win32":
+        # Snapshot open windows so we can raise the newly-launched one to the
+        # front (Windows otherwise opens it BEHIND the active window).
+        _before = _snapshot_windows()
         # 1. Real file path / folder path — opens with default association
         # (videos in default player, .rar in archive viewer, folders in Explorer, etc.)
         # Check this BEFORE PATH lookup so 'G:\foo.rar' isn't mistaken for an exe.
         cand_path = os.path.expanduser(canonical)
         if os.path.exists(cand_path):
             os.startfile(cand_path)  # type: ignore[attr-defined]
+            _bring_newest_to_front(_before)
             return f"opened: {cand_path}"
 
         # 2. URL-shaped → open in default browser via os.startfile
         if canonical.startswith(("http://", "https://", "file://")):
             os.startfile(canonical)  # type: ignore[attr-defined]
+            _bring_newest_to_front(_before)
             return f"opened url: {canonical}"
 
         # 3. Direct PATH lookup (calc, notepad, mspaint, explorer, etc.)
@@ -3977,6 +4059,7 @@ def _open_app(p: Dict) -> str:
             if full:
                 subprocess.Popen([full], shell=False, close_fds=True,
                                  creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+                _bring_newest_to_front(_before)
                 return f"launched: {full}"
 
         # 4. UWP URI scheme (Calculator on Win10/11 lives as a UWP app)
@@ -3984,6 +4067,7 @@ def _open_app(p: Dict) -> str:
         if uri:
             try:
                 os.startfile(uri)  # type: ignore[attr-defined]
+                _bring_newest_to_front(_before)
                 return f"launched UWP: {uri}"
             except OSError:
                 pass
@@ -3992,6 +4076,7 @@ def _open_app(p: Dict) -> str:
         lnk = _find_start_menu_lnk(canonical)
         if lnk:
             os.startfile(lnk)  # type: ignore[attr-defined]
+            _bring_newest_to_front(_before)
             return f"launched: {os.path.basename(lnk)[:-4]} (via Start Menu shortcut)"
 
         # 5. Failure — surface a real error and suggest matches
@@ -4057,6 +4142,7 @@ def _open_app(p: Dict) -> str:
                 f"If it's a web service, call open_in_browser instead.")
 
     # Linux (and other POSIX)
+    _before = _snapshot_windows()
     cand_path = os.path.expanduser(canonical)
     # Files / folders / URLs → xdg-open uses the desktop default handler.
     if os.path.exists(cand_path) or canonical.startswith(
@@ -4068,6 +4154,7 @@ def _open_app(p: Dict) -> str:
                 subprocess.Popen([opener, target],
                                  stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
+                _bring_newest_to_front(_before)
                 return f"opened: {target}"
             except Exception as e:
                 return f"Error: xdg-open failed: {e}"
@@ -4078,6 +4165,7 @@ def _open_app(p: Dict) -> str:
         try:
             subprocess.Popen([full], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
+            _bring_newest_to_front(_before)
             return f"launched: {full}"
         except Exception as e:
             return f"Error: {e}"
