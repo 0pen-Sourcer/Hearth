@@ -1,107 +1,110 @@
 ---
 name: make-diagram
-description: Build a diagram — flowchart, architecture/system diagram, sequence, mind map, org chart — as a self-contained HTML/SVG that opens in any browser, OR as an editable Excalidraw file. Use when the user wants a diagram, chart of boxes-and-arrows, system design picture, or flow. NOT for data charts (that's a chart inside make-pdf) or for reading an existing diagram.
-version: 1.0.0
+description: Build a diagram — flowchart, architecture/system diagram, sequence, mind map, org chart, decision tree — as a self-contained HTML/SVG that opens in any browser, OR as an editable Excalidraw file. Use when the user wants a diagram, chart of boxes-and-arrows, system design picture, or flow. NOT for data charts (that's a chart inside make-pdf) or for reading an existing diagram.
+version: 2.1.0
 ---
 
-# Make a diagram — pick the right backend, write a real file
+# Make a diagram — author it FRESH, let the helper handle the arrows
 
-No templates. You author the diagram fresh each time. Two output backends —
-pick based on what the user needs:
+There is NO template. You design each diagram from scratch so it fits THIS
+request — your own palette, layout, box shapes, grouping, emphasis. A login flow,
+a cloud architecture, and an org chart should look like three different pieces,
+not the same canned picture.
 
-| Want | Backend | Output |
-|---|---|---|
-| A polished diagram to view/share/screenshot | **inline-SVG in a self-contained .html** | opens in any browser, no internet |
-| A diagram the user will keep EDITING by hand | **Excalidraw JSON** (`.excalidraw`) | they drag it onto excalidraw.com |
-
-Default to the **SVG/HTML** backend unless the user says they want to edit it
-later, then use Excalidraw.
+The only part you must NOT hand-compute is **arrow geometry**. Hand-placed line
+coordinates are the #1 way diagrams break — arrows overshoot a box, miss it, or
+leave a node with nothing pointing at it. So you place the boxes (full design
+freedom) and call `connect()` for every arrow; it routes each one edge-to-edge.
 
 ## The pipeline (every time)
 
-1. **Plan the graph.** Nodes (boxes) + edges (arrows) + layout (top-down,
-   left-right, layered). Pick a palette (one bg, one accent, readable text).
-2. **Write the build script** to `<workspace>/.build/<slug>_build.py` that
-   emits the file to `<workspace>/diagrams/<slug>.html` (or `.excalidraw`).
-   Compute every x/y/width by hand — there's no auto-layout, you place boxes
-   on a grid.
-3. **Run it** with `run_command python <workspace>/.build/<slug>_build.py`.
-4. **Open it** — append the cross-platform open snippet so it opens in one shot:
+1. **Plan the design + the graph.** Pick the look (palette, dark/light, shapes,
+   spacing, which nodes carry the flow and get an accent). Then list nodes and
+   edges (which box points to which, branch labels, loops).
+
+2. **Write a fresh build script** to `<workspace>/.build/<slug>_build.py`. Place
+   YOUR boxes on a grid as plain dicts, draw them however your design wants, and
+   import the connector helper so the arrows are correct (load_skill gave you
+   this skill's folder):
+   ```python
+   import sys, os
+   sys.path.insert(0, r"<skill-folder>/scripts")
+   from diagram_helpers import connect, marker_defs
+
+   BG="#14121c"; CARD="#211d33"; ACCENT="#7c5cff"; FG="#e9e0ff"
+   GREEN="#22c55e"; GREENBG="#0c3a22"; RED="#ef4444"; REDBG="#3f1c1c"; AMBER="#f59e0b"
+
+   # YOU choose positions + styling — this is where the design lives:
+   start = {"x":300,"y":40, "w":200,"h":58}
+   creds = {"x":300,"y":170,"w":200,"h":58}
+   valid = {"x":300,"y":300,"w":170,"h":80,"shape":"diamond"}
+   ok    = {"x":120,"y":460,"w":200,"h":58}
+   fail  = {"x":480,"y":460,"w":200,"h":58}
+
+   def rect(b,label,stroke=ACCENT,fill=CARD):
+       return (f'<rect x="{b["x"]}" y="{b["y"]}" width="{b["w"]}" height="{b["h"]}" '
+               f'rx="13" fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
+               f'<text x="{b["x"]+b["w"]/2}" y="{b["y"]+b["h"]/2+5}" fill="{FG}" '
+               f'font-family="Segoe UI,Arial" font-size="15" font-weight="600" '
+               f'text-anchor="middle">{label}</text>')
+   def diamond(b,label,stroke=AMBER,fill="#3a2a0a"):
+       cx,cy=b["x"]+b["w"]/2,b["y"]+b["h"]/2
+       pts=f'{cx},{b["y"]} {b["x"]+b["w"]},{cy} {cx},{b["y"]+b["h"]} {b["x"]},{cy}'
+       return (f'<polygon points="{pts}" fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
+               f'<text x="{cx}" y="{cy+5}" fill="{FG}" font-family="Segoe UI,Arial" '
+               f'font-size="15" font-weight="600" text-anchor="middle">{label}</text>')
+
+   # edges FIRST (so boxes draw on top of the line ends), via the helper:
+   edges = (connect(start,creds) + connect(creds,valid)
+            + connect(valid,ok, kind="success", label="Yes")
+            + connect(valid,fail,kind="error",   label="No")
+            + connect(fail,creds,kind="error",   label="retry"))   # loop: auto side-lane
+
+   W,H=800,560
+   svg=(f'<svg width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
+        f'xmlns="http://www.w3.org/2000/svg"><defs>{marker_defs()}</defs>'
+        f'<rect width="{W}" height="{H}" fill="{BG}"/>{edges}'
+        f'{rect(start,"Start")}{rect(creds,"Enter credentials")}{diamond(valid,"Valid?")}'
+        f'{rect(ok,"Login complete",GREEN,GREENBG)}{rect(fail,"Failure",RED,REDBG)}</svg>')
+   out=r"<workspace>/diagrams/<slug>.html"
+   os.makedirs(os.path.dirname(out),exist_ok=True)
+   open(out,"w",encoding="utf-8").write(
+       f'<!doctype html><meta charset="utf-8"><body style="margin:0;background:{BG};'
+       f'display:grid;place-items:center;min-height:100vh">{svg}</body>')
+   print(out)
+   ```
+   `connect(a,b,kind=,label=,lane_x=)` figures out the route from the two boxes'
+   positions: b below a → down-elbow into its top; b above a (a loop) → out the
+   side and up a lane; b beside a → side-to-side. `kind`: normal/success/error.
+
+3. **Run it** — `run_command python <workspace>/.build/<slug>_build.py`. It prints
+   the output path.
+
+4. **Open it** so the user sees it right away:
    ```python
    import sys, subprocess, os
-   p = "out.html"
-   if sys.platform == "win32":   os.startfile(p)
-   elif sys.platform=="darwin":  subprocess.Popen(["open", p])
+   if sys.platform=="win32":   os.startfile(p)
+   elif sys.platform=="darwin": subprocess.Popen(["open", p])
    else:                         subprocess.Popen(["xdg-open", p])
    ```
-5. **Delete the build script** via `delete_path` after a clean run.
 
-## Backend A — self-contained SVG in HTML (the default)
+5. **Eyeball it + delete the build script.** Confirm every node is present and
+   every branch/loop is drawn, then `delete_path` the `.build` script.
 
-Build the SVG as a Python string and wrap it in a minimal HTML doc. Boxes are
-`<rect rx=...>` with a `<text>` centered inside; arrows are `<line>`/`<path>`
-with an arrowhead `<marker>`. One dark theme that reads well:
+## Shortcut for a plain flowchart (no bespoke styling needed)
 
-```python
-W, H = 1000, 640
-ACCENT = "#7c5cff"; BG = "#14121c"; CARD = "#211d33"; FG = "#e9e0ff"; MUT = "#9b8cc7"
-
-def box(x, y, w, h, label, fill=CARD):
-    return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="12" '
-            f'fill="{fill}" stroke="{ACCENT}" stroke-width="1.5"/>'
-            f'<text x="{x+w/2}" y="{y+h/2+5}" fill="{FG}" font-family="Segoe UI,Arial" '
-            f'font-size="15" font-weight="600" text-anchor="middle">{label}</text>')
-
-def arrow(x1, y1, x2, y2):
-    return f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{MUT}" stroke-width="2" marker-end="url(#a)"/>'
-
-svg = f'''<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
-    <path d="M0,0 L8,3 L0,6 Z" fill="{MUT}"/></marker></defs>
-  <rect width="{W}" height="{H}" fill="{BG}"/>
-  {box(400, 40, 200, 60, "User request")}
-  {arrow(500, 100, 500, 160)}
-  {box(400, 160, 200, 60, "Decision engine")}
-  <!-- ...lay out the rest on a grid... -->
-</svg>'''
-
-html = f'<!doctype html><meta charset="utf-8"><title>{{title}}</title>' \
-       f'<body style="margin:0;background:{BG};display:grid;place-items:center;min-height:100vh">{svg}</body>'
-open("out.html", "w", encoding="utf-8").write(html)
-print("out.html")
-```
-
-Layout rules: align boxes on a grid (consistent x columns, even y rows);
-route arrows from box edges (not centers) so they don't cross the text;
-give 40-60px gaps between rows. Recolor a few key nodes in ACCENT to show flow.
-
-## Backend B — Excalidraw (when they'll edit it)
-
-Emit an `.excalidraw` JSON file. Each element needs a unique `id`, `type`
-(`rectangle`/`ellipse`/`diamond`/`arrow`/`text`), `x`/`y`/`width`/`height`,
-and style fields. Bind arrows to shapes via `startBinding`/`endBinding` with
-the shape ids so they stay attached when the user drags boxes. Minimal shape:
-
-```python
-import json, time, random
-def el(t, x, y, w, h, **kw):
-    return {"id": f"{t}{random.randint(1,1<<30)}", "type": t, "x": x, "y": y,
-            "width": w, "height": h, "angle": 0, "strokeColor": "#1e1e1e",
-            "backgroundColor": "#a5d8ff", "fillStyle": "solid", "strokeWidth": 2,
-            "roughness": 1, "opacity": 100, "seed": random.randint(1,1<<30),
-            "version": 1, "versionNonce": random.randint(1,1<<30),
-            "isDeleted": False, "boundElements": [], "groupIds": [], **kw}
-doc = {"type": "excalidraw", "version": 2, "source": "hearth", "elements": [...], "appState": {"viewBackgroundColor": "#ffffff"}}
-open("out.excalidraw", "w", encoding="utf-8").write(json.dumps(doc, indent=2))
-```
-
-Tell the user: "open excalidraw.com → menu → Open → pick this file" to edit.
+If the user just wants a quick correct flowchart and doesn't care about custom
+design, skip writing a script: put the graph in a JSON spec and run the bundled
+renderer, which does layout + routing for you:
+`run_command python <skill-folder>/scripts/build_diagram.py <spec.json> --out <workspace>/diagrams/<slug>.html`
+(spec schema is documented at the top of build_diagram.py; `--format excalidraw`
+gives an editable file whose arrows stay bound to the boxes.) Use this ONLY for
+throwaway/quick asks — for anything the user cares about the look of, author it
+fresh per step 2.
 
 ## Hard rules
-
-- Self-contained: NO external JS/CSS/CDN in the HTML — it must open offline.
-- Place by coordinate; never try to lay out boxes with whitespace/flow.
-- Route arrows edge-to-edge, never through a box's label.
+- Self-contained: NO external JS/CSS/CDN — it must open offline.
+- Arrows via `connect()` (or the renderer); never hand-type line coordinates.
 - One palette per diagram; recolor only the few nodes that carry the flow.
-- Don't add a "generated by" footer or a date unless asked (AI-tell).
-- Verify the file opened (the open snippet) before you say it's done.
+- Draw edges before boxes so boxes cover the line ends.
+- No "generated by" footer or date unless asked (AI-tell).

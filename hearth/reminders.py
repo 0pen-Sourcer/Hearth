@@ -480,22 +480,33 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
             notify(title, body)
         except Exception:
             pass
-        # Push the FULL action result into the chat queue so it surfaces in
-        # the conversation on the next turn (or the GUI idle banner), not
-        # just the toast. Without this an action reminder runs invisibly —
-        # the tool fires but the user never sees what it found.
-        if action_tool and full_result:
-            try:
-                from . import subagents
-                subagents.enqueue_notification(
-                    source="reminder",
-                    name=r.get("what", "")[:60],
-                    status="completed",
-                    result_text=full_result,
-                    summary=f"reminder fired: {r.get('what', '')}"[:160],
-                )
-            except Exception:
-                pass
+        # Surface EVERY reminder to the agent (not just action ones) so it
+        # DELIVERS the reminder as a real, natural message and is AWARE it
+        # fired — instead of a canned static toast the model never sees. The
+        # desktop toast above still covers the away/asleep case; this makes the
+        # in-app experience an actual model turn ("hey, you wanted me to remind
+        # you about X") that can also follow up or act, not a dead string.
+        try:
+            from . import subagents
+            what = r.get("what", "")
+            if action_tool and full_result:
+                note = (f'A reminder you set just came due: "{what}". '
+                        f'It ran {action_tool} and got:\n{full_result}\n'
+                        f'Tell the user about it now, naturally.')
+            else:
+                note = (f'A reminder the user asked you to set just came due: '
+                        f'"{what}". Remind them about it now in your own words — '
+                        f'brief and natural, not a canned line. If it implies a '
+                        f'next action you can take, offer or do it.')
+            subagents.enqueue_notification(
+                source="reminder",
+                name=what[:60],
+                status="completed",
+                result_text=note,
+                summary=f"reminder due: {what}"[:160],
+            )
+        except Exception:
+            pass
 
     def _advance_after_fire(r: Dict, now: datetime, now_iso: str) -> None:
         rec_s = r.get("recurring_seconds")

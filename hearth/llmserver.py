@@ -707,11 +707,21 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     # have just freed VRAM, etc.). Surface the warning in the returned dict
     # so the GUI can show a non-blocking notice. CPU-only loads (n_gpu_layers=0)
     # skip this entirely.
+    # Match LM Studio on consumer GPUs: quantize the KV cache (q8_0) when
+    # offloading so a long context fits in VRAM instead of spilling to RAM/CPU
+    # (~half the KV memory, negligible quality loss). q8_0 V-cache needs flash
+    # attention, which is on by default. Caller can override either type.
+    if n_gpu_layers != 0:
+        if cache_type_k is None:
+            cache_type_k = "q8_0"
+        if cache_type_v is None:
+            cache_type_v = "q8_0"
+
     vram_warning: Optional[str] = None
     if n_gpu_layers != 0:
         try:
             sz = Path(model_path).stat().st_size / (1024 ** 3)
-            needed = sz + estimate_kv_cache_gb(sz, ctx)
+            needed = sz + estimate_kv_cache_gb(sz, ctx, cache_type_k)
 
             # VRAM check: WARN, don't refuse. The user's machine, the
             # user's call. If they want to spill to system RAM (slow but
@@ -720,7 +730,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             # the load doesn't OOM outright, and we surface the warning
             # so the GUI can show a non-blocking notice + the numbers.
             free_vram = detect_gpu_vram_free_gb()
-            if (free_vram is not None and needed > free_vram + 0.5
+            if (free_vram is not None and needed > free_vram + 1.0
                     and n_gpu_layers == -1):
                 est = estimate_safe_gpu_layers(sz, free_vram, ctx)
                 n_gpu_layers = est
@@ -1153,12 +1163,23 @@ def estimate_safe_gpu_layers(model_size_gb: Optional[float],
     return max(1, int(fraction * 40))
 
 
-def estimate_kv_cache_gb(model_size_gb: Optional[float], ctx: int = 8192) -> float:
-    """Approximate KV cache footprint at the given context window. Linear in
-    ctx (KV grows per token) and ~10% of weights at the 4K-ctx baseline."""
+def _kv_quant_factor(cache_type: Optional[str]) -> float:
+    """KV-cache memory multiplier vs f16, by quant. q8_0 ~halves it, q4 ~quarter.
+    Matches what LM Studio does by default to fit long context on consumer GPUs."""
+    return {"f16": 1.0, "q8_0": 0.53, "q4_0": 0.27, "q4_1": 0.29}.get(
+        (cache_type or "f16").lower(), 1.0)
+
+
+def estimate_kv_cache_gb(model_size_gb: Optional[float], ctx: int = 8192,
+                         cache_type: Optional[str] = None) -> float:
+    """Approximate KV cache footprint (f16) at the given context window. Linear
+    in ctx. Baseline tuned for modern GQA models (grouped-query attention keeps
+    the KV small — the old 10%-of-weights baseline over-estimated ~2x and made
+    models that actually fit look like they'd spill). `cache_type` applies the
+    quant multiplier when the KV cache is quantized."""
     if not model_size_gb or model_size_gb <= 0:
         return 0.0
-    return model_size_gb * 0.10 * (ctx / 4096.0)
+    return model_size_gb * 0.06 * (ctx / 4096.0) * _kv_quant_factor(cache_type)
 
 
 def vram_fit_class(model_size_gb: Optional[float],

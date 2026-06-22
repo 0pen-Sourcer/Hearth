@@ -21,6 +21,7 @@ import re
 import sys
 import json
 import time
+import shutil
 import asyncio
 import threading
 import urllib.request
@@ -122,6 +123,10 @@ def _read_brain_key(provider: str) -> str:
 
 
 _S_URL, _S_KEY, _S_MODEL, _S_PROV = _read_settings_endpoint()
+# True when the brain was pinned by an explicit launch env (e.g. grok.ps1).
+# Such a session ignores live settings.json brain-sync so the GUI can't yank a
+# deliberately env-pinned CLI off its endpoint mid-run.
+_BRAIN_FROM_ENV = bool(os.getenv("LOCAL_API_BASE"))
 LOCAL_API_BASE = os.getenv("LOCAL_API_BASE") or _S_URL or "http://localhost:1234/v1"
 LOCAL_MODEL = os.getenv("LOCAL_MODEL") or _S_MODEL or "local-model"
 # Cloud endpoints need a real key. Resolution order:
@@ -989,6 +994,32 @@ class JarvisCLI:
         print(f"{C_OK}↳ switched to {LOCAL_API_BASE}{C_RESET}  "
               f"{C_DIM}(model: {self.current_model}){C_RESET}")
 
+    def _sync_brain_from_settings(self) -> None:
+        """Keep the CLI on the same brain the GUI is using. If settings.json
+        changed under us (the GUI switched brains while this CLI is open), adopt
+        the new endpoint live. No-op when: launched with an env-pinned brain,
+        the file is unchanged, or the change was OUR own /brain write (its url
+        already equals the live LOCAL_API_BASE). The GUI reflects CLI changes
+        the other way because it re-reads settings.json on every poll."""
+        if _BRAIN_FROM_ENV:
+            return
+        try:
+            mtime = os.path.getmtime(os.path.join(WORKSPACE, "settings.json"))
+        except OSError:
+            return
+        if mtime == getattr(self, "_settings_mtime", None):
+            return
+        self._settings_mtime = mtime
+        url, key, model, provider = _read_settings_endpoint()
+        if not url or url == LOCAL_API_BASE:
+            return  # nothing to do / we already made this change
+        if not key and provider:
+            key = _read_brain_key(provider)
+        self._retarget_to(url, key or "not-needed", None)
+        if model:
+            self.current_model = model
+        print(f"{C_DIM}↳ brain synced from GUI → {provider or url}{C_RESET}")
+
     async def _cmd_models(self, raw: str) -> None:
         """Full model picker/downloader - matches the GUI Models tab.
 
@@ -1047,13 +1078,17 @@ class JarvisCLI:
                 print(f"{C_ERR}Usage: /models hf <search query>{C_RESET}")
                 return
             results = llmserver.search_huggingface(arg)
+            if results and results[0].get("error"):
+                print(f"{C_ERR}HF search failed: {results[0]['error']}{C_RESET}")
+                return
             if not results:
                 print(f"{C_DIM}No GGUF repos found for '{arg}'.{C_RESET}")
                 return
             print(f"\n{C_BRAND}Hugging Face GGUF results for '{arg}':{C_RESET}")
             for i, r in enumerate(results[:12], 1):
-                print(f"  [{i}] {C_TOOL}{r.get('id')}{C_RESET}  {C_DIM}{r.get('downloads') or 0:,} dl{C_RESET}")
-            print()
+                repo = r.get("hf_repo") or r.get("name") or "(unknown)"
+                print(f"  [{i}] {C_TOOL}{repo}{C_RESET}  {C_DIM}{r.get('downloads') or 0:,} dl{C_RESET}")
+            print(f"\n{C_DIM}Download + boot one with: /models get <repo>{C_RESET}\n")
             return
 
         if sub == "get":
@@ -1303,7 +1338,7 @@ class JarvisCLI:
             ids = cfg.get("allowed_chat_ids") or []
             ntfy = (cfg.get("ntfy_topic") or os.environ.get("HEARTH_NTFY_TOPIC")
                     or os.environ.get("JARVIS_NTFY_TOPIC") or "").strip()
-            print(f"\n{C_BRAND}Reach Hearth from your phone{C_RESET}  {C_DIM}(both opt-in, no OAuth){C_RESET}")
+            print(f"\n{C_BRAND}Reach Hearth from your phone{C_RESET}  {C_DIM}(all of these are opt-in, no OAuth){C_RESET}")
             print(f"  {C_BOT}Telegram bridge{C_RESET} (two-way): "
                   + (f"{C_OK}configured{C_RESET} {C_DIM}({len(ids)} allowed chat id"
                      f"{'s' if len(ids) != 1 else ''}){C_RESET}" if tok
@@ -1438,6 +1473,14 @@ class JarvisCLI:
             return True
         if low == "/models" or low.startswith("/models "):
             await self._cmd_models(cmd)
+            return True
+        if low == "/model" or low == "/load":
+            # Bare /model = show the current model + how to switch (was falling
+            # through to "Unknown command").
+            print(f"{C_BRAND}Current model:{C_RESET} {C_TOOL}{self.current_model}{C_RESET}  "
+                  f"{C_DIM}on {LOCAL_API_BASE}{C_RESET}")
+            print(f"{C_DIM}Switch: /model <id|n>  ·  list with /models  ·  "
+                  f"boot a local GGUF with /models use <n>{C_RESET}")
             return True
         if low.startswith("/model ") or low.startswith("/load "):
             arg = cmd.split(None, 1)[1].strip().strip("[]")
@@ -3310,6 +3353,9 @@ class JarvisCLI:
             # terminals occasionally emit them for emojis and they crash
             # the UTF-8 encoder downstream.
             user_input = _sanitize(user_input)
+            # Keep CLI/GUI on the same brain: if the GUI switched endpoints
+            # while this session was open, adopt it now (no-op otherwise).
+            self._sync_brain_from_settings()
             # New user turn = stop any in-flight TTS so audio doesn't
             # trail into the next reply, then clear the abort flag so the
             # assistant's response can actually speak.
@@ -4087,18 +4133,30 @@ class JarvisCLI:
         _maybe_flush_speech(force_tail=True)
 
         if _has_md(content_captured):
-            # Erase the raw-streamed block (cursor up over its visual/wrapped
-            # height + clear) and re-render it as rich markdown so tables,
-            # headings, and code look right instead of raw pipes. Best-effort:
-            # any failure just drops a newline rather than corrupting output.
+            # Re-render the raw-streamed block as rich markdown so tables,
+            # headings, and code look right instead of raw pipes. We can only
+            # erase lines still ON SCREEN: cursor-up can't reach text that has
+            # already scrolled into scrollback. If the raw reply was taller than
+            # the viewport, erasing would clear only the visible part and leave a
+            # fragment above the rich render — the duplication bug. So when it
+            # overflowed, keep the raw stream as-is (still readable) and skip the
+            # re-render. Best-effort: any failure just drops a newline.
             try:
-                # Erase exactly the lines we actually printed for this reply.
                 vlines = _emit_lines + (1 if _emit_col else 0)
-                sys.stdout.write(C_RESET)
-                if vlines:
+                try:
+                    term_h = shutil.get_terminal_size((80, 24)).lines
+                except Exception:
+                    term_h = 24
+                if vlines and vlines < term_h - 1:
+                    # fits on screen → safe to erase + pretty-render
+                    sys.stdout.write(C_RESET)
                     sys.stdout.write(f"\033[{vlines}F\033[J")
-                sys.stdout.flush()
-                _RICH.print(_RichMarkdown(content_captured, code_theme="monokai"))
+                    sys.stdout.flush()
+                    _RICH.print(_RichMarkdown(content_captured, code_theme="monokai"))
+                else:
+                    # taller than the viewport → can't erase cleanly without
+                    # duplicating; leave the raw markdown as-is.
+                    sys.stdout.write(C_RESET + "\n")
             except Exception:
                 sys.stdout.write(C_RESET + "\n")
         else:
