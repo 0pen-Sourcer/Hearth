@@ -1,29 +1,45 @@
-# Hearth
+<h1 align="center">Hearth 🔥</h1>
 
-> *You spun up a local model. It answers questions — but it can't touch your files, open your apps, or remember you. Now what? **This.***
+<p align="center">
+  <strong>The local AI that actually runs your computer.</strong>
+</p>
 
-**A local-first personal AI for Windows.** It runs on any OpenAI-compatible local LLM (LM Studio, Ollama, a bundled llama.cpp server, or anything that speaks the OpenAI API) and actually operates your computer — files, shell, apps, browser, screenshots, voice. Reach it as a terminal CLI, a desktop/web app, or an MCP server.
+<p align="center">
+  It talks. It listens. It opens your apps, reads and writes your files, drives a real browser you can watch, and remembers you — all on your own machine.<br>
+  No account. No cloud required. No telemetry.
+</p>
 
-No account. No cloud required. No telemetry. The model and your data stay on your machine; the only thing that ever leaves is a web search, and only when you ask for one.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-yellow" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/platform-Windows-blue" alt="Windows">
+  <img src="https://img.shields.io/badge/local--first-yes-success" alt="Local-first">
+  <img src="https://img.shields.io/badge/status-v0.7--preview-orange" alt="v0.7-preview">
+</p>
 
-> The framework is **Hearth**. The assistant persona it ships with is named **JARVIS** — you can rename it. They're separate things.
-
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-yellow)
-![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)
-![Status: v0.7-preview](https://img.shields.io/badge/status-v0.7--preview-orange)
+<p align="center">
+  <em>The framework is <strong>Hearth</strong>. The assistant it ships with is named <strong>JARVIS</strong> — rename it to anything. The resident, and the house.</em>
+</p>
 
 ---
 
-## What it is
+## Why Hearth exists
 
-Most local-AI projects are a chat window around a model. Hearth is a chat window plus a body. It reads and writes your files, runs shell commands, opens apps and URLs, drives a real browser you can watch, takes and reads screenshots, talks and listens, remembers facts across sessions, and builds documents on request — all locally.
+The smartest AI in the world lives in someone else's cloud. It's brilliant — and it can't touch your computer, it forgets you the moment the tab closes, and the meter never stops.
 
-A way to place it: **a model runner like Ollama runs the model, a chat app like Jan talks to it — Hearth lets that local model actually *do things on your Windows PC*.** It runs the real machine directly: no WSL2, no gateway service, no cloud account, no API key required. Point it at a local model and go.
+So you ran a model locally. Now what? Most "local AI" projects are one of three things:
 
-And what it can do is open-ended, because **skills are shareable**. A skill is a folder that teaches Hearth a workflow ("clean up my Downloads", "turn this folder of photos into a contact sheet"); installing one someone else wrote is a single line — `/skill install someone/their-repo` — and writing your own is one command. The capability set grows with the community, not just with releases.
+1. **A chat UI** around a model (LibreChat, Open WebUI, big-AGI). Beautiful — but it's just chat. It can't open your files or *do* anything on your machine.
+2. **A coding agent** (Aider, Cline, Continue, Open Interpreter). Powerful — but scoped to "write code in this folder," not "be the AI on my PC."
+3. **A cloud-locked assistant** (ChatGPT, Claude, Pi). Great, until they change the rules, deprecate your model, or you go offline.
 
-**v0.7-preview** — the CLI and desktop app are the daily drivers. Voice and the bundled llama.cpp server work but are preview-quality (see notes below). Windows is the supported platform; partial POSIX (macOS/Linux) support is in progress.
+**Hearth is the fourth thing.** A local-first operator that runs on the model you already have, controls your actual Windows PC — files, shell, apps, browser, screenshots, voice — talks back, listens, and remembers you across sessions. Nothing ever leaves your machine except a web search, and only when you ask.
+
+And it keeps growing: **skills are shareable.** A skill is a folder that teaches Hearth a workflow ("clean up my Downloads", "turn this folder of photos into a contact sheet"). Installing one someone else wrote is a single line — `/skill install someone/their-repo` — and writing your own is one command.
+
+Reach it however you work: a terminal **CLI**, a desktop/web **app**, a headless **bridge**, or an **MCP server**.
+
+> **v0.7-preview** — the CLI and desktop app are the daily drivers. Voice and the bundled llama.cpp server work but are preview-quality (see notes below). Windows is the supported platform; macOS/Linux run from source with most tools working.
 
 ---
 
