@@ -135,14 +135,34 @@ def _download(url: str, dest: str) -> None:
                 pass
 
 
+def _is_lite_build() -> bool:
+    """True on a packaged LITE bundle (slim/API build). Detected by the absence
+    of the bundled llama.cpp lib that only the Full build ships — so we don't need
+    a separate marker. Running from source is never 'lite'."""
+    import sys
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        return not os.path.exists(os.path.join(base, "llama_cpp", "lib", "llama.dll"))
+    except Exception:
+        return False
+
+
 def _ensure_kokoro_models() -> bool:
     """If the Kokoro model + voices aren't on disk, download them once.
-    Returns True when both are present. Honors JARVIS_NO_AUTODOWNLOAD=1."""
+    Returns True when both are present. Honors JARVIS_NO_AUTODOWNLOAD=1, and on a
+    LITE build never silently pulls ~100MB — the user enables voice explicitly
+    (GUI Downloads pane) so a slim/API install stays slim."""
     global _last_load_error
     if _find("kokoro") and _find("voices"):
         return True
     if os.environ.get("JARVIS_NO_AUTODOWNLOAD") == "1":
         _last_load_error = "kokoro models missing and auto-download disabled (JARVIS_NO_AUTODOWNLOAD=1)"
+        return False
+    if _is_lite_build():
+        _last_load_error = ("voice models not bundled in the Lite build — turn on "
+                            "voice in Settings → Voice to download them (~100MB).")
         return False
     os.makedirs(VOICES_DIR, exist_ok=True)
     try:
