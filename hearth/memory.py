@@ -22,10 +22,13 @@ Hard caps:
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import threading
+import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .tools import WORKSPACE
 
@@ -470,6 +473,94 @@ def curate(apply: bool = False) -> Dict[str, Any]:
         _write_index_lines(keep_lines)
     return {"applied": apply, "clusters": out_clusters,
             "archived" if apply else "would_archive": archived}
+
+
+# ---------------------------------------------------------------------------
+# Automatic, gated consolidation — so the user never has to type /curate
+# ---------------------------------------------------------------------------
+# Runs the SAME curate() merge + expire_stale() decay, but only when it's worth
+# it, so it's near-free to call opportunistically (e.g. after each memory write).
+# Gates: (>=min_hours since last run AND >=min_new facts added since) OR the
+# store has crossed the documented soft cap. Local-only — no LLM, no network.
+_AUTOCURATE_STATE = os.path.join(MEM_DIR, ".autocurate.json")
+_autocurate_lock = threading.Lock()
+
+
+def _autocurate_state() -> Dict[str, Any]:
+    try:
+        with open(_AUTOCURATE_STATE, encoding="utf-8") as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _mem_files() -> List[str]:
+    if not os.path.isdir(MEM_DIR):
+        return []
+    return [f for f in os.listdir(MEM_DIR) if f.endswith(".md") and f != "MEMORY.md"]
+
+
+def auto_curate(min_hours: float = 24.0, min_new: int = 5,
+                soft_cap_kb: float = 25.0) -> Dict[str, Any]:
+    """Gated automatic memory consolidation. Cheap to call often: returns
+    immediately unless (a) >= min_hours since the last run AND >= min_new facts
+    were added since, OR (b) the store has crossed soft_cap_kb (the documented
+    25KB cap). When it runs it archives duplicate-topic facts (curate) + expires
+    stale ones (expire_stale), then records state. Never raises — safe to call
+    fire-and-forget from the per-turn auto-save."""
+    try:
+        files = _mem_files()
+        count = len(files)
+        total_kb = (sum(os.path.getsize(os.path.join(MEM_DIR, f)) for f in files)
+                    / 1024.0) if files else 0.0
+    except Exception:
+        return {"ran": False, "reason": "scan failed"}
+
+    st = _autocurate_state()
+    if not st:
+        # First sight on this machine: record a baseline and DON'T run — avoids a
+        # surprise mass-consolidation on first launch or right after an upgrade.
+        try:
+            with open(_AUTOCURATE_STATE, "w", encoding="utf-8") as f:
+                json.dump({"last_ts": time.time(), "last_count": count}, f)
+        except Exception:
+            pass
+        return {"ran": False, "reason": "first run deferred"}
+    hours_since = (time.time() - float(st.get("last_ts", 0) or 0)) / 3600.0
+    new_since = max(0, count - int(st.get("last_count", 0) or 0))
+    over_cap = total_kb >= soft_cap_kb
+
+    if over_cap:
+        # Size-cap is an off-schedule trigger, but throttle it: a store that's
+        # legitimately large (many DISTINCT facts curate can't merge) would
+        # otherwise re-consolidate every single turn. At most hourly.
+        if hours_since < 1.0:
+            return {"ran": False, "reason": "over cap (throttled)",
+                    "kb": round(total_kb, 1)}
+    elif hours_since < min_hours or new_since < min_new:
+        return {"ran": False, "reason": "gates closed",
+                "hours_since": round(hours_since, 1),
+                "new": new_since, "kb": round(total_kb, 1)}
+
+    if not _autocurate_lock.acquire(blocking=False):
+        return {"ran": False, "reason": "already running"}
+    try:
+        cur = curate(apply=True)
+        try:
+            expired = expire_stale(once_per_day=True)
+        except Exception:
+            expired = []
+        try:
+            with open(_AUTOCURATE_STATE, "w", encoding="utf-8") as f:
+                json.dump({"last_ts": time.time(),
+                           "last_count": len(_mem_files())}, f)
+        except Exception:
+            pass
+        return {"ran": True, "trigger": "size cap" if over_cap else "time+new",
+                "archived": cur.get("archived", []), "expired": expired}
+    finally:
+        _autocurate_lock.release()
 
 
 def list_index() -> str:
