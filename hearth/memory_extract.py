@@ -321,14 +321,20 @@ def extract_and_save(
         except Exception:
             pass
 
-    # Temporal sweep: once a day, archive facts whose expires_at has passed
-    # (unless still actively recalled). Pure filesystem walk, no LLM — keeps the
-    # bank current over months without ever asking the model. Runs regardless of
-    # whether new facts landed this pass (staleness is time-driven, not save-driven).
+    # Periodic full maintenance sweep — gated to ~daily so it's free on the
+    # common turn (the gate returns instantly) and actually runs at most once a
+    # day or when memory crosses its size cap. Bundles: expire stale facts +
+    # a consolidation pass + a size-cap guard. All local, no LLM, non-destructive
+    # (archives are recoverable). Deferred on first sight so a fresh install or
+    # an upgrade doesn't mass-mutate. This is what makes /curate truly automatic.
     try:
-        expired = _memory.expire_stale(once_per_day=True)
-        if expired:
-            warnings.append(f"archived {len(expired)} stale: {', '.join(expired[:3])}")
+        res = _memory.auto_curate()
+        if res.get("ran"):
+            n = len(res.get("archived", [])) + len(res.get("expired", []))
+            if n:
+                warnings.append(
+                    f"auto-maintenance ({res.get('trigger', 'gated')}): "
+                    f"tidied {n} memor{'y' if n == 1 else 'ies'}")
     except Exception:
         pass
 
