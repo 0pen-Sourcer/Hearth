@@ -2075,21 +2075,16 @@ class JarvisCLI:
                     print(f"{C_ERR}{status_msg}{C_RESET}")
                 else:
                     self.listen_continuous = True
-                    try:
-                        from hearth import voice_overlay as _vo
-                        _vo.start()  # desktop dot-grid HUD while voice mode is on
-                    except Exception:
-                        pass
+                    # NOTE: voice_overlay (hearth/voice_overlay.py) intentionally
+                    # NOT wired here yet — it's a standalone win32 pulse that
+                    # doesn't match the GUI voice grid and isn't audio-reactive.
+                    # Rework it to be driven by real mic/TTS level + a shared
+                    # CLI+GUI invocation before shipping it.
                     print(f"{C_OK}listening: ON - talk any time. type to interrupt.{C_RESET}")
                 return True
             if arg in ("off", "0", "false", "stop"):
                 stt.stop_continuous()
                 self.listen_continuous = False
-                try:
-                    from hearth import voice_overlay as _vo
-                    _vo.stop()
-                except Exception:
-                    pass
                 print(f"{C_OK}listening: off{C_RESET}")
                 return True
             if arg == "status":
