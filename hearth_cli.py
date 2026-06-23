@@ -405,6 +405,9 @@ RISKY_TOOLS = {
     "create_plugin", "delete_plugin",
     # Browser actions can submit forms / click "buy" - gate the action ones.
     "browse_click", "browse_type",
+    # Computer-use: real mouse/keyboard on the live screen - gate the
+    # state-changing ones (move + screen-info are harmless, left ungated).
+    "computer_click", "computer_type", "computer_key", "computer_scroll",
     # Slow / scanning tools - also gated so the user can deny full-drive scans.
     "disk_usage",
     # VRAM-eating heavy ops - generation can take minutes and shuts down LLM
@@ -2072,11 +2075,21 @@ class JarvisCLI:
                     print(f"{C_ERR}{status_msg}{C_RESET}")
                 else:
                     self.listen_continuous = True
+                    try:
+                        from hearth import voice_overlay as _vo
+                        _vo.start()  # desktop dot-grid HUD while voice mode is on
+                    except Exception:
+                        pass
                     print(f"{C_OK}listening: ON - talk any time. type to interrupt.{C_RESET}")
                 return True
             if arg in ("off", "0", "false", "stop"):
                 stt.stop_continuous()
                 self.listen_continuous = False
+                try:
+                    from hearth import voice_overlay as _vo
+                    _vo.stop()
+                except Exception:
+                    pass
                 print(f"{C_OK}listening: off{C_RESET}")
                 return True
             if arg == "status":
