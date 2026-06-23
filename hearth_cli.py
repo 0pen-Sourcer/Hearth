@@ -365,6 +365,33 @@ def fresh_system_message(think_on: bool = False, voice_on: bool = False,
     return {"role": "system", "content": text}
 
 
+def _prune_old_images(messages: List[Dict], keep_last: int = 1) -> int:
+    """Replace base64 image_url blocks in OLD messages with a tiny text
+    placeholder. Each screenshot/photo is ~300KB of base64 that otherwise rides
+    in the context (and the saved history) on EVERY future turn — huge token
+    waste, and vision models only need the most recent image anyway. Keeps the
+    last `keep_last` images intact, strips the rest in place. Returns count
+    stripped."""
+    idxs = [i for i, m in enumerate(messages)
+            if isinstance(m.get("content"), list)
+            and any(isinstance(b, dict) and b.get("type") == "image_url"
+                    for b in m["content"])]
+    if len(idxs) <= keep_last:
+        return 0
+    strip = set(idxs[:-keep_last] if keep_last > 0 else idxs)
+    n = 0
+    for i in strip:
+        new = []
+        for b in messages[i]["content"]:
+            if isinstance(b, dict) and b.get("type") == "image_url":
+                new.append({"type": "text", "text": "[earlier image omitted to save context]"})
+                n += 1
+            else:
+                new.append(b)
+        messages[i]["content"] = new
+    return n
+
+
 # Tools that touch the system / user files / the network in non-trivial
 # ways. Asks the user before running unless they pick "always".
 RISKY_TOOLS = {
@@ -3704,6 +3731,9 @@ class JarvisCLI:
             self.messages[0] = fresh_system_message(think_on=self.think_on, voice_on=self.voice_on, vision=_vision)
         else:
             self.messages.insert(0, fresh_system_message(think_on=self.think_on, voice_on=self.voice_on, vision=_vision))
+        # Strip stale base64 images from earlier turns (keep the most recent) so
+        # they stop bloating the context + the saved history on every turn.
+        _prune_old_images(self.messages, keep_last=1)
 
         # The tool schemas (~6K tok for 46 tools) ride in EVERY prompt but are
         # NOT in self.messages - so all budgeting must reserve room for them.
