@@ -4130,8 +4130,7 @@ class JarvisCLI:
                     if pre:
                         if reasoning_open:
                             _close_reasoning()
-                        content_captured += pre
-                        sys.stdout.write(C_BOT + pre)
+                        content_captured += pre  # buffered; whole reply rendered once at end
                     if self.think_on:
                         _open_reasoning()
                     # Either way (display on/off), we're in a thinking block
@@ -4157,17 +4156,12 @@ class JarvisCLI:
                         _stream_reasoning(text)
                 else:
                     if text:
+                        # Buffer the body — don't stream it live. We render the
+                        # whole reply ONCE at the end as rich markdown. Streaming
+                        # raw then re-rendering can't erase lines that scrolled off,
+                        # so a tall table used to duplicate. Buffering = always
+                        # pretty, any height, any terminal. Speech still flows.
                         content_captured += text
-                        sys.stdout.write(C_BOT + text)
-                        sys.stdout.flush()
-                        for _ch in text:  # track physical lines printed (for the re-render erase)
-                            if _ch == "\n":
-                                _emit_lines += 1; _emit_col = 0
-                            else:
-                                _emit_col += 1
-                                if _emit_col >= _term_w:
-                                    _emit_lines += 1; _emit_col = 0
-                        # Track code-block state so we don't speak code
                         if "```" in text:
                             for _ in range(text.count("```")):
                                 in_code_block = not in_code_block
@@ -4199,35 +4193,21 @@ class JarvisCLI:
         # Flush any trailing speech that didn't end with a sentence boundary
         _maybe_flush_speech(force_tail=True)
 
-        if _has_md(content_captured):
-            # Re-render the raw-streamed block as rich markdown so tables,
-            # headings, and code look right instead of raw pipes. We can only
-            # erase lines still ON SCREEN: cursor-up can't reach text that has
-            # already scrolled into scrollback. If the raw reply was taller than
-            # the viewport, erasing would clear only the visible part and leave a
-            # fragment above the rich render — the duplication bug. So when it
-            # overflowed, keep the raw stream as-is (still readable) and skip the
-            # re-render. Best-effort: any failure just drops a newline.
+        # The body was buffered (not streamed), so nothing's on screen to erase.
+        # Render the whole reply ONCE: rich markdown if it has any, else plain.
+        # No cursor-up → the scrolled-off-table duplication can't happen, and it
+        # renders correctly at ANY height in ANY terminal (WT, VS Code, Linux).
+        if _RICH is not None and content_captured and _has_md(content_captured):
             try:
-                vlines = _emit_lines + (1 if _emit_col else 0)
-                try:
-                    term_h = shutil.get_terminal_size((80, 24)).lines
-                except Exception:
-                    term_h = 24
-                if vlines and vlines < term_h - 1:
-                    # fits on screen → safe to erase + pretty-render
-                    sys.stdout.write(C_RESET)
-                    sys.stdout.write(f"\033[{vlines}F\033[J")
-                    sys.stdout.flush()
-                    _RICH.print(_RichMarkdown(content_captured, code_theme="monokai"))
-                else:
-                    # taller than the viewport → can't erase cleanly without
-                    # duplicating; leave the raw markdown as-is.
-                    sys.stdout.write(C_RESET + "\n")
+                _RICH.print(_RichMarkdown(content_captured, code_theme="monokai"))
             except Exception:
-                sys.stdout.write(C_RESET + "\n")
+                sys.stdout.write(C_BOT + content_captured + C_RESET + "\n")
+                sys.stdout.flush()
+        elif content_captured:
+            sys.stdout.write(C_BOT + content_captured + C_RESET + "\n")
+            sys.stdout.flush()
         else:
-            sys.stdout.write(C_RESET + "\n")
+            sys.stdout.write(C_RESET)
 
         if first:
             spinner_task.cancel()
