@@ -408,6 +408,8 @@ RISKY_TOOLS = {
     # Computer-use: real mouse/keyboard on the live screen - gate the
     # state-changing ones (move + screen-info are harmless, left ungated).
     "computer_click", "computer_type", "computer_key", "computer_scroll",
+    # Desktop a11y: snapshot is read-only (ungated); click/type act, so gate them.
+    "desktop_click", "desktop_type",
     # Slow / scanning tools - also gated so the user can deny full-drive scans.
     "disk_usage",
     # VRAM-eating heavy ops - generation can take minutes and shuts down LLM
