@@ -177,3 +177,6 @@ dist_*/
 build/
 build_*/
 Output/
+
+# personal launch/social strategy (not public)
+docs/LAUNCH_CONTENT.md
