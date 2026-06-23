@@ -259,6 +259,47 @@ def search(query: str, limit: int = 8) -> List[Match]:
     except sqlite3.OperationalError:
         rows = []
     conn.close()
+    matches = [
+        Match(
+            conversation_id=r[0], title=r[1], message_index=r[2], role=r[3],
+            content=r[4], snippet=r[5], score=r[6], updated=r[7],
+        )
+        for r in rows
+    ]
+    if matches:
+        return matches
+    # Recency fallback: strict FTS5 found nothing — common for vague, natural
+    # questions like "what were we talking about just now" (no literal keyword
+    # overlap). Return the most-recent real messages so the model gets ACTUAL
+    # recent context instead of zero results, which previously made it fabricate
+    # an answer from stale system-prompt memory (the "I don't have it so I'll
+    # guess" failure). Recency is exactly what "just now / last / recent" wants.
+    return _recent(limit)
+
+
+def _recent(limit: int = 8) -> List[Match]:
+    """Most-recent user/assistant messages across all conversations, newest
+    first. The fallback when keyword search misses — gives 'what did we just
+    talk about' a real answer instead of nothing."""
+    if not os.path.isfile(INDEX_PATH):
+        return []
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            """
+            SELECT conversation_id, title, message_index, role, content,
+                   substr(content, 1, 200), 0.0, updated
+              FROM messages
+             WHERE role IN ('user', 'assistant') AND length(trim(content)) > 0
+          ORDER BY updated DESC, message_index DESC
+             LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
     return [
         Match(
             conversation_id=r[0], title=r[1], message_index=r[2], role=r[3],
