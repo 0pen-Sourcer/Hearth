@@ -327,16 +327,41 @@ _VOICE_MODE_DIRECTIVE = (
 )
 
 
-def fresh_system_message(think_on: bool = False, voice_on: bool = False) -> Dict:
+# So the model KNOWS its reasoning is on (it kept saying "off" when asked,
+# because only the OFF state was ever stated explicitly).
+_REASONING_ON_DIRECTIVE = (
+    "\n\n# REASONING MODE (active)\n"
+    "Reasoning is ON right now: you may think step-by-step before answering, and "
+    "your thinking is shown inline to the user. If they ask, your reasoning IS on.\n"
+)
+# Tell the model whether it can actually SEE, so it stops guessing about images.
+_HAS_VISION_DIRECTIVE = (
+    "\n\n# VISION (available)\n"
+    "The loaded model is vision-capable — you CAN look at images. Call view_image "
+    "on a screenshot/photo path to actually see it before describing it.\n"
+)
+_NO_VISION_DIRECTIVE = (
+    "\n\n# VISION (none)\n"
+    "The loaded model is text-only — it CANNOT see images. Don't pretend to; if "
+    "the user needs a picture understood, say this model can't see and offer to "
+    "switch to a vision-capable model.\n"
+)
+
+
+def fresh_system_message(think_on: bool = False, voice_on: bool = False,
+                         vision: Optional[bool] = None) -> Dict:
     """Rebuilt every turn so rules.md edits + new memory entries take effect.
-    think_on=False adds the low-latency directive so the model knows not to
-    emit reasoning blocks even if its chat template would default to thinking.
-    voice_on flips the model into a terse, spoken-aloud register."""
+    Always states the reasoning mode (ON or OFF) so the model knows its own
+    state. voice_on flips to a terse spoken register. `vision` (True/False/None)
+    tells the model whether it can actually view images."""
     text = system_prompt()
-    if not think_on:
-        text += _LOW_LATENCY_DIRECTIVE
+    text += _REASONING_ON_DIRECTIVE if think_on else _LOW_LATENCY_DIRECTIVE
     if voice_on:
         text += _VOICE_MODE_DIRECTIVE
+    if vision is True:
+        text += _HAS_VISION_DIRECTIVE
+    elif vision is False:
+        text += _NO_VISION_DIRECTIVE
     return {"role": "system", "content": text}
 
 
@@ -3671,10 +3696,14 @@ class JarvisCLI:
 
         # 1) Refresh system message every turn so rules.md + memory index are live
         # (and the voice-mode register flips with /voice on|off).
+        try:
+            _vision = self._is_vision_capable()  # cached per model id
+        except Exception:
+            _vision = None
         if self.messages and self.messages[0].get("role") == "system":
-            self.messages[0] = fresh_system_message(think_on=self.think_on, voice_on=self.voice_on)
+            self.messages[0] = fresh_system_message(think_on=self.think_on, voice_on=self.voice_on, vision=_vision)
         else:
-            self.messages.insert(0, fresh_system_message(think_on=self.think_on, voice_on=self.voice_on))
+            self.messages.insert(0, fresh_system_message(think_on=self.think_on, voice_on=self.voice_on, vision=_vision))
 
         # The tool schemas (~6K tok for 46 tools) ride in EVERY prompt but are
         # NOT in self.messages - so all budgeting must reserve room for them.
