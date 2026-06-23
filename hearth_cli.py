@@ -530,12 +530,12 @@ class JarvisCLI:
                 detected = autodetect_context(self.current_model)
                 if detected and detected > 1024:
                     self.context_tokens = detected
-        # Multi-line by default: on Windows, prompt_toolkit can't catch bracketed
-        # paste, so in single-line mode every pasted newline submits → a pasted
-        # block splits into many messages. In multi-line mode pasted newlines just
-        # insert (Enter = newline, Esc+Enter = send), so a paste stays ONE message.
-        # Single-line slash commands still submit on plain Enter (see _plain_enter).
-        self.multiline_mode = True  # toggled with /multi
+        # Single-line by default: Enter = send (the normal, expected behavior).
+        # Esc+Enter inserts a newline for the occasional multi-line message.
+        # Tradeoff: on Windows, prompt_toolkit can't catch bracketed paste, so a
+        # pasted multi-line block splits into separate sends — toggle /multi
+        # before pasting to keep it as one block. (Linux/macOS paste fine.)
+        self.multiline_mode = False  # toggled with /multi
         # ONE thinking toggle:
         #   /think on  → model reasons AND we show the body inline
         #   /think off → model skips reasoning entirely (no compute spent)
@@ -881,7 +881,7 @@ class JarvisCLI:
         # whether to go start LM Studio, load a model, or just start chatting.
         if not _is_local_endpoint(LOCAL_API_BASE):
             print(f"{C_OK}● {_AGENT_NAME} online{C_RESET}{C_DIM}  ·  brain: {self.current_model} (cloud)  ·  /help for commands{C_RESET}")
-            print(f"{C_DIM}  Enter = newline · Esc+Enter = send (paste multi-line freely){C_RESET}\n")
+            print(f"{C_DIM}  Enter = send · Esc+Enter = newline · /multi before pasting a block{C_RESET}\n")
         else:
             chat_models, reachable = self._probe_local_models()
             if not reachable:
