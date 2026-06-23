@@ -6194,6 +6194,123 @@ def _read_pdf_large(p: Dict) -> str:
 
 _HANDLERS["read_pdf_large"] = _read_pdf_large
 
+# ── Computer-use: real mouse + keyboard control (Windows, ctypes) ───────────
+# Lets Hearth operate the desktop the way it drives the browser. The model should
+# screenshot + view_image FIRST to find coordinates, then move/click/type. The
+# real OS cursor moves (visibly) — no overlay needed. The state-changing ones
+# (click/type/key/scroll) are in RISKY_TOOLS so they hit the permission prompt.
+def _computer_check():
+    from . import computer as _c
+    if not _c.supported():
+        return None, "Error: computer control (mouse/keyboard) is Windows-only on this build."
+    return _c, None
+
+
+def _computer_screen(p: Dict) -> str:
+    _c, err = _computer_check()
+    if err:
+        return err
+    w, h = _c.screen_size()
+    x, y = _c._pos()
+    return f"screen is {w}x{h} px; cursor at ({x},{y}). Screenshot + view_image to see what's where."
+
+
+def _computer_move(p: Dict) -> str:
+    _c, err = _computer_check()
+    if err:
+        return err
+    x, y = _c.move(int(p["x"]), int(p["y"]))
+    return f"moved cursor to ({x},{y})"
+
+
+def _computer_click(p: Dict) -> str:
+    _c, err = _computer_check()
+    if err:
+        return err
+    x, y = p.get("x"), p.get("y")
+    button = (p.get("button") or "left").lower()
+    double = bool(p.get("double"))
+    _c.click(int(x) if x is not None else None,
+             int(y) if y is not None else None, button=button, double=double)
+    where = f" at ({int(x)},{int(y)})" if x is not None and y is not None else " (at current position)"
+    return f"{'double-' if double else ''}{button} click{where} — done"
+
+
+def _computer_type(p: Dict) -> str:
+    _c, err = _computer_check()
+    if err:
+        return err
+    text = p.get("text", "")
+    _c.type_text(text)
+    return f"typed {len(text)} character(s) at the current focus"
+
+
+def _computer_key(p: Dict) -> str:
+    _c, err = _computer_check()
+    if err:
+        return err
+    key = (p.get("key") or "").strip()
+    if not key:
+        return "Error: 'key' required (e.g. 'enter', 'ctrl+s', 'alt+tab', 'win+d')"
+    if "+" in key:
+        _c.hotkey(key)
+    else:
+        _c.press_key(key)
+    return f"pressed {key}"
+
+
+def _computer_scroll(p: Dict) -> str:
+    _c, err = _computer_check()
+    if err:
+        return err
+    amt = int(p.get("amount", -3))
+    _c.scroll(amt)
+    return f"scrolled {'up' if amt > 0 else 'down'} {abs(amt)} notch(es)"
+
+
+_HANDLERS["computer_screen"] = _computer_screen
+_HANDLERS["computer_move"] = _computer_move
+_HANDLERS["computer_click"] = _computer_click
+_HANDLERS["computer_type"] = _computer_type
+_HANDLERS["computer_key"] = _computer_key
+_HANDLERS["computer_scroll"] = _computer_scroll
+
+for _cd in (
+    {"name": "computer_screen", "description":
+        "Report screen size + current cursor position. Call this + a screenshot "
+        "(view_image) FIRST so you know the pixel coordinate space before clicking.",
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "computer_move", "description":
+        "Glide the mouse to absolute screen pixel (x,y). The real cursor moves "
+        "visibly. Screenshot + view_image first to find the target's coordinates.",
+     "parameters": {"type": "object", "properties": {
+        "x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["x", "y"]}},
+    {"name": "computer_click", "description":
+        "Click the mouse. Give (x,y) to move there first, or omit to click the "
+        "current spot. button: left|right|middle. double:true = double-click. "
+        "ALWAYS screenshot first to find coordinates — don't guess.",
+     "parameters": {"type": "object", "properties": {
+        "x": {"type": "integer"}, "y": {"type": "integer"},
+        "button": {"type": "string", "enum": ["left", "right", "middle"]},
+        "double": {"type": "boolean"}}}},
+    {"name": "computer_type", "description":
+        "Type text at the current keyboard focus (click the field first). Unicode "
+        "ok; \\n sends Enter, \\t sends Tab.",
+     "parameters": {"type": "object", "properties": {
+        "text": {"type": "string"}}, "required": ["text"]}},
+    {"name": "computer_key", "description":
+        "Press a key or chord: a named key ('enter','tab','esc','f5','up') or a "
+        "combo joined with '+' ('ctrl+s','alt+tab','ctrl+shift+esc','win+d').",
+     "parameters": {"type": "object", "properties": {
+        "key": {"type": "string"}}, "required": ["key"]}},
+    {"name": "computer_scroll", "description":
+        "Scroll the mouse wheel. amount>0 = up, <0 = down (e.g. -3 scrolls down).",
+     "parameters": {"type": "object", "properties": {
+        "amount": {"type": "integer"}}, "required": ["amount"]}},
+):
+    TOOL_DEFINITIONS.append(_cd)
+
+
 # Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
 # can NEVER take down the core tools.
 try:
