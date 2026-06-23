@@ -6311,6 +6311,79 @@ for _cd in (
     TOOL_DEFINITIONS.append(_cd)
 
 
+# ── Desktop accessibility: read the UI tree + click by element (Windows UIA) ──
+# The PRECISE way to operate the desktop — like Playwright's a11y snapshot, not
+# pixel-guessing. desktop_snapshot lists the real interactive controls of the
+# foreground window; desktop_click / desktop_type act on them by index/name.
+def _desktop_snapshot(p: Dict) -> str:
+    from . import desktop_a11y as _a
+    if not _a.available():
+        return "Error: desktop UI inspection is Windows-only (needs the uiautomation package)."
+    snap = _a.snapshot(int(p.get("max_elements", 50)))
+    if snap.get("error"):
+        return f"Error: {snap['error']}"
+    els = snap.get("elements", [])
+    if not els:
+        return (f"Foreground window: {snap.get('window', '?')!r}. No interactive "
+                f"elements exposed — fall back to screenshot + computer_click.")
+    lines = [f"Window: {snap.get('window', '?')}  ({len(els)} interactive elements)"]
+    for e in els:
+        lines.append(f"  [{e['idx']}] {e['type']}: {e['name'] or '(no name)'}  @({e['x']},{e['y']})")
+    lines.append("→ act with desktop_click(idx=N) or desktop_type(idx=N, text=...).")
+    return "\n".join(lines)
+
+
+def _desktop_click(p: Dict) -> str:
+    from . import desktop_a11y as _a
+    if not _a.available():
+        return "Error: desktop control is Windows-only (needs the uiautomation package)."
+    r = _a.click(idx=p.get("idx"), name=p.get("name"),
+                 double=bool(p.get("double")), button=(p.get("button") or "left"))
+    if r is None:
+        return "Error: no matching element — call desktop_snapshot first, then click by its idx."
+    return f"clicked the element at ({r[0]},{r[1]})"
+
+
+def _desktop_type(p: Dict) -> str:
+    from . import desktop_a11y as _a
+    if not _a.available():
+        return "Error: desktop control is Windows-only (needs the uiautomation package)."
+    ok = _a.focus_and_type(idx=p.get("idx"), name=p.get("name"), text=p.get("text", ""))
+    return "typed into the element" if ok else \
+        "Error: couldn't focus that element — call desktop_snapshot first, then type by its idx."
+
+
+_HANDLERS["desktop_snapshot"] = _desktop_snapshot
+_HANDLERS["desktop_click"] = _desktop_click
+_HANDLERS["desktop_type"] = _desktop_type
+
+for _cd in (
+    {"name": "desktop_snapshot", "description":
+        "Read the FOREGROUND window's interactive UI elements (buttons, fields, "
+        "menu items, list items, checkboxes) as a numbered list with exact "
+        "positions — an accessibility snapshot of the app. PREFER this over "
+        "screenshot+computer_click: it's precise and costs no vision tokens. Then "
+        "act with desktop_click / desktop_type.",
+     "parameters": {"type": "object", "properties": {
+        "max_elements": {"type": "integer", "description": "cap (default 50)"}}}},
+    {"name": "desktop_click", "description":
+        "Click a UI element from the last desktop_snapshot, by idx (preferred) or "
+        "a name substring. button left|right|middle; double:true to double-click. "
+        "Clicks the element's real center — no pixel guessing.",
+     "parameters": {"type": "object", "properties": {
+        "idx": {"type": "integer"}, "name": {"type": "string"},
+        "button": {"type": "string", "enum": ["left", "right", "middle"]},
+        "double": {"type": "boolean"}}}},
+    {"name": "desktop_type", "description":
+        "Focus a UI element (by idx or name from the last desktop_snapshot) and "
+        "type text into it.",
+     "parameters": {"type": "object", "properties": {
+        "idx": {"type": "integer"}, "name": {"type": "string"},
+        "text": {"type": "string"}}, "required": ["text"]}},
+):
+    TOOL_DEFINITIONS.append(_cd)
+
+
 # Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
 # can NEVER take down the core tools.
 try:
