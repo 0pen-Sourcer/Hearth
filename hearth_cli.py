@@ -287,7 +287,7 @@ try:
         "markdown.h6": "color(183)",
         "markdown.link": "color(141)", "markdown.link_url": "color(141)",
         "markdown.item.bullet": "color(141)", "markdown.item.number": "color(141)",
-        "markdown.code": "color(220)", "markdown.block_quote": "color(183)",
+        "markdown.code": "color(183)", "markdown.block_quote": "color(146)",
         "markdown.hr": "color(240)",
         "table.header": "bold color(141)", "table.title": "color(183)",
     })
