@@ -384,7 +384,7 @@ def _prune_old_images(messages: List[Dict], keep_last: int = 1) -> int:
         new = []
         for b in messages[i]["content"]:
             if isinstance(b, dict) and b.get("type") == "image_url":
-                new.append({"type": "text", "text": "[earlier image omitted to save context]"})
+                new.append({"type": "text", "text": "[earlier image dropped to save context — its file path is in the view_image result above; call view_image on it again if you need to see it]"})
                 n += 1
             else:
                 new.append(b)
