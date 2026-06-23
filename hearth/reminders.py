@@ -392,6 +392,18 @@ def desktop_notify(title: str, body: str) -> bool:
     reminder watcher AND the `notify` tool."""
     _push_phone(title, body)  # best-effort phone push alongside the desktop toast
     icon = _ensure_app_identity()
+    # When we have the .ico, prefer win10toast FIRST — its `icon_path` actually
+    # renders our icon on the toast. plyer's Windows backend usually shows a
+    # generic/default icon, which is why reminders looked unbranded. plyer stays
+    # as the cross-platform fallback (and primary on macOS/Linux).
+    if icon and os.path.isfile(icon):
+        try:
+            from win10toast import ToastNotifier  # type: ignore
+            ToastNotifier().show_toast(title, body, duration=8, threaded=True,
+                                       icon_path=icon)
+            return True
+        except Exception:
+            pass
     try:
         from plyer import notification  # type: ignore
         kw = {"title": title, "message": body, "app_name": "Hearth", "timeout": 10}
