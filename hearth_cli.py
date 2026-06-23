@@ -276,7 +276,22 @@ C_ACCENT = C_BRAND
 try:
     from rich.console import Console as _RichConsole
     from rich.markdown import Markdown as _RichMarkdown
-    _RICH = _RichConsole(force_terminal=True, soft_wrap=False)
+    from rich.theme import Theme as _RichTheme
+    # Match rendered markdown to Hearth's palette (violet 141 / lavender 183 /
+    # gold 220) instead of rich's default cyan/green — so tables, headings, and
+    # links read as Hearth, not a generic terminal.
+    _HEARTH_MD_THEME = _RichTheme({
+        "markdown.h1": "bold color(141)", "markdown.h1.border": "color(141)",
+        "markdown.h2": "bold color(141)", "markdown.h3": "bold color(183)",
+        "markdown.h4": "color(183)", "markdown.h5": "color(183)",
+        "markdown.h6": "color(183)",
+        "markdown.link": "color(141)", "markdown.link_url": "color(141)",
+        "markdown.item.bullet": "color(141)", "markdown.item.number": "color(141)",
+        "markdown.code": "color(220)", "markdown.block_quote": "color(183)",
+        "markdown.hr": "color(240)",
+        "table.header": "bold color(141)", "table.title": "color(183)",
+    })
+    _RICH = _RichConsole(force_terminal=True, soft_wrap=False, theme=_HEARTH_MD_THEME)
 except Exception:
     _RICH = None
 _MD_SIGNAL = re.compile(
@@ -515,7 +530,12 @@ class JarvisCLI:
                 detected = autodetect_context(self.current_model)
                 if detected and detected > 1024:
                     self.context_tokens = detected
-        self.multiline_mode = False  # toggled with /multi
+        # Multi-line by default: on Windows, prompt_toolkit can't catch bracketed
+        # paste, so in single-line mode every pasted newline submits → a pasted
+        # block splits into many messages. In multi-line mode pasted newlines just
+        # insert (Enter = newline, Esc+Enter = send), so a paste stays ONE message.
+        # Single-line slash commands still submit on plain Enter (see _plain_enter).
+        self.multiline_mode = True  # toggled with /multi
         # ONE thinking toggle:
         #   /think on  → model reasons AND we show the body inline
         #   /think off → model skips reasoning entirely (no compute spent)
@@ -860,7 +880,8 @@ class JarvisCLI:
         # Connectivity + model sanity. A fresh user should instantly know
         # whether to go start LM Studio, load a model, or just start chatting.
         if not _is_local_endpoint(LOCAL_API_BASE):
-            print(f"{C_OK}● {_AGENT_NAME} online{C_RESET}{C_DIM}  ·  brain: {self.current_model} (cloud)  ·  /help for commands{C_RESET}\n")
+            print(f"{C_OK}● {_AGENT_NAME} online{C_RESET}{C_DIM}  ·  brain: {self.current_model} (cloud)  ·  /help for commands{C_RESET}")
+            print(f"{C_DIM}  Enter = newline · Esc+Enter = send (paste multi-line freely){C_RESET}\n")
         else:
             chat_models, reachable = self._probe_local_models()
             if not reachable:
@@ -2504,13 +2525,30 @@ class JarvisCLI:
         dots = ["", ".", "..", "..."]
         i = 0
         t0 = time.time()
+        # Esc-to-interrupt: prompt_toolkit isn't active mid-turn, so nothing
+        # reads the keyboard while we stream. Poll the console directly (Windows
+        # msvcrt) and set _respond_cancel — the respond() loop already bails on
+        # it between chunks/tools (same flag Ctrl-C sets). This is what actually
+        # makes the "esc to interrupt" hint true.
+        try:
+            import msvcrt as _kb
+        except Exception:
+            _kb = None
         try:
             while True:
                 dt = time.time() - t0
                 d = dots[(i // 4) % len(dots)]
                 color = GRAD[i % len(GRAD)]
-                # After a couple seconds, surface the interrupt — esc/ctrl-c
-                # already cancel, but users never discover it without a hint.
+                if _kb is not None:
+                    try:
+                        while _kb.kbhit():
+                            if _kb.getch() == b"\x1b":  # Esc
+                                self._respond_cancel.set()
+                                sys.stdout.write("\r\033[K" + C_DIM + "· interrupting…" + C_RESET + "\n")
+                                sys.stdout.flush()
+                                return
+                    except Exception:
+                        pass
                 hint = f"  {C_DIM}· esc to interrupt{C_RESET}" if dt > 2 else ""
                 sys.stdout.write(
                     f"\r{color}{frames[i % len(frames)]}{C_RESET} "
