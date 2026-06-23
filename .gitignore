@@ -170,3 +170,10 @@ hermes*.txt
 the-local-first-decade.pdf
 athis_frames/
 skilltest/
+
+# build artifacts (never commit)
+dist/
+dist_*/
+build/
+build_*/
+Output/
