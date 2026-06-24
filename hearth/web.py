@@ -3010,6 +3010,14 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self.send_error(500, f"UI file missing at {_UI_PATH}")
         with open(_UI_PATH, "rb") as f:
             payload = f.read()
+        # Stamp the edition (Full/Lite) + version into the page so the user can
+        # see which build they're running (Settings panel footer).
+        try:
+            from hearth import edition as _ed
+            tag = f"Hearth {_ed.label()} · v0.7-preview"
+        except Exception:
+            tag = "Hearth · v0.7-preview"
+        payload = payload.replace(b"__HEARTH_EDITION__", tag.encode("utf-8"))
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
