@@ -3403,6 +3403,20 @@ class JarvisCLI:
             pass
         await self._maybe_run_onboarding()
 
+        # Every boot (after the one-time onboarding), cheaply re-check the machine
+        # in the background and relearn into memory ONLY if it changed since last
+        # launch (drive plugged in/out, GPU swap) - so context never goes stale.
+        if os.environ.get("JARVIS_NO_ONBOARDING") not in ("1", "true", "yes"):
+            def _env_refresh():
+                try:
+                    from hearth import environment as _env
+                    msg = _env.refresh_environment_if_changed(endpoint=LOCAL_API_BASE)
+                    if msg:
+                        print(f"\n{C_DIM}● machine changed since last time — {msg}{C_RESET}")
+                except Exception:
+                    pass
+            threading.Thread(target=_env_refresh, daemon=True).start()
+
         last_interrupt = 0.0
         while True:
             if self._exit_requested:
