@@ -524,7 +524,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "when": {"type": "string", "description": "When to fire the FIRST time. Natural-language OK."},
                 "what": {"type": "string", "description": "The message to show the user."},
                 "recurring": {"type": "string", "description": "Optional: 'every 30 minutes', 'hourly', 'daily', 'weekly', 'every 2 hours', etc. Omit for one-shot reminders."},
-                "action_tool": {"type": "string", "description": "Optional: name of a Hearth tool to RUN when the reminder fires. The tool's result is appended to the toast body. E.g. 'summarize_file', 'web_search', 'open_app'."},
+                "action_tool": {"type": "string", "description": "Optional: name of a Hearth tool to RUN when the reminder fires (e.g. 'summarize_file', 'web_search', 'run_command', 'open_app'). Read-only tools run automatically and their result is appended to the toast. State-changing ones (run_command, open_app/url, write_file, send_email, computer_/desktop_, browse) are NOT run silently — when due, Hearth surfaces the reminder and ASKS you to confirm first, so you CAN schedule things like 'at 6pm run my backup script' safely."},
                 "action_args": {"type": "object", "description": "Optional: arguments for action_tool. Object matching the tool's parameter schema. Ignored if action_tool is empty."},
                 "tag": {"type": "string", "description": "Optional: free-form label like 'work' / 'side' / 'medication' for grouping in the GUI."},
             },

@@ -430,6 +430,22 @@ def desktop_notify(title: str, body: str) -> bool:
     return False
 
 
+# Action-reminders whose tool changes state or runs arbitrary code must NOT
+# auto-fire silently from the background watcher — when one comes due, Hearth
+# surfaces it and ASKS the user to confirm first (and the normal risky-tool
+# permission prompt still gates the actual call). Read-only actions (web_search,
+# etc.) keep firing inline so a "check X every morning" reminder still just works.
+_CONFIRM_ON_FIRE = {
+    "run_command", "write_file", "edit_file", "create_directory", "delete_path",
+    "move_path", "open_app", "open_url", "open_in_browser", "send_email",
+    "computer_click", "computer_type", "computer_key", "computer_scroll",
+    "computer_drag", "computer_move", "desktop_click", "desktop_type",
+    "browse", "browse_click", "browse_type", "browse_scroll",
+    "generate_image", "generate_video", "create_plugin", "delete_plugin",
+    "install_skill", "memory_forget",
+}
+
+
 def _run_action(action_tool: str, action_args: Dict) -> str:
     """Execute a reminder's bound tool. Returns the FULL result text. The
     caller truncates for the toast body but pushes the full text into chat
@@ -479,17 +495,22 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
     def _fire(r: Dict, missed: bool = False) -> None:
         body = r.get("what", "(empty)")
         action_tool = r.get("action_tool", "")
+        action_args = r.get("action_args") or {}
+        needs_confirm = bool(action_tool) and action_tool in _CONFIRM_ON_FIRE
         full_result = ""
-        if action_tool:
-            full_result = _run_action(action_tool, r.get("action_args") or {})
+        if action_tool and not needs_confirm:
+            full_result = _run_action(action_tool, action_args)
             if full_result:
                 tail = full_result[:240].rstrip()
                 if len(full_result) > 240:
                     tail += "..."
                 body = f"{body}\n> {tail}"
         title = "Hearth - while you were away" if missed else "Hearth reminder"
+        toast_body = body
+        if needs_confirm:
+            toast_body = f"{body}\n(wants to run {action_tool} — open Hearth to confirm)"
         try:
-            notify(title, body)
+            notify(title, toast_body)
         except Exception:
             pass
         # Surface EVERY reminder to the agent (not just action ones) so it
@@ -501,7 +522,18 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
         try:
             from . import subagents
             what = r.get("what", "")
-            if action_tool and full_result:
+            if needs_confirm:
+                try:
+                    args_str = json.dumps(action_args, ensure_ascii=False)[:300]
+                except Exception:
+                    args_str = str(action_args)[:300]
+                note = (f'A reminder you set just came due: "{what}". It is set to run the '
+                        f'{action_tool} tool with args {args_str}. Do NOT run it silently — '
+                        f'tell the user the reminder is due and that it wants to run this, then '
+                        f'ASK them to confirm. Only if they say yes, call {action_tool} with '
+                        f'those args (the normal permission prompt will still confirm). If they '
+                        f'say no, just drop it.')
+            elif action_tool and full_result:
                 note = (f'A reminder you set just came due: "{what}". '
                         f'It ran {action_tool} and got:\n{full_result}\n'
                         f'Tell the user about it now, naturally.')
