@@ -33,7 +33,7 @@ So you ran a model locally. Now what? Most "local AI" projects are one of three 
 2. **A coding agent** (Aider, Cline, Continue, Open Interpreter). Powerful — but scoped to "write code in this folder," not "be the AI on my PC."
 3. **A cloud-locked assistant** (ChatGPT, Claude, Pi). Great, until they change the rules, deprecate your model, or you go offline.
 
-**Hearth is the fourth thing.** A local-first operator that runs on the model you already have, controls your actual Windows PC — files, shell, apps, browser, screenshots, voice — talks back, listens, and remembers you across sessions. Nothing ever leaves your machine except a web search, and only when you ask.
+**Hearth is the fourth thing.** A local-first operator that runs on the model you already have, controls your actual Windows PC — files, shell, apps, browser, the desktop itself (clicks and types), screenshots, voice — talks back, listens, and remembers you across sessions. Nothing ever leaves your machine except a web search, and only when you ask.
 
 And it keeps growing: **skills are shareable.** A skill is a folder that teaches Hearth a workflow ("clean up my Downloads", "turn this folder of photos into a contact sheet"). Installing one someone else wrote is a single line — `/skill install someone/their-repo` — and writing your own is one command.
 
@@ -102,6 +102,8 @@ Hearth runs from source on macOS and Linux — the CLI and web UI work, and most
 **Apps and URLs.** Open any installed app, file, folder, Start Menu shortcut, or URL with one tool. Media opens in your default player, archives in your archive tool, folders in Explorer.
 
 **Browser.** Drive a real Chrome / Brave / Edge session you can watch: `browse` opens a page and lists its clickable elements, `browse_click` scrolls the target into view and clicks it, `browse_type` fills fields. The session persists across calls for multi-step flows.
+
+**Desktop control.** Beyond the browser, Hearth can operate the actual desktop. `desktop_snapshot` reads a window's real buttons, fields and menu items as a list (an accessibility snapshot — precise, not pixel-guessing), then `desktop_click` / `desktop_type` act on them by name. It can also move the mouse, click, type, and press key combos directly — you watch the real cursor move. Every action that changes something asks first. Windows for now (cross-platform in progress).
 
 **Screen and vision.** Take a screenshot, or attach an image, and have a vision-capable model describe it.
 
