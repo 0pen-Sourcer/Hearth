@@ -409,6 +409,8 @@ RISKY_TOOLS = {
     # state-changing ones (move + screen-info are harmless, left ungated).
     "computer_click", "computer_type", "computer_key", "computer_scroll",
     "computer_drag",
+    # Spawns a team of autonomous agents + opens panes — gate it.
+    "launch_team",
     # Desktop a11y: snapshot is read-only (ungated); click/type act, so gate them.
     "desktop_click", "desktop_type",
     # Slow / scanning tools - also gated so the user can deny full-drive scans.
