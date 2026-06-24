@@ -125,6 +125,7 @@ HIDDEN = [
     "hearth.computer",            # computer-use: ctypes mouse/keyboard/drag
     "hearth.desktop_a11y",        # desktop a11y snapshot/click/type
     "hearth.team",                # watch-a-team multi-agent panes
+    "hearth.voice_overlay",       # desktop voice HUD (win32 dot grid)
     # Desktop control needs the UI Automation COM bridge bundled, or
     # desktop_snapshot/click/type fail in the packaged exe with ImportError.
     # (comtypes.gen is generated at runtime — collect_all("comtypes") below
