@@ -882,7 +882,12 @@ class JarvisCLI:
             "     █░█ █▀▀ ▄▀█ █▀█ ▀█▀ █░█     ",
             "     █▀█ ██▄ █▀█ █▀▄ ░█░ █▀█     ",
         ]
-        sub = f"  local-first personal AI  ◆  hearth v{HEARTH_VERSION}"
+        try:
+            from hearth import edition as _ed
+            _ed_label = _ed.label()
+        except Exception:
+            _ed_label = "Full"
+        sub = f"  local-first personal AI  ◆  hearth v{HEARTH_VERSION} ({_ed_label})"
         os.system("cls" if os.name == "nt" else "clear")
         # Gradient cascade banner
         for i, ln in enumerate(art):
