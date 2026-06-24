@@ -124,6 +124,7 @@ HIDDEN = [
     "hearth.migrate",             # Hermes/OpenClaw import path
     "hearth.computer",            # computer-use: ctypes mouse/keyboard/drag
     "hearth.desktop_a11y",        # desktop a11y snapshot/click/type
+    "hearth.team",                # watch-a-team multi-agent panes
     # Desktop control needs the UI Automation COM bridge bundled, or
     # desktop_snapshot/click/type fail in the packaged exe with ImportError.
     # (comtypes.gen is generated at runtime — collect_all("comtypes") below
