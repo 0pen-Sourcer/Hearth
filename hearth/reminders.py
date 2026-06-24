@@ -522,8 +522,20 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
 
     def _advance_after_fire(r: Dict, now: datetime, now_iso: str) -> None:
         rec_s = r.get("recurring_seconds")
-        if rec_s and isinstance(rec_s, (int, float)):
-            next_due = now + timedelta(seconds=rec_s)
+        if rec_s and isinstance(rec_s, (int, float)) and rec_s > 0:
+            # Advance on the ORIGINAL phase: step the existing due time by the
+            # interval until the next slot is in the future. This keeps a
+            # "daily at 9am" reminder anchored at 9am instead of drifting to
+            # "launch time + 24h" -- which is what made multiple daily
+            # reminders set for different times (9am/2pm/4pm) all collapse onto
+            # the same instant and fire as duplicate toasts together.
+            try:
+                next_due = datetime.fromisoformat(r.get("due_iso", ""))
+            except Exception:
+                next_due = now
+            step = timedelta(seconds=max(1.0, float(rec_s)))
+            while next_due <= now:
+                next_due += step
             r["due_iso"] = next_due.isoformat(timespec="seconds")
             r["last_fired_at"] = now_iso
         else:
