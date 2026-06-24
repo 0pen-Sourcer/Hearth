@@ -2835,6 +2835,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             _rt_voice.set_barge_callback(_on_barge)
             msg = _rt_voice.start_continuous(_on_final)
             emit({"type": "started", "detail": msg})
+            # Desktop voice HUD — topmost dot grid that swells when Hearth
+            # speaks, so the user sees it's live even outside the app window.
+            try:
+                from hearth import voice_overlay as _vov
+                _vov.start()
+            except Exception:
+                pass
         except Exception as e:
             emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
             return
@@ -2857,6 +2864,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _rt_voice.set_caption_callback(None)
                 _rt_voice.set_barge_callback(None)
                 _rt_voice.stop_continuous()
+            except Exception:
+                pass
+            try:
+                from hearth import voice_overlay as _vov
+                _vov.stop()
             except Exception:
                 pass
 
