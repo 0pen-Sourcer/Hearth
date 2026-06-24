@@ -6335,14 +6335,15 @@ for _cd in (
     TOOL_DEFINITIONS.append(_cd)
 
 
-# ── Desktop accessibility: read the UI tree + click by element (Windows UIA) ──
+# ── Desktop accessibility: read the UI tree + click by element ──
 # The PRECISE way to operate the desktop — like Playwright's a11y snapshot, not
 # pixel-guessing. desktop_snapshot lists the real interactive controls of the
 # foreground window; desktop_click / desktop_type act on them by index/name.
+# Backends: Windows UIA (primary), Linux AT-SPI / macOS AX (experimental).
 def _desktop_snapshot(p: Dict) -> str:
     from . import desktop_a11y as _a
     if not _a.available():
-        return "Error: desktop UI inspection is Windows-only (needs the uiautomation package)."
+        return f"Error: desktop UI inspection unavailable — {_a.unsupported_reason()}."
     snap = _a.snapshot(int(p.get("max_elements", 50)))
     if snap.get("error"):
         return f"Error: {snap['error']}"
@@ -6360,7 +6361,7 @@ def _desktop_snapshot(p: Dict) -> str:
 def _desktop_click(p: Dict) -> str:
     from . import desktop_a11y as _a
     if not _a.available():
-        return "Error: desktop control is Windows-only (needs the uiautomation package)."
+        return f"Error: desktop control unavailable — {_a.unsupported_reason()}."
     r = _a.click(idx=p.get("idx"), name=p.get("name"),
                  double=bool(p.get("double")), button=(p.get("button") or "left"))
     if r is None:
@@ -6371,7 +6372,7 @@ def _desktop_click(p: Dict) -> str:
 def _desktop_type(p: Dict) -> str:
     from . import desktop_a11y as _a
     if not _a.available():
-        return "Error: desktop control is Windows-only (needs the uiautomation package)."
+        return f"Error: desktop control unavailable — {_a.unsupported_reason()}."
     ok = _a.focus_and_type(idx=p.get("idx"), name=p.get("name"), text=p.get("text", ""))
     return "typed into the element" if ok else \
         "Error: couldn't focus that element — call desktop_snapshot first, then type by its idx."
