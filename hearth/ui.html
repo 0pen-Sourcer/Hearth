@@ -8733,6 +8733,19 @@ function exitVoiceMode() {
 // you talk, the same way it reacts to the AI's voice while it speaks.
 function voiceUpdate(level) { voiceMicLevel = level || 0; }
 
+// Wake word + tray "Voice mode" open Hearth with ?voice=1 — auto-enter voice
+// mode AND start listening, so saying the wake word lands you already talking
+// (with the desktop HUD up) instead of in a window you still have to click.
+window.addEventListener('load', () => {
+  try {
+    if (new URLSearchParams(location.search).get('voice') === '1') {
+      setTimeout(async () => {
+        try { enterVoiceMode(); await startRealtimeVoice(); } catch (e) {}
+      }, 800);  // let the app + settings finish booting first
+    }
+  } catch (e) {}
+});
+
 function setVoiceStatus(s) { $('voice-status-text').textContent = s; }
 function setVoiceTranscript(s) { $('voice-transcript').textContent = s; }
 
