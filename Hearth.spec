@@ -122,6 +122,13 @@ HIDDEN = [
     "hearth.subagents",           # v0.7 sub-agent fork system
     "hearth.mcp_client",          # v0.7 outbound MCP client
     "hearth.migrate",             # Hermes/OpenClaw import path
+    "hearth.computer",            # computer-use: ctypes mouse/keyboard/drag
+    "hearth.desktop_a11y",        # desktop a11y snapshot/click/type
+    # Desktop control needs the UI Automation COM bridge bundled, or
+    # desktop_snapshot/click/type fail in the packaged exe with ImportError.
+    # (comtypes.gen is generated at runtime — collect_all("comtypes") below
+    # pulls what's needed; don't list it here or PyInstaller warns.)
+    "uiautomation", "comtypes", "comtypes.client",
     # RealtimeSTT + silero VAD for "ChatGPT voice mode" feel
     "RealtimeSTT", "silero_vad",
     # llama_cpp.server's runtime extras — without these the builtin
@@ -228,6 +235,20 @@ for _pkg in (() if LITE else ("fastapi", "uvicorn", "sse_starlette",
 # data files, the silero ONNX model is missing at runtime and the recorder
 # silently falls back to webrtc VAD (laggier endpoint).
 for _pkg in ("RealtimeSTT", "silero_vad"):
+    try:
+        from PyInstaller.utils.hooks import collect_all as _collect_all
+        _d, _b, _h = _collect_all(_pkg)
+        DATAS += _d
+        PW_BINARIES += _b
+        HIDDEN += _h
+    except Exception:
+        pass
+
+# Desktop control (Windows). uiautomation drives UI Automation through comtypes,
+# which GENERATES its interface modules into comtypes.gen at runtime — a bare
+# hiddenimport misses those, so collect_all both. Skipped off Windows (try/except),
+# where the cross-OS backends use pynput / AT-SPI instead of these.
+for _pkg in ("uiautomation", "comtypes"):
     try:
         from PyInstaller.utils.hooks import collect_all as _collect_all
         _d, _b, _h = _collect_all(_pkg)
