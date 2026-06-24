@@ -201,4 +201,83 @@ def learn_environment(endpoint: Optional[str] = None, write: bool = True) -> str
                         _format_drive_map(drives))
         summary_bits.append(f"{len(drives)} drive(s)")
 
+    # Stamp the machine fingerprint so the per-boot refresh stays a no-op until
+    # something actually changes (first-run onboarding and /learn both land here).
+    if write:
+        try:
+            fp = _fingerprint_path()
+            cur = _current_fingerprint()
+            if cur is not None:
+                os.makedirs(os.path.dirname(fp), exist_ok=True)
+                with open(fp, "w", encoding="utf-8") as f:
+                    json.dump(cur, f)
+        except Exception:
+            pass
+
     return "Learned " + ", ".join(summary_bits) + "."
+
+
+def _fingerprint_path() -> str:
+    return os.path.join(os.path.expanduser("~/.hearth"), "env_fingerprint.json")
+
+
+def _current_fingerprint() -> Optional[Dict[str, object]]:
+    """A cheap, boot-detectable signature of the machine: GPU, RAM, cores, and
+    the set of mounted fixed drives. Models are intentionally excluded — they
+    need the LLM server, which is often not up yet at boot."""
+    try:
+        gpu = detect_gpu()
+        drives = detect_drives()
+        import psutil
+        import platform
+        ram_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
+        cores = psutil.cpu_count(logical=True)
+        osname = f"{platform.system()} {platform.release()}"
+    except Exception:
+        return None
+    return {
+        "gpu": gpu.get("name"),
+        "vram": gpu.get("vram_gb"),
+        "ram": ram_gb,
+        "cores": cores,
+        "os": osname,
+        "drives": sorted(drives.keys()),
+    }
+
+
+def refresh_environment_if_changed(endpoint: Optional[str] = None) -> Optional[str]:
+    """Cheap per-boot check: re-detect the machine and refresh the stored memory
+    facts ONLY if it actually changed since last launch (a drive plugged in or
+    removed, a swapped GPU, a RAM change). No-op when nothing changed, so it's
+    safe to fire on every startup in a background thread. Returns the refresh
+    summary if it ran, else None.
+
+    This is what keeps Hearth's machine context FRESH after the one-time
+    onboarding scan — otherwise it learns the drives once and never notices the
+    external drive you plugged in yesterday."""
+    current = _current_fingerprint()
+    if current is None:
+        return None
+    fp = _fingerprint_path()
+    prev = None
+    try:
+        with open(fp, "r", encoding="utf-8") as f:
+            prev = json.load(f)
+    except Exception:
+        prev = None
+    if prev == current:
+        return None  # machine unchanged — nothing to relearn
+    # Changed (or first time we've fingerprinted): relearn into memory. A server
+    # that's down at boot just means the model section is skipped, not wiped.
+    summary = None
+    try:
+        summary = learn_environment(endpoint=endpoint, write=True)
+    except Exception:
+        summary = None
+    try:
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        with open(fp, "w", encoding="utf-8") as f:
+            json.dump(current, f)
+    except Exception:
+        pass
+    return summary
