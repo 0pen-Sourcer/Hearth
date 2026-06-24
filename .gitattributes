@@ -1,0 +1,23 @@
+# Normalize line endings so shell scripts work on Linux/macOS even when the
+# repo is checked out (or zip-exported) on Windows.
+* text=auto
+
+# Shell scripts MUST be LF — a CRLF shebang (#!/usr/bin/env bash\r) fails on
+# Linux with "bad interpreter". This is what bit the Mint test copy.
+*.sh    text eol=lf
+
+# Windows-native scripts stay CRLF.
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binaries — never touch.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.onnx  binary
+*.gguf  binary
+*.wav   binary
+*.mp3   binary
