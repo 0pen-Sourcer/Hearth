@@ -119,6 +119,8 @@ Hearth runs from source on macOS and Linux — the CLI and web UI work, and most
 
 **Sub-agents.** Fork focused workers that run with a tightened system prompt and a restricted tool allowlist. Six personas ship: researcher, coder, archivist, librarian, summarizer, and a PDF coordinator that fans out summarizer workers over a document and reduces their results. Workers run synchronously or in the background; background results arrive in your next chat turn rather than blocking. Fork depth is bounded to prevent runaway spawning.
 
+**Watch a team build.** Ask for a team — "one frontend, one backend, one architect" — and Hearth spawns each as a sub-agent and opens a live terminal pane per agent (Windows Terminal split-panes, or tmux on Linux/macOS), so you watch them think, call tools, and finish side by side. Opt-in; the agents act on their own once you ask, so it only runs when you do.
+
 **Background jobs.** Long-running operations (whole-drive scans, big searches) return a job ID immediately and run in a background thread while you keep working. List jobs and collect results when they finish.
 
 **MCP, both directions.** Hearth exposes its own tools as an MCP server, and it also consumes other MCP servers: drop an `mcp.json` in the workspace and their tools appear alongside the built-ins.
@@ -131,7 +133,7 @@ Hearth runs from source on macOS and Linux — the CLI and web UI work, and most
 
 **Image and video generation.** Optional tools for cloud image/video generation, plus integration with a local Stable Diffusion (Forge) install for fully local image generation.
 
-To keep the prompt small, Hearth loads a core set of tools by default and keeps niche ones behind a `load_tools` meta-tool the model calls on demand. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+**A long tool list isn't context bloat.** Hearth has ~100 tools, but the model never sees all of them at once. A core set loads by default; the rest stay behind a `load_tools` meta-tool the model calls on demand and then uses inline — so the per-turn prompt stays small no matter how many tools exist. The model only ever loads what it needs. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 ---
 
