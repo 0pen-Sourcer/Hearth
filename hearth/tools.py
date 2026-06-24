@@ -6268,12 +6268,27 @@ def _computer_scroll(p: Dict) -> str:
     return f"scrolled {'up' if amt > 0 else 'down'} {abs(amt)} notch(es)"
 
 
+def _computer_drag(p: Dict) -> str:
+    _c, err = _computer_check()
+    if err:
+        return err
+    try:
+        x1, y1 = int(p["x1"]), int(p["y1"])
+        x2, y2 = int(p["x2"]), int(p["y2"])
+    except (KeyError, TypeError, ValueError):
+        return "Error: drag needs x1,y1 (start) and x2,y2 (end) integers."
+    button = (p.get("button") or "left").lower()
+    _c.drag(x1, y1, x2, y2, button=button)
+    return f"dragged from ({x1},{y1}) to ({x2},{y2}) — done"
+
+
 _HANDLERS["computer_screen"] = _computer_screen
 _HANDLERS["computer_move"] = _computer_move
 _HANDLERS["computer_click"] = _computer_click
 _HANDLERS["computer_type"] = _computer_type
 _HANDLERS["computer_key"] = _computer_key
 _HANDLERS["computer_scroll"] = _computer_scroll
+_HANDLERS["computer_drag"] = _computer_drag
 
 for _cd in (
     {"name": "computer_screen", "description":
@@ -6307,6 +6322,15 @@ for _cd in (
         "Scroll the mouse wheel. amount>0 = up, <0 = down (e.g. -3 scrolls down).",
      "parameters": {"type": "object", "properties": {
         "amount": {"type": "integer"}}, "required": ["amount"]}},
+    {"name": "computer_drag", "description":
+        "Drag-and-drop: press at (x1,y1), move to (x2,y2) while held, release. "
+        "For moving a file/icon, dragging a slider, rearranging tabs, or marquee-"
+        "selecting a region. Screenshot first to find both points.",
+     "parameters": {"type": "object", "properties": {
+        "x1": {"type": "integer"}, "y1": {"type": "integer"},
+        "x2": {"type": "integer"}, "y2": {"type": "integer"},
+        "button": {"type": "string", "enum": ["left", "right", "middle"]}},
+        "required": ["x1", "y1", "x2", "y2"]}},
 ):
     TOOL_DEFINITIONS.append(_cd)
 
