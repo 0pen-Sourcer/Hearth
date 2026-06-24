@@ -923,6 +923,14 @@ async def run_once(
                     "memory_forget", "extract_archive_file",
                     "create_plugin", "delete_plugin",
                     "read_inbox", "send_email",
+                    # Computer-use drives the REAL mouse/keyboard over the whole
+                    # desktop, so the state-changing actions are gated here too
+                    # (the GUI persists an "always allow" so it prompts once,
+                    # not on every click). computer_screen/move and
+                    # desktop_snapshot are read-only / harmless -> left ungated.
+                    "computer_click", "computer_type", "computer_key",
+                    "computer_scroll", "computer_drag",
+                    "desktop_click", "desktop_type",
                     # browse_click / browse_type / browse_scroll are NOT
                     # listed — once the user has already approved the
                     # initial `browse` call, every subsequent click/type/
