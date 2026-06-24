@@ -931,6 +931,7 @@ async def run_once(
                     "computer_click", "computer_type", "computer_key",
                     "computer_scroll", "computer_drag",
                     "desktop_click", "desktop_type",
+                    "launch_team",  # spawns a team of autonomous agents + panes
                     # browse_click / browse_type / browse_scroll are NOT
                     # listed — once the user has already approved the
                     # initial `browse` call, every subsequent click/type/
