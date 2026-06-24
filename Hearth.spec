@@ -292,6 +292,14 @@ for _pkg in ("pymupdf", "pyfiglet", "matplotlib"):
     except Exception:
         pass
 
+# Stamp the edition (full/lite) into the bundle so the running app can SHOW the
+# user which build they have (Lite ships without the built-in llama.cpp server).
+# hearth/edition.py reads this marker from sys._MEIPASS at runtime.
+_edition_marker = os.path.join(REPO_ROOT, "_hearth_edition.txt")
+with open(_edition_marker, "w", encoding="utf-8") as _ef:
+    _ef.write("lite" if LITE else "full")
+DATAS += [(_edition_marker, ".")]
+
 # ============================================================
 # Analysis (shared imports across both entry points)
 # ============================================================
