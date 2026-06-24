@@ -229,10 +229,19 @@ def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
     speaking (it's a background subagent YOU spawned reporting back — the user
     did not type this). Inject it with role 'system' where the chat template
     allows; the banner makes the provenance unmistakable either way."""
+    src = (notif.get("source") or notif.get("persona") or "").lower()
+    if src == "reminder":
+        lead = ("A reminder you set earlier has come due; its details are below. "
+                "Deliver it to the user now, naturally")
+    elif src in ("schedule", "cron", "timer"):
+        lead = ("A scheduled background event you set up has fired; its details "
+                "are below. Act on it for the user")
+    else:
+        lead = ("A subagent you dispatched earlier has finished; its result is "
+                "below. Continue the user's original task with it")
     return (
         f"[SYSTEM NOTIFICATION — automated background event, NOT a message from "
-        f"the user. A subagent you dispatched earlier has finished; its result "
-        f"is below. Continue the user's original task with it; do not thank the "
+        f"the user. {lead}; do not thank the "
         f"user for it or treat it as a new user request.]\n"
         f"<task-notification>\n"
         f"  <agent-id>{notif.get('agent_id', '')}</agent-id>\n"
