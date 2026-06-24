@@ -36,7 +36,10 @@ sudo apt install -y \
 
 # --- 3. Virtualenv + Python deps ------------------------------------------
 say "Creating virtualenv (.venv, with access to system python3-gi)"
-python3 -m venv --system-site-packages .venv
+# --copies (not symlinks): a VirtualBox SHARED FOLDER (vboxsf) can't make
+# symlinks, so a normal `python3 -m venv` fails on it. --copies works anywhere.
+# --system-site-packages so the venv can see the system python3-gi (AT-SPI).
+python3 -m venv --copies --system-site-packages .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 python -m pip install --upgrade pip wheel
