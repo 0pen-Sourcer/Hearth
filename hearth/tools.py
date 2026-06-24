@@ -6600,8 +6600,31 @@ _DEFERRED_TOOLS = {
     # multi-agent "watch a team" — niche power feature; the model loads it when
     # the user asks for a team, so it never sits in the default prompt.
     "launch_team",
+    # Light diet (2026-06): redundant or rarely-called built-ins. Each still
+    # RUNS if called by name and is rediscoverable via load_tools — they just
+    # don't need a per-turn schema slot.
+    "get_time",            # the current local time is already injected each turn
+    "locate_path",         # find_file covers the common case
+    "whoami",              # niche self-introspection
+    "create_directory",    # niche (write_file to a path / run_command mkdir cover it)
+    "list_processes",      # system_info + run_command tasklist cover it
+    "list_browsers",       # browse auto-detects the installed browser
+    "list_subagent_personas", "get_subagent_result",  # spawn_subagent lists roles; bg results auto-arrive
+    "list_jobs",           # start_job/get_job_result stay core
+    "send_to_phone",       # ntfy push is opt-in / rare
+    "focus_window",        # niche window management
     "end_session",
 }
+
+# User plugins are deferred by DEFAULT so the core prompt stays bounded no matter
+# how many a user writes (this is the unbounded-bloat hole: plugins used to load
+# straight into core). They're rediscovered via load_tools like any deferred tool
+# — reliable now that the matcher scores by relevance. A plugin opts into the
+# always-loaded core set with TOOL["core"] = True.
+for _td in TOOL_DEFINITIONS:
+    if _td.get("_plugin") and not _td.get("core"):
+        _DEFERRED_TOOLS.add(_td["name"])
+
 _unlocked_tools: "set[str]" = set()
 _TOOL_DIET = os.environ.get("HEARTH_ALL_TOOLS", "") not in ("1", "true", "yes")
 
@@ -6646,26 +6669,51 @@ def _any_tool_still_deferred() -> bool:
                for n in (t["name"] for t in TOOL_DEFINITIONS))
 
 
+# Stopwords that match almost every tool description ("is", "it", "to", ...) and
+# would flood + bury the real match if used for matching. Dropped before scoring.
+_LOAD_STOPWORDS = {
+    "a", "an", "the", "to", "my", "me", "for", "of", "is", "it", "in", "on",
+    "and", "or", "with", "what", "how", "do", "does", "i", "can", "could",
+    "you", "please", "tool", "tools", "that", "this", "need", "want", "use",
+    "about", "any", "some", "give", "show", "find", "from", "into", "at",
+}
+
+
 def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
-    """Move deferred tools matching `query` (name / category / description
-    substring, or 'all') into the active set so their schemas ship next turn.
-    Returns the full tool-defs that matched."""
+    """Move deferred tools matching `query` into the active set so their schemas
+    ship next turn. Scores name > category > description, drops stopwords, and
+    caps the result so a vague query surfaces the RELEVANT tools, not a flood.
+    Returns the matched tool-defs."""
     q = (query or "").strip().lower()
+    deferred = [td for td in TOOL_DEFINITIONS if td["name"] in _DEFERRED_TOOLS]
+    if not q or q == "all":
+        for td in deferred:
+            _unlocked_tools.add(td["name"])
+        return deferred
     toks = [w for w in q.replace("-", " ").replace("/", " ").split() if w]
-    matched: "List[Dict[str, Any]]" = []
-    for td in TOOL_DEFINITIONS:
+    meaningful = [w for w in toks if w not in _LOAD_STOPWORDS and len(w) > 1]
+    toks = meaningful or toks  # if the whole query was stopwords, fall back
+    scored: "List[tuple]" = []
+    for td in deferred:
         n = td["name"]
-        if n not in _DEFERRED_TOOLS:
-            continue
+        nl = n.lower()
         cat = _TOOL_CATEGORY.get(n, "").lower()
-        hay = f"{n.lower()} {cat} {td['description'].lower()}"
-        # 'all'/empty → everything; else match if any query word (or its
-        # singular) appears in the tool's name/category/description.
-        hit = (not toks) or q == "all" or any(
-            (w in hay) or (w.rstrip("s") in hay) for w in toks)
-        if hit:
-            _unlocked_tools.add(n)
-            matched.append(td)
+        desc = td["description"].lower()
+        score = 0
+        for w in toks:
+            ws = w.rstrip("s")
+            if w in nl or (len(ws) > 2 and ws in nl):
+                score += 5          # name hit — strongest signal
+            elif w in cat or (len(ws) > 2 and ws in cat):
+                score += 3
+            elif w in desc or (len(ws) > 2 and ws in desc):
+                score += 1
+        if score > 0:
+            scored.append((score, td))
+    scored.sort(key=lambda x: -x[0])
+    matched = [td for _, td in scored[:10]]   # cap — don't flood the context
+    for td in matched:
+        _unlocked_tools.add(td["name"])
     return matched
 
 

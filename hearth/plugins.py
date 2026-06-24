@@ -86,6 +86,12 @@ def _register(tool: dict, run: Callable, tool_defs: list, handlers: dict,
         "name": name,
         "description": tool["description"],
         "parameters": tool["parameters"],
+        # Mark as a user plugin so the core stays lean: plugins are deferred by
+        # default (rediscovered via load_tools) UNLESS they opt in with
+        # TOOL["core"] = True. Keeps the prompt bounded no matter how many
+        # plugins a user writes.
+        "_plugin": True,
+        "core": bool(tool.get("core")),
     })
 
     def _wrapped(args, _run=run):
