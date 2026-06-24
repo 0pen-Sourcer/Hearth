@@ -6429,6 +6429,22 @@ def _log_activity(event: str, **fields: Any) -> None:
         pass
 
 
+# Tools with real side effects — intercepted in HEARTH_BENCH_DRYRUN mode so a
+# benchmark can measure tool SELECTION without moving the mouse, writing files,
+# opening apps, sending mail, or setting real reminders.
+_DRYRUN_GUARDED = {
+    "write_file", "edit_file", "create_directory", "delete_path", "move_path",
+    "run_command", "open_app", "open_url", "open_in_browser",
+    "computer_move", "computer_click", "computer_type", "computer_key",
+    "computer_scroll", "computer_drag", "desktop_click", "desktop_type",
+    "browse", "browse_click", "browse_type", "browse_scroll", "browse_key",
+    "set_reminder", "cancel_reminder", "snooze_reminder",
+    "send_email", "memory_save", "memory_forget", "edit_soul", "append_soul",
+    "create_plugin", "delete_plugin", "create_skill", "install_skill",
+    "generate_image", "generate_video",
+}
+
+
 def execute_tool(name: str, args: Optional[Dict] = None) -> str:
     """Run a tool by name. Returns a string (truncated to per-tool cap).
     MCP-bridged tools (name starts with 'mcp_') route through the live
@@ -6461,6 +6477,15 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         return (f"Error: there is no tool named '{name}'. Do NOT invent tools or "
                 f"import them with run_command. If you need a capability you don't "
                 f"see, call load_tools(\"<what you need>\") to discover it, then use it.")
+    # Dry-run mode (benchmarks): measure which tool the model REACHES for
+    # without the side effect. State-changing tools return a synthetic success
+    # so the chain keeps going; read-only tools (read_file, list_directory,
+    # system_info, web_search, screenshot, desktop_snapshot, computer_screen,
+    # memory_recall, ...) still execute so the run is realistic. Opt-in via
+    # HEARTH_BENCH_DRYRUN=1; off in normal use.
+    if os.getenv("HEARTH_BENCH_DRYRUN") == "1" and name in _DRYRUN_GUARDED:
+        _log_activity("call", tool=name, args=args)
+        return f"[dry-run] {name} would run with {json.dumps(args, ensure_ascii=False, default=str)[:200]} — skipped (benchmark)."
     _log_activity("call", tool=name, args=args)
     t0 = datetime.now()
     try:
