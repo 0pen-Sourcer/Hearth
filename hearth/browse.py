@@ -125,6 +125,14 @@ class _BrowserWorker(threading.Thread):
             args = [
                 "--disable-blink-features=AutomationControlled",
                 "--start-maximized",
+                # Suppress Chrome's yellow nag banners in automation: the
+                # "unsupported command-line flag: --no-sandbox" warning (Playwright
+                # adds --no-sandbox on some Windows launches) and the "controlled
+                # by automated test software" infobar. Cosmetic-only; --test-type
+                # tells Chrome this is a test/automation context.
+                "--test-type",
+                "--no-default-browser-check",
+                "--disable-infobars",
             ]
             win = os.getenv("HEARTH_BROWSE_WINDOW", "").strip()
             if win and len(win.split(",")) == 4:
