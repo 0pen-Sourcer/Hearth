@@ -23,6 +23,7 @@ First public release. Windows-first; macOS/Linux support is partial.
 - Shell command execution (PowerShell / cmd) with captured, sanitized output.
 - App, file, folder, and URL launching with one tool.
 - Real browser driving (Chrome / Brave / Edge): open a page, list clickable elements, click, type, scroll, with a persistent session across calls.
+- Desktop control (Windows): `desktop_snapshot` reads the focused window's interactive controls via UI Automation (precise, no vision tokens); `desktop_click` / `desktop_type` act on them by element. Plus direct mouse/keyboard control (`computer_move` / `click` / `type` / `key` / `scroll`) that moves the real cursor. State-changing actions go through the permission prompt.
 - Screenshot capture and image viewing through a vision-capable model.
 - Web search and fetch via DuckDuckGo.
 - Persistent per-fact memory with recall tracking, automatic cold-fact archiving and warm-back, and overlap detection on save.
