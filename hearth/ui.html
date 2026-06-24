@@ -4616,7 +4616,18 @@ function renderMessage(m) {
             regenerate
           </button>
         </div>
-      ` : ''}
+      ` : `
+        <div class="actions">
+          <button class="a-edit" title="Edit & resend this message">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            edit
+          </button>
+          <button class="a-copy" title="Copy">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            copy
+          </button>
+        </div>
+      `}
     </div>
   `;
   const contentEl = div.querySelector('.content');
@@ -4641,6 +4652,13 @@ function renderMessage(m) {
     // uploads etc.), show that instead so verbose tool-instruction prompts
     // don't leak onto the chat surface.
     contentEl.textContent = m.displayContent || m.content || '';
+    const editBtn = div.querySelector('.a-edit');
+    if (editBtn) editBtn.addEventListener('click', () => editUserMessage(m));
+    const copyBtnU = div.querySelector('.a-copy');
+    if (copyBtnU) copyBtnU.addEventListener('click', () => {
+      navigator.clipboard.writeText(m.displayContent || m.content || '')
+        .then(() => toast('Copied', '', 'ok', 1500));
+    });
   }
   return div;
 }
@@ -5491,6 +5509,28 @@ function regenerateFromMessage(assistantMsg) {
   touch(c);
   renderChat();
   send(lastUser.content, lastUser.displayContent || null);
+}
+
+function editUserMessage(userMsg) {
+  // Pull this message's text back into the composer and drop it + everything
+  // after it, so the user can fix a typo / rephrase and re-send (instead of
+  // being stuck with a sent message they can't change). Mirrors regenerate,
+  // but waits for the user to edit + hit send rather than firing immediately.
+  const c = activeConvo();
+  if (!c) return;
+  const idx = c.messages.indexOf(userMsg);
+  if (idx < 0) return;
+  if (typeof stopGen === 'function') { try { stopGen(); } catch {} }  // don't edit mid-stream
+  const original = userMsg.displayContent || userMsg.content || '';
+  c.messages = c.messages.slice(0, idx);
+  touch(c);
+  renderChat();
+  input.value = original;
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+  input.focus();
+  // Put the caret at the end so they can just keep typing / fix the tail.
+  input.setSelectionRange(original.length, original.length);
 }
 
 async function send(forced = null, displayAs = null, opts = {}) {
