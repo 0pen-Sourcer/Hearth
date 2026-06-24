@@ -6409,6 +6409,48 @@ for _cd in (
     TOOL_DEFINITIONS.append(_cd)
 
 
+# ── Watch-a-team: spawn several subagents + open a live pane per agent ──
+# Opt-in multi-agent "watch them build" — the Hearth-native version of the
+# Claude Code tmux multi-agent setup. Each member runs as a background subagent
+# (own scoped tools + transcript); a terminal pane live-tails each one.
+def _launch_team(p: Dict) -> str:
+    members = p.get("members") or []
+    if not isinstance(members, list) or not members:
+        return ("Error: launch_team needs a 'members' list, each with a 'prompt' "
+                "(and optional 'name' + 'persona': coder/researcher/locator/"
+                "archivist/summarizer). E.g. one architect, one frontend coder, "
+                "one backend coder.")
+    from . import team as _team
+    r = _team.launch_team(members)
+    if not r.get("ok"):
+        return f"Error: {r.get('error', 'team launch failed')}"
+    who = ", ".join(f"{m['name']} ({m['persona']})" for m in r.get("spawned", []))
+    return f"{r.get('note', 'Team launched.')}\nTeam: {who}"
+
+
+_HANDLERS["launch_team"] = _launch_team
+TOOL_DEFINITIONS.append({
+    "name": "launch_team",
+    "description":
+        "Spawn a TEAM of sub-agents that work in parallel and open a live "
+        "terminal pane for each so the user can WATCH them build side by side "
+        "(Windows Terminal panes / tmux). Use when the user asks for 'a team', "
+        "'multiple agents', 'one frontend one backend one architect', or to "
+        "watch agents work at once. Decompose the user's goal into focused "
+        "members, each with a clear scoped prompt. Agents act autonomously in "
+        "the background (the coder persona can write files + run commands), so "
+        "only use this when the user explicitly wants a team.",
+    "parameters": {"type": "object", "properties": {
+        "members": {"type": "array", "items": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Short label, e.g. 'Architect', 'Frontend'."},
+            "persona": {"type": "string", "enum": ["coder", "researcher", "locator", "archivist", "summarizer"],
+                        "description": "Sub-agent role. Default 'coder'."},
+            "prompt": {"type": "string", "description": "The scoped task for this member."},
+        }, "required": ["prompt"]}},
+    }, "required": ["members"]},
+})
+
+
 # Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
 # can NEVER take down the core tools.
 try:
@@ -6441,7 +6483,7 @@ _DRYRUN_GUARDED = {
     "set_reminder", "cancel_reminder", "snooze_reminder",
     "send_email", "memory_save", "memory_forget", "edit_soul", "append_soul",
     "create_plugin", "delete_plugin", "create_skill", "install_skill",
-    "generate_image", "generate_video",
+    "generate_image", "generate_video", "launch_team",
 }
 
 
@@ -6555,6 +6597,9 @@ _DEFERRED_TOOLS = {
     # email (opt-in, needs an app password) — surfaces via load_tools when the
     # user mentions email, so it never clutters the default tool list
     "read_inbox", "send_email",
+    # multi-agent "watch a team" — niche power feature; the model loads it when
+    # the user asks for a team, so it never sits in the default prompt.
+    "launch_team",
     "end_session",
 }
 _unlocked_tools: "set[str]" = set()
@@ -6571,7 +6616,8 @@ _LOAD_TOOLS_SCHEMA = {
             "'image generation' (forge_*), 'plugins' (write your own tools), "
             "'soul' (edit your persona), 'archive' (list/extract zips), "
             "'system' (network/disk/installed apps/battery), 'voice' (pick a "
-            "voice), 'end_session'. Pass 'all' to load everything."),
+            "voice), 'team' (launch_team — run several agents at once and watch "
+            "them), 'end_session'. Pass 'all' to load everything."),
         "parameters": {
             "type": "object",
             "properties": {
