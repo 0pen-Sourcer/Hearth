@@ -65,8 +65,12 @@ _server_url: str = ""
 _desktop_proc: Optional[subprocess.Popen] = None
 
 
-def _open_desktop_window():
+def _open_desktop_window(voice: bool = False):
     """Open the PyWebView native window as a SUBPROCESS.
+
+    voice=True appends ?voice=1 so the GUI auto-starts voice mode on load (the
+    wake word + tray 'Voice mode' use this — say the word, the window opens
+    already listening with the HUD up).
 
     PyWebView's `webview.start()` must run on the main thread, which doesn't
     play with pystray's blocking event loop. Sidestepping by spawning the
@@ -78,7 +82,12 @@ def _open_desktop_window():
     """
     global _desktop_proc
     if _desktop_proc and _desktop_proc.poll() is None:
+        # Window already open — bring it forward. (Auto-starting voice into an
+        # already-open window would need a backend signal; v1 just focuses it,
+        # the user hits the mic. Opening a CLOSED window into voice works below.)
         return
+
+    url = _server_url + ("?voice=1" if voice else "")
 
     # Combined flags: CREATE_NO_WINDOW suppresses the brief cmd console
     # flash users see when subprocess.Popen launches a child on Windows.
@@ -98,13 +107,13 @@ def _open_desktop_window():
         if os.path.isfile(window_exe):
             try:
                 _desktop_proc = subprocess.Popen(
-                    [window_exe, "--url", _server_url],
+                    [window_exe, "--url", url],
                     creationflags=_spawn_flags,
                 )
                 return
             except Exception as e:
                 print(f"[hearth.tray] could not spawn _HearthWindow.exe: {e}", file=sys.stderr)
-        webbrowser.open(_server_url)
+        webbrowser.open(url)
         return
 
     # Dev mode — locate venv python (prefer pythonw to suppress console)
@@ -116,12 +125,12 @@ def _open_desktop_window():
         venv_python if os.path.isfile(venv_python) else sys.executable)
     try:
         _desktop_proc = subprocess.Popen(
-            [py, "-m", "hearth.desktop_attach", "--url", _server_url],
+            [py, "-m", "hearth.desktop_attach", "--url", url],
             creationflags=_spawn_flags,
         )
     except Exception as e:
         print(f"[hearth.tray] could not spawn desktop window: {e}", file=sys.stderr)
-        webbrowser.open(_server_url)
+        webbrowser.open(url)
 
 
 def _open_browser():
@@ -230,8 +239,10 @@ def main(argv: Optional[list] = None) -> int:
             return True
 
         def on_wake(phrase: str):
-            print(f"[hearth.tray] wake: '{phrase}' — opening window", flush=True)
-            _open_desktop_window()
+            # Wake the assistant straight INTO voice mode — open the window
+            # already listening with the HUD up, so you just keep talking.
+            print(f"[hearth.tray] wake: '{phrase}' — opening into voice mode", flush=True)
+            _open_desktop_window(voice=True)
 
         wake_listener = WakeListener(on_wake=on_wake)
         ok = wake_listener.start()
@@ -248,6 +259,10 @@ def main(argv: Optional[list] = None) -> int:
 
     def on_open(icon, item):
         _open_desktop_window()
+
+    def on_voice(icon, item):
+        # Open Hearth straight into voice mode (listening + HUD).
+        _open_desktop_window(voice=True)
 
     def on_browser(icon, item):
         _open_browser()
@@ -283,11 +298,12 @@ def main(argv: Optional[list] = None) -> int:
 
     menu = pystray.Menu(
         pystray.MenuItem("Open Hearth", on_open, default=True),
+        pystray.MenuItem("Voice mode", on_voice),
         pystray.MenuItem("Open in browser", on_browser),
         pystray.MenuItem("Open workspace folder", on_workspace),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
-            lambda item: f"Wake word: {'on' if wake_state['on'] else 'off'}",
+            lambda item: f"Wake word → voice: {'on' if wake_state['on'] else 'off'}",
             on_toggle_wake,
             checked=lambda item: wake_state["on"],
         ),
