@@ -216,6 +216,21 @@ HEARTH_VERSION = "0.7.0-preview"
 HEARTH_REPO = "https://github.com/0pen-sourcer/hearth"
 
 
+def _tools_banner_label() -> str:
+    """Banner tools line: show what's ACTUALLY in the prompt vs total. Saying
+    '105 loaded' read like bloat when only ~50 ship per turn (the rest load on
+    demand via load_tools)."""
+    total = len(TOOL_DEFINITIONS)
+    try:
+        from hearth.tools import active_tool_count
+        active = active_tool_count()
+    except Exception:
+        active = total
+    if active >= total:
+        return f"{total} loaded"
+    return f"{active} active, {total} available on demand"
+
+
 def _is_local_endpoint(base: str) -> bool:
     """True for LM Studio / Ollama / vLLM running on this machine or LAN.
     Used to decide which request quirks apply (chat_template_kwargs is
@@ -667,6 +682,7 @@ class JarvisCLI:
                           "/tools", "/voice", "/listen", "/mem", "/log",
                           "/compact", "/context", "/think", "/agent", "/jobs",
                           "/mcp", "/migrate", "/name", "/allow", "/perms",
+                          "/lockdown", "/learn",
                           "/clear", "/exit", "/skill", "/update", "/multi"]
                 _completer = WordCompleter(_slash, ignore_case=True, sentence=False)
             except Exception:
@@ -923,7 +939,7 @@ class JarvisCLI:
             ("context",   f"{self.context_tokens} tokens, compact @ {int(COMPACT_AT*100)}%"),
             ("workspace", f"{WORKSPACE}"),
             ("reads",     "unrestricted" if not SAFE_READ_ONLY else "sandbox only"),
-            ("tools",     f"{len(TOOL_DEFINITIONS)} loaded"),
+            ("tools",     _tools_banner_label()),
             ("memories",  f"{mem_lines}"),
             ("voice",     v_label),
         ]
@@ -2537,6 +2553,26 @@ class JarvisCLI:
                 print(f"{C_OK}{learn_environment(endpoint=LOCAL_API_BASE)}{C_RESET}")
             except Exception as e:
                 print(f"{C_ERR}scan failed: {e}{C_RESET}")
+            return True
+        if low == "/lockdown" or low.startswith("/lockdown "):
+            # Toggle read confinement at runtime. Writes are ALWAYS workspace-
+            # confined; this controls whether READS can reach outside it too.
+            import hearth.tools as _t
+            parts = cmd.split()
+            arg = parts[1].lower() if len(parts) > 1 else ""
+            if arg in ("on", "1", "true"):
+                _t.SAFE_READ_ONLY = True
+            elif arg in ("off", "0", "false"):
+                _t.SAFE_READ_ONLY = False
+            elif arg in ("", "status"):
+                _t.SAFE_READ_ONLY = _t.SAFE_READ_ONLY if arg == "status" else (not _t.SAFE_READ_ONLY)
+            else:
+                print(f"{C_DIM}usage: /lockdown [on|off|status]{C_RESET}")
+                return True
+            if _t.SAFE_READ_ONLY:
+                print(f"{C_OK}lockdown ON{C_RESET} {C_DIM}— reads confined to the workspace ({_t.WORKSPACE}). Set JARVIS_LOCKDOWN=1 to make it the default.{C_RESET}")
+            else:
+                print(f"{C_OK}lockdown OFF{C_RESET} {C_DIM}— reads unrestricted (any file on disk). Writes stay workspace-confined regardless.{C_RESET}")
             return True
         if low in ("/voice", "/voices") or low.startswith("/voice ") or low.startswith("/voices "):
             parts = cmd.split()

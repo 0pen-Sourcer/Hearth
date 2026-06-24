@@ -6656,12 +6656,20 @@ _LOAD_TOOLS_SCHEMA = {
 def _tool_active(name: str) -> bool:
     if not _TOOL_DIET:
         return True
-    # A user's OWN plugins are always active — they authored them on purpose, so
-    # hiding them behind load_tools just makes the model flail (it tries to
-    # run_command-import a tool it can't see). Only niche BUILT-INS get deferred.
-    if name in _loaded_plugins:
-        return True
+    # Plugins are deferred by default like any niche tool, so a user with many
+    # plugins doesn't bloat the core prompt — they're rediscovered via load_tools
+    # (reliable now that the matcher scores by relevance). A plugin opts into the
+    # always-loaded core set with TOOL["core"] = True (handled in the deferred-set
+    # build above). This used to force-activate every plugin, from back when
+    # load_tools was unreliable; that's no longer needed.
     return (name not in _DEFERRED_TOOLS) or (name in _unlocked_tools)
+
+
+def active_tool_count() -> int:
+    """How many tool schemas actually ship in the prompt right now (core + any
+    unlocked). The rest load on demand via load_tools — so this, not the total,
+    is the real per-turn tool overhead."""
+    return sum(1 for t in TOOL_DEFINITIONS if _tool_active(t["name"]))
 
 
 def _any_tool_still_deferred() -> bool:
