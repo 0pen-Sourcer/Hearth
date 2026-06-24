@@ -60,6 +60,15 @@ clr-loader; sys_platform == "win32"
 # Linux native window (optional — uncomment if you want a real window vs browser):
 # pyqtwebengine; sys_platform == "linux"
 
+# ---- Desktop control (operate the OS: read the a11y tree, drive mouse/keyboard) ----
+uiautomation; sys_platform == "win32"      # Windows: read the focused window's UI tree (desktop_snapshot/click/type)
+comtypes; sys_platform == "win32"          # COM bridge uiautomation is built on
+pynput; sys_platform != "win32"            # Linux/macOS real mouse+keyboard (Windows uses pure ctypes; experimental off-Windows)
+pyobjc-framework-ApplicationServices; sys_platform == "darwin"   # macOS: Accessibility (AX) tree
+pyobjc-framework-Cocoa; sys_platform == "darwin"                 # macOS: frontmost-app lookup (NSWorkspace)
+# Linux desktop a11y uses AT-SPI via PyGObject, which needs system packages pip
+# can't install:  sudo apt install python3-gi gir1.2-atspi-2.0 at-spi2-core
+
 # ---- Discord bridge (optional) ----
 # Two-way chat via a Discord bot (official API, no ban risk). Off by default;
 # `pip install discord.py` to enable, then `python -m hearth.discord_bridge`.
