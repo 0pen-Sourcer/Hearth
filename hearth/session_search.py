@@ -36,7 +36,7 @@ class Match:
     message_index: int
     role: str
     content: str
-    snippet: str  # FTS5 snippet() output with [highlight] markers
+    snippet: str  # FTS5 snippet() context window (clean text, '…' for elision)
     score: float
     updated: float
 
@@ -246,7 +246,7 @@ def search(query: str, limit: int = 8) -> List[Match]:
         cur = conn.execute(
             """
             SELECT conversation_id, title, message_index, role, content,
-                   snippet(messages, 4, '[[', ']]', '…', 12),
+                   snippet(messages, 4, '', '', '…', 28),
                    bm25(messages), updated
               FROM messages
              WHERE messages MATCH ?
