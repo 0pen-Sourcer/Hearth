@@ -119,6 +119,9 @@ docs/DEMO_SCRIPT.md
 docs/TEST_PLAYBOOK*.md
 docs/TESTBOOK*.md
 docs/RUNBOOK.md
+docs/CONTENT_STRATEGY.md
+docs/LAUNCH_CONTENT.md
+docs/TESTER_GUIDE_LITE.md
 
 # ---- Stale deep docs — deferred until rewritten post-launch ----
 # The codebase moved fast; these describe an older Hearth and would ship wrong
