@@ -216,6 +216,17 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
     from . import subagents
     if not members:
         return {"ok": False, "error": "no team members given"}
+    # Cap team size: each member is a full background LLM loop hammering the
+    # model server + its own pane. A model that returns 20 members would self-DoS
+    # an 8GB local box (depth guard only stops NESTED forks, not siblings). Cap is
+    # endpoint-aware: a cloud endpoint can handle more parallelism (it costs $ but
+    # doesn't serialize), a local single-GPU server can't.
+    _base = os.environ.get("LOCAL_API_BASE", "").lower()
+    _local = any(h in _base for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1",
+                                      "192.168.", "10.", "host.docker.internal"))
+    _MAX_TEAM = 4 if _local else 8
+    if len(members) > _MAX_TEAM:
+        members = members[:_MAX_TEAM]
     spawned: List[Dict[str, Any]] = []
     for m in members:
         prompt = (m.get("prompt") or "").strip()
