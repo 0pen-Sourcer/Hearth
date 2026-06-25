@@ -416,6 +416,19 @@ async def run_once(
     _now = _dt.datetime.now().astimezone()
     _sys += (f"\n\nCurrent local time: {_now.strftime('%Y-%m-%d %H:%M')} "
              f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).")
+    # Tell the model where its brain lives so it can weigh resource vs cost when
+    # choosing heavy tools (big agent teams, many concurrent subagents). Re-checked
+    # each turn so a /brain switch mid-session updates it.
+    if _is_local_endpoint(os.environ.get("LOCAL_API_BASE", "")):
+        _sys += ("\n\nRuntime: LOCAL model server — free + private, but it serves ONE "
+                 "request at a time on limited VRAM, so big parallel fan-outs (large "
+                 "teams, many concurrent subagents) SERIALIZE and crawl. Keep teams "
+                 "small (~3-4) and prefer one capable pass over a wide fan-out.")
+    else:
+        _sys += ("\n\nRuntime: CLOUD model endpoint — every token costs the user real "
+                 "money. Parallel agents run fast here, but each one multiplies spend. "
+                 "Only fan out a team when the task genuinely needs it, and use the "
+                 "smallest team that does the job.")
     _block = _mem.recall_for_prompt(prompt)
     if _block:
         _sys += "\n\n" + _block
