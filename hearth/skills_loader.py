@@ -155,12 +155,19 @@ def skills_for_prompt(max_per_skill: int = 120) -> str:
     skills = list_skills(include_body=False)
     if not skills:
         return ""
+    # Cap the catalog so it can't grow the prompt unbounded as a user installs /
+    # authors more skills — the model loads the rest via list_skills on demand
+    # (same idea as the memory-index + tool-diet caps).
+    _MAX_IN_PROMPT = 30
+    extra = max(0, len(skills) - _MAX_IN_PROMPT)
     lines = ["# Available skills (call load_skill(<name>) for the full instructions)"]
-    for s in skills:
+    for s in skills[:_MAX_IN_PROMPT]:
         desc = (s.get("description") or "").strip()
         if len(desc) > max_per_skill:
             desc = desc[:max_per_skill].rstrip() + "..."
         lines.append(f"  - {s['name']} - {desc}")
+    if extra:
+        lines.append(f"  …and {extra} more — call list_skills for the full catalog.")
     return "\n".join(lines)
 
 

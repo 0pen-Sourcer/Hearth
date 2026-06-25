@@ -414,6 +414,33 @@ def _build_system_prompt(persona: Dict[str, Any], user_prompt: str) -> str:
     return body
 
 
+def _run_coro_quiet(coro):
+    """Run a coroutine on a private event loop whose teardown won't spew the
+    Windows 'Event loop is closed' race — a background subagent's AsyncOpenAI/
+    httpx client finishes its TLS aclose() AFTER asyncio.run() would have closed
+    the loop, and CPython's proactor reports that through the loop's exception
+    handler. We drain async-gens, give pending transport-close callbacks one
+    tick to run, and swallow only that specific RuntimeError."""
+    loop = asyncio.new_event_loop()
+
+    def _quiet(_loop, ctx):
+        exc = ctx.get("exception")
+        if isinstance(exc, RuntimeError) and "Event loop is closed" in str(exc):
+            return
+        _loop.default_exception_handler(ctx)
+
+    loop.set_exception_handler(_quiet)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.run_until_complete(asyncio.sleep(0))  # let transport closes fire
+        except Exception:
+            pass
+        loop.close()
+
+
 async def _run_subagent_async(
     persona: Dict[str, Any],
     user_prompt: str,
@@ -592,7 +619,7 @@ def _run_one_sync(p: Dict[str, Any], prompt: str, turns_cap: int,
                                     should_cancel=should_cancel), loop)
             result = fut.result(timeout=180.0 * turns_cap)
         except RuntimeError:
-            result = asyncio.run(
+            result = _run_coro_quiet(
                 _run_subagent_async(p, prompt, turns_cap, agent_id,
                                     should_cancel=should_cancel))
     except Exception as e:
