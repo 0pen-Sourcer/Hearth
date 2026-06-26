@@ -83,6 +83,20 @@ def _sender_number(message) -> str:
         return ""
 
 
+# System message injected every bridge turn (not persisted): teaches the model
+# it CAN send files here by naming their path.
+_CHANNEL_PRIMER = {
+    "role": "system",
+    "content": (
+        "You're reachable over WhatsApp right now — a chat bridge, not the "
+        "desktop GUI. To send the user a FILE or IMAGE (a screenshot, a PDF, a "
+        "chart you made), just include its absolute local path in your reply; "
+        "the bridge auto-sends any local path you mention. So you CAN send files "
+        "here — never tell the user you can't. Keep replies chat-length."
+    ),
+}
+
+
 async def _run(prompt: str, history: list) -> str:
     """One agent turn through the shared loop; collect the final reply."""
     from . import headless
@@ -101,7 +115,8 @@ async def _run(prompt: str, history: list) -> str:
                 events.append((nm, kw.get("args")))
 
     try:
-        await headless.run_once(prompt, emit=emit, history=history,
+        await headless.run_once(prompt, emit=emit,
+                                history=[_CHANNEL_PRIMER] + (history or []),
                                 permission_check=lambda _n, _a: "allow",
                                 supervised=False)  # phone: destructive guard still fires
     except Exception as e:
