@@ -4678,7 +4678,7 @@ function renderMessage(m) {
       // this, mashing Speak on multiple messages queues them all up and the
       // user has to wait through the whole queue.
       try { await stopTTS(); } catch {}
-      speakText(m.content);
+      speakText(m.content, true);  // explicit user action — always play
     });
     const regenBtn = div.querySelector('.a-regen');
     if (regenBtn) {
@@ -8447,7 +8447,7 @@ $$('.switch').forEach(sw => {
 // ============================================================
 // TTS - speak via backend (system speakers)
 // ============================================================
-async function speakText(text) {
+async function speakText(text, force = false) {
   if (!text || !text.trim()) {
     toast('Nothing to speak', 'message is empty', 'warn');
     return;
@@ -8455,7 +8455,9 @@ async function speakText(text) {
   try {
     const r = await fetch('/api/tts', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ text }),
+      // force=true on the manual Speak button: clear any stale abort so it
+      // ALWAYS plays. Streaming auto-speak leaves it false to keep barge-in.
+      body: JSON.stringify({ text, force }),
     });
     if (r.ok) return;
     // Surface the actual server reason instead of silently swallowing it.

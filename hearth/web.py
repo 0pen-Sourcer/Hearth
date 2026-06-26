@@ -2938,6 +2938,14 @@ class HearthHandler(BaseHTTPRequestHandler):
         if not _voice or not _voice.is_available():
             reason = _voice.status() if _voice else {"reason": "voice module missing"}
             return self._send_json(503, {"error": "TTS not available", "detail": reason})
+        # The manual Speak button sends force=true: clear any stale abort flag so
+        # it ALWAYS plays. Without this, a prior stop()/barge-in left _abort set
+        # and every Speak click was silently dropped (the silent-Speak bug).
+        if body.get("force"):
+            try:
+                _voice.reset_abort()
+            except Exception:
+                pass
         # Speak through system speakers — non-blocking so the request returns fast
         try:
             r = _voice.speak(text, blocking=False)
