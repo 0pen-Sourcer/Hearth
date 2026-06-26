@@ -152,8 +152,28 @@ def _build_recorder():
         spinner=False,
         level=40,
         use_microphone=True,
+        # Honor the user's mic pick (same setting as the CLI loop). None lets
+        # RealtimeSTT/PortAudio use the OS default.
+        input_device_index=_mic_index(),
     )
     return rec
+
+
+def _mic_index():
+    try:
+        from .listen import input_device_index
+        return input_device_index()
+    except Exception:
+        return None
+
+
+def reset_recorder():
+    """Drop the cached recorder so the next voice session rebuilds it — e.g.
+    after the user picks a different mic. A live session keeps its recorder
+    until it ends; the change lands on the next start."""
+    global _recorder
+    with _recorder_lock:
+        _recorder = None
 
 
 def _get_recorder():

@@ -25,10 +25,11 @@ _thread = None
 
 
 def _violet(intensity: float) -> int:
-    """A violet COLORREF (0x00BBGGRR) scaled by intensity 0..1 — brighter dots
-    read as 'energy', dim ones as the resting grid."""
+    """Hearth violet COLORREF (0x00BBGGRR) scaled by intensity 0..1 — brighter
+    dots read as 'energy', dim ones as the resting grid. Matches the GUI voice
+    grid's purple (≈ #9D7BFF); the old 0xE0/0x60/0xC0 was magenta/pink."""
     k = max(0.12, min(1.0, intensity))
-    r, g, b = int(0xE0 * k), int(0x60 * k), int(0xC0 * k)
+    r, g, b = int(0x9D * k), int(0x7B * k), int(0xFF * k)
     return (b << 16) | (g << 8) | r
 
 

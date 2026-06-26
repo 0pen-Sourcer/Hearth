@@ -48,6 +48,31 @@ VOICES_DIR = os.path.join(WORKSPACE, "voices")
 # on CPU. Override via env if user has a beefier setup.
 MODEL_SIZE = os.environ.get("JARVIS_STT_MODEL", "base.en")
 COMPUTE_TYPE = os.environ.get("JARVIS_STT_COMPUTE", "int8")  # CPU-friendly
+
+
+def list_input_devices() -> list:
+    """[{index, name}] of audio INPUT devices (mics), for the mic picker. The
+    OS default isn't always the one you want (e.g. a Steam Link / virtual mic)."""
+    try:
+        import sounddevice as sd  # type: ignore
+        devs = []
+        for i, d in enumerate(sd.query_devices()):
+            if int(d.get("max_input_channels", 0)) > 0:
+                devs.append({"index": i, "name": str(d.get("name", f"input {i}"))})
+        return devs
+    except Exception:
+        return []
+
+
+def input_device_index():
+    """Selected mic index (env JARVIS_VOICE_INPUT_DEVICE, set from settings), or
+    None = let PortAudio pick the OS default. Drives BOTH the CLI sounddevice
+    loop and the GUI RealtimeSTT recorder, so one picker controls both."""
+    v = (os.environ.get("JARVIS_VOICE_INPUT_DEVICE", "") or "").strip()
+    if v.lstrip("-").isdigit():
+        idx = int(v)
+        return idx if idx >= 0 else None
+    return None
 DEVICE = os.environ.get("JARVIS_STT_DEVICE", "cpu")  # "cuda" if you want GPU
 SAMPLE_RATE = 16000  # Whisper input rate
 
@@ -249,7 +274,7 @@ def _record_until_silence(max_seconds: float = MAX_UTTERANCE_S):
     t0 = time.time()
 
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                        blocksize=block_n) as stream:
+                        blocksize=block_n, device=input_device_index()) as stream:
         while time.time() - t0 < max_seconds:
             data, _overflow = stream.read(block_n)
             mono = data[:, 0] if data.ndim > 1 else data
@@ -351,7 +376,8 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
 
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1,
-                            dtype="float32", blocksize=block_n) as stream:
+                            dtype="float32", blocksize=block_n,
+                            device=input_device_index()) as stream:
             while _listening:
                 try:
                     data, _ = stream.read(block_n)
