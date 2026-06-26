@@ -2916,6 +2916,16 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">GPU acceleration</div>
+            <div class="hint">Whisper transcription is slow on CPU. Install the CUDA runtime (cuBLAS + cuDNN) to run it on your NVIDIA GPU — one-time, ~500&nbsp;MB. Toggle voice off/on after it finishes.</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; min-width:240px;">
+            <button id="btn-install-gpu-voice" class="ob-choice" style="padding:8px 14px; font-size:12px;">⬇ Install GPU support (CUDA)</button>
+            <span id="gpu-voice-install-msg" style="font-size:11px; color:var(--fg-faint);"></span>
+          </div>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">Voice speed</div>
             <div class="hint">1.5 is the new default - faster, less monotone. Slide higher if you want it snappier; lower if it's too quick to follow.</div>
           </div>
@@ -2947,8 +2957,8 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Mic where</div>
-            <div class="hint">Only matters for press-to-talk recording. Real-time mode picks automatically.</div>
+            <div class="name">Where to transcribe (STT)</div>
+            <div class="hint">CPU or GPU for Whisper speech-to-text. GPU is much faster but needs the CUDA runtime (use the "Install GPU support" button above first). Real-time mode auto-picks GPU when it's available.</div>
           </div>
           <select id="setting-stt-device">
             <option value="cpu">CPU</option>
@@ -8794,6 +8804,34 @@ window.addEventListener('load', () => {
       await api('/api/settings', { method: 'POST', body: JSON.stringify({ voice_input_device: isNaN(idx) ? -1 : idx }) });
       if (typeof toast === 'function') toast('Mic set', 'restart voice mode to use it', 'ok', 2500);
     } catch (e) {}
+  });
+});
+
+// GPU voice install button (Settings → Voice): pip-installs the CUDA STT runtime
+// (cuBLAS + cuDNN) in the background + polls progress — no terminal needed. This
+// is the "download button instead of just 'not installed'" the user asked for.
+window.addEventListener('load', () => {
+  const btn = document.getElementById('btn-install-gpu-voice');
+  if (!btn) return;
+  const msg = document.getElementById('gpu-voice-install-msg');
+  let poll = null;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    if (msg) msg.textContent = 'installing… (a few minutes, ~500MB)';
+    try {
+      await api('/api/voice/install-gpu', { method: 'POST', body: JSON.stringify({ device: 'cuda' }) });
+      poll = setInterval(async () => {
+        try {
+          const s = await fetch('/api/voice/install-status').then(x => x.json());
+          if (s.running) { if (msg) msg.textContent = 'installing…'; return; }
+          if (s.done) {
+            clearInterval(poll);
+            if (msg) msg.textContent = s.msg || (s.ok ? 'installed ✓ — toggle voice off/on' : 'failed');
+            btn.disabled = false;
+          }
+        } catch (e) {}
+      }, 2500);
+    } catch (e) { if (msg) msg.textContent = 'failed to start'; btn.disabled = false; }
   });
 });
 
