@@ -4550,29 +4550,42 @@ function emptyState() {
 // poll doesn't spam the same banner every 3s. Cleared on chat switch.
 const _announcedSubagents = new Set();
 
+let _lastAutoFold = 0;  // debounce: don't re-fire while the previous fold's
+                        // /chat is still spinning up (before STATE.streaming flips)
 async function pollSubagentCompletions() {
   if (STATE.streaming) return;  // banner would clash with the live response
   try {
     const r = await fetch('/api/subagent/pending').then(x => x.json());
     const items = (r && r.pending) || [];
-    let newCount = 0;
+    let newSub = 0, reminders = 0;
     for (const n of items) {
       const id = n.agent_id || '';
-      if (!id || _announcedSubagents.has(id)) continue;
-      _announcedSubagents.add(id);
-      newCount++;
+      if (id) {
+        // Background subagent completion — dedup by its stable agent id.
+        if (_announcedSubagents.has(id)) continue;
+        _announcedSubagents.add(id);
+        newSub++;
+      } else {
+        // Reminders + other source-only notifications have NO agent_id. They
+        // USED to be skipped here, which is why a due reminder showed as a card
+        // but the model never actually said it. Count them so they get
+        // delivered. (No content-key dedup — that'd permanently mute a recurring
+        // reminder after its first fire; the drain + streaming-guard + debounce
+        // below prevent double-delivery instead.)
+        reminders++;
+      }
     }
-    // Auto-fold: if any new completions arrived AND we're idle, fire a
-    // chat call with an invisible synthetic prompt. The headless drain
-    // injects the <task-notification> for each pending subagent ahead of
-    // this prompt, so the model sees the results + responds - without
-    // the user having to type "done?" or anything else.
-    if (newCount > 0 && !STATE.streaming && activeConvo()) {
-      // Silent send - the synthetic prompt doesn't render in chat. The
-      // model just speaks (the assistant bubble appears) and folds the
-      // subagent results in naturally. No fake "user said" turn.
-      send('Subagents just returned with results - synthesize what they found and present it.',
-           null, { silent: true });
+    // Auto-fold: if anything new arrived AND we're idle, fire an invisible
+    // synthetic prompt. The headless drain injects each <task-notification>
+    // ahead of it, so the model surfaces the reminder / synthesizes the
+    // subagent result on its own — no "done?" typing needed.
+    if ((newSub > 0 || reminders > 0) && !STATE.streaming && activeConvo()
+        && Date.now() - _lastAutoFold > 4000) {
+      _lastAutoFold = Date.now();
+      const what = reminders > 0 && newSub === 0
+        ? 'A reminder you set just came due (see the notification above). Tell me about it now, briefly and naturally.'
+        : 'A background task or reminder just came due — surface it / synthesize what returned and tell me now.';
+      send(what, null, { silent: true });
     }
   } catch {}
 }
