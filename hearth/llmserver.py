@@ -425,6 +425,30 @@ def _source_label(p: Path) -> str:
     return "Disk"
 
 
+def _iter_gguf(root: Path, max_depth: int = 5):
+    """Yield *.gguf paths under `root`, but PRUNE heavy/irrelevant subtrees and
+    cap depth. A plain rglob over a broad dir like ~/Downloads (which can hold a
+    whole project + .venv + cloned repos) walks tens of thousands of files and
+    made GUI boot hang ~10-15s. This skips venv/node_modules/.git/site-packages/
+    build dirs + anything hidden, and stops at max_depth."""
+    _SKIP = {"node_modules", "site-packages", "__pycache__", "venv",
+             "dist", "build", "$recycle.bin", "windows", "program files",
+             "program files (x86)"}
+    base = str(root).rstrip("\\/").count(os.sep)
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            if dirpath.count(os.sep) - base >= max_depth:
+                dirnames[:] = []
+            # prune in place: hidden dirs (.git/.venv/.cache subtrees) + heavies
+            dirnames[:] = [d for d in dirnames
+                           if not d.startswith(".") and d.lower() not in _SKIP]
+            for f in filenames:
+                if f.endswith(".gguf"):
+                    yield Path(dirpath) / f
+    except (OSError, PermissionError):
+        return
+
+
 def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
     """Search well-known locations for *.gguf files so the user can pick from
     everything they already have — no manual copy into ~/Jarvis/models needed.
@@ -438,10 +462,15 @@ def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
     # Then scan everything else
     for root in _scan_paths_for_gguf():
         try:
-            # rglob is needed because LM Studio shards models into
-            # <publisher>/<model>/file.gguf and HF cache uses long blob paths.
+            # Broad PERSONAL dirs (Downloads/Documents) are scanned TOP-LEVEL
+            # ONLY — on a shipped app we must never crawl a stranger's whole
+            # Downloads tree (privacy + speed). Model-specific dirs (LM Studio /
+            # GPT4All / HF cache) get the depth-bounded pruned walk, since they
+            # legitimately shard into <publisher>/<model>/file.gguf.
             count = 0
-            for p in root.rglob("*.gguf"):
+            _broad = root.name.lower() in ("downloads", "documents")
+            _gen = root.glob("*.gguf") if _broad else _iter_gguf(root)
+            for p in _gen:
                 if count >= max_per_dir:
                     break
                 sp = str(p)
