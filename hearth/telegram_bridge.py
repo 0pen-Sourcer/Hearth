@@ -87,6 +87,30 @@ def _send_message(token: str, chat_id: int, text: str, reply_to=None) -> None:
         time.sleep(0.1)  # dodge Telegram's rate limit between chunks
 
 
+def _send_one(token: str, chat_id: int, text: str, reply_to=None):
+    """Send a single (un-split) message, returning its message_id or None."""
+    body = {"chat_id": chat_id, "text": text[:_TG_MAX]}
+    if reply_to:
+        body["reply_to_message_id"] = reply_to
+    try:
+        r = _post_json(_api(token, "sendMessage"), body, timeout=15)
+        if r.get("ok"):
+            return r["result"]["message_id"]
+    except Exception:
+        pass
+    return None
+
+
+def _edit_message(token: str, chat_id: int, message_id: int, text: str) -> bool:
+    try:
+        r = _post_json(_api(token, "editMessageText"),
+                       {"chat_id": chat_id, "message_id": message_id,
+                        "text": text[:_TG_MAX]}, timeout=15)
+        return bool(r.get("ok"))
+    except Exception:
+        return False
+
+
 def _send_document(token: str, chat_id: int, path: str) -> None:
     """Multipart sendDocument via stdlib (no requests dependency)."""
     try:
@@ -130,16 +154,23 @@ def _files_in(text: str):
     return out[:4]
 
 
-async def _run(prompt: str, history: list) -> str:
+async def _run(prompt: str, history: list, on_tool=None) -> str:
     """Run one turn through the shared agent loop; collect the final reply."""
     from . import headless
     parts = []
+    events = []
 
     def emit(kind, **kw):
         if kind == "assistant":
             parts.append(kw.get("content") or "")
         elif kind == "error":
             parts.append("[error] " + str(kw.get("message", "")))
+        elif kind == "tool_call":
+            nm = kw.get("name")
+            if nm:
+                events.append((nm, kw.get("args")))
+                if on_tool:
+                    on_tool(list(events))  # live "which tool is firing" feed
 
     def _allow(_name, _args):
         return "allow"  # owner-gated by chat-id allowlist; auto-approve tools
@@ -203,13 +234,40 @@ def run() -> None:
             except Exception:
                 pass
             hist = histories.setdefault(chat_id, [])
-            reply = loop.run_until_complete(_run(text, hist))
+            # Live tool feed: one status message we edit as tools fire. Throttled
+            # to ~1s/edit to stay under Telegram's edit rate limit. Created lazily
+            # on the first tool call so a pure-chat reply shows no status noise.
+            from . import bridge_status
+            status = {"events": [], "msg_id": None, "last": 0.0}
+
+            def on_tool(events):
+                status["events"] = events
+                now = time.time()
+                if now - status["last"] < 1.0:
+                    return
+                status["last"] = now
+                body = bridge_status.format_status(events, working=True)
+                if status["msg_id"] is None:
+                    status["msg_id"] = _send_one(token, chat_id, body,
+                                                 reply_to=msg.get("message_id"))
+                else:
+                    _edit_message(token, chat_id, status["msg_id"], body)
+
+            reply = loop.run_until_complete(_run(text, hist, on_tool=on_tool))
             # keep a short rolling history for multi-turn context
             hist.append({"role": "user", "content": text})
             hist.append({"role": "assistant", "content": reply})
             del hist[:-16]  # cap to the last 8 exchanges
-            _send_message(token, chat_id, reply or "(no output)",
-                          reply_to=msg.get("message_id"))
+            final = reply or "(no output)"
+            chunks = _split_4096(final)
+            # Morph the live status message into the actual answer (first chunk).
+            if status["msg_id"] is not None and _edit_message(
+                    token, chat_id, status["msg_id"], chunks[0]):
+                for c in chunks[1:]:
+                    _send_message(token, chat_id, c)
+            else:
+                _send_message(token, chat_id, final,
+                              reply_to=msg.get("message_id"))
             for f in _files_in(reply):
                 _send_document(token, chat_id, f)
 
