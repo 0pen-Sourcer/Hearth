@@ -229,7 +229,21 @@ def delete_plugin(name: str, workspace: str, tool_defs: list, handlers: dict) ->
 
 
 def _warn(msg: str) -> None:
+    # A skipped/malformed plugin is NOT an error — but printing this on every
+    # launch reads like a crash to users (it did, for them). Stay quiet on the
+    # console unless HEARTH_DEBUG is set; always keep a copy in the workspace log
+    # for anyone actually debugging why a plugin didn't load.
+    line = f"[hearth.plugins] {msg}\n"
     try:
-        sys.stderr.write(f"[hearth.plugins] {msg}\n")
+        if os.environ.get("HEARTH_DEBUG"):
+            sys.stderr.write(line)
+    except Exception:
+        pass
+    try:
+        from .tools import WORKSPACE
+        logp = os.path.join(WORKSPACE, "logs", "plugins.log")
+        os.makedirs(os.path.dirname(logp), exist_ok=True)
+        with open(logp, "a", encoding="utf-8") as f:
+            f.write(line)
     except Exception:
         pass
