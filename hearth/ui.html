@@ -2926,6 +2926,15 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">Microphone</div>
+            <div class="hint">Which mic Hearth listens through. Pick your Steam Link / headset / virtual mic if the system default isn't capturing your voice.</div>
+          </div>
+          <select id="setting-mic-device" style="min-width:240px;">
+            <option value="-1">System default</option>
+          </select>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">Whisper model size</div>
             <div class="hint"><code>tiny.en</code> = fastest, fine for clear short prompts. <code>small.en</code> for harder accents or noisy rooms.</div>
           </div>
@@ -8757,6 +8766,30 @@ window.addEventListener('load', () => {
       }, 800);  // let the app + settings finish booting first
     }
   } catch (e) {}
+});
+
+// Mic picker (Settings → Voice): populate from the OS input devices + save the
+// choice. One setting drives both STT paths; a change rebuilds the recorder.
+window.addEventListener('load', () => {
+  const sel = document.getElementById('setting-mic-device');
+  if (!sel) return;
+  (async () => {
+    try {
+      const r = await fetch('/api/voice/devices').then(x => x.json());
+      const devs = (r && r.devices) || [];
+      const cur = (r && typeof r.selected === 'number') ? r.selected : -1;
+      sel.innerHTML = '<option value="-1">System default</option>' +
+        devs.map(d => `<option value="${d.index}">${String(d.name || ('input ' + d.index)).replace(/</g, '&lt;')}</option>`).join('');
+      sel.value = String(cur);
+    } catch (e) {}
+  })();
+  sel.addEventListener('change', async () => {
+    const idx = parseInt(sel.value, 10);
+    try {
+      await api('/api/settings', { method: 'POST', body: JSON.stringify({ voice_input_device: isNaN(idx) ? -1 : idx }) });
+      if (typeof toast === 'function') toast('Mic set', 'restart voice mode to use it', 'ok', 2500);
+    } catch (e) {}
+  });
 });
 
 function setVoiceStatus(s) { $('voice-status-text').textContent = s; }
