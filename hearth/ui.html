@@ -4271,10 +4271,15 @@ async function loadConversations() {
 
 async function persistConvo(c) {
   try {
+    // Don't persist SILENT synthetic triggers (the reminder / subagent auto-fold
+    // prompts). They're transient nudges — the live session hides them via
+    // renderMsg, but if saved they reload as a fake "you said this" bubble. Strip
+    // them; the assistant's actual reply (not silent) still persists.
+    const toSave = { ...c, messages: (c.messages || []).filter(m => !m.silent) };
     await api('/api/conversations', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(c),
+      body: JSON.stringify(toSave),
     });
   } catch (e) { console.error('persistConvo', e); }
 }
@@ -8877,12 +8882,31 @@ async function voiceCycle() {
   }
 }
 
+let _voiceMuted = false;
+const _MIC_ON_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/><path d="M8 23h8"/></svg>';
+const _MIC_OFF_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 1l22 22"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><path d="M12 19v4"/><path d="M8 23h8"/></svg>';
+// Mic button is a clear 2-state toggle in realtime mode: violet mic = listening,
+// dim slashed mic = muted (paused). Idle = plain mic.
+function setMicUI() {
+  const btn = document.getElementById('voice-mic-toggle'); if (!btn) return;
+  if (rtVoiceActive && _voiceMuted) {
+    btn.innerHTML = _MIC_OFF_SVG; btn.style.color = ''; btn.style.opacity = '0.45';
+    btn.title = 'Muted — click to listen'; setVoiceStatus('🔇 muted — click the mic to talk');
+  } else if (rtVoiceActive) {
+    btn.innerHTML = _MIC_ON_SVG; btn.style.color = 'var(--accent)'; btn.style.opacity = '1';
+    btn.title = 'Listening — click to mute'; setVoiceStatus('🎙 listening — just talk');
+  } else {
+    btn.innerHTML = _MIC_ON_SVG; btn.style.color = ''; btn.style.opacity = '1';
+    btn.title = 'Start / stop talking';
+  }
+}
 $('voice-mic-toggle').addEventListener('click', () => {
-  // If realtime mode is running, the mic button is a no-op (we're already
-  // listening continuously via silero VAD). Otherwise fall back to the
-  // legacy press-to-talk cycle.
+  // Realtime mode: the mic button is a MUTE toggle (we listen continuously via
+  // silero VAD). Muted drops transcripts so you can pause without exiting.
+  // Otherwise fall back to the legacy press-to-talk cycle.
   if (rtVoiceActive) {
-    setVoiceStatus('Realtime listening on - just talk');
+    _voiceMuted = !_voiceMuted;
+    setMicUI();
     return;
   }
   voiceCycle();
@@ -8920,8 +8944,9 @@ async function startRealtimeVoice() {
   const ok = await probeRealtimeVoice();
   if (!ok) return false;
   rtVoiceActive = true;
+  _voiceMuted = false;
   rtVoiceAbort = new AbortController();
-  setVoiceStatus('listening (realtime)');
+  setMicUI();  // show the listening state on the mic button + status
   try {
     const resp = await fetch('/api/voice/realtime/stream', {
       method: 'GET',
@@ -8974,8 +8999,9 @@ function handleRealtimeEvent(ev) {
   } else if (ev.type === 'final') {
     const text = (ev.text || '').trim();
     if (!text) return;
+    if (_voiceMuted) { setVoiceTranscript(''); return; }  // muted — drop the utterance
     setVoiceTranscript(text);
-    setVoiceStatus('thinking');
+    setVoiceStatus('💭 thinking');
     // Send to chat. The server pauses the mic during TTS playback so we
     // won't transcribe our own voice; partial events resume after silence.
     send(text);
