@@ -1372,6 +1372,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             if _listen:
                 try:
                     stt_status = _listen.status()
+                    # Surface whether the CUDA whisper runtime is actually present
+                    # so the GUI's STT dropdown shows "(not installed)" accurately.
+                    try:
+                        stt_status = {**stt_status, "cuda_available": bool(_listen.cuda_available())}
+                    except Exception:
+                        pass
                 except Exception as e:
                     stt_status = {"ready": False, "reason": f"{type(e).__name__}: {e}"}
             if _rt_voice:
@@ -1665,8 +1671,14 @@ class HearthHandler(BaseHTTPRequestHandler):
             global _VOICE_INSTALL
             body = self._read_json()
             dev = (body.get("device") or "cuda").strip().lower()
-            pkgs = {"cuda": ["nvidia-cublas-cu12", "nvidia-cudnn-cu12"],
-                    "dml":  ["onnxruntime-directml"]}.get(dev)
+            # The GUI can pass the exact pip package(s) for the option it's
+            # installing (TTS GPU = onnxruntime-gpu, etc.); otherwise fall back
+            # to the device map (STT CUDA = cuBLAS+cuDNN, DirectML = ort-dml).
+            explicit = body.get("packages")
+            if isinstance(explicit, str):
+                explicit = explicit.split()
+            pkgs = explicit or {"cuda": ["nvidia-cublas-cu12", "nvidia-cudnn-cu12"],
+                                "dml":  ["onnxruntime-directml"]}.get(dev)
             if not pkgs:
                 return self._send_json(400, {"ok": False, "error": f"unknown device '{dev}'"})
             if _VOICE_INSTALL.get("running"):

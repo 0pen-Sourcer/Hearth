@@ -623,6 +623,17 @@
   .branch-nav button:hover:not(:disabled) { color: var(--fg); background: rgba(255,255,255,.07); }
   .branch-nav button:disabled { opacity: .3; cursor: default; }
   .branch-nav .bn-count { font-size: 11px; color: var(--fg-faint); min-width: 26px; text-align: center; font-variant-numeric: tabular-nums; }
+  /* Inline GPU-runtime install: a real spinner ring + status right under the
+     device dropdown when you pick a "(not installed)" option. No separate
+     button, no disconnected "installing…" text. */
+  .gpu-installer { display: flex; align-items: center; gap: 8px; width: 100%; justify-content: flex-end; margin-top: 7px; font-size: 11.5px; color: var(--fg-dim); }
+  .gpu-installer[hidden] { display: none; }
+  .gpu-ring { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border-2); border-top-color: var(--accent-2, #a78bfa); animation: gpu-spin .8s linear infinite; flex: none; }
+  .gpu-installer.ok .gpu-ring { animation: none; border-color: var(--ok, #87ff87); }
+  .gpu-installer.err .gpu-ring { animation: none; border-color: #f87171; }
+  .gpu-installer.ok .gpu-msg { color: var(--ok, #87ff87); }
+  .gpu-installer.err .gpu-msg { color: #f87171; }
+  @keyframes gpu-spin { to { transform: rotate(360deg); } }
   /* Single-line input: buttons align dead-center with the textarea. When
      textarea grows multiline, buttons sit at the bottom edge so they remain
      next to the most-recent caret position. */
@@ -2976,16 +2987,6 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">GPU acceleration</div>
-            <div class="hint">Whisper transcription is slow on CPU. Install the CUDA runtime (cuBLAS + cuDNN) to run it on your NVIDIA GPU — one-time, ~500&nbsp;MB. Toggle voice off/on after it finishes.</div>
-          </div>
-          <div style="display:flex; align-items:center; gap:10px; min-width:240px;">
-            <button id="btn-install-gpu-voice" class="ob-choice" style="padding:8px 14px; font-size:12px;">⬇ Install GPU support (CUDA)</button>
-            <span id="gpu-voice-install-msg" style="font-size:11px; color:var(--fg-faint);"></span>
-          </div>
-        </div>
-        <div class="field">
-          <div class="label">
             <div class="name">Voice speed</div>
             <div class="hint">1.5 is the new default - faster, less monotone. Slide higher if you want it snappier; lower if it's too quick to follow.</div>
           </div>
@@ -3018,11 +3019,11 @@
         <div class="field">
           <div class="label">
             <div class="name">Where to transcribe (STT)</div>
-            <div class="hint">CPU or GPU for Whisper speech-to-text. GPU is much faster but needs the CUDA runtime (use the "Install GPU support" button above first). Real-time mode auto-picks GPU when it's available.</div>
+            <div class="hint">CPU or GPU for Whisper speech-to-text. GPU is much faster. If it says "(not installed)", just pick it — Hearth downloads the CUDA runtime for you (~500&nbsp;MB, one-time) right here.</div>
           </div>
-          <select id="setting-stt-device">
+          <select id="setting-stt-device" data-gpu="1">
             <option value="cpu">CPU</option>
-            <option value="cuda">GPU (CUDA)</option>
+            <option value="cuda" data-needs="nvidia-cublas-cu12 nvidia-cudnn-cu12">GPU (CUDA)</option>
           </select>
         </div>
 
@@ -7911,60 +7912,90 @@ async function refreshSettings() {
         forgeDetectBtn.textContent = 'Detect';
       }
     };
-    // Device selectors
+    // Device selectors. TTS + STT share ONE flow: a "(not installed)" GPU option
+    // is still selectable — picking it downloads its runtime right here (spinner
+    // ring + status under the dropdown) and then selects it. No separate install
+    // button, no disconnected "installing…" text.
     const ttsDev = $('setting-tts-device');
     const sttDev = $('setting-stt-device');
     const sttMdl = $('setting-stt-model');
-    if (ttsDev) {
-      ttsDev.value = s.tts_device || 'cpu';
-      // Grey-out options whose ONNX provider isn't actually installed on this
-      // machine, and append a download hint so the user knows WHY it's grey
-      // (and what to install). Without this, picking "GPU (CUDA)" with only
-      // the CPU wheel installed used to silently fall back to CPU AND
-      // sometimes emit zero-audio frames - confused users into thinking TTS
-      // was muted. (See voice.py `last_load_warning` path.)
-      try {
-        const vstat = await api('/api/voice/status');
-        const tprov = (vstat.tts && vstat.tts.onnx_providers_available) || [];
-        const installed = new Set(tprov);
-        const providerMap = {
-          'cuda': 'CUDAExecutionProvider',
-          'dml':  'DmlExecutionProvider',
-        };
-        for (const opt of ttsDev.options) {
-          // Capture the base label ONCE so re-opening Settings rebuilds from it
-          // instead of appending "(not installed)" every time (the triple-spam
-          // bug). Always reset, then re-decorate from current install state.
-          if (!opt.dataset.base) opt.dataset.base = opt.text;
-          const need = providerMap[opt.value];
-          if (need && !installed.has(need)) {
-            const wheel = opt.dataset.needs || '';
-            opt.text = `${opt.dataset.base} (not installed)`;
-            opt.title = `Install: pip install ${wheel}`;
-            opt.disabled = true;
-          } else {
-            opt.text = opt.dataset.base;
-            opt.title = '';
-            opt.disabled = false;
-          }
+
+    async function wireGpuSelect(sel, isInstalled, onApply) {
+      if (!sel) return;
+      const field = sel.parentElement;
+      let inst = field.querySelector('.gpu-installer');
+      if (!inst) {
+        field.style.flexWrap = 'wrap';
+        inst = document.createElement('div'); inst.className = 'gpu-installer'; inst.hidden = true;
+        inst.innerHTML = '<span class="gpu-ring"></span><span class="gpu-msg"></span>';
+        field.appendChild(inst);
+      }
+      const gmsg = inst.querySelector('.gpu-msg');
+      for (const opt of sel.options) {
+        if (!opt.dataset.base) opt.dataset.base = opt.text;  // capture once
+        if (opt.value === 'cpu') { opt.text = opt.dataset.base; opt.dataset.ni = ''; opt.disabled = false; continue; }
+        const ok = isInstalled(opt);
+        opt.disabled = false;  // keep selectable so picking it can install it
+        opt.text = ok ? opt.dataset.base : opt.dataset.base + ' (not installed)';
+        opt.dataset.ni = ok ? '' : '1';
+      }
+      let prev = sel.value;
+      sel.onchange = async () => {
+        const opt = sel.options[sel.selectedIndex];
+        if (opt.dataset.ni === '1') {
+          sel.value = prev; sel.disabled = true;           // hold until installed
+          inst.hidden = false; inst.className = 'gpu-installer';
+          gmsg.textContent = 'downloading GPU runtime… (~500MB, one-time)';
+          try {
+            await api('/api/voice/install-gpu', { method: 'POST',
+              body: JSON.stringify({ device: opt.value, packages: opt.dataset.needs || '' }) });
+            const st = await new Promise((res) => {
+              const t = setInterval(async () => {
+                try { const x = await fetch('/api/voice/install-status').then(r => r.json()); if (!x.running) { clearInterval(t); res(x); } } catch {}
+              }, 2000);
+            });
+            if (st && st.ok) {
+              inst.classList.add('ok'); gmsg.textContent = 'installed ✓';
+              opt.dataset.ni = ''; opt.text = opt.dataset.base;
+              sel.value = opt.value; prev = opt.value;
+              await onApply(opt.value);
+              setTimeout(() => { inst.hidden = true; inst.classList.remove('ok'); }, 2600);
+            } else {
+              inst.classList.add('err');
+              gmsg.textContent = 'install failed' + (st && st.msg ? ': ' + String(st.msg).slice(0, 70) : '');
+            }
+          } catch (e) { inst.classList.add('err'); gmsg.textContent = 'failed to start'; }
+          sel.disabled = false;
+          return;
         }
-      } catch {}
-      ttsDev.onchange = async (e) => {
-        await saveSetting('tts_device', e.target.value);
-        try {
-          await api('/api/voice/reload', { method: 'POST' });
-          // Re-fetch status: if the engine reports a soft warning (e.g. it
-          // gracefully fell back), tell the user instead of pretending success.
-          const after = await api('/api/voice/status');
-          const warn = after.tts && after.tts.last_load_warning;
-          if (warn) {
-            toast('TTS fell back', warn, 'warn', 8000);
-          } else {
-            toast('TTS', 'switched to ' + e.target.value, 'ok');
-          }
-        } catch (err) { toast('TTS device', err.message, 'err'); }
+        prev = sel.value;
+        await onApply(sel.value);
       };
     }
+
+    // Probe what's installed once, for both dropdowns.
+    let _ttsProv = new Set(), _sttCuda = false;
+    try {
+      const vstat = await api('/api/voice/status');
+      _ttsProv = new Set((vstat.tts && vstat.tts.onnx_providers_available) || []);
+      _sttCuda = !!(vstat.stt && (vstat.stt.cuda_available || vstat.stt.cuda));
+    } catch {}
+    const _provMap = { cuda: 'CUDAExecutionProvider', dml: 'DmlExecutionProvider' };
+
+    if (ttsDev) {
+      ttsDev.value = s.tts_device || 'cpu';
+      await wireGpuSelect(ttsDev, (opt) => _ttsProv.has(_provMap[opt.value]), async (v) => {
+        await saveSetting('tts_device', v);
+        try {
+          await api('/api/voice/reload', { method: 'POST' });
+          const after = await api('/api/voice/status');
+          const warn = after.tts && after.tts.last_load_warning;
+          if (warn) toast('TTS fell back', warn, 'warn', 8000);
+          else toast('TTS', 'switched to ' + v, 'ok');
+        } catch (err) { toast('TTS device', err.message, 'err'); }
+      });
+    }
+
     // Voice speed slider - applies live, persists to settings.json
     const speedInp = $('setting-voice-speed');
     const speedLbl = $('setting-voice-speed-label');
@@ -7981,15 +8012,14 @@ async function refreshSettings() {
         await saveSetting('voice_speed', v);
       };
     }
+
     if (sttDev) {
       sttDev.value = s.stt_device || 'cpu';
-      sttDev.onchange = async (e) => {
-        await saveSetting('stt_device', e.target.value);
-        try {
-          await api('/api/voice/reload', { method: 'POST' });
-          toast('STT', 'switched to ' + e.target.value, 'ok');
-        } catch (err) { toast('STT device', err.message, 'err'); }
-      };
+      await wireGpuSelect(sttDev, () => _sttCuda, async (v) => {
+        await saveSetting('stt_device', v);
+        try { await api('/api/voice/reload', { method: 'POST' }); toast('STT', 'switched to ' + v, 'ok'); }
+        catch (err) { toast('STT device', err.message, 'err'); }
+      });
     }
     if (sttMdl) {
       sttMdl.value = s.stt_model || 'base.en';
