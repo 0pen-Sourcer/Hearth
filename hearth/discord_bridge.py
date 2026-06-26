@@ -82,6 +82,22 @@ def _files_in(text: str):
     return out[:4]
 
 
+# Injected as a system message every bridge turn (not persisted to history, so
+# the rolling-history cap can't drop it). Teaches the model the channel's one
+# non-obvious affordance: it CAN send files here by naming their path.
+_CHANNEL_PRIMER = {
+    "role": "system",
+    "content": (
+        "You're reachable over Discord right now — a chat bridge, not the "
+        "desktop GUI. To send the user a FILE or IMAGE (a screenshot, a PDF, a "
+        "chart you made), just include its absolute local path in your reply; "
+        "the bridge auto-attaches any local path you mention. So you CAN attach "
+        "files here — never tell the user you can't. Keep replies chat-length "
+        "and don't reference GUI-only buttons."
+    ),
+}
+
+
 async def _run(prompt: str, history: list, on_tool=None) -> str:
     from . import headless
     parts = []
@@ -100,7 +116,8 @@ async def _run(prompt: str, history: list, on_tool=None) -> str:
                     on_tool(list(events))  # live "which tool is firing" feed
 
     try:
-        await headless.run_once(prompt, emit=emit, history=history,
+        await headless.run_once(prompt, emit=emit,
+                                history=[_CHANNEL_PRIMER] + (history or []),
                                 permission_check=lambda _n, _a: "allow",
                                 supervised=False)  # phone: destructive guard still fires
     except Exception as e:
@@ -205,7 +222,7 @@ def run() -> None:
                 if not state["dirty"]:
                     continue
                 state["dirty"] = False
-                body = bridge_status.format_status(state["events"], working=True)[:_DISCORD_MAX]
+                body = bridge_status.format_status(state["events"], working=True, rich=True)[:_DISCORD_MAX]
                 try:
                     if state["msg"] is None:
                         state["msg"] = await message.channel.send(body)
@@ -227,24 +244,17 @@ def run() -> None:
         hist.append({"role": "user", "content": text})
         hist.append({"role": "assistant", "content": reply})
         del hist[:-16]
-        chunks = _split(reply or "(no output)")
-        # Morph the live status message into the actual answer (first chunk), so
-        # the same bubble goes work -> result. Fall back to a fresh send.
-        first = chunks[0] if chunks else "(no output)"
-        if state["msg"] is not None:
+        # Finalize the tool status into a "Tools used" list that STAYS (its own
+        # message), then send the answer as separate message(s) below it — so the
+        # channel reads "tools used X" then the reply, never one edited into the
+        # other (which mashed two turns' replies together before).
+        if state["msg"] is not None and state["events"]:
             try:
-                await state["msg"].edit(content=first)
-            except Exception:
-                try:
-                    await message.channel.send(first)
-                except Exception:
-                    pass
-        else:
-            try:
-                await message.channel.send(first)
+                done = bridge_status.format_status(state["events"], working=False, rich=True)[:_DISCORD_MAX]
+                await state["msg"].edit(content=done)
             except Exception:
                 pass
-        for chunk in chunks[1:]:
+        for chunk in _split(reply or "(no output)"):
             try:
                 await message.channel.send(chunk)
             except Exception:
