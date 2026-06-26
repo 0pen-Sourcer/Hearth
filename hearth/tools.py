@@ -5362,13 +5362,11 @@ def _generate_video(p: Dict) -> str:
     )
     if not r.get("ok"):
         return f"Error: {r.get('error')}"
+    # Keep this terse — it shows in the tool card. Just enough for the model to
+    # carry the task_id and know it's async; no verbose NEXT-STEP dump.
     return (
-        f"Video generation started (task_id: {r.get('task_id')}).\n"
-        f"  model:  {r.get('model')}\n"
-        f"  prompt: \"{r.get('prompt')[:80]}\"\n"
-        f"{r.get('hint', '')}\n\n"
-        f"NEXT STEP: tell the user the video is cooking and they can ask "
-        f"'is the video ready?' later. Don't poll in a tight loop."
+        f"Video rendering (~20-60s) · task {r.get('task_id')}. "
+        f"Tell the user it's cooking; call check_video_task() when they ask if it's ready."
     )
 
 
