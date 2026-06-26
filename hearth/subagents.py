@@ -161,6 +161,14 @@ def enqueue_notification(*, source: str, name: str, status: str,
         "used_tools": [],
     }
     with _NOTIF_LOCK:
+        # Collapse accidental doubles (two watcher ticks / two processes firing
+        # the same reminder) — an identical notification already waiting in the
+        # queue would otherwise render as two identical cards in one turn.
+        for _n in _PENDING_NOTIFICATIONS:
+            if (_n.get("persona") == notif["persona"]
+                    and _n.get("name") == notif["name"]
+                    and _n.get("result_text") == notif["result_text"]):
+                return _n
         _PENDING_NOTIFICATIONS.append(notif)
     return notif
 
