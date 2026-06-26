@@ -419,6 +419,14 @@ def _clean_for_tts(text: str) -> str:
     s = _re.sub(r"[A-Za-z]:[\\/][\w\.\-\\\/ ]+", "a file", s)
     # Long numeric runs (timestamps, hashes) — replace with "the file"
     s = _re.sub(r"\d{8,}", "the file", s)
+    # Strip emojis + pictographs + variation selectors / ZWJ — Kokoro either
+    # mispronounces them or emits a weird noise; nobody wants "fire emoji" read
+    # aloud. Covers emoticons, symbols/pictographs, transport, supplemental,
+    # dingbats, flags.
+    s = _re.sub(
+        "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+        "\U00002B00-\U00002BFF\U0001F900-\U0001F9FF️‍♀♂]",
+        "", s)
     # Em-dash / en-dash → comma (more natural pause)
     s = s.replace("—", ", ").replace("–", ", ")
     # Collapse repeated newlines
