@@ -202,6 +202,18 @@
   }
   .btn-new-chat:hover { background: var(--accent-2); transform: translateY(-1px); }
   .btn-new-chat:active { transform: translateY(0); }
+  /* Collapsible recent-chats list — cleaner sidebar when you don't want the
+     history showing. State persists across launches. */
+  .convo-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none; padding: 9px 16px 5px;
+    font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--fg-faint); transition: color 0.15s;
+  }
+  .convo-toggle:hover { color: var(--fg-dim); }
+  .convo-toggle .cv-caret { transition: transform 0.2s ease; opacity: 0.8; }
+  .side.chats-collapsed .convo-toggle .cv-caret { transform: rotate(-90deg); }
+  .side.chats-collapsed #convo-list { display: none; }
 
   .convo-list {
     flex: 1;
@@ -2507,6 +2519,10 @@
              style="width:100%;margin-top:8px;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:7px 10px;font-size:12px;outline:none;" />
     </div>
 
+    <div class="convo-toggle" id="convo-toggle" title="Show or hide your chat history">
+      <span>Recent chats</span>
+      <svg class="cv-caret" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
     <div class="convo-list" id="convo-list"></div>
     <div class="convo-list" id="convo-search-results" hidden></div>
 
@@ -6440,6 +6456,19 @@ $('btn-new-chat').addEventListener('click', () => {
   showView('chat');
   input.focus();
 });
+
+// Collapse / expand the recent-chats list — cleaner sidebar, state persisted.
+(function () {
+  const tog = $('convo-toggle');
+  const side = document.querySelector('.side');
+  if (!tog || !side) return;
+  const KEY = 'hearth_chats_collapsed';
+  if (localStorage.getItem(KEY) === '1') side.classList.add('chats-collapsed');
+  tog.addEventListener('click', () => {
+    const collapsed = side.classList.toggle('chats-collapsed');
+    try { localStorage.setItem(KEY, collapsed ? '1' : '0'); } catch {}
+  });
+})();
 
 // ============================================================
 // FILE DROP - only visible during drag
