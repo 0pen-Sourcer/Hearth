@@ -59,6 +59,20 @@ def format_status(events, working: bool = True, rich: bool = False,
     return head + "\n" + "\n".join(lines)
 
 
+def format_done(events, rich: bool = False) -> str:
+    """The message left behind after a run: a compact deduped summary so even a
+    20-30 tool run collapses to one tidy line (the live view showed the detail).
+    e.g. "Tools used (25): run_command x20, read_file x3, web_search x2"."""
+    from collections import Counter
+    if not events:
+        return ""
+    bold = (lambda s: f"**{s}**") if rich else (lambda s: s)
+    code = (lambda s: f"`{s}`") if rich else (lambda s: s)
+    counts = Counter(n for n, _ in events)
+    parts = [code(n) + (f" x{c}" if c > 1 else "") for n, c in counts.items()]
+    return bold(f"Tools used ({len(events)}):") + " " + ", ".join(parts)
+
+
 def footer(events, max_tools: int = 8) -> str:
     """One-line summary for channels that can't edit a live message (WhatsApp)."""
     names = list(dict.fromkeys(n for n, _ in events))

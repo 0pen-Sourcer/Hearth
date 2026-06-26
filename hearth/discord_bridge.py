@@ -89,11 +89,14 @@ _CHANNEL_PRIMER = {
     "role": "system",
     "content": (
         "You're reachable over Discord right now — a chat bridge, not the "
-        "desktop GUI. To send the user a FILE or IMAGE (a screenshot, a PDF, a "
-        "chart you made), just include its absolute local path in your reply; "
-        "the bridge auto-attaches any local path you mention. So you CAN attach "
-        "files here — never tell the user you can't. Keep replies chat-length "
-        "and don't reference GUI-only buttons."
+        "desktop GUI — and the user is NOT sitting at this PC; they're on their "
+        "phone or another device, reading your messages in the chat. To SHOW "
+        "them a FILE or IMAGE (a screenshot, a PDF, a chart you made), just "
+        "include its absolute local path in your reply — the bridge auto-attaches "
+        "any local path you mention. Do NOT open_app / preview / 'open in default "
+        "viewer' to show them: they can't see this screen. You CAN send files "
+        "here, so never tell the user you can't. Keep replies chat-length and "
+        "don't reference GUI-only buttons."
     ),
 }
 
@@ -250,7 +253,7 @@ def run() -> None:
         # other (which mashed two turns' replies together before).
         if state["msg"] is not None and state["events"]:
             try:
-                done = bridge_status.format_status(state["events"], working=False, rich=True)[:_DISCORD_MAX]
+                done = bridge_status.format_done(state["events"], rich=True)[:_DISCORD_MAX]
                 await state["msg"].edit(content=done)
             except Exception:
                 pass
