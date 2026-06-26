@@ -932,6 +932,9 @@ def _load_settings() -> Dict:
     os.environ["JARVIS_TTS_DEVICE"] = defaults.get("tts_device", "cpu")
     os.environ["JARVIS_VOICE_SPEED"] = str(defaults.get("voice_speed", 1.5))
     os.environ["JARVIS_VOICE"]      = defaults.get("voice_name", "am_michael")
+    # Selected mic index (-1 = OS default). Drives both STT paths via
+    # listen.input_device_index(). The mic picker (Settings → Voice) writes it.
+    os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(defaults.get("voice_input_device", -1))
     # Agent name → persona module reads this at import-time via
     # HEARTH_PERSONA_NAME. Setting it here means the very next chat turn
     # picks up the user's renamed agent. On boot, this fires before any
@@ -971,6 +974,16 @@ def _save_settings(d: Dict) -> Dict:
     os.environ["JARVIS_TTS_DEVICE"] = cur.get("tts_device", "cpu")
     os.environ["JARVIS_VOICE_SPEED"] = str(cur.get("voice_speed", 1.5))
     os.environ["JARVIS_VOICE"]      = cur.get("voice_name", "am_michael")
+    # Mic pick — apply + drop the cached recorder so the NEXT voice session
+    # rebuilds on the chosen device (no restart needed).
+    _new_mic = str(cur.get("voice_input_device", -1))
+    if os.environ.get("JARVIS_VOICE_INPUT_DEVICE") != _new_mic:
+        os.environ["JARVIS_VOICE_INPUT_DEVICE"] = _new_mic
+        try:
+            from . import realtime_voice as _rv
+            _rv.reset_recorder()
+        except Exception:
+            pass
     # Keep the runtime chat model in sync with the saved pick. Without this a
     # cloud model swap (grok-4.20 -> grok-4.3) saved to disk but the next
     # /chat + the status poller still used the old LOCAL_MODEL, so the topbar
@@ -1329,6 +1342,20 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "pid": pid,
                 "text": text,
             })
+        if path == "/api/voice/devices":
+            # List audio INPUT devices for the mic picker (Settings → Voice).
+            devs = []
+            try:
+                if _listen:
+                    devs = _listen.list_input_devices()
+            except Exception:
+                devs = []
+            cur = -1
+            try:
+                cur = int(os.environ.get("JARVIS_VOICE_INPUT_DEVICE", "-1"))
+            except ValueError:
+                cur = -1
+            return self._send_json(200, {"devices": devs, "selected": cur})
         if path == "/api/voice/status":
             tts_status = {"available": False, "reason": "voice module missing"}
             stt_status = {"ready": False, "reason": "listen module missing"}
