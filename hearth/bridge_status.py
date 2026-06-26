@@ -1,40 +1,23 @@
 """Shared formatting for the live tool-call status the phone/chat bridges show.
 
 Discord and Telegram post one status message and edit it in place as the agent
-works, so the owner watches which tools fire (read_file -> web_search -> ...)
-instead of staring at a silent pause and then a wall of text. WhatsApp can't
-reliably edit a sent message, so it gets a one-line "used: ..." footer instead.
+works, then FINALIZE it into a "Tools used" list that stays put — the actual
+answer is sent as a separate message below it, so the channel reads
+"tools used X" then the reply (never one mashed into the other). WhatsApp can't
+reliably edit, so it gets a one-line "used: ..." footer instead.
 
-Plain text only (no markdown/backticks) so the same string renders cleanly in
-Discord, Telegram (no parse_mode), and a terminal log.
+Text only — NO emojis (the user explicitly didn't want emoji in chat). On
+Discord (`rich=True`) tool names are wrapped in `code` and the header bolded so
+they stay visually distinct; Telegram gets the same content in plain text.
 """
 from __future__ import annotations
-
-# A glyph per common tool so the live view reads at a glance.
-_ICON = {
-    "read_file": "\U0001F4C4", "summarize_file": "\U0001F4C4",
-    "write_file": "✍️", "edit_file": "✍️",
-    "list_dir": "\U0001F4C2", "list_directory": "\U0001F4C2",
-    "find_file": "\U0001F50E", "grep": "\U0001F50E", "search_files": "\U0001F50E",
-    "search_chats": "\U0001F50E",
-    "run_command": "⌨️",
-    "web_search": "\U0001F310", "fetch_url": "\U0001F310", "browse": "\U0001F310",
-    "open_url": "\U0001F310",
-    "view_image": "\U0001F5BC️", "screenshot": "\U0001F5BC️",
-    "take_screenshot": "\U0001F5BC️",
-    "memory_recall": "\U0001F9E0", "memory_save": "\U0001F9E0",
-    "set_reminder": "⏰", "list_reminders": "⏰",
-    "desktop_click": "\U0001F5B1️", "desktop_type": "⌨️",
-    "desktop_snapshot": "\U0001F5A5️",
-    "open_app": "\U0001F680",
-}
 
 # Argument keys most likely to say WHAT a call is acting on, best-first.
 _ARG_KEYS = ("path", "file", "filename", "query", "url", "command", "name",
              "pattern", "app", "text", "prompt")
 
 
-def arg_hint(args, limit: int = 40) -> str:
+def arg_hint(args, limit: int = 44) -> str:
     """A short human hint of what a call targets (the path/query/url/etc.)."""
     if not isinstance(args, dict):
         return ""
@@ -44,37 +27,36 @@ def arg_hint(args, limit: int = 40) -> str:
             v = v.strip().replace("\n", " ")
             if k in ("path", "file", "filename") and ("\\" in v or "/" in v):
                 v = v.replace("\\", "/").rstrip("/").split("/")[-1] or v
-            return v[:limit] + ("…" if len(v) > limit else "")
+            return v[:limit] + ("..." if len(v) > limit else "")
     return ""
 
 
-def _line(name, args=None, done=False) -> str:
-    icon = _ICON.get(name, "•")
-    hint = arg_hint(args) if args else ""
-    mark = "✓" if done else "…"  # check vs ellipsis
-    tail = f"  {hint}" if hint else ""
-    return f"{icon} {name}{tail} {mark}"
+def format_status(events, working: bool = True, rich: bool = False,
+                  max_lines: int = 10) -> str:
+    """Render the tool view (no emojis).
 
-
-def format_status(events, working: bool = True, max_lines: int = 8) -> str:
-    """Render the live tool view.
-
-    events: ordered list of (tool_name, args_dict). While ``working`` the last
-    line shows as in-progress (...); the rest are done (check). When the run is
-    over, pass working=False so every line reads done.
+    events: ordered list of (tool_name, args_dict).
+    working: True while the run is live (header "Running tools..."), False once
+             finished (header "Tools used (N)" — the message to leave behind).
+    rich:    Discord — bold header + `code` tool names. Telegram/plain — off.
     """
+    bold = (lambda s: f"**{s}**") if rich else (lambda s: s)
+    code = (lambda s: f"`{s}`") if rich else (lambda s: s)
     if not events:
-        return "\U0001F527 working…"
+        return bold("Running tools...")
     shown = events[-max_lines:]
     lines = []
-    for i, (name, args) in enumerate(shown):
-        in_progress = working and i == len(shown) - 1
-        lines.append(_line(name, args, done=not in_progress))
-    header = "\U0001F527 working…" if working else "✅ done"
+    for name, args in shown:
+        hint = arg_hint(args)
+        lines.append("  " + code(name) + (f"  {hint}" if hint else ""))
     extra = len(events) - len(shown)
-    if extra > 0:
-        header += f" (+{extra} earlier)"
-    return header + "\n" + "\n".join(lines)
+    if working:
+        head = bold("Running tools...")
+        if extra > 0:
+            head += f"  (+{extra} earlier)"
+    else:
+        head = bold(f"Tools used ({len(events)})")
+    return head + "\n" + "\n".join(lines)
 
 
 def footer(events, max_tools: int = 8) -> str:

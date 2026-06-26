@@ -154,6 +154,21 @@ def _files_in(text: str):
     return out[:4]
 
 
+# System message injected every bridge turn (not persisted, so the history cap
+# can't drop it): teaches the model it CAN send files here by naming their path.
+_CHANNEL_PRIMER = {
+    "role": "system",
+    "content": (
+        "You're reachable over Telegram right now — a chat bridge, not the "
+        "desktop GUI. To send the user a FILE or IMAGE (a screenshot, a PDF, a "
+        "chart you made), just include its absolute local path in your reply; "
+        "the bridge auto-sends any local path you mention as a document. So you "
+        "CAN send files here — never tell the user you can't. Keep replies "
+        "chat-length and don't reference GUI-only buttons."
+    ),
+}
+
+
 async def _run(prompt: str, history: list, on_tool=None) -> str:
     """Run one turn through the shared agent loop; collect the final reply."""
     from . import headless
@@ -176,7 +191,8 @@ async def _run(prompt: str, history: list, on_tool=None) -> str:
         return "allow"  # owner-gated by chat-id allowlist; auto-approve tools
 
     try:
-        await headless.run_once(prompt, emit=emit, history=history,
+        await headless.run_once(prompt, emit=emit,
+                                history=[_CHANNEL_PRIMER] + (history or []),
                                 permission_check=_allow,
                                 supervised=False)  # phone: destructive guard still fires
     except Exception as e:
@@ -259,15 +275,13 @@ def run() -> None:
             hist.append({"role": "assistant", "content": reply})
             del hist[:-16]  # cap to the last 8 exchanges
             final = reply or "(no output)"
-            chunks = _split_4096(final)
-            # Morph the live status message into the actual answer (first chunk).
-            if status["msg_id"] is not None and _edit_message(
-                    token, chat_id, status["msg_id"], chunks[0]):
-                for c in chunks[1:]:
-                    _send_message(token, chat_id, c)
-            else:
-                _send_message(token, chat_id, final,
-                              reply_to=msg.get("message_id"))
+            # Finalize the tool status into a "Tools used" list that STAYS, then
+            # send the answer as its own message below — "tools used X" then the
+            # reply, never one edited into the other.
+            if status["msg_id"] is not None and status["events"]:
+                _edit_message(token, chat_id, status["msg_id"],
+                              bridge_status.format_status(status["events"], working=False))
+            _send_message(token, chat_id, final, reply_to=msg.get("message_id"))
             for f in _files_in(reply):
                 _send_document(token, chat_id, f)
 

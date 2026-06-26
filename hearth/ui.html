@@ -3825,12 +3825,18 @@ function renderMD(src) {
     ).join('');
     return `\n<ul>${items}</ul>`;
   });
-  // Ordered lists
+  // Ordered lists. When list items are separated by non-list lines (e.g. each
+  // "1. ..." is followed by sub-content like equations), the run breaks into
+  // many one-item lists — and a bare <ol> auto-numbers each from 1, so "1. 2.
+  // 3. 4. 5." all rendered as "1.". Preserve the AUTHORED number via start=N so
+  // the visible number always matches what the model wrote.
   html = html.replace(/(?:^|\n)((?:\d+\.\s.+(?:\n|$))+)/g, (_, block) => {
-    const items = block.trim().split('\n').map(li =>
+    const lines = block.trim().split('\n');
+    const startNum = parseInt((lines[0].match(/^(\d+)\./) || [])[1] || '1', 10);
+    const items = lines.map(li =>
       `<li>${li.replace(/^\d+\.\s+/, '')}</li>`
     ).join('');
-    return `\n<ol>${items}</ol>`;
+    return `\n<ol start="${startNum}">${items}</ol>`;
   });
   // Paragraphs: split by 2+ newlines, wrap loose runs of text in <p>
   html = html.split(/\n{2,}/).map(block => {
