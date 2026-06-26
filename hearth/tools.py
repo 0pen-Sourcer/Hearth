@@ -859,9 +859,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "generate_video",
         "description": (
             "Start an ASYNC video generation. Returns a task_id immediately; "
-            "videos take 20-60+ seconds. Poll with check_video_task(task_id) "
-            "or just tell the user 'video's cooking, I'll let you know'. The "
-            "user can ask 'is my video ready?' later and you can check then. "
+            "videos take 20-60+ seconds. Poll with check_video_task() or just "
+            "tell the user 'video's cooking, I'll let you know'. To ANIMATE an "
+            "image you just generated ('now animate it'), pass that image's file "
+            "PATH (the one generate_image returned) as image_url — do NOT "
+            "re-generate the image. Omit image_url for a fresh text-to-video. "
             "xAI Grok only today."
         ),
         "parameters": {
@@ -871,7 +873,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "duration":     {"type": "integer", "description": "Seconds, 1-15. Default 5."},
                 "aspect_ratio": {"type": "string", "description": "16:9 | 9:16 | 1:1 | 4:3 | 3:4 | 3:2 | 2:3. Default 16:9."},
                 "resolution":   {"type": "string", "description": "'480p' or '720p'. Default 720p."},
-                "image_url":    {"type": "string", "description": "Optional — image URL to animate (image-to-video mode)."},
+                "image_url":    {"type": "string", "description": "Optional, for image-to-video. A local image file PATH (e.g. exactly what generate_image returned) or a URL. Set this ONLY when the user wants THAT specific image animated; leave empty for a fresh text-to-video."},
             },
             "required": ["prompt"],
         },
@@ -882,14 +884,15 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "Poll a video generation task ONCE. Does NOT block. Status is one "
             "of: pending / done / failed / expired / unknown. When done, the "
             "response includes 'path' = the saved mp4 file the GUI/CLI can "
-            "render. Safe to call repeatedly — caches the downloaded file."
+            "render. Safe to call repeatedly — caches the downloaded file. "
+            "NEVER invent a task_id: omit it to check your most recent video."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "task_id": {"type": "string", "description": "The task_id returned by generate_video."},
+                "task_id": {"type": "string", "description": "Optional — the task_id generate_video returned. Omit to check your most recent video task (don't make one up)."},
             },
-            "required": ["task_id"],
+            "required": [],
         },
     },
     {
@@ -5371,9 +5374,9 @@ def _generate_video(p: Dict) -> str:
 
 def _check_video_task(p: Dict) -> str:
     from . import imagine
+    # task_id is optional — empty string makes check_video_task fall back to the
+    # most recent video task (so the agent can't fail by losing/faking the id).
     task_id = (p.get("task_id") or "").strip()
-    if not task_id:
-        return "Error: task_id is required."
     r = imagine.check_video_task(task_id)
     if not r.get("ok"):
         return f"Error: {r.get('error')}"

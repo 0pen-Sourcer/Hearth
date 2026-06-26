@@ -387,6 +387,47 @@ def generate_image(
 # VIDEO — asynchronous
 # ---------------------------------------------------------------------------
 
+_IMG_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+             ".webp": "image/webp", ".gif": "image/gif"}
+
+
+def _resolve_image_input(image: str) -> Optional[str]:
+    """Turn an image reference into something the video API accepts.
+
+    - already a URL or data URI -> passed through unchanged
+    - a local file path -> read + base64-encoded as a data URI
+    - missing file -> None (caller surfaces a clean error)
+    """
+    s = (image or "").strip().strip('"').strip("'")
+    if not s:
+        return None
+    if s.startswith(("http://", "https://", "data:")):
+        return s
+    p = Path(s)
+    if not p.is_absolute():
+        # let a bare filename resolve against the generated/ folder too
+        cand = GENERATED_DIR / s
+        p = cand if cand.exists() else p
+    if not p.is_file():
+        return None
+    # Downscale best-effort so the inline base64 stays small enough for the
+    # provider's request-size cap (a full 3-4 MB still encodes to ~5 MB). Falls
+    # back to the raw bytes if Pillow isn't available.
+    try:
+        from PIL import Image
+        import io as _io
+        im = Image.open(p).convert("RGB")
+        im.thumbnail((1280, 1280), Image.LANCZOS)
+        buf = _io.BytesIO()
+        im.save(buf, format="JPEG", quality=88, optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return f"data:image/jpeg;base64,{b64}"
+    except Exception:
+        mime = _IMG_MIME.get(p.suffix.lower(), "image/png")
+        b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+
+
 def start_video(
     prompt: str,
     *,
@@ -432,7 +473,14 @@ def start_video(
         "resolution": resolution,
     }
     if image_url:
-        body["image"] = image_url
+        # image-to-video: the provider wants a URL or a base64 data URI, NOT a
+        # bare local path. When the agent passes the just-generated image's
+        # local path (the common "now animate it" case), encode it inline so it
+        # works instead of erroring with "image_url expects a real URL".
+        img_payload = _resolve_image_input(image_url)
+        if img_payload is None:
+            return {"ok": False, "error": f"image not found for animation: {image_url}"}
+        body["image"] = img_payload
 
     headers = {"Authorization": f"Bearer {api_key}"}
     url = base.rstrip("/") + "/videos/generations"
@@ -484,7 +532,16 @@ def check_video_task(task_id: str, *, api_key: Optional[str] = None,
     tasks = _load_tasks()
     task = tasks.get(task_id)
     if not task:
-        return {"ok": False, "error": f"no known task with id {task_id}", "status": "unknown"}
+        # The agent sometimes loses or fabricates the id (it did, on a real run).
+        # Fall back to the most recent video task on file so "is it done?" still
+        # resolves to the thing that's actually cooking.
+        vids = sorted((t for t in tasks.values() if t.get("kind") == "video"),
+                      key=lambda t: t.get("created_at", 0), reverse=True)
+        if vids:
+            task = vids[0]
+            task_id = task["task_id"]
+        else:
+            return {"ok": False, "error": f"no known task with id {task_id}", "status": "unknown"}
 
     if task.get("status") == "done" and task.get("path") and os.path.isfile(task["path"]):
         return {"ok": True, "task_id": task_id, "status": "done",
