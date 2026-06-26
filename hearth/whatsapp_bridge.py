@@ -88,11 +88,17 @@ async def _run(prompt: str, history: list) -> str:
     from . import headless
     parts = []
 
+    events = []
+
     def emit(kind, **kw):
         if kind == "assistant":
             parts.append(kw.get("content") or "")
         elif kind == "error":
             parts.append("[error] " + str(kw.get("message", "")))
+        elif kind == "tool_call":
+            nm = kw.get("name")
+            if nm:
+                events.append((nm, kw.get("args")))
 
     try:
         await headless.run_once(prompt, emit=emit, history=history,
@@ -100,7 +106,15 @@ async def _run(prompt: str, history: list) -> str:
                                 supervised=False)  # phone: destructive guard still fires
     except Exception as e:
         return f"(run failed: {type(e).__name__}: {e})"
-    return "".join(parts).strip()
+    reply = "".join(parts).strip()
+    # WhatsApp can't reliably edit a sent message, so no live tool feed — append a
+    # one-line "used: ..." footer instead so the user still sees what ran.
+    if events:
+        from . import bridge_status
+        foot = bridge_status.footer(events)
+        if foot:
+            reply = (reply + "\n\n" + foot).strip()
+    return reply
 
 
 def run() -> None:
