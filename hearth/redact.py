@@ -123,10 +123,10 @@ def has_secrets(text: str, **kw) -> bool:
 
 if __name__ == "__main__":  # quick self-test
     sample = (
-        "Commit by swaggybaba. key xai-REDACTED-KEY\n"
-        "hackatime 2f688dee-b167-48ba-9b96-bb249be0f5f2\n"
-        "path C:\\Users\\swaggybaba\\Jarvis\\settings.json email 25mt0633@iitism.ac.in"
+        "Commit by example. key xai-EXAMPLE0000000000000000000000000000\n"
+        "hackatime 00000000-0000-0000-0000-000000000000\n"
+        "path C:\\Users\\example\\Jarvis\\settings.json email you@example.com"
     )
-    red, found = redact_for_public(sample, email="25mt0633@iitism.ac.in")
+    red, found = redact_for_public(sample, email="you@example.com")
     print(red)
     print("FOUND:", found)
