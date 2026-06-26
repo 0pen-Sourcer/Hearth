@@ -4599,17 +4599,16 @@ async function pollSubagentCompletions() {
         reminders++;
       }
     }
-    // Auto-fold: if anything new arrived AND we're idle, fire an invisible
-    // synthetic prompt. The headless drain injects each <task-notification>
-    // ahead of it, so the model surfaces the reminder / synthesizes the
-    // subagent result on its own — no "done?" typing needed.
+    // Auto-fold: if anything new arrived AND we're idle, fire a notification
+    // flush. NO synthetic user prompt — the backend drains each
+    // <task-notification> and makes IT the turn, so the model surfaces the
+    // reminder / synthesizes the subagent result on its own and the user never
+    // sees a fake "you" message. (The old verbose prompt got quoted by the
+    // model as "the task" and auto-titled the chat "Due Reminder Response".)
     if ((newSub > 0 || reminders > 0) && !STATE.streaming && activeConvo()
         && Date.now() - _lastAutoFold > 4000) {
       _lastAutoFold = Date.now();
-      const what = reminders > 0 && newSub === 0
-        ? 'A reminder you set just came due (see the notification above). Tell me about it now, briefly and naturally.'
-        : 'A background task or reminder just came due — surface it / synthesize what returned and tell me now.';
-      send(what, null, { silent: true });
+      send('__HEARTH_NOTIFY_FLUSH__', null, { notify: true });
     }
   } catch {}
 }
@@ -5578,6 +5577,12 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // `opts.silent=true` - don't render a user bubble at all (used by the
   // subagent autofold: model just speaks, no fake "user" turn appears).
   const _silent = !!opts.silent;
+  // `opts.notify=true` — a notification-flush turn: a due reminder / finished
+  // subagent should be surfaced while idle. We send a sentinel the backend
+  // swaps for the actual <task-notification>, and crucially we add NO user
+  // message to the conversation at all (no bubble, no title, no history
+  // pollution). The model just speaks; the user never sees a fake "you" turn.
+  const _notify = !!opts.notify;
   let prompt = (forced ?? input.value).trim();
   // Weave pending attachments (from the attach button or clipboard paste)
   // into the prompt - the user's typed text comes first, then a hidden
@@ -5627,11 +5632,16 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // (when set) is what the chat bubble renders. Keeps file-upload prompts
   // from leaking "I just dropped an image at C:\...\foo.png. Call view_image..."
   // into the chat surface.
-  const userMsg = { role: 'user', content: prompt };
-  if (displayAs && displayAs !== prompt) userMsg.displayContent = displayAs;
-  if (_silent) userMsg.silent = true;  // skip rendering this bubble
-  c.messages.push(userMsg);
-  touch(c);
+  // Notification flush adds NO user message — the backend turns the drained
+  // notification into the trailing turn itself. Everything else pushes the
+  // user message as normal.
+  if (!_notify) {
+    const userMsg = { role: 'user', content: prompt };
+    if (displayAs && displayAs !== prompt) userMsg.displayContent = displayAs;
+    if (_silent) userMsg.silent = true;  // skip rendering this bubble
+    c.messages.push(userMsg);
+    touch(c);
+  }
 
   // Build history (everything before this new prompt) - strip events,
   // keep only the OpenAI-shape role/content fields the backend expects.
@@ -5641,8 +5651,12 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // refuse to generate the next response - looked to the user like "AI
   // forgot the thread after restart". This makes the history always
   // well-formed before going to the LLM.
-  const history = c.messages.slice(0, -1)
+  // On a normal turn the just-pushed user message is the last element, so slice
+  // it off. On a flush turn we pushed nothing, so send the whole history. Either
+  // way, scrub stale silent synthetic turns so they never reach the model.
+  const history = (_notify ? c.messages.slice() : c.messages.slice(0, -1))
     .filter(m => !(m.role === 'assistant' && !(m.content || '').trim()))
+    .filter(m => !m.silent)
     .map(m => ({ role: m.role, content: m.content || '' }));
 
   // Open the placeholder assistant message NOW - it'll be filled by chunks.
@@ -5761,6 +5775,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
     refreshState();
     // Flush any TTS leftover (only if voice mode is on - chat auto-TTS removed)
     if (voiceModeOn) maybeFlushTTS(true);
+    // A notification flush that produced no text (the queue was already drained
+    // by a real turn, or the model said nothing) leaves an empty assistant
+    // placeholder — drop it so no blank bubble lingers.
+    if (_notify && !(assistantMsg.content || '').trim()
+        && !(assistantMsg.events || []).length) {
+      const _i = c.messages.indexOf(assistantMsg);
+      if (_i >= 0) c.messages.splice(_i, 1);
+    }
     // Persist final message
     touch(c);
     // Re-render so the message gets its persistent copy/speak buttons + tool cards stay

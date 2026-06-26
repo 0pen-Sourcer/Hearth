@@ -438,27 +438,26 @@ async def run_once(
         for h in history:
             if h.get("role") and h.get("role") != "system":
                 messages.append({"role": h["role"], "content": h.get("content", "")})
-    # Background subagent completions queue up between turns; drain them
-    # BEFORE the new user prompt so the model sees the results in the
-    # right order (completion -> user reply). Each notification arrives
-    # as its own synthetic user-role message with a <task-notification>
-    # block.
+    # A "notification flush" turn carries no real user message — the GUI fires
+    # it (idle) only to let the model surface a due reminder / finished subagent.
+    # The notification itself becomes the trailing user-role message (Claude
+    # Code's isMeta pattern: the model reads + reports it, but no user bubble was
+    # ever rendered for it). Sentinel must match ui.html's flush call.
+    NOTIFY_FLUSH = "__HEARTH_NOTIFY_FLUSH__"
+    _is_flush = prompt.strip() == NOTIFY_FLUSH
+
+    # Background subagent completions + due reminders queue up between turns;
+    # drain them so the model sees the results. On a normal turn they're inserted
+    # as SYSTEM events just before the user's message (provenance: a background
+    # task reporting back isn't the user talking). On a flush turn they ARE the
+    # turn, appended as user-role messages so the sequence still ends on a user
+    # turn (strict local chat templates require that).
+    _flushed = 0
     try:
         from . import subagents as _sa
         pending = _sa.drain_pending_notifications()
-        # Insert each completion as a SYSTEM event (NOT user — a background
-        # subagent reporting back isn't the user talking) immediately BEFORE the
-        # last user message, so provenance is correct AND the sequence still
-        # ends on the user's turn (strict local chat templates require that).
-        _ins = len(messages)
-        for _i in range(len(messages) - 1, -1, -1):
-            if messages[_i].get("role") == "user":
-                _ins = _i
-                break
-        for notif in pending:
-            xml = _sa.format_notification_as_user_message(notif)
-            messages.insert(_ins, {"role": "system", "content": xml})
-            _ins += 1
+
+        def _emit_card(notif):
             emit("subagent_done", agent_id=notif.get("agent_id"),
                  persona=notif.get("persona"), name=notif.get("name"),
                  status=notif.get("status"),
@@ -466,10 +465,38 @@ async def run_once(
                  result_text=notif.get("result_text"),
                  elapsed_s=notif.get("elapsed_s"),
                  used_tools=notif.get("used_tools") or [])
+
+        if _is_flush:
+            for notif in pending:
+                xml = _sa.format_notification_as_user_message(notif)
+                messages.append({"role": "user", "content": xml})
+                _flushed += 1
+                _emit_card(notif)
+        else:
+            _ins = len(messages)
+            for _i in range(len(messages) - 1, -1, -1):
+                if messages[_i].get("role") == "user":
+                    _ins = _i
+                    break
+            for notif in pending:
+                xml = _sa.format_notification_as_user_message(notif)
+                messages.insert(_ins, {"role": "system", "content": xml})
+                _ins += 1
+                _emit_card(notif)
     except Exception:
         pass
-    messages.append({"role": "user", "content": prompt})
-    emit("user", content=prompt)
+
+    if _is_flush:
+        # Race: the queue was already drained by a real user turn between the
+        # GUI's peek and this flush. Nothing to surface — don't feed the model a
+        # bare sentinel. Tell the GUI to drop its empty placeholder and bail.
+        if _flushed == 0:
+            emit("done", reply="", iterations=0)
+            return
+        # No emit("user") — the GUI rendered no user bubble for this turn.
+    else:
+        messages.append({"role": "user", "content": prompt})
+        emit("user", content=prompt)
 
     tools = to_openai_tools()
     # Context budget so a long history (the GUI re-sends a growing one every
