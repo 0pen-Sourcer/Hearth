@@ -591,7 +591,10 @@
     padding: 12px 20px;
     display: flex; gap: 8px; align-items: center;
   }
-  /* Edit-mode banner above the composer. */
+  /* Edit-mode banner above the composer. The author `display:flex` below beats
+     the UA `[hidden]{display:none}` rule, so we must re-assert hidden explicitly
+     or the banner shows permanently. */
+  .edit-banner[hidden] { display: none; }
   .edit-banner {
     display: flex; align-items: center; gap: 8px;
     margin: 0 20px; padding: 7px 12px;
