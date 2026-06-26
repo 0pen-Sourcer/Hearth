@@ -160,10 +160,13 @@ _CHANNEL_PRIMER = {
     "role": "system",
     "content": (
         "You're reachable over Telegram right now — a chat bridge, not the "
-        "desktop GUI. To send the user a FILE or IMAGE (a screenshot, a PDF, a "
-        "chart you made), just include its absolute local path in your reply; "
-        "the bridge auto-sends any local path you mention as a document. So you "
-        "CAN send files here — never tell the user you can't. Keep replies "
+        "desktop GUI — and the user is NOT sitting at this PC; they're on their "
+        "phone or another device, reading your messages in the chat. To SHOW "
+        "them a FILE or IMAGE (a screenshot, a PDF, a chart you made), just "
+        "include its absolute local path in your reply — the bridge auto-sends "
+        "any local path you mention as a document. Do NOT open_app / preview / "
+        "'open in default viewer' to show them: they can't see this screen. You "
+        "CAN send files here, so never tell the user you can't. Keep replies "
         "chat-length and don't reference GUI-only buttons."
     ),
 }
@@ -280,7 +283,7 @@ def run() -> None:
             # reply, never one edited into the other.
             if status["msg_id"] is not None and status["events"]:
                 _edit_message(token, chat_id, status["msg_id"],
-                              bridge_status.format_status(status["events"], working=False))
+                              bridge_status.format_done(status["events"]))
             _send_message(token, chat_id, final, reply_to=msg.get("message_id"))
             for f in _files_in(reply):
                 _send_document(token, chat_id, f)
