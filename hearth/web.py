@@ -282,6 +282,8 @@ _models_cache: Dict[str, Any] = {"ts": 0, "data": None}
 import queue as _queue
 _permission_queues: Dict[str, _queue.Queue] = {}
 _PERMS_FILE = os.path.join(WORKSPACE, "permissions.json")
+# Background GPU-voice install state (the Settings "Install GPU support" button).
+_VOICE_INSTALL: Dict[str, Any] = {"running": False}
 
 
 def _load_perms_from_disk():
@@ -1356,6 +1358,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             except ValueError:
                 cur = -1
             return self._send_json(200, {"devices": devs, "selected": cur})
+        if path == "/api/voice/install-status":
+            return self._send_json(200, _VOICE_INSTALL or {"running": False})
         if path == "/api/voice/status":
             tts_status = {"available": False, "reason": "voice module missing"}
             stt_status = {"ready": False, "reason": "listen module missing"}
@@ -1653,6 +1657,41 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, res)
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/voice/install-gpu":
+            # Install the GPU runtime for STT so whisper runs on the user's card
+            # instead of slow CPU. CUDA whisper = ctranslate2 needs the cuBLAS +
+            # cuDNN wheels; DirectML = onnxruntime-directml. Runs in the
+            # background; the UI polls /api/voice/install-status.
+            global _VOICE_INSTALL
+            body = self._read_json()
+            dev = (body.get("device") or "cuda").strip().lower()
+            pkgs = {"cuda": ["nvidia-cublas-cu12", "nvidia-cudnn-cu12"],
+                    "dml":  ["onnxruntime-directml"]}.get(dev)
+            if not pkgs:
+                return self._send_json(400, {"ok": False, "error": f"unknown device '{dev}'"})
+            if _VOICE_INSTALL.get("running"):
+                return self._send_json(200, {"ok": True, "already": True})
+
+            def _go(_pkgs=pkgs, _dev=dev):
+                global _VOICE_INSTALL
+                _VOICE_INSTALL = {"running": True, "device": _dev}
+                try:
+                    import subprocess as _sp
+                    r = _sp.run([sys.executable, "-m", "pip", "install", *_pkgs],
+                                capture_output=True, text=True, timeout=1800,
+                                creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+                    ok = r.returncode == 0
+                    _VOICE_INSTALL = {
+                        "running": False, "done": True, "ok": ok, "device": _dev,
+                        "msg": ("Installed — toggle voice off/on to use the GPU."
+                                if ok else ((r.stderr or r.stdout or "")[-400:] or "pip failed")),
+                    }
+                except Exception as e:
+                    _VOICE_INSTALL = {"running": False, "done": True, "ok": False,
+                                      "msg": f"{type(e).__name__}: {e}"[-400:]}
+
+            threading.Thread(target=_go, daemon=True).start()
+            return self._send_json(200, {"ok": True, "started": True})
         if path == "/api/skills/remove":
             body = self._read_json()
             try:
