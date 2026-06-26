@@ -82,15 +82,22 @@ def _files_in(text: str):
     return out[:4]
 
 
-async def _run(prompt: str, history: list) -> str:
+async def _run(prompt: str, history: list, on_tool=None) -> str:
     from . import headless
     parts = []
+    events = []
 
     def emit(kind, **kw):
         if kind == "assistant":
             parts.append(kw.get("content") or "")
         elif kind == "error":
             parts.append("[error] " + str(kw.get("message", "")))
+        elif kind == "tool_call":
+            nm = kw.get("name")
+            if nm:
+                events.append((nm, kw.get("args")))
+                if on_tool:
+                    on_tool(list(events))  # live "which tool is firing" feed
 
     try:
         await headless.run_once(prompt, emit=emit, history=history,
@@ -179,15 +186,65 @@ def run() -> None:
                 pass
             return
         hist = histories.setdefault(uid, [])
+        # Live tool feed: one status message that edits itself as tools fire, so
+        # the user watches the work instead of a silent pause then a wall of text.
+        # Created lazily on the first tool call (a pure-chat reply shows none).
+        import asyncio
+        from . import bridge_status
+        state = {"events": [], "dirty": False, "msg": None}
+
+        def on_tool(events):
+            state["events"] = events
+            state["dirty"] = True
+
+        stop = asyncio.Event()
+
+        async def _updater():
+            while not stop.is_set():
+                await asyncio.sleep(0.6)
+                if not state["dirty"]:
+                    continue
+                state["dirty"] = False
+                body = bridge_status.format_status(state["events"], working=True)[:_DISCORD_MAX]
+                try:
+                    if state["msg"] is None:
+                        state["msg"] = await message.channel.send(body)
+                    else:
+                        await state["msg"].edit(content=body)
+                except Exception:
+                    pass
+
+        updater = asyncio.create_task(_updater())
         try:
-            async with message.channel.typing():
-                reply = await _run(text, hist)
+            reply = await _run(text, hist, on_tool=on_tool)
         except Exception as e:
             reply = f"(error: {type(e).__name__}: {e})"
+        stop.set()
+        try:
+            await updater
+        except Exception:
+            pass
         hist.append({"role": "user", "content": text})
         hist.append({"role": "assistant", "content": reply})
         del hist[:-16]
-        for chunk in _split(reply or "(no output)"):
+        chunks = _split(reply or "(no output)")
+        # Morph the live status message into the actual answer (first chunk), so
+        # the same bubble goes work -> result. Fall back to a fresh send.
+        first = chunks[0] if chunks else "(no output)"
+        if state["msg"] is not None:
+            try:
+                await state["msg"].edit(content=first)
+            except Exception:
+                try:
+                    await message.channel.send(first)
+                except Exception:
+                    pass
+        else:
+            try:
+                await message.channel.send(first)
+            except Exception:
+                pass
+        for chunk in chunks[1:]:
             try:
                 await message.channel.send(chunk)
             except Exception:
