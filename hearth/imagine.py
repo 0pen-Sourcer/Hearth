@@ -464,7 +464,18 @@ def start_video(
         return {"ok": False, "error": "Empty prompt."}
     duration = max(1, min(15, int(duration)))
 
-    model = model or "grok-imagine-video"
+    # image-to-video vs text-to-video are SEPARATE xAI models (verified live):
+    #   - grok-imagine-video      = text-to-video (ignores any image)
+    #   - grok-imagine-video-1.5  = image-to-video (rejects text-only)
+    # and the image goes in `image: {"url": <url|data-uri>}` — NOT a string.
+    img_payload = None
+    if image_url:
+        img_payload = _resolve_image_input(image_url)
+        if img_payload is None:
+            return {"ok": False, "error": f"image not found for animation: {image_url}"}
+
+    if not model:
+        model = "grok-imagine-video-1.5" if img_payload else "grok-imagine-video"
     body: Dict[str, Any] = {
         "model": model,
         "prompt": prompt.strip(),
@@ -472,17 +483,8 @@ def start_video(
         "aspect_ratio": aspect_ratio,
         "resolution": resolution,
     }
-    if image_url:
-        # image-to-video: the provider wants a URL or a base64 data URI, NOT a
-        # bare local path. When the agent passes the just-generated image's
-        # local path (the common "now animate it" case), encode it inline so it
-        # works instead of erroring with "image_url expects a real URL".
-        img_payload = _resolve_image_input(image_url)
-        if img_payload is None:
-            return {"ok": False, "error": f"image not found for animation: {image_url}"}
-        # xAI's video API wants the field `image_url` (a URL or base64 data URI),
-        # NOT `image` — the latter 422s "failed to deserialize". Verified live.
-        body["image_url"] = img_payload
+    if img_payload:
+        body["image"] = {"url": img_payload}
 
     headers = {"Authorization": f"Bearer {api_key}"}
     url = base.rstrip("/") + "/videos/generations"
