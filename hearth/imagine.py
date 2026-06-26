@@ -480,7 +480,9 @@ def start_video(
         img_payload = _resolve_image_input(image_url)
         if img_payload is None:
             return {"ok": False, "error": f"image not found for animation: {image_url}"}
-        body["image"] = img_payload
+        # xAI's video API wants the field `image_url` (a URL or base64 data URI),
+        # NOT `image` — the latter 422s "failed to deserialize". Verified live.
+        body["image_url"] = img_payload
 
     headers = {"Authorization": f"Bearer {api_key}"}
     url = base.rstrip("/") + "/videos/generations"
