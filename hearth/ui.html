@@ -611,6 +611,15 @@
     color: var(--fg-dim); flex: none; transition: .14s;
   }
   .edit-banner .eb-cancel:hover { background: rgba(255,255,255,.08); color: var(--fg); }
+  /* Branch-version arrows under an edited message. */
+  .branch-nav { display: inline-flex; align-items: center; gap: 1px; margin-right: 7px; }
+  .branch-nav button {
+    background: none; border: none; color: var(--fg-faint); cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 0 4px; border-radius: 4px; transition: .12s;
+  }
+  .branch-nav button:hover:not(:disabled) { color: var(--fg); background: rgba(255,255,255,.07); }
+  .branch-nav button:disabled { opacity: .3; cursor: default; }
+  .branch-nav .bn-count { font-size: 11px; color: var(--fg-faint); min-width: 26px; text-align: center; font-variant-numeric: tabular-nums; }
   /* Single-line input: buttons align dead-center with the textarea. When
      textarea grows multiline, buttons sit at the bottom edge so they remain
      next to the most-recent caret position. */
@@ -4754,6 +4763,27 @@ function renderMessage(m) {
       navigator.clipboard.writeText(m.displayContent || m.content || '')
         .then(() => toast('Copied', '', 'ok', 1500));
     });
+    // Branch nav: if this user message is an edit branch-point with >1 version,
+    // show ‹ k/n › arrows to flip between the alternative conversations.
+    const _c = activeConvo();
+    const _idx = _c ? _c.messages.indexOf(m) : -1;
+    const grp = _c && _c.branches ? _c.branches[_idx] : null;
+    if (grp && grp.variants && grp.variants.length > 1) {
+      const actions = div.querySelector('.actions');
+      const nav = document.createElement('span');
+      nav.className = 'branch-nav';
+      nav.innerHTML =
+        `<button class="bn-prev" title="Previous version">‹</button>` +
+        `<span class="bn-count">${grp.active + 1}/${grp.variants.length}</span>` +
+        `<button class="bn-next" title="Next version">›</button>`;
+      const prev = nav.querySelector('.bn-prev');
+      const next = nav.querySelector('.bn-next');
+      prev.disabled = grp.active === 0;
+      next.disabled = grp.active === grp.variants.length - 1;
+      prev.addEventListener('click', () => switchBranch(_idx, -1));
+      next.addEventListener('click', () => switchBranch(_idx, +1));
+      if (actions) actions.insertBefore(nav, actions.firstChild);
+    }
   }
   return div;
 }
@@ -5645,6 +5675,30 @@ function cancelEdit(clearInput = true) {
   if (clearInput) { input.value = ''; input.style.height = '42px'; }
 }
 
+// Set when a commit-edit turn is in flight; the finally captures the new tail.
+let _pendingBranch = null;
+
+// Flip between sibling branches at an edit point. `dir` is -1 / +1.
+// c.branches[idx] = { variants: [tail, ...], active }, where each `tail` is the
+// list of messages from idx to the end of that branch (its first element is the
+// edited user message). We park the live tail back into the active slot, then
+// swap in the target branch's tail.
+function switchBranch(idx, dir) {
+  const c = activeConvo();
+  if (!c || !c.branches || !c.branches[idx]) return;
+  if (STATE.streaming) return;  // don't reshuffle history mid-stream
+  const grp = c.branches[idx];
+  const k = grp.active + dir;
+  if (k < 0 || k >= grp.variants.length) return;
+  grp.variants[grp.active] = c.messages.slice(idx);   // save what's on screen
+  grp.active = k;
+  c.messages = c.messages.slice(0, idx).concat(grp.variants[k]);
+  // Deeper branch points belonged to the tail we just swapped away.
+  Object.keys(c.branches).forEach(kk => { if (+kk > idx) delete c.branches[kk]; });
+  touch(c);
+  renderChat();
+}
+
 async function send(forced = null, displayAs = null, opts = {}) {
   // `forced` is the FULL prompt sent to the LLM (carries the path, the tool
   // instruction, etc.). `displayAs` is the OPTIONAL short version shown in
@@ -5704,11 +5758,22 @@ async function send(forced = null, displayAs = null, opts = {}) {
   let c = activeConvo();
   if (!c) c = newConversation();
 
-  // Committing an edit: NOW drop the edited message + everything after it, then
-  // fall through to push the new text as a fresh turn. This is the only place
-  // the tail is destroyed — and only on an explicit re-send, never on click.
+  // Committing an edit: park the current tail as a BRANCH (don't destroy it),
+  // truncate to the edit point, and let the new turn build a sibling branch.
+  // After the turn finishes we capture that new tail as variant N (see the
+  // _pendingBranch handling in the finally below). Arrows then let the user
+  // flip between the old and new versions.
   if (editState && !_notify && !_silent && c.id === editState.convoId) {
-    c.messages = c.messages.slice(0, editState.idx);
+    const bidx = editState.idx;
+    if (!c.branches) c.branches = {};
+    let grp = c.branches[bidx];
+    const curTail = c.messages.slice(bidx);
+    if (!grp) c.branches[bidx] = grp = { variants: [curTail], active: 0 };
+    else grp.variants[grp.active] = curTail;  // refresh the snapshot we're leaving
+    c.messages = c.messages.slice(0, bidx);
+    // Branch points deeper than here belonged to the tail we just parked.
+    Object.keys(c.branches).forEach(k => { if (+k > bidx) delete c.branches[k]; });
+    _pendingBranch = bidx;
   }
   if (editState && !_notify && !_silent) cancelEdit(false);
 
@@ -5866,6 +5931,16 @@ async function send(forced = null, displayAs = null, opts = {}) {
         && !(assistantMsg.events || []).length) {
       const _i = c.messages.indexOf(assistantMsg);
       if (_i >= 0) c.messages.splice(_i, 1);
+    }
+    // Edit-commit just finished: capture the fresh tail as a new branch variant
+    // and make it active, so ‹ k/n › arrows appear under the edited message.
+    if (_pendingBranch != null) {
+      const bidx = _pendingBranch; _pendingBranch = null;
+      const grp = c.branches && c.branches[bidx];
+      if (grp) {
+        grp.variants.push(c.messages.slice(bidx));
+        grp.active = grp.variants.length - 1;
+      }
     }
     // Persist final message
     touch(c);
