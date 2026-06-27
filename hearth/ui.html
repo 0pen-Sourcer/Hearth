@@ -634,6 +634,14 @@
   .gpu-installer.ok .gpu-msg { color: var(--ok, #87ff87); }
   .gpu-installer.err .gpu-msg { color: #f87171; }
   @keyframes gpu-spin { to { transform: rotate(360deg); } }
+  /* When pip reports real % we fill a progress donut instead of spinning. */
+  .gpu-installer.det .gpu-ring {
+    animation: none; border: none;
+    background: conic-gradient(var(--accent-2, #a78bfa) calc(var(--pct, 0) * 1%), var(--border-2) 0);
+    -webkit-mask: radial-gradient(closest-side, transparent 62%, #000 64%);
+    mask: radial-gradient(closest-side, transparent 62%, #000 64%);
+  }
+  .gpu-installer .gpu-msg { font-variant-numeric: tabular-nums; }
   /* Single-line input: buttons align dead-center with the textarea. When
      textarea grows multiline, buttons sit at the bottom edge so they remain
      next to the most-recent caret position. */
@@ -7949,11 +7957,27 @@ async function refreshSettings() {
           try {
             await api('/api/voice/install-gpu', { method: 'POST',
               body: JSON.stringify({ device: opt.value, packages: opt.dataset.needs || '' }) });
+            const ring = inst.querySelector('.gpu-ring');
             const st = await new Promise((res) => {
               const t = setInterval(async () => {
-                try { const x = await fetch('/api/voice/install-status').then(r => r.json()); if (!x.running) { clearInterval(t); res(x); } } catch {}
-              }, 2000);
+                try {
+                  const x = await fetch('/api/voice/install-status').then(r => r.json());
+                  if (x.running) {
+                    if (x.pct != null) {
+                      inst.classList.add('det');
+                      if (ring) ring.style.setProperty('--pct', x.pct);
+                      gmsg.textContent = `${x.pct}%` + (x.downloaded ? ` · ${x.downloaded}` : '') + (x.speed ? ` · ${x.speed}` : '');
+                    } else {
+                      inst.classList.remove('det');
+                      gmsg.textContent = x.step || 'downloading GPU runtime…';
+                    }
+                    return;
+                  }
+                  clearInterval(t); res(x);
+                } catch {}
+              }, 1200);
             });
+            inst.classList.remove('det');
             if (st && st.ok) {
               inst.classList.add('ok'); gmsg.textContent = 'installed ✓';
               opt.dataset.ni = ''; opt.text = opt.dataset.base;

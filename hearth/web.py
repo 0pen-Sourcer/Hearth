@@ -1686,17 +1686,54 @@ class HearthHandler(BaseHTTPRequestHandler):
 
             def _go(_pkgs=pkgs, _dev=dev):
                 global _VOICE_INSTALL
-                _VOICE_INSTALL = {"running": True, "device": _dev}
+                _VOICE_INSTALL = {"running": True, "device": _dev, "pct": None,
+                                  "speed": "", "downloaded": "", "step": "resolving…"}
                 try:
-                    import subprocess as _sp
-                    r = _sp.run([sys.executable, "-m", "pip", "install", *_pkgs],
-                                capture_output=True, text=True, timeout=1800,
-                                creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
-                    ok = r.returncode == 0
+                    import subprocess as _sp, re as _re, os as _os
+                    env = dict(_os.environ, PYTHONUNBUFFERED="1")
+                    proc = _sp.Popen(
+                        [sys.executable, "-m", "pip", "install", "--progress-bar", "on", *_pkgs],
+                        stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, bufsize=1, env=env,
+                        creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+                    # pip's rich progress updates a line in place via \r, e.g.
+                    #   "Downloading nvidia_cublas... (363 MB)"
+                    #   "  ----  231.4/363.3 MB 12.1 MB/s eta 0:00:11"
+                    prog = _re.compile(r"([\d.]+)/([\d.]+)\s*(kB|MB|GB)")
+                    spd = _re.compile(r"([\d.]+\s*[kKMG]?B/s)")
+                    dl = _re.compile(r"Downloading\s+([\w.\-]+)")
+                    tail = []
+                    buf = ""
+                    while True:
+                        ch = proc.stdout.read(1)
+                        if not ch:
+                            break
+                        if ch in ("\r", "\n"):
+                            line = buf.strip(); buf = ""
+                            if not line:
+                                continue
+                            tail.append(line); tail[:] = tail[-12:]
+                            d = dl.search(line)
+                            if d:
+                                _VOICE_INSTALL["step"] = "downloading " + d.group(1).split("-")[0]
+                                _VOICE_INSTALL["pct"] = None
+                            m = prog.search(line)
+                            if m:
+                                cur, tot = float(m.group(1)), float(m.group(2))
+                                if tot > 0:
+                                    _VOICE_INSTALL["pct"] = round(cur / tot * 100)
+                                    _VOICE_INSTALL["downloaded"] = f"{cur:.0f}/{tot:.0f} {m.group(3)}"
+                            sm = spd.search(line)
+                            if sm:
+                                _VOICE_INSTALL["speed"] = sm.group(1).replace(" ", "")
+                            if "Installing collected" in line:
+                                _VOICE_INSTALL.update(step="installing…", pct=None, speed="")
+                        else:
+                            buf += ch
+                    ok = proc.wait() == 0
                     _VOICE_INSTALL = {
                         "running": False, "done": True, "ok": ok, "device": _dev,
                         "msg": ("Installed — toggle voice off/on to use the GPU."
-                                if ok else ((r.stderr or r.stdout or "")[-400:] or "pip failed")),
+                                if ok else ("\n".join(tail))[-400:] or "pip failed"),
                     }
                 except Exception as e:
                     _VOICE_INSTALL = {"running": False, "done": True, "ok": False,
