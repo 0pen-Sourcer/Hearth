@@ -1691,6 +1691,16 @@ class HearthHandler(BaseHTTPRequestHandler):
                 try:
                     import subprocess as _sp, re as _re, os as _os
                     env = dict(_os.environ, PYTHONUNBUFFERED="1")
+                    # onnxruntime, -gpu and -directml all ship the SAME
+                    # `onnxruntime` module and collide — with the CPU one already
+                    # present pip stalls / "could not install" the GPU variant.
+                    # Remove every variant first so the GPU TTS install succeeds.
+                    if any("onnxruntime" in p for p in _pkgs):
+                        _VOICE_INSTALL["step"] = "clearing old onnxruntime…"
+                        _sp.run([sys.executable, "-m", "pip", "uninstall", "-y",
+                                 "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml"],
+                                capture_output=True, text=True,
+                                creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
                     proc = _sp.Popen(
                         [sys.executable, "-m", "pip", "install", "--progress-bar", "on", *_pkgs],
                         stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, bufsize=1, env=env,
@@ -1815,7 +1825,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             if dev not in ("cpu", "cuda"):
                 return self._send_json(400, {"ok": False, "error": "device must be cpu or cuda"})
             try:
-                from . import listen as _listen
+                # NOTE: do NOT re-import `from . import listen as _listen` here —
+                # it made `_listen` a LOCAL for the whole do_POST, so every other
+                # `if _listen:` in this method (e.g. STT model change) crashed with
+                # UnboundLocalError. Use the module-global imported at the top.
                 if dev == "cuda" and not _listen.cuda_available():
                     return self._send_json(200, {
                         "ok": False, "device": _listen.DEVICE,
