@@ -1101,6 +1101,28 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "capture_active_window",
+        "description": (
+            "Screenshot ONLY the window in focus (the game/app the user is "
+            "actually looking at), not the whole desktop. Use this over "
+            "`screenshot` when answering 'what's happening in the game / on "
+            "this screen right now' — it's tighter and cleaner for vision. "
+            "Pass window_title to grab a named window that isn't in front. "
+            "Chain view_image on the returned path to actually see it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "window_title": {"type": "string", "description":
+                    "Optional: capture the visible window whose title contains "
+                    "this text, instead of the foreground one."},
+                "delay_s": {"type": "number", "description":
+                    "Seconds to wait before capturing (0-10), so the user can "
+                    "focus the target window first. Default 0."},
+            },
+        },
+    },
+    {
         "name": "view_image",
         "description": "Load an image file from disk so you can SEE it. Use this when the user gives you a path to an image (e.g. 'see this image C:\\\\path.png') or asks about a screenshot you just took. Returns the image content for vision processing. Works with .png, .jpg, .jpeg, .gif, .webp, .bmp.",
         "parameters": {
@@ -4565,6 +4587,74 @@ def _screenshot(p: Dict) -> str:
     )
 
 
+def _capture_active_window(p: Dict) -> str:
+    """Screenshot ONLY the foreground window (the game/app in focus), not the
+    whole desktop. The core primitive for the overlay HUD: one grab of exactly
+    what the user is looking at, in virtual-screen coords so it works across
+    monitors. Optional window_title captures a named window instead."""
+    import time as _t
+    try:
+        delay = max(0.0, min(10.0, float(p.get("delay_s") or 0)))
+    except (TypeError, ValueError):
+        delay = 0.0
+    title = (p.get("window_title") or "").strip()
+    if sys.platform != "win32":
+        # No per-window grab off Windows — degrade to a full-screen capture.
+        return _screenshot({"delay_s": delay})
+    try:
+        import win32gui  # type: ignore
+    except Exception:
+        return "Error: needs pywin32 for window capture. Run: pip install pywin32"
+    if delay > 0:
+        try:
+            from . import capture_overlay
+            capture_overlay.flash(delay)
+        except Exception:
+            pass
+        _t.sleep(delay + 0.35)
+    # Resolve target: explicit title substring, else the foreground window.
+    hwnd = None
+    if title:
+        matches: List[int] = []
+        def _en(h, _):
+            if win32gui.IsWindowVisible(h) and title.lower() in (win32gui.GetWindowText(h) or "").lower():
+                matches.append(h)
+        win32gui.EnumWindows(_en, None)
+        hwnd = matches[0] if matches else None
+        if hwnd is None:
+            return f"Error: no visible window matching {title!r}. Call list_windows to see titles."
+    else:
+        hwnd = win32gui.GetForegroundWindow()
+    if not hwnd:
+        return "Error: no foreground window found."
+    win_title = win32gui.GetWindowText(hwnd) or "(untitled)"
+    try:
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    except Exception as e:
+        return f"Error: couldn't read window bounds: {e}"
+    if right - left < 8 or bottom - top < 8:
+        return ("Error: that window has no visible area (minimized?). Restore it "
+                "first with manage_window(action='restore').")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = os.path.join(SHOTS_DIR, f"window_{ts}.png")
+    try:
+        from PIL import ImageGrab  # type: ignore
+        # all_screens=True makes the bbox virtual-screen relative, matching
+        # GetWindowRect — so a window on a left/secondary monitor (negative
+        # coords) still grabs correctly.
+        img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+        img.save(out)
+    except ImportError:
+        return "Error: needs Pillow. Run: pip install pillow"
+    except Exception as e:
+        return f"Error: {e}"
+    return (
+        f"Saved: {out} ({img.size[0]}x{img.size[1]}) — window {win_title!r}\n"
+        f"NEXT STEP: if the user asked what's on screen / in the game, call "
+        f"view_image with path='{out}' RIGHT NOW in this same turn — don't stop."
+    )
+
+
 def _clipboard_posix_read_cmd() -> Optional[list]:
     """Pick the right clipboard-read command for this POSIX desktop.
     macOS uses pbpaste; Linux prefers Wayland (wl-paste) then X11
@@ -5477,6 +5567,7 @@ _HANDLERS = {
     "open_in_browser": _open_in_browser,
     "list_browsers": _list_browsers,
     "screenshot": _screenshot,
+    "capture_active_window": _capture_active_window,
     "view_image": _view_image,
     "clipboard_read": _clipboard_read,
     "clipboard_write": _clipboard_write,
@@ -6989,6 +7080,7 @@ _TOOL_CATEGORY = {
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
     "network_info": "System & apps", "get_battery": "System & apps", "list_installed_apps": "System & apps",
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
+    "capture_active_window": "System & apps",
     "focus_window": "System & apps", "list_windows": "System & apps", "manage_window": "System & apps",
     "list_jobs": "Background jobs", "get_job_result": "Background jobs",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
