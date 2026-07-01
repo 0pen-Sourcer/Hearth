@@ -173,7 +173,18 @@ def _spawn_bridge(ch: str) -> Tuple[bool, Optional[str]]:
         # In the packaged app sys.executable is Hearth.exe; the sentinel
         # runs the bundled interpreter against the module.
         args = [sys.executable, "--hearth-run-python", "-m", mod]
-    p = subprocess.Popen(args, creationflags=_NO_WINDOW,
+    # Pin the bridge to the CURRENT brain from settings, overriding any launch
+    # env (e.g. grok.ps1). Otherwise a bridge stays on the old provider after a
+    # GUI brain switch — the "auth failed on Telegram after switching" bug.
+    env = dict(os.environ)
+    try:
+        _s = _load_settings()
+        if _s.get("llm_url"):   env["LOCAL_API_BASE"] = _s["llm_url"]
+        if _s.get("llm_key"):   env["LOCAL_API_KEY"] = _s["llm_key"]
+        if _s.get("llm_model"): env["LOCAL_MODEL"] = _s["llm_model"]
+    except Exception:
+        pass
+    p = subprocess.Popen(args, creationflags=_NO_WINDOW, env=env,
                          cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     _BRIDGE_PROCS[ch] = p
     import time as _t
@@ -496,7 +507,10 @@ def _list_models() -> List[Dict]:
     out: List[Dict] = []
     # The endpoint we'll actually probe — may differ from LOCAL_API_BASE if
     # the chat is currently routed to a cloud endpoint. See _models_probe_endpoint.
-    probe_base = _models_probe_endpoint()
+    # rstrip the trailing slash — Gemini's base is ".../v1beta/openai/", so a
+    # naive base + "/models" yields a double slash that Google 404s (the picker
+    # then looked empty / stuck on a single preset model).
+    probe_base = _models_probe_endpoint().rstrip("/")
 
     # 1) Built-in llama-cpp server is the active endpoint?
     # Match on port (not full URL) so we tolerate localhost vs 127.0.0.1
@@ -2209,10 +2223,27 @@ class HearthHandler(BaseHTTPRequestHandler):
                         local_probe = {"reachable": False, "kind": "none"}
                 except Exception:
                     pass
+            # Respawn any running phone bridge so it adopts the new brain — a
+            # bridge inherits the endpoint at spawn time, so without this a
+            # Telegram/Discord bot keeps hitting the old provider (and 401s if
+            # that provider was ejected or out of credits).
+            restarted_bridges = []
+            for _ch in list(_BRIDGE_PROCS.keys()):
+                if _bridge_running(_ch):
+                    try:
+                        _p = _BRIDGE_PROCS.get(_ch)
+                        if _p and _p.poll() is None:
+                            _p.terminate()
+                        _BRIDGE_PROCS.pop(_ch, None)
+                        _spawn_bridge(_ch)
+                        restarted_bridges.append(_ch)
+                    except Exception:
+                        pass
             return self._send_json(200, {
                 "ok": True, "url": url, "provider": provider,
                 "stopped_builtin": stopped_builtin,
                 "local_probe": local_probe,
+                "restarted_bridges": restarted_bridges,
             })
         if path == "/api/llmserver/start":
             # Boot the optional built-in llama-cpp-python server with the user's
