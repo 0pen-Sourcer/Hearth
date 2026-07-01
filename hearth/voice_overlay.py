@@ -132,18 +132,46 @@ def _run() -> None:
             hwnd, _BG_KEY, 230, win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
         win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
 
+        _shown = True
         while not _stop.is_set():
-            # Pulse: a gentle idle breathe, swelling when Hearth is speaking so
-            # the grid visibly "talks" (center-out), like the GUI voice mode.
+            # Focus-based handoff: when the Hearth GUI window is foreground it
+            # draws its OWN in-app grid, so hide this desktop HUD to avoid two
+            # grids. Show it only when focus is elsewhere (a game / other app) —
+            # the whole point is a visible listening/talking cue when no Hearth
+            # window is in view.
+            try:
+                fg = win32gui.GetWindowText(win32gui.GetForegroundWindow()) or ""
+            except Exception:
+                fg = ""
+            if fg.strip() == "Hearth":
+                if _shown:
+                    try:
+                        win32gui.SetLayeredWindowAttributes(hwnd, _BG_KEY, 0,
+                            win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
+                    except Exception:
+                        pass
+                    _shown = False
+                win32gui.PumpWaitingMessages()
+                time.sleep(0.08)
+                continue
+            if not _shown:
+                try:
+                    win32gui.SetLayeredWindowAttributes(hwnd, _BG_KEY, 230,
+                        win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
+                except Exception:
+                    pass
+                _shown = True
+            # Reach is driven by Hearth's REAL TTS amplitude (voice.current_level),
+            # so the grid reacts to its own speech — quiet = center, loud = edge —
+            # not a canned loop. A slow idle breathe when silent keeps it alive.
             try:
                 from . import voice as _v
-                speaking = _v.is_speaking()
+                lvl = _v.current_level()
             except Exception:
-                speaking = False
+                lvl = 0.0
             t = time.time() - start_t
-            idle = 0.34 + 0.12 * sin(t * 2.2)
-            tex = (sin(t * 7.0) * 0.5 + 0.5) * (sin(t * 4.3 + 1.0) * 0.5 + 0.5)
-            state["level"] = min(1.0, idle + (0.55 * (0.5 + 0.5 * tex) if speaking else 0.0))
+            idle = 0.30 + 0.06 * sin(t * 2.0)
+            state["level"] = min(1.0, max(idle, 0.35 + lvl * 0.75)) if lvl > 0.02 else idle
             try:
                 win32gui.InvalidateRect(hwnd, None, True)
                 win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, x, y, 0, 0,
