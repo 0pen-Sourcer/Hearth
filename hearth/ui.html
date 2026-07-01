@@ -4360,7 +4360,7 @@ async function persistConvo(c) {
     // prompts). They're transient nudges — the live session hides them via
     // renderMsg, but if saved they reload as a fake "you said this" bubble. Strip
     // them; the assistant's actual reply (not silent) still persists.
-    const toSave = { ...c, messages: (c.messages || []).filter(m => !m.silent) };
+    const toSave = { ...c, messages: (c.messages || []).filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__') };
     await api('/api/conversations', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -4714,9 +4714,9 @@ function _agentInitial() {
 }
 
 function renderMessage(m) {
-  // Silent user turns (synthetic auto-fold prompts) stay in history for the
-  // LLM but never render - model just speaks, no fake "you" bubble.
-  if (m && m.silent) return null;
+  // Never render silent turns or the notification-flush sentinel (old convos
+  // saved it as a user message before the notify path skipped it).
+  if (m && (m.silent || m.content === '__HEARTH_NOTIFY_FLUSH__')) return null;
   const div = document.createElement('div');
   div.className = `msg ${m.role}`;
   const agentInit = _agentInitial();
@@ -5864,7 +5864,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // way, scrub stale silent synthetic turns so they never reach the model.
   const history = (_notify ? c.messages.slice() : c.messages.slice(0, -1))
     .filter(m => !(m.role === 'assistant' && !(m.content || '').trim()))
-    .filter(m => !m.silent)
+    .filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__')
     .map(m => ({ role: m.role, content: m.content || '' }));
 
   // Open the placeholder assistant message NOW - it'll be filled by chunks.
@@ -6254,6 +6254,12 @@ async function send(forced = null, displayAs = null, opts = {}) {
       ttsBuffer += ev.content;
       maybeFlushTTS(false);
       chatBody.scrollTop = chatBody.scrollHeight;
+      // Mirror the reply into the voice overlay + drive the grid.
+      if (voiceModeOn) {
+        voiceSpeaking = true;
+        setVoiceStatus('speaking');
+        setVoiceTranscript(assistantMsg.content);
+      }
       return;
     }
 
@@ -9004,13 +9010,14 @@ let voiceGridAnim = null;
 //  analyser - see docs/VOICE_UPGRADE_PLAN.md; this envelope is the safe version.)
 let voiceMicLevel = 0;
 let voiceLevel = 0;
+let _ttsLevel = 0, _lastLevelAt = 0;   // live amplitude streamed from the server's TTS
 function _voiceGridFrame(t) {
   const s = t / 1000;
   let target = 0;
-  if (voiceSpeaking) {
-    const gate = Math.max(0, Math.sin(s * 2.1) * 0.5 + 0.5 - 0.12);     // natural pauses
-    const tex = (Math.sin(s * 12.7) * 0.5 + 0.5) * (Math.sin(s * 7.3 + 1.1) * 0.5 + 0.5); // texture
-    target = Math.min(1, 0.22 + gate * (0.55 + 0.45 * tex));
+  if (t - _lastLevelAt < 220) {
+    target = _ttsLevel;                          // real TTS loudness → radial reach
+  } else if (voiceSpeaking) {
+    target = 0.24;                               // speaking, awaiting first level
   } else if (recorder.recording) {
     target = Math.min(1, voiceMicLevel * 1.7);
   }
@@ -9330,8 +9337,14 @@ async function startRealtimeVoice() {
 }
 
 function handleRealtimeEvent(ev) {
+  if (ev.type === 'level') {
+    _ttsLevel = ev.v || 0;
+    _lastLevelAt = performance.now();
+    return;
+  }
   if (ev.type === 'partial') {
-    // Live caption while user is still speaking.
+    if (_voiceMuted) return;  // muted → don't caption or reset status
+    voiceSpeaking = false;
     setVoiceTranscript(ev.text || '');
     setVoiceStatus('listening');
   } else if (ev.type === 'barge') {
@@ -9347,7 +9360,7 @@ function handleRealtimeEvent(ev) {
     if (!text) return;
     if (_voiceMuted) { setVoiceTranscript(''); return; }  // muted — drop the utterance
     setVoiceTranscript(text);
-    setVoiceStatus('💭 thinking');
+    setVoiceStatus('thinking…');
     // Send to chat. The server pauses the mic during TTS playback so we
     // won't transcribe our own voice; partial events resume after silence.
     send(text);
