@@ -651,16 +651,17 @@
   .perm-seg.on.ask { background: var(--border-2); color: var(--fg); }
   .perm-seg.on.allow { background: rgba(135,255,135,.16); color: #87ff87; }
   .perm-seg.on.deny { background: rgba(248,113,113,.16); color: #f87171; }
-  /* "Use this brain" must be un-missable after a provider change. Filled
-     accent (not a ghost button) so it reads as the primary action. */
+  /* "Use this brain" — the apply row only appears once you actually change
+     something, so a filled accent (not a ghost) reads as the pending action
+     without needing to shout. Slides in rather than snapping. */
   .btn-apply-brain {
     background: var(--accent); border: 1px solid var(--accent);
     color: #fff; font-weight: 600;
     padding: 8px 18px; font-size: 13px; border-radius: var(--r-sm);
   }
   .btn-apply-brain:hover { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
-  .btn-apply-brain.needs-apply { animation: applyPulse 1.3s ease-in-out infinite; }
-  @keyframes applyPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,.55); } 50% { box-shadow: 0 0 0 7px rgba(139,92,246,0); } }
+  #brain-apply-row { animation: applyRowIn 0.22s var(--ease); }
+  @keyframes applyRowIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
   #brain-apply-hint.unsaved { color: var(--accent-2, #a78bfa); font-weight: 600; }
   /* Single-line input: buttons align dead-center with the textarea. When
      textarea grows multiline, buttons sit at the bottom edge so they remain
@@ -8176,7 +8177,8 @@ async function refreshSettings() {
         cloudFields.hidden = isLocal;
         if (modelField) modelField.hidden = true; // hidden placeholder; topbar owns model pick now
         customUrl.hidden   = (v !== 'custom');
-        applyRow.hidden    = false;
+        // applyRow stays hidden until the user actually changes something
+        // (provider/key/url) — see _dirtyBrain(). No permanent eyesore.
         const p = PRESETS[v] || PRESETS.local;
         brainHint.innerHTML = p.hint;
         if (modelHint && p.modelHint) modelHint.innerHTML = p.modelHint;
@@ -8184,6 +8186,15 @@ async function refreshSettings() {
         if (!llmMdl.value && p.sample) llmMdl.placeholder = 'e.g. ' + p.sample;
       }
       applyMode(prov);
+      // Reveal the apply row only when there's an unapplied change. Called on
+      // provider switch and on key/url edits. Hidden again after apply.
+      function _dirtyBrain() {
+        applyRow.hidden = false;
+        const _h = $('brain-apply-hint');
+        if (_h) { _h.classList.add('unsaved'); _h.textContent = 'Not switched yet — click "Use this brain" to apply.'; }
+      }
+      llmKey.addEventListener('input', _dirtyBrain);
+      llmUrl.addEventListener('input', _dirtyBrain);
       brainMode.onchange = (e) => {
         const v = e.target.value;
         // Remember the key you were using, then load the new provider's key
@@ -8201,11 +8212,7 @@ async function refreshSettings() {
         // moving to Gemini would send an invalid model to the new endpoint.
         if (v !== 'custom') llmMdl.value = (PRESETS[v] || {}).sample || '';
         applyMode(v);
-        // A provider change alone doesn't switch — you must apply. Make that
-        // un-missable so the switch is never silently lost.
-        llmApply.classList.add('needs-apply');
-        const _h = $('brain-apply-hint');
-        if (_h) { _h.classList.add('unsaved'); _h.textContent = 'Not switched yet — click "Use this brain" to apply.'; }
+        _dirtyBrain();
       };
 
       llmApply.onclick = async () => {
@@ -8259,6 +8266,12 @@ async function refreshSettings() {
             } else {
               toast('Switched brain', 'Next message uses ' + (body.provider === 'local' ? 'your local server' : body.provider), 'ok');
             }
+            // Confirm any phone bridge that was respawned onto the new brain, so
+            // it's clear the Telegram/Discord bot won't keep hitting the old one.
+            if (Array.isArray(r.restarted_bridges) && r.restarted_bridges.length) {
+              const _names = r.restarted_bridges.map(c => c[0].toUpperCase() + c.slice(1)).join(', ');
+              toast('Reconnected on new brain', _names + ' restarted so it uses ' + (body.provider || 'this brain'), 'ok', 5000);
+            }
             // Optimistically sync STATE.settings so the very next refreshModels
             // sees the new provider (and gates the eject button) without waiting
             // for a poll. Switching to local also clears the sticker so a cloud
@@ -8305,7 +8318,8 @@ async function refreshSettings() {
         } finally {
           llmApply.disabled = false;
           llmApply.textContent = 'Use this brain';
-          llmApply.classList.remove('needs-apply');
+          // Applied — collapse the row again so it's not a permanent fixture.
+          applyRow.hidden = true;
           const _h2 = $('brain-apply-hint');
           if (_h2) { _h2.classList.remove('unsaved'); _h2.textContent = 'When ready, switch to this brain - your next message will use it.'; }
           setState('idle');
