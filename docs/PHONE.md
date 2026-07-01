@@ -1,172 +1,95 @@
 # Reach Hearth from your phone
 
-Opt-in features:
+Message Hearth from anywhere and it runs the full agent on your PC, then replies —
+files included. Only the chat/user IDs you allow are answered; everyone else is
+ignored. No OAuth, no public server, no port forwarding. Nothing leaves your
+machine except the service you set up yourself.
 
-1. **Telegram bridge** — two-way chat from anywhere. Text the bot, it runs the
-   full agent on your PC and texts back (files included). *Recommended* —
-   official API, nothing to break.
-2. **Discord bridge** — two-way chat via a Discord bot (DM it or @mention it).
-   Also official + ban-free; good if you live in Discord.
-3. **ntfy push** — one-way reminder notifications to your phone, so a reminder
-   reaches you even when the PC is asleep.
-4. **WhatsApp bridge** — two-way over WhatsApp. *Experimental* — an unofficial
-   link to a real account (ban risk; spare number only). See its section first.
-
-None use OAuth, none need a public server or a port forwarded, and none send your
-data anywhere except the service you set up yourself.
+Channels:
+- **Telegram** — *recommended*. Official bot API, nothing to break.
+- **Discord** — also official + ban-free; good if you live in Discord.
+- **ntfy push** — one-way reminders to your phone, even when the PC is asleep.
+- **WhatsApp** — *experimental*, unofficial link to a real account (ban risk;
+  spare number only).
 
 ---
 
-## 1. Telegram bridge (two-way)
+## The easy way — Settings → Reach from phone
 
-You message a private Telegram bot; it relays to Hearth running on your PC, which
-replies with the answer and any file it produced. Only chat IDs you allow are
-answered — everyone else is ignored.
+No files to edit, no commands to run. Paste a token + your ID, hit **Save**, done.
+Hearth keeps the bot running and **auto-starts it on every launch**.
 
-### Setup (~2 minutes)
+### Telegram (~2 min)
 
 1. In Telegram, message **@BotFather** → `/newbot` → follow the prompts → copy the
-   **bot token** it gives you (looks like `123456789:ABCdef...`).
-2. Message your new bot once (say anything) so it has a chat with you.
-3. Find your numeric **chat id**: open
-   `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser and look for
-   `"chat":{"id":...}`. (Or just run the bridge below — it logs the chat id of
-   anyone who messages it.)
-4. Create `~/.hearth/phone_bridge.json`:
+   **bot token** (looks like `123456789:ABCdef…`).
+2. Get **your chat ID**: message **@userinfobot** in Telegram — it replies with
+   your numeric id. (Or paste the token, hit **Start**, message your bot once, and
+   the status line shows the incoming id.)
+3. In Hearth: **Settings → Reach from phone → Telegram**. Paste the token and your
+   chat ID, click **Save**, then **Start**.
+4. Text your bot. It runs the agent on your PC and replies — with any file it made.
 
-   ```json
-   {
-     "bot_token": "123456789:ABCdef...",
-     "allowed_chat_ids": [123456789],
-     "ntfy_topic": "hearth-pick-something-random"
-   }
-   ```
+### Discord (~3 min)
 
-5. Point it at a model the same way the CLI does (it defaults to a local LM Studio
-   server), then run:
-
-   ```powershell
-   python -m hearth.telegram_bridge
-   ```
-
-   Leave it running. Now text your bot from your phone.
-
-### Notes
-
-- The bridge auto-approves tool calls — the chat-id allowlist is the security
-  boundary, so keep `allowed_chat_ids` tight and the token out of any repo.
-- Replies longer than Telegram's limit are split automatically; files the agent
-  creates (a PDF, a screenshot) are sent back as attachments.
-- It keeps a short rolling history per chat, so follow-up messages have context.
-- This is a single-owner bridge, not a multi-user gateway.
-
----
-
-## 1b. Discord bridge (two-way, official)
-
-DM a Discord bot (or @mention it in a server) and it relays to Hearth, which
-replies with the answer + any file it produced. Official bot API — no ban risk,
-nothing that breaks on a protocol change.
-
-### Setup (~3 minutes)
-
-1. `pip install discord.py` (optional dep, off by default).
-2. At <https://discord.com/developers/applications> → New Application → **Bot**,
-   copy the token, and under **Privileged Gateway Intents** enable
-   **MESSAGE CONTENT INTENT** (needed to read message text).
+1. Go to **discord.com/developers** → **New Application** → **Bot** → copy the
+   **token**, and turn on **MESSAGE CONTENT INTENT**.
+2. Get **your user ID**: Discord → Settings → Advanced → turn on **Developer
+   Mode**, then right-click your name → **Copy User ID**.
 3. Invite the bot to a server you own, or just DM it.
-4. Get your numeric user id: Discord Settings → Advanced → Developer Mode on,
-   then right-click your name → Copy User ID.
-5. Create `~/.hearth/discord_bridge.json`:
+4. In Hearth: **Settings → Reach from phone → Discord**. Paste the token and your
+   user ID, **Save**, **Start**. DM it or @mention it in a channel.
 
-   ```json
-   {"bot_token": "...", "allowed_user_ids": [123456789], "ntfy_topic": ""}
-   ```
+### ntfy push (reminders to your phone)
 
-6. Point it at a brain (same env as the CLI) and run:
-
-   ```powershell
-   python -m hearth.discord_bridge
-   ```
-
-Only `allowed_user_ids` are answered. In a server it responds when @mentioned; in
-a DM it always responds. Run status: `/phone`.
+Install the **ntfy** app (iOS/Android), subscribe to a topic you pick (e.g.
+`hearth-<something-random>`), and set the same topic in **Settings → Reach from
+phone → ntfy**. Reminders now buzz your phone even when the PC is asleep.
 
 ---
 
-## 2. ntfy push (reminders to your phone)
+## Advanced — run a bridge from the CLI / headless
 
-[ntfy.sh](https://ntfy.sh) is a free, no-account push service. Pick a hard-to-guess
-topic name and Hearth will POST reminders to it; the ntfy app on your phone
-(subscribed to the same topic) shows them as notifications.
+If you run Hearth headless (no desktop app), configure a bridge by hand:
 
-### Setup (~1 minute)
+**Telegram** — create `~/.hearth/phone_bridge.json`:
+```json
+{ "bot_token": "123456:ABC…", "allowed_chat_ids": [<your id>], "ntfy_topic": "" }
+```
+point it at a brain (the same `LOCAL_API_BASE` / `LOCAL_API_KEY` / `LOCAL_MODEL`
+env the CLI uses) and run:
+```
+python -m hearth.telegram_bridge
+```
 
-1. Install the **ntfy** app on your phone (Android / iOS) or open
-   [ntfy.sh](https://ntfy.sh) in a browser.
-2. Subscribe to a topic name only you know, e.g. `hearth-7f3a9c2`.
-3. Tell Hearth the topic — either in `phone_bridge.json` above (`ntfy_topic`), or
-   as an environment variable before launching:
+**Discord** — create `~/.hearth/discord_bridge.json`:
+```json
+{ "bot_token": "…", "allowed_user_ids": [<your id>], "ntfy_topic": "" }
+```
+then `python -m hearth.discord_bridge`.
 
-   ```powershell
-   $env:HEARTH_NTFY_TOPIC = "hearth-7f3a9c2"
-   .\hearth.bat
-   ```
-
-Now every reminder that fires also pushes to your phone. To use a self-hosted ntfy
-server instead of the public one, set `HEARTH_NTFY_SERVER` to its base URL.
-
-### Privacy
-
-The reminder text is sent to the ntfy server you choose. The topic name is the
-only thing protecting it, so make it long and random — anyone who knows the topic
-can read messages posted to it. Self-host ntfy if you want full control.
+The desktop app's **Reach from phone** panel writes these same files for you, so
+you only need this route for a server / headless setup.
 
 ---
 
-## 3. WhatsApp bridge (two-way, experimental)
+## WhatsApp (experimental)
 
-Chat with Hearth over WhatsApp. It links a WhatsApp account as a companion device
-(the same "Linked Devices" mechanism as WhatsApp Web) using [`neonize`](https://pypi.org/project/neonize/)
-— pure Python, **no Node, no Chromium**. You scan a QR once; the session persists.
+WhatsApp has **no official personal-account bot API**, so this uses an unofficial
+library that logs in as a real account — which carries a **ban risk**. Use a
+**spare number**, never your main one, and don't spam it. Configure it under
+**Settings → Reach from phone → WhatsApp** (scan the QR to link), or run
+`python -m hearth.whatsapp_bridge`. Editing a sent message isn't reliable on
+WhatsApp, so unlike Telegram/Discord it can't show live tool progress — it just
+sends the final reply with a short "used: …" footer.
 
-> ⚠ **Read before using.** WhatsApp has no bot API for personal accounts, so this
-> drives a *real* account through an unofficial protocol. Meta's anti-automation
-> ML watches for "too-perfect bot" patterns (instant replies, zero typing delay,
-> 24/7 presence) and **can ban the number** — for occasional personal use behind
-> an allowlist the risk is low but **not zero, so use a spare / secondary number,
-> not your primary.** It can also break when WhatsApp changes their protocol
-> (then `pip install -U neonize` and re-pair). **Telegram is the recommended
-> channel** — official, ban-free, and you'll be able to test it in a minute. Use
-> WhatsApp only if you specifically need it and have a number you can risk.
+---
 
-### Setup
+## What the bot can do
 
-1. `pip install neonize` (pulls in `segno` for the QR). It's an optional,
-   experimental dependency — not installed by default. WhatsApp is currently a
-   **run-from-source** feature — start it from a clone, not the packaged .exe.
-2. Create `~/.hearth/whatsapp_bridge.json`:
-
-   ```json
-   {
-     "allowed_numbers": ["<your number, digits only, country code, no +>"],
-     "allow_self_chat": true,
-     "ntfy_topic": ""
-   }
-   ```
-
-   `allowed_numbers` is who may talk to it (you). `allow_self_chat` lets you
-   message the linked number's own chat.
-3. Point it at a brain (same `LOCAL_API_BASE` / `LOCAL_API_KEY` / `LOCAL_MODEL`
-   env the CLI uses), then run:
-
-   ```powershell
-   python -m hearth.whatsapp_bridge
-   ```
-
-4. Scan the QR it prints: WhatsApp → **Settings → Linked Devices → Link a Device**.
-   The session is saved under `~/.hearth/whatsapp/` and survives restarts.
-
-Like the Telegram bridge it's single-owner: the allowlist is the gate and tool
-calls auto-approve (you're the owner). Group messages are ignored. Check status
-anytime with `/phone`.
+Anything Hearth can: read/write files, run the shell, search the web, drive apps,
+generate images, set reminders, run sub-agents. On Telegram and Discord it shows
+**live tool calls** as it works (`read_file → web_search → …`), then the answer.
+To send you a file, it just names the path — the bridge attaches it. Tool calls
+auto-approve on these channels (you're the owner, gated by the allow-list), so
+keep your allowed IDs tight and your tokens out of any repo.
