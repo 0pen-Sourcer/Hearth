@@ -5975,6 +5975,49 @@ def _focus_window_linux(name: str) -> str:
             "under a pure Wayland session.)")
 
 
+def _manage_window(p: Dict) -> str:
+    """Minimize / maximize / restore / close a window by a substring of its title."""
+    name = (p.get("name") or "").strip()
+    action = (p.get("action") or "").strip().lower()
+    if not name:
+        return "Error: window name required (a substring of the title)."
+    if action not in ("minimize", "maximize", "restore", "close"):
+        return "Error: action must be minimize | maximize | restore | close."
+    if sys.platform != "win32":
+        return "manage_window: Windows only for now."
+    try:
+        import win32con
+        import win32gui
+    except Exception:
+        return "manage_window needs pywin32 (pip install pywin32)."
+    matches: List = []
+
+    def _cb(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd):
+            t = win32gui.GetWindowText(hwnd)
+            if t and name.lower() in t.lower():
+                matches.append((hwnd, t))
+
+    try:
+        win32gui.EnumWindows(_cb, None)
+    except Exception as e:
+        return f"Error enumerating windows: {e}"
+    if not matches:
+        return f"No open window matching '{name}'."
+    hwnd, title = matches[0]
+    try:
+        if action == "close":
+            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        else:
+            win32gui.ShowWindow(hwnd, {"minimize": win32con.SW_MINIMIZE,
+                                       "maximize": win32con.SW_MAXIMIZE,
+                                       "restore": win32con.SW_RESTORE}[action])
+    except Exception as e:
+        return f"Error: {e}"
+    extra = f" ({len(matches)} matched; acted on the first)" if len(matches) > 1 else ""
+    return f"{action.capitalize()}d '{title}'.{extra}"
+
+
 def _list_windows(p: Dict) -> str:
     """Every open top-level window: title, state, owning process. This is the
     desktop awareness desktop_snapshot lacks (it only sees the foreground window)."""
@@ -6180,6 +6223,7 @@ TOOL_DEFINITIONS.append({
 
 _HANDLERS["focus_window"] = _focus_window
 _HANDLERS["list_windows"] = _list_windows
+_HANDLERS["manage_window"] = _manage_window
 
 TOOL_DEFINITIONS.append({
     "name": "focus_window",
@@ -6209,6 +6253,24 @@ TOOL_DEFINITIONS.append({
         "this sees them all."
     ),
     "parameters": {"type": "object", "properties": {}},
+})
+
+TOOL_DEFINITIONS.append({
+    "name": "manage_window",
+    "description": (
+        "Minimize, maximize, restore, or close a window by a substring of its "
+        "title. Use for 'minimize Chrome', 'close Spotify', 'maximize the editor'. "
+        "Close asks the app to close (unsaved work may prompt). Pair with "
+        "list_windows to find the exact title."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Substring of the target window's title."},
+            "action": {"type": "string", "description": "minimize | maximize | restore | close"},
+        },
+        "required": ["name", "action"],
+    },
 })
 
 TOOL_DEFINITIONS.append({
@@ -6927,7 +6989,7 @@ _TOOL_CATEGORY = {
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
     "network_info": "System & apps", "get_battery": "System & apps", "list_installed_apps": "System & apps",
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
-    "focus_window": "System & apps", "list_windows": "System & apps",
+    "focus_window": "System & apps", "list_windows": "System & apps", "manage_window": "System & apps",
     "list_jobs": "Background jobs", "get_job_result": "Background jobs",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
     "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps",
