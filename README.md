@@ -41,6 +41,8 @@ Reach it however you work: a terminal **CLI**, a desktop/web **app**, a headless
 
 > **v0.7-preview** — the CLI and desktop app are the daily drivers. Voice and the bundled llama.cpp server work but are preview-quality (see notes below). Windows is the supported platform; macOS/Linux run from source with most tools working.
 
+Where it's headed — grounded computer-use (it watches the screen, points, and acts), a guided "walk me through this" mode, and Mac/Linux — is in the **[Roadmap](ROADMAP.md)**.
+
 ---
 
 ## Install
