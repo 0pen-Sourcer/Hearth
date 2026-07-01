@@ -2996,10 +2996,15 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _voice.set_level_sink(lambda v: _rt_event_queue.put({"type": "level", "v": v}))
             msg = _rt_voice.start_continuous(_on_final)
             emit({"type": "started", "detail": msg})
-            # NOTE: the GUI voice mode draws its OWN full-window dot grid, so we
-            # do NOT also raise the win32 desktop HUD here — that produced TWO
-            # grids (the centered one + a jittery pink one at the bottom). The
-            # win32 overlay is for the windowless CLI voice loop only.
+            # Raise the desktop HUD too. It self-hides whenever the Hearth GUI is
+            # the foreground window (focus-based handoff in voice_overlay), so
+            # there's no double grid — it only appears when you've tabbed away to
+            # a game / another app, driven by the same real TTS amplitude.
+            try:
+                from . import voice_overlay as _vo
+                _vo.start()
+            except Exception:
+                pass
         except Exception as e:
             emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
             return
@@ -3024,6 +3029,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 if _voice:
                     _voice.set_level_sink(None)
                 _rt_voice.stop_continuous()
+                from . import voice_overlay as _vo
+                _vo.stop()
             except Exception:
                 pass
 
