@@ -72,6 +72,7 @@ build_log.txt
 htmlcov/
 .tox/
 .claude/
+Hearth Design System.zip
 
 # ---- Historical / superseded docs (kept locally, not shipped) ----
 # QUICKSTART duplicates README's install. Battleplans are Gemini's old wishlist
@@ -129,6 +130,7 @@ docs/TESTER_GUIDE_LITE.md
 # than stale ones. Remove from this list once they're brought up to date.
 docs/ARCHITECTURE.md
 docs/WAKE_WORD.md
+_hearth_edition.txt
 
 # ---- Local-only build artefacts ----
 # graphify knowledge-graph outputs (regenerate with scripts/run_graphify_on_hearth.py)
@@ -173,6 +175,7 @@ hermes*.txt
 the-local-first-decade.pdf
 athis_frames/
 skilltest/
+dexter.mp4
 
 # build artifacts (never commit)
 dist/
@@ -180,6 +183,6 @@ dist_*/
 build/
 build_*/
 Output/
-
+Hearth Design System/*
 # personal launch/social strategy (not public)
 docs/LAUNCH_CONTENT.md

@@ -651,6 +651,11 @@
   .perm-seg.on.ask { background: var(--border-2); color: var(--fg); }
   .perm-seg.on.allow { background: rgba(135,255,135,.16); color: #87ff87; }
   .perm-seg.on.deny { background: rgba(248,113,113,.16); color: #f87171; }
+  /* "Use this brain" must be un-missable after a provider change. */
+  .btn-apply-brain { padding: 8px 18px; font-size: 13px; }
+  .btn-apply-brain.needs-apply { animation: applyPulse 1.3s ease-in-out infinite; }
+  @keyframes applyPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,.55); } 50% { box-shadow: 0 0 0 7px rgba(139,92,246,0); } }
+  #brain-apply-hint.unsaved { color: var(--accent-2, #a78bfa); font-weight: 600; }
   /* Single-line input: buttons align dead-center with the textarea. When
      textarea grows multiline, buttons sit at the bottom edge so they remain
      next to the most-recent caret position. */
@@ -2959,9 +2964,9 @@
         </div>
         <div class="field" id="brain-apply-row" hidden>
           <div class="label">
-            <div class="hint">When ready, switch to this brain - your next message will use it.</div>
+            <div class="hint" id="brain-apply-hint">When ready, switch to this brain - your next message will use it.</div>
           </div>
-          <button class="btn-mini" id="btn-llm-apply">Use this brain</button>
+          <button class="btn-primary btn-apply-brain" id="btn-llm-apply">Use this brain</button>
         </div>
         <div class="field">
           <div class="label">
@@ -8190,6 +8195,11 @@ async function refreshSettings() {
         // moving to Gemini would send an invalid model to the new endpoint.
         if (v !== 'custom') llmMdl.value = (PRESETS[v] || {}).sample || '';
         applyMode(v);
+        // A provider change alone doesn't switch — you must apply. Make that
+        // un-missable so the switch is never silently lost.
+        llmApply.classList.add('needs-apply');
+        const _h = $('brain-apply-hint');
+        if (_h) { _h.classList.add('unsaved'); _h.textContent = 'Not switched yet — click "Use this brain" to apply.'; }
       };
 
       llmApply.onclick = async () => {
@@ -8289,6 +8299,9 @@ async function refreshSettings() {
         } finally {
           llmApply.disabled = false;
           llmApply.textContent = 'Use this brain';
+          llmApply.classList.remove('needs-apply');
+          const _h2 = $('brain-apply-hint');
+          if (_h2) { _h2.classList.remove('unsaved'); _h2.textContent = 'When ready, switch to this brain - your next message will use it.'; }
           setState('idle');
         }
       };
