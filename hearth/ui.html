@@ -8186,6 +8186,9 @@ async function refreshSettings() {
         // whatever the user typed. (applyMode on first LOAD must NOT do this -
         // it would clobber a saved custom-local URL like Ollama on :11434.)
         if (v !== 'custom') llmUrl.value = (PRESETS[v] || PRESETS.local).url;
+        // Switch the model to the new provider's default. Keeping grok-4.3 when
+        // moving to Gemini would send an invalid model to the new endpoint.
+        if (v !== 'custom') llmMdl.value = (PRESETS[v] || {}).sample || '';
         applyMode(v);
       };
 
