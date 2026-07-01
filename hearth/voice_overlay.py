@@ -143,7 +143,9 @@ def _run() -> None:
                 fg = win32gui.GetWindowText(win32gui.GetForegroundWindow()) or ""
             except Exception:
                 fg = ""
-            if fg.strip() == "Hearth":
+            # Substring (not ==) so any Hearth-titled window hides the HUD —
+            # erring toward hiding, since a double grid is the worse outcome.
+            if "hearth" in fg.lower():
                 if _shown:
                     try:
                         win32gui.SetLayeredWindowAttributes(hwnd, _BG_KEY, 0,
