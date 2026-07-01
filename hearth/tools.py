@@ -6788,11 +6788,23 @@ _normalize_tool_workspace_paths()
 # PROVIDER FORMAT CONVERTERS
 # ============================================================
 
+def _denied_tools() -> set:
+    """Tools set to always-deny in the Settings permission panel. They're dropped
+    from the schema below — no point shipping a tool's description to the model
+    when the call would be refused anyway."""
+    try:
+        with open(os.path.join(WORKSPACE, "permissions.json"), encoding="utf-8") as f:
+            return {k for k, v in json.load(f).items() if v == "never"}
+    except Exception:
+        return set()
+
+
 def to_openai_tools() -> List[Dict[str, Any]]:
     """All tools the model can call this turn: built-ins + any MCP-bridged
     tools currently connected. MCP tools come in lazily (their sessions
     take a few seconds to spawn at boot) so the list grows as servers come
     up — no model restart needed."""
+    denied = _denied_tools()
     out = [
         {
             "type": "function",
@@ -6803,7 +6815,7 @@ def to_openai_tools() -> List[Dict[str, Any]]:
             },
         }
         for td in TOOL_DEFINITIONS
-        if _tool_active(td["name"])
+        if _tool_active(td["name"]) and td["name"] not in denied
     ]
     # Discovery meta-tool: only ship it while something is still deferred, so it
     # vanishes once the model has unlocked everything (or HEARTH_ALL_TOOLS=1).
