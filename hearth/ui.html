@@ -642,6 +642,15 @@
     mask: radial-gradient(closest-side, transparent 62%, #000 64%);
   }
   .gpu-installer .gpu-msg { font-variant-numeric: tabular-nums; }
+  /* Per-tool permission rows (Settings → Behavior). */
+  .perm-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 9px; border-radius: 7px; background: rgba(255,255,255,.015); }
+  .perm-name { font-family: var(--mono); font-size: 12px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .perm-segs { display: inline-flex; gap: 2px; flex: none; background: var(--bg-0); border: 1px solid var(--border); border-radius: 7px; padding: 2px; }
+  .perm-seg { font-size: 11px; padding: 3px 10px; border-radius: 5px; background: none; border: none; color: var(--fg-faint); cursor: pointer; transition: .12s; }
+  .perm-seg:hover { color: var(--fg); }
+  .perm-seg.on.ask { background: var(--border-2); color: var(--fg); }
+  .perm-seg.on.allow { background: rgba(135,255,135,.16); color: #87ff87; }
+  .perm-seg.on.deny { background: rgba(248,113,113,.16); color: #f87171; }
   /* Single-line input: buttons align dead-center with the textarea. When
      textarea grows multiline, buttons sit at the bottom edge so they remain
      next to the most-recent caret position. */
@@ -3178,6 +3187,11 @@
           <div class="kbd-row"><div class="kbd-keys"><kbd>Enter</kbd></div><div class="kbd-desc">send message</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Shift</kbd><span class="kbd-plus">+</span><kbd>Enter</kbd></div><div class="kbd-desc">newline in input</div></div>
         </div>
+
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
+        <div class="hint" style="margin-bottom:10px;">What each tool does when the AI calls it: <b>Ask</b> every time, <b>Allow</b> always, or <b>Deny</b> always. Risky tools default to Ask.</div>
+        <input type="text" id="perm-search" placeholder="Search tools…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;margin-bottom:10px;">
+        <div id="perm-list" style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow:auto;"></div>
 
         </div><!-- /pane behavior -->
 
@@ -7855,10 +7869,45 @@ $('btn-log-clear').addEventListener('click', () => {
 // ============================================================
 // SETTINGS view
 // ============================================================
+async function refreshToolPerms() {
+  const list = $('perm-list'), search = $('perm-search');
+  if (!list) return;
+  let tools = [], perms = { always_allow: [], always_deny: [] };
+  try {
+    const [t, p] = await Promise.all([api('/api/tools'), api('/api/permissions')]);
+    tools = (t.tools || []).map(x => x.name).sort();
+    perms = p;
+  } catch { list.innerHTML = '<div class="hint">Couldn\'t load tools.</div>'; return; }
+  const allow = new Set(perms.always_allow || []), deny = new Set(perms.always_deny || []);
+  function render() {
+    const q = (search ? search.value : '').toLowerCase();
+    list.innerHTML = tools.filter(n => n.toLowerCase().includes(q)).map(n => {
+      const st = allow.has(n) ? 'allow' : deny.has(n) ? 'deny' : 'ask';
+      const seg = (m, l) => `<button class="perm-seg${st === m ? ' on ' + m : ''}" data-tool="${n}" data-mode="${m}">${l}</button>`;
+      return `<div class="perm-row"><span class="perm-name">${esc(n)}</span><span class="perm-segs">${seg('ask', 'Ask')}${seg('allow', 'Allow')}${seg('deny', 'Deny')}</span></div>`;
+    }).join('') || '<div class="hint">No tools match.</div>';
+  }
+  render();
+  if (search) search.oninput = render;
+  list.onclick = async (e) => {
+    const b = e.target.closest('.perm-seg'); if (!b) return;
+    const tool = b.dataset.tool, mode = b.dataset.mode;
+    allow.delete(tool); deny.delete(tool);
+    if (mode === 'allow') allow.add(tool); else if (mode === 'deny') deny.add(tool);
+    render();
+    const decision = mode === 'allow' ? 'always' : mode === 'deny' ? 'never' : '';
+    try {
+      await api('/api/permission/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(decision ? { name: tool, decision } : { name: tool }) });
+    } catch {}
+  };
+}
+
 async function refreshSettings() {
   try {
     const s = await api('/api/settings');
     STATE.settings = s;
+    refreshToolPerms();
     // Sync the chat-input placeholder with the configured agent name so
     // "Message JARVIS" becomes "Message Cortana" the moment the user
     // saves the rename in Settings.
