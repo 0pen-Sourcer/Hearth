@@ -2828,6 +2828,10 @@
             Server
             <span class="logs-server-pid" id="logs-server-pid" hidden></span>
           </button>
+          <button class="logs-tab" data-logs="phone">
+            <span class="logs-dot" id="logs-phone-dot"></span>
+            Phone
+          </button>
         </div>
         <button class="btn-mini" id="btn-log-pause" title="Pause auto-scroll">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
@@ -2851,6 +2855,10 @@
       <!-- Server log: raw text from llama_cpp.server, monospace, line-by-line.
            Auto-scrolls to the bottom unless the user paused or scrolled up. -->
       <pre class="server-log" id="server-log" hidden></pre>
+      <!-- Phone log: tailed *_bridge.log lines, each tagged with its channel
+           (telegram/discord/whatsapp) so incoming reach-from-phone traffic is
+           visible. Reuses the server-log monospace styling. -->
+      <pre class="server-log" id="phone-log" hidden></pre>
     </section>
 
     <!-- MODELS -->
@@ -7732,6 +7740,7 @@ let LOGS_SOURCE = 'agent';        // 'agent' | 'server'
 let LOGS_TIMER = null;             // setInterval id while view is open
 let LOGS_PAUSED = false;           // true = stop auto-refresh + auto-scroll
 let LOGS_SERVER_LAST_LEN = 0;      // for scroll-only-when-content-grew
+let LOGS_PHONE_LAST_LEN = 0;       // same, for the phone-log tab
 
 async function refreshAgentLog() {
   try {
@@ -7803,8 +7812,41 @@ async function refreshServerLog() {
   }
 }
 
+async function refreshPhoneLog() {
+  try {
+    const r = await api('/api/phone-logs?lines=250');
+    const dot = $('logs-phone-dot');
+    const chans = Array.isArray(r.channels) ? r.channels : [];
+    dot.classList.toggle('live', chans.length > 0);
+    const pre = $('phone-log');
+    const lines = Array.isArray(r.lines) ? r.lines : [];
+    if (!lines.length) {
+      pre.innerHTML = '<span class="dim">No phone activity yet. Set up a bot in Settings → Reach from phone, then message it — incoming traffic shows here, tagged by channel.</span>';
+      LOGS_PHONE_LAST_LEN = 0;
+      return;
+    }
+    const html = lines.map(ln => {
+      const safe = esc(ln);
+      if (/ERROR|Traceback|failed|Unauthorized|\b401\b/i.test(ln)) return `<span class="err">${safe}</span>`;
+      if (/^\[telegram\]/.test(ln)) return `<span class="info">${safe}</span>`;
+      if (/^\[discord\]/.test(ln))  return `<span class="hint">${safe}</span>`;
+      return safe;
+    }).join('\n');
+    pre.innerHTML = html;
+    const nearBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 60;
+    const total = lines.join('').length;
+    if (!LOGS_PAUSED && (nearBottom || total > LOGS_PHONE_LAST_LEN)) {
+      pre.scrollTop = pre.scrollHeight;
+    }
+    LOGS_PHONE_LAST_LEN = total;
+  } catch (e) {
+    $('phone-log').textContent = 'Phone log fetch failed: ' + e.message;
+  }
+}
+
 function refreshLogs() {
   if (LOGS_SOURCE === 'server') return refreshServerLog();
+  if (LOGS_SOURCE === 'phone') return refreshPhoneLog();
   return refreshAgentLog();
 }
 
@@ -7813,8 +7855,11 @@ function setLogsSource(src) {
   document.querySelectorAll('.logs-tab').forEach(b => b.classList.toggle('active', b.dataset.logs === src));
   $('log-list').hidden = src !== 'agent';
   $('server-log').hidden = src !== 'server';
+  $('phone-log').hidden = src !== 'phone';
   $('logs-sub').textContent = src === 'server'
     ? 'raw llama_cpp.server output - loading, requests, errors'
+    : src === 'phone'
+    ? 'incoming Discord / Telegram / WhatsApp messages + what ran'
     : 'every tool call, live';
   refreshLogs();
 }

@@ -1301,20 +1301,25 @@ class HearthHandler(BaseHTTPRequestHandler):
                 n = 120
             logs_dir = os.path.join(WORKSPACE, "logs")
             out = []
+            channels = []
             try:
                 for fn in sorted(os.listdir(logs_dir)):
                     if fn.endswith("_bridge.log"):
+                        channel = fn[:-len("_bridge.log")]  # telegram/discord/whatsapp
+                        channels.append(channel)
                         fp = os.path.join(logs_dir, fn)
                         try:
                             with open(fp, "r", encoding="utf-8", errors="replace") as f:
                                 for ln in f.read().splitlines():
                                     if ln.strip():
-                                        out.append(ln)
+                                        # Tag each line with its channel so the
+                                        # one view keeps them distinguishable.
+                                        out.append(f"[{channel}] {ln}")
                         except OSError:
                             pass
             except OSError:
                 pass
-            return self._send_json(200, {"lines": out[-n:]})
+            return self._send_json(200, {"lines": out[-n:], "channels": channels})
         if path == "/api/logs/download":
             return self._download_logs()
         if path == "/api/logs/server":
