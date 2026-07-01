@@ -349,11 +349,46 @@ def _load_persona(slug: str) -> Dict[str, Any]:
 # Cost-class -> endpoint routing
 # ---------------------------------------------------------------------------
 
+def _local_server_has_model(base: str) -> bool:
+    """True only if a local server at `base` is actually up AND has a model
+    ready to serve. Cheap-class routing uses this so it diverts to local ONLY
+    when local can serve — a cloud-only user (no LM Studio / built-in) would
+    otherwise dead-end with 'no model loaded at localhost'."""
+    try:
+        from . import llmserver as _ls
+        st = _ls.status(base)
+        if st.get("builtin_running") and st.get("builtin_model"):
+            return True
+    except Exception:
+        pass
+    import urllib.request
+    hdr = {"Authorization": "Bearer hearth-builtin"}
+    # v0: a genuinely-loaded llm/vlm. v1: any listed model (LM Studio only lists
+    # loaded ones there). Either positive means local can serve right now.
+    try:
+        req = urllib.request.Request(base.replace("/v1", "/api/v0") + "/models", headers=hdr)
+        with urllib.request.urlopen(req, timeout=1.5) as r:
+            for m in json.loads(r.read().decode("utf-8")).get("data", []):
+                if m.get("state") == "loaded" and m.get("type") in ("llm", "vlm"):
+                    return True
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(base + "/models", headers=hdr)
+        with urllib.request.urlopen(req, timeout=1.5) as r:
+            if json.loads(r.read().decode("utf-8")).get("data"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
     """Return (base_url, api_key, model) the subagent should chat against.
 
-    cheap     -> force local (LM Studio / built-in) regardless of parent's
-                 brain. PDF fan-out shouldn't bill 50 cloud calls.
+    cheap     -> prefer local (LM Studio / built-in) so a fan-out doesn't bill
+                 50 cloud calls — but ONLY if local can actually serve; else
+                 fall back to the parent's brain (correctness > cost).
     standard  -> inherit parent's current LOCAL_API_BASE / LOCAL_MODEL.
     premium   -> stay on parent's endpoint (if cloud, that's what the user
                  wanted; if local, we don't auto-upgrade — no surprise bills).
@@ -362,13 +397,13 @@ def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
     key = os.environ.get("LOCAL_API_KEY", "") or "not-needed"
     model = os.environ.get("LOCAL_MODEL", "")
     if cost_class == "cheap":
-        # If parent is cloud, swap to local. If parent is already local,
-        # no change.
         lower = base.lower()
         is_cloud = any(host in lower for host in
                        ("api.x.ai", "googleapis", "openai.com",
                         "anthropic.com", "openrouter.ai"))
-        if is_cloud:
+        # Only divert a cloud parent to local when local is genuinely ready.
+        # Otherwise keep the parent's cloud brain so the subagent still runs.
+        if is_cloud and _local_server_has_model("http://localhost:1234/v1"):
             base = "http://localhost:1234/v1"
             key = "hearth-builtin"
             model = ""  # let probe pick the loaded one
