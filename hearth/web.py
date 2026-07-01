@@ -612,8 +612,13 @@ def _list_models() -> List[Dict]:
     # they use /v1/images/generations and /v1/videos/generations instead.
     # Hide them from the chat-model picker; they're still callable via the
     # generate_image / generate_video TOOLS once a chat model is selected.
+    # Providers list image/video/music/speech/embedding models next to chat
+    # models, but they 400 on /v1/chat/completions. Hide them from the chat
+    # picker (they're reachable via the generate_image/_video tools). Covers
+    # xAI (imagine-*) AND Gemini (imagen/veo/lyria/native-audio/tts/aqa/robotics).
     NON_CHAT_PATTERNS = ("imagine-image", "imagine-video", "imagine-audio",
-                         "embedding", "embed-")
+                         "embedding", "embed-", "imagen", "veo-", "lyria",
+                         "native-audio", "-tts", "tts-", "aqa", "robotics")
     # Collect the chat-capable rows first, then flag the one the user actually
     # picked (settings.llm_model) as "loaded" — NOT just index 0. The old
     # "loaded if i==0" hardcode meant the topbar sticker reverted to the
