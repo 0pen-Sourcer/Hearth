@@ -1,12 +1,12 @@
 """Watch a team of agents build — spawn several Hearth subagents and watch them
 work live, side by side, in terminal panes.
 
-Opt-in: nothing here runs unless you call it (the `launch_team` tool, the CLI
-`/team` command, or launch_team() directly). The agents run IN-PROCESS via
-subagents.spawn_subagent(mode='background'), each writing a live JSONL
-transcript; each pane just live-TAILS one agent's transcript and pretty-prints
-it. So you see every agent think, call tools, and finish in real time — the
-Hearth-native version of the Claude Code tmux multi-agent setup.
+Opt-in: nothing here runs unless the model calls the `launch_team` tool (which
+decomposes a task into members), or code calls launch_team() directly. The
+agents run IN-PROCESS via subagents.spawn_subagent(mode='background'), each
+writing a live JSONL transcript; each pane just live-TAILS one agent's
+transcript and pretty-prints it. So you see every agent think, call tools, and
+finish in real time — the Hearth-native version of a tmux multi-agent setup.
 
 Panes: Windows Terminal split-panes (wt.exe) on Windows; tmux on Linux/macOS.
 If neither is available, the agents still run — you just read their transcripts
