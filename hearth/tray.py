@@ -295,6 +295,22 @@ def main(argv: Optional[list] = None) -> int:
             llmserver.stop_builtin()
         except Exception:
             pass
+        # Kill every child we spawned (the window process, phone bridges, the
+        # python/llama sentinels) so no Hearth.exe lingers holding a file lock
+        # after Quit — that stray process is what blocked reinstalling/rebuilding
+        # ("file is open in Hearth" even though the tray was gone). Then hard-exit
+        # so THIS process dies too instead of hanging on a stuck thread.
+        try:
+            import psutil as _ps
+            _me = _ps.Process(os.getpid())
+            for _ch in _me.children(recursive=True):
+                try:
+                    _ch.kill()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        os._exit(0)
 
     menu = pystray.Menu(
         pystray.MenuItem("Open Hearth", on_open, default=True),
