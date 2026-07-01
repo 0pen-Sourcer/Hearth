@@ -4370,6 +4370,15 @@ async function persistConvo(c) {
 }
 
 function newConversation() {
+  // Don't stack up blank sessions — clicking "New chat" repeatedly used to make
+  // infinitely many empty chats. If an empty one already exists, jump to it.
+  const empty = STATE.conversations.find(x => !(x.messages || []).length);
+  if (empty) {
+    setActiveId(empty.id);
+    renderConvoList();
+    renderChat();
+    return empty;
+  }
   const c = { id: uuid(), title: 'New chat', messages: [], created: Date.now(), updated: Date.now() };
   STATE.conversations.unshift(c);
   setActiveId(c.id);
@@ -9050,7 +9059,8 @@ function enterVoiceMode() {
   let c = activeConvo();
   if (!c || c.messages.length === 0) {
     c = c || newConversation();
-    if (c && (!c.title || c.title === 'New chat')) c.title = 'Voice chat';
+    // Leave the title as-is — it gets named from the actual first exchange like
+    // any other chat (was force-labelled "Voice chat", which looked odd).
     persistConvo(c);
     renderConvoList();
   }
@@ -9230,7 +9240,7 @@ function setMicUI() {
     btn.title = 'Muted — click to listen'; setVoiceStatus('🔇 muted — click the mic to talk');
   } else if (rtVoiceActive) {
     btn.innerHTML = _MIC_ON_SVG; btn.style.color = 'var(--accent)'; btn.style.opacity = '1';
-    btn.title = 'Listening — click to mute'; setVoiceStatus('🎙 listening');
+    btn.title = 'Listening — click to mute'; setVoiceStatus('listening');
   } else {
     btn.innerHTML = _MIC_ON_SVG; btn.style.color = ''; btn.style.opacity = '1';
     btn.title = 'Start / stop talking';

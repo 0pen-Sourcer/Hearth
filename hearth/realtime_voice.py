@@ -216,8 +216,12 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
                 # Block until silero detects an endpoint and faster-whisper
                 # returns the finalized text. ~200-400ms after you stop talking.
                 text = rec.text()
+                # Diagnostic: proves whether VAD is actually endpointing (a final
+                # utterance) vs blocking forever. If you SEE this line in the
+                # terminal after you stop talking, the final fired.
+                print(f"[hearth.realtime_voice] FINAL utterance -> {text!r}", flush=True)
             except Exception as e:
-                print(f"[hearth.realtime_voice] rec.text() error: {e}")
+                print(f"[hearth.realtime_voice] rec.text() error: {e}", flush=True)
                 time.sleep(0.2)
                 continue
             if _stop_flag.is_set():
