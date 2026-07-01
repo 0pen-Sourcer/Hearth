@@ -651,8 +651,14 @@
   .perm-seg.on.ask { background: var(--border-2); color: var(--fg); }
   .perm-seg.on.allow { background: rgba(135,255,135,.16); color: #87ff87; }
   .perm-seg.on.deny { background: rgba(248,113,113,.16); color: #f87171; }
-  /* "Use this brain" must be un-missable after a provider change. */
-  .btn-apply-brain { padding: 8px 18px; font-size: 13px; }
+  /* "Use this brain" must be un-missable after a provider change. Filled
+     accent (not a ghost button) so it reads as the primary action. */
+  .btn-apply-brain {
+    background: var(--accent); border: 1px solid var(--accent);
+    color: #fff; font-weight: 600;
+    padding: 8px 18px; font-size: 13px; border-radius: var(--r-sm);
+  }
+  .btn-apply-brain:hover { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
   .btn-apply-brain.needs-apply { animation: applyPulse 1.3s ease-in-out infinite; }
   @keyframes applyPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,.55); } 50% { box-shadow: 0 0 0 7px rgba(139,92,246,0); } }
   #brain-apply-hint.unsaved { color: var(--accent-2, #a78bfa); font-weight: 600; }
@@ -2966,7 +2972,7 @@
           <div class="label">
             <div class="hint" id="brain-apply-hint">When ready, switch to this brain - your next message will use it.</div>
           </div>
-          <button class="btn-primary btn-apply-brain" id="btn-llm-apply">Use this brain</button>
+          <button class="btn-mini btn-apply-brain" id="btn-llm-apply">Use this brain</button>
         </div>
         <div class="field">
           <div class="label">
