@@ -652,14 +652,15 @@
   .perm-seg.on.allow { background: rgba(135,255,135,.16); color: #87ff87; }
   .perm-seg.on.deny { background: rgba(248,113,113,.16); color: #f87171; }
   /* "Use this brain" — the apply row only appears once you actually change
-     something, so a filled accent (not a ghost) reads as the pending action
-     without needing to shout. Slides in rather than snapping. */
+     something. Accent-OUTLINE (tinted, not a loud filled block) so it reads as
+     the pending action without shouting; fills in on hover. Slides in. */
   .btn-apply-brain {
-    background: var(--accent); border: 1px solid var(--accent);
-    color: #fff; font-weight: 600;
-    padding: 8px 18px; font-size: 13px; border-radius: var(--r-sm);
+    background: rgba(139,92,246,.13); border: 1px solid var(--accent);
+    color: var(--accent-2); font-weight: 600;
+    padding: 7px 16px; font-size: 12.5px; border-radius: var(--r-sm);
+    transition: all 0.15s var(--ease);
   }
-  .btn-apply-brain:hover { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+  .btn-apply-brain:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
   #brain-apply-row { animation: applyRowIn 0.22s var(--ease); }
   @keyframes applyRowIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
   #brain-apply-hint.unsaved { color: var(--accent-2, #a78bfa); font-weight: 600; }
@@ -5971,11 +5972,18 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
   }
 
+  // On a cloud brain, pin the model the topbar is showing. The server's
+  // auto-detect fallback picks the provider's FIRST /v1/models entry, which for
+  // Gemini is often a non-chat model (imagen/embedding) → empty reply. Sending
+  // the selected id kills that race. Local stays auto-detected (model omitted).
+  const _chatModel = (STATE.brain && STATE.brain.kind === 'cloud'
+    && STATE.loadedModel && STATE.loadedModel.id) ? STATE.loadedModel.id : null;
   try {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ prompt, think: STATE.thinking, history }),
+      body: JSON.stringify(Object.assign({ prompt, think: STATE.thinking, history },
+                                         _chatModel ? { model: _chatModel } : {})),
       signal: currentAbort ? currentAbort.signal : undefined,
     });
     if (!res.ok || !res.body) {
