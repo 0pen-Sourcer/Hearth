@@ -3189,7 +3189,7 @@
         </div>
 
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
-        <div class="hint" style="margin-bottom:10px;">What each tool does when the AI calls it: <b>Ask</b> every time, <b>Allow</b> always, or <b>Deny</b> always. Risky tools default to Ask.</div>
+        <div class="hint" style="margin-bottom:10px;">What each tool does when the AI calls it: <b>Ask</b> every time, <b>Allow</b> always, or <b>Deny</b> — a denied tool is hidden from the model entirely (saves the tokens its description would cost). Risky tools default to Ask.</div>
         <input type="text" id="perm-search" placeholder="Search tools…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;margin-bottom:10px;">
         <div id="perm-list" style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow:auto;"></div>
 
