@@ -394,10 +394,20 @@ async def run_once(
         except Exception:
             pass
     if not model:
-        # Last resort — first model in the v1 list. May fail if it's not loaded.
+        # Last resort — first CHAT model in the v1 list. Skip image/video/music/
+        # speech/embedding models (Gemini lists imagen/veo/lyria/native-audio/
+        # embedding alongside chat models, and picking one yields an empty reply
+        # or a 400). May still fail if the picked model isn't actually loaded.
+        _NONCHAT = ("imagine-image", "imagine-video", "imagine-audio", "imagen",
+                    "veo-", "lyria", "native-audio", "-tts", "tts-", "aqa",
+                    "robotics", "embedding", "embed-")
         try:
             models_resp = await client.models.list()
-            model = models_resp.data[0].id
+            _chat = [m.id for m in models_resp.data
+                     if m.id and not any(p in m.id.lower() for p in _NONCHAT)]
+            model = _chat[0] if _chat else (models_resp.data[0].id if models_resp.data else None)
+            if not model:
+                raise RuntimeError("no models listed")
         except Exception as e:
             emit("error", message=f"Could not auto-detect a model on {LOCAL_API_BASE}: {e}")
             return 3
