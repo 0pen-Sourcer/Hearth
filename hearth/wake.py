@@ -52,6 +52,12 @@ def _wake_phrases() -> List[str]:
     env = os.environ.get("JARVIS_WAKE_PHRASES", "").strip()
     if env:
         return [p.strip().lower() for p in env.split(",") if p.strip()]
+    # Track the agent's actual name — a renamed agent (FRIDAY) should wake on
+    # "hey friday", not still on "jarvis".
+    name = os.environ.get("HEARTH_PERSONA_NAME", "").strip().lower()
+    if name and name != "jarvis":
+        return [name, f"hey {name}", f"hi {name}", f"yo {name}",
+                f"wake up {name}", f"{name} wake up"]
     return DEFAULT_WAKE_PHRASES
 
 

@@ -2961,6 +2961,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         try:
             _rt_voice.set_caption_callback(_on_partial)
             _rt_voice.set_barge_callback(_on_barge)
+            if _voice:
+                _voice.set_level_sink(lambda v: _rt_event_queue.put({"type": "level", "v": v}))
             msg = _rt_voice.start_continuous(_on_final)
             emit({"type": "started", "detail": msg})
             # NOTE: the GUI voice mode draws its OWN full-window dot grid, so we
@@ -2988,6 +2990,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             try:
                 _rt_voice.set_caption_callback(None)
                 _rt_voice.set_barge_callback(None)
+                if _voice:
+                    _voice.set_level_sink(None)
                 _rt_voice.stop_continuous()
             except Exception:
                 pass

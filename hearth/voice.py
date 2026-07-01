@@ -35,7 +35,7 @@ import threading
 import time
 import wave
 from io import BytesIO
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from .tools import WORKSPACE
 
@@ -351,6 +351,43 @@ def is_available() -> bool:
     return _load_engine() is not None
 
 
+# Amplitude sink — the GUI voice overlay registers one to drive its dot grid
+# from real voice loudness instead of a canned wave. Called ~25x/sec during TTS.
+_level_sink: Optional[Callable[[float], None]] = None
+
+
+def set_level_sink(cb: Optional[Callable[[float], None]]) -> None:
+    global _level_sink
+    _level_sink = cb
+
+
+def _emit_levels(arr, sample_rate: int) -> None:
+    sink = _level_sink
+    if sink is None:
+        return
+    try:
+        import numpy as np
+        a = arr.astype("float32") / 32768.0
+        win = max(1, int(sample_rate * 0.04))
+        levels = [min(1.0, float(np.sqrt(np.mean(seg * seg))) * 3.4)
+                  for seg in (a[i:i + win] for i in range(0, len(a), win)) if len(seg)]
+
+        def _run():
+            for lv in levels:
+                try:
+                    sink(lv)
+                except Exception:
+                    pass
+                time.sleep(0.04)
+            try:
+                sink(0.0)
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
 def _play(audio_bytes_or_array, sample_rate: int) -> None:
     try:
         import sounddevice as sd  # type: ignore
@@ -364,6 +401,7 @@ def _play(audio_bytes_or_array, sample_rate: int) -> None:
         if hasattr(arr, "dtype") and arr.dtype.kind == "f":
             import numpy as np  # type: ignore
             arr = (arr * 32767).clip(-32768, 32767).astype(np.int16)
+    _emit_levels(arr, sample_rate)
     sd.play(arr, sample_rate)
     sd.wait()
 
