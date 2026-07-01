@@ -8142,6 +8142,10 @@ async function refreshSettings() {
         openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator - gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-3.5-sonnet</code>.', sample: 'anthropic/claude-3.5-sonnet' },
         custom:     { url: '', hint: 'Any OpenAI-compatible server. You set the URL.', modelHint: 'Use whatever model id your server exposes.', sample: '' },
       };
+      // Per-provider key memory: each provider remembers its own key, so
+      // switching xAI -> Gemini -> xAI loads the right key instead of juggling.
+      const _brainKeys = () => { try { return JSON.parse(localStorage.getItem('hearth_brain_keys') || '{}'); } catch { return {}; } };
+      const _saveBrainKey = (prov, key) => { const m = _brainKeys(); if (key) m[prov] = key; else delete m[prov]; try { localStorage.setItem('hearth_brain_keys', JSON.stringify(m)); } catch {} };
       // Reflect the LIVE endpoint (STATE.endpoint, set by refreshState), not just
       // the saved provider - they can drift (a past /brain left llm_url=Grok
       // while llm_provider stayed "local"). The live endpoint is the truth.
@@ -8150,7 +8154,11 @@ async function refreshSettings() {
                    : (liveProv !== 'local' ? liveProv : (s.llm_provider || 'local'));
       brainMode.value = prov;
       llmUrl.value = s.llm_url || (STATE.endpoint && !STATE.endpoint.includes('localhost') ? STATE.endpoint : '') || (PRESETS[prov] && PRESETS[prov].url) || '';
-      llmKey.value = s.llm_key || '';
+      // Seed the map with the saved key so it isn't lost, then show this
+      // provider's remembered key.
+      if (s.llm_key && prov !== 'local') _saveBrainKey(prov, s.llm_key);
+      llmKey.value = _brainKeys()[prov] || s.llm_key || '';
+      let _prevProv = prov;
       llmMdl.value = s.llm_model || '';
       function applyMode(v) {
         const isLocal = (v === 'local');
@@ -8167,6 +8175,11 @@ async function refreshSettings() {
       applyMode(prov);
       brainMode.onchange = (e) => {
         const v = e.target.value;
+        // Remember the key you were using, then load the new provider's key
+        // (blank if none saved) so you never juggle keys by hand.
+        _saveBrainKey(_prevProv, llmKey.value);
+        _prevProv = v;
+        llmKey.value = _brainKeys()[v] || '';
         // A user-initiated provider switch resets the endpoint to that
         // provider's default, so a previous provider's URL (e.g. a cloud URL
         // left over from Grok) never carries into the new mode. Custom keeps
@@ -8188,6 +8201,7 @@ async function refreshSettings() {
           toast('API key needed', body.provider + ' requires a key', 'warn');
           return;
         }
+        _saveBrainKey(body.provider, body.key);  // remember this provider's key
         // Switching to cloud stops the built-in server (5-15s VRAM unload);
         // switching to local can spin up the built-in (model load). Either
         // way the user was watching a frozen-looking pane with no feedback.

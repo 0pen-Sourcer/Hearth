@@ -5975,6 +5975,57 @@ def _focus_window_linux(name: str) -> str:
             "under a pure Wayland session.)")
 
 
+def _list_windows(p: Dict) -> str:
+    """Every open top-level window: title, state, owning process. This is the
+    desktop awareness desktop_snapshot lacks (it only sees the foreground window)."""
+    if sys.platform != "win32":
+        return "list_windows: Windows only for now."
+    try:
+        import win32gui
+        import win32process
+    except Exception:
+        return "list_windows needs pywin32 (pip install pywin32)."
+    fg = win32gui.GetForegroundWindow()
+    rows: List = []
+
+    def _cb(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        title = win32gui.GetWindowText(hwnd)
+        if not title:
+            return
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        except Exception:
+            pid = 0
+        state = "foreground" if hwnd == fg else ("minimized" if win32gui.IsIconic(hwnd) else "open")
+        rows.append((title, pid, state))
+
+    try:
+        win32gui.EnumWindows(_cb, None)
+    except Exception as e:
+        return f"Error enumerating windows: {e}"
+    if not rows:
+        return "No visible windows."
+    procs = {}
+    try:
+        import psutil
+        for _, pid, _s in rows:
+            if pid and pid not in procs:
+                try:
+                    procs[pid] = psutil.Process(pid).name()
+                except Exception:
+                    procs[pid] = ""
+    except Exception:
+        pass
+    lines = []
+    for title, pid, state in rows:
+        tag = f" [{state}]" if state != "open" else ""
+        proc = procs.get(pid, "")
+        lines.append(f"- {title}{tag}" + (f"  ({proc})" if proc else ""))
+    return f"{len(rows)} open windows:\n" + "\n".join(lines)
+
+
 def _focus_window(p: Dict) -> str:
     """Bring an already-open window to the front by (partial) title match.
     Like open_app, but for windows that are ALREADY open — raise/focus them."""
@@ -6128,6 +6179,7 @@ TOOL_DEFINITIONS.append({
 })
 
 _HANDLERS["focus_window"] = _focus_window
+_HANDLERS["list_windows"] = _list_windows
 
 TOOL_DEFINITIONS.append({
     "name": "focus_window",
@@ -6145,6 +6197,18 @@ TOOL_DEFINITIONS.append({
         },
         "required": ["name"],
     },
+})
+
+TOOL_DEFINITIONS.append({
+    "name": "list_windows",
+    "description": (
+        "List EVERY open window (title, state — foreground/minimized/open — and "
+        "owning app). Use to see what's actually on the desktop before acting: "
+        "'what do I have open', 'is Steam running', or to pick a window to "
+        "focus_window / act on. desktop_snapshot only sees the foreground window; "
+        "this sees them all."
+    ),
+    "parameters": {"type": "object", "properties": {}},
 })
 
 TOOL_DEFINITIONS.append({
@@ -6863,7 +6927,7 @@ _TOOL_CATEGORY = {
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
     "network_info": "System & apps", "get_battery": "System & apps", "list_installed_apps": "System & apps",
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
-    "focus_window": "System & apps",
+    "focus_window": "System & apps", "list_windows": "System & apps",
     "list_jobs": "Background jobs", "get_job_result": "Background jobs",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
     "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps",
