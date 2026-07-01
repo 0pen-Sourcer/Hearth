@@ -361,28 +361,50 @@ def set_level_sink(cb: Optional[Callable[[float], None]]) -> None:
     _level_sink = cb
 
 
+# Most-recent TTS amplitude, pollable by any consumer (the desktop voice HUD)
+# without stealing the single sink the GUI registers. Decays to 0 when no audio
+# has played for a beat, so pollers rest instead of freezing on the last value.
+_current_level: float = 0.0
+_current_level_ts: float = 0.0
+
+
+def current_level() -> float:
+    """Latest real TTS amplitude 0..1, or 0.0 if nothing has played for ~150ms."""
+    if time.time() - _current_level_ts > 0.15:
+        return 0.0
+    return _current_level
+
+
 def _emit_levels(arr, sample_rate: int) -> None:
-    sink = _level_sink
-    if sink is None:
-        return
+    # Compute the RMS envelope regardless of whether a sink is registered — the
+    # desktop HUD polls current_level(), so amplitude must track even with no
+    # GUI attached. Forward each window to the sink too, if present.
     try:
         import numpy as np
         a = arr.astype("float32") / 32768.0
         win = max(1, int(sample_rate * 0.04))
         levels = [min(1.0, float(np.sqrt(np.mean(seg * seg))) * 3.4)
                   for seg in (a[i:i + win] for i in range(0, len(a), win)) if len(seg)]
+        sink = _level_sink
 
         def _run():
+            global _current_level, _current_level_ts
             for lv in levels:
+                _current_level = lv
+                _current_level_ts = time.time()
+                if sink is not None:
+                    try:
+                        sink(lv)
+                    except Exception:
+                        pass
+                time.sleep(0.04)
+            _current_level = 0.0
+            _current_level_ts = time.time()
+            if sink is not None:
                 try:
-                    sink(lv)
+                    sink(0.0)
                 except Exception:
                     pass
-                time.sleep(0.04)
-            try:
-                sink(0.0)
-            except Exception:
-                pass
         threading.Thread(target=_run, daemon=True).start()
     except Exception:
         pass
