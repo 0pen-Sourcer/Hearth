@@ -379,18 +379,37 @@ def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
 # Subagent loop  (thin wrapper around the openai SDK)
 # ---------------------------------------------------------------------------
 
+# Tools a WILDCARD subagent should not inherit by default. Scoped tight on
+# purpose: file ops are already sandboxed to the workspace and run_command
+# already gates destructive patterns, so those stay available. What's left is
+# browser driving and physical desktop takeover (mouse/keyboard/window) — a
+# fanned-out, unattended child grabbing the user's actual input is the wrong
+# default. An explicit allowed_tools list still grants any of these by name;
+# HEARTH_SUBAGENT_ALLOW_DANGEROUS=1 lifts it globally.
+_DANGEROUS_FOR_SUBAGENTS = {
+    "browse", "browse_click", "browse_type", "browse_scroll", "browse_key", "browse_close",
+    "computer_move", "computer_click", "computer_type", "computer_key",
+    "computer_scroll", "computer_drag",
+    "desktop_click", "desktop_type", "manage_window",
+}
+
+
 def _filter_tools(allowed: List[str]) -> List[Dict[str, Any]]:
     """Return TOOL_DEFINITIONS filtered to the persona's allowlist in
     OpenAI tool-call shape. `['*']` (wildcard) inherits the parent's
-    FULL toolset. Always silently drops `spawn_subagent` /
-    `get_subagent_result` even under wildcard so depth=3 can't be reached
-    via nested forks."""
+    toolset MINUS the fork primitives and the dangerous set above (so a
+    fanned-out child can't shell out / delete / drive the mouse). An explicit
+    allowlist is honored verbatim — list a dangerous tool by name to grant it."""
+    import os
     from . import TOOL_DEFINITIONS
     block = {"spawn_subagent", "get_subagent_result", "list_subagent_personas"}
-    # Wildcard: every Hearth tool except the fork primitives.
     if allowed and ("*" in allowed):
         allow = {t["name"] for t in TOOL_DEFINITIONS} - block
+        # Wildcard doesn't mean "hand a child the keys to run_command + mouse".
+        if not os.environ.get("HEARTH_SUBAGENT_ALLOW_DANGEROUS"):
+            allow -= _DANGEROUS_FOR_SUBAGENTS
     else:
+        # Explicit list = explicit intent; honor it (dangerous tools included).
         allow = set(allowed) - block
     out = []
     for t in TOOL_DEFINITIONS:
