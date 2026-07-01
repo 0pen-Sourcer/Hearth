@@ -138,6 +138,9 @@ def _build_recorder():
         # SNAP. 0.3s silence after end-of-speech = endpoint. ChatGPT feels
         # this fast because it's around the same value.
         post_speech_silence_duration=0.3,
+        # Neural end-of-speech detection — webrtc misses silence on a noisy mic,
+        # so rec.text() never endpoints.
+        silero_deactivity_detection=True,
         min_length_of_recording=0.25,
         min_gap_between_recordings=0.05,
         # Live partials every 100ms - what makes the caption stream feel
