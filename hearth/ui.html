@@ -8223,12 +8223,18 @@ async function refreshSettings() {
     if (sttMdl) {
       sttMdl.value = s.stt_model || 'base.en';
       sttMdl.onchange = async (e) => {
-        await saveSetting('stt_model', e.target.value);
-        toast('Whisper', 'downloading ' + e.target.value + ' (first time only)', 'info', 4000);
+        const mdl = e.target.value;
+        await saveSetting('stt_model', mdl);
+        // Disable the dropdown for the duration so it's OBVIOUS work is happening —
+        // /api/voice/reload blocks while faster-whisper pulls the model (can be a
+        // minute for small.en), and a vanished toast made it look frozen.
+        sttMdl.disabled = true;
+        toast('Whisper', 'Downloading ' + mdl + ' — first time only, up to ~1-2 min for bigger models. Hang tight, the app stays responsive.', 'info', 90000);
         try {
           await api('/api/voice/reload', { method: 'POST' });
-          toast('Whisper ready', e.target.value + ' loaded', 'ok');
-        } catch (err) { toast('STT model', err.message, 'err'); }
+          toast('Whisper ready', mdl + ' loaded ✓', 'ok');
+        } catch (err) { toast('STT model', 'download/load failed: ' + err.message, 'err', 8000); }
+        finally { sttMdl.disabled = false; }
       };
     }
 
