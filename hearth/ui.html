@@ -8163,8 +8163,16 @@ async function refreshSettings() {
           await api('/api/voice/reload', { method: 'POST' });
           const after = await api('/api/voice/status');
           const warn = after.tts && after.tts.last_load_warning;
-          if (warn) toast('TTS fell back', warn, 'warn', 8000);
-          else toast('TTS', 'switched to ' + v, 'ok');
+          if (warn) {
+            toast('TTS fell back to CPU', warn, 'warn', 8000);
+            // onnxruntime lists CUDA optimistically; if the runtime actually
+            // failed, snap the dropdown back to CPU so the UI matches reality
+            // instead of showing GPU + "installed ✓" while running on CPU.
+            ttsDev.value = 'cpu';
+            await saveSetting('tts_device', 'cpu');
+          } else {
+            toast('TTS', 'switched to ' + v, 'ok');
+          }
         } catch (err) { toast('TTS device', err.message, 'err'); }
       });
     }
