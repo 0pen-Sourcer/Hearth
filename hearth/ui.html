@@ -2329,6 +2329,7 @@
   .ob-overlay.open { display: flex; }
   .ob-card {
     width: 100%; max-width: 720px;
+    max-height: 92vh;                 /* never taller than the viewport … */
     background: var(--bg-1);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-xl);
@@ -2348,7 +2349,9 @@
   }
   .ob-progress .dot.done { background: var(--accent); }
   .ob-progress .dot.cur  { background: var(--accent-2); box-shadow: 0 0 12px rgba(167,139,250,0.45); }
-  .ob-body { padding: 36px 44px 32px 44px; }
+  /* … so the body scrolls between the fixed progress bar + footer, keeping
+     Continue always reachable even with many models / a short screen. */
+  .ob-body { padding: 36px 44px 32px 44px; flex: 1 1 auto; overflow-y: auto; min-height: 0; }
   .ob-hero {
     width: 64px; height: 64px;
     border-radius: 16px;
@@ -11313,26 +11316,19 @@ async function obLoadBrains() {
     ? 'Looks good - you already have a brain. Pick a different one if you want, or hit Continue.'
     : 'I look in LM Studio, Ollama, HuggingFace cache, and Downloads automatically. Here\'s what I found:';
 
-  // Choices: existing disk picks first (cap 3), then recommended (cap 1)
+  // Onboarding shows ONLY models already on disk — downloads belong in the
+  // Models tab (keeps onboarding clean, not overwhelming). The body scrolls,
+  // so all disk models are reachable without trapping the Continue button.
   const slots = [];
-  for (const m of disk.slice(0, 3)) {
+  for (const m of disk) {
     slots.push({
       title: m.filename,
       sub: `${m.source} · ${m.size_gb} GB - already on your disk, nothing to download`,
       data: { kind: 'disk', path: m.path },
     });
   }
-  const rec = picks.find(p => p.id === recId) || picks[0];
-  if (rec && !builtin) {
-    slots.push({
-      title: rec.name + ' (download)',
-      sub: `${rec.size_gb} GB · ${rec.description}`,
-      badge: 'Recommended for your PC',
-      data: { kind: 'pick', id: rec.id },
-    });
-  }
   if (!slots.length) {
-    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>No options to show - open the Models tab after onboarding.</span></div>';
+    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>No models on disk yet — skip this, then grab one in the Models tab (one click).</span></div>';
     return;
   }
   let html = '';
