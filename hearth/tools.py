@@ -1123,6 +1123,31 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "smart_click",
+        "description": (
+            "The RELIABLE way to click something on screen (computer-use). "
+            "Workflow: capture_active_window -> view_image to SEE it -> smart_click "
+            "with the pixel (x,y) at the target's CENTER in that image, in the "
+            "image's own coordinate space (top-left = 0,0). Hearth maps your pixel "
+            "to real screen coords, snaps it to the nearest real UI control from "
+            "the accessibility tree (so the click lands on the actual button, not "
+            "a guessed pixel), clicks it, and takes a fresh screenshot to verify. "
+            "Pass label = what you think it is (helps logging). Prefer this over "
+            "computer_click for anything you located visually."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "Pixel X of the target's center IN THE LAST capture image."},
+                "y": {"type": "integer", "description": "Pixel Y of the target's center IN THE LAST capture image."},
+                "label": {"type": "string", "description": "What the target is (e.g. 'Send button'). Optional."},
+                "button": {"type": "string", "enum": ["left", "right", "middle"]},
+                "double": {"type": "boolean", "description": "true = double-click."},
+            },
+            "required": ["x", "y"],
+        },
+    },
+    {
         "name": "view_image",
         "description": "Load an image file from disk so you can SEE it. Use this when the user gives you a path to an image (e.g. 'see this image C:\\\\path.png') or asks about a screenshot you just took. Returns the image content for vision processing. Works with .png, .jpg, .jpeg, .gif, .webp, .bmp.",
         "parameters": {
@@ -4529,6 +4554,11 @@ def _screenshot_posix_cli(out: str) -> Optional[str]:
     return None
 
 
+# Mapping from the last capture_active_window image back to real screen coords,
+# so smart_click can turn a vision-model pixel into a click on the right control.
+_LAST_CAPTURE: Dict = {}
+
+
 def _prune_shots(keep: int = 40) -> None:
     """Keep only the newest `keep` auto-captures in SHOTS_DIR so a long session
     (esp. the game HUD screenshotting each turn) doesn't pile up forever. Only
@@ -4662,15 +4692,94 @@ def _capture_active_window(p: Dict) -> str:
         # GetWindowRect — so a window on a left/secondary monitor (negative
         # coords) still grabs correctly.
         img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+        # Downscale to <=1280 long-edge — smaller + crisper for the vision model,
+        # and we record the exact scale so smart_click maps the model's pixel
+        # back to real screen coords (the coordinate contract).
+        _le = max(img.size)
+        if _le > 1280:
+            _k = 1280.0 / _le
+            img = img.resize((max(1, int(img.size[0] * _k)), max(1, int(img.size[1] * _k))))
         img.save(out)
+        img_w, img_h = img.size
     except ImportError:
         return "Error: needs Pillow. Run: pip install pillow"
     except Exception as e:
         return f"Error: {e}"
+    global _LAST_CAPTURE
+    _LAST_CAPTURE = {"origin_x": left, "origin_y": top,
+                     "src_w": right - left, "src_h": bottom - top,
+                     "img_w": img_w, "img_h": img_h, "path": out}
     return (
-        f"Saved: {out} ({img.size[0]}x{img.size[1]}) — window {win_title!r}\n"
-        f"NEXT STEP: if the user asked what's on screen / in the game, call "
-        f"view_image with path='{out}' RIGHT NOW in this same turn — don't stop."
+        f"Saved: {out} ({img_w}x{img_h}) — window {win_title!r}\n"
+        f"COORDINATE CONTRACT: this image is {img_w}x{img_h} px, top-left = (0,0). "
+        f"Any pixel you read off it is in THIS space.\n"
+        f"NEXT STEP: view_image path='{out}' to see it. To CLICK something, then "
+        f"call smart_click(x, y, label=<what it is>) with the pixel at the target's "
+        f"CENTER in this {img_w}x{img_h} image — Hearth snaps it to the real UI "
+        f"control and verifies."
+    )
+
+
+def _smart_click(p: Dict) -> str:
+    """FUSE vision-point + the accessibility tree — the reliable computer-use
+    click. Give (x,y) as a pixel in the LAST capture_active_window image; Hearth
+    maps it to real screen coords, snaps to the NEAREST named UI control, clicks
+    THAT (native invoke, no pixel guessing), then re-captures so you can verify.
+    Falls back to a raw pixel click only if no control is within reach."""
+    cap = _LAST_CAPTURE
+    if not cap:
+        return ("Error: no recent capture to click into. Call "
+                "capture_active_window first, then smart_click with a pixel from "
+                "that image.")
+    try:
+        mx = float(p["x"]); my = float(p["y"])
+    except (KeyError, TypeError, ValueError):
+        return "Error: smart_click needs numeric x and y (a pixel in the last capture image)."
+    label = (p.get("label") or "").strip()
+    button = (p.get("button") or "left").strip()
+    double = bool(p.get("double"))
+    iw, ih = cap.get("img_w", 0), cap.get("img_h", 0)
+    if iw <= 0 or ih <= 0:
+        return "Error: bad capture mapping; re-run capture_active_window."
+    # Image-space pixel -> real screen coords via the recorded contract.
+    sx = int(cap["origin_x"] + (mx / iw) * cap["src_w"])
+    sy = int(cap["origin_y"] + (my / ih) * cap["src_h"])
+    fused = None
+    try:
+        from . import desktop_a11y as _a
+        if _a.available():
+            _a.snapshot(80)                       # fresh tree
+            near = _a.element_near(sx, sy, tol=90)
+            if near is not None:
+                if _a.click(idx=near["idx"], double=double, button=button) is not None:
+                    fused = near
+    except Exception:
+        pass
+    if fused is not None:
+        clicked = (f"control {fused['name']!r} @({fused['x']},{fused['y']}) "
+                   f"[snapped {fused['dist']}px from your point]")
+    else:
+        try:
+            from . import computer
+            computer.click(sx, sy, button=button, double=double)
+            clicked = f"pixel ({sx},{sy}) [no UI control within 90px — raw click]"
+        except Exception as e:
+            return f"Error: click failed: {type(e).__name__}: {e}"
+    # Verify-after-click: re-capture so the model must SEE the result.
+    _t.sleep(0.4)
+    vpath = ""
+    try:
+        for line in _capture_active_window({}).splitlines():
+            if line.startswith("Saved: "):
+                vpath = line.split("Saved: ", 1)[1].split(" (")[0]
+                break
+    except Exception:
+        pass
+    return (
+        f"Clicked {clicked}" + (f" (you called it {label!r})" if label else "") + ".\n"
+        + (f"VERIFY: fresh screenshot at {vpath} — call view_image on it to confirm "
+           f"the click did what you expected before continuing." if vpath else
+           "Re-capture with capture_active_window to verify the result.")
     )
 
 
@@ -5587,6 +5696,7 @@ _HANDLERS = {
     "list_browsers": _list_browsers,
     "screenshot": _screenshot,
     "capture_active_window": _capture_active_window,
+    "smart_click": _smart_click,
     "view_image": _view_image,
     "clipboard_read": _clipboard_read,
     "clipboard_write": _clipboard_write,
@@ -7101,7 +7211,7 @@ _TOOL_CATEGORY = {
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
     "network_info": "System & apps", "get_battery": "System & apps", "list_installed_apps": "System & apps",
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
-    "capture_active_window": "System & apps",
+    "capture_active_window": "System & apps", "smart_click": "System & apps",
     "focus_window": "System & apps", "list_windows": "System & apps", "manage_window": "System & apps",
     "list_jobs": "Background jobs", "get_job_result": "Background jobs",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
