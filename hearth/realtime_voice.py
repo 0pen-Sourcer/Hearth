@@ -44,6 +44,13 @@ _caption_cb: Optional[Callable[[str], None]] = None
 # starts speaking (silero VAD start). Lets the GUI kill TTS + abort the
 # LLM stream so a phone-call-like interrupt works.
 _barge_cb: Optional[Callable[[], None]] = None
+# Echo guard: on speakers (not headphones) the mic can hear Hearth's own TTS and
+# false-trigger a barge on its own voice. Set HEARTH_BARGE_GUARD_MS>0 to require
+# speech to SUSTAIN that long before it counts as a real interrupt (a transient
+# echo blip gets cancelled by on_vad_detect_stop). Default 0 = instant barge
+# (unchanged) — perfect on headphones; bump to ~200 if you run on speakers.
+_barge_guard_ms: int = int(os.environ.get("HEARTH_BARGE_GUARD_MS", "0") or "0")
+_barge_timer: Optional[threading.Timer] = None
 
 
 def is_available() -> bool:
@@ -117,19 +124,38 @@ def _build_recorder():
             except Exception:
                 pass
 
+    def _fire_barge() -> None:
+        cb = _barge_cb
+        if cb is not None:
+            try: cb()
+            except Exception: pass
+
     def _on_vad_start() -> None:
-        # User just started speaking. If TTS is mid-sentence, that's a
-        # barge-in — fire it immediately so the assistant shuts up + the
-        # in-flight LLM call gets aborted.
+        # User just started speaking. If TTS is mid-sentence, that's a barge-in —
+        # kill TTS + abort the in-flight LLM so the interrupt feels phone-call snappy.
         if _tts.is_speaking():
-            cb = _barge_cb
-            if cb is not None:
-                try: cb()
-                except Exception: pass
+            global _barge_timer
+            if _barge_guard_ms > 0:
+                # Debounce: only barge if speech sustains past the guard window,
+                # so a transient echo of Hearth's own voice doesn't self-interrupt.
+                _barge_timer = threading.Timer(_barge_guard_ms / 1000.0, _fire_barge)
+                _barge_timer.daemon = True
+                _barge_timer.start()
+            else:
+                _fire_barge()
         else:
             # Not speaking → the user has the floor: drive the HUD to "listening".
             try: _tts.set_voice_state("listening")
             except Exception: pass
+
+    def _on_vad_stop() -> None:
+        # Speech ended. Cancel a pending guarded barge — it was just a blip
+        # (likely echo), not a real interrupt.
+        global _barge_timer
+        if _barge_timer is not None:
+            try: _barge_timer.cancel()
+            except Exception: pass
+            _barge_timer = None
 
     rec = AudioToTextRecorder(
         model=model,
@@ -155,6 +181,7 @@ def _build_recorder():
         on_realtime_transcription_update=_on_realtime_update,
         # Barge-in: VAD says user started speaking → kill TTS NOW.
         on_vad_detect_start=_on_vad_start,
+        on_vad_detect_stop=_on_vad_stop,
         # Quiet.
         spinner=False,
         level=40,
