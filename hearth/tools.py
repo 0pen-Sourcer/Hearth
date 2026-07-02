@@ -6831,6 +6831,8 @@ _DEFERRED_TOOLS = {
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # ntfy push is opt-in / rare
     "focus_window",        # niche window management
+    "glob_files",          # find_file already accepts glob patterns + is fuzzier
+    "clipboard_read", "clipboard_write",  # niche; rarely needed as a tool call
     "end_session",
 }
 
