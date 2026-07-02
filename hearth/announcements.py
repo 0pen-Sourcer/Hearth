@@ -62,11 +62,46 @@ def _fetch(url: str, timeout: float = 6.0):
         with urlopen(req, timeout=timeout, context=ctx) as r:
             return json.loads(r.read().decode("utf-8"))
 
+ANNOUNCE_PUBKEY_B64 = ""
+
+
+def _canonical(entry: dict) -> bytes:
+    """Deterministic bytes to sign/verify: the entry minus its own `sig`."""
+    e = {k: v for k, v in entry.items() if k != "sig"}
+    return json.dumps(e, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _verify(entry: dict) -> bool:
+    """True only if `entry` carries a valid signature from the author's key."""
+    if not ANNOUNCE_PUBKEY_B64 or not entry.get("sig"):
+        return False
+    try:
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(ANNOUNCE_PUBKEY_B64))
+        pub.verify(base64.b64decode(entry["sig"]), _canonical(entry))
+        return True
+    except Exception:
+        return False
+
+
+def sign_entry(entry: dict, private_key_path: str) -> dict:
+    """Author-only: sign an announcement with the private key, returning it with
+    a `sig`. Never ship the private key. Used by the publishing flow."""
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    with open(private_key_path, "rb") as f:
+        priv = Ed25519PrivateKey.from_private_bytes(base64.b64decode(f.read().strip()))
+    e = {k: v for k, v in entry.items() if k != "sig"}
+    e["sig"] = base64.b64encode(priv.sign(_canonical(e))).decode("ascii")
+    return e
+
 
 def _entries(data) -> list:
     if isinstance(data, dict):
         data = data.get("announcements") or data.get("items") or []
-    return [e for e in data if isinstance(e, dict) and e.get("id")]
+    # Only VERIFIED, signed entries are ever shown — unsigned/forged ones drop.
+    return [e for e in data if isinstance(e, dict) and e.get("id") and _verify(e)]
 
 
 def _read_local_feed() -> list:
