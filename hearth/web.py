@@ -283,6 +283,9 @@ def _delete_convo(cid: str) -> bool:
 
 _gpu_cache: Dict[str, Any] = {"ts": 0, "data": None}
 _models_cache: Dict[str, Any] = {"ts": 0, "data": None}
+# Set when a CLOUD model-list fetch fails/empties (e.g. xAI 403s) so the GUI can
+# explain why the picker only shows the active model, instead of looking broken.
+_models_notice: str = ""
 
 # ----- Permission system -----
 # When a risky tool fires during /chat, the bridge calls permission_check
@@ -500,10 +503,12 @@ def _list_models() -> List[Dict]:
     Anything else (Ollama, cloud, custom): use plain /v1/models and mark loaded.
     Cached 4s either way.
     """
+    global _models_notice
     now = time.time()
     if _models_cache["data"] is not None and now - _models_cache["ts"] < 4:
         return _models_cache["data"]
 
+    _models_notice = ""  # cleared each fresh compute; set only if a cloud list fails
     out: List[Dict] = []
     # The endpoint we'll actually probe — may differ from LOCAL_API_BASE if
     # the chat is currently routed to a cloud endpoint. See _models_probe_endpoint.
@@ -605,8 +610,9 @@ def _list_models() -> List[Dict]:
     # Try with the configured API key so an auth-gated server (builtin /
     # Gemini / etc.) actually answers instead of silently returning empty.
     api_key = os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
-    data = _http_get_json(f"{probe_base}/models",
-                          headers={"Authorization": f"Bearer {api_key}"}) or {"data": []}
+    _raw_models = _http_get_json(f"{probe_base}/models",
+                                 headers={"Authorization": f"Bearer {api_key}"})
+    data = _raw_models or {"data": []}
     # Skip non-chat models — xAI lists grok-imagine-image / grok-imagine-video
     # alongside chat models, but they 400 on /v1/chat/completions because
     # they use /v1/images/generations and /v1/videos/generations instead.
@@ -637,6 +643,19 @@ def _list_models() -> List[Dict]:
         # to basename here so the topbar shows "model.gguf" not "C:\Users\...".
         clean_id = os.path.basename(raw_id.replace("\\", "/")) or raw_id
         rows.append((clean_id, m))
+    # Honest surface: if a CLOUD provider gave us nothing (403/no response), tell
+    # the user WHY the picker is sparse instead of showing a misleading catalog.
+    _h = probe_base.lower()
+    _is_cloud = not any(x in _h for x in ("localhost", "127.0.0.1", "0.0.0.0", "::1"))
+    if not rows and _is_cloud:
+        _prov = ("xAI Grok" if "api.x.ai" in _h else "OpenAI" if "api.openai.com" in _h
+                 else "Gemini" if "googleapis" in _h else "the provider")
+        _reason = "returned no response" if _raw_models is None else "returned an empty list"
+        _models_notice = (f"{_prov} {_reason} for the model list — usually out of credits or an API "
+                          f"key without model-list access. Your active model still works; type a "
+                          f"different model id in Settings → Chat brain if you need to switch.")
+    else:
+        _models_notice = ""
     _loaded_idx = 0
     for idx, (cid, _m) in enumerate(rows):
         if _picked and cid.lower() == _picked:
@@ -1187,7 +1206,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(404, {"error": "not found"})
             return self._send_json(200, data)
         if path == "/api/models":
-            return self._send_json(200, {"models": _list_models()})
+            _ms = _list_models()
+            return self._send_json(200, {"models": _ms, "notice": _models_notice})
         if path == "/api/mcp/config":
             # Outbound MCP config — pasted from a standard mcp.json. Stored
             # at ~/Jarvis/mcp.json. Empty file → empty config (valid).
