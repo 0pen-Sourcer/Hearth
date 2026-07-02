@@ -82,6 +82,7 @@ def _mark_speaking_start() -> None:
     global _speaking_count
     with _speaking_state_lock:
         _speaking_count += 1
+    set_voice_state("speaking")
 
 
 def _mark_speaking_end() -> None:
@@ -89,6 +90,10 @@ def _mark_speaking_end() -> None:
     with _speaking_state_lock:
         _speaking_count = max(0, _speaking_count - 1)
         _last_spoke_at = time.time()
+        _still = _speaking_count > 0
+    # Only fall back to idle when the LAST overlapping utterance finished.
+    if not _still:
+        set_voice_state("idle")
 # Last HARD load error — surfaced in status() so we don't silently report
 # "engine: null" when the actual issue is, e.g., a missing file format.
 _last_load_error: Optional[str] = None
@@ -366,6 +371,20 @@ def set_level_sink(cb: Optional[Callable[[float], None]]) -> None:
 # has played for a beat, so pollers rest instead of freezing on the last value.
 _current_level: float = 0.0
 _current_level_ts: float = 0.0
+
+# Coarse voice-loop state, so the desktop HUD can animate PRESENCE (not text):
+# idle=calm breathe, listening=steady glow, thinking=brisk pulse, speaking=
+# amplitude-reactive. Set by realtime_voice + the TTS player; polled by the HUD.
+_voice_state: str = "idle"
+
+
+def set_voice_state(s: str) -> None:
+    global _voice_state
+    _voice_state = s if s in ("idle", "listening", "thinking", "speaking") else "idle"
+
+
+def voice_state() -> str:
+    return _voice_state
 
 
 def current_level() -> float:
