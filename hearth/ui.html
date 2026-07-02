@@ -10380,12 +10380,10 @@ function modelsRenderPicks() {
         <div class="cell-size">${p.size_gb} GB</div>
         <button class="model-action" data-pick="${esc(p.id)}">Download &amp; use</button>
         <div class="model-expand" data-expand="${rowId}">
-          <div class="ex-head">Load configuration</div>
-          <div class="ex-desc">Applied after download finishes.</div>
-          ${modelsLoadConfigHTML({ maxCtx: p.context, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 24576, p.context) })}
+          <div class="ex-desc">Downloads the file, then loads it with sensible defaults. Tune context / GPU layers anytime in <b>My Models</b> — set once, right where you load it.</div>
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
-            <button class="model-action" data-apply-pick="${esc(p.id)}" data-apply-id="${rowId}">Download with this config</button>
+            <button class="model-action" data-apply-pick="${esc(p.id)}" data-apply-id="${rowId}">Download</button>
           </div>
         </div>
       </div>`;
@@ -10444,11 +10442,10 @@ async function modelsRenderDiscover() {
           <div class="ex-head">Choose a quantization</div>
           <div class="ex-desc">Bigger Q = better quality but slower + more VRAM. Q4_K_M is the usual sweet spot.</div>
           <div class="ex-files" data-hf-files="${rowId}">Loading files…</div>
-          <div class="ex-head" style="margin-top:14px">Load configuration</div>
-          ${modelsLoadConfigHTML({ maxCtx: 32768, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 24576, 32768) })}
+          <div class="ex-desc" style="margin-top:12px">Pick a quant, download, and it loads with sensible defaults. Tune context / GPU layers in <b>My Models</b> — set once, right where you load it.</div>
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
-            <button class="model-action" data-apply-hf-repo="${esc(it.hf_repo)}" data-apply-id="${rowId}" disabled>Download with this config</button>
+            <button class="model-action" data-apply-hf-repo="${esc(it.hf_repo)}" data-apply-id="${rowId}" disabled>Download</button>
           </div>
         </div>
       </div>`;
