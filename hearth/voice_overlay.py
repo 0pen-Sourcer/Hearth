@@ -10,10 +10,26 @@ blocks the voice loop.
 """
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
 from math import hypot, sin
+
+
+def _corner_xy(sw: int, sh: int, width: int, height: int):
+    """Screen position for the HUD from HEARTH_HUD_CORNER (tr/tl/br/bl), default
+    top-right. A setting beats drag here: drag needs a non-click-through window,
+    which would block clicks to the game underneath — the opposite of what a HUD
+    should do. So it stays fully click-through and you pick the corner instead."""
+    m = 28
+    corner = (os.environ.get("HEARTH_HUD_CORNER", "tr") or "tr").strip().lower()
+    right = sw - width - m
+    bottom = sh - height - m
+    return {
+        "tr": (right, m), "tl": (m, m),
+        "br": (right, bottom), "bl": (m, bottom),
+    }.get(corner, (right, m))
 
 _BG_KEY = 0x00010101   # near-black, painted transparent via color-key
 _COLS, _ROWS = 11, 6   # grid size
@@ -94,6 +110,13 @@ def _run() -> None:
                     win32gui.SelectObject(hdc, old)
                 win32gui.EndPaint(hwnd, ps)
                 return 0
+            if msg == win32con.WM_NCHITTEST:
+                # Hold Ctrl → the whole HUD becomes a grab handle (drag it
+                # anywhere). Otherwise every click passes straight through to the
+                # game/app underneath, so it never interferes with play.
+                if win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000:
+                    return win32con.HTCAPTION
+                return win32con.HTTRANSPARENT
             if msg == win32con.WM_DESTROY:
                 win32gui.PostQuitMessage(0)
                 return 0
@@ -121,11 +144,13 @@ def _run() -> None:
         sh = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
         width = _COLS * _SP + _PAD
         height = _ROWS * _SP + _PAD
-        x = (sw - width) // 2          # bottom-center HUD
-        y = sh - height - 70
+        x, y = _corner_xy(sw, sh, width, height)   # top-right default; env-configurable
+        # Click-through is done via WM_NCHITTEST (HTTRANSPARENT) NOT
+        # WS_EX_TRANSPARENT — that way holding Ctrl can flip it to HTCAPTION and
+        # the whole window becomes draggable, while a normal click still passes
+        # through to the game underneath.
         ex = (win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST
-              | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOOLWINDOW
-              | win32con.WS_EX_NOACTIVATE)
+              | win32con.WS_EX_TOOLWINDOW | win32con.WS_EX_NOACTIVATE)
         hwnd = win32gui.CreateWindowEx(ex, cls, None, win32con.WS_POPUP,
                                        x, y, width, height, 0, 0, hinst, None)
         win32gui.SetLayeredWindowAttributes(
@@ -185,15 +210,21 @@ def _run() -> None:
                 target = 0.58 + 0.05 * sin(t * 2.6)                 # steady hold
             else:
                 target = 0.30 + 0.06 * sin(t * 2.0)                 # calm breathe
-            state["level"] = target
+            # Ease toward the target instead of snapping — this is what kills the
+            # jank. ~0.22/frame @60fps = a smooth ~80ms glide, so amplitude spikes
+            # read as fluid motion, not a strobe.
+            state["level"] += (target - state["level"]) * 0.22
             try:
                 win32gui.InvalidateRect(hwnd, None, True)
-                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, x, y, 0, 0,
-                                      win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
+                # Re-assert topmost WITHOUT moving (SWP_NOMOVE) — otherwise it
+                # would snap back to origin every frame and fight a Ctrl-drag.
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                                      win32con.SWP_NOSIZE | win32con.SWP_NOMOVE
+                                      | win32con.SWP_NOACTIVATE)
                 win32gui.PumpWaitingMessages()
             except Exception:
                 break
-            time.sleep(0.045)
+            time.sleep(0.016)   # ~60fps
 
         try:
             win32gui.DestroyWindow(hwnd)
