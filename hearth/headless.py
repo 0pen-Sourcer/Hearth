@@ -1170,6 +1170,25 @@ async def run_once(
         # final text.
         if msg.content:
             emit("assistant", content=msg.content)
+        elif not msg.tool_calls:
+            # Empty completion, no tool call — the model returned NOTHING. Say
+            # why instead of leaving a blank turn (which looks like Hearth broke
+            # or the brain got lost). Providers return empty content on safety/
+            # recitation blocks, on truncation before any text, and sometimes on
+            # a swallowed rate-limit — a silent blank hid all of these.
+            _fr = (finish_reason or "").lower()
+            if _fr in ("content_filter", "safety"):
+                _why = "the provider blocked this response with its safety filter. Try rephrasing."
+            elif _fr == "recitation":
+                _why = ("the provider blocked it as too close to copyrighted/training text "
+                        "(recitation) — common on piracy/DLC topics. Rephrase or ask more generally.")
+            elif _fr in ("length", "max_tokens"):
+                _why = "it hit the output-length cap before producing text. Ask for something shorter."
+            else:
+                _why = (f"the model returned nothing (finish_reason: {finish_reason or 'unknown'}). "
+                        "On a cloud free tier this is often a rate/quota limit (HTTP 429) — "
+                        "wait a moment, or check your provider quota.")
+            emit("assistant", content=f"_(no output — {_why})_")
 
         # NEXT-STEP nudge: previous tool emitted a "NEXT STEP:" directive,
         # and the model just narrated instead of executing it.
