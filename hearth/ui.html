@@ -8930,10 +8930,15 @@ async function refreshSettings() {
       const v = await api('/api/voice/status');
       const tts = v.tts || {}; const stt = v.stt || {};
       const ttsOK = tts.engine && tts.engine !== null;
-      $('tts-status').textContent = ttsOK ? `ready (${tts.engine})` : (tts.last_load_error || 'not available - pip install kokoro-onnx sounddevice numpy + drop voice models in ~/Jarvis/voices/');
+      // Not-installed reads as reassuring, not broken: voice is OPTIONAL and
+      // Hearth is fully usable by text. (A real load error still shows verbatim
+      // so it's debuggable.) The voice packages ship with the Full edition.
+      $('tts-status').textContent = ttsOK ? `ready (${tts.engine})`
+        : (tts.last_load_error || 'Not set up — spoken replies are optional; Hearth works fully by text. Voice ships with the Full edition.');
       $('tts-status').className = 'voice-status ' + (ttsOK ? 'ok' : 'bad');
       const sttOK = stt.ready;
-      $('stt-status').textContent = sttOK ? `ready (whisper ${stt.model_size}, ${stt.device})` : (stt.last_load_error || 'not available - pip install faster-whisper sounddevice numpy');
+      $('stt-status').textContent = sttOK ? `ready (whisper ${stt.model_size}, ${stt.device})`
+        : (stt.last_load_error || 'Not set up — talking to Hearth is optional; you can always type. Voice ships with the Full edition.');
       $('stt-status').className = 'voice-status ' + (sttOK ? 'ok' : 'bad');
     } catch {}
 
