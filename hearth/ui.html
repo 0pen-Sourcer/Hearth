@@ -3028,6 +3028,23 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">Voice</div>
+            <div class="hint">Which Kokoro voice speaks. Change it anytime — no need to redo onboarding.</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; min-width:300px;">
+            <select id="setting-voice-name" style="flex:1; min-width:210px;">
+              <option value="am_michael">am_michael - American, calm Jarvis baseline</option>
+              <option value="bm_george">bm_george - British, deep, formal butler</option>
+              <option value="bm_fable">bm_fable - British, warmer, conversational</option>
+              <option value="am_fenrir">am_fenrir - American, gravelly, low</option>
+              <option value="am_onyx">am_onyx - American, smooth deep</option>
+              <option value="bm_daniel">bm_daniel - British, crisp, professional</option>
+            </select>
+            <button class="btn-mini" id="setting-voice-test" title="Hear the selected voice">▶ Test</button>
+          </div>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">Voice speed</div>
             <div class="hint">1.5 is the new default - faster, less monotone. Slide higher if you want it snappier; lower if it's too quick to follow.</div>
           </div>
@@ -8166,6 +8183,32 @@ async function refreshSettings() {
       speedInp.onchange = async (e) => {
         const v = parseFloat(e.target.value) || 1.5;
         await saveSetting('voice_speed', v);
+      };
+    }
+
+    // Voice picker - change the spoken voice from Settings (not just onboarding).
+    const voiceSel = $('setting-voice-name');
+    const voiceTest = $('setting-voice-test');
+    if (voiceSel) {
+      voiceSel.value = s.voice_name || 'am_michael';
+      voiceSel.onchange = async (e) => {
+        await saveSetting('voice_name', e.target.value);
+        toast('Voice', 'set to ' + e.target.value, 'ok', 2000);
+      };
+    }
+    if (voiceTest) {
+      voiceTest.onclick = async () => {
+        voiceTest.disabled = true;
+        const prev = voiceTest.textContent; voiceTest.textContent = 'playing…';
+        try {
+          if (voiceSel) await saveSetting('voice_name', voiceSel.value);  // so /api/tts uses it
+          const r = await fetch('/api/tts', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ text: 'This is ' + (voiceSel ? voiceSel.value : 'the voice') + '. This is how I sound.' }),
+          });
+          if (!r.ok) toast('Voice test', 'playback failed — make sure TTS is enabled above', 'warn', 5000);
+        } catch (err) { toast('Voice test', err.message, 'err'); }
+        finally { voiceTest.disabled = false; voiceTest.textContent = prev; }
       };
     }
 
