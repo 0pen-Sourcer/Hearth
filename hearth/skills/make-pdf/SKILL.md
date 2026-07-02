@@ -133,12 +133,22 @@ story = [
     Paragraph("Second bullet", BULLET, bulletText="•"),
 ]
 
-# 4) Tables when you have rows of data
-table = Table([
-    ["Name", "Role", "Years"],
-    ["Ada",  "Eng",  "5"],
-    ["Linus","Eng",  "34"],
-], colWidths=[60*mm, 60*mm, 30*mm])
+# 4) Tables when you have rows of data.
+# HARD RULE — this is the #1 table bug (columns overlapping into a mess):
+#   (a) ANY cell that can exceed ~2 words MUST be a Paragraph(text, style) so it
+#       WRAPS. Raw strings do NOT wrap — long text overruns into the next column.
+#   (b) colWidths MUST sum to <= the content width: A4 usable ≈ 170mm, Letter
+#       ≈ 176mm (page width minus left+right margins). Wider = it runs off-page.
+CELL  = ParagraphStyle("cell",  parent=BODY, fontSize=9, leading=12)
+HEADC = ParagraphStyle("headc", parent=CELL, textColor=white, fontName="Helvetica-Bold")
+def _row(cells, style=CELL):
+    return [Paragraph(str(c), style) for c in cells]   # every cell wraps
+table = Table(
+    [_row(["Object", "History / usage", "Material"], HEADC)] +
+    [_row(["Alarm clock", "Mechanical winding clock used since the early 1900s to wake people", "Brass"]),
+     _row(["Recipe book", "Handwritten family recipes passed down across generations", "Paper"])],
+    colWidths=[40*mm, 100*mm, 30*mm],   # 40+100+30 = 170mm → fits A4 exactly
+)
 table.setStyle(TableStyle([
     ("BACKGROUND", (0,0), (-1,0), ACCENT),
     ("TEXTCOLOR",  (0,0), (-1,0), white),
