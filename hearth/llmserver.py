@@ -1366,6 +1366,24 @@ _status_cache: Dict[str, Any] = {"ts": 0, "data": None, "key": None}
 _STATUS_TTL_SECONDS = 8.0
 
 
+def list_partial_downloads() -> List[Dict[str, Any]]:
+    """Interrupted downloads (*.gguf.part) in MODELS_DIR, so the GUI can surface
+    them as RESUMABLE instead of showing 'no downloads' after a restart — the
+    bytes are on disk and re-downloading the same model resumes from here."""
+    out: List[Dict[str, Any]] = []
+    try:
+        for p in MODELS_DIR.glob("*.gguf.part"):
+            try:
+                out.append({"filename": p.name[:-5],  # drop ".part"
+                            "gb": round(p.stat().st_size / (1024 ** 3), 2),
+                            "path": str(p)})
+            except OSError:
+                pass
+    except Exception:
+        pass
+    return out
+
+
 def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
     """Snapshot of the LLM-server situation, for the GUI Models panel.
 
@@ -1460,6 +1478,7 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
         "builtin_url": _proc_info.get("url") if builtin else None,
         "builtin_model": _proc_info.get("model_path") if builtin else None,
         "disk_models": _disk,
+        "partial_downloads": list_partial_downloads(),
         "local_models": _local,
         "remote_endpoint": not _is_local,
         "scanning": _is_scanning,
