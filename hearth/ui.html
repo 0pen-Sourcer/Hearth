@@ -2891,6 +2891,7 @@
           <div class="label" id="models-dl-label"></div>
           <div class="progress-bar"><div id="models-dl-bar"></div></div>
           <div class="detail" id="models-dl-detail"></div>
+          <button class="btn-mini" id="models-dl-resume" hidden style="margin-top:8px;">▶ Resume download</button>
         </div>
       </div>
     </section>
@@ -10192,6 +10193,7 @@ async function refreshModelsView() {
   // Render panes (cheap - none has a network call beyond status)
   modelsRenderMine();
   if (_modelsState.tab === 'discover') modelsRenderDiscover();
+  showResumableDownload(s);   // surface any interrupted .part download + Resume
 }
 
 // Header-only renderer broken out so the stale-while-revalidate path above
@@ -10992,6 +10994,10 @@ async function modelsDownloadPick(pickId, loadCfg) {
 async function modelsDownloadHF(repo, filename, loadCfg) {
   const dl = $('models-dl');
   dlToggle(true);  // progress shows in the downloads overlay, not the model list
+  // Remember what's downloading so a restart mid-download can offer Resume
+  // (the .part on disk resumes; this just gives us the repo to re-request).
+  try { localStorage.setItem('hearth_pending_dl', JSON.stringify({ repo, filename })); } catch {}
+  const rb = $('models-dl-resume'); if (rb) rb.hidden = true;
   const bar = $('models-dl-bar'), label = $('models-dl-label'), detail = $('models-dl-detail');
   bar.style.width = '0%';
   label.textContent = 'Downloading ' + filename + '...';
@@ -11005,7 +11011,38 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
     modelPath = await streamDownload(res, bar, label, detail, filename);
   } catch (e) { label.textContent = 'Error'; detail.textContent = e.message; return; }
-  if (modelPath) await startWithModel(modelPath, label, detail, loadCfg);
+  if (modelPath) {
+    try { localStorage.removeItem('hearth_pending_dl'); } catch {}  // done — nothing to resume
+    await startWithModel(modelPath, label, detail, loadCfg);
+  }
+}
+
+// After a restart mid-download, the .part is on disk but the progress UI is
+// gone. Surface it in the SAME overlay with a one-click Resume (re-requesting
+// the HF file resumes from the .part). Called whenever models status loads.
+function showResumableDownload(s) {
+  if (typeof dlActiveCount === 'function' && dlActiveCount() > 0) return;  // a live download is running
+  const dl = $('models-dl'), rb = $('models-dl-resume');
+  if (!dl || !rb) return;
+  const partials = (s && s.partial_downloads) || [];
+  if (!partials.length) { dl.hidden = true; rb.hidden = true; return; }
+  const part = partials[0];
+  let pending = null;
+  try { pending = JSON.parse(localStorage.getItem('hearth_pending_dl') || 'null'); } catch {}
+  dl.hidden = false;
+  $('models-dl-bar').style.width = '60%';
+  $('models-dl-label').textContent = 'Interrupted download — ' + part.filename;
+  $('models-dl-detail').textContent = part.gb + ' GB already on disk. Resuming picks up from here, not from zero.';
+  rb.hidden = false;
+  rb.onclick = () => {
+    rb.hidden = true;
+    if (pending && pending.repo && pending.filename) {
+      modelsDownloadHF(pending.repo, pending.filename, {});   // resumes via the .part
+    } else {
+      _modelsState.tab = 'discover'; modelsRenderDiscover();
+      toast('Resume from Discover', 'Search the same model + click Download — it resumes from the ' + part.gb + ' GB already there.', 'ok', 7000);
+    }
+  };
 }
 
 async function streamDownload(res, bar, label, detail, filenameHint) {
