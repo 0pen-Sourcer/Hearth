@@ -163,17 +163,29 @@ def _run() -> None:
                 except Exception:
                     pass
                 _shown = True
-            # Reach is driven by Hearth's REAL TTS amplitude (voice.current_level),
-            # so the grid reacts to its own speech — quiet = center, loud = edge —
-            # not a canned loop. A slow idle breathe when silent keeps it alive.
+            # PRESENCE via motion (no text, no face): each voice-loop state gets
+            # its own signature the eye reads instantly —
+            #   speaking  : reactive, driven by REAL TTS amplitude (quiet=center,
+            #               loud=edge) — not a canned loop
+            #   thinking  : brisk rhythmic pulse ("working on it")
+            #   listening : steady bright hold ("I've got the floor to you")
+            #   idle      : slow calm breathe (alive but resting)
             try:
                 from . import voice as _v
                 lvl = _v.current_level()
+                st = _v.voice_state()
             except Exception:
-                lvl = 0.0
+                lvl, st = 0.0, "idle"
             t = time.time() - start_t
-            idle = 0.30 + 0.06 * sin(t * 2.0)
-            state["level"] = min(1.0, max(idle, 0.35 + lvl * 0.75)) if lvl > 0.02 else idle
+            if lvl > 0.02:
+                target = min(1.0, max(0.35, 0.35 + lvl * 0.75))
+            elif st == "thinking":
+                target = 0.52 + 0.40 * (0.5 + 0.5 * sin(t * 5.2))   # brisk pulse
+            elif st == "listening":
+                target = 0.58 + 0.05 * sin(t * 2.6)                 # steady hold
+            else:
+                target = 0.30 + 0.06 * sin(t * 2.0)                 # calm breathe
+            state["level"] = target
             try:
                 win32gui.InvalidateRect(hwnd, None, True)
                 win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, x, y, 0, 0,

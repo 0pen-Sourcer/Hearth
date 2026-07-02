@@ -126,6 +126,10 @@ def _build_recorder():
             if cb is not None:
                 try: cb()
                 except Exception: pass
+        else:
+            # Not speaking → the user has the floor: drive the HUD to "listening".
+            try: _tts.set_voice_state("listening")
+            except Exception: pass
 
     rec = AudioToTextRecorder(
         model=model,
@@ -237,6 +241,10 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
             # Don't dispatch our own TTS playback as user input
             if _tts.is_speaking() or _tts.seconds_since_spoke() < 0.5:
                 continue
+            # Utterance accepted → LLM is about to work: HUD shows "thinking"
+            # (brisk pulse) until the first TTS chunk flips it to "speaking".
+            try: _tts.set_voice_state("thinking")
+            except Exception: pass
             try:
                 on_utterance(text)
             except Exception as e:
