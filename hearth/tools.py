@@ -4529,6 +4529,23 @@ def _screenshot_posix_cli(out: str) -> Optional[str]:
     return None
 
 
+def _prune_shots(keep: int = 40) -> None:
+    """Keep only the newest `keep` auto-captures in SHOTS_DIR so a long session
+    (esp. the game HUD screenshotting each turn) doesn't pile up forever. Only
+    touches our own shot_/window_ captures — never user files or forge_ outputs."""
+    try:
+        shots = [os.path.join(SHOTS_DIR, f) for f in os.listdir(SHOTS_DIR)
+                 if (f.startswith("shot_") or f.startswith("window_")) and f.endswith(".png")]
+        if len(shots) <= keep:
+            return
+        shots.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        for old in shots[keep:]:
+            try: os.remove(old)
+            except OSError: pass
+    except Exception:
+        pass
+
+
 def _screenshot(p: Dict) -> str:
     # Optional delay so the user can switch to the window they want
     # captured before the shutter fires. Without this, the screenshot
@@ -4554,6 +4571,7 @@ def _screenshot(p: Dict) -> str:
     # guarantees it's off-screen + destroyed before we grab, so it's never in
     # the shot.
     _t.sleep(0.35)
+    _prune_shots()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = os.path.join(SHOTS_DIR, f"shot_{ts}.png")
     # Primary path: PIL.ImageGrab (works on Windows + macOS; on Linux it has
@@ -4635,6 +4653,7 @@ def _capture_active_window(p: Dict) -> str:
     if right - left < 8 or bottom - top < 8:
         return ("Error: that window has no visible area (minimized?). Restore it "
                 "first with manage_window(action='restore').")
+    _prune_shots()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = os.path.join(SHOTS_DIR, f"window_{ts}.png")
     try:
