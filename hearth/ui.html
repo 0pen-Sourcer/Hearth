@@ -5172,9 +5172,18 @@ function makeMeta(text, kind = '') {
 // ============================================================
 // TOP BAR - models
 // ============================================================
+let _lastModelNotice = '';
 async function refreshModels() {
   try {
-    const { models } = await api('/api/models');
+    const resp = await api('/api/models');
+    const models = resp.models;
+    // Explain a sparse cloud picker (e.g. xAI 403s the model list) — toast once
+    // per distinct notice so the 9s poll doesn't spam it.
+    const notice = resp.notice || '';
+    if (notice && notice !== _lastModelNotice) {
+      toast('Model list unavailable', notice, 'warn', 9000);
+    }
+    _lastModelNotice = notice;
     STATE.models = models;
     // Also pull the disk-scan list so the user can swap models from this
     // dropdown without leaving the chat view. The currently-running one is
