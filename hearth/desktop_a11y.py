@@ -334,6 +334,27 @@ def _snapshot_mac(max_elements: int) -> dict:
 
 
 # ------------------------------------------------------------------- actions
+def element_near(sx: int, sy: int, tol: int = 90):
+    """Nearest cached interactive element to screen point (sx, sy), or None if
+    none is within `tol` px. This is the FUSE step of vision-point + a11y: the
+    vision model gives an approximate pixel; we snap it to the real named control
+    so the click lands on the actual button, not a guessed coordinate. Call
+    snapshot() first so `_last` is populated."""
+    best = None
+    best_d = float(tol) + 1.0
+    for e in _last:
+        try:
+            d = ((e["x"] - sx) ** 2 + (e["y"] - sy) ** 2) ** 0.5
+        except Exception:
+            continue
+        if d < best_d:
+            best, best_d = e, d
+    if best is None:
+        return None
+    return {"idx": _last.index(best), "name": best.get("name", ""),
+            "x": best["x"], "y": best["y"], "dist": round(best_d, 1)}
+
+
 def _find(idx=None, name=None):
     if idx is not None:
         try:
