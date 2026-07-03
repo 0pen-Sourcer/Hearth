@@ -10187,6 +10187,11 @@ async function refreshModelsView() {
   else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; ' + (s.external_model_id ? esc(s.external_model_id) : 'OpenAI-compatible API on this PC') + '</span>';
   else head.innerHTML = '<span class="server-pill is-off">No brain active &middot; pick a model below</span>';
 
+  // Lite build has no built-in server — steer to cloud/LM Studio or Full.
+  if (s.is_lite) {
+    head.innerHTML += '<div style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,.08);border:1px solid var(--accent-line);border-radius:8px;font-size:12.5px;color:var(--fg-dim)">You\'re on <b>Hearth Lite</b> — no built-in model server. Point Hearth at a cloud brain (Settings → Chat brain) or LM Studio / Ollama, or <a href="' + esc(s.full_url || '#') + '" target="_blank" style="color:var(--accent-2)">get Hearth Full ↗</a> to run local models here.</div>';
+  }
+
   // Disk-count badge on the "My Models" tab
   $('tab-mine-n').textContent = (s.disk_models || []).length;
 
