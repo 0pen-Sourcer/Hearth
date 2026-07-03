@@ -3205,6 +3205,13 @@
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Toasts</h4>
         <div class="field">
           <div class="label">
+            <div class="name">Mute all notification toasts</div>
+            <div class="hint">Silences every corner pop-up (API errors, status, confirmations). Master switch - overrides the toggles below. Errors still show in Logs.</div>
+          </div>
+          <div class="switch" data-key="mute_toasts"></div>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">"Remembered N facts" toast</div>
             <div class="hint">Pops up when Hearth auto-extracts durable facts at end of a turn. Off = silent saves; check the Memory tab to see what landed.</div>
           </div>
@@ -4015,6 +4022,7 @@ async function api(path, opts = {}) {
 }
 
 function toast(title, body = '', kind = 'ok', ms = 3500) {
+  if (STATE.settings && STATE.settings.mute_toasts) return;  // muted in Settings -> Behavior
   const t = document.createElement('div');
   t.className = `toast ${kind}`;
   t.innerHTML = `<div class="title">${esc(title)}</div>${body ? `<div class="body">${esc(body)}</div>` : ''}`;
@@ -11024,11 +11032,14 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
 // Surface an interrupted .part download; auto-resume it when the repo is known.
 let _autoResumedDl = false;
 function showResumableDownload(s) {
-  if (typeof dlActiveCount === 'function' && dlActiveCount() > 0) return;  // a live download is running
   const dl = $('models-dl'), rb = $('models-dl-resume');
   if (!dl || !rb) return;
   const partials = (s && s.partial_downloads) || [];
-  if (!partials.length) { dl.hidden = true; rb.hidden = true; return; }
+  // A live download shows in the top-right Downloads overlay — hide the pane
+  // banner so it's never stale next to an active download.
+  if ((typeof dlActiveCount === 'function' && dlActiveCount() > 0) || !partials.length) {
+    dl.hidden = true; rb.hidden = true; return;
+  }
   const part = partials[0];
   // Repo: backend-remembered first, localStorage as fallback.
   let repo = part.repo || '';
