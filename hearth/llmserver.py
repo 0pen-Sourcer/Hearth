@@ -1367,14 +1367,12 @@ _STATUS_TTL_SECONDS = 8.0
 
 
 def list_partial_downloads() -> List[Dict[str, Any]]:
-    """Interrupted downloads (*.gguf.part) in MODELS_DIR, so the GUI can surface
-    them as RESUMABLE instead of showing 'no downloads' after a restart — the
-    bytes are on disk and re-downloading the same model resumes from here."""
+    """Interrupted downloads (*.gguf.part) in MODELS_DIR, for the GUI resume UI."""
     out: List[Dict[str, Any]] = []
     try:
         for p in MODELS_DIR.glob("*.gguf.part"):
             try:
-                out.append({"filename": p.name[:-5],  # drop ".part"
+                out.append({"filename": p.name[:-5],
                             "gb": round(p.stat().st_size / (1024 ** 3), 2),
                             "path": str(p)})
             except OSError:

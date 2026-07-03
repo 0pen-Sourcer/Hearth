@@ -366,15 +366,11 @@ def set_level_sink(cb: Optional[Callable[[float], None]]) -> None:
     _level_sink = cb
 
 
-# Most-recent TTS amplitude, pollable by any consumer (the desktop voice HUD)
-# without stealing the single sink the GUI registers. Decays to 0 when no audio
-# has played for a beat, so pollers rest instead of freezing on the last value.
+# Most-recent TTS amplitude, pollable (decays to 0 when idle).
 _current_level: float = 0.0
 _current_level_ts: float = 0.0
 
-# Coarse voice-loop state, so the desktop HUD can animate PRESENCE (not text):
-# idle=calm breathe, listening=steady glow, thinking=brisk pulse, speaking=
-# amplitude-reactive. Set by realtime_voice + the TTS player; polled by the HUD.
+# Voice-loop state for the desktop HUD: idle/listening/thinking/speaking.
 _voice_state: str = "idle"
 
 
@@ -395,9 +391,7 @@ def current_level() -> float:
 
 
 def _emit_levels(arr, sample_rate: int) -> None:
-    # Compute the RMS envelope regardless of whether a sink is registered — the
-    # desktop HUD polls current_level(), so amplitude must track even with no
-    # GUI attached. Forward each window to the sink too, if present.
+    # RMS envelope; updates current_level() and forwards to the sink if present.
     try:
         import numpy as np
         a = arr.astype("float32") / 32768.0

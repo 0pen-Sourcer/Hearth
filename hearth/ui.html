@@ -10994,8 +10994,7 @@ async function modelsDownloadPick(pickId, loadCfg) {
 async function modelsDownloadHF(repo, filename, loadCfg) {
   const dl = $('models-dl');
   dlToggle(true);  // progress shows in the downloads overlay, not the model list
-  // Remember what's downloading so a restart mid-download can offer Resume
-  // (the .part on disk resumes; this just gives us the repo to re-request).
+  // Remember repo/filename so a restart can offer Resume.
   try { localStorage.setItem('hearth_pending_dl', JSON.stringify({ repo, filename })); } catch {}
   const rb = $('models-dl-resume'); if (rb) rb.hidden = true;
   const bar = $('models-dl-bar'), label = $('models-dl-label'), detail = $('models-dl-detail');
@@ -11017,9 +11016,7 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
   }
 }
 
-// After a restart mid-download, the .part is on disk but the progress UI is
-// gone. Surface it in the SAME overlay with a one-click Resume (re-requesting
-// the HF file resumes from the .part). Called whenever models status loads.
+// Surface an interrupted .part download in the overlay with a Resume button.
 function showResumableDownload(s) {
   if (typeof dlActiveCount === 'function' && dlActiveCount() > 0) return;  // a live download is running
   const dl = $('models-dl'), rb = $('models-dl-resume');
