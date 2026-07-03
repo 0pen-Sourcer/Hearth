@@ -44,11 +44,8 @@ _caption_cb: Optional[Callable[[str], None]] = None
 # starts speaking (silero VAD start). Lets the GUI kill TTS + abort the
 # LLM stream so a phone-call-like interrupt works.
 _barge_cb: Optional[Callable[[], None]] = None
-# Echo guard: on speakers (not headphones) the mic can hear Hearth's own TTS and
-# false-trigger a barge on its own voice. Set HEARTH_BARGE_GUARD_MS>0 to require
-# speech to SUSTAIN that long before it counts as a real interrupt (a transient
-# echo blip gets cancelled by on_vad_detect_stop). Default 0 = instant barge
-# (unchanged) — perfect on headphones; bump to ~200 if you run on speakers.
+# Echo guard: HEARTH_BARGE_GUARD_MS>0 requires speech to sustain that long
+# before it counts as a barge (cancels echo blips). Default 0 = instant barge.
 _barge_guard_ms: int = int(os.environ.get("HEARTH_BARGE_GUARD_MS", "0") or "0")
 _barge_timer: Optional[threading.Timer] = None
 
