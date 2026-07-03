@@ -11021,7 +11021,8 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
   }
 }
 
-// Surface an interrupted .part download in the overlay with a Resume button.
+// Surface an interrupted .part download; auto-resume it when the repo is known.
+let _autoResumedDl = false;
 function showResumableDownload(s) {
   if (typeof dlActiveCount === 'function' && dlActiveCount() > 0) return;  // a live download is running
   const dl = $('models-dl'), rb = $('models-dl-resume');
@@ -11029,22 +11030,29 @@ function showResumableDownload(s) {
   const partials = (s && s.partial_downloads) || [];
   if (!partials.length) { dl.hidden = true; rb.hidden = true; return; }
   const part = partials[0];
-  let pending = null;
-  try { pending = JSON.parse(localStorage.getItem('hearth_pending_dl') || 'null'); } catch {}
+  // Repo: backend-remembered first, localStorage as fallback.
+  let repo = part.repo || '';
+  if (!repo) { try { const p = JSON.parse(localStorage.getItem('hearth_pending_dl') || 'null'); if (p && p.filename === part.filename) repo = p.repo; } catch {} }
   dl.hidden = false;
   $('models-dl-bar').style.width = '60%';
-  $('models-dl-label').textContent = 'Interrupted download — ' + part.filename;
-  $('models-dl-detail').textContent = part.gb + ' GB already on disk. Resuming picks up from here, not from zero.';
+  $('models-dl-label').textContent = 'Resuming — ' + part.filename;
+  $('models-dl-detail').textContent = part.gb + ' GB already on disk. Continuing from here, not from zero.';
   rb.hidden = false;
   rb.onclick = () => {
-    rb.hidden = true;
-    if (pending && pending.repo && pending.filename) {
-      modelsDownloadHF(pending.repo, pending.filename, {});   // resumes via the .part
-    } else {
+    if (repo) { rb.hidden = true; modelsDownloadHF(repo, part.filename, {}); }
+    else {
       _modelsState.tab = 'discover'; modelsRenderDiscover();
       toast('Resume from Discover', 'Search the same model + click Download — it resumes from the ' + part.gb + ' GB already there.', 'ok', 7000);
     }
   };
+  // Continue on its own: auto-resume once per session when the repo is known.
+  if (repo && !_autoResumedDl) {
+    _autoResumedDl = true;
+    rb.hidden = true;
+    modelsDownloadHF(repo, part.filename, {});
+  } else if (!repo) {
+    $('models-dl-label').textContent = 'Interrupted download — ' + part.filename;
+  }
 }
 
 async function streamDownload(res, bar, label, detail, filenameHint) {
