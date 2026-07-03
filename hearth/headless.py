@@ -325,6 +325,72 @@ def emit_text(event_type: str, **fields: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Builtin-server tool calling (manual injection)
+# ---------------------------------------------------------------------------
+# Hearth's builtin llama_cpp.server can't inject the OpenAI `tools` param on its
+# own — that needs a function-calling chat_format, and that handler returns empty
+# / crashes the stream on real prompts. So for the builtin ONLY we hand-inject
+# the <tools> spec as text (the format Qwen/Hermes are trained on) and recover
+# <tool_call> from the reply via hearth.tool_call_parser. Cloud + LM Studio keep
+# the native `tools` API — it works there.
+
+def _manual_tools_block(tools: List[Dict[str, Any]]) -> str:
+    lines = ["You can call functions. Their signatures are inside "
+             "<tools></tools>:", "<tools>"]
+    for t in tools:
+        fn = t.get("function", t)
+        lines.append(json.dumps(fn, ensure_ascii=False))
+    lines.append("</tools>")
+    lines.append('To call one, emit a JSON object inside <tool_call></tool_call>:')
+    lines.append('<tool_call>\n{"name": "func_name", "arguments": {...}}\n</tool_call>')
+    lines.append("Emit several <tool_call> blocks to call several functions. "
+                 "Results return inside <tool_response> tags — use them to answer.")
+    return "\n".join(lines)
+
+
+def _to_manual_messages(msgs: List[Dict[str, Any]],
+                        tools_block: str) -> List[Dict[str, Any]]:
+    """Rewrite the standard OpenAI message list into the text form the builtin
+    server's native template accepts: append <tools> to the system message,
+    render assistant tool_calls back to <tool_call> text, and fold tool results
+    into a user-role <tool_response> turn (role=tool 500s on the builtin).
+    Consecutive tool results merge into one user turn."""
+    out: List[Dict[str, Any]] = []
+    sys_done = False
+    pending: List[str] = []
+
+    def _flush():
+        if pending:
+            out.append({"role": "user", "content": "\n".join(pending)})
+            pending.clear()
+
+    for m in msgs:
+        role = m.get("role")
+        if role == "tool":
+            pending.append(f"<tool_response>\n{m.get('content','')}\n</tool_response>")
+            continue
+        _flush()
+        if role == "system" and not sys_done:
+            sys_done = True
+            content = m.get("content", "")
+            if tools_block:
+                content = content + "\n\n" + tools_block
+            out.append({"role": "system", "content": content})
+        elif role == "assistant" and m.get("tool_calls"):
+            parts = [m["content"]] if m.get("content") else []
+            for tc in m["tool_calls"]:
+                fn = tc.get("function", {})
+                parts.append(
+                    f'<tool_call>\n{{"name": "{fn.get("name","")}", '
+                    f'"arguments": {fn.get("arguments") or "{}"}}}\n</tool_call>')
+            out.append({"role": "assistant", "content": "\n".join(parts).strip()})
+        else:
+            out.append(dict(m))
+    _flush()
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Core loop
 # ---------------------------------------------------------------------------
 
@@ -370,6 +436,9 @@ async def run_once(
                 _effective_key = "hearth-builtin"
     except Exception:
         pass
+    # Only our builtin server uses the hearth-builtin key. That's the exclusive
+    # signal to hand-inject tools as text instead of via the API `tools` param.
+    _use_manual_tools = (_effective_key == "hearth-builtin")
     client = AsyncOpenAI(base_url=LOCAL_API_BASE, api_key=_effective_key, timeout=180.0)
 
     # Auto-pick the LOADED model (not just downloaded) — LM Studio's v1
@@ -748,6 +817,7 @@ async def run_once(
                 "temperature": temperature,
                 "stream": True,
             }
+            _tools_block_text = ""
             if _force_answer:
                 # Spiral guard tripped last turn: withhold tools so the model
                 # is FORCED to produce a text answer instead of calling again.
@@ -756,8 +826,16 @@ async def run_once(
             else:
                 # Rebuilt each turn so tools the model unlocks via `load_tools`
                 # (tool-diet) appear on the next request.
-                kwargs["tools"] = to_openai_tools()
-                kwargs["tool_choice"] = "auto"
+                _tools = to_openai_tools()
+                if _use_manual_tools:
+                    _tools_block_text = _manual_tools_block(_tools)
+                else:
+                    kwargs["tools"] = _tools
+                    kwargs["tool_choice"] = "auto"
+            if _use_manual_tools:
+                # Builtin server: send tools as text + tool history rewritten to
+                # the <tool_call>/<tool_response> form its native template reads.
+                kwargs["messages"] = _to_manual_messages(messages, _tools_block_text)
             # `chat_template_kwargs` is an LM-Studio / llama.cpp-specific extra.
             # Cloud OpenAI-compatible endpoints (Gemini, OpenAI, OpenRouter)
             # reject unknown fields with a 400. Only send it to local servers.
@@ -863,6 +941,34 @@ async def run_once(
         except Exception as e:
             emit("error", message=f"Streaming failed at depth {depth}: {type(e).__name__}: {e}")
             return 4
+
+        # Empty-stream rescue. llama.cpp's chatml-function-calling STREAMING
+        # handler crashes mid-generation on some models ("ASGI callable
+        # returned without completing response") — the 200 header is sent but
+        # the generator yields nothing, so content + tool_calls arrive empty
+        # with finish_reason None. The NON-streaming path for the same request
+        # is reliable. A local model always produces something, so an empty
+        # local stream means the bug, not a real empty answer — retry once,
+        # non-streamed. Cloud is left alone (empty there is a real throttle).
+        if (not content_buf and not tool_calls_by_idx
+                and "tools" in kwargs and _is_local_endpoint(LOCAL_API_BASE)):
+            try:
+                ns_kwargs = dict(kwargs)
+                ns_kwargs["stream"] = False
+                r2 = await client.chat.completions.create(**ns_kwargs)
+                m2 = r2.choices[0].message
+                finish_reason = r2.choices[0].finish_reason or finish_reason
+                if getattr(m2, "content", None):
+                    content_buf.append(m2.content)
+                    emit("assistant_chunk", content=m2.content)
+                for tc in (getattr(m2, "tool_calls", None) or []):
+                    tool_calls_by_idx[len(tool_calls_by_idx)] = {
+                        "id": tc.id, "type": "function",
+                        "function": {"name": tc.function.name,
+                                     "arguments": tc.function.arguments or ""},
+                    }
+            except Exception:
+                pass  # fall through to the normal empty-response handling below
 
         # Build the synthetic message in the same shape the rest of the loop
         # expects. The legacy strip_tool_markup() + nudge here was made
@@ -1185,6 +1291,10 @@ async def run_once(
                         "(recitation) — common on piracy/DLC topics. Rephrase or ask more generally.")
             elif _fr in ("length", "max_tokens"):
                 _why = "it hit the output-length cap before producing any text — ask for something shorter."
+            elif _is_local_endpoint(LOCAL_API_BASE):
+                _why = (f"the local model returned no text (finish_reason: {finish_reason or 'unknown'}). "
+                        "The server's streaming tool-call handler likely dropped the response — "
+                        "retry, or switch to a different local model.")
             else:
                 _why = (f"the model returned no text (finish_reason: {finish_reason or 'unknown'}). "
                         "On a cloud free tier this is usually a rate/quota throttle — wait a "
