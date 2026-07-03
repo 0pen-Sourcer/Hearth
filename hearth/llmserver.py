@@ -35,6 +35,17 @@ WORKSPACE = Path(os.environ.get("JARVIS_WORKSPACE", Path.home() / "Jarvis"))
 MODELS_DIR = WORKSPACE / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
+FULL_DOWNLOAD_URL = "https://github.com/0pen-sourcer/hearth/releases"
+
+
+def _is_lite_edition() -> bool:
+    """True on a packaged Lite build (no bundled server). Source = Full."""
+    try:
+        from . import edition
+        return edition.is_lite()
+    except Exception:
+        return False
+
 # Per-model load-config persistence. Keyed by normalized absolute path so the
 # user only configures GPU offload / ctx / KV cache once per .gguf file and we
 # auto-restore on every "Use this" click after.
@@ -1477,6 +1488,8 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
         "builtin_model": _proc_info.get("model_path") if builtin else None,
         "disk_models": _disk,
         "partial_downloads": list_partial_downloads(),
+        "is_lite": _is_lite_edition(),
+        "full_url": FULL_DOWNLOAD_URL,
         "local_models": _local,
         "remote_endpoint": not _is_local,
         "scanning": _is_scanning,
