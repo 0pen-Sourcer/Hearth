@@ -263,6 +263,33 @@ def detect_gpu_vram_free_gb() -> Optional[float]:
     return None
 
 
+_compute_cap_cache: List[Optional[float]] = []
+
+
+def detect_gpu_compute_cap() -> Optional[float]:
+    """NVIDIA compute capability (e.g. 8.6 Ampere, 8.9 Ada, 12.0 Blackwell) as a
+    float. Cached. Used to work around arch-specific llama.cpp kernel bugs — on
+    Blackwell (>=12.0) this build's flash-attention returns empty on long
+    context. Returns None if not detectable."""
+    if _compute_cap_cache:
+        return _compute_cap_cache[0]
+    val: Optional[float] = None
+    try:
+        import subprocess
+        no_window = 0x08000000 if os.name == "nt" else 0
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=4, creationflags=no_window,
+        )
+        line = (out.stdout or "").strip().splitlines()[0].strip()
+        if line:
+            val = float(line)
+    except Exception:
+        val = None
+    _compute_cap_cache.append(val)
+    return val
+
+
 def detect_ram_gb() -> Optional[float]:
     """Total system RAM in GB. Fallback when there's no GPU - llama.cpp will
     run on CPU + RAM, so we pick a tinier model in that case."""
@@ -754,51 +781,72 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     # offloading so a long context fits in VRAM instead of spilling to RAM/CPU
     # (~half the KV memory, negligible quality loss). q8_0 V-cache needs flash
     # attention, which is on by default. Caller can override either type.
+    # Blackwell (compute cap >=12.0, e.g. RTX 50-series): this llama.cpp build's
+    # flash-attention kernels return EMPTY output on long context. q8_0 KV
+    # *requires* flash attention, so on these cards the safe default is f16 KV +
+    # flash off (verified: full-context tool calls work with it, hang/empty with
+    # flash on). Older cards keep the q8_0+flash VRAM saver. Only defaults are
+    # touched — an explicit load-config choice is left alone (the GUI warns).
+    _blackwell = (detect_gpu_compute_cap() or 0.0) >= 12.0
     if n_gpu_layers != 0:
+        _kv_default = "f16" if _blackwell else "q8_0"
+        _was_default = cache_type_k is None
         if cache_type_k is None:
-            cache_type_k = "q8_0"
+            cache_type_k = _kv_default
         if cache_type_v is None:
-            cache_type_v = "q8_0"
+            cache_type_v = _kv_default
+        if _blackwell and _was_default:
+            flash_attn = False
 
     vram_warning: Optional[str] = None
     if n_gpu_layers != 0:
         try:
             sz = Path(model_path).stat().st_size / (1024 ** 3)
             needed = sz + estimate_kv_cache_gb(sz, ctx, cache_type_k)
-
-            # VRAM check: WARN, don't refuse. The user's machine, the
-            # user's call. If they want to spill to system RAM (slow but
-            # works for emergencies), let them. We auto-downgrade
-            # n_gpu_layers from "all" to a safe partial-offload count so
-            # the load doesn't OOM outright, and we surface the warning
-            # so the GUI can show a non-blocking notice + the numbers.
+            layers = gguf_layer_count(model_path)
             free_vram = detect_gpu_vram_free_gb()
-            if (free_vram is not None and needed > free_vram + 1.0
-                    and n_gpu_layers == -1):
-                est = estimate_safe_gpu_layers(sz, free_vram, ctx)
-                n_gpu_layers = est
-                print(f"  [llmserver] tight-fit: auto-set n_gpu_layers={est} "
-                      f"(weights {sz:.1f}GB, KV {needed-sz:.1f}GB, free {free_vram:.1f}GB) "
-                      f"— rest spills to RAM, will be slower", flush=True)
-                vram_warning = (
-                    f"Tight VRAM: model needs ~{needed:.1f} GB but only "
-                    f"{free_vram:.1f} GB free. Auto-offloading {est} layers "
-                    f"to GPU and the rest to RAM — load will work but "
-                    f"inference will be slower. Eject another model or pick "
-                    f"a smaller quant for full GPU speed."
-                )
 
-            fit = vram_fit_class(sz, ctx=ctx)
-            if fit["tier"] == "overflow":
-                vram_warning = (
-                    f"VRAM tight: this model needs ~{needed:.1f} GB "
-                    f"(weights {sz:.1f} + KV {needed - sz:.1f} at {ctx} ctx). "
-                    f"{fit['label']}. llama.cpp will spill what doesn't fit to CPU — "
-                    f"loading will work but tokens/sec may drop. Smaller quant or lower "
-                    f"ctx fixes it if you'd rather pick again."
-                )
-            elif fit["tier"] == "partial":
-                vram_warning = f"VRAM tight: {fit['label']} — should still load."
+            # n_gpu_layers == -1 means "Auto" — WE pick a count that fits current
+            # free VRAM. If we let -1 ride when it won't fit, the NVIDIA driver
+            # spills the overflow into shared system RAM, which is slower than CPU
+            # AND returns empty output on this class of card. So downgrade to a
+            # controlled partial offload (some layers explicitly on CPU).
+            if n_gpu_layers == -1 and free_vram is not None:
+                est = estimate_safe_gpu_layers(sz, free_vram, ctx,
+                                               layer_count=layers, cache_type=cache_type_k)
+                if est == 0:
+                    n_gpu_layers = 0
+                    vram_warning = (
+                        f"Very low free VRAM (~{free_vram:.1f} GB) — running this "
+                        f"model on CPU. Close other GPU apps and reload for GPU speed."
+                    )
+                elif est != -1:
+                    n_gpu_layers = est
+                    _tot = f"/{layers}" if layers else ""
+                    print(f"  [llmserver] auto-offload {est}{_tot} layers "
+                          f"(weights {sz:.1f}GB, KV {needed-sz:.1f}GB, free {free_vram:.1f}GB)",
+                          flush=True)
+                    vram_warning = (
+                        f"Tight VRAM (~{free_vram:.1f} GB free): offloading {est}{_tot} "
+                        f"layers to GPU, the rest to CPU — loads fine, a bit slower. "
+                        f"Close other GPU apps or lower context for full-GPU speed."
+                    )
+                # est == -1 → fits fully, leave n_gpu_layers as -1 (offload all)
+            elif n_gpu_layers > 0 and free_vram is not None:
+                # Explicit user pick (a specific layer count, even one that
+                # over-fills). Never override it — the user's machine, the user's
+                # call — but warn if the numbers say it'll spill so they know why
+                # it might crawl or come back empty.
+                fits = estimate_safe_gpu_layers(sz, free_vram, ctx,
+                                                layer_count=layers, cache_type=cache_type_k)
+                over = layers and n_gpu_layers > fits > 0
+                if fits == 0 or over:
+                    vram_warning = (
+                        f"Heads up: {n_gpu_layers} GPU layers likely won't fit "
+                        f"~{free_vram:.1f} GB free VRAM — the driver will spill to "
+                        f"shared RAM, which is slow and can return empty output on "
+                        f"some GPUs. Auto (or ~{max(fits,0)} layers) is the safe pick."
+                    )
         except (OSError, AttributeError):
             pass  # if we can't stat or VRAM probe fails, just proceed silently
 
@@ -1182,31 +1230,83 @@ def _estimate_gguf_size_gb(filename: str) -> Optional[float]:
 _VRAM_DRIVER_RESERVE_GB = 2.29
 
 
+_GGUF_FIXED_SZ = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
+_layer_count_cache: Dict[str, Optional[int]] = {}
+
+
+def gguf_layer_count(model_path: str) -> Optional[int]:
+    """Read <arch>.block_count (the transformer layer count) straight from the
+    GGUF header — no llama.cpp load, no deps. Lets the offload math size against
+    the model's REAL layer count instead of a 40-layer proxy. Returns None if
+    the header can't be parsed."""
+    if model_path in _layer_count_cache:
+        return _layer_count_cache[model_path]
+    import struct
+    result: Optional[int] = None
+    try:
+        with open(model_path, "rb") as f:
+            if f.read(4) != b"GGUF":
+                _layer_count_cache[model_path] = None
+                return None
+            f.read(4)                                    # version
+            f.read(8)                                    # tensor_count
+            kv_count = struct.unpack("<Q", f.read(8))[0]
+
+            def _skip(vt: int) -> None:
+                if vt in _GGUF_FIXED_SZ:
+                    f.read(_GGUF_FIXED_SZ[vt])
+                elif vt == 8:                            # STRING
+                    f.read(struct.unpack("<Q", f.read(8))[0])
+                elif vt == 9:                            # ARRAY
+                    et = struct.unpack("<I", f.read(4))[0]
+                    for _ in range(struct.unpack("<Q", f.read(8))[0]):
+                        _skip(et)
+                else:
+                    raise ValueError(f"unknown gguf type {vt}")
+
+            for _ in range(kv_count):
+                klen = struct.unpack("<Q", f.read(8))[0]
+                key = f.read(klen).decode("utf-8", "replace")
+                vt = struct.unpack("<I", f.read(4))[0]
+                if key.endswith(".block_count"):
+                    fmt = {0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I",
+                           5: "<i", 10: "<Q", 11: "<q"}.get(vt, "<I")
+                    result = int(struct.unpack(fmt, f.read(_GGUF_FIXED_SZ.get(vt, 4)))[0])
+                    break
+                _skip(vt)
+    except Exception:
+        result = None
+    _layer_count_cache[model_path] = result
+    return result
+
+
 def estimate_safe_gpu_layers(model_size_gb: Optional[float],
                              free_vram_gb: Optional[float],
-                             ctx: int = 24576) -> int:
-    """For force-load mode: estimate how many transformer layers fit in free
-    VRAM, leaving room for KV cache + driver overhead. Layers beyond this
-    stay on CPU/RAM (true partial offload).
+                             ctx: int = 24576,
+                             layer_count: Optional[int] = None,
+                             cache_type: Optional[str] = None) -> int:
+    """How many transformer layers to offload so the GPU allocation stays UNDER
+    free VRAM. Returns -1 (offload all — it fits comfortably), 0 (CPU-only —
+    no VRAM budget), or a positive count (partial offload; the rest run on CPU).
 
-    n_gpu_layers=-1 ("all to GPU") OOMs the second the guardrail is
-    bypassed. n_gpu_layers=0 (CPU-only) works but ~10x slower than partial.
-    A positive integer is the sweet spot.
-
-    Heuristic — doesn't parse GGUF layer count, uses 40 as a proxy (typical
-    for 7-13B models). llama.cpp clamps if we overshoot. Returns 0 when
-    estimation isn't possible or VRAM budget is gone."""
+    Overshooting is the failure we guard against: n_gpu_layers=-1 when the
+    model doesn't fit makes the NVIDIA driver silently spill the overflow into
+    shared system RAM, which is slower than pure CPU AND returns empty/garbage
+    on some cards. So reserve generously and bias toward fewer layers."""
     if not model_size_gb or not free_vram_gb or model_size_gb <= 0:
         return 0
-    kv_gb = estimate_kv_cache_gb(model_size_gb, ctx)
-    # Keep ~1 GB for driver + small allocs, plus half the KV cache
-    # (heuristic: KV split roughly tracks layer split, leave half on GPU).
-    safety = 1.0
-    budget = max(0.0, free_vram_gb - safety - kv_gb * 0.5)
+    kv_gb = estimate_kv_cache_gb(model_size_gb, ctx, cache_type)
+    L = layer_count or 40  # real count when known, proxy otherwise
+    # Reserve for the CUDA context + the n_batch compute/graph buffer + a margin
+    # so a slightly-busy GPU (browser, the Hearth window itself) doesn't tip us
+    # into a spill. Empirically ~2.3 GB on consumer cards with n_batch=2048.
+    budget = free_vram_gb - 2.3
+    footprint = model_size_gb + kv_gb
     if budget <= 0:
         return 0
-    fraction = min(1.0, budget / model_size_gb)
-    return max(1, int(fraction * 40))
+    if footprint <= budget:
+        return -1  # everything fits — offload all
+    return max(1, int((budget / footprint) * L))
 
 
 def _kv_quant_factor(cache_type: Optional[str]) -> float:

@@ -103,6 +103,9 @@ def _try_json(s: str) -> Optional[Dict[str, Any]]:
              .replace("False", "false")
         )
         repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+        # Escape lone backslashes that aren't a valid JSON escape — models emit
+        # raw Windows paths like "C:\Users\..." which are invalid JSON as-is.
+        repaired = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', repaired)
         return json.loads(repaired)
     except Exception:
         return None
@@ -368,6 +371,30 @@ def parse(text: str, tool_names: Optional[List[str]] = None
             })
         new_cleaned.append(cleaned[last:])
         cleaned = "".join(new_cleaned)
+
+    # Bare-JSON fallback. Some models (Qwen 2.5 among them) intermittently drop
+    # the <tool_call> wrapper and emit just {"name": ..., "arguments": {...}} as
+    # the whole reply. Catch that when nothing tagged matched — but only when the
+    # name resolves to a REAL registered tool, so an ordinary JSON answer the
+    # model happened to produce isn't hijacked into a bogus tool call.
+    if not calls:
+        stripped = cleaned.strip()
+        fence = re.match(r"^```(?:json)?\s*([\s\S]+?)\s*```$", stripped)
+        if fence:
+            stripped = fence.group(1).strip()
+        if stripped.startswith("{") and '"name"' in stripped:
+            obj = _try_json(stripped)
+            if isinstance(obj, dict) and obj.get("name"):
+                nm = _resolve_tool_name(str(obj.get("name")), tool_names)
+                if nm in tool_names:
+                    args = obj.get("arguments") or obj.get("parameters") or {}
+                    calls.append({
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": nm, "arguments": _force_json_str(args)},
+                        "_family": "bare_json",
+                    })
+                    cleaned = ""
 
     # Light cleanup: collapse the whitespace where tool-call blocks used
     # to live so the surrounding prose still reads naturally.
