@@ -62,17 +62,17 @@ def _fetch(url: str, timeout: float = 6.0):
         with urlopen(req, timeout=timeout, context=ctx) as r:
             return json.loads(r.read().decode("utf-8"))
 
+
+# ed25519 public key; private key never in repo. Empty = no trusted feed.
 ANNOUNCE_PUBKEY_B64 = ""
 
 
 def _canonical(entry: dict) -> bytes:
-    """Deterministic bytes to sign/verify: the entry minus its own `sig`."""
     e = {k: v for k, v in entry.items() if k != "sig"}
     return json.dumps(e, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def _verify(entry: dict) -> bool:
-    """True only if `entry` carries a valid signature from the author's key."""
     if not ANNOUNCE_PUBKEY_B64 or not entry.get("sig"):
         return False
     try:
@@ -86,8 +86,6 @@ def _verify(entry: dict) -> bool:
 
 
 def sign_entry(entry: dict, private_key_path: str) -> dict:
-    """Author-only: sign an announcement with the private key, returning it with
-    a `sig`. Never ship the private key. Used by the publishing flow."""
     import base64
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     with open(private_key_path, "rb") as f:
@@ -100,7 +98,6 @@ def sign_entry(entry: dict, private_key_path: str) -> dict:
 def _entries(data) -> list:
     if isinstance(data, dict):
         data = data.get("announcements") or data.get("items") or []
-    # Only VERIFIED, signed entries are ever shown — unsigned/forged ones drop.
     return [e for e in data if isinstance(e, dict) and e.get("id") and _verify(e)]
 
 
