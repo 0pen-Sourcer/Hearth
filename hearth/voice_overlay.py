@@ -18,10 +18,7 @@ from math import hypot, sin
 
 
 def _corner_xy(sw: int, sh: int, width: int, height: int):
-    """Screen position for the HUD from HEARTH_HUD_CORNER (tr/tl/br/bl), default
-    top-right. A setting beats drag here: drag needs a non-click-through window,
-    which would block clicks to the game underneath — the opposite of what a HUD
-    should do. So it stays fully click-through and you pick the corner instead."""
+    """HUD position from HEARTH_HUD_CORNER (tr/tl/br/bl), default top-right."""
     m = 28
     corner = (os.environ.get("HEARTH_HUD_CORNER", "tr") or "tr").strip().lower()
     right = sw - width - m
@@ -111,9 +108,7 @@ def _run() -> None:
                 win32gui.EndPaint(hwnd, ps)
                 return 0
             if msg == win32con.WM_NCHITTEST:
-                # Hold Ctrl → the whole HUD becomes a grab handle (drag it
-                # anywhere). Otherwise every click passes straight through to the
-                # game/app underneath, so it never interferes with play.
+                # Ctrl held = draggable (HTCAPTION); else click-through.
                 if win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000:
                     return win32con.HTCAPTION
                 return win32con.HTTRANSPARENT
@@ -168,8 +163,7 @@ def _run() -> None:
                 fg = win32gui.GetWindowText(win32gui.GetForegroundWindow()) or ""
             except Exception:
                 fg = ""
-            # Substring (not ==) so any Hearth-titled window hides the HUD —
-            # erring toward hiding, since a double grid is the worse outcome.
+            # Hide over any Hearth-titled window (avoid a double grid).
             if "hearth" in fg.lower():
                 if _shown:
                     try:
@@ -188,13 +182,8 @@ def _run() -> None:
                 except Exception:
                     pass
                 _shown = True
-            # PRESENCE via motion (no text, no face): each voice-loop state gets
-            # its own signature the eye reads instantly —
-            #   speaking  : reactive, driven by REAL TTS amplitude (quiet=center,
-            #               loud=edge) — not a canned loop
-            #   thinking  : brisk rhythmic pulse ("working on it")
-            #   listening : steady bright hold ("I've got the floor to you")
-            #   idle      : slow calm breathe (alive but resting)
+            # Motion per state: speaking=amplitude-reactive, thinking=pulse,
+            # listening=steady hold, idle=slow breathe.
             try:
                 from . import voice as _v
                 lvl = _v.current_level()
@@ -210,14 +199,11 @@ def _run() -> None:
                 target = 0.58 + 0.05 * sin(t * 2.6)                 # steady hold
             else:
                 target = 0.30 + 0.06 * sin(t * 2.0)                 # calm breathe
-            # Ease toward the target instead of snapping — this is what kills the
-            # jank. ~0.22/frame @60fps = a smooth ~80ms glide, so amplitude spikes
-            # read as fluid motion, not a strobe.
+            # Ease toward target (~0.22/frame @60fps) for smooth motion.
             state["level"] += (target - state["level"]) * 0.22
             try:
                 win32gui.InvalidateRect(hwnd, None, True)
-                # Re-assert topmost WITHOUT moving (SWP_NOMOVE) — otherwise it
-                # would snap back to origin every frame and fight a Ctrl-drag.
+                # Re-assert topmost without moving (so a Ctrl-drag sticks).
                 win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
                                       win32con.SWP_NOSIZE | win32con.SWP_NOMOVE
                                       | win32con.SWP_NOACTIVATE)

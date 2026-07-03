@@ -4554,15 +4554,12 @@ def _screenshot_posix_cli(out: str) -> Optional[str]:
     return None
 
 
-# Mapping from the last capture_active_window image back to real screen coords,
-# so smart_click can turn a vision-model pixel into a click on the right control.
+# Last capture_active_window image -> screen-coord mapping, used by smart_click.
 _LAST_CAPTURE: Dict = {}
 
 
 def _prune_shots(keep: int = 40) -> None:
-    """Keep only the newest `keep` auto-captures in SHOTS_DIR so a long session
-    (esp. the game HUD screenshotting each turn) doesn't pile up forever. Only
-    touches our own shot_/window_ captures — never user files or forge_ outputs."""
+    """Keep only the newest `keep` shot_/window_ captures in SHOTS_DIR."""
     try:
         shots = [os.path.join(SHOTS_DIR, f) for f in os.listdir(SHOTS_DIR)
                  if (f.startswith("shot_") or f.startswith("window_")) and f.endswith(".png")]
@@ -4692,9 +4689,7 @@ def _capture_active_window(p: Dict) -> str:
         # GetWindowRect — so a window on a left/secondary monitor (negative
         # coords) still grabs correctly.
         img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
-        # Downscale to <=1280 long-edge — smaller + crisper for the vision model,
-        # and we record the exact scale so smart_click maps the model's pixel
-        # back to real screen coords (the coordinate contract).
+        # Downscale to <=1280 long-edge; record the scale for smart_click.
         _le = max(img.size)
         if _le > 1280:
             _k = 1280.0 / _le
@@ -4721,11 +4716,9 @@ def _capture_active_window(p: Dict) -> str:
 
 
 def _smart_click(p: Dict) -> str:
-    """FUSE vision-point + the accessibility tree — the reliable computer-use
-    click. Give (x,y) as a pixel in the LAST capture_active_window image; Hearth
-    maps it to real screen coords, snaps to the NEAREST named UI control, clicks
-    THAT (native invoke, no pixel guessing), then re-captures so you can verify.
-    Falls back to a raw pixel click only if no control is within reach."""
+    """Vision-point fused with the a11y tree: (x,y) is a pixel in the last
+    capture_active_window image. Map to screen, snap to the nearest control,
+    click, re-capture. Raw pixel fallback if nothing's near."""
     cap = _LAST_CAPTURE
     if not cap:
         return ("Error: no recent capture to click into. Call "
