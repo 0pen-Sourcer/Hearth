@@ -3917,9 +3917,12 @@ function stripGarbageToolCalls(s) {
     .replace(/<\|im_(start|end)\|>/gi, '')
     // Pipe-escaped quote tokens that leak when the chat template's quoting fails
     .replace(/<\|"\|>/g, '"')
-    // ORPHANED open markers (model truncated mid-tool-call) - strip from the
-    // open marker through end-of-string so the user doesn't see half a call.
+    // ORPHANED open markers (model truncated mid-tool-call, or a live stream
+    // that hasn't reached the closing tag yet) - strip from the open marker
+    // through end-of-string so the user doesn't see half a call. The plain
+    // <tool_call> open is common now that the builtin server emits it live.
     .replace(/<\|tool[_ ]?call\|?>[\s\S]*$/i, '')
+    .replace(/<tool_call>[\s\S]*$/i, '')
     .replace(/<\|python_tag\|>[\s\S]*$/i, '');
 }
 
@@ -7977,12 +7980,12 @@ $('btn-log-clear').addEventListener('click', () => {
   // the user was on the server view (user reported the cross-wire bug).
   const which = (typeof LOGS_SOURCE !== 'undefined' && LOGS_SOURCE === 'server') ? 'server' : 'agent';
   const label = which === 'server' ? 'server log' : 'activity log';
-  showModal(`Clear ${label}?`, `Backs up the current ${label} file (renamed with timestamp) and starts a fresh one. Existing log data is preserved on disk.`, [
+  showModal(`Clear ${label}?`, `Empties the ${label}. This can't be undone.`, [
     { label: 'Cancel' },
     { label: `Clear ${label}`, kind: 'danger', onclick: async () => {
       try {
         await api('/api/logs/clear?which=' + which, { method: 'POST' });
-        toast('Log cleared', `${label} saved as .bak`, 'ok');
+        toast('Log cleared', `${label} emptied`, 'ok');
         refreshLogs();
       } catch (e) { toast('Clear failed', e.message, 'err'); }
     }},
