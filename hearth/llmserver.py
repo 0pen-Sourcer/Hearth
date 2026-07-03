@@ -877,15 +877,21 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     fname = os.path.basename(model_path).lower()
     if any(t in fname for t in ("qwen", "hermes", "deepseek", "mistral", "yi")):
         cmd += ["--chat_format", "chatml-function-calling"]
-    # Optional load-config overrides — surface llama.cpp's advanced knobs
-    # in the GUI without re-passing n_threads (already on the base cmd).
+    # KV cache quant. This llama_cpp.server build wants --type_k/--type_v as the
+    # ggml type INT, not the "q8_0" string — map it. Quantized KV needs flash attn.
+    _GGML_TYPE = {"f32": 0, "f16": 1, "q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8}
+    _kv_quant = False
     if cache_type_k:
-        cmd += ["--type_k", cache_type_k]
+        _t = _GGML_TYPE.get(str(cache_type_k).lower())
+        if _t is not None:
+            cmd += ["--type_k", str(_t)]
+            _kv_quant = _kv_quant or _t not in (0, 1)
     if cache_type_v:
-        cmd += ["--type_v", cache_type_v]
-    if flash_attn:
-        # llama_cpp.server CLI accepts boolean flags as 'true'/'false' strings.
-        # Must come AFTER --n_gpu_layers in older builds (was order-sensitive).
+        _t = _GGML_TYPE.get(str(cache_type_v).lower())
+        if _t is not None:
+            cmd += ["--type_v", str(_t)]
+            _kv_quant = _kv_quant or _t not in (0, 1)
+    if flash_attn or _kv_quant:
         cmd += ["--flash_attn", "true"]
     # Suppress llama.cpp's internal CUDA debug logging — server log was
     # filling with 404x "CUDA Graph id N reused" per session. Real errors
