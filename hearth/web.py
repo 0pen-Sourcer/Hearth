@@ -1935,21 +1935,21 @@ class HearthHandler(BaseHTTPRequestHandler):
             # so the button no longer cross-wires onto the wrong file.
             q = self._query()
             which = (q.get("which") or "agent").lower()
-            if which == "server":
-                log_path = os.path.join(WORKSPACE, "logs", "llamaserver.log")
-                bak_prefix = "llamaserver"
-                bak_ext = "log"
-            else:
-                log_path = os.path.join(LOGS_DIR, "activity.jsonl")
-                bak_prefix = "activity"
-                bak_ext = "jsonl"
+            # Truncate in place, no backup. A rename/delete fails on Windows
+            # while the llama.cpp child still holds llamaserver.log open
+            # (WinError 32), and users don't want hoarded *.log.bak files full
+            # of /v1/models poll spam. The server log goes through llmserver's
+            # own held handle so a truncate lands even while it's locked.
             try:
-                if os.path.isfile(log_path):
-                    bak = os.path.join(os.path.dirname(log_path),
-                                       f"{bak_prefix}.{int(time.time())}.{bak_ext}.bak")
-                    os.rename(log_path, bak)
-                with open(log_path, "w", encoding="utf-8") as f:
-                    f.write("")
+                if which == "server":
+                    from . import llmserver
+                    if not llmserver.clear_server_log():
+                        return self._send_json(500, {"error": "could not clear server log"})
+                else:
+                    log_path = os.path.join(LOGS_DIR, "activity.jsonl")
+                    if os.path.isfile(log_path):
+                        with open(log_path, "w", encoding="utf-8") as f:
+                            f.write("")
                 return self._send_json(200, {"ok": True, "cleared": which})
             except OSError as e:
                 return self._send_json(500, {"error": str(e)})
