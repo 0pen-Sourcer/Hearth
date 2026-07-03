@@ -597,6 +597,9 @@ def download_model(pick_id: str,
 
 _proc: Optional[subprocess.Popen] = None
 _proc_info: Dict[str, Any] = {}
+# Kept so the log can be truncated in place while the child still holds it
+# open (Windows won't let another handle rename/delete a locked file).
+_log_fh = None
 
 # Live load-progress snapshot. Written by start_builtin while a model loads,
 # read by /api/llmserver/progress every ~500ms so the GUI can show a real
@@ -866,17 +869,12 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         "--n_threads", str(effective_threads),
         "--n_threads_batch", str(effective_threads),
     ]
-    # Pick a chat format that actually parses tool calls for the model family.
-    # llama-cpp-python ships a `chatml-function-calling` handler that parses
-    # OpenAI-style <tools>/<tool_call> JSON — Qwen 2.5 / Qwen 3 / Hermes
-    # models speak this natively. Without setting this flag, the server uses
-    # the GGUF's embedded template + no tool parser, and tool-call syntax
-    # leaks into the chat stream as raw text (the "<|toolcall>" mess).
-    # For Gemma 4 we leave default; the GUI's stripGarbageToolCalls catches
-    # its raw emit, and hearth.tool_call_parser recovers any real tool calls.
-    fname = os.path.basename(model_path).lower()
-    if any(t in fname for t in ("qwen", "hermes", "deepseek", "mistral", "yi")):
-        cmd += ["--chat_format", "chatml-function-calling"]
+    # No --chat_format: use the GGUF's native template. llama-cpp-python's
+    # `chatml-function-calling` handler was the old choice, but it returns empty
+    # and crashes the stream on real prompts (long persona + many tools). Hearth
+    # now hand-injects the <tools> spec and recovers <tool_call> via
+    # hearth.tool_call_parser (headless._use_manual_tools) — same technique LM
+    # Studio uses, and it doesn't depend on the fragile grammar handler.
     # KV cache quant. This llama_cpp.server build wants --type_k/--type_v as the
     # ggml type INT, not the "q8_0" string — map it. Quantized KV needs flash attn.
     _GGML_TYPE = {"f32": 0, "f16": 1, "q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8}
@@ -919,7 +917,9 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         # Pass parent env so the CUDA DLL dirs we prepended in hearth/__init__.py
         # ride along into the subprocess. stdout+stderr go to the log file so
         # the GUI failure toast can read them.
+        global _log_fh
         log_fh = open(log_path, "ab")
+        _log_fh = log_fh
         spawned = subprocess.Popen(
             cmd, stdout=log_fh, stderr=subprocess.STDOUT,
             creationflags=_NO_WINDOW, env=dict(os.environ),
@@ -1401,6 +1401,29 @@ def clear_pending_download() -> None:
         os.remove(_PENDING_DL_PATH)
     except Exception:
         pass
+
+
+def clear_server_log() -> bool:
+    """Empty llamaserver.log in place. The child holds the file open, so on
+    Windows we can't rename/delete it — truncate through our own append-mode
+    handle instead (next child write appends from 0). Falls back to a direct
+    truncate when no child is running."""
+    if _log_fh is not None:
+        try:
+            _log_fh.seek(0)
+            _log_fh.truncate()
+            _log_fh.flush()
+            return True
+        except Exception:
+            pass
+    try:
+        p = WORKSPACE / "logs" / "llamaserver.log"
+        if p.exists():
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("")
+        return True
+    except Exception:
+        return False
 
 
 def _load_pending_download() -> dict:
