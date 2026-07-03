@@ -1377,15 +1377,47 @@ _status_cache: Dict[str, Any] = {"ts": 0, "data": None, "key": None}
 _STATUS_TTL_SECONDS = 8.0
 
 
+_PENDING_DL_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "pending_download.json")
+
+
+def save_pending_download(repo: str, filename: str) -> None:
+    """Remember what's downloading so Resume can re-request it after a restart."""
+    try:
+        os.makedirs(os.path.dirname(_PENDING_DL_PATH), exist_ok=True)
+        with open(_PENDING_DL_PATH, "w", encoding="utf-8") as f:
+            json.dump({"repo": repo, "filename": filename}, f)
+    except Exception:
+        pass
+
+
+def clear_pending_download() -> None:
+    try:
+        os.remove(_PENDING_DL_PATH)
+    except Exception:
+        pass
+
+
+def _load_pending_download() -> dict:
+    try:
+        with open(_PENDING_DL_PATH, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
 def list_partial_downloads() -> List[Dict[str, Any]]:
-    """Interrupted downloads (*.gguf.part) in MODELS_DIR, for the GUI resume UI."""
+    """Interrupted downloads (*.gguf.part) in MODELS_DIR, for the GUI resume UI.
+    Attaches the saved repo (if known) so Resume re-requests it directly."""
     out: List[Dict[str, Any]] = []
+    pend = _load_pending_download()
     try:
         for p in MODELS_DIR.glob("*.gguf.part"):
             try:
-                out.append({"filename": p.name[:-5],
+                fn = p.name[:-5]
+                out.append({"filename": fn,
                             "gb": round(p.stat().st_size / (1024 ** 3), 2),
-                            "path": str(p)})
+                            "path": str(p),
+                            "repo": pend.get("repo", "") if pend.get("filename") == fn else ""})
             except OSError:
                 pass
     except Exception:

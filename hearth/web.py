@@ -2410,8 +2410,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _last_emit[0] = now
                 emit({"type": "progress", "done": done, "total": total})
 
+            llmserver.save_pending_download(repo, filename)  # so Resume knows the repo
             try:
                 result = llmserver.download_from_hf_repo(repo, filename, on_progress=on_progress)
+                if result.get("ok"):
+                    llmserver.clear_pending_download()
                 emit({"type": "done", **result})
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
