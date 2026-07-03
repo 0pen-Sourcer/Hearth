@@ -10896,6 +10896,18 @@ function dlToggle(force) {
     ov.style.cssText = 'position:fixed;top:112px;right:34px;width:368px;max-height:64vh;overflow:auto;background:var(--bg-1);border:1px solid var(--border);border-radius:12px;box-shadow:0 26px 64px rgba(0,0,0,0.62);padding:14px 16px;z-index:9999;display:none;';
     document.body.appendChild(ov);
     ov.addEventListener('click', (e) => {
+      const ds = e.target.dataset || {};
+      if (ds.dlpause) {
+        const d = _dls[ds.dlpause];
+        if (d && d.abort) { try { d.abort.abort(); } catch {} }
+        dlUpsert(ds.dlpause, { status: 'paused' });   // .part stays on disk; Resume picks up
+        return;
+      }
+      if (ds.dlresume) {
+        const d = _dls[ds.dlresume];
+        if (d && d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {});
+        return;
+      }
       if (e.target.dataset && e.target.dataset.act === 'discover') {
         dlToggle(false);
         document.querySelectorAll('.models-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === 'discover'));
@@ -10920,13 +10932,21 @@ function dlRender() {
     const pctTxt = d.status === 'done' ? '✓ done' : d.status === 'error' ? 'failed' : d.pct + '%';
     const barCol = d.status === 'error' ? '#ff5c5c' : 'linear-gradient(90deg, var(--accent), #a78bfa)';
     const meta = d.total ? (_fmtGB(d.done) + ' / ' + _fmtGB(d.total) + (d.status === 'downloading' ? '  ·  ' + _fmtSpeed(d.speed) + '  ·  ETA ' + _fmtETA(d.eta) : '')) : '';
+    const _btnCss = 'background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);font-size:11px;padding:3px 9px;cursor:pointer;flex-shrink:0';
+    const ctrlBtn = d.status === 'downloading' && d.repo
+      ? `<button data-dlpause="${esc(id)}" style="${_btnCss}">❚❚ Pause</button>`
+      : (d.status === 'paused' && d.repo
+        ? `<button data-dlresume="${esc(id)}" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : '');
     return `<div style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:6px">
         <span style="color:var(--fg);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span>
-        <span style="color:${d.status === 'done' ? 'var(--ok,#7dd3a8)' : 'var(--fg-dim)'};flex-shrink:0">${pctTxt}</span>
+        <span style="color:${d.status === 'done' ? 'var(--ok,#7dd3a8)' : d.status === 'paused' ? 'var(--accent-2)' : 'var(--fg-dim)'};flex-shrink:0">${d.status === 'paused' ? 'paused' : pctTxt}</span>
       </div>
       <div style="height:7px;background:var(--bg-0);border-radius:4px;overflow:hidden;border:1px solid var(--border)"><div style="height:100%;width:${d.pct}%;background:${barCol};border-radius:4px"></div></div>
-      <div style="font-size:11.5px;color:var(--fg-faint,#5a5a66);margin-top:5px;font-family:var(--mono)">${meta}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">
+        <span style="font-size:11.5px;color:var(--fg-faint,#5a5a66);font-family:var(--mono)">${meta}</span>
+        ${ctrlBtn}
+      </div>
     </div>`;
   }).join('') : '<div style="color:var(--fg-dim);font-size:13px;padding:6px 0 14px">No downloads yet.</div>';
   ov.innerHTML = `<div style="font-weight:700;font-size:15px;color:var(--fg);margin-bottom:12px">Downloads</div>${rows}<button data-act="discover" style="width:100%;padding:9px 0;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">Browse Hugging Face &rarr;</button>`;
@@ -11014,15 +11034,21 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
   bar.style.width = '0%';
   label.textContent = 'Downloading ' + filename + '...';
   detail.textContent = repo;
+  // Per-download abort handle + repo, so the overlay Pause/Resume can act on it.
+  const ctrl = new AbortController();
+  dlUpsert(filename, { name: filename, status: 'downloading', pct: 0, abort: ctrl, repo, filename });
   let modelPath = null;
   try {
     const res = await fetch('/api/llmserver/download-hf', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repo, filename }),
+      body: JSON.stringify({ repo, filename }), signal: ctrl.signal,
     });
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
     modelPath = await streamDownload(res, bar, label, detail, filename);
-  } catch (e) { label.textContent = 'Error'; detail.textContent = e.message; return; }
+  } catch (e) {
+    if (e && e.name === 'AbortError') { dlUpsert(filename, { status: 'paused' }); return; }  // user paused; .part kept
+    label.textContent = 'Error'; detail.textContent = e.message; dlUpsert(filename, { status: 'error' }); return;
+  }
   if (modelPath) {
     try { localStorage.removeItem('hearth_pending_dl'); } catch {}  // done — nothing to resume
     await startWithModel(modelPath, label, detail, loadCfg);
