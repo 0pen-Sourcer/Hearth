@@ -967,7 +967,14 @@ class JarvisCLI:
             chat_models, reachable = self._probe_local_models()
             if not reachable:
                 print(f"{C_WARN}● can't reach LM Studio at {LOCAL_API_BASE}{C_RESET}")
-                print(f"{C_DIM}  Start LM Studio and load a model (or run a cloud model). /help for commands.{C_RESET}\n")
+                print(f"{C_DIM}  Start LM Studio and load a model (or run a cloud model). /help for commands.{C_RESET}")
+                try:
+                    from hearth import llmserver as _ls
+                    if _ls._is_lite_edition():
+                        print(f"{C_DIM}  Hearth Lite has no built-in server — bring LM Studio/Ollama or a cloud key, or get Full: {_ls.FULL_DOWNLOAD_URL}{C_RESET}")
+                except Exception:
+                    pass
+                print()
             elif not chat_models:
                 print(f"{C_WARN}● LM Studio is running, but no model is loaded{C_RESET}")
                 print(f"{C_DIM}  Load a model in LM Studio, then send a message. /models to re-check.{C_RESET}\n")
