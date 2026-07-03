@@ -17,24 +17,23 @@ This is the trajectory, not a promise sheet — dates are intent, not contracts.
 - **Five front doors.** Desktop app, terminal CLI, phone (Telegram / Discord /
   WhatsApp), MCP server, and a scriptable headless bridge.
 - **Voice.** Real-time listen (silero VAD + Whisper) and speak (Kokoro) — local,
-  hands-free, with barge-in.
+  hands-free, with barge-in. A desktop presence overlay reacts to its own voice
+  (listening / thinking / speaking) while you're in another window.
+- **Computer-use.** `smart_click` fuses a vision point with the accessibility
+  tree — it snaps to the real named control, clicks it, and re-screenshots to
+  verify, instead of guessing a pixel. Window awareness: list / focus / manage
+  windows by name.
 - **Generates media.** Images and video, local via Forge or through a cloud model.
 - **Private by default.** Your model and your data stay on your disk. No account,
   no cloud required, no telemetry.
 
-## Next — computer-use
+## Next
 
-Closing the gap between "reads a window's controls" and "watches your screen and
-walks you through a task."
-
-- **Vision-first control loop** — screenshot → describe → act → verify, so every
-  click is grounded instead of pixel-guessed.
-- **Window & desktop awareness** — list / focus / minimize windows by name;
-  taskbar, tray, and multi-monitor awareness.
 - **Guided mode** — "walk me through this" inside an app: it drives, narrates,
   and hands you the wheel at each step.
-- **Voice presence** — a persistent overlay that surfaces on the wake word and
-  while the app is minimized, reacting to its own voice as it speaks.
+- **Multi-monitor + fullscreen** awareness for the control loop.
+- **Self-improving skills** — an idle curator that refines and prunes the tools
+  the agent writes for itself.
 
 ## Later
 
