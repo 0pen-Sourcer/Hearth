@@ -4024,8 +4024,17 @@ async function api(path, opts = {}) {
   return r.json();
 }
 
+const _toastLast = {};
 function toast(title, body = '', kind = 'ok', ms = 3500) {
   if (STATE.settings && STATE.settings.mute_toasts) return;  // muted in Settings -> Behavior
+  // Throttle identical toasts. Background pollers (model status every 9s, server
+  // checks) could re-fire the same notice — e.g. "no model loaded" — on every
+  // tick. Suppress a repeat within the cooldown and slide the window forward so
+  // continuous spam stays hidden until it actually stops.
+  const key = kind + '|' + title + '|' + body;
+  const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  if (_toastLast[key] && (now - _toastLast[key]) < 10000) { _toastLast[key] = now; return; }
+  _toastLast[key] = now;
   const t = document.createElement('div');
   t.className = `toast ${kind}`;
   t.innerHTML = `<div class="title">${esc(title)}</div>${body ? `<div class="body">${esc(body)}</div>` : ''}`;
@@ -4848,11 +4857,23 @@ function renderMessage(m) {
     div.querySelector('.a-copy').addEventListener('click', () => {
       navigator.clipboard.writeText(m.content).then(() => toast('Copied', '', 'ok', 1500));
     });
-    div.querySelector('.a-tts').addEventListener('click', async () => {
-      // Stop any currently-playing TTS BEFORE starting the new one. Without
-      // this, mashing Speak on multiple messages queues them all up and the
-      // user has to wait through the whole queue.
+    const ttsBtn = div.querySelector('.a-tts');
+    ttsBtn.addEventListener('click', async () => {
+      // Toggle. If THIS message is the one currently speaking, stop it — a real
+      // "shut up" button mid-utterance. Otherwise stop whatever else is playing
+      // and speak this one. (Stopping first also prevents queueing when the user
+      // mashes Speak across messages.)
+      if (_activeTtsBtn === ttsBtn) {
+        try { await stopTTS(); } catch {}
+        _clearActiveTts();
+        return;
+      }
       try { await stopTTS(); } catch {}
+      _clearActiveTts();
+      _setTtsBtn(ttsBtn, true);
+      _activeTtsBtn = ttsBtn;
+      const estMs = Math.min(5 * 60 * 1000, 2000 + (m.content || '').length * 60);
+      _ttsRevertTimer = setTimeout(() => { if (_activeTtsBtn === ttsBtn) _clearActiveTts(); }, estMs);
       speakText(m.content, true);  // explicit user action — always play
     });
     const regenBtn = div.querySelector('.a-regen');
@@ -9050,6 +9071,23 @@ async function stopTTS() {
   try { await api('/api/voice/stop', { method: 'POST' }); } catch {}
 }
 
+// Per-message Speak button becomes a Stop button while it's talking. TTS plays
+// server-side so the frontend can't observe the end of playback — we revert the
+// label on an estimated duration (from text length) as a fallback, and clear it
+// the instant the user hits Stop or speaks another message.
+const _TTS_ICO_SPEAK = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+const _TTS_ICO_STOP  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+let _activeTtsBtn = null, _ttsRevertTimer = null;
+function _setTtsBtn(btn, playing) {
+  if (!btn) return;
+  btn.innerHTML = (playing ? _TTS_ICO_STOP : _TTS_ICO_SPEAK) + (playing ? ' stop' : ' speak');
+  btn.classList.toggle('is-playing', playing);
+}
+function _clearActiveTts() {
+  if (_ttsRevertTimer) { clearTimeout(_ttsRevertTimer); _ttsRevertTimer = null; }
+  if (_activeTtsBtn) { _setTtsBtn(_activeTtsBtn, false); _activeTtsBtn = null; }
+}
+
 // ============================================================
 // BARGE-IN - lets the user interrupt the AI's voice by just talking.
 // While the AI is speaking, a parallel light mic stream watches RMS. If it
@@ -11962,6 +12000,10 @@ async function pollAnnouncements() {
   setInterval(refreshModels, 9000);
   setInterval(refreshGpu, 4000);
   setInterval(() => { if (STATE.view === 'logs') refreshLogs(); }, 6000);
+  // Keep the Models pane live while it's open (running badge, VRAM, which
+  // model is loaded) - it used to only refresh on tab re-entry, so state
+  // looked frozen until you navigated away and back.
+  setInterval(() => { if (STATE.view === 'models') refreshModelsView(); }, 4000);
   // Background-subagent push: poll every 3s. If a new completion shows
   // up, drop a violet heads-up banner in the chat body so the user sees
   // it the moment work returns - no need to type "done?" to surface it.
