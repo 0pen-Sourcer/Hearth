@@ -533,6 +533,15 @@ def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
             continue
     # Bigger first - that's usually the more capable model
     out.sort(key=lambda m: (-m.get("size_gb", 0), m.get("filename", "")))
+    # Tag each with its real transformer layer count (GGUF header, cached) so the
+    # load-config UI can cap the GPU-offload slider at the true max instead of a
+    # blind 99, and size a VRAM estimate.
+    for m in out:
+        if "layers" not in m:
+            try:
+                m["layers"] = gguf_layer_count(m.get("path", ""))
+            except Exception:
+                m["layers"] = None
     return out
 
 
