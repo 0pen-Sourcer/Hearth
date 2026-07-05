@@ -933,7 +933,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     # ---- KNOW MY PC ----
     {
         "name": "system_info",
-        "description": "OS, CPU, RAM, disk, hostname, user, uptime — a snapshot of the machine.",
+        "description": "Full machine snapshot in ONE call: OS, CPU, GPU(s) with "
+                       "VRAM/temp/load/driver (nvidia-smi), RAM total/used/available, "
+                       "disks, hostname, user, uptime. Use this alone for any "
+                       "hardware/spec question — do NOT also run nvidia-smi or other "
+                       "shell commands, it already includes them.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
@@ -3382,6 +3386,71 @@ def _try_psutil():
         return None
 
 
+def _cpu_name() -> str:
+    """Marketing CPU name (e.g. 'AMD Ryzen 7 5700G'). platform.processor() only
+    gives the family/model identifier on Windows, so read the registry there."""
+    if os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as k:
+                name = winreg.QueryValueEx(k, "ProcessorNameString")[0].strip()
+                if name:
+                    return name
+        except Exception:
+            pass
+    return platform.processor() or platform.machine() or "?"
+
+
+def _detect_gpus() -> List[Dict[str, Any]]:
+    """GPU inventory. Tries nvidia-smi first (full detail: VRAM, temp, load,
+    driver), then falls back to Windows WMI for the adapter name so the model
+    never has to shell out on its own. Returns [] when nothing is found."""
+    no_window = 0x08000000 if os.name == "nt" else 0
+    gpus: List[Dict[str, Any]] = []
+    try:
+        out = subprocess.run(
+            ["nvidia-smi",
+             "--query-gpu=name,memory.total,memory.used,memory.free,"
+             "temperature.gpu,utilization.gpu,driver_version",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5, creationflags=no_window,
+        )
+        for line in (out.stdout or "").strip().splitlines():
+            c = [x.strip() for x in line.split(",")]
+            if len(c) >= 7 and c[0]:
+                gpus.append({
+                    "name": c[0],
+                    "vram_total_gb": round(float(c[1]) / 1024, 1),
+                    "vram_used_gb": round(float(c[2]) / 1024, 1),
+                    "vram_free_gb": round(float(c[3]) / 1024, 1),
+                    "temp_c": c[4],
+                    "load_pct": f"{c[5]}%",
+                    "driver": c[6],
+                })
+    except Exception:
+        pass
+    if gpus:
+        return gpus
+    # Fallback: Windows WMI gives at least the adapter name(s) for AMD/Intel/
+    # NVIDIA when nvidia-smi isn't present.
+    if os.name == "nt":
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_VideoController | "
+                 "Select-Object -ExpandProperty Name"],
+                capture_output=True, text=True, timeout=6, creationflags=no_window,
+            )
+            for name in (out.stdout or "").strip().splitlines():
+                if name.strip():
+                    gpus.append({"name": name.strip()})
+        except Exception:
+            pass
+    return gpus
+
+
 def _system_info(p: Dict) -> str:
     psu = _try_psutil()
     info = {
@@ -3389,16 +3458,21 @@ def _system_info(p: Dict) -> str:
         "user": os.environ.get("USERNAME") or os.environ.get("USER") or "?",
         "os": f"{platform.system()} {platform.release()} ({platform.version()})",
         "arch": platform.machine(),
+        "cpu_model": _cpu_name(),
         "python": sys.version.split()[0],
         "cwd": os.getcwd(),
         "workspace": WORKSPACE,
     }
+    gpus = _detect_gpus()
+    if gpus:
+        info["gpus"] = gpus
     if psu:
         vm = psu.virtual_memory()
         info["cpu_count"] = psu.cpu_count(logical=True)
         info["cpu_percent"] = f"{psu.cpu_percent(interval=0.2)}%"
         info["ram_total_gb"] = round(vm.total / (1024**3), 2)
         info["ram_used_gb"] = round(vm.used / (1024**3), 2)
+        info["ram_available_gb"] = round(vm.available / (1024**3), 2)
         info["ram_percent"] = f"{vm.percent}%"
         try:
             boot = datetime.fromtimestamp(psu.boot_time())
