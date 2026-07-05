@@ -2956,6 +2956,7 @@
           </div>
           <select id="setting-brain-mode">
             <option value="local">Local-first - on this PC (recommended)</option>
+            <option value="anthropic">Anthropic - Claude (up to 1M ctx)</option>
             <option value="gemini">Google - Gemini</option>
             <option value="openai">OpenAI - GPT</option>
             <option value="grok">xAI - Grok</option>
@@ -3648,6 +3649,7 @@
           <div class="ob-label">Pick a path</div>
           <select id="ob-brain-where" class="ob-select">
             <option value="local">Local-first - stay on this PC (default)</option>
+            <option value="anthropic">Cloud - Anthropic Claude</option>
             <option value="gemini">Cloud - Google Gemini</option>
             <option value="openai">Cloud - OpenAI GPT</option>
             <option value="grok">Cloud - xAI Grok</option>
@@ -5570,6 +5572,7 @@ function providerFromEndpoint(url) {
     return { key: 'local', label: 'local' };
   if (u.includes('api.x.ai')) return { key: 'grok', label: 'xAI Grok' };
   if (u.includes('generativelanguage.googleapis')) return { key: 'gemini', label: 'Gemini' };
+  if (u.includes('api.anthropic.com')) return { key: 'anthropic', label: 'Anthropic Claude' };
   if (u.includes('api.openai.com')) return { key: 'openai', label: 'OpenAI' };
   if (u.includes('openrouter.ai')) return { key: 'openrouter', label: 'OpenRouter' };
   return { key: 'custom', label: 'cloud' };
@@ -7755,6 +7758,7 @@ async function refreshServerCard() {
     const running = !!r.builtin_running;
     const providerLabel = {
       local: 'Local server',
+      anthropic: 'Anthropic Claude',
       gemini: 'Google Gemini', openai: 'OpenAI',
       grok: 'xAI Grok', openrouter: 'OpenRouter', custom: 'Custom endpoint',
     }[s.llm_provider || 'local'] || (s.llm_provider || 'cloud');
@@ -8331,6 +8335,7 @@ async function refreshSettings() {
       const PRESETS = {
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },
         gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: 'Try <code>gemini-2.5-flash</code>, <code>gemini-1.5-flash</code>, or <code>gemini-1.5-pro</code>.', sample: 'gemini-2.5-flash' },
+        anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint. Sonnet supports up to 1M context.', modelHint: 'Try <code>claude-sonnet-5</code>, <code>claude-opus-4-8</code>, or <code>claude-haiku-4-5-20251001</code>.', sample: 'claude-sonnet-5' },
         openai:     { url: 'https://api.openai.com/v1', hint: 'OpenAI GPT models.', modelHint: 'Try <code>gpt-4o-mini</code>, <code>gpt-4o</code>, or <code>o1-mini</code>.', sample: 'gpt-4o-mini' },
         grok:       { url: 'https://api.x.ai/v1', hint: 'xAI Grok models.', modelHint: 'Try <code>grok-2-1212</code> or <code>grok-beta</code>.', sample: 'grok-2-1212' },
         openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator - gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-3.5-sonnet</code>.', sample: 'anthropic/claude-3.5-sonnet' },
