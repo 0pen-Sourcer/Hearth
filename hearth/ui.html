@@ -1131,6 +1131,10 @@
   .ex-config .ex-hint {
     font-size: 11px; color: var(--fg-faint); line-height: 1.4;
   }
+  .ex-vram-est { font-family: var(--mono); font-weight: 600; }
+  .ex-vram-est.est-ok   { color: #4ade80; }
+  .ex-vram-est.est-warn { color: #fbbf24; }
+  .ex-vram-est.est-bad  { color: #f87171; }
   .ex-config input[type="number"],
   .ex-config input[type="text"],
   .ex-config select {
@@ -5541,6 +5545,9 @@ async function refreshGpu() {
       return;
     }
     const gpu = g.gpus[0];
+    // Stash free VRAM so the load-config memory estimate can flag a spill.
+    STATE.gpuFreeGb = Math.max(0, (gpu.mem_total_mb - gpu.mem_used_mb) / 1024);
+    STATE.gpuTotalGb = gpu.mem_total_mb / 1024;
     const mem = `${(gpu.mem_used_mb/1024).toFixed(1)}/${(gpu.mem_total_mb/1024).toFixed(0)}GB`;
     const tcls = gpu.temp_c > 80 ? 'danger' : gpu.temp_c > 65 ? 'warn' : '';
     $('gpu-chip').innerHTML =
@@ -10100,15 +10107,18 @@ function modelsLoadConfigHTML(opts) {
   const o = opts || {};
   const maxCtx = o.maxCtx || 32768;
   const defCtx = Math.min(o.defaultCtx || (STATE.settings && STATE.settings.server_default_ctx) || 24576, maxCtx);
+  const layers = o.layers || 0;                 // real transformer layer count (0 = unknown)
+  const sliderMax = layers || 99;               // cap the slider at the true max, not a blind 99
+  const layerNote = layers ? `This model has ${layers} layers.` : '';
   return `
-    <div class="ex-config">
+    <div class="ex-config" data-model-size="${o.sizeGb || 0}" data-model-layers="${layers}">
       <div class="ex-row">
         <label>GPU offload layers</label>
         <div class="ex-slider-row">
-          <input type="range" min="-1" max="99" value="-1" data-cfg="n_gpu_layers" />
-          <span class="v">All</span>
+          <input type="range" min="-1" max="${sliderMax}" value="-1" data-cfg="n_gpu_layers" />
+          <span class="v">Auto</span>
         </div>
-        <div class="ex-hint">-1 = put every layer on GPU. 0 = CPU-only. Anything between offloads the first N layers.</div>
+        <div class="ex-hint">Auto = Hearth fits as many layers as your VRAM holds. 0 = CPU-only. ${layerNote} <b class="ex-vram-est"></b></div>
       </div>
       <div class="ex-row">
         <label>Context length</label>
@@ -10171,21 +10181,65 @@ function modelsReadLoadConfig(rootEl) {
   return out;
 }
 
+// KV-cache memory multiplier vs f16 — mirrors llmserver._kv_quant_factor.
+function _kvFactor(t) { return ({ '': 1, 'q8_0': 0.53, 'q4_0': 0.27, 'q4_1': 0.29 })[t || ''] ?? 1; }
+
+// Live VRAM estimate for the current load-config settings, LM-Studio style.
+// Mirrors llmserver's math: footprint = weights + KV; offloaded slice + ~1.5 GB
+// overhead. Flags a spill against free VRAM so the user sees "99 layers 🤡"
+// won't fit BEFORE they boot.
+function modelsUpdateVramEstimate(cfgEl) {
+  if (!cfgEl) return;
+  const est = cfgEl.querySelector('.ex-vram-est');
+  if (!est) return;
+  const sizeGb = parseFloat(cfgEl.dataset.modelSize) || 0;
+  const layers = parseInt(cfgEl.dataset.modelLayers, 10) || 0;
+  if (!sizeGb) { est.textContent = ''; return; }
+  const g = (sel) => cfgEl.querySelector(sel);
+  const ctx = parseInt(g('input[data-cfg="ctx"]')?.value, 10) || 24576;
+  const kK = g('select[data-cfg="cache_type_k"]')?.value || '';
+  const nglRaw = parseInt(g('input[data-cfg="n_gpu_layers"]')?.value, 10);
+  const kv = sizeGb * 0.06 * (ctx / 4096) * _kvFactor(kK);
+  const footprint = sizeGb + kv;
+  // fraction of the model on GPU: Auto(-1) estimates a VRAM-fit; explicit N uses N/layers.
+  let frac;
+  const freeGb = STATE.gpuFreeGb;
+  if (nglRaw === 0) frac = 0;
+  else if (nglRaw === -1) {
+    frac = (freeGb != null) ? Math.min(1, Math.max(0, (freeGb - 2.3) / footprint)) : 1;
+  } else frac = layers ? Math.min(1, nglRaw / layers) : 1;
+  const vram = frac * footprint + (frac > 0 ? 1.5 : 0);   // + CUDA/compute overhead
+  let cls = '', tag = '';
+  if (freeGb != null && frac > 0) {
+    if (vram > freeGb) { cls = 'est-bad'; tag = ` — over ${freeGb.toFixed(1)} GB free, will spill to RAM`; }
+    else if (vram > freeGb - 0.8) { cls = 'est-warn'; tag = ' — tight'; }
+    else { cls = 'est-ok'; tag = ' — fits'; }
+  }
+  est.className = 'ex-vram-est ' + cls;
+  est.textContent = frac === 0 ? '≈ CPU only (0 VRAM)' : `≈ ${vram.toFixed(1)} GB VRAM${tag}`;
+}
+
 function modelsWireLoadConfig(rootEl) {
-  // Slider for n_gpu_layers - update label to show "All" when -1
+  const cfgEl = rootEl.querySelector('.ex-config') || rootEl;
   const slider = rootEl.querySelector('input[data-cfg="n_gpu_layers"]');
+  const layers = parseInt(cfgEl.dataset?.modelLayers, 10) || 0;
   if (slider) {
     const upd = () => {
       const v = parseInt(slider.value, 10);
       const lbl = slider.parentElement.querySelector('.v');
-      if (lbl) lbl.textContent = (v === -1) ? 'All' : (v === 0 ? 'CPU' : String(v));
+      if (lbl) lbl.textContent = (v === -1) ? 'Auto' : (v === 0 ? 'CPU' : (layers ? `${v} / ${layers}` : String(v)));
+      modelsUpdateVramEstimate(cfgEl);
     };
     slider.addEventListener('input', upd); upd();
   }
+  // Recompute the estimate when ctx or KV-cache quant changes too.
+  rootEl.querySelectorAll('input[data-cfg="ctx"], select[data-cfg="cache_type_k"], select[data-cfg="cache_type_v"]')
+    .forEach(el => el.addEventListener('input', () => modelsUpdateVramEstimate(cfgEl)));
   // Flash-attn toggle
   rootEl.querySelectorAll('.switch[data-cfg]').forEach(sw => {
     sw.addEventListener('click', () => sw.classList.toggle('on'));
   });
+  modelsUpdateVramEstimate(cfgEl);
 }
 
 async function refreshModelsView() {
@@ -10385,7 +10439,7 @@ function modelsRenderMine() {
         <div class="model-expand" data-expand="${filenameId}">
           <div class="ex-head">Load configuration</div>
           <div class="ex-desc">Tune llama.cpp before booting. Saved per-model so you only set this once. "Use this" on the row always boots with these values.</div>
-          ${modelsLoadConfigHTML({ maxCtx: ctxGuess, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 24576, ctxGuess) })}
+          ${modelsLoadConfigHTML({ maxCtx: ctxGuess, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 24576, ctxGuess), layers: m.layers, sizeGb: m.size_gb })}
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${filenameId}">Cancel</button>
             <button class="model-action" data-apply-path="${esc(m.path)}" data-apply-id="${filenameId}">Save & use with these settings</button>
