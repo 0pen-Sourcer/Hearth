@@ -2122,6 +2122,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                     return "local"
                 if "api.x.ai" in u: return "grok"
                 if "generativelanguage.googleapis" in u: return "gemini"
+                if "api.anthropic.com" in u: return "anthropic"
                 if "api.openai.com" in u: return "openai"
                 if "openrouter.ai" in u: return "openrouter"
                 return ""  # unknown host: leave provider as the caller set it
