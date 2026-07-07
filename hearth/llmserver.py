@@ -716,6 +716,52 @@ def server_extras_missing() -> Optional[str]:
     return None
 
 
+_native_server_cache: List[Optional[Dict[str, Any]]] = []
+
+
+def find_native_llama_server() -> Optional[Dict[str, Any]]:
+    """Locate a standalone llama.cpp `llama-server.exe` — the official OpenAI-
+    compatible server. It's newer than our pinned llama-cpp-python wheel and,
+    crucially, has working Blackwell (sm_120 / RTX 50-series) CUDA kernels the
+    wheel lacks (the wheel returns empty on long context there). Prefers a
+    Hearth-managed copy, then the newest CUDA-12 build LM Studio already pulled.
+    Returns {exe, dll_dirs, label} or None. Cached; call reset_native_cache()
+    after a runtime download."""
+    if _native_server_cache:
+        return _native_server_cache[0]
+    found: Optional[Dict[str, Any]] = None
+    candidates: List[Path] = []
+    # 1) Hearth-managed runtime (download target — newest version dir wins)
+    hearth_rt = Path(os.path.expanduser("~/.hearth/llamacpp"))
+    if hearth_rt.is_dir():
+        candidates += sorted(hearth_rt.glob("*/llama-server.exe"),
+                             key=lambda p: p.parent.name, reverse=True)
+    # 2) Reuse LM Studio's CUDA-12 backend if the user has it (zero download)
+    lms = Path(os.path.expanduser("~/.lmstudio/extensions/backends"))
+    if lms.is_dir():
+        candidates += sorted(lms.glob("*nvidia-cuda12*/llama-server.exe"),
+                             key=lambda p: p.parent.name, reverse=True)
+    for exe in candidates:
+        try:
+            if not exe.is_file():
+                continue
+        except OSError:
+            continue
+        dll_dirs = [str(exe.parent)]
+        # CUDA runtime DLLs live in a sibling vendor dir for LM Studio builds.
+        vendor = exe.parent.parent / "vendor" / "win-llama-cuda12-vendor-v2"
+        if vendor.is_dir():
+            dll_dirs.append(str(vendor))
+        found = {"exe": str(exe), "dll_dirs": dll_dirs, "label": exe.parent.name}
+        break
+    _native_server_cache.append(found)
+    return found
+
+
+def reset_native_cache() -> None:
+    _native_server_cache.clear()
+
+
 def start_builtin(model_path: str, port: Optional[int] = None,
                   ctx: int = 24576, n_gpu_layers: int = -1,
                   n_threads: Optional[int] = None,
@@ -797,14 +843,21 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     # flash on). Older cards keep the q8_0+flash VRAM saver. Only defaults are
     # touched — an explicit load-config choice is left alone (the GUI warns).
     _blackwell = (detect_gpu_compute_cap() or 0.0) >= 12.0
+    _native = find_native_llama_server()
+    _use_native = _native is not None
     if n_gpu_layers != 0:
-        _kv_default = "f16" if _blackwell else "q8_0"
+        # The native llama-server has working Blackwell kernels → keep the
+        # q8_0 + flash VRAM saver (fits a 9B on 8 GB, like LM Studio). Only the
+        # old llama-cpp-python wheel needs the f16 + flash-off workaround on
+        # Blackwell, where its flash kernel returns empty on long context.
+        _needs_bw_workaround = _blackwell and not _use_native
+        _kv_default = "f16" if _needs_bw_workaround else "q8_0"
         _was_default = cache_type_k is None
         if cache_type_k is None:
             cache_type_k = _kv_default
         if cache_type_v is None:
             cache_type_v = _kv_default
-        if _blackwell and _was_default:
+        if _needs_bw_workaround and _was_default:
             flash_attn = False
 
     vram_warning: Optional[str] = None
@@ -907,51 +960,62 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     # tray's argparse and dies with "unrecognized arguments". Re-invoke the
     # bundle with a sentinel the entrypoint catches and routes to
     # llama_cpp.server. From source, sys.executable IS python, so use -m.
-    _launcher = ([sys.executable, "--hearth-run-llama-server"]
-                 if getattr(sys, "frozen", False)
-                 else [sys.executable, "-m", "llama_cpp.server"])
-    cmd = [
-        *_launcher,
-        "--model", model_path,
-        "--host", BUILTIN_HOST,
-        "--port", str(port),
-        "--n_ctx", str(ctx),
-        "--n_gpu_layers", str(n_gpu_layers),
-        "--api_key", "hearth-builtin",
-        # Throughput-critical defaults that llama_cpp.server leaves at
-        # conservative values. Bumping these gives roughly 1.5-2x prefill
-        # on the same model + ctx + GPU.
-        "--n_batch", "2048",
-        "--n_ubatch", "512",
-        "--n_threads", str(effective_threads),
-        "--n_threads_batch", str(effective_threads),
-    ]
-    # No --chat_format: use the GGUF's native template. llama-cpp-python's
-    # `chatml-function-calling` handler was the old choice, but it returns empty
-    # and crashes the stream on real prompts (long persona + many tools). Hearth
-    # now hand-injects the <tools> spec and recovers <tool_call> via
-    # hearth.tool_call_parser (headless._use_manual_tools) — same technique LM
-    # Studio uses, and it doesn't depend on the fragile grammar handler.
-    # KV cache quant. This llama_cpp.server build wants --type_k/--type_v as the
-    # ggml type INT, not the "q8_0" string — map it. Quantized KV needs flash attn.
-    _GGML_TYPE = {"f32": 0, "f16": 1, "q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8}
-    _kv_quant = False
-    if cache_type_k:
-        _t = _GGML_TYPE.get(str(cache_type_k).lower())
-        if _t is not None:
-            cmd += ["--type_k", str(_t)]
-            _kv_quant = _kv_quant or _t not in (0, 1)
-    if cache_type_v:
-        _t = _GGML_TYPE.get(str(cache_type_v).lower())
-        if _t is not None:
-            cmd += ["--type_v", str(_t)]
-            _kv_quant = _kv_quant or _t not in (0, 1)
-    if flash_attn or _kv_quant:
-        cmd += ["--flash_attn", "true"]
-    # Suppress llama.cpp's internal CUDA debug logging — server log was
-    # filling with 404x "CUDA Graph id N reused" per session. Real errors
-    # still hit stderr → log file → GUI failure modal.
-    cmd += ["--verbose", "false"]
+    # Quantized V-cache (q8_0/q4) requires flash attention in llama.cpp.
+    _kv_quant = (str(cache_type_k or "f16").lower() not in ("", "f16", "f32")
+                 or str(cache_type_v or "f16").lower() not in ("", "f16", "f32"))
+    _flash = bool(flash_attn or _kv_quant)
+    # No --chat_format / --jinja tool wiring on either engine: Hearth hand-injects
+    # the <tools> spec and recovers <tool_call> via hearth.tool_call_parser
+    # (headless._use_manual_tools) — the model's native template handles chat +
+    # reasoning, Hearth handles tools. Same technique LM Studio uses.
+    if _use_native:
+        # Standalone llama.cpp `llama-server.exe`. Args differ from the wheel:
+        # cache types are STRINGS (q8_0), flash is on/off, ctx is --ctx-size,
+        # layers --n-gpu-layers. This is the path that actually works on Blackwell.
+        cmd = [
+            _native["exe"],
+            "--model", model_path,
+            "--host", BUILTIN_HOST,
+            "--port", str(port),
+            "--ctx-size", str(ctx),
+            "--n-gpu-layers", str(999 if n_gpu_layers == -1 else n_gpu_layers),
+            "--api-key", "hearth-builtin",
+            "--batch-size", "2048",
+            "--ubatch-size", "512",
+            "--threads", str(effective_threads),
+            "--flash-attn", ("on" if _flash else "off"),
+        ]
+        if cache_type_k:
+            cmd += ["--cache-type-k", str(cache_type_k)]
+        if cache_type_v:
+            cmd += ["--cache-type-v", str(cache_type_v)]
+    else:
+        # PyInstaller: sys.executable is Hearth.exe (tray), so route via the
+        # --hearth-run-llama-server sentinel; from source it's python → -m.
+        _launcher = ([sys.executable, "--hearth-run-llama-server"]
+                     if getattr(sys, "frozen", False)
+                     else [sys.executable, "-m", "llama_cpp.server"])
+        cmd = [
+            *_launcher,
+            "--model", model_path,
+            "--host", BUILTIN_HOST,
+            "--port", str(port),
+            "--n_ctx", str(ctx),
+            "--n_gpu_layers", str(n_gpu_layers),
+            "--api_key", "hearth-builtin",
+            "--n_batch", "2048",
+            "--n_ubatch", "512",
+            "--n_threads", str(effective_threads),
+            "--n_threads_batch", str(effective_threads),
+        ]
+        # This wheel wants --type_k/--type_v as the ggml type INT, not "q8_0".
+        _GGML_TYPE = {"f32": 0, "f16": 1, "q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8}
+        for _flag, _ct in (("--type_k", cache_type_k), ("--type_v", cache_type_v)):
+            if _ct and _GGML_TYPE.get(str(_ct).lower()) is not None:
+                cmd += [_flag, str(_GGML_TYPE[str(_ct).lower()])]
+        if _flash:
+            cmd += ["--flash_attn", "true"]
+        cmd += ["--verbose", "false"]
 
     # Pipe stdout+stderr to a real log file so the user (and the GUI failure
     # toast) can see WHY a start failed. Without this the user just sees "did
@@ -977,9 +1041,14 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         global _log_fh
         log_fh = open(log_path, "ab")
         _log_fh = log_fh
+        _env = dict(os.environ)
+        if _use_native and _native.get("dll_dirs"):
+            # ggml-cuda.dll + the CUDA runtime (cudart/cublas) live next to the
+            # native exe / in its vendor dir — put them on PATH so it loads.
+            _env["PATH"] = os.pathsep.join(_native["dll_dirs"]) + os.pathsep + _env.get("PATH", "")
         spawned = subprocess.Popen(
             cmd, stdout=log_fh, stderr=subprocess.STDOUT,
-            creationflags=_NO_WINDOW, env=dict(os.environ),
+            creationflags=_NO_WINDOW, env=_env,
         )
         # Hand the child off to the Windows Job Object so it dies with us
         # even on Ctrl-C, force-kill, or unhandled crash. This is the actual
