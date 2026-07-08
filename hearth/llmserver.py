@@ -985,9 +985,14 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             # spills the overflow into shared system RAM, which is slower than CPU
             # AND returns empty output on this class of card. So downgrade to a
             # controlled partial offload (some layers explicitly on CPU).
+            # Native llama-server spills gracefully → run a small reserve and
+            # keep most layers on the GPU (fast). The wheel needs a big reserve
+            # (its spill returns empty on Blackwell).
+            _reserve = 1.0 if _use_native else 2.3
             if n_gpu_layers == -1 and free_vram is not None:
                 est = estimate_safe_gpu_layers(sz, free_vram, ctx,
-                                               layer_count=layers, cache_type=cache_type_k)
+                                               layer_count=layers, cache_type=cache_type_k,
+                                               reserve_gb=_reserve)
                 if est == 0:
                     n_gpu_layers = 0
                     vram_warning = (
@@ -1012,7 +1017,8 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                 # call — but warn if the numbers say it'll spill so they know why
                 # it might crawl or come back empty.
                 fits = estimate_safe_gpu_layers(sz, free_vram, ctx,
-                                                layer_count=layers, cache_type=cache_type_k)
+                                                layer_count=layers, cache_type=cache_type_k,
+                                                reserve_gb=_reserve)
                 over = layers and n_gpu_layers > fits > 0
                 if fits == 0 or over:
                     vram_warning = (
@@ -1474,23 +1480,22 @@ def estimate_safe_gpu_layers(model_size_gb: Optional[float],
                              free_vram_gb: Optional[float],
                              ctx: int = 24576,
                              layer_count: Optional[int] = None,
-                             cache_type: Optional[str] = None) -> int:
+                             cache_type: Optional[str] = None,
+                             reserve_gb: float = 2.3) -> int:
     """How many transformer layers to offload so the GPU allocation stays UNDER
     free VRAM. Returns -1 (offload all — it fits comfortably), 0 (CPU-only —
     no VRAM budget), or a positive count (partial offload; the rest run on CPU).
 
-    Overshooting is the failure we guard against: n_gpu_layers=-1 when the
-    model doesn't fit makes the NVIDIA driver silently spill the overflow into
-    shared system RAM, which is slower than pure CPU AND returns empty/garbage
-    on some cards. So reserve generously and bias toward fewer layers."""
+    `reserve_gb` is headroom kept free for the CUDA context + n_batch compute
+    buffer. The old llama-cpp-python wheel needed a big reserve (2.3) because a
+    spill there returned empty/garbage — but the native llama-server spills
+    gracefully (slow, not broken), like LM Studio, so it can run a smaller
+    reserve and keep far more layers on the GPU (much faster on a tight 8 GB)."""
     if not model_size_gb or not free_vram_gb or model_size_gb <= 0:
         return 0
     kv_gb = estimate_kv_cache_gb(model_size_gb, ctx, cache_type)
     L = layer_count or 40  # real count when known, proxy otherwise
-    # Reserve for the CUDA context + the n_batch compute/graph buffer + a margin
-    # so a slightly-busy GPU (browser, the Hearth window itself) doesn't tip us
-    # into a spill. Empirically ~2.3 GB on consumer cards with n_batch=2048.
-    budget = free_vram_gb - 2.3
+    budget = free_vram_gb - reserve_gb
     footprint = model_size_gb + kv_gb
     if budget <= 0:
         return 0
