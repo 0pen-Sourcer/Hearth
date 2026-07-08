@@ -10362,7 +10362,7 @@ async function refreshModelsView() {
 
   // Lite build has no built-in server — steer to cloud/LM Studio or Full.
   if (s.is_lite) {
-    head.innerHTML += '<div style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,.08);border:1px solid var(--accent-line);border-radius:8px;font-size:12.5px;color:var(--fg-dim)">You\'re on <b>Hearth Lite</b> — no built-in model server. Point Hearth at a cloud brain (Settings → Chat brain) or LM Studio / Ollama, or <a href="' + esc(s.full_url || '#') + '" target="_blank" style="color:var(--accent-2)">get Hearth Full ↗</a> to run local models here.</div>';
+    head.innerHTML += '<div style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,.08);border:1px solid var(--accent-line);border-radius:8px;font-size:12.5px;color:var(--fg-dim)">You\'re on <b>Hearth Lite</b> — no built-in engine yet. Use a cloud brain (Settings → Chat brain) or LM Studio / Ollama — or <a href="#" onclick="document.getElementById(\'btn-runtime-update\').click();return false;" style="color:var(--accent-2)">download the GPU engine here ↓</a> to run local models in Hearth (just the engine, no app reinstall).</div>';
   }
 
   // Disk-count badge on the "My Models" tab
