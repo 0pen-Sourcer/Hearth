@@ -282,6 +282,7 @@ C_FRAME = "\033[38;5;103m"
 C_ERR = "\033[1;31m"
 C_WARN = "\033[38;5;215m"
 C_ACCENT = C_BRAND
+_BOLD = "\033[1m"
 
 # Terminal markdown rendering. We stream raw tokens live (fast), then re-render
 # the finished message once IF it contains markdown worth formatting (a table,
@@ -966,12 +967,18 @@ class JarvisCLI:
         else:
             chat_models, reachable = self._probe_local_models()
             if not reachable:
-                print(f"{C_WARN}● can't reach LM Studio at {LOCAL_API_BASE}{C_RESET}")
-                print(f"{C_DIM}  Start LM Studio and load a model (or run a cloud model). /help for commands.{C_RESET}")
+                # Nothing serving yet — try to auto-boot Hearth's OWN built-in
+                # server with the last-used model (like the GUI), so the CLI runs
+                # standalone. Re-probe if it came up.
+                if self._try_autoboot_builtin():
+                    chat_models, reachable = self._probe_local_models()
+            if not reachable:
+                print(f"{C_WARN}● no local model server running{C_RESET}")
+                print(f"{C_DIM}  Pick one with {C_RESET}{C_TOOL}/models use <n>{C_RESET}{C_DIM} — that boots Hearth's built-in server (no LM Studio needed). Or start LM Studio, or {C_RESET}{C_TOOL}/brain{C_RESET}{C_DIM} a cloud model.{C_RESET}")
                 try:
                     from hearth import llmserver as _ls
                     if _ls._is_lite_edition():
-                        print(f"{C_DIM}  Hearth Lite has no built-in server — bring LM Studio/Ollama or a cloud key, or get Full: {_ls.FULL_DOWNLOAD_URL}{C_RESET}")
+                        print(f"{C_DIM}  Hearth Lite has no built-in engine yet — bring LM Studio/Ollama or a cloud key, or get the engine: {_ls.FULL_DOWNLOAD_URL}{C_RESET}")
                 except Exception:
                     pass
                 print()
@@ -1044,6 +1051,84 @@ class JarvisCLI:
         except Exception as e:
             print(f"{C_ERR}Could not reach {LOCAL_API_BASE}/models: {e}{C_RESET}")
             return []
+
+    def _save_preferred_model(self, model_path: str) -> None:
+        """Remember the last local model booted so the CLI auto-loads it next
+        launch (same settings key the GUI uses)."""
+        try:
+            import json as _json
+            sp = os.path.join(WORKSPACE, "settings.json")
+            s = _json.load(open(sp, encoding="utf-8")) if os.path.isfile(sp) else {}
+            if s.get("preferred_model") != model_path:
+                s["preferred_model"] = model_path
+                with open(sp, "w", encoding="utf-8") as f:
+                    _json.dump(s, f, indent=2)
+        except Exception:
+            pass
+
+    def _try_autoboot_builtin(self) -> bool:
+        """Boot Hearth's OWN built-in server with the last-used local model
+        (settings preferred_model) so the CLI runs standalone — no LM Studio
+        needed. Returns True if it booted a reachable server."""
+        try:
+            from hearth import llmserver as _ls
+            if _ls._is_lite_edition():
+                return False
+            import json as _json
+            sp = os.path.join(WORKSPACE, "settings.json")
+            s = _json.load(open(sp, encoding="utf-8")) if os.path.isfile(sp) else {}
+            if not s.get("server_autoboot", True):
+                return False
+            model = (s.get("preferred_model") or "").strip()
+            if not model or not os.path.isfile(model):
+                return False
+            print(f"{C_DIM}● booting built-in server · {os.path.basename(model)} "
+                  f"(first load ~10-30s)…{C_RESET}", flush=True)
+            r = _ls.start_builtin(model)
+            if r.get("ok"):
+                self._retarget_to(r.get("url"), "hearth-builtin", model)
+                print(f"{C_OK}● built-in server ready{C_RESET}")
+                return True
+            print(f"{C_WARN}● built-in server failed: {str(r.get('error', ''))[:90]}{C_RESET}")
+        except Exception:
+            pass
+        return False
+
+    async def _onboard_pick_local_model(self) -> None:
+        """First-run: let a local user pick + boot a model NOW (into Hearth's own
+        server) so they don't finish setup with a dead endpoint. Saves it as the
+        auto-load model for next launch."""
+        try:
+            from hearth import llmserver as _ls
+            if _ls._is_lite_edition():
+                print(f"  {C_DIM}Hearth Lite: after setup, open {C_RESET}{C_TOOL}/models{C_RESET}"
+                      f"{C_DIM} to grab the GPU engine, or {C_RESET}{C_TOOL}/brain{C_RESET}{C_DIM} a cloud model.{C_RESET}\n")
+                return
+            disk = _ls.scan_disk_for_models()
+            if not disk:
+                print(f"  {C_DIM}No local models on disk yet. After setup, run {C_RESET}{C_TOOL}/models{C_RESET}"
+                      f"{C_DIM} — I'll recommend one that fits your GPU and download it.{C_RESET}\n")
+                return
+            print(f"  {C_TOOL}Pick a model to run locally{C_RESET}{C_DIM} (boots Hearth's OWN server — no LM Studio needed):{C_RESET}")
+            for i, m in enumerate(disk[:6], 1):
+                print(f"  {C_DIM}[{i}] {m.get('filename')}  ({m.get('size_gb')} GB · {m.get('source')}){C_RESET}")
+            choice = input(f"  {C_DIM}number to load now, or Enter to skip (pick later with "
+                           f"{C_RESET}{C_TOOL}/models use <n>{C_RESET}{C_DIM}){C_RESET}\n  > ").strip()
+            if choice.isdigit() and 0 <= int(choice) - 1 < len(disk[:6]):
+                path = disk[int(choice) - 1].get("path")
+                print(f"  {C_DIM}booting {os.path.basename(path)}… (first load ~10-30s){C_RESET}", flush=True)
+                r = _ls.start_builtin(path)
+                if r.get("ok"):
+                    self._retarget_to(r.get("url"), "hearth-builtin", path)
+                    self._save_preferred_model(path)
+                    print(f"  {C_OK}● ready — loaded, and I'll auto-load it next time.{C_RESET}")
+                else:
+                    print(f"  {C_WARN}couldn't start: {str(r.get('error', ''))[:80]}{C_RESET}")
+            print()
+        except (KeyboardInterrupt, EOFError):
+            print()
+        except Exception:
+            pass
 
     def _retarget_to(self, url: str, api_key: str = "not-needed",
                      model_path: Optional[str] = None) -> None:
@@ -1224,6 +1309,7 @@ class JarvisCLI:
                 if r2.get("ok"):
                     print(f"{C_OK}Built-in server up at {r2.get('url')}{C_RESET}")
                     self._retarget_to(r2.get("url"), "hearth-builtin", path)
+                    self._save_preferred_model(path)  # auto-load next launch
                 else:
                     print(f"{C_ERR}{r2.get('error') or 'failed to start'}{C_RESET}")
             except Exception as e:
@@ -1292,6 +1378,7 @@ class JarvisCLI:
                 if r.get("ok"):
                     print(f"{C_OK}Up at {r.get('url')}{C_RESET}")
                     self._retarget_to(r.get("url"), "hearth-builtin", path)
+                    self._save_preferred_model(path)  # auto-load next launch
                 else:
                     print(f"{C_ERR}{r.get('error') or 'failed'}{C_RESET}")
             except Exception as e:
@@ -3219,6 +3306,10 @@ class JarvisCLI:
                 else:
                     print(f"  {C_DIM}no key - staying local. Switch anytime with /brain {brain} <key>.{C_RESET}")
             print()
+            # Staying local → help them pick + boot a model right now, so setup
+            # ends with a WORKING server, not "can't reach LM Studio".
+            if _is_local_endpoint(LOCAL_API_BASE):
+                await self._onboard_pick_local_model()
         except (KeyboardInterrupt, EOFError):
             print()
 
@@ -4146,6 +4237,12 @@ class JarvisCLI:
         reasoning_chars = 0
         reasoning_t0 = 0.0
 
+        # Reasoning renders as dim ITALIC "thoughts" — distinct from the rich
+        # Markdown answer, no heavy hand-drawn box. Kept as raw ANSI (not rich)
+        # because it streams live token-by-token; rich's buffered print would
+        # race the raw stream and misorder the frame.
+        _ITAL, _ITAL_OFF = "\033[3m", "\033[23m"
+
         def _open_reasoning():
             nonlocal reasoning_open, reasoning_chars, reasoning_t0
             if not reasoning_open:
@@ -4153,12 +4250,10 @@ class JarvisCLI:
                 reasoning_chars = 0
                 reasoning_t0 = time.time()
                 if self.think_on:
-                    sys.stdout.write(
-                        f"\n{C_FRAME}┌─ {C_WARN}thinking{C_FRAME} ─────{C_RESET}\n{C_DIM}"
-                    )
+                    sys.stdout.write(f"\n{C_DIM}{_ITAL}thinking · ")
                 else:
-                    # Spinner-style placeholder; replaced when reasoning ends
-                    sys.stdout.write(f"\n{C_DIM}▶ thinking…{C_RESET}")
+                    # Collapsed placeholder; replaced with a summary when it ends
+                    sys.stdout.write(f"\n{C_DIM}thinking…{C_RESET}")
                 sys.stdout.flush()
 
         def _close_reasoning():
@@ -4166,13 +4261,11 @@ class JarvisCLI:
             if reasoning_open:
                 dt = time.time() - reasoning_t0
                 if self.think_on:
-                    sys.stdout.write(
-                        f"{C_RESET}\n{C_FRAME}└─ {dt:.1f}s, {reasoning_chars}c{C_RESET}\n{C_BOT}"
-                    )
+                    sys.stdout.write(f"{_ITAL_OFF}{C_RESET}\n{C_DIM}{dt:.1f}s · {reasoning_chars}c{C_RESET}\n{C_BOT}")
                 else:
-                    # Erase the "▶ thinking…" line, replace with summary
+                    # Erase the "thinking…" line, replace with a collapsed summary
                     sys.stdout.write(
-                        f"\r\033[K{C_DIM}▶ thought for {dt:.1f}s ({reasoning_chars}c) - /think to expand{C_RESET}\n{C_BOT}"
+                        f"\r\033[K{C_DIM}thought for {dt:.1f}s ({reasoning_chars}c) — /think to expand{C_RESET}\n{C_BOT}"
                     )
                 sys.stdout.flush()
                 reasoning_open = False
@@ -4181,7 +4274,8 @@ class JarvisCLI:
             nonlocal reasoning_chars
             reasoning_chars += len(text)
             if self.think_on:
-                sys.stdout.write(C_DIM + text)
+                # dim + italic, re-armed each chunk so wrapped lines stay styled
+                sys.stdout.write(C_DIM + _ITAL + text)
                 sys.stdout.flush()
             # else: silently absorb - only the summary line shows
 
@@ -4424,21 +4518,34 @@ class JarvisCLI:
                             and not _path_safe
                             and self.tool_perms.get(name) not in ("always", "never"))
 
-            print(f"{C_FRAME}╭─ {C_TOOL}⚡ {name}{C_FRAME} ─{C_RESET}")
-            if _will_prompt and len(preview_full) > 100:
-                # Pretty-print + word-wrap so the full args read cleanly on
-                # multiple lines before the [y/n/a/N] prompt.
+            # Tool card, Claude-Code style: "● name(key: val, …)" then a dim
+            # "└ result" continuation. Bold name, dim args — distinct at a glance
+            # from thinking (dim italic) and the rich-rendered answer. The full
+            # pretty-printed args only unfurl when we're about to prompt.
+            def _arg_summary(a) -> str:
+                if not isinstance(a, dict):
+                    return ""
+                bits = []
+                for k, v in a.items():
+                    if k.startswith("_"):
+                        continue
+                    sv = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+                    sv = sv.replace("\n", " ")
+                    if len(sv) > 44:
+                        sv = sv[:44] + "…"
+                    bits.append(f"{k}: {sv}")
+                s = ", ".join(bits)
+                return s if len(s) <= 90 else s[:90] + "…"
+
+            _unfurl = _will_prompt and len(preview_full) > 100
+            print(f"\n  {C_TOOL}●{C_RESET} {_BOLD}{name}{C_RESET}{C_DIM}({_arg_summary(args)}){C_RESET}")
+            if _unfurl:
                 try:
                     pretty = json.dumps(args, ensure_ascii=False, indent=2)
                 except Exception:
                     pretty = preview_full
                 for ln in pretty.split("\n"):
-                    print(f"{C_FRAME}│ {C_DIM}{ln}{C_RESET}")
-            else:
-                preview = preview_full
-                if len(preview) > 100:
-                    preview = preview[:100] + "…"
-                print(f"{C_FRAME}│ {C_DIM}{preview}{C_RESET}")
+                    print(f"    {C_DIM}{ln}{C_RESET}")
 
             # Permission gate for risky tools - uses prompt_async if pt is
             # active so we don't deadlock with prompt_toolkit's stdin grab.
@@ -4452,9 +4559,9 @@ class JarvisCLI:
                 if self.tool_perms.get(name) == "never":
                     denied = True
                 else:
-                    print(f"{C_FRAME}│ {C_WARN}? allow this call?{C_RESET} "
+                    print(f"    {C_WARN}allow this call?{C_RESET} "
                           f"{C_DIM}[y]es / [n]o / [a]lways / [N]ever / or type what to do instead{C_RESET}")
-                    raw_choice = await self._read_choice(f"{C_FRAME}│ > {C_RESET}")
+                    raw_choice = await self._read_choice(f"    {C_TOOL}>{C_RESET} ")
                     choice = raw_choice.strip().lower()
                     if choice in ("", "y", "yes"):
                         pass  # blank Enter or y = allow once (less punishing in flow)
@@ -4524,16 +4631,14 @@ class JarvisCLI:
             # Screen preview: clean dim label for synthetic results, else the
             # real result head (green ok / orange error).
             if display is not None:
-                print(f"{C_FRAME}│ {C_DIM}↳ {display}{C_RESET}")
-                print(f"{C_FRAME}╰─ {C_DIM}{dt:.0f}ms{C_RESET}")
+                print(f"  {C_DIM}└ {display} · {dt:.0f}ms{C_RESET}")
             else:
                 head = result.split("\n", 1)[0][:140]
                 is_err = head.startswith("Error") or "could not" in head.lower()
                 head_color = C_WARN if is_err else C_OK
                 extra_lines = result.count("\n")
                 size_label = f"{len(result)}c" + (f", +{extra_lines}L" if extra_lines else "")
-                print(f"{C_FRAME}│ {head_color}↳ {head}{C_RESET}")
-                print(f"{C_FRAME}╰─ {C_DIM}{size_label} · {dt:.0f}ms{C_RESET}")
+                print(f"  {C_DIM}└ {head_color}{head}{C_RESET}  {C_DIM}({size_label} · {dt:.0f}ms){C_RESET}")
 
             tool_msg: Dict = {
                 "role": "tool",
