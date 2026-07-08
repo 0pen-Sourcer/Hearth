@@ -1515,6 +1515,25 @@ def _coerce_int(v, default):
         return default
 
 
+# Read-before-edit guard. Tracks files the model has actually SEEN this process
+# (read_file / write_file), with the mtime at that moment. edit_file then refuses
+# to touch a file the model never read, or one that changed since — the same
+# discipline Claude Code enforces, so a local model can't blind-edit from a
+# guessed view of the file.
+_SEEN_FILES: Dict[str, float] = {}
+
+
+def _seen_key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _mark_seen(path: str) -> None:
+    try:
+        _SEEN_FILES[_seen_key(path)] = os.path.getmtime(path)
+    except OSError:
+        pass
+
+
 def _read_file(p: Dict) -> str:
     """Smart reader. Routes by extension to a dedicated extractor for
     PDF / DOCX / XLSX / PPTX / EPUB / IPYNB / CSV / JSON / HTML / RTF.
@@ -1540,6 +1559,7 @@ def _read_file(p: Dict) -> str:
         return f"Error: not found: {path}"
     if os.path.isdir(path):
         return f"Error: '{path}' is a directory. Use list_directory."
+    _mark_seen(path)  # the model has now seen this file → edit_file may touch it
 
     ext = os.path.splitext(path)[1].lower()
     # Handle .tar.gz / .tar.bz2 / .tar.xz as archives, not single-stream gz
@@ -2302,6 +2322,7 @@ def _write_file(p: Dict) -> str:
 
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
+    _mark_seen(path)  # model wrote it → it knows the content → edit_file allowed
     verb = "Updated" if existed else "Created"
     return f"{verb}: {path} ({len(content)} chars, {content.count(chr(10))+1} lines)"
 
@@ -2325,6 +2346,22 @@ def _edit_file(p: Dict) -> str:
     path = _resolve_write(p["path"])
     if not os.path.exists(path):
         return f"Error: not found: {path}. Use write_file to create it."
+
+    # Read-before-edit: refuse to edit a file the model hasn't actually seen, or
+    # one that changed since it last read it. Forces old_text to come from the
+    # real current content, not a guess.
+    _key = _seen_key(path)
+    if _key not in _SEEN_FILES:
+        return (f"Error: read the file first — call read_file(path='{p['path']}') "
+                f"before editing it, then copy old_text from what you read. "
+                f"(Editing a file you haven't read leads to wrong / failed edits.)")
+    try:
+        if abs(os.path.getmtime(path) - _SEEN_FILES[_key]) > 0.001:
+            return (f"Error: {os.path.basename(path)} changed since you read it. "
+                    f"read_file(path='{p['path']}') again to see the current "
+                    f"content, then retry the edit.")
+    except OSError:
+        pass
 
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         original = f.read()
@@ -2436,6 +2473,7 @@ def _edit_file(p: Dict) -> str:
 
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
+    _mark_seen(path)  # refresh the mtime so a follow-up edit isn't blocked
     chars_changed = abs(len(content) - len(original))
     return (
         f"edit_file({path}):\n" + "\n".join(log) +
