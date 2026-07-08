@@ -1291,7 +1291,18 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                 "log_path": str(log_path),
                 "log_tail": tail[-2000:]}
 
-    _proc_info = {"url": api_base, "model_path": model_path, "port": port, "ctx": ctx}
+    # Resolve GPU-vs-CPU split for display. n_gpu_layers is now concrete:
+    # -1 = all layers on GPU, 0 = CPU-only, N = first N on GPU.
+    _total_layers = gguf_layer_count(model_path)
+    if n_gpu_layers == -1:
+        _gpu_on = _total_layers
+    elif n_gpu_layers == 0:
+        _gpu_on = 0
+    else:
+        _gpu_on = n_gpu_layers
+    _proc_info = {"url": api_base, "model_path": model_path, "port": port, "ctx": ctx,
+                  "gpu_layers_on": _gpu_on, "total_layers": _total_layers,
+                  "engine": "native" if _use_native else "wheel"}
     # Remember the user's tuned config so the next "Use this" on the same
     # .gguf restores GPU offload / ctx / KV cache without them setting it again.
     save_model_config(model_path, {
@@ -1842,6 +1853,9 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
         "builtin_pid": (_proc.pid if (_proc and builtin) else None),
         "builtin_url": _proc_info.get("url") if builtin else None,
         "builtin_model": _proc_info.get("model_path") if builtin else None,
+        "builtin_gpu_layers": _proc_info.get("gpu_layers_on") if builtin else None,
+        "builtin_total_layers": _proc_info.get("total_layers") if builtin else None,
+        "builtin_engine": _proc_info.get("engine") if builtin else None,
         "disk_models": _disk,
         "partial_downloads": list_partial_downloads(),
         "is_lite": _is_lite_edition(),
