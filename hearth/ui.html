@@ -126,6 +126,19 @@
   .model-state.loaded { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
   .model-state.loading { background: var(--warn); animation: pulse 1.1s infinite; }
   @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
+  /* Unified download indicator: a small dot that turns violet + pulses while a
+     background download runs, then does one "breathe" when it completes. One
+     visual language across whisper / engine / model / voice pulls. */
+  .dl-dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+            background:transparent; margin-left:6px; vertical-align:middle;
+            transition:background .2s; }
+  .dl-dot.active { background:var(--accent); animation:pulse 1.1s infinite; }
+  .dl-dot.done   { background:var(--ok); animation:dl-breathe 1.2s ease-out 1; }
+  @keyframes dl-breathe {
+    0%   { transform:scale(1);   box-shadow:0 0 0 0 var(--ok); }
+    50%  { transform:scale(1.6); }
+    100% { transform:scale(1);   box-shadow:0 0 0 9px transparent; }
+  }
   .model-picker select {
     background: transparent; border: none; outline: none;
     color: var(--fg); padding: 6px 0; flex: 1;
@@ -3080,7 +3093,7 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Whisper model size</div>
+            <div class="name">Whisper model size<span class="dl-dot" id="stt-dl-dot"></span></div>
             <div class="hint"><code>tiny.en</code> = fastest, fine for clear short prompts. <code>small.en</code> for harder accents or noisy rooms.</div>
           </div>
           <select id="setting-stt-model">
@@ -3285,7 +3298,11 @@
             <span class="v mono" id="server-st-url">-</span>
           </div>
           <div class="server-card-row">
-            <span class="k">Engine</span>
+            <span class="k">Compute</span>
+            <span class="v" id="server-st-gpu" style="text-align:right">-</span>
+          </div>
+          <div class="server-card-row">
+            <span class="k">Engine<span class="dl-dot" id="engine-dl-dot"></span></span>
             <span class="v" id="runtime-status" style="text-align:right">checking…</span>
           </div>
           <div class="progress-row" id="runtime-dl" style="display:none;align-items:center;gap:8px;margin:6px 0 2px;">
@@ -7789,6 +7806,23 @@ async function refreshServerCard() {
     $('server-st-model').textContent = modelText;
     $('server-st-url').textContent = r.builtin_url
       || (r.external_running ? 'http://127.0.0.1:1234/v1' : (s.llm_url || '-'));
+    // Compute split: how many transformer layers landed on the GPU vs CPU.
+    // Only meaningful for our built-in server (we resolve the offload count).
+    const gpuEl = $('server-st-gpu');
+    if (gpuEl) {
+      if (running && r.builtin_gpu_layers != null) {
+        const on = r.builtin_gpu_layers, tot = r.builtin_total_layers || 0;
+        let txt, cls = 'v';
+        if (on === 0)                 { txt = tot ? `CPU-only (0/${tot} on GPU)` : 'CPU-only'; cls = 'v stopped'; }
+        else if (tot && on >= tot)    { txt = `Full GPU (${tot}/${tot} layers)`; cls = 'v running'; }
+        else if (tot)                 { txt = `${on}/${tot} layers on GPU, rest on CPU`; }
+        else                          { txt = `${on} layers on GPU`; }
+        gpuEl.textContent = txt; gpuEl.className = cls;
+      } else {
+        gpuEl.textContent = running ? '-' : (usingCloud ? 'n/a (cloud)' : '-');
+        gpuEl.className = 'v';
+      }
+    }
     // Disable Stop / Restart when there's no builtin to act on.
     const stopBtn = $('btn-server-stop');
     const restartBtn = $('btn-server-restart');
@@ -8309,7 +8343,7 @@ async function refreshSettings() {
           if (voiceSel) await saveSetting('voice_name', voiceSel.value);  // so /api/tts uses it
           const r = await fetch('/api/tts', {
             method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ text: 'This is ' + (voiceSel ? voiceSel.value : 'the voice') + '. This is how I sound.' }),
+            body: JSON.stringify({ text: 'This is ' + (voiceSel ? voiceSel.value.replace(/^[a-z]{2}_/, '').replace(/^./, c => c.toUpperCase()) : 'the voice') + '. This is how I sound.' }),
           });
           if (!r.ok) toast('Voice test', 'playback failed — make sure TTS is enabled above', 'warn', 5000);
         } catch (err) { toast('Voice test', err.message, 'err'); }
@@ -8327,6 +8361,7 @@ async function refreshSettings() {
     }
     if (sttMdl) {
       sttMdl.value = s.stt_model || 'base.en';
+      markLoadedOption(sttMdl, s.stt_model || 'base.en');  // show which one is live
       sttMdl.onchange = async (e) => {
         const mdl = e.target.value;
         await saveSetting('stt_model', mdl);
@@ -8334,11 +8369,14 @@ async function refreshSettings() {
         // /api/voice/reload blocks while faster-whisper pulls the model (can be a
         // minute for small.en), and a vanished toast made it look frozen.
         sttMdl.disabled = true;
+        setDlDot($('stt-dl-dot'), 'active');
         toast('Whisper', 'Downloading ' + mdl + ' — first time only, up to ~1-2 min for bigger models. Hang tight, the app stays responsive.', 'info', 90000);
         try {
           await api('/api/voice/reload', { method: 'POST' });
-          toast('Whisper ready', mdl + ' loaded ✓', 'ok');
-        } catch (err) { toast('STT model', 'download/load failed: ' + err.message, 'err', 8000); }
+          setDlDot($('stt-dl-dot'), 'done');
+          markLoadedOption(sttMdl, mdl);
+          toast('Whisper ready', mdl + ' loaded', 'ok');
+        } catch (err) { setDlDot($('stt-dl-dot'), 'idle'); toast('STT model', 'download/load failed: ' + err.message, 'err', 8000); }
         finally { sttMdl.disabled = false; }
       };
     }
@@ -10271,6 +10309,30 @@ function modelsWireLoadConfig(rootEl) {
   modelsUpdateVramEstimate(cfgEl);
 }
 
+// Unified download-indicator dot. state: 'active' (violet pulse while pulling),
+// 'done' (one green breathe, then idle), 'idle' (clear). Shared by whisper /
+// engine / voice downloads so they all speak the same visual language.
+function setDlDot(el, state) {
+  if (!el) return;
+  el.classList.remove('active', 'done');
+  if (state === 'active') el.classList.add('active');
+  else if (state === 'done') {
+    el.classList.add('done');
+    setTimeout(() => el.classList.remove('done'), 1400);
+  }
+}
+
+// Mark which <option> in a <select> is the live/installed one by suffixing
+// " · loaded" to its label (and stripping the marker off the rest). Gives the
+// dropdown a persistent "this is what's actually running" confirmation.
+function markLoadedOption(sel, value) {
+  if (!sel) return;
+  for (const opt of sel.options) {
+    const base = opt.textContent.replace(/\s*·\s*loaded$/, '');
+    opt.textContent = (opt.value === value) ? base + ' · loaded' : base;
+  }
+}
+
 // Inference engine (llama.cpp runtime) bar: show what's running + let the user
 // download Hearth's own copy or update it.
 async function refreshRuntimeBar() {
@@ -10281,16 +10343,17 @@ async function refreshRuntimeBar() {
     if (r.engine === 'native') {
       const src = { hearth: "Hearth's own", lmstudio: "LM Studio's (signed)", other: 'detected copy' }[r.source] || r.source;
       statusEl.innerHTML = `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} · ${esc(src)}</span>`;
-      if (btn) btn.textContent = (r.source === 'hearth') ? 'Update engine' : "Get Hearth's own";
+      if (btn) btn.textContent = (r.source === 'hearth') ? 'Update engine' : "Install Hearth's own copy";
     } else {
       statusEl.innerHTML = `bundled wheel <span style="color:#fbbf24">· older, may fail on new GPUs</span>`;
-      if (btn) btn.textContent = 'Download engine';
+      if (btn) btn.textContent = 'Install GPU engine';
     }
   } catch { statusEl.textContent = 'unknown'; }
 }
 async function runtimeInstall() {
   const dl = $('runtime-dl'), fill = $('runtime-dl-fill'), pct = $('runtime-dl-pct'), btn = $('btn-runtime-update');
   dl.style.display = 'flex'; btn.disabled = true; btn.textContent = 'Downloading…';
+  setDlDot($('engine-dl-dot'), 'active');
   try {
     const resp = await fetch('/api/runtime/install', { method: 'POST' });
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
@@ -10308,6 +10371,7 @@ async function runtimeInstall() {
           pct.textContent = `${(ev.done / 1e6).toFixed(0)}/${(ev.total / 1e6).toFixed(0)} MB`;
         } else if (ev.type === 'done') {
           dl.style.display = 'none'; btn.disabled = false;
+          setDlDot($('engine-dl-dot'), ev.ok ? 'done' : 'idle');
           if (ev.ok) toast('Engine ready', 'llama.cpp ' + (ev.tag || ''), 'ok');
           else toast('Engine download failed', ev.error || '', 'err', 8000);
         }
@@ -10315,6 +10379,7 @@ async function runtimeInstall() {
     }
   } catch (e) {
     dl.style.display = 'none'; btn.disabled = false;
+    setDlDot($('engine-dl-dot'), 'idle');
     toast('Engine download failed', e.message, 'err', 8000);
   }
   refreshRuntimeBar();
