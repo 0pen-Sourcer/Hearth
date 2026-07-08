@@ -186,6 +186,34 @@ if __name__ == "__main__":
     print(f"[Jarvis MCP] workspace: {WORKSPACE}", file=sys.stderr)
     print(f"[Jarvis MCP] activity log: {ACTIVITY_LOG}", file=sys.stderr)
     _log_activity("server_start", tools=len(TOOL_DEFINITIONS), workspace=WORKSPACE)
+    # Register this inbound connection so the Hearth GUI's MCP tab can show WHO'S
+    # connected. stdio spawns one server process per client, so our pid + the
+    # parent process name (claude.exe / lmstudio / cursor …) identify the client.
+    # The file is removed on clean exit; the GUI prunes dead pids for hard kills.
+    try:
+        _clients_dir = os.path.join(os.path.expanduser("~/.hearth"), "mcp_clients")
+        os.makedirs(_clients_dir, exist_ok=True)
+        _client = "unknown"
+        try:
+            import psutil  # type: ignore
+            _pn = psutil.Process(os.getppid()).name().lower()
+            _client = _pn
+            for _k, _label in (("claude", "Claude Desktop"), ("lmstudio", "LM Studio"),
+                               ("lm studio", "LM Studio"), ("cursor", "Cursor"),
+                               ("code", "VS Code"), ("ollama", "Ollama")):
+                if _k in _pn:
+                    _client = _label
+                    break
+        except Exception:
+            pass
+        _reg = os.path.join(_clients_dir, f"{os.getpid()}.json")
+        with open(_reg, "w", encoding="utf-8") as _f:
+            json.dump({"pid": os.getpid(), "client": _client,
+                       "connected_at": datetime.now().isoformat(timespec="seconds")}, _f)
+        import atexit as _ax
+        _ax.register(lambda: os.path.exists(_reg) and os.remove(_reg))
+    except Exception:
+        pass
     # Hand the pristine stdout back for the JSON-RPC stdio transport.
     sys.stdout = _REAL_STDOUT
     mcp.run()
