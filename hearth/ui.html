@@ -2888,15 +2888,6 @@
         <button class="models-tab active" data-tab="mine">My Models <span class="count" id="tab-mine-n">0</span></button>
         <button class="models-tab" data-tab="discover">Discover</button>
       </div>
-      <!-- Inference engine (llama.cpp runtime) — download/update Hearth's own -->
-      <div class="runtime-bar" id="runtime-bar" style="display:flex;align-items:center;gap:10px;padding:8px 12px;margin:2px 0 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;font-size:12px;">
-        <span id="runtime-status" style="color:var(--fg-dim);flex:1;">checking engine…</span>
-        <div class="progress-row" id="runtime-dl" hidden style="flex:2;display:flex;align-items:center;gap:8px;">
-          <div style="flex:1;height:6px;background:var(--bg-1);border-radius:4px;overflow:hidden;"><div id="runtime-dl-fill" style="height:100%;width:0%;background:var(--accent);transition:width .2s;"></div></div>
-          <span id="runtime-dl-pct" style="color:var(--fg-dim);min-width:64px;text-align:right;"></span>
-        </div>
-        <button id="btn-runtime-update" style="background:var(--bg-1);border:1px solid var(--border);border-radius:6px;color:var(--fg);padding:5px 12px;cursor:pointer;font-size:12px;white-space:nowrap;">Download engine</button>
-      </div>
       <div class="models-body">
         <div class="models-pane" data-pane="mine" id="models-pane-mine"></div>
         <div class="models-pane" data-pane="discover" id="models-pane-discover" hidden></div>
@@ -3293,7 +3284,16 @@
             <span class="k">Endpoint</span>
             <span class="v mono" id="server-st-url">-</span>
           </div>
+          <div class="server-card-row">
+            <span class="k">Engine</span>
+            <span class="v" id="runtime-status" style="text-align:right">checking…</span>
+          </div>
+          <div class="progress-row" id="runtime-dl" style="display:none;align-items:center;gap:8px;margin:6px 0 2px;">
+            <div style="flex:1;height:6px;background:var(--bg-1);border-radius:4px;overflow:hidden;"><div id="runtime-dl-fill" style="height:100%;width:0%;background:var(--accent);transition:width .2s;"></div></div>
+            <span id="runtime-dl-pct" style="color:var(--fg-dim);min-width:70px;text-align:right;font-size:11px;"></span>
+          </div>
           <div class="server-card-actions">
+            <button class="btn-mini" id="btn-runtime-update">Download engine</button>
             <button class="btn-mini" id="btn-server-restart">Restart</button>
             <button class="btn-mini danger" id="btn-server-stop">Stop</button>
             <button class="btn-mini" id="btn-server-logs-tab">Open server logs</button>
@@ -8071,6 +8071,7 @@ async function refreshToolPerms() {
 }
 
 async function refreshSettings() {
+  refreshRuntimeBar();  // engine status lives in Settings → Built-in server now
   try {
     const s = await api('/api/settings');
     STATE.settings = s;
@@ -10265,17 +10266,17 @@ async function refreshRuntimeBar() {
     const r = await api('/api/runtime/info');
     if (r.engine === 'native') {
       const src = { hearth: "Hearth's own", lmstudio: "LM Studio's (signed)", other: 'detected copy' }[r.source] || r.source;
-      statusEl.innerHTML = `Engine: <b>llama.cpp</b> ${esc(r.version || '')} <span style="color:var(--fg-faint)">· ${esc(src)}</span>`;
+      statusEl.innerHTML = `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} · ${esc(src)}</span>`;
       if (btn) btn.textContent = (r.source === 'hearth') ? 'Update engine' : "Get Hearth's own";
     } else {
-      statusEl.innerHTML = `Engine: <b>bundled wheel</b> <span style="color:#fbbf24">· older, may fail on new GPUs</span>`;
+      statusEl.innerHTML = `bundled wheel <span style="color:#fbbf24">· older, may fail on new GPUs</span>`;
       if (btn) btn.textContent = 'Download engine';
     }
-  } catch { statusEl.textContent = 'engine: unknown'; }
+  } catch { statusEl.textContent = 'unknown'; }
 }
 async function runtimeInstall() {
   const dl = $('runtime-dl'), fill = $('runtime-dl-fill'), pct = $('runtime-dl-pct'), btn = $('btn-runtime-update');
-  dl.hidden = false; btn.disabled = true; btn.textContent = 'Downloading…';
+  dl.style.display = 'flex'; btn.disabled = true; btn.textContent = 'Downloading…';
   try {
     const resp = await fetch('/api/runtime/install', { method: 'POST' });
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
@@ -10292,14 +10293,14 @@ async function runtimeInstall() {
           fill.style.width = Math.round(ev.done / ev.total * 100) + '%';
           pct.textContent = `${(ev.done / 1e6).toFixed(0)}/${(ev.total / 1e6).toFixed(0)} MB`;
         } else if (ev.type === 'done') {
-          dl.hidden = true; btn.disabled = false;
+          dl.style.display = 'none'; btn.disabled = false;
           if (ev.ok) toast('Engine ready', 'llama.cpp ' + (ev.tag || ''), 'ok');
           else toast('Engine download failed', ev.error || '', 'err', 8000);
         }
       }
     }
   } catch (e) {
-    dl.hidden = true; btn.disabled = false;
+    dl.style.display = 'none'; btn.disabled = false;
     toast('Engine download failed', e.message, 'err', 8000);
   }
   refreshRuntimeBar();
@@ -10312,7 +10313,6 @@ $('btn-runtime-update')?.addEventListener('click', () => {
 });
 
 async function refreshModelsView() {
-  refreshRuntimeBar();  // fire-and-forget: keep the engine bar current
   const head = $('models-server-line');
   // Stale-while-revalidate: if we already have a previous status snapshot,
   // render with it INSTANTLY so the user never sees "checking server…" on
