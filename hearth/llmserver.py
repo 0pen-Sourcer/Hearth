@@ -743,7 +743,13 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
                              key=lambda p: p.parent.name, reverse=True)
     for exe in candidates:
         try:
-            if not exe.is_file():
+            # Skip a missing exe OR an AV-quarantined stub. AVs flag the unsigned
+            # official llama-server.exe as IDP.generic and truncate it (seen: 9 KB).
+            # llama-server.exe is a thin launcher — the real one is ~20 KB+ (heavy
+            # code lives in the DLLs) — so a 15 KB floor drops the stub while
+            # keeping real builds, and we fall back to a signed copy (LM Studio's)
+            # that AV trusts.
+            if not exe.is_file() or exe.stat().st_size < 15_000:
                 continue
         except OSError:
             continue
@@ -760,6 +766,102 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
 
 def reset_native_cache() -> None:
     _native_server_cache.clear()
+
+
+_LLAMA_CPP_REPO = "ggml-org/llama.cpp"
+
+
+def llama_runtime_info() -> Dict[str, Any]:
+    """What runtime is Hearth using for the builtin server, and where from.
+    Powers the CLI/GUI 'update' UI."""
+    n = find_native_llama_server()
+    managed = Path(os.path.expanduser("~/.hearth/llamacpp"))
+    have_managed = managed.is_dir() and any(managed.glob("*/llama-server.exe"))
+    return {
+        "engine": "native" if n else "bundled-wheel",
+        "label": (n or {}).get("label"),
+        "exe": (n or {}).get("exe"),
+        "managed": have_managed,   # True once Hearth downloaded its own copy
+    }
+
+
+def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
+                           on_progress: Optional[Callable[[int, int], None]] = None
+                           ) -> Dict[str, Any]:
+    """Download the official ggml-org llama.cpp Windows CUDA build (llama-server
+    .exe + ggml DLLs) and its CUDA runtime into ~/.hearth/llamacpp/<tag>/. This
+    is what lets Hearth's builtin run on any GPU without bundling a giant wheel
+    and without depending on LM Studio — the 'updatable runtime'. Also serves as
+    the Lite->Full upgrade (pull the runtime, not the whole app).
+    Returns {ok, dir, tag} or {ok: False, error}."""
+    import urllib.request
+    import zipfile
+    import tempfile
+    try:
+        api = (f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases/"
+               + (f"tags/{tag}" if tag else "latest"))
+        req = urllib.request.Request(api, headers={"User-Agent": "Hearth",
+                                                   "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            rel = json.load(r)
+    except Exception as e:
+        return {"ok": False, "error": f"couldn't reach GitHub releases: {e}"}
+    tagname = rel.get("tag_name") or tag or "latest"
+    assets = rel.get("assets") or []
+
+    # NB: both "llama-<tag>-bin-win-cuda-X-x64.zip" (the binaries) and
+    # "cudart-llama-bin-win-cuda-X-x64.zip" (the CUDA runtime) contain the
+    # substring "bin-win-cuda-X-x64.zip" — so the binaries matcher must exclude
+    # "cudart" or it grabs the runtime zip twice and misses llama-server.exe.
+    _tail = f"bin-win-cuda-{cuda}-x64.zip"
+    bins = next((a for a in assets
+                 if _tail in a.get("name", "") and "cudart" not in a.get("name", "")), None)
+    runtime = next((a for a in assets
+                    if f"cudart-llama-{_tail}" in a.get("name", "")), None)
+    if not bins or not runtime:
+        return {"ok": False, "error": f"no cuda-{cuda} Windows assets in release {tagname}"}
+
+    dest = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tagname}"))
+    dest.mkdir(parents=True, exist_ok=True)
+    total = int(bins.get("size", 0)) + int(runtime.get("size", 0))
+    done = [0]
+
+    def _fetch(asset) -> None:
+        fd, tmp = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        try:
+            u = urllib.request.Request(asset["browser_download_url"],
+                                       headers={"User-Agent": "Hearth"})
+            with urllib.request.urlopen(u, timeout=60) as resp, open(tmp, "wb") as f:
+                while True:
+                    chunk = resp.read(262144)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done[0] += len(chunk)
+                    if on_progress:
+                        try:
+                            on_progress(done[0], total)
+                        except Exception:
+                            pass
+            with zipfile.ZipFile(tmp) as z:
+                z.extractall(dest)   # exe + ggml DLLs + cudart all land together
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+    try:
+        _fetch(bins)
+        _fetch(runtime)
+    except Exception as e:
+        return {"ok": False, "error": f"download/extract failed: {type(e).__name__}: {e}"}
+    reset_native_cache()
+    exe = next(iter(dest.rglob("llama-server.exe")), None)
+    if not exe:
+        return {"ok": False, "error": "llama-server.exe not found after extract"}
+    return {"ok": True, "dir": str(dest), "tag": tagname}
 
 
 def start_builtin(model_path: str, port: Optional[int] = None,
