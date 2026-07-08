@@ -3393,6 +3393,7 @@
               Other MCP clients (LM Studio chat UI, Claude Desktop, Cursor, your own scripts) can
               call into Hearth's full tool set. The snippet below goes in their mcp.json.
             </div>
+            <div id="mcp-inbound-clients" style="margin-top:8px;font-size:12px;color:var(--fg-dim);">no clients connected right now</div>
           </div>
           <button class="btn-mini" id="btn-mcp-snippet" style="min-width:140px;">Show config</button>
         </div>
@@ -8070,8 +8071,21 @@ async function refreshToolPerms() {
   };
 }
 
+async function refreshMcpInbound() {
+  const el = $('mcp-inbound-clients');
+  if (!el) return;
+  try {
+    const r = await api('/api/mcp/inbound');
+    const cs = r.clients || [];
+    if (!cs.length) { el.textContent = 'no clients connected right now'; return; }
+    el.innerHTML = cs.map(c =>
+      `<span style="color:#4ade80">●</span> <b>${esc(c.client || 'client')}</b> <span style="color:var(--fg-faint)">· since ${esc((c.connected_at || '').replace('T', ' '))}</span>`
+    ).join('<br>');
+  } catch { el.textContent = 'no clients connected right now'; }
+}
 async function refreshSettings() {
   refreshRuntimeBar();  // engine status lives in Settings → Built-in server now
+  refreshMcpInbound();  // live inbound MCP clients (Claude Desktop etc.)
   try {
     const s = await api('/api/settings');
     STATE.settings = s;
@@ -12128,6 +12142,8 @@ async function pollAnnouncements() {
   // model is loaded) - it used to only refresh on tab re-entry, so state
   // looked frozen until you navigated away and back.
   setInterval(() => { if (STATE.view === 'models') refreshModelsView(); }, 4000);
+  // Live inbound MCP clients (Claude Desktop / Cursor connecting/disconnecting).
+  setInterval(() => { if (STATE.view === 'settings') refreshMcpInbound(); }, 4000);
   // Background-subagent push: poll every 3s. If a new completion shows
   // up, drop a violet heads-up banner in the chat body so the user sees
   // it the moment work returns - no need to type "done?" to surface it.
