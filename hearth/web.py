@@ -1452,6 +1452,31 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/runtime/info":
             from . import llmserver
             return self._send_json(200, llmserver.llama_runtime_info())
+        if path == "/api/mcp/inbound":
+            # Inbound MCP clients (Claude Desktop / LM Studio / Cursor …) that
+            # spawned a hearth.mcp_server. Each writes ~/.hearth/mcp_clients/<pid>
+            # .json on connect; we prune the ones whose process is gone.
+            import glob as _glob
+            clients = []
+            d = os.path.join(os.path.expanduser("~/.hearth"), "mcp_clients")
+            for fp in _glob.glob(os.path.join(d, "*.json")):
+                try:
+                    with open(fp, encoding="utf-8") as f:
+                        c = json.load(f)
+                    alive = True
+                    try:
+                        import psutil
+                        alive = psutil.pid_exists(int(c.get("pid", -1)))
+                    except Exception:
+                        alive = True
+                    if alive:
+                        clients.append(c)
+                    else:
+                        os.remove(fp)
+                except Exception:
+                    pass
+            clients.sort(key=lambda c: c.get("connected_at", ""))
+            return self._send_json(200, {"clients": clients})
         if path == "/api/subagent/pending":
             # Idle-poll surface for the GUI: returns pending background
             # subagent completions WITHOUT draining the queue.
