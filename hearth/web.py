@@ -1449,6 +1449,9 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/llmserver/status":
             from . import llmserver
             return self._send_json(200, llmserver.status(LOCAL_API_BASE))
+        if path == "/api/runtime/info":
+            from . import llmserver
+            return self._send_json(200, llmserver.llama_runtime_info())
         if path == "/api/subagent/pending":
             # Idle-poll surface for the GUI: returns pending background
             # subagent completions WITHOUT draining the queue.
@@ -2416,6 +2419,38 @@ class HearthHandler(BaseHTTPRequestHandler):
                 result = llmserver.download_from_hf_repo(repo, filename, on_progress=on_progress)
                 if result.get("ok"):
                     llmserver.clear_pending_download()
+                emit({"type": "done", **result})
+            except Exception as e:
+                emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if path == "/api/runtime/install":
+            # Download Hearth's own llama.cpp runtime (the native llama-server.exe
+            # + CUDA DLLs). Streams NDJSON progress like the model download. The
+            # GUI shows the AV-false-positive heads-up BEFORE calling this.
+            from . import llmserver
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            _last = [0.0]
+
+            def emit(obj: Dict[str, Any]) -> None:
+                try:
+                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def on_progress(done: int, total: int) -> None:
+                now = time.time()
+                if now - _last[0] < 0.2 and done != total:
+                    return
+                _last[0] = now
+                emit({"type": "progress", "done": done, "total": total})
+
+            try:
+                result = llmserver.download_llama_runtime(on_progress=on_progress)
                 emit({"type": "done", **result})
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})

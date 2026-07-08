@@ -775,12 +775,22 @@ def llama_runtime_info() -> Dict[str, Any]:
     """What runtime is Hearth using for the builtin server, and where from.
     Powers the CLI/GUI 'update' UI."""
     n = find_native_llama_server()
+    exe = (n or {}).get("exe") or ""
     managed = Path(os.path.expanduser("~/.hearth/llamacpp"))
     have_managed = managed.is_dir() and any(managed.glob("*/llama-server.exe"))
+    if not n:
+        source = "wheel"      # falling back to the bundled llama-cpp-python
+    elif ".hearth" in exe:
+        source = "hearth"     # Hearth's own downloaded runtime (self-sufficient)
+    elif ".lmstudio" in exe:
+        source = "lmstudio"   # reusing LM Studio's signed backend
+    else:
+        source = "other"
     return {
         "engine": "native" if n else "bundled-wheel",
-        "label": (n or {}).get("label"),
-        "exe": (n or {}).get("exe"),
+        "source": source,
+        "version": (n or {}).get("label"),
+        "exe": exe or None,
         "managed": have_managed,   # True once Hearth downloaded its own copy
     }
 
