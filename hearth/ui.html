@@ -9424,10 +9424,10 @@ function stopVoiceGridWave() {
   });
 }
 
-function enterVoiceMode() {
+async function enterVoiceMode() {
   voiceModeOn = true;
   $('voice-mode').classList.add('show');
-  setVoiceStatus('tap mic to start talking');
+  setVoiceStatus('starting…');     // neutral until we know the brain is ready
   startVoiceGridWave();  // continuous reactive loop (mic + AI voice)
   // Ensure a real conversation exists BEFORE the user starts talking, so the
   // voice exchange is recorded in the sidebar and persisted to ~/Jarvis/
@@ -9440,6 +9440,17 @@ function enterVoiceMode() {
     // any other chat (was force-labelled "Voice chat", which looked odd).
     persistConvo(c);
     renderConvoList();
+  }
+  // Realtime (silero VAD) auto-listens — its starter owns the warm-up + status.
+  // Legacy press-to-talk: warm the brain up front so the first reply is instant,
+  // then invite a tap. Either way we never show "listening"/"tap mic" against a
+  // model that isn't loaded.
+  const rt = await probeRealtimeVoice();
+  if (!rt) {
+    setVoiceStatus('warming up the model…');
+    const ready = await warmUpBrainForVoice();
+    // On success invite a tap; on failure keep warm-up's diagnostic message.
+    if (voiceModeOn && ready) setVoiceStatus('tap mic to start talking');
   }
   // Do NOT auto-start mic - user taps when ready (avoids accidental capture
   // before they're set up, and mic stays off if they immediately exit)
@@ -9462,7 +9473,7 @@ window.addEventListener('load', () => {
   try {
     if (new URLSearchParams(location.search).get('voice') === '1') {
       setTimeout(async () => {
-        try { enterVoiceMode(); await startRealtimeVoice(); } catch (e) {}
+        try { await enterVoiceMode(); await startRealtimeVoice(); } catch (e) {}
       }, 800);  // let the app + settings finish booting first
     }
   } catch (e) {}
@@ -9662,10 +9673,69 @@ async function probeRealtimeVoice() {
   return rtVoiceAvailable;
 }
 
+// Voice mode used to jump straight to "listening" even when no chat brain was
+// loaded yet — so the first thing you said stalled for 15-30s while the local
+// model cold-booted. This warms the brain FIRST (showing live boot %), and only
+// lets the caller present "listening" once something can actually answer.
+// Idempotent: concurrent callers (enter + realtime-start fire on one click)
+// share the same in-flight promise. Resolves true when a brain is ready.
+let _brainWarmupPromise = null;
+async function warmUpBrainForVoice() {
+  if (_brainWarmupPromise) return _brainWarmupPromise;
+  const isBooting = p => p && p.phase && !['idle', 'ready', 'error'].includes(p.phase);
+  _brainWarmupPromise = (async () => {
+    try {
+      const cfg = await api('/api/settings').catch(() => ({}));
+      // A cloud brain answers instantly — nothing to warm up.
+      if (cfg.llm_provider && cfg.llm_provider !== 'local') return true;
+      let st = await api('/api/llmserver/status').catch(() => ({}));
+      if (st.builtin_running || st.external_running) return true;
+      // Nothing loaded. Kick the preferred model if nothing is booting yet, so
+      // the user doesn't have to leave voice mode to start it by hand.
+      const prog0 = await api('/api/llmserver/progress').catch(() => ({}));
+      if (!isBooting(prog0)) {
+        if (!cfg.preferred_model) {
+          setVoiceStatus('no local model set — pick one in Settings → Built-in server');
+          return false;
+        }
+        api('/api/llmserver/start', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_path: cfg.preferred_model }),
+        }).catch(() => {});
+      }
+      // Poll boot progress until a brain is ready (or the user exits / it fails
+      // / a 90s ceiling). Progress "ready" is the real signal; status is backup.
+      const t0 = performance.now();
+      while (voiceModeOn && (performance.now() - t0) < 90000) {
+        const prog = await api('/api/llmserver/progress').catch(() => ({}));
+        if (prog && prog.phase === 'ready') return true;
+        if (prog && prog.phase === 'error') {
+          setVoiceStatus('model failed to load — see Settings → Built-in server');
+          return false;
+        }
+        const pct = Math.max(0, Math.min(100, (prog && prog.percent) || 0));
+        setVoiceStatus(isBooting(prog) ? `warming up the model… ${pct}%` : 'warming up the model…');
+        st = await api('/api/llmserver/status').catch(() => ({}));
+        if (st.builtin_running || st.external_running) return true;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      return false;
+    } finally {
+      _brainWarmupPromise = null;
+    }
+  })();
+  return _brainWarmupPromise;
+}
+
 async function startRealtimeVoice() {
   if (rtVoiceActive) return;
   const ok = await probeRealtimeVoice();
   if (!ok) return false;
+  // Don't present "listening" against a brain that can't answer yet.
+  setVoiceStatus('warming up the model…');
+  const ready = await warmUpBrainForVoice();
+  if (!voiceModeOn) return false;      // user exited during warm-up
+  if (!ready) return false;            // warm-up already showed why (failure / no model)
   rtVoiceActive = true;
   _voiceMuted = false;
   rtVoiceAbort = new AbortController();
