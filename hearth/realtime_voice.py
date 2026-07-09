@@ -264,8 +264,15 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
             text = text.strip()
             if not text:
                 continue
-            # Don't dispatch our own TTS playback as user input
-            if _tts.is_speaking() or _tts.seconds_since_spoke() < 0.5:
+            # Don't dispatch our own TTS playback as user input. With speaker->mic
+            # bleed (common on shared/virtual audio devices like Steam's), the mic
+            # transcribes Jarvis's own voice and feeds it back as a "user" turn.
+            # Drop anything captured while speaking or in the ~1.2s tail after, AND
+            # flush the recorder buffer so buffered echo doesn't carry into the
+            # next turn (clear_audio_queue is the RealtimeSTT reset for exactly this).
+            if _tts.is_speaking() or _tts.seconds_since_spoke() < 1.2:
+                try: rec.clear_audio_queue()
+                except Exception: pass
                 continue
             # Utterance accepted → LLM is about to work: HUD shows "thinking"
             # (brisk pulse) until the first TTS chunk flips it to "speaking".

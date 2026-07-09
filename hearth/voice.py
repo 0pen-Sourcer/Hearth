@@ -396,18 +396,25 @@ def _emit_levels(arr, sample_rate: int) -> None:
         import numpy as np
         a = arr.astype("float32") / 32768.0
         win = max(1, int(sample_rate * 0.04))
-        levels = [min(1.0, float(np.sqrt(np.mean(seg * seg))) * 3.4)
+        # Raw per-40ms RMS swings between loud vowels and near-silent consonants
+        # 25x/sec — driving the HUD with it made the dot grid strobe. Gain 2.6
+        # (was 3.4) so it doesn't slam to 1.0 and flatten; the running smooth
+        # below turns phoneme jitter into a word-level breathing envelope.
+        levels = [min(1.0, float(np.sqrt(np.mean(seg * seg))) * 2.6)
                   for seg in (a[i:i + win] for i in range(0, len(a), win)) if len(seg)]
         sink = _level_sink
 
         def _run():
             global _current_level, _current_level_ts
+            env = 0.0
             for lv in levels:
-                _current_level = lv
+                # Exponential smooth (~word cadence) so the HUD breathes, not strobes.
+                env = env * 0.62 + lv * 0.38
+                _current_level = env
                 _current_level_ts = time.time()
                 if sink is not None:
                     try:
-                        sink(lv)
+                        sink(env)
                     except Exception:
                         pass
                 time.sleep(0.04)
