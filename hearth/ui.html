@@ -6097,11 +6097,15 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // the selected id kills that race. Local stays auto-detected (model omitted).
   const _chatModel = (STATE.brain && STATE.brain.kind === 'cloud'
     && STATE.loadedModel && STATE.loadedModel.id) ? STATE.loadedModel.id : null;
+  // Voice mode forces thinking OFF — a spoken reply should be instant, and a
+  // reasoning block adds many seconds of silent latency before it speaks. (The
+  // main-chat think toggle is untouched; this only affects voice-mode turns.)
+  const _think = voiceModeOn ? false : STATE.thinking;
   try {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(Object.assign({ prompt, think: STATE.thinking, history },
+      body: JSON.stringify(Object.assign({ prompt, think: _think, history },
                                          _chatModel ? { model: _chatModel } : {})),
       signal: currentAbort ? currentAbort.signal : undefined,
     });
