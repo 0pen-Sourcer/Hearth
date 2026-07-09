@@ -9381,6 +9381,12 @@ let voiceGridAnim = null;
 let voiceMicLevel = 0;
 let voiceLevel = 0;
 let _ttsLevel = 0, _lastLevelAt = 0;   // live amplitude streamed from the server's TTS
+// Utterance stitching: silero endpoints on short pauses, so one spoken sentence
+// arrives as several "final" fragments. Buffer them and only send to chat once
+// the user has actually stopped (no new fragment for _UTTER_GAP ms) — instead of
+// firing a separate chat turn per breath (which jammed the loop).
+let _utterBuf = '', _utterTimer = null;
+const _UTTER_GAP = 900;
 function _voiceGridFrame(t) {
   const s = t / 1000;
   let target = 0;
@@ -9391,8 +9397,9 @@ function _voiceGridFrame(t) {
   } else if (recorder.recording) {
     target = Math.min(1, voiceMicLevel * 1.7);
   }
-  // Asymmetric smoothing: snap up fast (attack), ease down (release).
-  voiceLevel += (target - voiceLevel) * (target > voiceLevel ? 0.4 : 0.12);
+  // Asymmetric smoothing: gentle attack, slower release. Kept soft on purpose —
+  // raw mic amplitude is spiky, and a snappy follow made the grid strobe.
+  voiceLevel += (target - voiceLevel) * (target > voiceLevel ? 0.22 : 0.08);
   const cx = (VOICE_GRID_COLS - 1) / 2, cy = (VOICE_GRID_ROWS - 1) / 2;
   const maxDist = Math.hypot(cx, cy);
   const reach = voiceLevel * (maxDist + 0.8);
@@ -9400,8 +9407,13 @@ function _voiceGridFrame(t) {
     const x = i % VOICE_GRID_COLS, y = Math.floor(i / VOICE_GRID_COLS);
     const dist = Math.hypot(x - cx, y - cy);
     const edge = reach - dist;
-    const on = dist < 0.7 || edge > -0.25;            // center always faintly lit
-    const hot = edge > 0.7 && voiceLevel > 0.28;       // bright at the leading edge
+    // Per-dot hysteresis: a dot needs a WIDER swing to flip than to hold, so a
+    // jittery reach boundary can't flicker it on/off every frame (the "shaking").
+    // Previous state is read straight off the classList — no side array needed.
+    const wasHot = d.classList.contains('hot');
+    const wasOn  = wasHot || d.classList.contains('on');
+    let on = dist < 0.7 || (wasOn ? edge > -0.55 : edge > -0.2);   // center always faintly lit
+    let hot = voiceLevel > 0.3 && (wasHot ? edge > 0.4 : edge > 0.85);
     d.classList.toggle('on', on && !hot);
     d.classList.toggle('hot', hot);
   });
@@ -9461,6 +9473,9 @@ function exitVoiceMode() {
   stopVoiceGridWave();
   if (recorder.recording) stopRecording().catch(() => {});
   voiceDots.forEach(d => d.classList.remove('on', 'hot'));
+  // Drop any half-accumulated utterance so it can't fire after we've left.
+  if (_utterTimer) { clearTimeout(_utterTimer); _utterTimer = null; }
+  _utterBuf = '';
 }
 // Fed by the mic recorder (peak 0..1) so the grid reacts to YOUR voice while
 // you talk, the same way it reacts to the AI's voice while it speaks.
@@ -9778,7 +9793,9 @@ async function startRealtimeVoice() {
 
 function handleRealtimeEvent(ev) {
   if (ev.type === 'level') {
-    _ttsLevel = ev.v || 0;
+    // Light low-pass on the raw amplitude before it drives the grid — the
+    // stream is spiky and un-smoothed values made the dots shimmer.
+    _ttsLevel = _ttsLevel * 0.45 + (ev.v || 0) * 0.55;
     _lastLevelAt = performance.now();
     return;
   }
@@ -9799,11 +9816,25 @@ function handleRealtimeEvent(ev) {
     const text = (ev.text || '').trim();
     if (!text) return;
     if (_voiceMuted) { setVoiceTranscript(''); return; }  // muted — drop the utterance
-    setVoiceTranscript(text);
-    setVoiceStatus('thinking…');
-    // Send to chat. The server pauses the mic during TTS playback so we
-    // won't transcribe our own voice; partial events resume after silence.
-    send(text);
+    // Stitch fragments: append, show the running transcript, and (re)arm a gap
+    // timer. Only when you've paused for _UTTER_GAP with nothing new do we
+    // actually send — so "…math exam. On July 1. In six days." is ONE message.
+    _utterBuf = _utterBuf ? (_utterBuf + ' ' + text) : text;
+    setVoiceTranscript(_utterBuf);
+    setVoiceStatus('listening…');
+    if (_utterTimer) clearTimeout(_utterTimer);
+    const fire = () => {
+      // A reply is still streaming — wait rather than stacking a second send()
+      // on top of it (stacked sends were part of what jammed the loop).
+      if (STATE.streaming) { _utterTimer = setTimeout(fire, 300); return; }
+      _utterTimer = null;
+      const msg = _utterBuf.trim(); _utterBuf = '';
+      if (!msg || _voiceMuted || !voiceModeOn) return;
+      setVoiceStatus('thinking…');
+      // Server pauses the mic during TTS playback so we won't hear our own voice.
+      send(msg);
+    };
+    _utterTimer = setTimeout(fire, _UTTER_GAP);
   } else if (ev.type === 'started') {
     setVoiceStatus('listening');
   } else if (ev.type === 'stopped') {

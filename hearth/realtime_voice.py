@@ -162,9 +162,11 @@ def _build_recorder():
         silero_sensitivity=0.35,
         silero_use_onnx=True,
         webrtc_sensitivity=2,
-        # SNAP. 0.3s silence after end-of-speech = endpoint. ChatGPT feels
-        # this fast because it's around the same value.
-        post_speech_silence_duration=0.3,
+        # 0.5s silence after end-of-speech = endpoint. Was 0.3s, which chopped a
+        # normal sentence into a fragment per breath; the browser then stitches
+        # fragments within a short gap, so this only needs to be long enough that
+        # a mid-sentence pause doesn't fire, without feeling laggy.
+        post_speech_silence_duration=0.5,
         # Neural end-of-speech detection — webrtc misses silence on a noisy mic,
         # so rec.text() never endpoints.
         silero_deactivity_detection=True,
