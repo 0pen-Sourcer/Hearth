@@ -115,6 +115,24 @@ def redact_for_public(text: str, *, email: str = "", hostname: str = "",
     return out, findings
 
 
+def redact_secrets_only(text: str) -> Tuple[str, List[Dict[str, str]]]:
+    """Mask ONLY hard secrets (API keys / tokens), leaving emails, home paths and
+    hostnames intact. For semi-private outbound surfaces — a chat reply to the
+    user's OWN Telegram/Discord/WhatsApp — where masking a legit email or a path
+    the user is discussing would be wrong, but a leaked API key must never go out.
+    """
+    if not text:
+        return text, []
+    findings: List[Dict[str, str]] = []
+    out = text
+    for label, pat in _KEY_PATTERNS:
+        hits = pat.findall(out)
+        if hits:
+            findings.append({"type": label, "count": str(len(hits))})
+            out = pat.sub("<REDACTED_KEY>", out)
+    return out, findings
+
+
 def has_secrets(text: str, **kw) -> bool:
     """True if redaction would change anything (a leak is present)."""
     _, findings = redact_for_public(text, **kw)
