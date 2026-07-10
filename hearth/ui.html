@@ -5834,6 +5834,7 @@ thinkBtn.addEventListener('click', () => {
 function regenerateFromMessage(assistantMsg) {
   const c = activeConvo();
   if (!c) return;
+  if (STATE.streaming) return;               // don't regenerate mid-stream
   const idx = c.messages.indexOf(assistantMsg);
   if (idx < 1) return;
   // Find the user message immediately before this assistant turn.
@@ -5841,12 +5842,24 @@ function regenerateFromMessage(assistantMsg) {
   while (userIdx >= 0 && c.messages[userIdx].role !== 'user') userIdx--;
   if (userIdx < 0) return;
   const lastUser = c.messages[userIdx];
-  // Drop the rejected assistant + everything after (tool calls, etc.) AND
-  // the user msg too - send() will re-push it. Keep messages up to userIdx-1.
+  // Back up the WHOLE history before truncating. send() can early-return at a
+  // guard (no model loaded, etc.) without re-pushing the user message — and the
+  // truncation would then have wiped the chat for good, dumping the user on the
+  // empty "ready" screen. Drop the rejected assistant + everything after AND the
+  // user msg (send() re-pushes it); keep messages up to userIdx-1.
+  const backup = c.messages.slice();
   c.messages = c.messages.slice(0, userIdx);
   touch(c);
   renderChat();
-  send(lastUser.content, lastUser.displayContent || null);
+  const p = send(lastUser.content, lastUser.displayContent || null);
+  // send() runs synchronously up to its first await; if it bailed at a guard it
+  // never appended the user message, so the tail is still empty — restore.
+  if (c.messages.length <= userIdx) {
+    c.messages = backup;
+    touch(c);
+    renderChat();
+  }
+  return p;
 }
 
 // Tracks an in-progress message edit: { convoId, idx, original }. While set, the

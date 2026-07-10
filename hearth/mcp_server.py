@@ -54,6 +54,7 @@ from hearth.tools import (
     LOGS_DIR,
     ACTIVITY_LOG,
     _log_activity,
+    _DEFERRED_TOOLS,
 )
 
 mcp = FastMCP("Jarvis")
@@ -154,11 +155,22 @@ def _make_tool(name: str, description: str, schema: Dict[str, Any]):
     return fn
 
 
+# Tool diet on the OUTBOUND MCP surface. Unlike Hearth's own prompt, an MCP host
+# (Claude Desktop / Cursor / LM Studio) has no `load_tools` escape hatch — every
+# tool we register lands in ITS context permanently. Dumping all ~100 floods the
+# host, so by default we expose only the core (non-deferred) set — the same diet
+# that keeps Hearth's own prompt lean. HEARTH_MCP_ALL_TOOLS=1 exposes everything.
+_MCP_ALL_TOOLS = os.environ.get("HEARTH_MCP_ALL_TOOLS", "") in ("1", "true", "yes")
+_mcp_exposed = 0
 for td in TOOL_DEFINITIONS:
     if td["name"] in _SKIP_DYNAMIC:
+        _mcp_exposed += 1
         continue  # registered manually above with proper return type
+    if not _MCP_ALL_TOOLS and td["name"] in _DEFERRED_TOOLS:
+        continue  # niche tool — kept off the host's list to save its context
     fn = _make_tool(td["name"], td["description"], td["parameters"])
     mcp.tool(name=td["name"], description=td["description"])(fn)
+    _mcp_exposed += 1
 
 
 # ----------------------------------------------------------------------------
@@ -171,7 +183,7 @@ def _status() -> str:
     return json.dumps({
         "name": "Jarvis",
         "workspace": WORKSPACE,
-        "tools": len(TOOL_DEFINITIONS),
+        "tools": _mcp_exposed,
         "started": datetime.now().isoformat(timespec="seconds"),
         "activity_log": ACTIVITY_LOG,
     }, indent=2)
@@ -182,10 +194,11 @@ def _status() -> str:
 # ----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print(f"[Jarvis MCP] {len(TOOL_DEFINITIONS)} tools registered", file=sys.stderr)
+    _diet = "" if _MCP_ALL_TOOLS else f" (core diet; {len(TOOL_DEFINITIONS)} available — set HEARTH_MCP_ALL_TOOLS=1 for all)"
+    print(f"[Jarvis MCP] {_mcp_exposed} tools registered{_diet}", file=sys.stderr)
     print(f"[Jarvis MCP] workspace: {WORKSPACE}", file=sys.stderr)
     print(f"[Jarvis MCP] activity log: {ACTIVITY_LOG}", file=sys.stderr)
-    _log_activity("server_start", tools=len(TOOL_DEFINITIONS), workspace=WORKSPACE)
+    _log_activity("server_start", tools=_mcp_exposed, workspace=WORKSPACE)
     # Register this inbound connection so the Hearth GUI's MCP tab can show WHO'S
     # connected. stdio spawns one server process per client, so our pid + the
     # parent process name (claude.exe / lmstudio / cursor …) identify the client.
