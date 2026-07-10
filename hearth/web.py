@@ -2370,6 +2370,12 @@ class HearthHandler(BaseHTTPRequestHandler):
                     _save_settings(_s)
                 except Exception:
                     pass
+                # Warm the KV cache with the (stable) system prompt + tools now,
+                # in the background, so the user's FIRST chat message reuses it
+                # instead of paying the full ~20K-token prefill cold. Fire-and-
+                # forget; no-op on error.
+                try: _hl.warm_up_model(base=result["url"])
+                except Exception: pass
                 _models_cache["ts"] = 0  # force /api/models to repopulate
                 llmserver.invalidate_status_cache()  # instant-fresh status/state
                 # Sticky default: remember the model the user just picked so
@@ -3571,6 +3577,10 @@ def _auto_boot_preferred_model_async() -> None:
                 # to the new server, which 404s it.
                 os.environ.pop("LOCAL_MODEL", None)
                 _models_cache["ts"] = 0
+                # Prime the KV cache with the system prompt so the first message
+                # after launch is fast (see warm_up_model). Background, best-effort.
+                try: _hl.warm_up_model(base=r["url"])
+                except Exception: pass
                 print(f"  [hearth.web] builtin up at {r['url']} — endpoint switched", flush=True)
             else:
                 print(f"  [hearth.web] autoboot failed: {r.get('error')}", flush=True)
