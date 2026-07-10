@@ -353,32 +353,21 @@
   }
   .chat-body .empty {
     display: flex; flex-direction: column; align-items: center;
-    justify-content: center; height: 100%; gap: 18px;
-    color: var(--fg-dim); position: relative;
+    justify-content: center; height: 100%; gap: 16px;
+    color: var(--fg-dim);
+    animation: emptyFade .5s ease both;
   }
+  @keyframes emptyFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   .empty-mark {
-    position: relative;
-    width: 60px; height: 60px;
-    background: linear-gradient(150deg, var(--accent), var(--accent-2));
-    border-radius: 17px;
+    width: 56px; height: 56px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-radius: var(--r-xl);
     display: grid; place-items: center;
-    color: #0a0a0c; font-weight: 800; font-size: 27px;
-    box-shadow: 0 10px 34px -6px var(--accent-line), inset 0 1px 0 rgba(255,255,255,.28);
+    color: #0a0a0c; font-weight: 800; font-size: 26px;
+    box-shadow: 0 0 32px var(--accent-line);
   }
-  /* Soft hearth-ember glow behind the mark — the warm-fire motif, breathing
-     slowly so the screen feels alive without being flashy. */
-  .empty-mark::before {
-    content: ''; position: absolute; inset: -38px; z-index: -1;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--accent-line) 0%, transparent 68%);
-    animation: ember 4.5s ease-in-out infinite;
-  }
-  @keyframes ember {
-    0%, 100% { opacity: .5;  transform: scale(.95); }
-    50%      { opacity: .85; transform: scale(1.04); }
-  }
-  .empty-title { color: var(--fg); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
-  .empty-sub { font-size: 13px; max-width: 456px; text-align: center; color: var(--fg-dim); line-height: 1.6; }
+  .empty-title { color: var(--fg); font-size: 16px; font-weight: 500; }
+  .empty-sub { font-size: 13px; max-width: 480px; text-align: center; color: var(--fg-dim); }
   .examples {
     display: grid; grid-template-columns: repeat(2, 1fr);
     gap: 8px; max-width: 640px; margin-top: 8px;
@@ -4795,8 +4784,8 @@ function emptyState() {
   wrap.className = 'empty';
   wrap.innerHTML = `
     <div class="empty-mark">H</div>
-    <div class="empty-title">Hearth is lit.</div>
-    <div class="empty-sub">Talk or type. I open apps, dig through your files, drive the browser, read what's on screen, and remember what matters — all on this machine.</div>
+    <div class="empty-title">Hearth is ready.</div>
+    <div class="empty-sub">Local AI that talks, listens, and actually does things on your machine.</div>
   `;
   return wrap;
 }
