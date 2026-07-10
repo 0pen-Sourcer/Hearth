@@ -257,7 +257,11 @@ def run() -> None:
                 await state["msg"].edit(content=done)
             except Exception:
                 pass
-        for chunk in _split(reply or "(no output)"):
+        # Scrub any API key/token before it leaves the machine over Discord
+        # (secrets-only — a legit email/path the user is discussing stays).
+        from .redact import redact_secrets_only
+        _safe = redact_secrets_only(reply or "(no output)")[0]
+        for chunk in _split(_safe):
             try:
                 await message.channel.send(chunk)
             except Exception:

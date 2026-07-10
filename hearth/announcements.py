@@ -143,10 +143,18 @@ def mark_all_seen(url: str = FEED_URL) -> None:
 def publish(title: str, body: str, kind: str = "info") -> dict:
     """Append an announcement to the LOCAL announcements.json (repo root). The
     author then commits + pushes it; every build picks it up on next poll."""
+    # An announcement ships to EVERY build/user. Scrub any secret or PII the
+    # author didn't mean to broadcast — API keys, tokens, home paths, email,
+    # machine name — before it's written and pushed. Conservative: only known
+    # leak shapes, so normal announcement prose is untouched.
+    from .redact import redact_for_public
+    title, _t = redact_for_public((title or "").strip())
+    body, _b = redact_for_public((body or "").strip())
+    scrubbed = _t + _b
     entry = {
         "id": uuid.uuid4().hex[:12],
-        "title": (title or "").strip(),
-        "body": (body or "").strip(),
+        "title": title,
+        "body": body,
         "kind": kind,
         "created": int(time.time()),
     }
@@ -154,9 +162,14 @@ def publish(title: str, body: str, kind: str = "info") -> dict:
     feed.append(entry)
     with open(_LOCAL_FEED, "w", encoding="utf-8") as f:
         json.dump({"announcements": feed}, f, indent=2)
-    return {
+    result = {
         "ok": True,
         "entry": entry,
         "path": _LOCAL_FEED,
         "next": "commit + push announcements.json, then every Hearth build sees it on next open",
     }
+    if scrubbed:
+        kinds = ", ".join(sorted({f["type"] for f in scrubbed}))
+        result["redacted"] = scrubbed
+        result["warning"] = f"Scrubbed {kinds} from the announcement before saving — verify the text still reads right."
+    return result
