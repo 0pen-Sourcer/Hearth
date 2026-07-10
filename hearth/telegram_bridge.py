@@ -277,7 +277,10 @@ def run() -> None:
             hist.append({"role": "user", "content": text})
             hist.append({"role": "assistant", "content": reply})
             del hist[:-16]  # cap to the last 8 exchanges
-            final = reply or "(no output)"
+            # Scrub any API key/token before it leaves the machine over Telegram
+            # (secrets-only — a legit email/path the user is discussing stays).
+            from .redact import redact_secrets_only
+            final = redact_secrets_only(reply or "(no output)")[0]
             # Finalize the tool status into a "Tools used" list that STAYS, then
             # send the answer as its own message below — "tools used X" then the
             # reply, never one edited into the other.

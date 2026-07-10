@@ -207,7 +207,11 @@ def run() -> None:
             hist.append({"role": "user", "content": text})
             hist.append({"role": "assistant", "content": reply})
             del hist[:-16]
-            for chunk in _split(reply or "(no output)"):
+            # Scrub any API key/token before it leaves the machine over WhatsApp
+            # (secrets-only — a legit email/path the user is discussing stays).
+            from .redact import redact_secrets_only
+            _safe = redact_secrets_only(reply or "(no output)")[0]
+            for chunk in _split(_safe):
                 client.send_message(chat, chunk)
         except Exception as e:
             print(f"[whatsapp] handler error: {type(e).__name__}: {e}")
