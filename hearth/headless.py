@@ -181,8 +181,8 @@ def autodetect_context(model_id: str) -> Optional[int]:
         f"{LOCAL_API_BASE}/models",
         LOCAL_API_BASE.replace("/v1", "/api/v0") + "/models",
     )
-    fields = ("loaded_context_length", "max_context_length",
-              "context_length", "n_ctx", "max_position_embeddings")
+    fields = ("loaded_context_length", "n_ctx",
+              "max_context_length", "context_length")
     for url in candidates:
         try:
             req = urllib.request.Request(url, headers=_hdr)
@@ -234,6 +234,19 @@ def resolve_context_tokens(model_id: str) -> tuple:
                 return v, f"JARVIS_CONTEXT={v // 1024}K (env pin)"
         except ValueError:
             pass
+    # Built-in server: use the context we ACTUALLY booted it with, not the model's
+    # theoretical max. A "1M" GGUF advertises max_position_embeddings ~200K via
+    # /v1/models, but we only loaded (say) 32K — trusting the advertised ceiling
+    # over-packs the prompt and overflows the server. _proc_info["ctx"] is the truth.
+    try:
+        from . import llmserver as _ls
+        from urllib.parse import urlparse as _up
+        _pi = getattr(_ls, "_proc_info", {}) or {}
+        if _pi.get("ctx") and _pi.get("url") and LOCAL_API_BASE:
+            if _up(_pi["url"]).port == _up(LOCAL_API_BASE).port:
+                return int(_pi["ctx"]), "built-in server (loaded ctx)"
+    except Exception:
+        pass
     probed = autodetect_context(model_id)
     if probed:
         return probed, "endpoint probe"
@@ -887,9 +900,11 @@ async def run_once(
             # rejects `chat_template_kwargs`) stream reasoning via a dedicated
             # `reasoning_content` channel, so neither workaround is needed.
             if _is_local_endpoint(LOCAL_API_BASE):
+                # enable_thinking=False is the non-destructive way to skip reasoning
+                # on models that respect it. No stop=["<think>"] anymore: on a
+                # reasoning-FORCED model it halted at the first think tag (empty
+                # reply) and hid the reasoning we now surface.
                 kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": think}}
-                if not think:
-                    kwargs["stop"] = ["<think>", "<thinking>"]
             else:
                 # Cloud: actually disable reasoning at the API when think is
                 # off, not just drop the reasoning_content. Otherwise the model
@@ -951,9 +966,12 @@ async def run_once(
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
 
-                # Reasoning chunks (some LM Studio backends stream this)
+                # Reasoning chunks (some LM Studio backends stream this). Emit
+                # whenever they arrive — with think off we asked the model to skip
+                # reasoning, so anything that streams here is a FORCED model, and
+                # showing it beats a blind wait. The GUI collapses it by default.
                 rc = getattr(delta, "reasoning_content", None)
-                if rc and think:
+                if rc:
                     reasoning_buf.append(rc)
                     emit("thinking_chunk", content=rc)
 
@@ -1073,8 +1091,9 @@ async def run_once(
                 # to the original behavior of just showing the raw content.
                 emit("nudge", reason=f"tool-call parser error: {type(e).__name__}: {e}")
 
-        if reasoning and think:
-            # Emit aggregate for clients that don't process chunks
+        if reasoning:
+            # Emit aggregate for clients that don't process chunks. Un-gated from
+            # `think` so a forced model's reasoning still reaches the UI.
             emit("thinking", content=reasoning)
 
         if msg.tool_calls:
