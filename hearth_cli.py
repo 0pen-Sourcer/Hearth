@@ -1087,7 +1087,10 @@ class JarvisCLI:
                 return False
             print(f"{C_DIM}● booting built-in server · {os.path.basename(model)} "
                   f"(first load ~10-30s)…{C_RESET}", flush=True)
-            r = _ls.start_builtin(model)
+            # Honor the per-model config saved by the GUI (KV quant, GPU layers,
+            # ctx, flash) so the CLI boots the model the same way, not with bare
+            # defaults. Empty dict on first load → start_builtin's own defaults.
+            r = _ls.start_builtin(model, **(_ls.get_model_config(model) or {}))
             if r.get("ok"):
                 self._retarget_to(r.get("url"), "hearth-builtin", model)
                 print(f"{C_OK}● built-in server ready{C_RESET}")
@@ -1120,7 +1123,7 @@ class JarvisCLI:
             if choice.isdigit() and 0 <= int(choice) - 1 < len(disk[:6]):
                 path = disk[int(choice) - 1].get("path")
                 print(f"  {C_DIM}booting {os.path.basename(path)}… (first load ~10-30s){C_RESET}", flush=True)
-                r = _ls.start_builtin(path)
+                r = _ls.start_builtin(path, **(_ls.get_model_config(path) or {}))
                 if r.get("ok"):
                     self._retarget_to(r.get("url"), "hearth-builtin", path)
                     self._save_preferred_model(path)
@@ -1308,7 +1311,7 @@ class JarvisCLI:
                 path = r.get("path")
                 print(f"{C_OK}Saved to {path}{C_RESET}")
                 print(f"{C_DIM}Starting built-in server…{C_RESET}")
-                r2 = llmserver.start_builtin(path)
+                r2 = llmserver.start_builtin(path, **(llmserver.get_model_config(path) or {}))
                 if r2.get("ok"):
                     print(f"{C_OK}Built-in server up at {r2.get('url')}{C_RESET}")
                     self._retarget_to(r2.get("url"), "hearth-builtin", path)
@@ -1377,7 +1380,7 @@ class JarvisCLI:
                         return
             print(f"{C_DIM}Booting llama.cpp built-in server with {path}…{C_RESET}")
             try:
-                r = llmserver.start_builtin(path)
+                r = llmserver.start_builtin(path, **(llmserver.get_model_config(path) or {}))
                 if r.get("ok"):
                     print(f"{C_OK}Up at {r.get('url')}{C_RESET}")
                     self._retarget_to(r.get("url"), "hearth-builtin", path)
