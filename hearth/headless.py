@@ -101,44 +101,6 @@ def _cloud_reasoning_effort(base: str, think: bool, model: str):
     return "minimal" if "openai.com" in (base or "").lower() else "none"
 
 
-def warm_up_model(model=None, base=None) -> None:
-    """Fire-and-forget prefill of the (now-stable) system prompt + tool schemas
-    into a LOCAL server's KV cache, so the user's FIRST message reuses it instead
-    of paying the whole ~20K-token prefill up front — the reason a cold "hello"
-    lagged far behind a bare chat UI whose prompt is tiny. No-op for cloud
-    endpoints (no local prefill to hide) and silent on any error; never blocks."""
-    def _run():
-        try:
-            _base = base or os.environ.get("LOCAL_API_BASE") or LOCAL_API_BASE
-            if not _is_local_endpoint(_base):
-                return
-            mdl = model or os.getenv("LOCAL_MODEL") or ""
-            if not mdl:
-                try:
-                    import urllib.request, json as _json
-                    with urllib.request.urlopen(f"{_base}/models", timeout=5) as r:
-                        mdl = ((_json.loads(r.read()).get("data") or [{}])[0]).get("id", "")
-                except Exception:
-                    return
-            if not mdl:
-                return
-            import openai as _oai
-            _oai.OpenAI(base_url=_base,
-                        api_key=os.getenv("LOCAL_API_KEY") or "not-needed",
-                        timeout=120.0).chat.completions.create(
-                model=mdl,
-                messages=[{"role": "system", "content": system_prompt()},
-                          {"role": "user", "content": "hi"}],
-                tools=to_openai_tools(),
-                max_tokens=1,
-                stream=False,
-            )
-        except Exception:
-            pass
-    import threading
-    threading.Thread(target=_run, daemon=True).start()
-
-
 DEFAULT_MAX_DEPTH = 40  # Bumped 20 → 40 after a live LM Studio PDF read hit
                         # the ceiling mid-task: Qwen 3.5 Harmonic 9B was
                         # doing legitimate map-reduce-by-hand on a 514-page
@@ -538,8 +500,14 @@ async def run_once(
     # nothing matches. Same behavior as the CLI's _prepare_context.
     from . import memory as _mem
     _sys = system_prompt()
-    # Runtime notice (LOCAL vs CLOUD) is stable within a session — only a /brain
-    # switch changes it — so it rides the cacheable system prompt.
+    # Inject the current local time on every turn so the model can reason about
+    # "what were we doing" / "is it late?" / "remind me tomorrow" without a
+    # get_time call, and read the passage of time across turns.
+    import datetime as _dt
+    _now = _dt.datetime.now().astimezone()
+    _sys += (f"\n\nCurrent local time: {_now.strftime('%Y-%m-%d %H:%M')} "
+             f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).")
+    # Where the brain lives — weigh resource vs cost for heavy tools.
     if _is_local_endpoint(os.environ.get("LOCAL_API_BASE", "")):
         _sys += ("\n\nRuntime: LOCAL model server — free + private, but it serves ONE "
                  "request at a time on limited VRAM, so big parallel fan-outs (large "
@@ -550,6 +518,9 @@ async def run_once(
                  "money. Parallel agents run fast here, but each one multiplies spend. "
                  "Only fan out a team when the task genuinely needs it, and use the "
                  "smallest team that does the job.")
+    _block = _mem.recall_for_prompt(prompt)
+    if _block:
+        _sys += "\n\n" + _block
     messages: List[Dict[str, Any]] = [{"role": "system", "content": _sys}]
     if history:
         # Drop any system entries the caller smuggled in — only ours is canonical.
@@ -571,6 +542,7 @@ async def run_once(
     # turn, appended as user-role messages so the sequence still ends on a user
     # turn (strict local chat templates require that).
     _flushed = 0
+    _notif_ctx: List[str] = []   # notifications to fold into this turn's user msg
     try:
         from . import subagents as _sa
         pending = _sa.drain_pending_notifications()
@@ -591,34 +563,14 @@ async def run_once(
                 _flushed += 1
                 _emit_card(notif)
         else:
-            _ins = len(messages)
-            for _i in range(len(messages) - 1, -1, -1):
-                if messages[_i].get("role") == "user":
-                    _ins = _i
-                    break
+            # Collect notifications to fold into THIS turn's user message (below).
+            # NOT inserted as mid-conversation system messages — strict templates
+            # (Qwythos / Qwen3.5) reject any system message that isn't the first.
             for notif in pending:
-                xml = _sa.format_notification_as_user_message(notif)
-                messages.insert(_ins, {"role": "system", "content": xml})
-                _ins += 1
+                _notif_ctx.append(_sa.format_notification_as_user_message(notif))
                 _emit_card(notif)
     except Exception:
         pass
-
-    # PER-TURN volatile context — the current wall-clock time + the memories
-    # recalled for THIS prompt — injected as a note right BEFORE the user's
-    # message, not folded into the system prompt. Folding it in made the system
-    # prefix unique every turn, so the local server's KV cache never matched and
-    # it re-prefilled the whole history each message (the big reason Hearth felt
-    # slower than a bare chat UI). Out of the prefix, the persona+history stays
-    # cached and only this small note re-prefills.
-    import datetime as _dt
-    _now = _dt.datetime.now().astimezone()
-    _turn_note = (f"Current local time: {_now.strftime('%Y-%m-%d %H:%M')} "
-                  f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).")
-    if not _is_flush:
-        _mem_ctx = _mem.recall_for_prompt(prompt)
-        if _mem_ctx:
-            _turn_note += "\n\n" + _mem_ctx
 
     if _is_flush:
         # Race: the queue was already drained by a real user turn between the
@@ -629,8 +581,12 @@ async def run_once(
             return
         # No emit("user") — the GUI rendered no user bubble for this turn.
     else:
-        messages.append({"role": "system", "content": _turn_note})
-        messages.append({"role": "user", "content": prompt})
+        # Fold any background notifications into the user turn (template-safe:
+        # avoids a mid-conversation system message, which strict Qwen3.5/Qwythos
+        # templates reject with "System message must be at the beginning"). The
+        # GUI shows the clean prompt via emit().
+        _user_content = ("\n\n".join(_notif_ctx) + "\n\n---\n\n" + prompt) if _notif_ctx else prompt
+        messages.append({"role": "user", "content": _user_content})
         emit("user", content=prompt)
 
     tools = to_openai_tools()
