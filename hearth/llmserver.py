@@ -304,14 +304,13 @@ def recommend_pick_for_this_pc() -> Dict[str, Any]:
     """Return the pick that's the best fit for this machine's VRAM/RAM.
     Returns the pick dict with an extra 'reason' string explaining the choice.
 
-    Logic:
-    - 8 GB+ VRAM: Harmonic Hermes 9B (Qwen3.5 base + Hermes finetune — best
-      tool-use + reasoning combo on an 8GB rig).
-    - 6-8 GB VRAM: Qwen 2.5 7B still fits at Q4_K_M (4.7 GB) and is faster.
-    - <6 GB VRAM / CPU-only: Qwen 2.5 7B too — it'll spill to CPU but still
-      gives the best tool-use of the curated picks. (Hermes-3-3B was a
-      smaller option but was removed from the picks list — Qwen 2.5 is the
-      better universal default.)
+    Logic (curated suggestion; a user's own downloaded model always wins):
+    - 8 GB+ (the common case): Harmonic Hermes 9B — Qwen3.5-9B base + Hermes
+      finetune. Modern architecture, strong + fast tool-use, not reasoning-forced,
+      so a good first-run impression. (Qwen 2.5 is deliberately NOT recommended at
+      this tier — it's weak at tool-calling in a tool-heavy agent loop.)
+    - 12 GB+ / 24 GB+: larger Qwen picks (more headroom, more context).
+    - <8 GB / CPU-only: the smaller picks, which still tool-call acceptably.
     """
     vram = detect_gpu_vram_gb()
     ram = detect_ram_gb()
@@ -324,7 +323,7 @@ def recommend_pick_for_this_pc() -> Dict[str, Any]:
         reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 2.5 14B is the sweet spot at this tier."
     elif vram is not None and vram >= 8:
         pick = next(p for p in TOP_PICKS if p["id"] == "harmonic-hermes-9b-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Harmonic Hermes 9B is the sweet spot (reasoning + tool use)."
+        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Harmonic Hermes 9B (Qwen3.5 base) is the sweet spot for reasoning + tool use at this tier."
     elif vram is not None and vram >= 6:
         pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-7b-instruct-q4_k_m")
         reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 7B Q4 fits and gives the best tool-use at this tier."
