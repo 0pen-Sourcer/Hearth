@@ -515,8 +515,11 @@ def autodetect_context(model_id: str) -> Optional[int]:
         # Strip /v1 from LOCAL_API_BASE to derive the native API root.
         LOCAL_API_BASE.replace("/v1", "/api/v0") + "/models",
     )
-    fields = ("loaded_context_length", "max_context_length",
-              "context_length", "n_ctx", "max_position_embeddings")
+    # Prefer the ACTUALLY-loaded context; drop max_position_embeddings (the model's
+    # trained ceiling, e.g. 200K on a "1M" GGUF) — trusting it over-packs the prompt
+    # into a server that only loaded a fraction of it.
+    fields = ("loaded_context_length", "n_ctx",
+              "max_context_length", "context_length")
     for url in candidates:
         try:
             with urllib.request.urlopen(url, timeout=2) as r:
@@ -4123,13 +4126,14 @@ class JarvisCLI:
             _is_local = any(h in _base for h in ("localhost", "127.0.0.1", "0.0.0.0",
                                                  "::1", "192.168.", "10.", "host.docker.internal"))
             if _is_local:
+                # enable_thinking=False is the PROPER, non-destructive way to skip
+                # reasoning on models that respect it (Qwen3+ etc.). We deliberately
+                # do NOT add stop=["<think>"] anymore: on a reasoning-FORCED model it
+                # halted generation at the first think tag — truncating the reply to
+                # empty — and it fought showing the reasoning we now surface live.
                 create_kwargs["extra_body"] = {
                     "chat_template_kwargs": {"enable_thinking": self.think_on}
                 }
-                # `stop` is local-only too - Grok rejects it outright, and
-                # cloud models stream reasoning via reasoning_content anyway.
-                if not self.think_on:
-                    create_kwargs["stop"] = ["<think>", "<thinking>"]
             else:
                 # Cloud: actually disable reasoning at the API when /think is
                 # off - not just hide it. Without this the model (e.g. Grok)
@@ -4243,41 +4247,33 @@ class JarvisCLI:
         # race the raw stream and misorder the frame.
         _ITAL, _ITAL_OFF = "\033[3m", "\033[23m"
 
+        # Reasoning is shown live WHENEVER it streams. With /think off we already
+        # asked the model to skip it; if it reasons anyway it's a reasoning-FORCED
+        # model, and hiding a 30s think behind a blind spinner is the worst option.
+        # So these render the body the same way regardless of the toggle.
         def _open_reasoning():
             nonlocal reasoning_open, reasoning_chars, reasoning_t0
             if not reasoning_open:
                 reasoning_open = True
                 reasoning_chars = 0
                 reasoning_t0 = time.time()
-                if self.think_on:
-                    sys.stdout.write(f"\n{C_DIM}{_ITAL}thinking · ")
-                else:
-                    # Collapsed placeholder; replaced with a summary when it ends
-                    sys.stdout.write(f"\n{C_DIM}thinking…{C_RESET}")
+                sys.stdout.write(f"\n{C_DIM}{_ITAL}thinking · ")
                 sys.stdout.flush()
 
         def _close_reasoning():
             nonlocal reasoning_open, reasoning_chars, reasoning_t0
             if reasoning_open:
                 dt = time.time() - reasoning_t0
-                if self.think_on:
-                    sys.stdout.write(f"{_ITAL_OFF}{C_RESET}\n{C_DIM}{dt:.1f}s · {reasoning_chars}c{C_RESET}\n{C_BOT}")
-                else:
-                    # Erase the "thinking…" line, replace with a collapsed summary
-                    sys.stdout.write(
-                        f"\r\033[K{C_DIM}thought for {dt:.1f}s ({reasoning_chars}c) — /think to expand{C_RESET}\n{C_BOT}"
-                    )
+                sys.stdout.write(f"{_ITAL_OFF}{C_RESET}\n{C_DIM}{dt:.1f}s · {reasoning_chars}c{C_RESET}\n{C_BOT}")
                 sys.stdout.flush()
                 reasoning_open = False
 
         def _stream_reasoning(text: str):
             nonlocal reasoning_chars
             reasoning_chars += len(text)
-            if self.think_on:
-                # dim + italic, re-armed each chunk so wrapped lines stay styled
-                sys.stdout.write(C_DIM + _ITAL + text)
-                sys.stdout.flush()
-            # else: silently absorb - only the summary line shows
+            # dim + italic, re-armed each chunk so wrapped lines stay styled
+            sys.stdout.write(C_DIM + _ITAL + text)
+            sys.stdout.flush()
 
         async for chunk in stream:
             # Ctrl-C during the stream sets _respond_cancel; bail cleanly
@@ -4312,14 +4308,13 @@ class JarvisCLI:
 
             delta = chunk.choices[0].delta
 
-            # OpenAI-extension: dedicated reasoning channel. Some servers
-            # (LM Studio with reasoning models) emit thinking here even when
-            # we asked them not to via stop tokens or chat_template_kwargs.
-            # Gate ENTIRELY on self.think_on so /think off truly hides it.
-            reasoning = None
-            if self.think_on:
-                reasoning = getattr(delta, "reasoning_content", None) \
-                    or getattr(delta, "reasoning", None)
+            # OpenAI-extension: dedicated reasoning channel. Read it REGARDLESS of
+            # /think. With /think off we already asked the model to skip reasoning
+            # (enable_thinking=False / reasoning_effort=none); if it streams anyway
+            # it's a reasoning-FORCED model, and showing the live think beats a
+            # blind 30s spinner. So: it arrives → the user sees it.
+            reasoning = getattr(delta, "reasoning_content", None) \
+                or getattr(delta, "reasoning", None)
             if reasoning:
                 _open_reasoning()
                 _stream_reasoning(reasoning)
@@ -4339,17 +4334,14 @@ class JarvisCLI:
                         if reasoning_open:
                             _close_reasoning()
                         content_captured += pre  # buffered; whole reply rendered once at end
-                    if self.think_on:
-                        _open_reasoning()
-                    # Either way (display on/off), we're in a thinking block
+                    _open_reasoning()
                     text = after
                     in_think = True
                 if "</think>" in text and in_think:
                     body, _, post = text.partition("</think>")
-                    if body and self.think_on:
+                    if body:
                         _stream_reasoning(body)
-                    if self.think_on:
-                        _close_reasoning()
+                    _close_reasoning()
                     in_think = False
                     text = post
 
@@ -4358,9 +4350,9 @@ class JarvisCLI:
                     _close_reasoning()
 
                 if in_think:
-                    # When display is on, stream into the thinking UI.
-                    # When display is off, silently drop these bytes.
-                    if text and self.think_on:
+                    # Stream the thinking body live (shown regardless of /think —
+                    # a forced model's reasoning is worth seeing, not dropping).
+                    if text:
                         _stream_reasoning(text)
                 else:
                     if text:
