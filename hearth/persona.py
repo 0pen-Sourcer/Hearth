@@ -23,11 +23,7 @@ NAME = os.environ.get("HEARTH_PERSONA_NAME", "JARVIS").strip() or "JARVIS"
 
 
 def system_prompt() -> str:
-    # DATE only, no time-of-day. This string is the cacheable system-prompt
-    # prefix; a per-minute clock here changed the prefix every minute and made
-    # the local server's KV cache miss, re-prefilling the whole history each turn.
-    # The precise current time is injected per-turn as a trailing note (headless).
-    today = datetime.now().strftime("%A, %d %B %Y")
+    today = datetime.now().strftime("%A, %d %B %Y, %H:%M")
     tool_names = ", ".join(t["name"] for t in TOOL_DEFINITIONS)
     rules = read_rules().strip()
     soul = read_soul().strip()
