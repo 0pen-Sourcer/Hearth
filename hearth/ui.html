@@ -358,6 +358,13 @@
     animation: emptyFade .5s ease both;
   }
   @keyframes emptyFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  /* While no model is loaded (booting / first launch), the mark breathes so the
+     screen reads as "working," not "ready but broken." */
+  .empty.booting .empty-mark { animation: bootPulse 1.7s ease-in-out infinite; }
+  @keyframes bootPulse {
+    0%, 100% { opacity: .55; transform: scale(.96); box-shadow: 0 0 18px var(--accent-line); }
+    50%      { opacity: 1;   transform: scale(1.03); box-shadow: 0 0 40px var(--accent-line); }
+  }
   .empty-mark {
     width: 56px; height: 56px;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
@@ -4779,14 +4786,26 @@ function renderChat() {
   _updateCtxRingFromHistory();  // reflect existing chat's usage on load/switch
 }
 
+let _prevLoadedReady = false;  // tracks model-loaded transitions to refresh the empty state
 function emptyState() {
   const wrap = document.createElement('div');
-  wrap.className = 'empty';
-  wrap.innerHTML = `
-    <div class="empty-mark">H</div>
-    <div class="empty-title">Hearth is ready.</div>
-    <div class="empty-sub">Local AI that talks, listens, and actually does things on your machine.</div>
-  `;
+  const ready = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
+  wrap.className = 'empty' + (ready ? '' : ' booting');
+  if (ready) {
+    wrap.innerHTML = `
+      <div class="empty-mark">H</div>
+      <div class="empty-title">Hearth is ready.</div>
+      <div class="empty-sub">Local AI that talks, listens, and actually does things on your machine.</div>
+    `;
+  } else {
+    // No model loaded yet — the app is still booting one (first launch can take a
+    // minute) or the user ejected. Say so honestly instead of a fake "ready".
+    wrap.innerHTML = `
+      <div class="empty-mark">H</div>
+      <div class="empty-title">Getting Hearth ready…</div>
+      <div class="empty-sub">Warming up your local model — the first launch can take a minute. Still here after that? Open <b>Models</b> to pick one.</div>
+    `;
+  }
   return wrap;
 }
 
@@ -5369,6 +5388,15 @@ async function refreshModels() {
     }
     // Repaint dropdown selection + sticker + eject + ctx from one place.
     applyBrainState();
+    // If the empty ("Getting Hearth ready…") screen is up, refresh it when the
+    // model finishes loading so it flips to "ready" — only on CHANGE, so the
+    // fade/breathe animation doesn't restart every poll.
+    const _nowReady = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
+    if (_nowReady !== _prevLoadedReady) {
+      _prevLoadedReady = _nowReady;
+      const _c = activeConvo();
+      if (_c && !(_c.messages || []).length) renderChat();
+    }
   } catch (e) { console.error('refreshModels', e); }
 }
 
