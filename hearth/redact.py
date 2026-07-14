@@ -52,7 +52,7 @@ _EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 def _home_patterns() -> List[Tuple[str, "re.Pattern[str]"]]:
     """Match the user's actual home dir (Windows + POSIX spellings) so paths
-    like C:\\Users\\swaggybaba\\... collapse to a neutral placeholder."""
+    like C:\\Users\\<name>\\... collapse to a neutral placeholder."""
     home = os.path.expanduser("~")
     user = os.path.basename(home.rstrip("\\/")) or ""
     pats: List[Tuple[str, "re.Pattern[str]"]] = []
