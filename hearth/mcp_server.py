@@ -161,11 +161,21 @@ def _make_tool(name: str, description: str, schema: Dict[str, Any]):
 # host, so by default we expose only the core (non-deferred) set — the same diet
 # that keeps Hearth's own prompt lean. HEARTH_MCP_ALL_TOOLS=1 exposes everything.
 _MCP_ALL_TOOLS = os.environ.get("HEARTH_MCP_ALL_TOOLS", "") in ("1", "true", "yes")
+# Interactive tools that depend on Hearth's OWN UI to render options / a decision
+# prompt. Over MCP the host (LM Studio, Claude Desktop, Cursor) has no way to show
+# those choices, so the tool just hangs or dead-ends. Never expose them outward —
+# not even under HEARTH_MCP_ALL_TOOLS.
+#   - ask_user: renders numbered options in Hearth's UI; a host can't show them.
+#   - spawn_subagent / launch_team: results come back through Hearth's OWN
+#     turn-notification loop, which an external host never sees — it just hangs.
+_MCP_NEVER = {"ask_user", "spawn_subagent", "launch_team"}
 _mcp_exposed = 0
 for td in TOOL_DEFINITIONS:
     if td["name"] in _SKIP_DYNAMIC:
         _mcp_exposed += 1
         continue  # registered manually above with proper return type
+    if td["name"] in _MCP_NEVER:
+        continue  # needs Hearth's own UI — useless / hangs on an external host
     if not _MCP_ALL_TOOLS and td["name"] in _DEFERRED_TOOLS:
         continue  # niche tool — kept off the host's list to save its context
     fn = _make_tool(td["name"], td["description"], td["parameters"])
