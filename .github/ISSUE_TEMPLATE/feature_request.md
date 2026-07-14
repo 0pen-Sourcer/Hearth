@@ -20,7 +20,7 @@ assignees: ''
 
 ## Have you checked the deferred list?
 
-<!-- Some big-ticket items are intentionally deferred. Check the README's Roadmap section + CLAUDE.md's "What to NOT do" before opening, in case this is one of them (and we should change our minds!). -->
+<!-- Some big-ticket items are intentionally deferred. Check the Roadmap (ROADMAP.md) before opening, in case this is already planned (or intentionally out of scope — and maybe we should reconsider!). -->
 
 ## Anything similar in another tool?
 
