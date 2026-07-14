@@ -353,8 +353,15 @@ def _make_permission_check(emit_fn):
                 decision = "timeout"
         finally:
             _permission_queues.pop(req_id, None)
+        _reason = ""
+        if isinstance(decision, dict):
+            _reason = (decision.get("reason") or "").strip()
+            decision = decision.get("decision") or "deny"
         if decision == "always": _always_allow.add(name); _save_perms_to_disk(); return "allow"
         if decision == "never":  _always_deny.add(name);  _save_perms_to_disk(); return "deny"
+        # A decline WITH the user's reason → hand both back so the model is told why.
+        if decision == "deny" and _reason:
+            return {"decision": "deny", "reason": _reason}
         return decision
 
     def _extend(path: str) -> bool:
@@ -386,12 +393,14 @@ def _make_permission_check(emit_fn):
     return _check
 
 
-def _resolve_permission(req_id: str, decision: str) -> bool:
+def _resolve_permission(req_id: str, decision: str, reason: str = "") -> bool:
     q = _permission_queues.get(req_id)
     if q is None:
         return False
     try:
-        q.put_nowait(decision)
+        # Carry the user's typed reason with a decline so the model gets it in the
+        # tool result (a plain string when there's no reason keeps back-compat).
+        q.put_nowait({"decision": decision, "reason": reason} if reason else decision)
         return True
     except _queue.Full:
         return False
@@ -2090,9 +2099,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             body = self._read_json()
             rid = (body.get("id") or "").strip()
             dec = (body.get("decision") or "").strip()
+            reason = (body.get("reason") or "").strip()[:500]
             if dec not in ("allow", "deny", "always", "never"):
                 return self._send_json(400, {"error": "decision must be allow/deny/always/never"})
-            ok = _resolve_permission(rid, dec)
+            ok = _resolve_permission(rid, dec, reason)
             return self._send_json(200 if ok else 404, {"ok": ok})
         if path == "/api/permission/clear":
             # Reset always_allow / always_deny — also wipe disk so they don't come

@@ -1114,12 +1114,18 @@ async def run_once(
                     # approval on every interaction.
                 }
                 if name in RISKY and permission_check is not None:
+                    _deny_reason = ""
                     try:
                         decision = permission_check(name, args)
                         if asyncio.iscoroutine(decision):
                             decision = await decision
                     except Exception:
                         decision = "deny"
+                    # A decline can arrive as {"decision","reason"} — the user's own
+                    # words for WHY they said no. Surface that to the model.
+                    if isinstance(decision, dict):
+                        _deny_reason = (decision.get("reason") or "").strip()
+                        decision = decision.get("decision") or "deny"
                     if decision in ("deny", "never", "timeout"):
                         if decision == "timeout":
                             tool_result = (
@@ -1139,6 +1145,15 @@ async def run_once(
                                 f"or pick a non-risky alternative. Don't retry the "
                                 f"same call."
                             )
+                            if _deny_reason:
+                                tool_result += (
+                                    f"\n\nThe user's words when they declined: "
+                                    f"\"{_deny_reason}\". Treat that as a direct "
+                                    f"instruction — usually it means STOP this line "
+                                    f"of action entirely. Acknowledge that you "
+                                    f"stopped, do what they asked instead, and do "
+                                    f"NOT retry this call."
+                                )
                         # Run the decline through the loop guard so a
                         # second identical retry trips FAILURE_WARN and
                         # a fourth trips FAILURE_STOP. Without this the
