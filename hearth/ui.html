@@ -2552,7 +2552,12 @@
     font-family: var(--mono);
     letter-spacing: 0.5px;
     min-height: 22px;
+    transition: color .3s var(--ease);
   }
+  /* Subtle per-state tint so the phase is legible at a glance. */
+  #voice-mode[data-vstate="listening"] .voice-status-text { color: var(--ok); }
+  #voice-mode[data-vstate="thinking"]  .voice-status-text { color: var(--accent-2); }
+  #voice-mode[data-vstate="speaking"]  .voice-status-text { color: var(--accent); }
   .voice-transcript {
     color: var(--fg);
     font-size: 16px;
@@ -9434,21 +9439,55 @@ let _ttsLevel = 0, _lastLevelAt = 0;   // live amplitude streamed from the serve
 // firing a separate chat turn per breath (which jammed the loop).
 let _utterBuf = '', _utterTimer = null;
 const _UTTER_GAP = 900;
+// Voice HUD state drives the grid's EFFECT so each phase reads distinctly:
+//   speaking  → radial bloom from real TTS amplitude
+//   listening → gentle breathe (realtime mic is server-side, no client level)
+//   thinking  → radar-ping rings expanding out (shows work, not a frozen dot)
+//   idle      → calm center
+let _voiceState = 'idle';
+
+function _voiceGridThinking(s, cx, cy, maxDist) {
+  // Two staggered rings so motion is continuous; front bright, short trail soft.
+  const period = 1.5;
+  const rings = [(s % period) / period, ((s + period / 2) % period) / period];
+  voiceDots.forEach((d, i) => {
+    const x = i % VOICE_GRID_COLS, y = Math.floor(i / VOICE_GRID_COLS);
+    const dist = Math.hypot(x - cx, y - cy);
+    let hot = false, on = dist < 0.7;
+    for (const ph of rings) {
+      const ringR = ph * (maxDist + 1);
+      const near = Math.abs(dist - ringR);
+      if (near < 0.6 && ph < 0.85) hot = true;
+      else if (near < 1.25 && ph < 0.9) on = true;
+    }
+    d.classList.toggle('hot', hot);
+    d.classList.toggle('on', on && !hot);
+  });
+}
+
 function _voiceGridFrame(t) {
   const s = t / 1000;
-  let target = 0;
-  if (t - _lastLevelAt < 220) {
-    target = _ttsLevel;                          // real TTS loudness → radial reach
-  } else if (voiceSpeaking) {
-    target = 0.24;                               // speaking, awaiting first level
-  } else if (recorder.recording) {
-    target = Math.min(1, voiceMicLevel * 1.7);
-  }
-  // Asymmetric smoothing: gentle attack, slower release. Kept soft on purpose —
-  // raw mic amplitude is spiky, and a snappy follow made the grid strobe.
-  voiceLevel += (target - voiceLevel) * (target > voiceLevel ? 0.22 : 0.08);
   const cx = (VOICE_GRID_COLS - 1) / 2, cy = (VOICE_GRID_ROWS - 1) / 2;
   const maxDist = Math.hypot(cx, cy);
+
+  if (_voiceState === 'thinking') {
+    _voiceGridThinking(s, cx, cy, maxDist);
+    voiceGridAnim = requestAnimationFrame(_voiceGridFrame);
+    return;
+  }
+
+  // speaking / listening / idle → amplitude-driven radial bloom.
+  let target = 0;
+  if (_voiceState === 'speaking') {
+    target = (t - _lastLevelAt < 220) ? _ttsLevel : 0.24;   // real TTS loudness
+  } else if (_voiceState === 'listening') {
+    // Legacy press-to-talk exposes a client mic level; realtime does not (mic is
+    // server-side), so fall back to a calm breathe that says "I'm here, listening".
+    target = recorder.recording ? Math.min(1, voiceMicLevel * 1.7)
+                                : (0.14 + 0.07 * Math.sin(s * 2.0));
+  }
+  // Asymmetric smoothing: gentle attack, slower release — raw amplitude is spiky.
+  voiceLevel += (target - voiceLevel) * (target > voiceLevel ? 0.22 : 0.08);
   const reach = voiceLevel * (maxDist + 0.8);
   voiceDots.forEach((d, i) => {
     const x = i % VOICE_GRID_COLS, y = Math.floor(i / VOICE_GRID_COLS);
@@ -9456,7 +9495,6 @@ function _voiceGridFrame(t) {
     const edge = reach - dist;
     // Per-dot hysteresis: a dot needs a WIDER swing to flip than to hold, so a
     // jittery reach boundary can't flicker it on/off every frame (the "shaking").
-    // Previous state is read straight off the classList — no side array needed.
     const wasHot = d.classList.contains('hot');
     const wasOn  = wasHot || d.classList.contains('on');
     let on = dist < 0.7 || (wasOn ? edge > -0.55 : edge > -0.2);   // center always faintly lit
@@ -9593,7 +9631,18 @@ window.addEventListener('load', () => {
   });
 });
 
-function setVoiceStatus(s) { $('voice-status-text').textContent = s; }
+function setVoiceStatus(s) {
+  $('voice-status-text').textContent = s;
+  // Infer the HUD state from the status text so the grid picks the right effect
+  // (and CSS can tint) without threading a state arg through 15 call sites.
+  const low = (s || '').toLowerCase();
+  let st = 'idle';
+  if (low.includes('speak')) st = 'speaking';
+  else if (/think|transcrib|warming|starting/.test(low)) st = 'thinking';
+  else if (/listen|your turn/.test(low)) st = 'listening';
+  _voiceState = st;
+  const vm = $('voice-mode'); if (vm) vm.dataset.vstate = st;
+}
 function setVoiceTranscript(s) { $('voice-transcript').textContent = s; }
 
 $('btn-voice-mode').addEventListener('click', enterVoiceMode);
