@@ -4227,7 +4227,7 @@ function hideInlinePermission() {
   document.getElementById('input').placeholder = `Message ${_agentName()}…`;
 }
 
-async function sendPermDecision(decision) {
+async function sendPermDecision(decision, reason) {
   if (!pendingPermId) return;
   const id = pendingPermId;
   const tool = pendingPermTool;
@@ -4239,7 +4239,7 @@ async function sendPermDecision(decision) {
   try {
     await api('/api/permission', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, decision }),
+      body: JSON.stringify(reason ? { id, decision, reason } : { id, decision }),
     });
   } catch (e) { toast('Permission send failed', e.message, 'err'); }
 }
@@ -5987,13 +5987,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
   }
   if (!prompt) return;
-  // Inline permission active - treat the typed text as "decline + do this instead":
-  // send a 'deny' for the pending tool, queue the text, and fire it after the
-  // current turn finishes (handled in the 'done' event below).
+  // Inline permission active — the typed text IS the reason for declining
+  // ("stop now", "do X instead"). Send it WITH the deny so the model gets it in
+  // the tool result THIS turn (connected to the decline), instead of a
+  // disconnected follow-up turn that arrives after it has already carried on.
   if (pendingPermId) {
-    pendingFollowup = prompt;
     input.value = ''; input.style.height = '42px';
-    sendPermDecision('deny');
+    sendPermDecision('deny', prompt);
     return;
   }
   if (STATE.streaming) return;
