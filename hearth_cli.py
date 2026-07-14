@@ -288,7 +288,7 @@ _BOLD = "\033[1m"
 # the finished message once IF it contains markdown worth formatting (a table,
 # code fence, or heading) — so a table no longer prints as raw `| ... |` pipes.
 # Plain replies skip the re-render entirely, so they're untouched + instant.
-# Same idea as the GUI + Claude Code's terminal renderer.
+# Same idea as the GUI's terminal renderer.
 try:
     from rich.console import Console as _RichConsole
     from rich.markdown import Markdown as _RichMarkdown

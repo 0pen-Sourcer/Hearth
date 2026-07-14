@@ -298,20 +298,6 @@ Reads default to **unrestricted** (whole disk — Jarvis needs to know your mach
 
 ---
 
-## Star-farming the launch (for the maintainer)
-
-If you're reading this as the contributor: the demo prompts that land best for a 30-second README GIF:
-
-1. **"Find my [movie] and play it"** — find_file → open_app chain. Universal "wow, it knows my disk."
-2. **"Summarize this"** + drop a real PDF. Instant value.
-3. **"Remind me to take a break in 20 minutes"** + show the toast firing later. Real-Jarvis vibe.
-4. **Voice mode** + GPU stats question. Local LLM + voice without API keys = the differentiator.
-5. **"What did we discuss about [topic] last week"** — `search_chats`. Nobody else does this locally.
-
-Post on **r/LocalLLaMA** (Tuesday 9-11 AM EST is the data-backed sweet spot). Lead with "I built a local Jarvis that has voice + cross-session memory + can actually open my apps." Pin the .exe in the GitHub Releases.
-
----
-
 ## When things break
 
 - **GUI exe shows traceback dialog** → check `~/Jarvis/logs/hearth_tray.log` for the actual error
