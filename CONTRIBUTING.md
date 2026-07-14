@@ -48,7 +48,7 @@ The highest-leverage contribution isn't even to this repo. A skill is a folder w
 - New backends (cloud APIs) that change the "local-first" promise. Cloud opt-in is fine, default-on isn't.
 - Heavy dependencies for niche features. `kokoro-onnx` is ~80MB and earns its place; an electron UI doesn't.
 - Refactors without a behavior change unless they unlock something specific. We're not optimizing for a clean codebase, we're optimizing for shipping a useful tool fast.
-- Anything that breaks Ishant's existing setup without a clear migration path. He's user #1.
+- Anything that breaks an existing user's setup without a clear migration path.
 
 ## Development setup
 

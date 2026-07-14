@@ -127,7 +127,7 @@ GOOD (will save):
 
   {"title": "current-os", "category": "user", "description": "User switched their main machine to Linux Mint.", "body": "Tailor shell/commands to Linux now.", "confidence": 5, "volatility": "seasonal", "supersedes": "primary OS"}
 
-  {"title": "side-project-deadline", "category": "project", "description": "Side project has a hard ship date this month.", "body": "Avoid blocking on related work. Star-farm or release is the win condition.", "confidence": 5, "volatility": "seasonal"}
+  {"title": "side-project-deadline", "category": "project", "description": "Side project has a hard ship date this month.", "body": "Avoid blocking on related work; shipping is the win condition.", "confidence": 5, "volatility": "seasonal"}
 
 BAD (will NOT save — extractor must filter these):
   {"title": "likes-breaking-bad", "category": "user", "description": "User likes kids who cook Heisenberg's Blue.", ...}  # joke / quote — DROP

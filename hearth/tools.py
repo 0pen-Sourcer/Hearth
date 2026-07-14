@@ -1517,8 +1517,8 @@ def _coerce_int(v, default):
 
 # Read-before-edit guard. Tracks files the model has actually SEEN this process
 # (read_file / write_file), with the mtime at that moment. edit_file then refuses
-# to touch a file the model never read, or one that changed since — the same
-# discipline Claude Code enforces, so a local model can't blind-edit from a
+# to touch a file the model never read, or one that changed since — a
+# read-before-edit discipline, so a local model can't blind-edit from a
 # guessed view of the file.
 _SEEN_FILES: Dict[str, float] = {}
 
@@ -6862,8 +6862,8 @@ for _cd in (
 
 
 # ── Watch-a-team: spawn several subagents + open a live pane per agent ──
-# Opt-in multi-agent "watch them build" — the Hearth-native version of the
-# Claude Code tmux multi-agent setup. Each member runs as a background subagent
+# Opt-in multi-agent "watch them build" — a split-pane tmux/Windows-Terminal
+# multi-agent setup. Each member runs as a background subagent
 # (own scoped tools + transcript); a terminal pane live-tails each one.
 def _launch_team(p: Dict) -> str:
     members = p.get("members") or []
