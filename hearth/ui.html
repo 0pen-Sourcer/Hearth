@@ -3695,9 +3695,14 @@
             <option value="openai">Cloud - OpenAI GPT</option>
             <option value="grok">Cloud - xAI Grok</option>
             <option value="openrouter">Cloud - OpenRouter (100+ models)</option>
+            <option value="custom">Cloud - Custom / OpenAI-compatible (Groq, Together, …)</option>
           </select>
         </div>
         <div class="ob-section" id="ob-cloud-key-row" hidden>
+          <div class="ob-section" id="ob-cloud-url-row" hidden style="margin-bottom:12px">
+            <div class="ob-label">Endpoint URL</div>
+            <input type="text" id="ob-cloud-url" class="ob-input" placeholder="e.g. https://api.groq.com/openai/v1"/>
+          </div>
           <div class="ob-label">Your API key</div>
           <input type="password" id="ob-cloud-key" class="ob-input" placeholder="paste here · stays on this PC in ~/Jarvis/settings.json"/>
           <div class="ob-section" style="margin-top:12px">
@@ -11887,10 +11892,12 @@ function obWireCloudStep() {
   const sel = $('ob-brain-where');
   const keyRow = $('ob-cloud-key-row');
   if (!sel || !keyRow) return;
+  const urlRow = $('ob-cloud-url-row');
   const upd = () => {
     const v = sel.value;
     obState.cloud.provider = v;
     keyRow.hidden = (v === 'local');
+    if (urlRow) urlRow.hidden = (v !== 'custom');  // only a custom endpoint needs a URL
   };
   sel.onchange = upd;
   upd();
@@ -12194,30 +12201,39 @@ async function obFinish(skipped) {
       obState.cloud.model = (modelEl && modelEl.value || '').trim();
       if (obState.cloud.provider && obState.cloud.provider !== 'local' && obState.cloud.key) {
         const PRESETS = {
+          anthropic:  { url: 'https://api.anthropic.com/v1/', sample: 'claude-sonnet-4-20250514' },
           gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', sample: 'gemini-2.5-flash' },
           openai:     { url: 'https://api.openai.com/v1', sample: 'gpt-4o-mini' },
           grok:       { url: 'https://api.x.ai/v1', sample: 'grok-2-1212' },
           openrouter: { url: 'https://openrouter.ai/api/v1', sample: 'anthropic/claude-3.5-sonnet' },
         };
         const p = PRESETS[obState.cloud.provider] || {};
+        // Custom endpoint (Groq, Together, any OpenAI-compatible): take the URL the
+        // user typed. Everything else uses the preset base.
+        const _customUrl = obState.cloud.provider === 'custom'
+          ? (($('ob-cloud-url') && $('ob-cloud-url').value || '').trim()) : '';
         const body = {
           provider: obState.cloud.provider,
-          url: p.url || '',
+          url: _customUrl || p.url || '',
           key: obState.cloud.key,
           model: obState.cloud.model || p.sample || '',
         };
-        await api('/api/llm-endpoint', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        await api('/api/settings', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            llm_provider: body.provider, llm_url: body.url,
-            llm_key: body.key, llm_model: body.model,
-          }),
-        });
-        toast('Cloud brain wired', obState.cloud.provider + ' ready', 'ok', 4000);
+        if (obState.cloud.provider === 'custom' && !_customUrl) {
+          toast('Custom brain', 'Add the endpoint URL (e.g. https://api.groq.com/openai/v1) — skipping for now.', 'warn', 5000);
+        } else {
+          await api('/api/llm-endpoint', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          await api('/api/settings', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              llm_provider: body.provider, llm_url: body.url,
+              llm_key: body.key, llm_model: body.model,
+            }),
+          });
+          toast('Cloud brain wired', obState.cloud.provider + ' ready', 'ok', 4000);
+        }
       }
     } catch (err) { console.warn('cloud setup failed', err); }
   } catch {}
