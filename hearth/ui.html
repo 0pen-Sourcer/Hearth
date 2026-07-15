@@ -3707,7 +3707,7 @@
           <input type="password" id="ob-cloud-key" class="ob-input" placeholder="paste here · stays on this PC in ~/Jarvis/settings.json"/>
           <div class="ob-section" style="margin-top:12px">
             <div class="ob-label">Model id (optional)</div>
-            <input type="text" id="ob-cloud-model" class="ob-input" placeholder="e.g. gemini-2.5-flash · leave blank for default"/>
+            <input type="text" id="ob-cloud-model" class="ob-input" placeholder="e.g. gemini-3-flash · leave blank for default"/>
           </div>
         </div>
 
@@ -8453,11 +8453,11 @@ async function refreshSettings() {
     if (brainMode && llmUrl && llmKey && llmMdl && llmApply) {
       const PRESETS = {
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },
-        gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: 'Try <code>gemini-2.5-flash</code>, <code>gemini-1.5-flash</code>, or <code>gemini-1.5-pro</code>.', sample: 'gemini-2.5-flash' },
-        anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint. Sonnet supports up to 1M context.', modelHint: 'Try <code>claude-sonnet-5</code>, <code>claude-opus-4-8</code>, or <code>claude-haiku-4-5-20251001</code>.', sample: 'claude-sonnet-5' },
-        openai:     { url: 'https://api.openai.com/v1', hint: 'OpenAI GPT models.', modelHint: 'Try <code>gpt-4o-mini</code>, <code>gpt-4o</code>, or <code>o1-mini</code>.', sample: 'gpt-4o-mini' },
-        grok:       { url: 'https://api.x.ai/v1', hint: 'xAI Grok models.', modelHint: 'Try <code>grok-2-1212</code> or <code>grok-beta</code>.', sample: 'grok-2-1212' },
-        openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator - gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-3.5-sonnet</code>.', sample: 'anthropic/claude-3.5-sonnet' },
+        gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: 'Try <code>gemini-3-flash</code> or <code>gemini-3-pro</code>.', sample: 'gemini-3-flash' },
+        anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint. Sonnet supports up to 1M context.', modelHint: 'Try <code>claude-sonnet-5</code>, <code>claude-opus-4-8</code>, or <code>claude-haiku-4-5</code>.', sample: 'claude-sonnet-5' },
+        openai:     { url: 'https://api.openai.com/v1', hint: 'OpenAI GPT models.', modelHint: 'Try <code>gpt-5.1</code> or <code>gpt-5-mini</code>.', sample: 'gpt-5.1' },
+        grok:       { url: 'https://api.x.ai/v1', hint: 'xAI Grok models.', modelHint: 'Try <code>grok-4.5</code>.', sample: 'grok-4.5' },
+        openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator - gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-4.6-sonnet</code>.', sample: 'anthropic/claude-4.6-sonnet' },
         custom:     { url: '', hint: 'Any OpenAI-compatible server. You set the URL.', modelHint: 'Use whatever model id your server exposes.', sample: '' },
       };
       // Per-provider key memory: each provider remembers its own key, so
@@ -12201,11 +12201,11 @@ async function obFinish(skipped) {
       obState.cloud.model = (modelEl && modelEl.value || '').trim();
       if (obState.cloud.provider && obState.cloud.provider !== 'local' && obState.cloud.key) {
         const PRESETS = {
-          anthropic:  { url: 'https://api.anthropic.com/v1/', sample: 'claude-sonnet-4-20250514' },
-          gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', sample: 'gemini-2.5-flash' },
-          openai:     { url: 'https://api.openai.com/v1', sample: 'gpt-4o-mini' },
-          grok:       { url: 'https://api.x.ai/v1', sample: 'grok-2-1212' },
-          openrouter: { url: 'https://openrouter.ai/api/v1', sample: 'anthropic/claude-3.5-sonnet' },
+          anthropic:  { url: 'https://api.anthropic.com/v1/', sample: 'claude-sonnet-5' },
+          gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', sample: 'gemini-3-flash' },
+          openai:     { url: 'https://api.openai.com/v1', sample: 'gpt-5.1' },
+          grok:       { url: 'https://api.x.ai/v1', sample: 'grok-4.5' },
+          openrouter: { url: 'https://openrouter.ai/api/v1', sample: 'anthropic/claude-4.6-sonnet' },
         };
         const p = PRESETS[obState.cloud.provider] || {};
         // Custom endpoint (Groq, Together, any OpenAI-compatible): take the URL the
