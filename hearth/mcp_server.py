@@ -172,6 +172,11 @@ _MCP_ALL_TOOLS = os.environ.get("HEARTH_MCP_ALL_TOOLS", "") in ("1", "true", "ye
 #     non-deferred (surfaces for weak local models when Forge is detected), so it
 #     leaks onto the MCP surface where it's setup-specific noise. Keep it off.
 _MCP_NEVER = {"ask_user", "spawn_subagent", "launch_team", "forge_generate"}
+# Low-level computer-use PRIMITIVES: redundant on MCP with smart_click (fused
+# vision + accessibility) and desktop_snapshot/click/type + screenshot, which are
+# the reliable interface. Hidden by default to keep the host's tool list clean;
+# HEARTH_MCP_ALL_TOOLS=1 restores them for a host that wants raw pixel control.
+_MCP_DIET_EXTRA = {"computer_move", "computer_drag", "computer_scroll", "computer_screen"}
 _mcp_exposed = 0
 for td in TOOL_DEFINITIONS:
     if td["name"] in _SKIP_DYNAMIC:
@@ -179,8 +184,8 @@ for td in TOOL_DEFINITIONS:
         continue  # registered manually above with proper return type
     if td["name"] in _MCP_NEVER:
         continue  # needs Hearth's own UI — useless / hangs on an external host
-    if not _MCP_ALL_TOOLS and td["name"] in _DEFERRED_TOOLS:
-        continue  # niche tool — kept off the host's list to save its context
+    if not _MCP_ALL_TOOLS and (td["name"] in _DEFERRED_TOOLS or td["name"] in _MCP_DIET_EXTRA):
+        continue  # niche / redundant tool — kept off the host's list to save its context
     fn = _make_tool(td["name"], td["description"], td["parameters"])
     mcp.tool(name=td["name"], description=td["description"])(fn)
     _mcp_exposed += 1
