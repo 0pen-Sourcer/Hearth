@@ -3304,13 +3304,24 @@ class JarvisCLI:
             print(f"  {C_TOOL}Which brain should I run on?{C_RESET}")
             print(f"  {C_DIM}    Enter = local ({self.current_model} via {LOCAL_API_BASE}, "
                   f"currently {cur}). Or pick a cloud model.{C_RESET}")
-            brain = ask("Enter for local, or: grok / gemini / openai / openrouter").lower()
+            brain = ask("Enter for local, or: grok / gemini / openai / openrouter / groq / custom").lower()
             if brain in ("grok", "gemini", "openai", "openrouter"):
                 key = ask(f"Paste your {brain} API key (saved locally, asked once)")
                 if key:
                     await self.handle_command(f"/brain {brain} {key}")
                 else:
                     print(f"  {C_DIM}no key - staying local. Switch anytime with /brain {brain} <key>.{C_RESET}")
+            elif brain in ("custom", "groq"):
+                # Any OpenAI-compatible endpoint. Groq is the fast free one, so
+                # offer its URL as the default when they type 'groq'.
+                _def = "https://api.groq.com/openai/v1" if brain == "groq" else ""
+                _prompt = f"Endpoint URL (Enter for {_def})" if _def else "Endpoint URL (e.g. https://api.groq.com/openai/v1)"
+                url = ask(_prompt).strip() or _def
+                key = ask("Paste your API key (saved locally)")
+                if url and key:
+                    await self.handle_command(f"/brain custom {url} {key}")
+                else:
+                    print(f"  {C_DIM}need URL + key - staying local. Switch anytime with /brain custom <url> <key>.{C_RESET}")
             print()
             # Staying local → help them pick + boot a model right now, so setup
             # ends with a WORKING server, not "can't reach LM Studio".
