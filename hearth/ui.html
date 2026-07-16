@@ -398,8 +398,12 @@
     0%, 100% { box-shadow: 0 0 18px var(--accent-line); opacity: .85; }
     50%      { box-shadow: 0 0 28px var(--accent-line); opacity: 1; }
   }
-  /* Warming: the H goes bright so the light sweep across it reads as movement. */
-  .empty.booting .empty-mark { color: #fff; }
+  /* App-startup scan keeps the H black (it's only finding models). A model that
+     is actively LOADING animates the H to white; it settles back to black on ready. */
+  .empty.booting.loading .empty-mark {
+    animation: bootGlow 3s ease-in-out infinite, hWhiten .7s var(--ease) both;
+  }
+  @keyframes hWhiten { 0% { color: #0a0a0c; } 100% { color: #fff; } }
   /* Ready: one soft settle-in pop, so "on" is felt, not just shown. */
   .empty:not(.booting):not(.idle-nomodel) .empty-mark { animation: markPop .55s var(--ease) both; }
   @keyframes markPop {
@@ -4849,8 +4853,11 @@ function emptyState() {
   // models right after launch, GPU still "-"), plus any active model load. Both
   // are genuinely "getting ready". Only say "no model" once we're truly idle and
   // certain, so we never sit on a fake "warming up".
-  const busy = !ready && (_appBooting || (typeof LOAD_PROGRESS_TIMER !== 'undefined' && LOAD_PROGRESS_TIMER != null));
-  wrap.className = 'empty' + (ready ? '' : (busy ? ' booting' : ' idle-nomodel'));
+  const scanning = !ready && _appBooting;   // app-startup drive scan (just finding models)
+  const loading  = !ready && !scanning && (typeof LOAD_PROGRESS_TIMER !== 'undefined' && LOAD_PROGRESS_TIMER != null);  // a model is actively loading
+  const busy     = scanning || loading;
+  // .loading gets the white-H animation; plain .booting (scan) keeps the H black.
+  wrap.className = 'empty' + (ready ? '' : (loading ? ' booting loading' : (busy ? ' booting' : ' idle-nomodel')));
   if (ready) {
     wrap.innerHTML = `
       <div class="empty-mark">H</div>
