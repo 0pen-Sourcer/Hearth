@@ -4862,7 +4862,11 @@ function emptyState() {
   // are genuinely "getting ready". Only say "no model" once we're truly idle and
   // certain, so we never sit on a fake "warming up".
   const scanning = !ready && _appBooting;   // app-startup drive scan (just finding models)
-  const loading  = !ready && !scanning && (typeof LOAD_PROGRESS_TIMER !== 'undefined' && LOAD_PROGRESS_TIMER != null);  // a model is actively loading
+  // A model is actively loading — STATE.brain.busy is set for the whole load
+  // (the progress timer flickers off between phases, so don't rely on it alone).
+  const loading  = !ready && !scanning &&
+    ((STATE.brain && STATE.brain.busy) ||
+     (typeof LOAD_PROGRESS_TIMER !== 'undefined' && LOAD_PROGRESS_TIMER != null));
   const busy     = scanning || loading;
   // .loading gets the white-H animation; plain .booting (scan) keeps the H black.
   wrap.className = 'empty' + (ready ? '' : (loading ? ' booting loading' : (busy ? ' booting' : ' idle-nomodel')));
@@ -5528,6 +5532,7 @@ $('model-select').addEventListener('change', async (e) => {
   }
   STATE.brain.busy = true;
   applyBrainState();  // shows the loading pulse on the dot
+  _refreshEmptyIfShown();  // flip the empty screen to the white-H "loading" state now
   // Cleaner labels - "starting server" was misleading when the server was
   // already running (e.g. swapping models). Phase actually visible in the
   // sticker bar now ("loading weights · 45%"), so the pill just narrates.
@@ -5621,6 +5626,7 @@ $('model-select').addEventListener('change', async (e) => {
     toast('Load failed', err.message, 'err', 7000);
   } finally {
     STATE.brain.busy = false;
+    _refreshEmptyIfShown();  // load finished (or failed) — repaint out of the white-H loading state
     applyBrainState();
     await refreshModels();
     await refreshState();
@@ -6352,7 +6358,12 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
   function handleEvent(ev) {
     if (ev.type === 'user') return;
-    _clearPromptPoll();  // any real event = generation started; stop the prompt-% poll
+    // Stop the prompt-% poll only when GENERATION actually starts (a token,
+    // reasoning, or a tool call). Clearing on *any* event killed it instantly —
+    // context_budget/context_state fire at turn start, before the prompt even
+    // finishes processing, which is exactly when we WANT the % visible.
+    if (ev.type === 'thinking_chunk' || ev.type === 'thinking' ||
+        ev.type === 'assistant_chunk' || ev.type === 'tool_call') _clearPromptPoll();
 
     if (ev.type === 'slow_tool') {
       // Watchdog fires this when a tool takes >30s / >90s. Tell the user
