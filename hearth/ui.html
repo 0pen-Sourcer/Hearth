@@ -6385,10 +6385,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
       if (label) label.textContent = `thought for ${seconds}s`;
     }
     activeThink._closedAt = Date.now();
-    _gotThinkingChunks = false;   // phase ended; the next reasoning phase starts fresh
   }
 
-  let _gotThinkingChunks = false;   // per reasoning phase; true once a chunk streams, so the redundant aggregate is skipped
   function handleEvent(ev) {
     if (ev.type === 'user') return;
     // Stop the prompt-% poll only when GENERATION actually starts (a token,
@@ -6452,16 +6450,15 @@ async function send(forced = null, displayAs = null, opts = {}) {
         bodySpan.textContent += ev.content || '';
         if (follow) bodySpan.scrollTop = bodySpan.scrollHeight;
       }
-      _gotThinkingChunks = true;   // so the redundant aggregate below is ignored
       assistantMsg.events.push({ kind: 'think_chunk', content: ev.content });
       return;
     }
     if (ev.type === 'thinking') {
-      // The GUI already builds the thinking block from thinking_chunk deltas. The
-      // backend ALSO emits this full aggregate for clients that DON'T stream chunks;
-      // for us that's a duplicate, and replaying it was spawning the second block.
-      // Ignore it when we streamed chunks; only use it as a no-chunk fallback.
-      if (_gotThinkingChunks) return;
+      // Aggregate event fired AFTER all chunks streamed. It's the final text of
+      // the LAST thinking block, so REPLACE that block's body. Reuse the last
+      // block whether it's still active OR already closed ("thought for Xs") —
+      // creating a new one when it had closed was the duplicate-thinking bug (a
+      // late aggregate spawning a second block under the first).
       let thinkBlock = chatBody.querySelector('.think.active')
                     || chatBody.querySelector('.think:last-of-type');
       if (!thinkBlock) {
