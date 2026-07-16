@@ -7311,10 +7311,9 @@ function renderMemTree(filter) {
 }
 
 // ---- Constellation graph view (D3 force-directed) ---------------------
-// Why this exists: a flat list or a static tree is a weak
-// visualization (a flat list). A
-// LIVE FORCE GRAPH where you see clusters self-organize is what makes
-// people screenshot. Same data as List/Tree views - different lens.
+// A live force graph where memory clusters self-organize as you watch is far
+// more compelling than a flat list or a static tree. Same data as the
+// List/Tree views, just a different lens.
 let _memSimulation = null;   // active D3 force simulation (we kill it on view-switch)
 
 function renderMemGraph(filter) {
