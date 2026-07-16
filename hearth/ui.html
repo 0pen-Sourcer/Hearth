@@ -5541,9 +5541,11 @@ $('model-select').addEventListener('change', async (e) => {
       const savedCfg = (_modelsState
         && _modelsState.status && _modelsState.status.model_configs
         && _modelsState.status.model_configs[path.toLowerCase()]) || {};
-      const settingsCtx = (STATE.settings && STATE.settings.server_default_ctx) || 32768;
-      plannedCtx = savedCfg.ctx || settingsCtx;
-      setState(`loading at ${(plannedCtx/1024).toFixed(0)}K ctx…`);
+      // Only claim a number we actually KNOW: the per-model saved ctx. The
+      // backend seeds from the saved config anyway, so guessing from the
+      // Settings default here showed "24K" while the load was really 32K.
+      plannedCtx = savedCfg.ctx || 0;
+      setState(plannedCtx ? `loading at ${(plannedCtx/1024).toFixed(0)}K ctx…` : 'loading model…');
       r = await api('/api/llmserver/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.assign({ model_path: path }, savedCfg)),
@@ -5560,9 +5562,12 @@ $('model-select').addEventListener('change', async (e) => {
       STATE.brain.modelId = displayId;
       STATE.brain.modelName = displayId.split(/[\/\\]/).pop();
       STATE.brain.loaded = true;
-      if (plannedCtx) { STATE.brain.ctxTotal = plannedCtx; STATE.brain.ctxSource = 'loaded model'; }
-      STATE.loadedModel = { id: displayId, state: 'loaded', loaded_context_length: plannedCtx || undefined };
-      const ctxNote = plannedCtx ? ` at ${(plannedCtx/1024).toFixed(0)}K ctx` : '';
+      // The backend's answer is the truth — it seeds from the saved per-model
+      // config, so its ctx can differ from (and beats) whatever we guessed.
+      const actualCtx = (r && r.info && r.info.ctx) || plannedCtx;
+      if (actualCtx) { STATE.brain.ctxTotal = actualCtx; STATE.brain.ctxSource = 'loaded model'; }
+      STATE.loadedModel = { id: displayId, state: 'loaded', loaded_context_length: actualCtx || undefined };
+      const ctxNote = actualCtx ? ` at ${(actualCtx/1024).toFixed(0)}K ctx` : '';
       toast('Model loaded', displayId + ctxNote, 'ok');
       // Hard warning: anything < 16K with our persona+tools (~18K) will
       // crash with "Requested tokens exceed context window" on the first
