@@ -398,6 +398,15 @@
     0%, 100% { box-shadow: 0 0 18px var(--accent-line); opacity: .85; }
     50%      { box-shadow: 0 0 28px var(--accent-line); opacity: 1; }
   }
+  /* Warming: the H goes bright so the light sweep across it reads as movement. */
+  .empty.booting .empty-mark { color: #fff; }
+  /* Ready: one soft settle-in pop, so "on" is felt, not just shown. */
+  .empty:not(.booting):not(.idle-nomodel) .empty-mark { animation: markPop .55s var(--ease) both; }
+  @keyframes markPop {
+    0%   { transform: scale(.82); opacity: .2; }
+    60%  { transform: scale(1.06); }
+    100% { transform: scale(1); opacity: 1; }
+  }
   .empty-mark {
     width: 56px; height: 56px;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
@@ -3380,8 +3389,8 @@
           <select id="setting-server-ctx">
             <option value="8192">8K (too small)</option>
             <option value="16384">16K (tight - no headroom for long chats)</option>
-            <option value="24576" selected>24K (recommended)</option>
-            <option value="32768">32K (comfortable)</option>
+            <option value="24576">24K (leaner on VRAM)</option>
+            <option value="32768" selected>32K (recommended)</option>
             <option value="65536">64K (uses noticeably more KV-cache VRAM)</option>
           </select>
         </div>
@@ -7923,12 +7932,14 @@ async function refreshServerCard() {
     if (gpuEl) {
       if (running && r.builtin_gpu_layers != null) {
         const on = r.builtin_gpu_layers, tot = r.builtin_total_layers || 0;
-        let txt, cls = 'v';
-        if (on === 0)                 { txt = tot ? `CPU-only (0/${tot} on GPU)` : 'CPU-only'; cls = 'v stopped'; }
+        let txt, cls = 'v', tip = '';
+        if (on === 0)                 { txt = tot ? `CPU-only (0/${tot} on GPU)` : 'CPU-only'; cls = 'v stopped'; tip = 'The whole model runs on the CPU, no GPU acceleration. Load with GPU layers for speed.'; }
         else if (tot && on >= tot)    { txt = `Full GPU (${tot}/${tot} layers)`; cls = 'v running'; }
-        else if (tot)                 { txt = `${on}/${tot} layers on GPU, rest on CPU`; }
+        else if (tot)                 { txt = `${on}/${tot} on GPU, rest on CPU (slower)`; tip = `${tot - on} layer(s) run on the CPU. In Auto, Hearth fits layers to your free VRAM so it won't spill into slow shared RAM. Want all ${tot} on the GPU? Set GPU layers explicitly in the model's config (respected as-is), or close other GPU apps.`; }
         else                          { txt = `${on} layers on GPU`; }
-        gpuEl.textContent = txt; gpuEl.className = cls;
+        // Persist the reason on the row itself (tooltip) so it survives muted
+        // toasts — the load-time "why" shouldn't live only in a toast.
+        gpuEl.textContent = txt; gpuEl.className = cls; gpuEl.title = tip;
       } else {
         gpuEl.textContent = running ? '-' : (usingCloud ? 'n/a (cloud)' : '-');
         gpuEl.className = 'v';
