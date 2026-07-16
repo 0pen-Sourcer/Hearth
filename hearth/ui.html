@@ -418,6 +418,9 @@
     display: grid; place-items: center;
     color: #0a0a0c; font-weight: 800; font-size: 26px;
     box-shadow: 0 0 32px var(--accent-line);
+    /* Ease the H back to black when the load finishes (the white hWhiten hold
+       releases into this base) so ready doesn't snap-cut from the loading state. */
+    transition: color .5s var(--ease);
   }
   .empty-title { color: var(--fg); font-size: 16px; font-weight: 500; }
   .empty-sub { font-size: 13px; max-width: 480px; text-align: center; color: var(--fg-dim); }
@@ -2255,10 +2258,20 @@
     padding: 8px 2px;
     font-family: var(--mono);
     font-size: 12.5px;
-    color: var(--fg-dim);
+    font-style: italic;
+    color: var(--fg-faint);
     letter-spacing: .2px;
   }
-  .prompt-prog b { color: var(--accent-2); font-weight: 600; }
+  .prompt-prog .pp-num {
+    display: inline-block;
+    font-style: normal;
+    color: var(--fg-dim);
+    animation: ppRoll .34s cubic-bezier(.3,.7,.3,1);
+  }
+  @keyframes ppRoll {
+    from { transform: translateY(0.6em); opacity: 0; }
+    to   { transform: translateY(0);     opacity: 1; }
+  }
   .dot-bounce {
     display: inline-flex;
     gap: 4px;
@@ -4854,42 +4867,46 @@ function renderChat() {
 
 let _prevLoadedReady = false;  // tracks model-loaded transitions to refresh the empty state
 let _appBooting = true;        // true during the first drive-scan after launch; cleared once the initial model/state poll returns
-function emptyState() {
-  const wrap = document.createElement('div');
+// One source of truth for the empty screen's state, so a fresh build and an
+// in-place morph agree on class + copy. Keeping this pure lets the transition
+// (_refreshEmptyIfShown) mutate the SAME node instead of re-mounting.
+function _computeEmptyState() {
   const ready = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
   // "Warming up" covers the app-startup window (Hearth scanning your drives for
   // models right after launch, GPU still "-"), plus any active model load. Both
-  // are genuinely "getting ready". Only say "no model" once we're truly idle and
-  // certain, so we never sit on a fake "warming up".
+  // are genuinely "getting ready". Only say "no model" once we're truly idle.
   const scanning = !ready && _appBooting;   // app-startup drive scan (just finding models)
   // A model is actively loading — STATE.brain.busy is set for the whole load
   // (the progress timer flickers off between phases, so don't rely on it alone).
   const loading  = !ready && !scanning &&
     ((STATE.brain && STATE.brain.busy) ||
      (typeof LOAD_PROGRESS_TIMER !== 'undefined' && LOAD_PROGRESS_TIMER != null));
-  const busy     = scanning || loading;
+  const busy = scanning || loading;
   // .loading gets the white-H animation; plain .booting (scan) keeps the H black.
-  wrap.className = 'empty' + (ready ? '' : (loading ? ' booting loading' : (busy ? ' booting' : ' idle-nomodel')));
+  const cls = 'empty' + (ready ? '' : (loading ? ' booting loading' : (busy ? ' booting' : ' idle-nomodel')));
+  let title, sub;
   if (ready) {
-    wrap.innerHTML = `
-      <div class="empty-mark">H</div>
-      <div class="empty-title">Hearth is ready.</div>
-      <div class="empty-sub">Local AI that talks, listens, and actually does things on your machine.</div>
-    `;
+    title = 'Hearth is ready.';
+    sub = 'Local AI that talks, listens, and actually does things on your machine.';
   } else if (busy) {
-    wrap.innerHTML = `
-      <div class="empty-mark">H</div>
-      <div class="empty-title">Getting Hearth ready…</div>
-      <div class="empty-sub">Starting up and finding your models. Just a moment.</div>
-    `;
+    title = 'Getting Hearth ready…';
+    sub = 'Starting up and finding your models. Just a moment.';
   } else {
-    // Truly idle — nothing loaded, nothing loading. Don't pretend to be busy.
-    wrap.innerHTML = `
-      <div class="empty-mark">H</div>
-      <div class="empty-title">No model loaded</div>
-      <div class="empty-sub">Open <b>Models</b> to load one, or point Hearth at a cloud brain in <b>Settings</b>.</div>
-    `;
+    title = 'No model loaded';
+    sub = 'Open <b>Models</b> to load one, or point Hearth at a cloud brain in <b>Settings</b>.';
   }
+  return { cls, title, sub };
+}
+
+function emptyState() {
+  const wrap = document.createElement('div');
+  const st = _computeEmptyState();
+  wrap.className = st.cls;
+  wrap.innerHTML = `
+    <div class="empty-mark">H</div>
+    <div class="empty-title">${st.title}</div>
+    <div class="empty-sub">${st.sub}</div>
+  `;
   return wrap;
 }
 
@@ -6188,8 +6205,22 @@ async function send(forced = null, displayAs = null, opts = {}) {
         const r = await api('/api/llmserver/prompt-progress');
         const p = r && r.progress;
         if (p && typeof p.progress === 'number' && p.progress < 1) {
-          liveContent.innerHTML =
-            '<div class="prompt-prog">Processing prompt <b>' + Math.round(p.progress * 100) + '%</b></div>';
+          const pct = Math.round(p.progress * 100);
+          const box = liveContent.querySelector('.prompt-prog');
+          if (box) {
+            // Only swap the number span so the ppRoll keyframe replays -> the
+            // digits roll up on each change instead of re-mounting the whole line.
+            const num = box.querySelector('.pp-num');
+            if (!num || num.dataset.v !== String(pct)) {
+              const s = document.createElement('span');
+              s.className = 'pp-num'; s.dataset.v = String(pct); s.textContent = pct;
+              if (num) num.replaceWith(s); else box.appendChild(s);
+            }
+          } else {
+            liveContent.innerHTML =
+              '<div class="prompt-prog">Processing prompt <span class="pp-num" data-v="' +
+              pct + '">' + pct + '</span>%</div>';
+          }
         } else if (liveContent.querySelector('.prompt-prog')) {
           liveContent.innerHTML =
             '<div class="dot-bounce"><span></span><span></span><span></span></div>';  // prompt done -> thinking dots
@@ -6354,8 +6385,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
       if (label) label.textContent = `thought for ${seconds}s`;
     }
     activeThink._closedAt = Date.now();
+    _gotThinkingChunks = false;   // phase ended; the next reasoning phase starts fresh
   }
 
+  let _gotThinkingChunks = false;   // per reasoning phase; true once a chunk streams, so the redundant aggregate is skipped
   function handleEvent(ev) {
     if (ev.type === 'user') return;
     // Stop the prompt-% poll only when GENERATION actually starts (a token,
@@ -6419,15 +6452,16 @@ async function send(forced = null, displayAs = null, opts = {}) {
         bodySpan.textContent += ev.content || '';
         if (follow) bodySpan.scrollTop = bodySpan.scrollHeight;
       }
+      _gotThinkingChunks = true;   // so the redundant aggregate below is ignored
       assistantMsg.events.push({ kind: 'think_chunk', content: ev.content });
       return;
     }
     if (ev.type === 'thinking') {
-      // Aggregate event fired AFTER all chunks streamed. It's the final text of
-      // the LAST thinking block, so REPLACE that block's body. Reuse the last
-      // block whether it's still active OR already closed ("thought for Xs") —
-      // creating a new one when it had closed was the duplicate-thinking bug (a
-      // late aggregate spawning a second block under the first).
+      // The GUI already builds the thinking block from thinking_chunk deltas. The
+      // backend ALSO emits this full aggregate for clients that DON'T stream chunks;
+      // for us that's a duplicate, and replaying it was spawning the second block.
+      // Ignore it when we streamed chunks; only use it as a no-chunk fallback.
+      if (_gotThinkingChunks) return;
       let thinkBlock = chatBody.querySelector('.think.active')
                     || chatBody.querySelector('.think:last-of-type');
       if (!thinkBlock) {
@@ -7754,10 +7788,26 @@ async function tickLoadProgress() {
   }
 }
 function _refreshEmptyIfShown() {
-  // Repaint the empty screen when the load state changes, so it flips
-  // no-model -> warming up -> ready live instead of on the next slow poll.
+  // Flip the empty screen live as the load state changes (scan -> loading ->
+  // ready). Mutate the EXISTING node in place rather than re-rendering the whole
+  // chat: the same .empty-mark stays mounted where it stands, so the class swap
+  // lets CSS morph it (H whitens, mark pops, glow settles) instead of the block
+  // tearing down and re-fading in — no abrupt cut between states.
   const c = (typeof activeConvo === 'function') ? activeConvo() : null;
-  if (c && !(c.messages || []).length && typeof renderChat === 'function') renderChat();
+  if (!c || (c.messages || []).length) return;
+  const existing = document.querySelector('.empty');
+  if (existing) {
+    const st = _computeEmptyState();
+    if (existing.className !== st.cls) {
+      existing.className = st.cls;
+      const t = existing.querySelector('.empty-title');
+      const s = existing.querySelector('.empty-sub');
+      if (t) t.textContent = st.title;
+      if (s) s.innerHTML = st.sub;
+    }
+    return;
+  }
+  if (typeof renderChat === 'function') renderChat();
 }
 function startLoadProgress() {
   if (LOAD_PROGRESS_TIMER) return;
