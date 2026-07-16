@@ -1764,6 +1764,44 @@ def clear_pending_download() -> None:
         pass
 
 
+try:
+    import re as _re_mod
+    _PROMPT_PROG_RE = _re_mod.compile(
+        r"prompt processing,\s*n_tokens\s*=\s*(\d+),\s*progress\s*=\s*([\d.]+)")
+except Exception:
+    _PROMPT_PROG_RE = None
+
+
+def prompt_progress():
+    """Current cold-prompt processing progress from the built-in server log.
+    llama.cpp emits 'progress = 0.88' lines while it chews a big prompt before
+    the first token, so the UI can show 'Processing prompt 88%' instead of a
+    frozen-looking spinner. Returns {'progress': 0..1, 'n_tokens': int} from the
+    most recent line, or None if it's not our server / nothing processing. Best-
+    effort, never raises; only the built-in server logs this."""
+    try:
+        if _PROMPT_PROG_RE is None or not (_proc and _proc.poll() is None):
+            return None
+        p = WORKSPACE / "logs" / "llamaserver.log"
+        with open(p, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 4096))
+            tail = f.read().decode("utf-8", "replace")
+        last = None
+        for m in _PROMPT_PROG_RE.finditer(tail):
+            last = m
+        if not last:
+            return None
+        # If the prompt already finished (an 'eval time' line came after the last
+        # progress line), the bar would be stale — hide it.
+        if "eval time" in tail[last.end():]:
+            return None
+        return {"progress": float(last.group(2)), "n_tokens": int(last.group(1))}
+    except Exception:
+        return None
+
+
 def clear_server_log() -> bool:
     """Empty llamaserver.log in place. The child holds the file open, so on
     Windows we can't rename/delete it — truncate through our own append-mode
