@@ -1203,7 +1203,7 @@
     display: flex; align-items: center; gap: 10px;
   }
   .ex-config .ex-slider-row .v {
-    min-width: 44px; text-align: right;
+    min-width: 72px; text-align: right; white-space: nowrap;
     font-family: var(--mono); font-size: 12px; color: var(--fg);
   }
   .ex-config .toggle-line {
@@ -4832,28 +4832,30 @@ function renderChat() {
 }
 
 let _prevLoadedReady = false;  // tracks model-loaded transitions to refresh the empty state
+let _appBooting = true;        // true during the first drive-scan after launch; cleared once the initial model/state poll returns
 function emptyState() {
   const wrap = document.createElement('div');
   const ready = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
-  // A load is only actually happening while the progress poller is live. Without
-  // this we'd claim "warming up" while sitting idle with no model, which is a lie.
-  const loading = !ready && (typeof LOAD_PROGRESS_TIMER !== 'undefined' && LOAD_PROGRESS_TIMER != null);
-  wrap.className = 'empty' + (ready ? '' : (loading ? ' booting' : ' idle-nomodel'));
+  // "Warming up" covers the app-startup window (Hearth scanning your drives for
+  // models right after launch, GPU still "-"), plus any active model load. Both
+  // are genuinely "getting ready". Only say "no model" once we're truly idle and
+  // certain, so we never sit on a fake "warming up".
+  const busy = !ready && (_appBooting || (typeof LOAD_PROGRESS_TIMER !== 'undefined' && LOAD_PROGRESS_TIMER != null));
+  wrap.className = 'empty' + (ready ? '' : (busy ? ' booting' : ' idle-nomodel'));
   if (ready) {
     wrap.innerHTML = `
       <div class="empty-mark">H</div>
       <div class="empty-title">Hearth is ready.</div>
       <div class="empty-sub">Local AI that talks, listens, and actually does things on your machine.</div>
     `;
-  } else if (loading) {
-    // A model is genuinely loading right now.
+  } else if (busy) {
     wrap.innerHTML = `
       <div class="empty-mark">H</div>
       <div class="empty-title">Getting Hearth ready…</div>
-      <div class="empty-sub">Warming up your model. The first launch can take a minute.</div>
+      <div class="empty-sub">Starting up and finding your models. Just a moment.</div>
     `;
   } else {
-    // Idle with nothing loaded and nothing loading — don't pretend to be busy.
+    // Truly idle — nothing loaded, nothing loading. Don't pretend to be busy.
     wrap.innerHTML = `
       <div class="empty-mark">H</div>
       <div class="empty-title">No model loaded</div>
@@ -5523,7 +5525,7 @@ $('model-select').addEventListener('change', async (e) => {
       const savedCfg = (_modelsState
         && _modelsState.status && _modelsState.status.model_configs
         && _modelsState.status.model_configs[path.toLowerCase()]) || {};
-      const settingsCtx = (STATE.settings && STATE.settings.server_default_ctx) || 24576;
+      const settingsCtx = (STATE.settings && STATE.settings.server_default_ctx) || 32768;
       plannedCtx = savedCfg.ctx || settingsCtx;
       setState(`loading at ${(plannedCtx/1024).toFixed(0)}K ctx…`);
       r = await api('/api/llmserver/start', {
@@ -6348,21 +6350,18 @@ async function send(forced = null, displayAs = null, opts = {}) {
       return;
     }
     if (ev.type === 'thinking') {
-      // Aggregate event fired AFTER all chunks streamed. REPLACE the block
-      // body so the final canonical text wins over any partial stream
-      // (avoids the same paragraph rendering twice).
-      let thinkBlock = chatBody.querySelector('.think.active');
+      // Aggregate event fired AFTER all chunks streamed. It's the final text of
+      // the LAST thinking block, so REPLACE that block's body. Reuse the last
+      // block whether it's still active OR already closed ("thought for Xs") —
+      // creating a new one when it had closed was the duplicate-thinking bug (a
+      // late aggregate spawning a second block under the first).
+      let thinkBlock = chatBody.querySelector('.think.active')
+                    || chatBody.querySelector('.think:last-of-type');
       if (!thinkBlock) {
-        const last = chatBody.querySelector('.think:last-of-type');
-        if (last && !last._closedAt) {
-          thinkBlock = last;
-          thinkBlock.classList.add('active');
-        } else {
-          thinkBlock = makeThink('');
-          thinkBlock.classList.add('active');
-          thinkBlock._startedAt = Date.now();
-          insertUnderAssistant(thinkBlock, live);
-        }
+        thinkBlock = makeThink('');
+        thinkBlock.classList.add('active');
+        thinkBlock._startedAt = Date.now();
+        insertUnderAssistant(thinkBlock, live);
       }
       const bodySpan = thinkBlock.querySelector('.think-body');
       if (bodySpan) bodySpan.textContent = ev.content || '';
@@ -9133,7 +9132,7 @@ async function refreshSettings() {
     const ctxSel = $('setting-server-ctx');
     const idleSel = $('setting-server-idle');
     const portInput = $('setting-server-port');
-    if (ctxSel)  { ctxSel.value  = String(s.server_default_ctx || 24576);
+    if (ctxSel)  { ctxSel.value  = String(s.server_default_ctx || 32768);
       ctxSel.onchange  = (e) => saveSetting('server_default_ctx', parseInt(e.target.value, 10)); }
     if (idleSel) { idleSel.value = String(s.server_idle_min ?? 15);
       idleSel.onchange = (e) => saveSetting('server_idle_min', parseInt(e.target.value, 10)); }
@@ -10426,7 +10425,7 @@ function modelsCapTagsHTML(caps) {
 function modelsLoadConfigHTML(opts) {
   const o = opts || {};
   const maxCtx = o.maxCtx || 32768;
-  const defCtx = Math.min(o.defaultCtx || (STATE.settings && STATE.settings.server_default_ctx) || 24576, maxCtx);
+  const defCtx = Math.min(o.defaultCtx || (STATE.settings && STATE.settings.server_default_ctx) || 32768, maxCtx);
   const layers = o.layers || 0;                 // real transformer layer count (0 = unknown)
   const sliderMax = layers || 99;               // cap the slider at the true max, not a blind 99
   const layerNote = layers ? `This model has ${layers} layers.` : '';
@@ -10443,10 +10442,10 @@ function modelsLoadConfigHTML(opts) {
       <div class="ex-row">
         <label>Context length</label>
         <div class="ex-slider-row">
-          <input type="number" min="1024" max="${maxCtx}" step="1024" value="${defCtx}" data-cfg="ctx" />
-          <span class="v">tokens</span>
+          <input type="range" min="4096" max="${maxCtx}" step="1024" value="${defCtx}" data-cfg="ctx" />
+          <span class="v ctx-v">${defCtx.toLocaleString()}</span>
         </div>
-        <div class="ex-hint">Max prompt + reply. Bigger = more VRAM. Model max is ${maxCtx.toLocaleString()}.</div>
+        <div class="ex-hint">Max prompt + reply. Bigger = more VRAM. Model supports up to ${maxCtx.toLocaleString()} tokens.</div>
       </div>
       <div class="ex-row">
         <label>KV cache (K)</label>
@@ -10516,7 +10515,7 @@ function modelsUpdateVramEstimate(cfgEl) {
   const layers = parseInt(cfgEl.dataset.modelLayers, 10) || 0;
   if (!sizeGb) { est.textContent = ''; return; }
   const g = (sel) => cfgEl.querySelector(sel);
-  const ctx = parseInt(g('input[data-cfg="ctx"]')?.value, 10) || 24576;
+  const ctx = parseInt(g('input[data-cfg="ctx"]')?.value, 10) || 32768;
   const kK = g('select[data-cfg="cache_type_k"]')?.value || '';
   const nglRaw = parseInt(g('input[data-cfg="n_gpu_layers"]')?.value, 10);
   const kv = sizeGb * 0.06 * (ctx / 4096) * _kvFactor(kK);
@@ -10551,6 +10550,13 @@ function modelsWireLoadConfig(rootEl) {
       modelsUpdateVramEstimate(cfgEl);
     };
     slider.addEventListener('input', upd); upd();
+  }
+  // Context slider: live token readout as it drags (LM Studio style).
+  const ctxSlider = rootEl.querySelector('input[type="range"][data-cfg="ctx"]');
+  if (ctxSlider) {
+    const cv = ctxSlider.parentElement.querySelector('.ctx-v');
+    const updc = () => { if (cv) cv.textContent = (parseInt(ctxSlider.value, 10) || 0).toLocaleString(); };
+    ctxSlider.addEventListener('input', updc); updc();
   }
   // Recompute the estimate when ctx or KV-cache quant changes too.
   rootEl.querySelectorAll('input[data-cfg="ctx"], select[data-cfg="cache_type_k"], select[data-cfg="cache_type_v"]')
@@ -10817,6 +10823,9 @@ function modelsRenderMine() {
     // Known 32K+ families go to 32K; everything else floors at 24K.
     const _fn = m.filename.toLowerCase();
     const ctxGuess = /qwen[ -]?2.5|qwen3|hermes|mistral|mixtral|llama-?3|yi-|deepseek/.test(_fn) ? 32768 : 24576;
+    // Prefer the model's REAL trained context read straight from its GGUF header
+    // (e.g. 1048576 for a 1M model); the filename regex is only the fallback.
+    const ctxMax = m.ctx_max || ctxGuess;
     // One primary button only - "Use this" boots with the SAVED (or default)
     // load config. Click the row to reveal the load-config panel; the same
     // button down there says "Use with these settings" so the difference is
@@ -10841,7 +10850,7 @@ function modelsRenderMine() {
         <div class="model-expand" data-expand="${filenameId}">
           <div class="ex-head">Load configuration</div>
           <div class="ex-desc">Tune llama.cpp before booting. Saved per-model so you only set this once. "Use this" on the row always boots with these values.</div>
-          ${modelsLoadConfigHTML({ maxCtx: ctxGuess, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 24576, ctxGuess), layers: m.layers, sizeGb: m.size_gb })}
+          ${modelsLoadConfigHTML({ maxCtx: ctxMax, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 32768, ctxMax), layers: m.layers, sizeGb: m.size_gb })}
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${filenameId}">Cancel</button>
             <button class="model-action" data-apply-path="${esc(m.path)}" data-apply-id="${filenameId}">Save & use with these settings</button>
@@ -12450,6 +12459,10 @@ async function pollAnnouncements() {
   // the user was on Grok.
   await refreshSettings();
   await Promise.all([refreshModels(), refreshState(), refreshGpu()]);
+  // Initial drive-scan done — we now know the real state. Drop the startup
+  // "warming up" screen and repaint so it flips to ready / no-model.
+  _appBooting = false;
+  _refreshEmptyIfShown();
   // Pull the real context window now so the bottom-bar ctx pill + ring tooltip
   // are correct on first paint (don't wait for the first chat turn).
   refreshCtxBudget().catch(() => {});
@@ -12470,7 +12483,17 @@ async function pollAnnouncements() {
   // Keep the Models pane live while it's open (running badge, VRAM, which
   // model is loaded) - it used to only refresh on tab re-entry, so state
   // looked frozen until you navigated away and back.
-  setInterval(() => { if (STATE.view === 'models') refreshModelsView(); }, 4000);
+  setInterval(() => {
+    if (STATE.view !== 'models') return;
+    // This tick only keeps the running/loaded badge fresh. Never rebuild the
+    // pane while the user is mid-interaction, that's what was collapsing an open
+    // load-config and flickering Discover every few seconds:
+    if (_modelsState.tab === 'discover') return;               // Discover is manual + cached; don't churn it
+    if (document.querySelector('.model-row.is-open')) return;  // don't collapse an expanded config
+    const ae = document.activeElement;
+    if (ae && ae.closest && ae.closest('#view-models')) return; // don't yank focus / interrupt typing
+    refreshModelsView();
+  }, 4000);
   // Live inbound MCP clients (Claude Desktop / Cursor connecting/disconnecting).
   setInterval(() => { if (STATE.view === 'settings') refreshMcpInbound(); }, 4000);
   // Background-subagent push: poll every 3s. If a new completion shows
