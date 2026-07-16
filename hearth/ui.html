@@ -358,12 +358,45 @@
     animation: emptyFade .5s ease both;
   }
   @keyframes emptyFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  /* While no model is loaded (booting / first launch), the mark breathes so the
-     screen reads as "working," not "ready but broken." */
-  .empty.booting .empty-mark { animation: bootPulse 1.7s ease-in-out infinite; }
-  @keyframes bootPulse {
-    0%, 100% { opacity: .55; transform: scale(.96); box-shadow: 0 0 18px var(--accent-line); }
-    50%      { opacity: 1;   transform: scale(1.03); box-shadow: 0 0 40px var(--accent-line); }
+  /* Warming up a model: the mark sits in a soft churning violet aura (the same
+     "cooking" feel as the image-gen placeholder), a light sweeps across its face,
+     and it breathes a gentle glow. Alive and calm, never a bounce. */
+  .empty.booting .empty-mark {
+    position: relative;
+    overflow: visible;
+    animation: bootGlow 3s ease-in-out infinite;
+  }
+  @keyframes bootGlow {
+    0%, 100% { box-shadow: 0 0 20px rgba(139,92,246,.30), 0 0 44px rgba(139,92,246,.12); }
+    50%      { box-shadow: 0 0 30px rgba(167,139,250,.50), 0 0 70px rgba(139,92,246,.26); }
+  }
+  .empty.booting .empty-mark::before {   /* churning violet aura behind the mark */
+    content: ''; position: absolute; inset: -22px; z-index: -1; border-radius: 50%;
+    background:
+      radial-gradient(circle at 30% 30%, rgba(167,139,250,.55) 0%, transparent 55%),
+      radial-gradient(circle at 72% 62%, rgba(139,92,246,.50) 0%, transparent 52%),
+      radial-gradient(circle at 55% 82%, rgba(196,181,253,.40) 0%, transparent 48%);
+    filter: blur(12px);
+    animation: bootAura 6s ease-in-out infinite alternate;
+  }
+  @keyframes bootAura {
+    0%   { transform: rotate(0deg)  scale(1);    opacity: .75; }
+    50%  { opacity: 1; }
+    100% { transform: rotate(22deg) scale(1.12); opacity: .85; }
+  }
+  .empty.booting .empty-mark::after {    /* light sweep across the mark face */
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    background: linear-gradient(115deg, transparent 34%, rgba(255,255,255,.5) 50%, transparent 66%);
+    background-size: 220% 100%;
+    animation: bootShimmer 2s cubic-bezier(.4,0,.2,1) infinite;
+    mix-blend-mode: screen;
+  }
+  @keyframes bootShimmer { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+  /* No model loaded and nothing loading: calm and honest, no shimmer. */
+  .empty.idle-nomodel .empty-mark { animation: idleBreath 5s ease-in-out infinite; }
+  @keyframes idleBreath {
+    0%, 100% { box-shadow: 0 0 18px var(--accent-line); opacity: .85; }
+    50%      { box-shadow: 0 0 28px var(--accent-line); opacity: 1; }
   }
   .empty-mark {
     width: 56px; height: 56px;
@@ -4077,15 +4110,17 @@ async function api(path, opts = {}) {
 }
 
 const _toastLast = {};
-function toast(title, body = '', kind = 'ok', ms = 3500) {
-  if (STATE.settings && STATE.settings.mute_toasts) return;  // muted in Settings -> Behavior
+function toast(title, body = '', kind = 'ok', ms = 3500, force = false) {
+  // force = a signed admin broadcast; it overrides Mute-all (rare + trusted, the
+  // one toast the user should never miss). Normal status toasts still honor mute.
+  if (!force && STATE.settings && STATE.settings.mute_toasts) return;  // muted in Settings -> Behavior
   // Throttle identical toasts. Background pollers (model status every 9s, server
   // checks) could re-fire the same notice — e.g. "no model loaded" — on every
   // tick. Suppress a repeat within the cooldown and slide the window forward so
   // continuous spam stays hidden until it actually stops.
   const key = kind + '|' + title + '|' + body;
   const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-  if (_toastLast[key] && (now - _toastLast[key]) < 10000) { _toastLast[key] = now; return; }
+  if (!force && _toastLast[key] && (now - _toastLast[key]) < 10000) { _toastLast[key] = now; return; }
   _toastLast[key] = now;
   const t = document.createElement('div');
   t.className = `toast ${kind}`;
@@ -4800,20 +4835,29 @@ let _prevLoadedReady = false;  // tracks model-loaded transitions to refresh the
 function emptyState() {
   const wrap = document.createElement('div');
   const ready = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
-  wrap.className = 'empty' + (ready ? '' : ' booting');
+  // A load is only actually happening while the progress poller is live. Without
+  // this we'd claim "warming up" while sitting idle with no model, which is a lie.
+  const loading = !ready && (typeof LOAD_PROGRESS_TIMER !== 'undefined' && LOAD_PROGRESS_TIMER != null);
+  wrap.className = 'empty' + (ready ? '' : (loading ? ' booting' : ' idle-nomodel'));
   if (ready) {
     wrap.innerHTML = `
       <div class="empty-mark">H</div>
       <div class="empty-title">Hearth is ready.</div>
       <div class="empty-sub">Local AI that talks, listens, and actually does things on your machine.</div>
     `;
-  } else {
-    // No model loaded yet — the app is still booting one (first launch can take a
-    // minute) or the user ejected. Say so honestly instead of a fake "ready".
+  } else if (loading) {
+    // A model is genuinely loading right now.
     wrap.innerHTML = `
       <div class="empty-mark">H</div>
       <div class="empty-title">Getting Hearth ready…</div>
-      <div class="empty-sub">Warming up your local model — the first launch can take a minute. Still here after that? Open <b>Models</b> to pick one.</div>
+      <div class="empty-sub">Warming up your model. The first launch can take a minute.</div>
+    `;
+  } else {
+    // Idle with nothing loaded and nothing loading — don't pretend to be busy.
+    wrap.innerHTML = `
+      <div class="empty-mark">H</div>
+      <div class="empty-title">No model loaded</div>
+      <div class="empty-sub">Open <b>Models</b> to load one, or point Hearth at a cloud brain in <b>Settings</b>.</div>
     `;
   }
   return wrap;
@@ -7634,13 +7678,20 @@ async function tickLoadProgress() {
     // Network blip - keep ticking, the next poll usually recovers.
   }
 }
+function _refreshEmptyIfShown() {
+  // Repaint the empty screen when the load state changes, so it flips
+  // no-model -> warming up -> ready live instead of on the next slow poll.
+  const c = (typeof activeConvo === 'function') ? activeConvo() : null;
+  if (c && !(c.messages || []).length && typeof renderChat === 'function') renderChat();
+}
 function startLoadProgress() {
   if (LOAD_PROGRESS_TIMER) return;
   tickLoadProgress();
   LOAD_PROGRESS_TIMER = setInterval(tickLoadProgress, 500);
+  _refreshEmptyIfShown();
 }
 function stopLoadProgress() {
-  if (LOAD_PROGRESS_TIMER) { clearInterval(LOAD_PROGRESS_TIMER); LOAD_PROGRESS_TIMER = null; }
+  if (LOAD_PROGRESS_TIMER) { clearInterval(LOAD_PROGRESS_TIMER); LOAD_PROGRESS_TIMER = null; _refreshEmptyIfShown(); }
 }
 
 // ============================================================
