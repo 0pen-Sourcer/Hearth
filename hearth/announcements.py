@@ -64,7 +64,7 @@ def _fetch(url: str, timeout: float = 6.0):
 
 
 # ed25519 public key; private key never in repo. Empty = no trusted feed.
-ANNOUNCE_PUBKEY_B64 = ""
+ANNOUNCE_PUBKEY_B64 = "QXGmqitjTGfF1y6quU4Y/VrpJYCMqI7+GEZXTQzFxb0="
 
 
 def _canonical(entry: dict) -> bytes:
