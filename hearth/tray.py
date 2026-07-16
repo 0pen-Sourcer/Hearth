@@ -229,6 +229,25 @@ def main(argv: Optional[list] = None) -> int:
     wake_listener = None
     wake_state = {"on": False}
 
+    def _load_wake_pref():
+        # Did the user leave the tray wake word ON last time? It should survive a
+        # restart so they never have to re-arm it (that re-arming was the wedge-
+        # killer). Persisted in ~/Jarvis/settings.json as tray_wake_on.
+        try:
+            from .web import _load_settings
+            return bool(_load_settings().get("tray_wake_on"))
+        except Exception:
+            return False
+
+    def _save_wake_pref(on):
+        try:
+            from .web import _load_settings, _save_settings
+            s = _load_settings()
+            s["tray_wake_on"] = bool(on)
+            _save_settings(s)
+        except Exception:
+            pass
+
     def _start_wake():
         nonlocal wake_listener
         try:
@@ -280,6 +299,9 @@ def main(argv: Optional[list] = None) -> int:
                     icon.notify("Wake word needs faster-whisper + a working mic", "Wake unavailable")
                 except Exception:
                     pass
+        # Persist ONLY on the explicit user toggle — not in _stop_wake(), which
+        # also runs on Quit; otherwise quitting would silently disarm it.
+        _save_wake_pref(wake_state["on"])
         icon.update_menu()
 
     def on_quit(icon, item):
@@ -332,7 +354,7 @@ def main(argv: Optional[list] = None) -> int:
     # who double-click Hearth.exe get a window, not just a tray icon).
     if args.open or getattr(sys, "frozen", False):
         threading.Timer(0.5, _open_desktop_window).start()
-    if args.wake:
+    if args.wake or _load_wake_pref():
         threading.Timer(1.0, _start_wake).start()
 
     # Signal handlers — Ctrl-C from the terminal MUST also free port 1234.
