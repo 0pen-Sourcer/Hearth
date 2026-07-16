@@ -2322,15 +2322,23 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import llmserver
             body = self._read_json()
             model_path = (body.get("model_path") or "").strip()
-            # Body wins (Models tab can override per-load); else user's saved
-            # Settings → Default context window; else 24K as final fallback.
-            ctx        = int(body.get("ctx") or _load_settings().get("server_default_ctx") or 24576)
-            n_gpu      = int(body.get("n_gpu_layers") if body.get("n_gpu_layers") is not None else -1)
-            n_threads  = body.get("n_threads")
+            # Start from the saved per-model config the user tuned last time, so a
+            # plain "Use this" honors their saved 32/32 / context / quant instead of
+            # silently dropping to Auto. The request body still wins per field (the
+            # Models tab expansion can override any of these for this one load);
+            # then Settings → Default context window; then 32K as the final floor.
+            saved = llmserver.get_model_config(model_path) or {}
+            def _cfg(k, d=None):
+                v = body.get(k)
+                return v if v is not None else saved.get(k, d)
+            ctx        = int(_cfg("ctx") or _load_settings().get("server_default_ctx") or 32768)
+            _ng        = _cfg("n_gpu_layers", -1)
+            n_gpu      = int(_ng if _ng is not None else -1)
+            n_threads  = _cfg("n_threads")
             n_threads  = int(n_threads) if n_threads not in (None, "", "auto") else None
-            ck         = (body.get("cache_type_k") or "").strip() or None
-            cv         = (body.get("cache_type_v") or "").strip() or None
-            flash      = bool(body.get("flash_attn", True))
+            ck         = (_cfg("cache_type_k") or "").strip() or None
+            cv         = (_cfg("cache_type_v") or "").strip() or None
+            flash      = bool(_cfg("flash_attn", True))
             # `force=true` from the GUI bypasses the VRAM guardrail — opt-in
             # only, after the user clicks "Force load anyway" in the modal.
             # llama.cpp will spill weights to system RAM (slow but boots).

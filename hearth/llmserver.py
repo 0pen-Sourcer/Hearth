@@ -1010,9 +1010,11 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                           f"(weights {sz:.1f}GB, KV {needed-sz:.1f}GB, free {free_vram:.1f}GB)",
                           flush=True)
                     vram_warning = (
-                        f"Tight VRAM (~{free_vram:.1f} GB free): offloading {est}{_tot} "
-                        f"layers to GPU, the rest to CPU — loads fine, a bit slower. "
-                        f"Close other GPU apps or lower context for full-GPU speed."
+                        f"Auto-fit: kept {est}{_tot} layers on your GPU and put the rest on "
+                        f"CPU so it wouldn't overflow VRAM into slow shared RAM (~{free_vram:.1f} "
+                        f"GB free). Loads fine, just a little slower. Want all {layers or est} on "
+                        f"the GPU? Set the layers yourself in the model's config (it's respected "
+                        f"as-is), or close other GPU apps and reload."
                     )
                 # est == -1 → fits fully, leave n_gpu_layers as -1 (offload all)
             elif n_gpu_layers > 0 and free_vram is not None:
