@@ -1137,22 +1137,24 @@ async def run_once(
                             )
                         else:
                             tool_result = (
-                                f"This tool call was NOT executed - the user "
-                                f"declined it. NOTHING ran. No file was created, "
-                                f"written, moved, or changed. Do NOT claim it "
-                                f"succeeded or that any file/output exists. Move on "
-                                f"or pick a non-risky alternative. Don't retry the "
-                                f"same call."
+                                f"The user DECLINED this action - it did NOT run, "
+                                f"nothing was created, written, moved, or changed. A "
+                                f"decline means the user is steering and likely wants "
+                                f"something different. STOP this line of action now: "
+                                f"do NOT retry it and do NOT try a workaround. Give a "
+                                f"brief reply that you've stopped, and ask them what "
+                                f"they'd like instead."
                             )
                             if _deny_reason:
                                 tool_result += (
-                                    f"\n\nThe user's words when they declined: "
-                                    f"\"{_deny_reason}\". Treat that as a direct "
-                                    f"instruction — usually it means STOP this line "
-                                    f"of action entirely. Acknowledge that you "
-                                    f"stopped, do what they asked instead, and do "
-                                    f"NOT retry this call."
+                                    f"\n\nWhat they said when they declined: "
+                                    f"\"{_deny_reason}\". Follow that as a direct "
+                                    f"instruction."
                                 )
+                            # A decline is the user taking the wheel — end the tool
+                            # loop now so the model asks, instead of grinding through
+                            # retries or workarounds they never asked for.
+                            _force_answer = True
                         # Run the decline through the loop guard so a
                         # second identical retry trips FAILURE_WARN and
                         # a fourth trips FAILURE_STOP. Without this the
