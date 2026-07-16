@@ -177,6 +177,17 @@ TOP_PICKS: List[Dict[str, Any]] = [
         "tags": ["recommended", "tools"],
     },
     {
+        "id": "qwythos-9b-claude-mythos-q4_k_m",
+        "name": "Qwythos 9B Claude-Mythos (Q4_K_M)",
+        "size_gb": 5.3,
+        "vram_min_gb": 8,
+        "context": 32768,
+        "hf_repo": "empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF",
+        "hf_file": "Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf",
+        "description": "Qwen3.5-9B base with a 1M context. Sharp reasoning and decisive tool-use on multi-step tasks. The default pick on 8 GB.",
+        "tags": ["recommended", "reasoning", "tools"],
+    },
+    {
         "id": "harmonic-hermes-9b-q4_k_m",
         "name": "Harmonic Hermes 9B (Q4_K_M)",
         "size_gb": 5.3,
@@ -184,8 +195,8 @@ TOP_PICKS: List[Dict[str, Any]] = [
         "context": 32768,
         "hf_repo": "DJLougen/Harmonic-Hermes-9B-GGUF",
         "hf_file": "Qwen3.5-9B-Harmonic.Q4_K_M.gguf",
-        "description": "Qwen3.5 base + Hermes finetune. Strong reasoning + tool-use. Fits 10 GB without spilling.",
-        "tags": ["recommended", "reasoning", "tools"],
+        "description": "Qwen3.5 base + Hermes finetune. Also strong on reasoning + tool-use. A solid alternative at this tier.",
+        "tags": ["reasoning", "tools"],
     },
     {
         "id": "gemma-4-e4b-it-q4_k_m",
@@ -305,10 +316,10 @@ def recommend_pick_for_this_pc() -> Dict[str, Any]:
     Returns the pick dict with an extra 'reason' string explaining the choice.
 
     Logic (curated suggestion; a user's own downloaded model always wins):
-    - 8 GB+ (the common case): Harmonic Hermes 9B — Qwen3.5-9B base + Hermes
-      finetune. Modern architecture, strong + fast tool-use, not reasoning-forced,
-      so a good first-run impression. (Qwen 2.5 is deliberately NOT recommended at
-      this tier — it's weak at tool-calling in a tool-heavy agent loop.)
+    - 8 GB+ (the common case): Qwythos 9B — Qwen3.5-9B base with a 1M context.
+      Modern architecture, strong reasoning + decisive tool-use. (Qwen 2.5 is
+      deliberately NOT recommended at this tier — it's weak at tool-calling in a
+      tool-heavy agent loop.)
     - 12 GB+ / 24 GB+: larger Qwen picks (more headroom, more context).
     - <8 GB / CPU-only: the smaller picks, which still tool-call acceptably.
     """
@@ -322,8 +333,8 @@ def recommend_pick_for_this_pc() -> Dict[str, Any]:
         pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-14b-instruct-q4_k_m")
         reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 2.5 14B is the sweet spot at this tier."
     elif vram is not None and vram >= 8:
-        pick = next(p for p in TOP_PICKS if p["id"] == "harmonic-hermes-9b-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Harmonic Hermes 9B (Qwen3.5 base) is the sweet spot for reasoning + tool use at this tier."
+        pick = next(p for p in TOP_PICKS if p["id"] == "qwythos-9b-claude-mythos-q4_k_m")
+        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwythos 9B (Qwen3.5 base, 1M context) is the sweet spot for reasoning + tool use at this tier."
     elif vram is not None and vram >= 6:
         pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-7b-instruct-q4_k_m")
         reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 7B Q4 fits and gives the best tool-use at this tier."
