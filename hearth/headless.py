@@ -231,11 +231,10 @@ def resolve_context_tokens(model_id: str) -> tuple:
         elif "grok-2" in m: known = 131_072
         else: known = 131_072  # safe Grok default for unknown ids
     elif "generativelanguage.googleapis" in base:
-        # Gemini 1.5/2.0/2.5/3.x = 1M+, older = 32K
-        if any(t in m for t in ("1.5", "2.0", "2.5", "3.0", "3.1")):
-            known = 1_000_000
-        else:
-            known = 32_768
+        # Every modern Gemini (1.5 / 2.x / 3.x, flash and pro) is 1M+. Only the
+        # long-retired gemini-1.0 / bare gemini-pro were 32K. Match on "is it the
+        # old one" so a fresh version string (e.g. 3.5) never falls back to 32K.
+        known = 32_768 if ("1.0" in m or m in ("gemini-pro", "gemini-pro-vision")) else 1_000_000
     elif "api.openai.com" in base:
         # GPT-4.1 = 1M, GPT-4o / o3 / o1 = 128K
         if "gpt-4.1" in m: known = 1_000_000
