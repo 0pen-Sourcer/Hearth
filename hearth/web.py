@@ -1535,6 +1535,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             # "loading_weights 45%" instead of an indeterminate spinner.
             from . import llmserver
             return self._send_json(200, llmserver.get_load_progress())
+        if path == "/api/llmserver/prompt-progress":
+            # Cold-prompt processing progress for the built-in server, polled by
+            # the chat UI during the wait before the first token so it can show
+            # "Processing prompt 88%" instead of a frozen-looking spinner.
+            from . import llmserver
+            return self._send_json(200, {"progress": llmserver.prompt_progress()})
         if path == "/api/llmserver/log":
             log_path = os.path.join(WORKSPACE, "logs", "llamaserver.log")
             try:

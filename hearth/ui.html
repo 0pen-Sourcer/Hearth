@@ -2251,6 +2251,14 @@
 
   /* Subtle 3-dot bounce while the model is generating. Calm, not eye-sore.
      Sits in the empty assistant bubble; overwritten on first content chunk. */
+  .prompt-prog {
+    padding: 8px 2px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--fg-dim);
+    letter-spacing: .2px;
+  }
+  .prompt-prog b { color: var(--accent-2); font-weight: 600; }
   .dot-bounce {
     display: inline-flex;
     gap: 4px;
@@ -6159,6 +6167,30 @@ async function send(forced = null, displayAs = null, opts = {}) {
     liveContent.innerHTML =
       '<div class="dot-bounce"><span></span><span></span><span></span></div>';
   }
+  // A local model can chew a big cold prompt for 10-15s before the first token.
+  // Poll the built-in server's real processing progress and show "Processing
+  // prompt X%" so it never looks frozen (LM Studio does the same). Cleared the
+  // moment any token or reasoning arrives (_clearPromptPoll, called below).
+  let _promptPoll = null;
+  const _clearPromptPoll = () => { if (_promptPoll) { clearInterval(_promptPoll); _promptPoll = null; } };
+  if (liveContent) {
+    _promptPoll = setInterval(async () => {
+      if (!liveContent.querySelector('.dot-bounce') && !liveContent.querySelector('.prompt-prog')) {
+        _clearPromptPoll(); return;   // real content took over the bubble
+      }
+      try {
+        const r = await api('/api/llmserver/prompt-progress');
+        const p = r && r.progress;
+        if (p && typeof p.progress === 'number' && p.progress < 1) {
+          liveContent.innerHTML =
+            '<div class="prompt-prog">Processing prompt <b>' + Math.round(p.progress * 100) + '%</b></div>';
+        } else if (liveContent.querySelector('.prompt-prog')) {
+          liveContent.innerHTML =
+            '<div class="dot-bounce"><span></span><span></span><span></span></div>';  // prompt done -> thinking dots
+        }
+      } catch {}
+    }, 450);
+  }
 
   input.value = ''; input.style.height = '42px';
   // Wipe the attachment tray - the paths are now woven into the message.
@@ -6256,6 +6288,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       chatBody.appendChild(makeMeta(`network error: ${e.message}`, 'err'));
     }
   } finally {
+    _clearPromptPoll();  // stop the prompt-% poll if the turn ended before any event
     STATE.streaming = false; setSendStop(false); currentAbort = null;
     // If the user typed a "do this instead" during a permission prompt, fire it
     // now that the current turn is done. (No await - we want the finally to finish.)
@@ -6319,6 +6352,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
   function handleEvent(ev) {
     if (ev.type === 'user') return;
+    _clearPromptPoll();  // any real event = generation started; stop the prompt-% poll
 
     if (ev.type === 'slow_tool') {
       // Watchdog fires this when a tool takes >30s / >90s. Tell the user
