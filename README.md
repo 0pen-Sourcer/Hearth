@@ -28,6 +28,10 @@
   <em>The framework is <strong>Hearth</strong>. The assistant it ships with is named <strong>JARVIS</strong>, rename it to anything. The resident, and the house.</em>
 </p>
 
+<p align="center">
+  <img src="docs/media/hero.gif" alt="Hearth creating a folder, writing a file, and opening it in Notepad from a single request" width="820">
+</p>
+
 ---
 
 ## Why Hearth exists
