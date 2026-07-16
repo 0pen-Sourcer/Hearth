@@ -71,6 +71,34 @@ if not _WIN:
         _PYN = False
 
 
+# Optional agent-cursor overlay: a distinct marker that rides with Hearth's
+# cursor so its actions read apart from the user's. Fully guarded — a missing or
+# failed overlay just means no marker, never a broken click.
+try:
+    import threading as _threading
+    from . import agent_cursor as _agc
+except Exception:
+    _agc, _threading = None, None
+_agc_timer = None
+
+
+def _agc_arm_hide(x, y):
+    """Show the marker at (x, y) and (re)schedule it to fade ~1.8s after the last
+    move, so consecutive actions keep it lit and it clears once Hearth is idle."""
+    global _agc_timer
+    if _agc is None or _threading is None:
+        return
+    try:
+        _agc.show(x, y)
+        if _agc_timer:
+            _agc_timer.cancel()
+        _agc_timer = _threading.Timer(1.8, _agc.hide)
+        _agc_timer.daemon = True
+        _agc_timer.start()
+    except Exception:
+        pass
+
+
 def supported() -> bool:
     return _WIN or _PYN
 
@@ -113,11 +141,17 @@ def move(x: int, y: int, duration: float = 0.35):
             _u.SetCursorPos(nx, ny)
         else:
             _pyn_m.position = (nx, ny)
+        if _agc is not None:
+            try:
+                _agc.show(nx, ny)
+            except Exception:
+                pass
         time.sleep(0.012)
     if _WIN:
         _u.SetCursorPos(x, y)
     else:
         _pyn_m.position = (x, y)
+    _agc_arm_hide(x, y)
     return (x, y)
 
 
