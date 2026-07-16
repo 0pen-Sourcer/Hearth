@@ -7663,6 +7663,10 @@ async function tickLoadProgress() {
     }
     if (r.phase === 'ready') {
       showLoadProgress(r.phase, 100, r.marker);
+      // Model just landed — refresh state now so STATE.loadedModel updates and the
+      // empty screen flips to "Hearth is ready" on its own (no click needed); the
+      // empty's fade animation makes the swap smooth instead of an abrupt cut.
+      if (typeof refreshModels === 'function') refreshModels();
       // Brief beat at 100% so the user sees it land before we hide.
       setTimeout(() => { hideLoadProgress(); stopLoadProgress(); }, 900);
       return;
