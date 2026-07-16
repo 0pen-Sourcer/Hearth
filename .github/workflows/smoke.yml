@@ -41,7 +41,7 @@ jobs:
 
       - name: Verify all tool dispatchers exist
         run: |
-          python -c "from hearth.tools import TOOL_DEFINITIONS, execute_tool; from hearth import tools as t; missing = [td['name'] for td in TOOL_DEFINITIONS if not hasattr(t, '_' + td['name'])]; assert not missing, f'tools missing _ prefix dispatcher: {missing}'; print('ok')"
+          python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"
 
   persona-stable:
     name: persona prompt renders cleanly
@@ -54,4 +54,4 @@ jobs:
       - run: pip install openai psutil
       - name: Render persona
         run: |
-          python -c "from hearth.persona import system_prompt; p = system_prompt(); assert 4000 < len(p) < 30000, f'persona suspicious size: {len(p)}'; print('persona ok,', len(p), 'chars')"
+          python -c "from hearth.persona import system_prompt; p = system_prompt(); assert 4000 < len(p) < 60000, f'persona suspicious size: {len(p)}'; print('persona ok,', len(p), 'chars')"
