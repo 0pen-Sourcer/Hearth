@@ -31,7 +31,7 @@ So you ran a model locally. Now what? Most "local AI" projects are one of three 
 
 1. **A chat UI** around a model (LibreChat, Open WebUI, big-AGI). Beautiful, but it's just chat. It can't open your files or *do* anything on your machine.
 2. **A coding agent** (Aider, Cline, Continue, Open Interpreter). Powerful, but scoped to "write code in this folder," not "be the AI on my PC."
-3. **A cloud-locked assistant** (ChatGPT, Claude, Pi). Great, until they change the rules, deprecate your model, or you go offline.
+3. **A cloud-locked assistant** (ChatGPT, Claude, Gemini). Great, until they change the rules, deprecate your model, or you go offline.
 
 **Hearth is the fourth thing.** A local-first operator that runs on the model you already have, controls your actual Windows PC, files, shell, apps, browser, the desktop itself (clicks and types), screenshots, voice, talks back, listens, and remembers you across sessions. Nothing ever leaves your machine except a web search, and only when you ask.
 
