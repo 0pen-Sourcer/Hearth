@@ -14,8 +14,9 @@ cd hearth
 # 2. install (venv, deps, voice models)
 .\install.ps1
 
-# 3. install LM Studio (https://lmstudio.ai), open it, click "Discover",
-#    grab Harmonic-Hermes-9B (Q4_K_M), then click "Local Server → Start"
+# 3. or use LM Studio (https://lmstudio.ai): open it, click "Discover",
+#    grab Qwythos-9B Claude-Mythos (Q4_K_M), then "Local Server -> Start".
+#    (Hearth can also download + serve it itself from the Models tab.)
 
 # 4. create the Desktop + Startup-folder shortcuts (one-shot, optional)
 .\.venv\Scripts\python.exe -m hearth.install_shortcuts
@@ -260,12 +261,12 @@ Tested on 8GB VRAM:
 
 | Model | Pros | Cons |
 |---|---|---|
-| **Harmonic-Hermes-9B Q4_K_M** | Best tool adherence, fast, decisive on multi-step chains | Slightly more shell drift than Qwen |
+| **Qwythos-9B Claude-Mythos Q4_K_M** | Best tool adherence, decisive on multi-step chains, 1M context | Slightly more shell drift than Qwen |
+| Harmonic-Hermes-9B Q4_K_M | Also strong tool use, fast | A touch behind Qwythos on adherence |
 | Qwen 2.5 7B Instruct Q4_K_M | Cleaner memory tool use | ~30% slower overall |
-| Qwen 3.5 9B Q4_K_M | Vision capable | Slightly less reliable on chains |
 | ❌ RNJ-1 8B / any Gemma 3 | — | Emits tool calls as raw text inside the reasoning channel, NOT via OpenAI structured `tool_calls` field. Broken for Hearth until we ship an alt-format parser. |
 
-**For the launch demo:** Hermes 9B. Period.
+**Best local pick:** Qwythos 9B (Qwen3.5 base, distilled further for tool-calling). Harmonic Hermes is a solid alternative.
 
 **Wanting to try cloud?** Set `LOCAL_API_BASE=https://generativelanguage.googleapis.com/v1beta/openai` + your Gemini API key — Gemini has an OpenAI-compat endpoint that works with Hearth. But this defeats the "local-first" pitch; do it just to see the ceiling.
 
