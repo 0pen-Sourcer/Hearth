@@ -1,11 +1,11 @@
-<h1 align="center">Hearth 🔥</h1>
+<h1 align="center">Hearth</h1>
 
 <p align="center">
   <strong>The local AI that actually runs your computer.</strong>
 </p>
 
 <p align="center">
-  It talks. It listens. It opens your apps, reads and writes your files, drives a real browser you can watch, and remembers you — all on your own machine.<br>
+  It talks. It listens. It opens your apps, reads and writes your files, drives a real browser you can watch, and remembers you, all on your own machine.<br>
   No account. No cloud required. No telemetry.
 </p>
 
@@ -18,30 +18,30 @@
 </p>
 
 <p align="center">
-  <em>The framework is <strong>Hearth</strong>. The assistant it ships with is named <strong>JARVIS</strong> — rename it to anything. The resident, and the house.</em>
+  <em>The framework is <strong>Hearth</strong>. The assistant it ships with is named <strong>JARVIS</strong>, rename it to anything. The resident, and the house.</em>
 </p>
 
 ---
 
 ## Why Hearth exists
 
-The smartest AI in the world lives in someone else's cloud. It's brilliant — and it can't touch your computer, it forgets you the moment the tab closes, and the meter never stops.
+The smartest AI in the world lives in someone else's cloud. It's brilliant, and it can't touch your computer, it forgets you the moment the tab closes, and the meter never stops.
 
 So you ran a model locally. Now what? Most "local AI" projects are one of three things:
 
-1. **A chat UI** around a model (LibreChat, Open WebUI, big-AGI). Beautiful — but it's just chat. It can't open your files or *do* anything on your machine.
-2. **A coding agent** (Aider, Cline, Continue, Open Interpreter). Powerful — but scoped to "write code in this folder," not "be the AI on my PC."
+1. **A chat UI** around a model (LibreChat, Open WebUI, big-AGI). Beautiful, but it's just chat. It can't open your files or *do* anything on your machine.
+2. **A coding agent** (Aider, Cline, Continue, Open Interpreter). Powerful, but scoped to "write code in this folder," not "be the AI on my PC."
 3. **A cloud-locked assistant** (ChatGPT, Claude, Pi). Great, until they change the rules, deprecate your model, or you go offline.
 
-**Hearth is the fourth thing.** A local-first operator that runs on the model you already have, controls your actual Windows PC — files, shell, apps, browser, the desktop itself (clicks and types), screenshots, voice — talks back, listens, and remembers you across sessions. Nothing ever leaves your machine except a web search, and only when you ask.
+**Hearth is the fourth thing.** A local-first operator that runs on the model you already have, controls your actual Windows PC, files, shell, apps, browser, the desktop itself (clicks and types), screenshots, voice, talks back, listens, and remembers you across sessions. Nothing ever leaves your machine except a web search, and only when you ask.
 
-And it keeps growing: **skills are shareable.** A skill is a folder that teaches Hearth a workflow ("clean up my Downloads", "turn this folder of photos into a contact sheet"). Installing one someone else wrote is a single line — `/skill install someone/their-repo` — and writing your own is one command.
+And it keeps growing: **skills are shareable.** A skill is a folder that teaches Hearth a workflow ("clean up my Downloads", "turn this folder of photos into a contact sheet"). Installing one someone else wrote is a single line, `/skill install someone/their-repo`, and writing your own is one command.
 
 Reach it however you work: a terminal **CLI**, a desktop/web **app**, a headless **bridge**, or an **MCP server**.
 
-> **v0.7-preview** — the CLI and desktop app are the daily drivers. Voice and the bundled llama.cpp server work but are preview-quality (see notes below). Windows is the supported platform; macOS/Linux run from source with most tools working.
+> **v0.7-preview**, the CLI and desktop app are the daily drivers. Voice and the bundled llama.cpp server work but are preview-quality (see notes below). Windows is the supported platform; macOS/Linux run from source with most tools working.
 
-Where it's headed — grounded computer-use (it watches the screen, points, and acts), a guided "walk me through this" mode, and Mac/Linux — is in the **[Roadmap](ROADMAP.md)**.
+Where it's headed, grounded computer-use (it watches the screen, points, and acts), a guided "walk me through this" mode, and Mac/Linux, is in the **[Roadmap](ROADMAP.md)**.
 
 ---
 
@@ -62,13 +62,13 @@ cd hearth
 .\hearth.bat
 ```
 
-The installer is idempotent (safe to re-run) and has switches to skip optional pieces — voice, STT, MCP SDK, file readers, desktop window, browser control. Run `Get-Help .\install.ps1 -Detailed` for the full list.
+The installer is idempotent (safe to re-run) and has switches to skip optional pieces, voice, STT, MCP SDK, file readers, desktop window, browser control. Run `Get-Help .\install.ps1 -Detailed` for the full list.
 
 On first launch, a short onboarding flow asks which model brain to use, sets up voice, and personalizes the assistant.
 
 ### Pointing it at a model
 
-Hearth auto-detects a running **LM Studio** (port 1234), **Ollama** (11434), or **llama.cpp** server (8080) at boot — no configuration needed. To use something else, set `LOCAL_API_BASE` to any OpenAI-compatible endpoint.
+Hearth auto-detects a running **LM Studio** (port 1234), **Ollama** (11434), or **llama.cpp** server (8080) at boot, no configuration needed. To use something else, set `LOCAL_API_BASE` to any OpenAI-compatible endpoint.
 
 A cloud key is optional. In the desktop app's Settings (or via env vars), you can point the chat brain at Gemini, OpenAI, Grok, or OpenRouter and switch back to local at any time without restarting. Files, voice, and memory stay local regardless; only the prompt goes to the provider you choose.
 
@@ -76,11 +76,11 @@ A cloud key is optional. In the desktop app's Settings (or via env vars), you ca
 
 Any ~7B-or-larger model with OpenAI-style tool-calling works. On ~8GB VRAM, tool adherence is best on recent tool-trained models. Small local models handle everyday tasks well (open this, read that, remember this) but can fumble long multi-step chains; a built-in loop guard catches and breaks those spirals. For heavier reasoning (deep web research, multi-page browser sessions) a larger or cloud model helps.
 
-Hearth ships a tool-call parser that recognizes the formats emitted by Gemma, Hermes, Qwen 2.5/3, Llama 3.x, Mistral, Phi, Granite, and Cohere Command-R, plus a generic `<function=NAME>` form — so models whose tool calls aren't natively parsed by the server still work.
+Hearth ships a tool-call parser that recognizes the formats emitted by Gemma, Hermes, Qwen 2.5/3, Llama 3.x, Mistral, Phi, Granite, and Cohere Command-R, plus a generic `<function=NAME>` form, so models whose tool calls aren't natively parsed by the server still work.
 
 ### macOS / Linux
 
-Hearth runs from source on macOS and Linux — the CLI and web UI work, and most tools (shell, files, screenshots, app launching, window focus, clipboard, web search, reminders, notifications) have native POSIX paths. The CLI, web UI, tools, and skills are verified running on Linux (Mint 22 / Ubuntu 24.04 base); macOS shares the same POSIX code paths but has had less testing. The one-click installer and packaged build are Windows-only for now; everywhere else you clone and run with Python. See **[docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md)** for the exact steps. PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Hearth runs from source on macOS and Linux. The CLI and web UI work, and most tools (shell, files, screenshots, app launching, window focus, clipboard, web search, reminders, notifications) have native POSIX paths. That said, both get far less mileage than Windows, so treat them as lightly tested and expect rough edges. The desktop-control layer, the one-click installer, and the packaged build are Windows-only for now; everywhere else you clone and run with Python. See **[docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md)** for the exact steps, and [CONTRIBUTING.md](CONTRIBUTING.md) if you want to help port the rest.
 
 ---
 
@@ -97,7 +97,7 @@ Hearth runs from source on macOS and Linux — the CLI and web UI work, and most
 
 ## What it can do
 
-**Files.** Read, write, edit, list, move, delete. `read_file` extracts clean text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, and single-stream `.gz`/`.bz2`/`.xz`. It peeks into and pulls files out of zip/tar archives without unpacking them, and can summarize very large PDFs — hundreds of pages that don't fit in context — by working through them in chunks.
+**Files.** Read, write, edit, list, move, delete. `read_file` extracts clean text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, JSON, HTML, RTF, and single-stream `.gz`/`.bz2`/`.xz`. It peeks into and pulls files out of zip/tar archives without unpacking them, and can summarize very large PDFs, hundreds of pages that don't fit in context, by working through them in chunks.
 
 **Shell.** Real PowerShell or cmd commands, with output captured and sanitized.
 
@@ -105,7 +105,7 @@ Hearth runs from source on macOS and Linux — the CLI and web UI work, and most
 
 **Browser.** Drive a real Chrome / Brave / Edge session you can watch: `browse` opens a page and lists its clickable elements, `browse_click` scrolls the target into view and clicks it, `browse_type` fills fields. The session persists across calls for multi-step flows.
 
-**Desktop control.** Beyond the browser, Hearth can operate the actual desktop. `desktop_snapshot` reads a window's real buttons, fields and menu items as a list (an accessibility snapshot — precise, not pixel-guessing), then `desktop_click` / `desktop_type` act on them by name. It can also move the mouse, click, type, and press key combos directly — you watch the real cursor move. Every action that changes something asks first. Windows for now (cross-platform in progress).
+**Desktop control.** Beyond the browser, Hearth can operate the actual desktop. `desktop_snapshot` reads a window's real buttons, fields and menu items as a list (an accessibility snapshot, precise, not pixel-guessing), then `desktop_click` / `desktop_type` act on them by name. It can also move the mouse, click, type, and press key combos directly, you watch the real cursor move. Every action that changes something asks first. Windows for now (cross-platform in progress).
 
 **Screen and vision.** Take a screenshot, or attach an image, and have a vision-capable model describe it.
 
@@ -113,29 +113,29 @@ Hearth runs from source on macOS and Linux — the CLI and web UI work, and most
 
 **Memory.** Per-fact markdown files that persist across sessions. The index is always loaded and the facts most relevant to your message are folded into context automatically. Memory self-curates: each fact tracks how often it's recalled, cold facts archive automatically (never deleted) when a category grows too large, and an archived fact warms back to active storage once it's recalled enough. When you save something that overlaps an existing fact, Hearth notices and decides whether to update or add.
 
-**Reminders.** One-shot or recurring, set in natural language ("in 25 minutes", "every weekday at 9am"). A reminder can also fire a tool when it pops (for example, run a web search and include the result in the toast). Reminders that came due while Hearth was closed surface on next launch — in the CLI they print into the chat, since Windows often suppresses the toast. Set an [ntfy](https://ntfy.sh) topic and reminders also push to your phone, so they reach you even when the PC is asleep.
+**Reminders.** One-shot or recurring, set in natural language ("in 25 minutes", "every weekday at 9am"). A reminder can also fire a tool when it pops (for example, run a web search and include the result in the toast). Reminders that came due while Hearth was closed surface on next launch, in the CLI they print into the chat, since Windows often suppresses the toast. Set an [ntfy](https://ntfy.sh) topic and reminders also push to your phone, so they reach you even when the PC is asleep.
 
-**Phone.** Reach Hearth from your phone through a **Telegram** or **Discord** bot — bot token only, no OAuth, no public server to host. Message the bot and it runs the same agent loop as the CLI, replies (long answers chunked), and sends back any file it produced. An allowlist (your chat/user id) is the only gate. Configure it in the desktop app under **Settings → Reach from phone** (or hand-edit the config); reminders can also push to your phone via [ntfy](https://ntfy.sh). An experimental WhatsApp bridge exists too (unofficial — see the caveats). Opt-in; full setup in [docs/PHONE.md](docs/PHONE.md).
+**Phone.** Reach Hearth from your phone through a **Telegram** or **Discord** bot, bot token only, no OAuth, no public server to host. Message the bot and it runs the same agent loop as the CLI, replies (long answers chunked), and sends back any file it produced. An allowlist (your chat/user id) is the only gate. Configure it in the desktop app under **Settings → Reach from phone** (or hand-edit the config); reminders can also push to your phone via [ntfy](https://ntfy.sh). An experimental WhatsApp bridge exists too (unofficial, see the caveats). Opt-in; full setup in [docs/PHONE.md](docs/PHONE.md).
 
-**Skills — and you can share them.** A skill is a folder with a `SKILL.md` that teaches Hearth a repeatable workflow; the model sees a one-line summary of each and loads the full steps only when it uses one, so dozens can be installed without bloating context. Built-in skills cover PDFs, slide decks (PPTX), spreadsheets (XLSX), diagrams (SVG/HTML), and ASCII art (plus PDF split/merge). The part that compounds: **install a skill someone else wrote with one line** — `/skill install owner/repo` (or paste a GitHub link in chat) — and publish your own by pushing a folder to GitHub. Install discloses what a skill can do and asks before it lands; its scripts only ever run through the same permission prompt as any command. Write once, share with a link — see [docs/SKILLS.md](docs/SKILLS.md) and the community index, [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
+**Skills, and you can share them.** A skill is a folder with a `SKILL.md` that teaches Hearth a repeatable workflow; the model sees a one-line summary of each and loads the full steps only when it uses one, so dozens can be installed without bloating context. Built-in skills cover PDFs, slide decks (PPTX), spreadsheets (XLSX), diagrams (SVG/HTML), and ASCII art (plus PDF split/merge). The part that compounds: **install a skill someone else wrote with one line**, `/skill install owner/repo` (or paste a GitHub link in chat), and publish your own by pushing a folder to GitHub. Install discloses what a skill can do and asks before it lands; its scripts only ever run through the same permission prompt as any command. Write once, share with a link, see [docs/SKILLS.md](docs/SKILLS.md) and the community index, [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
 
 **Sub-agents.** Fork focused workers that run with a tightened system prompt and a restricted tool allowlist. Six personas ship: researcher, coder, archivist, librarian, summarizer, and a PDF coordinator that fans out summarizer workers over a document and reduces their results. Workers run synchronously or in the background; background results arrive in your next chat turn rather than blocking. Fork depth is bounded to prevent runaway spawning.
 
-**Watch a team build.** Ask for a team — "one frontend, one backend, one architect" — and Hearth spawns each as a sub-agent and opens a live terminal pane per agent (Windows Terminal split-panes, or tmux on Linux/macOS), so you watch them think, call tools, and finish side by side. Opt-in; the agents act on their own once you ask, so it only runs when you do.
+**Watch a team build.** Ask for a team, "one frontend, one backend, one architect", and Hearth spawns each as a sub-agent and opens a live terminal pane per agent (Windows Terminal split-panes, or tmux on Linux/macOS), so you watch them think, call tools, and finish side by side. Opt-in; the agents act on their own once you ask, so it only runs when you do.
 
 **Background jobs.** Long-running operations (whole-drive scans, big searches) return a job ID immediately and run in a background thread while you keep working. List jobs and collect results when they finish.
 
 **MCP, both directions.** Hearth exposes its own tools as an MCP server, and it also consumes other MCP servers: drop an `mcp.json` in the workspace and their tools appear alongside the built-ins.
 
-**Voice.** Text-to-speech (Kokoro) streams sentence by sentence; speech-to-text (faster-whisper) supports a continuous-listen mode with mid-sentence barge-in — start talking and the current reply stops. Speech-to-text auto-detects CUDA and runs on the GPU when one is available, falling back to CPU. Preview-quality at v0.7.
+**Voice.** Text-to-speech (Kokoro) streams sentence by sentence; speech-to-text (faster-whisper) supports a continuous-listen mode with mid-sentence barge-in, start talking and the current reply stops. Speech-to-text auto-detects CUDA and runs on the GPU when one is available, falling back to CPU. Preview-quality at v0.7.
 
-**Self-extending tools.** When Hearth hits a capability gap, it can write a new tool for itself with `create_plugin` — validated, saved to the workspace, and usable the same turn. You can also hand-write plugins (a `TOOL` dict plus a `run(args)` function); any `*.py` in the plugins folder auto-loads at startup.
+**Self-extending tools.** When Hearth hits a capability gap, it can write a new tool for itself with `create_plugin`, validated, saved to the workspace, and usable the same turn. You can also hand-write plugins (a `TOOL` dict plus a `run(args)` function); any `*.py` in the plugins folder auto-loads at startup.
 
-**Identity.** A `soul.md` file rides at the top of every system prompt. The assistant can write its own durable identity instructions there, and you can rename the whole agent — the chat avatar, persona, and workspace folder all follow.
+**Identity.** A `soul.md` file rides at the top of every system prompt. The assistant can write its own durable identity instructions there, and you can rename the whole agent, the chat avatar, persona, and workspace folder all follow.
 
 **Image and video generation.** Optional tools for cloud image/video generation, plus integration with a local Stable Diffusion (Forge) install for fully local image generation.
 
-**A long tool list isn't context bloat.** Hearth has ~100 tools, but the model never sees all of them at once. A core set loads by default; the rest stay behind a `load_tools` meta-tool the model calls on demand and then uses inline — so the per-turn prompt stays small no matter how many tools exist. The model only ever loads what it needs. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+**A long tool list isn't context bloat.** Hearth has ~100 tools, but the model never sees all of them at once. A core set loads by default; the rest stay behind a `load_tools` meta-tool the model calls on demand and then uses inline, so the per-turn prompt stays small no matter how many tools exist. The model only ever loads what it needs. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 ---
 
@@ -249,7 +249,7 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 
 ## FAQ
 
-**Does it need LM Studio?** No. Anything OpenAI-compatible works — Ollama, vLLM, llama.cpp, LocalAI — or the bundled llama.cpp server (`-BuiltinLLM`).
+**Does it need LM Studio?** No. Anything OpenAI-compatible works, Ollama, vLLM, llama.cpp, LocalAI, or the bundled llama.cpp server (`-BuiltinLLM`).
 
 **Can it use a cloud model?** Optionally. Set a cloud endpoint in Settings or via env vars. Local is the default; your files, voice, and memory stay local either way.
 
@@ -259,7 +259,7 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 
 **Does it work offline?** Yes, except web search/fetch.
 
-**Why "Hearth"?** It's the framework — the warm center of the machine. The default character is JARVIS, but personas, voices, and models are all swappable.
+**Why "Hearth"?** It's the framework, the warm center of the machine. The default character is JARVIS, but personas, voices, and models are all swappable.
 
 ---
 
@@ -269,20 +269,20 @@ Good first PRs: POSIX ports of the Windows-specific tools in [`hearth/tools.py`]
 
 ## Privacy
 
-Hearth runs on your machine and **collects nothing** — no account, no telemetry, no analytics, no server the author operates. Your files, prompts, and memory stay local.
+Hearth runs on your machine and **collects nothing**, no account, no telemetry, no analytics, no server the author operates. Your files, prompts, and memory stay local.
 
 The only things that ever leave your computer are ones **you** turn on, and they go to the service *you* chose, not to us:
 
-- a **cloud model**, if you point the brain at one (Gemini/OpenAI/Grok/OpenRouter) — then your prompt goes to that provider;
+- a **cloud model**, if you point the brain at one (Gemini/OpenAI/Grok/OpenRouter), then your prompt goes to that provider;
 - **web search / fetch** (DuckDuckGo), when the model looks something up;
 - **ntfy** push and the **Telegram** bridge, if you configure them;
 - **email**, if you set up the optional IMAP/SMTP tool.
 
-All of those are off by default. Run against a local model with none of them configured and Hearth is fully offline. Because it's a local, no-data-collection tool, there's no privacy policy or terms to agree to — and the [MIT license](LICENSE) is the warranty/liability disclaimer.
+All of those are off by default. Run against a local model with none of them configured and Hearth is fully offline. Because it's a local, no-data-collection tool, there's no privacy policy or terms to agree to, and the [MIT license](LICENSE) is the warranty/liability disclaimer.
 
 ## Support
 
-Hearth is free and MIT-licensed, built by one developer. If it's useful to you, a ⭐ is the biggest help — it's how other people find the project. If you'd like to go further, sponsorship options are in [docs/SUPPORT.md](docs/SUPPORT.md).
+Hearth is free and MIT-licensed, built by one developer. If it's useful to you, a ⭐ is the biggest help, it's how other people find the project. If you'd like to go further, sponsorship options are in [docs/SUPPORT.md](docs/SUPPORT.md).
 
 ## License
 
@@ -290,7 +290,7 @@ Hearth is free and MIT-licensed, built by one developer. If it's useful to you, 
 
 ## Acknowledgements
 
-- [Kokoro TTS](https://github.com/thewh1teagle/kokoro-onnx) — text-to-speech
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — speech-to-text
-- [LM Studio](https://lmstudio.ai) — local LLM runner
-- [Model Context Protocol](https://modelcontextprotocol.io) — tool interop
+- [Kokoro TTS](https://github.com/thewh1teagle/kokoro-onnx), text-to-speech
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper), speech-to-text
+- [LM Studio](https://lmstudio.ai), local LLM runner
+- [Model Context Protocol](https://modelcontextprotocol.io), tool interop
