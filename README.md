@@ -18,6 +18,13 @@
 </p>
 
 <p align="center">
+  <a href="https://get-hearth.vercel.app"><img src="https://img.shields.io/badge/website-get--hearth.vercel.app-8b5cf6?style=flat-square" alt="Website"></a>
+  <a href="https://github.com/0pen-sourcer/hearth/releases"><img src="https://img.shields.io/badge/download-installer-8b5cf6?style=flat-square" alt="Download the installer"></a>
+  <a href="docs/USER_GUIDE.md"><img src="https://img.shields.io/badge/docs-user%20guide-6b6b76?style=flat-square" alt="Docs"></a>
+  <a href="https://ko-fi.com/Q6B1238Q4L"><img src="https://img.shields.io/badge/Ko--fi-support-ff5e5b?style=flat-square&logo=kofi&logoColor=white" alt="Support on Ko-fi"></a>
+</p>
+
+<p align="center">
   <em>The framework is <strong>Hearth</strong>. The assistant it ships with is named <strong>JARVIS</strong>, rename it to anything. The resident, and the house.</em>
 </p>
 
