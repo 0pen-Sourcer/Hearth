@@ -6354,7 +6354,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
         thinkBlock._startedAt = Date.now();
       }
       const bodySpan = thinkBlock.querySelector('.think-body');
-      if (bodySpan) bodySpan.textContent += ev.content || '';
+      if (bodySpan) {
+        // The think body has its own 260px scroll. Keep the newest thinking in
+        // view as it streams, but only if the user is already near the bottom,
+        // so it never yanks them back up while they're reading higher up.
+        const follow = bodySpan.scrollHeight - bodySpan.scrollTop - bodySpan.clientHeight < 44;
+        bodySpan.textContent += ev.content || '';
+        if (follow) bodySpan.scrollTop = bodySpan.scrollHeight;
+      }
       assistantMsg.events.push({ kind: 'think_chunk', content: ev.content });
       return;
     }
@@ -6373,7 +6380,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         insertUnderAssistant(thinkBlock, live);
       }
       const bodySpan = thinkBlock.querySelector('.think-body');
-      if (bodySpan) bodySpan.textContent = ev.content || '';
+      if (bodySpan) { bodySpan.textContent = ev.content || ''; bodySpan.scrollTop = bodySpan.scrollHeight; }
       return;
     }
 
