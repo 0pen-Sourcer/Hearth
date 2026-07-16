@@ -56,6 +56,18 @@ Where it's headed, grounded computer-use (it watches the screen, points, and act
 
 ---
 
+## See it work
+
+<table>
+<tr>
+<td width="33%" align="center"><strong>It remembers you</strong><br><img src="docs/media/memory.gif" alt="Hearth's memory" width="280"></td>
+<td width="33%" align="center"><strong>It finds and installs models</strong><br><img src="docs/media/discover.gif" alt="Discovering and installing a model" width="280"></td>
+<td width="33%" align="center"><strong>It runs your skills</strong><br><img src="docs/media/skills.gif" alt="Reminders, skills, and workspace" width="280"></td>
+</tr>
+</table>
+
+---
+
 ## Install
 
 You need **Windows 10/11** and **Python 3.11+**.
