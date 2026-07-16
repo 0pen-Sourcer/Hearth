@@ -541,6 +541,11 @@ def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
                 m["layers"] = gguf_layer_count(m.get("path", ""))
             except Exception:
                 m["layers"] = None
+        if "ctx_max" not in m:
+            try:
+                m["ctx_max"] = gguf_context_length(m.get("path", ""))
+            except Exception:
+                m["ctx_max"] = None
     return out
 
 
@@ -1486,6 +1491,55 @@ def gguf_layer_count(model_path: str) -> Optional[int]:
     return result
 
 
+_ctx_length_cache: Dict[str, Optional[int]] = {}
+
+
+def gguf_context_length(model_path: str) -> Optional[int]:
+    """Read <arch>.context_length (the model's REAL trained max context) from the
+    GGUF header, exactly how gguf_layer_count reads block_count. This is the true
+    ceiling (e.g. 1048576 for a 1M-context model), so we stop guessing it from
+    the filename and capping capable models way too low. None if unparseable."""
+    if model_path in _ctx_length_cache:
+        return _ctx_length_cache[model_path]
+    import struct
+    result: Optional[int] = None
+    try:
+        with open(model_path, "rb") as f:
+            if f.read(4) != b"GGUF":
+                _ctx_length_cache[model_path] = None
+                return None
+            f.read(4)                                    # version
+            f.read(8)                                    # tensor_count
+            kv_count = struct.unpack("<Q", f.read(8))[0]
+
+            def _skip(vt: int) -> None:
+                if vt in _GGUF_FIXED_SZ:
+                    f.read(_GGUF_FIXED_SZ[vt])
+                elif vt == 8:                            # STRING
+                    f.read(struct.unpack("<Q", f.read(8))[0])
+                elif vt == 9:                            # ARRAY
+                    et = struct.unpack("<I", f.read(4))[0]
+                    for _ in range(struct.unpack("<Q", f.read(8))[0]):
+                        _skip(et)
+                else:
+                    raise ValueError(f"unknown gguf type {vt}")
+
+            for _ in range(kv_count):
+                klen = struct.unpack("<Q", f.read(8))[0]
+                key = f.read(klen).decode("utf-8", "replace")
+                vt = struct.unpack("<I", f.read(4))[0]
+                if key.endswith(".context_length"):
+                    fmt = {0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I",
+                           5: "<i", 10: "<Q", 11: "<q"}.get(vt, "<I")
+                    result = int(struct.unpack(fmt, f.read(_GGUF_FIXED_SZ.get(vt, 4)))[0])
+                    break
+                _skip(vt)
+    except Exception:
+        result = None
+    _ctx_length_cache[model_path] = result
+    return result
+
+
 def estimate_safe_gpu_layers(model_size_gb: Optional[float],
                              free_vram_gb: Optional[float],
                              ctx: int = 24576,
@@ -1834,11 +1888,18 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
     # when the cache is cold. On subsequent cloud polls, reuse the cached
     # result so the Models tab keeps showing what's on disk without
     # paying multi-second filesystem scans on every status poll.
-    if _is_local or _status_cache.get("disk_models_cache") is None:
+    # Cache the disk scan itself — it walks several directories and costs
+    # multiple seconds. Reuse it for up to 60s even while local, instead of
+    # re-walking the disk on every status rebuild; that constant rescan was the
+    # startup lag and the Models-tab churn. A fresh scan still runs on the first
+    # call, once the 60s lapses, or on an explicit force_local_rescan().
+    _disk_fresh = (time.time() - _status_cache.get("disk_scan_ts", 0)) < 60
+    if _status_cache.get("disk_models_cache") is None or (_is_local and not _disk_fresh):
         _disk = scan_disk_for_models()
         _local = list_local_models()
         _status_cache["disk_models_cache"] = _disk
         _status_cache["local_models_cache"] = _local
+        _status_cache["disk_scan_ts"] = time.time()
     else:
         _disk = _status_cache.get("disk_models_cache") or []
         _local = _status_cache.get("local_models_cache") or []
