@@ -70,28 +70,35 @@ Where it's headed, grounded computer-use (it watches the screen, points, and act
 
 ## Install
 
-You need **Windows 10/11** and **Python 3.11+**.
+### Download the installer (easiest, Windows)
+
+Grab the [latest release](https://github.com/0pen-sourcer/Hearth/releases/latest), no Python, no git, no setup. Two editions:
+
+- **Hearth Full (~1 GB)** bundles a GPU model server (CUDA llama.cpp). It downloads and runs models for you, so there is nothing else to install.
+- **Hearth Lite (~500 MB)** skips the bundled server, for when you already run LM Studio, Ollama, or another OpenAI-compatible endpoint.
+
+Both install to your user folder, no admin needed. Started on Lite and want the built-in server later? Run the Full installer over it, your settings, memory, and chats stay exactly where they are.
+
+### Install from source (Windows, macOS, Linux)
+
+Needs **Python 3.11+**. Windows has a one-line installer:
 
 ```powershell
-git clone https://github.com/0pen-sourcer/hearth.git
-cd hearth
-
-# Install. Pick how you want to run the model:
+git clone https://github.com/0pen-sourcer/Hearth.git
+cd Hearth
 .\install.ps1                      # bring your own server (LM Studio / Ollama / vLLM / llama.cpp / a cloud key)
 .\install.ps1 -BuiltinLLM cuda     # NVIDIA GPU: Hearth installs + runs its own llama.cpp server
-.\install.ps1 -BuiltinLLM cpu      # CPU-only: same, no GPU
-
-# Launch
-.\hearth.bat
+.\install.ps1 -BuiltinLLM cpu      # no GPU: same server, on CPU
+.\hearth.bat                       # launch
 ```
 
-The installer is idempotent (safe to re-run) and has switches to skip optional pieces, voice, STT, MCP SDK, file readers, desktop window, browser control. Run `Get-Help .\install.ps1 -Detailed` for the full list.
+The installer is idempotent (safe to re-run) and has switches to skip optional pieces, voice, STT, MCP SDK, file readers, desktop window, browser control. Run `Get-Help .\install.ps1 -Detailed` for the full list. On macOS and Linux you clone and run with Python (`pip install -r requirements.txt`, then `python hearth_cli.py`), steps in the macOS / Linux section below.
 
-On first launch, a short onboarding flow asks which model brain to use, sets up voice, and personalizes the assistant.
+On first launch, a short onboarding flow asks which model brain to use, lets you pick a voice and rename the assistant to anything you want, and sets its tone.
 
 ### Pointing it at a model
 
-Hearth auto-detects a running **LM Studio** (port 1234), **Ollama** (11434), or **llama.cpp** server (8080) at boot, no configuration needed. To use something else, set `LOCAL_API_BASE` to any OpenAI-compatible endpoint.
+If you installed **Full** (or ran `install.ps1 -BuiltinLLM`), Hearth has its own bundled llama.cpp server, open the Models tab, pick a model, and it downloads and runs it for you, no other app needed. Otherwise Hearth auto-detects a running **LM Studio** (port 1234), **Ollama** (11434), or **llama.cpp** server (8080) at boot, no configuration needed. To use something else, set `LOCAL_API_BASE` to any OpenAI-compatible endpoint.
 
 A cloud key is optional. In the desktop app's Settings (or via env vars), you can point the chat brain at Gemini, OpenAI, Grok, or OpenRouter and switch back to local at any time without restarting. Files, voice, and memory stay local regardless; only the prompt goes to the provider you choose.
 
@@ -103,7 +110,7 @@ Hearth ships a tool-call parser that recognizes the formats emitted by Gemma, He
 
 ### macOS / Linux
 
-Hearth runs from source on macOS and Linux. The CLI and web UI work, and most tools (shell, files, screenshots, app launching, window focus, clipboard, web search, reminders, notifications) have native POSIX paths. That said, both get far less mileage than Windows, so treat them as lightly tested and expect rough edges. The desktop-control layer, the one-click installer, and the packaged build are Windows-only for now; everywhere else you clone and run with Python. See **[docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md)** for the exact steps, and [CONTRIBUTING.md](CONTRIBUTING.md) if you want to help port the rest.
+Hearth runs from source on macOS and Linux. The CLI and web UI work, and most tools (shell, files, screenshots, app launching, window focus, clipboard, web search, reminders, notifications) have native POSIX paths. Linux is verified (tested on Mint 22 / Ubuntu 24.04); macOS shares the same POSIX paths but has had less testing. The desktop-control layer, the one-click installer, and the packaged build are Windows-only for now; everywhere else you clone and run with Python. See **[docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md)** for the exact steps, and [CONTRIBUTING.md](CONTRIBUTING.md) if you want to help port the rest.
 
 ---
 
@@ -150,7 +157,7 @@ Hearth runs from source on macOS and Linux. The CLI and web UI work, and most to
 
 **MCP, both directions.** Hearth exposes its own tools as an MCP server, and it also consumes other MCP servers: drop an `mcp.json` in the workspace and their tools appear alongside the built-ins.
 
-**Voice.** Text-to-speech (Kokoro) streams sentence by sentence; speech-to-text (faster-whisper) supports a continuous-listen mode with mid-sentence barge-in, start talking and the current reply stops. Speech-to-text auto-detects CUDA and runs on the GPU when one is available, falling back to CPU. Preview-quality at v0.7.
+**Voice.** Text-to-speech (Kokoro) streams sentence by sentence; speech-to-text (faster-whisper) supports a continuous-listen mode with mid-sentence barge-in, start talking and the current reply stops. Both auto-detect your hardware: text-to-speech runs on CUDA or DirectML, speech-to-text on CUDA, and either falls back to CPU. Preview-quality at v0.7.
 
 **Self-extending tools.** When Hearth hits a capability gap, it can write a new tool for itself with `create_plugin`, validated, saved to the workspace, and usable the same turn. You can also hand-write plugins (a `TOOL` dict plus a `run(args)` function); any `*.py` in the plugins folder auto-loads at startup.
 
@@ -224,6 +231,9 @@ Reads default to your whole disk (the assistant needs to know your machine). Wri
 | `JARVIS_VOICE_SPEED` | `1.0` | TTS playback rate |
 | `JARVIS_STT_DEVICE` | auto | force `cpu` or `cuda` for speech-to-text (auto-detects GPU when unset) |
 | `JARVIS_WAKE_WORD` | (none) | If set, continuous listen only triggers on this prefix |
+| `JARVIS_BUILTIN_PORT` | `1234` | Port for the bundled llama.cpp server |
+| `JARVIS_COMPACT_AT` | `0.75` | Auto-compact context past this fraction |
+| `JARVIS_NO_ONBOARDING` | `0` | `1` = skip the first-run setup |
 | `HEARTH_PERSONA_NAME` | `JARVIS` | Assistant name |
 | `HEARTH_PERSONA` | (none) | Tone overlay: `bro` / `chill` / `professional` / `formal` |
 | `HEARTH_ALL_TOOLS` | `0` | `1` = load every tool up front instead of on demand |
@@ -237,25 +247,26 @@ Reads default to your whole disk (the assistant needs to know your machine). Wri
 
 ```
 /help                 full list
-/models, /model <n>   list / switch model
+/brain <provider>     switch brain: local, grok, gemini, openai, openrouter, custom (keys persist)
+/models, /model <n>   list / download / switch model (built-in server)
 /tools                list available tools
-/voice [on|off]       text-to-speech toggle
-/listen [on|off]      continuous voice input
-/listen               one-shot voice input
-/mem                  show memory index
-/log [n]              tail recent activity
-/compact              summarize old turns + extract facts to memory
-/context <n>          set context window
+/voice [on|off]       text-to-speech toggle; /stt <model> sets the whisper size
+/listen [on|off]      continuous voice input (/listen alone = one-shot)
 /think [on|off]       show/hide model reasoning
-/agent <slug> "..."   dispatch a sub-agent
-/jobs [id]            list background jobs / show one's result
+/mem                  memory index; /curate merges duplicates
+/import-memory        pull your memory in from ChatGPT / Claude
+/context <n|auto>     set / auto-detect the context window; /tokens shows usage
+/compact              summarize old turns + extract facts to memory
+/agent <slug> "..."   dispatch a sub-agent; /jobs manages background ones
+/skill install <src>  install a skill from a GitHub repo
 /mcp                  MCP status / config
-/migrate              import memory from another agent
-/name <new>           rename the assistant
-/allow <path>         grant write access to a folder this session
+/phone                Telegram / Discord / ntfy bridge status
+/migrate <hermes|openclaw>   import memory + skills from another agent
+/name <new>           rename the assistant; /learn re-scans your machine
+/allow <path>         grant write access to a folder; /lockdown confines reads
 /perms                show / reset cached tool permissions
-/clear                wipe history (keep system prompt)
-/exit                 quit
+/update               check for and install the latest release
+/clear                wipe history (keep system prompt); /exit to quit
 ```
 
 Plus `@<path>` to attach a file (text spliced inline, images sent to vision), arrow-key history, reverse search, and a multi-line input mode.
@@ -264,7 +275,7 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 
 ## Voice setup
 
-**Text-to-speech (Kokoro):** ~80 MB ONNX model, runs on CPU in real time. The installer offers to download the model; pick a voice with `JARVIS_VOICE`.
+**Text-to-speech (Kokoro):** ~80 MB ONNX model. Runs on CPU in real time, or offloads to your GPU via CUDA (NVIDIA) or DirectML (any GPU). The installer offers to download the model; pick a voice with `JARVIS_VOICE`.
 
 **Speech-to-text (faster-whisper):** the `base.en` model (~150 MB) auto-downloads on first `/listen on`. It auto-detects CUDA and uses the GPU when available, otherwise CPU. Use `/listen` for one-shot or `/listen on` for continuous mode with barge-in.
 
@@ -296,7 +307,7 @@ Hearth runs on your machine and **collects nothing**, no account, no telemetry, 
 
 The only things that ever leave your computer are ones **you** turn on, and they go to the service *you* chose, not to us:
 
-- a **cloud model**, if you point the brain at one (Gemini/OpenAI/Grok/OpenRouter), then your prompt goes to that provider;
+- a **cloud model**, if you point the brain at one (Gemini/OpenAI/Grok/OpenRouter/Anthropic/Custom), then your prompt goes to that provider;
 - **web search / fetch** (DuckDuckGo), when the model looks something up;
 - **ntfy** push and the **Telegram** bridge, if you configure them;
 - **email**, if you set up the optional IMAP/SMTP tool.
