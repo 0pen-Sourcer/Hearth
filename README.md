@@ -60,8 +60,8 @@ Where it's headed, grounded computer-use (it watches the screen, points, and act
 
 <table>
 <tr>
-<td width="33%" align="center"><strong>It remembers you</strong><br><img src="docs/media/memory.gif" alt="Hearth's memory" width="280"></td>
-<td width="33%" align="center"><strong>Built-in model manager — no LM Studio needed</strong><br><img src="docs/media/discover.gif" alt="Downloading and running a model directly inside Hearth" width="280"></td>
+<td width="33%" align="center"><strong>Disposable facts get archived, what matters builds a wall of memory</strong><br><img src="docs/media/memory.gif" alt="Hearth's memory browser" width="280"></td>
+<td width="33%" align="center"><strong>Built-in model manager, no LM Studio needed</strong><br><img src="docs/media/discover.gif" alt="Downloading and running a model directly inside Hearth" width="280"></td>
 <td width="33%" align="center"><strong>Skills, reminders, your workspace</strong><br><img src="docs/media/skills.gif" alt="Skills, reminders, and workspace tour" width="280"></td>
 </tr>
 </table>
