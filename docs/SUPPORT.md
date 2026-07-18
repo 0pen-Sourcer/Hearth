@@ -14,7 +14,7 @@ Hearth is free, open-source (MIT), and built by one person in their spare time. 
 | 🐛 **Report a bug** | open an [issue](https://github.com/0pen-sourcer/hearth/issues) | A clear repro is worth a lot. It's how Hearth gets more reliable across the huge range of machines it runs on. |
 | 🔧 **Send a PR** | see [CONTRIBUTING.md](../CONTRIBUTING.md) | POSIX ports, new tools, new skills — all welcome. |
 | 📣 **Tell someone** | share it | If Hearth solved something for you, a post or a link helps more than you'd think. |
-| 💜 **Sponsor** | _coming soon_ | Donation options (Ko-fi / GitHub Sponsors) are being set up. Until then, a ⭐ is the most useful thing by far. |
+| 💜 **Sponsor** | **[Ko-fi](https://ko-fi.com/Q6B1238Q4L)** | If Hearth is useful to you and you'd like to chip in, that's the place. A ⭐ helps just as much. |
 
 ---
 
