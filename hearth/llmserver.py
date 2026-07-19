@@ -1073,6 +1073,53 @@ def check_llama_update(max_age: int = 21600) -> Dict[str, Any]:
             "available": bool(installed) and latest not in installed}
 
 
+def list_llama_builds(limit: int = 8) -> Dict[str, Any]:
+    """Recent llama.cpp releases and the Windows CUDA variants each one ships,
+    so a build that regresses on some GPU can be rolled back to a known-good
+    tag instead of leaving the user stuck on latest."""
+    import urllib.request
+    import re
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases?per_page={max(1, min(limit, 30))}",
+            headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            rels = json.load(r)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "builds": []}
+    installed = set(installed_llama_tags())
+    health = _engine_health()
+    bad = {Path(k).parent.name for k, v in health.items() if v.get("ok") is False}
+    builds = []
+    for rel in rels if isinstance(rels, list) else []:
+        tag = (rel.get("tag_name") or "").strip()
+        if not tag:
+            continue
+        cudas, size = [], 0
+        for a in rel.get("assets") or []:
+            m = re.search(r"bin-win-cuda-([\d.]+)-x64\.zip$", a.get("name", ""))
+            if m and "cudart" not in a.get("name", ""):
+                cudas.append(m.group(1))
+                size = max(size, int(a.get("size") or 0))
+        if not cudas:
+            continue
+        builds.append({"tag": tag, "cuda": sorted(set(cudas)),
+                       "size_mb": round(size / 1e6),
+                       "published": (rel.get("published_at") or "")[:10],
+                       "installed": tag in installed,
+                       # Verified by actually generating on THIS machine, not
+                       # inferred from the build name.
+                       "verified": tag in {Path(k).parent.name
+                                           for k, v in health.items() if v.get("ok")},
+                       "known_bad": tag in bad})
+    # No honest way to label a build with the GPU generations it supports: the
+    # asset name only carries the CUDA toolkit version, and the real kernel list
+    # is only printed once the server runs. Report the card instead and let the
+    # health verdict speak for compatibility.
+    return {"ok": True, "builds": builds,
+            "gpu_compute_cap": detect_gpu_compute_cap()}
+
+
 def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                            on_progress: Optional[Callable[[int, int], None]] = None,
                            force: bool = False) -> Dict[str, Any]:

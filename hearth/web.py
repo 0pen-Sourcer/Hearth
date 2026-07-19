@@ -2508,6 +2508,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
             return
+        if path == "/api/runtime/builds":
+            from . import llmserver
+            return self._send_json(200, llmserver.list_llama_builds())
         if path == "/api/runtime/cancel":
             from . import llmserver
             return self._send_json(200, llmserver.cancel_llama_download())
