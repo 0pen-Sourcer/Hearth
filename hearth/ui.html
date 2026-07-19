@@ -2731,7 +2731,10 @@
         </button>
         <button class="nav-btn" data-view="models">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          Models
+          Models &amp; engine
+          <span class="count" id="nav-dl-dot" hidden
+                style="background:var(--accent);width:7px;height:7px;border-radius:50%;padding:0;min-width:0"
+                title="download in progress"></span>
         </button>
         <button class="nav-btn" data-view="settings">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -11553,7 +11556,13 @@ function _fmtGB(b) { return ((b || 0) / 1e9).toFixed(2) + ' GB'; }
 function _fmtSpeed(bps) { if (!bps || bps <= 0) return '--'; return bps > 1e6 ? (bps / 1e6).toFixed(1) + ' MB/s' : (bps / 1e3).toFixed(0) + ' KB/s'; }
 function _fmtETA(s) { if (!isFinite(s) || s <= 0) return '--'; s = Math.round(s); const m = Math.floor(s / 60), ss = s % 60; return m ? m + 'm ' + ss + 's' : ss + 's'; }
 function dlActiveCount() { return Object.values(_dls).filter(d => d.status === 'downloading').length; }
-function dlSyncBadge() { const b = $('btn-models-download-badge'); if (b) b.hidden = dlActiveCount() === 0; }
+function dlSyncBadge() {
+  const active = dlActiveCount() === 0;
+  const b = $('btn-models-download-badge'); if (b) b.hidden = active;
+  // Same signal on the sidebar, so a download is visible from anywhere in the
+  // app instead of only after opening the Models tab.
+  const n = $('nav-dl-dot'); if (n) n.hidden = active;
+}
 function dlUpsert(id, patch) {
   const d = _dls[id] || (_dls[id] = { name: id, status: 'downloading', pct: 0 });
   Object.assign(d, patch);
