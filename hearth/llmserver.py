@@ -734,6 +734,18 @@ def server_extras_missing() -> Optional[str]:
 _native_server_cache: List[Optional[Dict[str, Any]]] = []
 
 
+# Floor that separates a real llama-server.exe (~20 KB+ thin launcher, the heavy
+# code is in the DLLs) from an AV-truncated stub (seen: 9 KB).
+_MIN_SERVER_EXE_BYTES = 15_000
+
+
+def _usable_server_exe(exe: Path) -> bool:
+    try:
+        return exe.is_file() and exe.stat().st_size >= _MIN_SERVER_EXE_BYTES
+    except OSError:
+        return False
+
+
 def find_native_llama_server() -> Optional[Dict[str, Any]]:
     """Locate a standalone llama.cpp `llama-server.exe` — the official OpenAI-
     compatible server. It's newer than our pinned llama-cpp-python wheel and,
@@ -764,7 +776,7 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
             # code lives in the DLLs) — so a 15 KB floor drops the stub while
             # keeping real builds, and we fall back to a signed copy (LM Studio's)
             # that AV trusts.
-            if not exe.is_file() or exe.stat().st_size < 15_000:
+            if not exe.is_file() or exe.stat().st_size < _MIN_SERVER_EXE_BYTES:
                 continue
         except OSError:
             continue
@@ -792,7 +804,12 @@ def llama_runtime_info() -> Dict[str, Any]:
     n = find_native_llama_server()
     exe = (n or {}).get("exe") or ""
     managed = Path(os.path.expanduser("~/.hearth/llamacpp"))
-    have_managed = managed.is_dir() and any(managed.glob("*/llama-server.exe"))
+    # Same size floor as the picker — an AV-truncated stub on disk is not a
+    # usable install, and reporting it as one offers "update" instead of a redo.
+    have_managed = managed.is_dir() and any(
+        _usable_server_exe(p) for p in managed.glob("*/llama-server.exe"))
+    stub_managed = (managed.is_dir()
+                    and any(managed.glob("*/llama-server.exe")) and not have_managed)
     if not n:
         source = "wheel"      # falling back to the bundled llama-cpp-python
     elif ".hearth" in exe:
@@ -807,6 +824,44 @@ def llama_runtime_info() -> Dict[str, Any]:
         "version": (n or {}).get("label"),
         "exe": exe or None,
         "managed": have_managed,   # True once Hearth downloaded its own copy
+        "stub": stub_managed,      # downloaded but truncated (antivirus)
+    }
+
+
+# Highest arch the bundled llama-cpp-python wheel compiles kernels for
+# (CUDA : ARCHS = 700,750,800,860,890,900). Above this the driver PTX-JITs and
+# long-context prompt processing degrades hard — currently means Blackwell.
+_WHEEL_MAX_ARCH = 9.0
+
+
+def runtime_advice() -> Dict[str, Any]:
+    """Environment check for the builtin runtime. Advisory only — never
+    downloads. Flags the one combination that silently costs performance:
+    a GPU newer than the wheel's kernels falling back to that wheel, which
+    both PTX-JITs every op and forces the f16 KV + flash-off workaround in
+    start_builtin, so it pays in speed and in VRAM."""
+    info = llama_runtime_info()
+    none = {"nudge": False, "level": "none", "short": None,
+            "reason": None, "action": None}
+    if info.get("engine") == "native":
+        return none
+    cap = detect_gpu_compute_cap()
+    if cap is None or cap <= _WHEEL_MAX_ARCH:
+        # No NVIDIA GPU (a CUDA build buys nothing), or the wheel has real
+        # kernels for this card.
+        return none
+    return {
+        "nudge": True,
+        "level": "recommended",
+        "short": (f"Your GPU (compute {cap:g}) is newer than the bundled "
+                  "engine's kernels, so past ~30K context it runs slower than "
+                  "CPU. Installing Hearth's own llama.cpp fixes that."),
+        "reason": (f"The bundled engine has no kernels for your GPU (compute "
+                   f"{cap:g}), so every op goes through driver JIT, measured "
+                   "slower than plain CPU past ~30K context. Flash attention is "
+                   "also forced off to stay correct, which costs extra VRAM. "
+                   "Installing Hearth's own llama.cpp fixes both."),
+        "action": "install_runtime",
     }
 
 
