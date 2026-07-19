@@ -1268,10 +1268,10 @@ class JarvisCLI:
             if adv.get("nudge"):
                 print(f"  {C_WARN}{adv['short']}{C_RESET}")
             if info.get("stub"):
-                print(f"  {C_WARN}A previous engine download is on disk but truncated - "
-                      f"antivirus flags the unsigned llama-server.exe.{C_RESET}")
-                print(f"  {C_DIM}Allow ~/.hearth/llamacpp in your AV, then re-run "
-                      f"with {C_RESET}{C_TOOL}install{C_RESET}{C_DIM}.{C_RESET}")
+                print(f"  {C_WARN}An engine download is on disk but unusable "
+                      f"(no runnable llama-server.exe).{C_RESET}")
+                print(f"  {C_DIM}Usually antivirus quarantine. Allow ~/.hearth/llamacpp, "
+                      f"then re-run with {C_RESET}{C_TOOL}install{C_RESET}{C_DIM}.{C_RESET}")
             if arg.strip().lower() not in ("install", "update"):
                 nxt = "update" if info.get("managed") else "install"
                 print(f"{C_DIM}Run {C_RESET}{C_TOOL}/models engine {nxt}{C_RESET}"
