@@ -1460,7 +1460,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, llmserver.status(LOCAL_API_BASE))
         if path == "/api/runtime/info":
             from . import llmserver
-            return self._send_json(200, llmserver.llama_runtime_info())
+            _info = llmserver.llama_runtime_info()
+            _info["advice"] = llmserver.runtime_advice()
+            return self._send_json(200, _info)
         if path == "/api/mcp/inbound":
             # Inbound MCP clients (Claude Desktop / LM Studio / Cursor …) that
             # spawned a hearth.mcp_server. Each writes ~/.hearth/mcp_clients/<pid>

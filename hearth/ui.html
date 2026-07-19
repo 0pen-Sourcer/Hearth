@@ -3386,6 +3386,7 @@
             <span class="k">Engine<span class="dl-dot" id="engine-dl-dot"></span></span>
             <span class="v" id="runtime-status" style="text-align:right">checking…</span>
           </div>
+          <div id="runtime-nudge" style="display:none;margin:8px 0 2px;padding:9px 11px;background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.25);border-radius:8px;font-size:12px;line-height:1.5;color:var(--fg-dim)"></div>
           <div class="progress-row" id="runtime-dl" style="display:none;align-items:center;gap:8px;margin:6px 0 2px;">
             <div style="flex:1;height:6px;background:var(--bg-1);border-radius:4px;overflow:hidden;"><div id="runtime-dl-fill" style="height:100%;width:0%;background:var(--accent);transition:width .2s;"></div></div>
             <span id="runtime-dl-pct" style="color:var(--fg-dim);min-width:70px;text-align:right;font-size:11px;"></span>
@@ -10724,13 +10725,22 @@ async function refreshRuntimeBar() {
   if (!statusEl) return;
   try {
     const r = await api('/api/runtime/info');
+    const adv = r.advice || {}, nudgeEl = $('runtime-nudge');
     if (r.engine === 'native') {
       const src = { hearth: "Hearth's own", lmstudio: "LM Studio's (signed)", other: 'detected copy' }[r.source] || r.source;
       statusEl.innerHTML = `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} · ${esc(src)}</span>`;
       if (btn) btn.textContent = (r.source === 'hearth') ? 'Update engine' : "Install Hearth's own copy";
     } else {
-      statusEl.innerHTML = `bundled wheel <span style="color:#fbbf24">· older, may fail on new GPUs</span>`;
+      // Only call the wheel a problem when it actually is one for this card.
+      // On CPU-only / older GPUs it has real kernels and a CUDA build buys nothing.
+      statusEl.innerHTML = adv.nudge
+        ? `bundled wheel <span style="color:#fbbf24">· no kernels for your GPU</span>`
+        : `bundled wheel <span style="color:var(--fg-faint)">· built in</span>`;
       if (btn) btn.textContent = 'Install GPU engine';
+    }
+    if (nudgeEl) {
+      nudgeEl.style.display = adv.nudge ? 'block' : 'none';
+      if (adv.nudge) nudgeEl.textContent = adv.reason || '';
     }
   } catch { statusEl.textContent = 'unknown'; }
 }
@@ -12115,6 +12125,15 @@ async function obLoadBrains() {
   } else {
     banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>No models found yet. Pick a recommended one and Hearth will download it for you.</span></div>`;
   }
+  // Second row: the bundled engine has no kernels for this GPU. Only fires on
+  // a card newer than the wheel builds for (see llmserver.runtime_advice) —
+  // silent on CPU-only, older GPUs, and anyone already on a native engine.
+  try {
+    const rt = await api('/api/runtime/info');
+    if (rt.advice && rt.advice.nudge) {
+      banner += `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>${esc(rt.advice.short)}</span></div>`;
+    }
+  } catch {}
   status.innerHTML = banner;
 
   blurb.textContent = (builtin || external)
