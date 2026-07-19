@@ -10755,6 +10755,11 @@ async function refreshRuntimeBar() {
     }
   } catch { statusEl.textContent = 'unknown'; }
 }
+// The engine is an asset like a model, so it shares the Downloads overlay —
+// its own row, its own icon, and a Cancel that keeps the partial for resume.
+const ENGINE_DL_ID = '__engine__';
+const _engDl = { t0: 0, b0: 0 };
+
 async function runtimeInstall() {
   const dl = $('runtime-dl'), fill = $('runtime-dl-fill'), pct = $('runtime-dl-pct'), btn = $('btn-runtime-update');
   dl.style.display = 'flex'; btn.disabled = true; btn.textContent = 'Downloading…';
@@ -10774,11 +10779,27 @@ async function runtimeInstall() {
         if (ev.type === 'progress' && ev.total) {
           fill.style.width = Math.round(ev.done / ev.total * 100) + '%';
           pct.textContent = `${(ev.done / 1e6).toFixed(0)}/${(ev.total / 1e6).toFixed(0)} MB`;
+          // Mirror into the shared Downloads overlay so it's visible (and
+          // cancellable) from the Models tab, not only from Settings.
+          const now = Date.now();
+          if (!_engDl.t0) { _engDl.t0 = now; _engDl.b0 = ev.done; }
+          const secs = (now - _engDl.t0) / 1000;
+          const speed = secs > 1 ? (ev.done - _engDl.b0) / secs : 0;
+          dlUpsert(ENGINE_DL_ID, {
+            name: 'llama.cpp engine', kind: 'engine', status: 'downloading',
+            pct: Math.round(ev.done / ev.total * 100),
+            done: ev.done, total: ev.total, speed,
+            eta: speed > 0 ? (ev.total - ev.done) / speed : 0,
+          });
         } else if (ev.type === 'done') {
           dl.style.display = 'none'; btn.disabled = false;
           setDlDot($('engine-dl-dot'), ev.ok ? 'done' : 'idle');
+          _engDl.t0 = 0;
+          dlUpsert(ENGINE_DL_ID, { status: ev.ok ? 'done' : (ev.cancelled ? 'paused' : 'error'), pct: ev.ok ? 100 : undefined });
           if (ev.ok) toast('Engine ready', 'llama.cpp ' + (ev.tag || ''), 'ok');
+          else if (ev.cancelled) toast('Engine download cancelled', 'Progress kept — installing again resumes.', 'ok', 7000);
           else toast('Engine download failed', ev.error || '', 'err', 8000);
+          refreshRuntimeBar();
         }
       }
     }
@@ -11549,6 +11570,14 @@ function dlToggle(force) {
     document.body.appendChild(ov);
     ov.addEventListener('click', (e) => {
       const ds = e.target.dataset || {};
+      if (ds.dlcancel) {
+        // Backend stops mid-chunk and keeps the .part, so this is a pause in
+        // everything but name — installing again resumes from where it stopped.
+        api('/api/runtime/cancel', { method: 'POST' }).catch(() => {});
+        dlUpsert(ds.dlcancel, { status: 'paused' });
+        return;
+      }
+      if (ds.dlengresume) { runtimeInstall(); return; }
       if (ds.dlpause) {
         const d = _dls[ds.dlpause];
         if (d && d.abort) { try { d.abort.abort(); } catch {} }
@@ -11585,13 +11614,24 @@ function dlRender() {
     const barCol = d.status === 'error' ? '#ff5c5c' : 'linear-gradient(90deg, var(--accent), #a78bfa)';
     const meta = d.total ? (_fmtGB(d.done) + ' / ' + _fmtGB(d.total) + (d.status === 'downloading' ? '  ·  ' + _fmtSpeed(d.speed) + '  ·  ETA ' + _fmtETA(d.eta) : '')) : '';
     const _btnCss = 'background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);font-size:11px;padding:3px 9px;cursor:pointer;flex-shrink:0';
-    const ctrlBtn = d.status === 'downloading' && d.repo
-      ? `<button data-dlpause="${esc(id)}" style="${_btnCss}">❚❚ Pause</button>`
-      : (d.status === 'paused' && d.repo
-        ? `<button data-dlresume="${esc(id)}" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : '');
+    const isEngine = d.kind === 'engine';
+    const ctrlBtn = isEngine
+      ? (d.status === 'downloading'
+          ? `<button data-dlcancel="${esc(id)}" style="${_btnCss}">✕ Cancel</button>`
+          : (d.status === 'paused'
+            ? `<button data-dlengresume="1" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : ''))
+      : (d.status === 'downloading' && d.repo
+        ? `<button data-dlpause="${esc(id)}" style="${_btnCss}">❚❚ Pause</button>`
+        : (d.status === 'paused' && d.repo
+          ? `<button data-dlresume="${esc(id)}" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : ''));
+    // Engine reads as infrastructure, models as content — different glyphs so
+    // the row is identifiable at a glance.
+    const icon = isEngine
+      ? '<span title="inference engine" style="opacity:.85;margin-right:6px">⚙</span>'
+      : '<span title="model" style="opacity:.85;margin-right:6px">◆</span>';
     return `<div style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:6px">
-        <span style="color:var(--fg);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span>
+        <span style="color:var(--fg);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${icon}${esc(d.name)}</span>
         <span style="color:${d.status === 'done' ? 'var(--ok,#7dd3a8)' : d.status === 'paused' ? 'var(--accent-2)' : 'var(--fg-dim)'};flex-shrink:0">${d.status === 'paused' ? 'paused' : pctTxt}</span>
       </div>
       <div style="height:7px;background:var(--bg-0);border-radius:4px;overflow:hidden;border:1px solid var(--border)"><div style="height:100%;width:${d.pct}%;background:${barCol};border-radius:4px"></div></div>
