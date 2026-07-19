@@ -11189,6 +11189,9 @@ async function modelsRenderEngine() {
               ${pill('', 'Auto')}${pill('hearth', 'Downloaded')}${pill('lmstudio', 'LM Studio')}${pill('wheel', 'Built-in')}
             </span></div>
         </div>
+        <div class="server-card-actions" style="margin-top:10px">
+          <button class="btn-mini" id="engine-open-settings">Server status, port &amp; logs &rarr;</button>
+        </div>
       </div>
     </div>`;
 
@@ -11241,6 +11244,12 @@ async function modelsRenderEngine() {
       modelsRenderEngine(); refreshRuntimeBar();
     } catch (err) { toast('Engine', err.message, 'err', 7000); }
   };
+  // Status, PID, port, ctx and logs live in Settings — link there instead of
+  // duplicating them here and letting the two drift apart.
+  $('engine-open-settings')?.addEventListener('click', () => {
+    showView('settings');
+    document.querySelector('.settings-side-btn[data-st="server"]')?.click();
+  });
   pane.querySelectorAll('[data-engine-pref]').forEach(p => {
     p.addEventListener('click', () => setPref(p.dataset.enginePref,
       'Preference saved. Restart the server to apply.'));
