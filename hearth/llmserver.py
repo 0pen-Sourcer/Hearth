@@ -846,15 +846,23 @@ def clear_engine_health(exe: Optional[str] = None) -> None:
 _ENGINE_PREF_PATH = Path(os.path.expanduser("~/.hearth/engine_pref.txt"))
 
 
+def _valid_pref(v: str) -> bool:
+    # "hearth:<tag>" pins one installed build so a rollback actually sticks;
+    # the picker otherwise always sorts to the newest tag.
+    return v in ("hearth", "lmstudio", "wheel") or v.startswith("hearth:")
+
+
 def get_engine_preference() -> str:
-    """'' (auto), 'hearth', 'lmstudio', or 'wheel'. Lets a user override the
-    picker when one engine misbehaves on their hardware."""
+    """'' (auto), 'hearth', 'hearth:<tag>', 'lmstudio', or 'wheel'. Lets a user
+    override the picker when one engine misbehaves on their hardware."""
     env = (os.environ.get("HEARTH_ENGINE") or "").strip().lower()
-    if env in ("hearth", "lmstudio", "wheel", "auto"):
-        return "" if env == "auto" else env
+    if env == "auto":
+        return ""
+    if env and _valid_pref(env):
+        return env
     try:
         v = _ENGINE_PREF_PATH.read_text(encoding="utf-8").strip().lower()
-        return v if v in ("hearth", "lmstudio", "wheel") else ""
+        return v if _valid_pref(v) else ""
     except OSError:
         return ""
 
@@ -868,7 +876,7 @@ def set_engine_preference(pref: str) -> Dict[str, Any]:
             pass
         reset_native_cache()
         return {"ok": True, "preference": ""}
-    if pref not in ("hearth", "lmstudio", "wheel"):
+    if not _valid_pref(pref):
         return {"ok": False, "error": f"unknown engine '{pref}'"}
     try:
         _ENGINE_PREF_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -912,7 +920,15 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
     if pref == "wheel":
         _native_server_cache.append(None)   # fall through to llama-cpp-python
         return None
-    if pref in ("hearth", "lmstudio"):
+    if pref.startswith("hearth:"):          # pinned to one build
+        want = pref.split(":", 1)[1]
+        pinned = [c for c in candidates
+                  if _engine_source_of(c) == "hearth" and c.parent.name.lower() == want]
+        # A pin to a build that's since been pruned must not drop the user to
+        # the slow wheel; ignore the stale pin and rank normally instead.
+        if pinned:
+            candidates = pinned
+    elif pref in ("hearth", "lmstudio"):
         candidates = [c for c in candidates if _engine_source_of(c) == pref]
     for exe in candidates:
         # Skip a missing exe or an AV-quarantined stub (AVs flag the unsigned
@@ -2246,6 +2262,66 @@ def list_partial_downloads() -> List[Dict[str, Any]]:
     except Exception:
         pass
     return out
+
+
+def discard_partial(filename: str) -> Dict[str, Any]:
+    """Delete an interrupted model download. Pause and resume existed but there
+    was no way to abandon one, so a mistaken multi-GB pull sat on disk with no
+    way out of the UI. Confined to MODELS_DIR and to *.gguf.part."""
+    name = os.path.basename((filename or "").strip())
+    if not name:
+        return {"ok": False, "error": "no filename"}
+    if not name.endswith(".part"):
+        name += ".part"
+    target = (MODELS_DIR / name).resolve()
+    try:
+        # Never let a crafted name walk outside the models dir.
+        target.relative_to(MODELS_DIR.resolve())
+    except ValueError:
+        return {"ok": False, "error": "outside models dir"}
+    if not target.name.endswith(".gguf.part") or not target.is_file():
+        return {"ok": False, "error": "no such partial download"}
+    freed = 0
+    try:
+        freed = target.stat().st_size
+        target.unlink()
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    try:                       # drop the resume pointer so it can't reappear
+        if _load_pending_download().get("filename") == target.name[:-5]:
+            clear_pending_download()
+    except Exception:
+        pass
+    return {"ok": True, "freed_gb": round(freed / (1024 ** 3), 2)}
+
+
+def delete_model(path: str) -> Dict[str, Any]:
+    """Delete a downloaded .gguf. Only files Hearth manages (MODELS_DIR) are
+    removable — a model detected inside LM Studio's or Ollama's own store
+    belongs to that app, and silently deleting it there would be hostile."""
+    if not path:
+        return {"ok": False, "error": "no path"}
+    try:
+        target = Path(path).resolve()
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    try:
+        target.relative_to(MODELS_DIR.resolve())
+    except ValueError:
+        return {"ok": False, "error":
+                "This model lives outside Hearth's models folder (LM Studio / "
+                "Ollama / HF cache). Remove it from that app instead."}
+    if target.suffix.lower() != ".gguf" or not target.is_file():
+        return {"ok": False, "error": "not a .gguf on disk"}
+    if _proc is not None and _proc.poll() is None and \
+            os.path.normcase(str(target)) == os.path.normcase(str(_proc_info.get("model_path") or "")):
+        return {"ok": False, "error": "That model is loaded right now — eject it first."}
+    try:
+        freed = target.stat().st_size
+        target.unlink()
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "freed_gb": round(freed / (1024 ** 3), 2)}
 
 
 def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
