@@ -1704,7 +1704,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             try:
                 from . import updater
                 # Keep in sync with hearth_cli.HEARTH_VERSION + Hearth.iss.
-                return self._send_json(200, updater.check_for_update("0.7.0-preview"))
+                return self._send_json(200, updater.check_for_update())
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/update/apply":
