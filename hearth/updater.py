@@ -21,7 +21,7 @@ REPO = os.environ.get("HEARTH_UPDATE_REPO", "0pen-sourcer/hearth")
 
 # Single source of truth for the shipped version. Callers must NOT hardcode it -
 # a stale copy makes the update prompt fire forever after the user updates.
-HEARTH_VERSION = "0.7.0-preview"
+HEARTH_VERSION = "0.7.1-preview"
 
 
 def _norm(v: str) -> tuple:
