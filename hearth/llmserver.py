@@ -95,6 +95,8 @@ def save_model_config(model_path: str, config: Dict[str, Any]) -> None:
 
 BUILTIN_PORT = int(os.environ.get("JARVIS_BUILTIN_PORT", "1234"))
 BUILTIN_HOST = "127.0.0.1"
+# Key the builtin server is spawned with; every local caller must send it.
+BUILTIN_API_KEY = "hearth-builtin"
 
 # Hide the cmd-flash for any subprocess we spawn on Windows.
 _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -758,6 +760,75 @@ def _usable_server_exe(exe: Path) -> bool:
         return False
 
 
+def _engine_emits_token(api_base: str, timeout: float = 90.0) -> bool:
+    """Ask the running server for one token. True only if it actually returns
+    text — the single check that catches an engine which loads fine and then
+    generates nothing."""
+    import urllib.request
+    body = json.dumps({"model": "local", "max_tokens": 4, "temperature": 0,
+                       "messages": [{"role": "user", "content": "Hi"}]}).encode()
+    req = urllib.request.Request(
+        api_base.rstrip("/") + "/chat/completions", data=body,
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {BUILTIN_API_KEY}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.load(r)
+        msg = (data.get("choices") or [{}])[0].get("message") or {}
+        return bool((msg.get("content") or "").strip())
+    except Exception:
+        return False   # unreachable/erroring counts as not proven
+
+
+_ENGINE_HEALTH_PATH = Path(os.path.expanduser("~/.hearth/engine_health.json"))
+
+
+def _engine_health() -> Dict[str, Any]:
+    try:
+        with open(_ENGINE_HEALTH_PATH, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def set_engine_health(exe: str, ok: bool, reason: str = "") -> None:
+    """Record whether an engine actually produced output. A binary can pass every
+    static check, boot, report ready, and still emit nothing (seen: a llama.cpp
+    build with no working kernels for the installed GPU), so health is decided by
+    behaviour and remembered across runs."""
+    data = _engine_health()
+    data[str(exe)] = {"ok": bool(ok), "reason": reason, "at": int(time.time())}
+    try:
+        _ENGINE_HEALTH_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_ENGINE_HEALTH_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+    except OSError:
+        pass
+
+
+def engine_is_known_bad(exe: str) -> bool:
+    rec = _engine_health().get(str(exe))
+    return bool(rec) and rec.get("ok") is False
+
+
+def clear_engine_health(exe: Optional[str] = None) -> None:
+    """Forget one engine's verdict, or all of them (lets a user retry after a
+    driver/GPU change)."""
+    if exe is None:
+        try:
+            _ENGINE_HEALTH_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
+    data = _engine_health()
+    data.pop(str(exe), None)
+    try:
+        with open(_ENGINE_HEALTH_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+    except OSError:
+        pass
+
+
 def find_native_llama_server() -> Optional[Dict[str, Any]]:
     """Locate a standalone llama.cpp `llama-server.exe` — the official OpenAI-
     compatible server. It's newer than our pinned llama-cpp-python wheel and,
@@ -786,6 +857,10 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
         # upstream ships a ~9 KB launcher + -impl.dll, so this must not be a
         # bare size test or every official build gets rejected.
         if not _usable_server_exe(exe):
+            continue
+        # Proven not to generate on this machine — skip so the next candidate
+        # (or the wheel) takes over instead of silently returning empty replies.
+        if engine_is_known_bad(str(exe)):
             continue
         dll_dirs = [str(exe.parent)]
         # CUDA runtime DLLs live in a sibling vendor dir for LM Studio builds.
@@ -968,7 +1043,8 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                   cache_type_k: Optional[str] = None,
                   cache_type_v: Optional[str] = None,
                   flash_attn: bool = True,
-                  force: bool = False) -> Dict[str, Any]:  # noqa: ARG001 — kept for caller compat; load no longer refuses on VRAM
+                  force: bool = False,
+                  _smoke_checked: bool = False) -> Dict[str, Any]:  # noqa: ARG001 — kept for caller compat; load no longer refuses on VRAM
     """Spawn llama-cpp-python's OpenAI-compatible server.
 
     Args:
@@ -1187,7 +1263,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             "--port", str(port),
             "--ctx-size", str(ctx),
             "--n-gpu-layers", str(999 if n_gpu_layers == -1 else n_gpu_layers),
-            "--api-key", "hearth-builtin",
+            "--api-key", BUILTIN_API_KEY,
             "--batch-size", "2048",
             "--ubatch-size", "512",
             "--threads", str(effective_threads),
@@ -1210,7 +1286,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             "--port", str(port),
             "--n_ctx", str(ctx),
             "--n_gpu_layers", str(n_gpu_layers),
-            "--api_key", "hearth-builtin",
+            "--api_key", BUILTIN_API_KEY,
             "--n_batch", "2048",
             "--n_ubatch", "512",
             "--n_threads", str(effective_threads),
@@ -1358,7 +1434,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         # connect either succeeds quickly (port bound, uvicorn not accepting
         # yet — slow socket close) or fails fast. 0.5s is long enough for the
         # response when the server IS ready and short enough to keep cadence.
-        if external_server_running(api_base, timeout=0.5, api_key="hearth-builtin"):
+        if external_server_running(api_base, timeout=0.5, api_key=BUILTIN_API_KEY):
             try:
                 print(f"  [hearth.llmserver] ready in {time.time() - t_spawn:.1f}s", flush=True)
             except Exception:
@@ -1403,6 +1479,31 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         "cache_type_v": cache_type_v,
         "flash_attn": flash_attn,
     })
+    # First real use of a native engine: prove it emits a token before trusting
+    # it. Booting and reporting ready is not proof — a build with no kernels for
+    # the installed GPU does both and then returns empty for every request.
+    # Verified once per exe, then remembered.
+    if _use_native and _native and not _smoke_checked:
+        _exe = (_native or {}).get("exe") or ""
+        if _engine_health().get(_exe) is None:
+            if _engine_emits_token(api_base):
+                set_engine_health(_exe, True)
+            else:
+                set_engine_health(_exe, False, "booted but generated no tokens")
+                try:
+                    print(f"  [hearth.llmserver] engine {Path(_exe).parent.name} "
+                          f"produced no output — falling back", flush=True)
+                except Exception:
+                    pass
+                stop_builtin()
+                reset_native_cache()
+                with _start_lock: _starting_paths.discard(normalized_path)
+                return start_builtin(model_path, port=port, ctx=ctx,
+                                     n_gpu_layers=n_gpu_layers, n_threads=n_threads,
+                                     cache_type_k=cache_type_k, cache_type_v=cache_type_v,
+                                     flash_attn=flash_attn, force=force,
+                                     _smoke_checked=True)
+
     # Release the path-level lock — this load is fully complete.
     with _start_lock: _starting_paths.discard(normalized_path)
     result = {"ok": True, "url": api_base, "pid": _proc.pid, "info": _proc_info}
@@ -1974,7 +2075,7 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
         _is_local = True
     _key = os.environ.get("LOCAL_API_KEY") or ""
     ext = external_server_running(api_base, timeout=0.5,
-                                  api_key=_key or "hearth-builtin") and not builtin
+                                  api_key=_key or BUILTIN_API_KEY) and not builtin
     ext_id: Optional[str] = None
     ext_path: Optional[str] = None
     _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}

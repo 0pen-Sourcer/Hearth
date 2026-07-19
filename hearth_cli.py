@@ -212,7 +212,7 @@ COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
 # hearth/loop_guard.py - outcome-hash based, not a magic per-tool count.)
 
 
-HEARTH_VERSION = "0.7.0-preview"
+from hearth.updater import HEARTH_VERSION  # one source of truth; see updater.py
 HEARTH_REPO = "https://github.com/0pen-sourcer/hearth"
 
 

@@ -19,6 +19,10 @@ import urllib.request
 
 REPO = os.environ.get("HEARTH_UPDATE_REPO", "0pen-sourcer/hearth")
 
+# Single source of truth for the shipped version. Callers must NOT hardcode it -
+# a stale copy makes the update prompt fire forever after the user updates.
+HEARTH_VERSION = "0.7.0-preview"
+
 
 def _norm(v: str) -> tuple:
     """'v0.7.1-preview' -> (0, 7, 1). Ignores any non-numeric suffix so a
@@ -34,10 +38,11 @@ def is_git_checkout() -> bool:
     return os.path.isdir(os.path.join(root, ".git"))
 
 
-def check_for_update(current: str, timeout: float = 6.0) -> dict:
+def check_for_update(current: str = "", timeout: float = 6.0) -> dict:
     """Query the latest GitHub release. Returns a dict:
        {ok, available, latest, current, url, notes}  or  {ok: False, error}.
     Network-failure-safe: never raises."""
+    current = current or HEARTH_VERSION
     url = f"https://api.github.com/repos/{REPO}/releases/latest"
     try:
         req = urllib.request.Request(url, headers={
