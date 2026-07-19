@@ -834,6 +834,47 @@ def clear_engine_health(exe: Optional[str] = None) -> None:
         pass
 
 
+_ENGINE_PREF_PATH = Path(os.path.expanduser("~/.hearth/engine_pref.txt"))
+
+
+def get_engine_preference() -> str:
+    """'' (auto), 'hearth', 'lmstudio', or 'wheel'. Lets a user override the
+    picker when one engine misbehaves on their hardware."""
+    env = (os.environ.get("HEARTH_ENGINE") or "").strip().lower()
+    if env in ("hearth", "lmstudio", "wheel", "auto"):
+        return "" if env == "auto" else env
+    try:
+        v = _ENGINE_PREF_PATH.read_text(encoding="utf-8").strip().lower()
+        return v if v in ("hearth", "lmstudio", "wheel") else ""
+    except OSError:
+        return ""
+
+
+def set_engine_preference(pref: str) -> Dict[str, Any]:
+    pref = (pref or "").strip().lower()
+    if pref in ("", "auto"):
+        try:
+            _ENGINE_PREF_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+        reset_native_cache()
+        return {"ok": True, "preference": ""}
+    if pref not in ("hearth", "lmstudio", "wheel"):
+        return {"ok": False, "error": f"unknown engine '{pref}'"}
+    try:
+        _ENGINE_PREF_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _ENGINE_PREF_PATH.write_text(pref, encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    reset_native_cache()
+    return {"ok": True, "preference": pref}
+
+
+def _engine_source_of(exe: Path) -> str:
+    s = str(exe)
+    return "hearth" if ".hearth" in s else ("lmstudio" if ".lmstudio" in s else "other")
+
+
 def find_native_llama_server() -> Optional[Dict[str, Any]]:
     """Locate a standalone llama.cpp `llama-server.exe` — the official OpenAI-
     compatible server. It's newer than our pinned llama-cpp-python wheel and,
@@ -856,6 +897,14 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
     if lms.is_dir():
         candidates += sorted(lms.glob("*nvidia-cuda12*/llama-server.exe"),
                              key=lambda p: p.parent.name, reverse=True)
+    # An explicit choice beats the ranking — the escape hatch when one engine
+    # misbehaves on hardware we can't test.
+    pref = get_engine_preference()
+    if pref == "wheel":
+        _native_server_cache.append(None)   # fall through to llama-cpp-python
+        return None
+    if pref in ("hearth", "lmstudio"):
+        candidates = [c for c in candidates if _engine_source_of(c) == pref]
     for exe in candidates:
         # Skip a missing exe or an AV-quarantined stub (AVs flag the unsigned
         # official llama-server.exe as IDP.generic and truncate it). Current

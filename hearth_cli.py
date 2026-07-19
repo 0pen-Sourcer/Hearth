@@ -1272,7 +1272,23 @@ class JarvisCLI:
                       f"(no runnable llama-server.exe).{C_RESET}")
                 print(f"  {C_DIM}Usually antivirus quarantine. Allow ~/.hearth/llamacpp, "
                       f"then re-run with {C_RESET}{C_TOOL}install{C_RESET}{C_DIM}.{C_RESET}")
-            if arg.strip().lower() not in ("install", "update"):
+            _a = arg.strip().lower()
+            if _a.startswith("use "):
+                res = llmserver.set_engine_preference(_a.split(None, 1)[1])
+                if not res.get("ok"):
+                    print(f"{C_ERR}{res.get('error')}{C_RESET}")
+                    return
+                pick = res.get("preference") or "auto"
+                new = llmserver.llama_runtime_info()
+                print(f"{C_OK}Engine preference: {pick}{C_RESET}"
+                      f"  {C_DIM}now using {new.get('source')} "
+                      f"{new.get('version') or ''}{C_RESET}\n")
+                return
+            if _a not in ("install", "update"):
+                cur = llmserver.get_engine_preference() or "auto"
+                print(f"  {C_DIM}preference {C_RESET}{C_TOOL}{cur}{C_RESET}"
+                      f"{C_DIM} - switch with {C_RESET}{C_TOOL}/models engine use "
+                      f"hearth|lmstudio|wheel|auto{C_RESET}")
                 nxt = "update" if info.get("managed") else "install"
                 print(f"{C_DIM}Run {C_RESET}{C_TOOL}/models engine {nxt}{C_RESET}"
                       f"{C_DIM} to fetch the official llama.cpp CUDA build "
