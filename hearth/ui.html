@@ -10729,7 +10729,18 @@ async function refreshRuntimeBar() {
     if (r.engine === 'native') {
       const src = { hearth: "Hearth's own", lmstudio: "LM Studio's (signed)", other: 'detected copy' }[r.source] || r.source;
       statusEl.innerHTML = `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} · ${esc(src)}</span>`;
-      if (btn) btn.textContent = (r.source === 'hearth') ? 'Update engine' : "Install Hearth's own copy";
+      const upd = r.update || {};
+      if (btn) {
+        // Say what the click will DO. "Update engine" on the newest build
+        // invites a pointless 640 MB re-download.
+        btn.textContent = (r.source === 'hearth')
+          ? (upd.available ? `Update to ${upd.latest}` : 'Engine up to date')
+          : "Install Hearth's own copy";
+        btn.disabled = (r.source === 'hearth' && !upd.available && upd.ok);
+      }
+      if (upd.available) statusEl.innerHTML += ' <span title="newer llama.cpp available"'
+        + ' style="display:inline-block;width:7px;height:7px;border-radius:50%;'
+        + 'background:#fbbf24;margin-left:6px;vertical-align:middle"></span>';
     } else {
       // Only call the wheel a problem when it actually is one for this card.
       // On CPU-only / older GPUs it has real kernels and a CUDA build buys nothing.
