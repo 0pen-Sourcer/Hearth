@@ -1458,6 +1458,9 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/llmserver/status":
             from . import llmserver
             return self._send_json(200, llmserver.status(LOCAL_API_BASE))
+        if path == "/api/runtime/builds":   # GET — the Engine pane reads this
+            from . import llmserver
+            return self._send_json(200, llmserver.list_llama_builds())
         if path == "/api/runtime/info":
             from . import llmserver
             _info = llmserver.llama_runtime_info()
@@ -2481,6 +2484,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             # + CUDA DLLs). Streams NDJSON progress like the model download. The
             # GUI shows the AV-false-positive heads-up BEFORE calling this.
             from . import llmserver
+            # Optional {tag} pins a specific build so a regressed one can be
+            # rolled back; absent means latest.
+            _want_tag = (self._read_json().get("tag") or "").strip()
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -2503,17 +2509,30 @@ class HearthHandler(BaseHTTPRequestHandler):
                 emit({"type": "progress", "done": done, "total": total})
 
             try:
-                result = llmserver.download_llama_runtime(on_progress=on_progress)
+                result = llmserver.download_llama_runtime(
+                    tag=_want_tag or None, on_progress=on_progress)
                 emit({"type": "done", **result})
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
             return
-        if path == "/api/runtime/builds":
+        if path == "/api/llmserver/discard-partial":
             from . import llmserver
-            return self._send_json(200, llmserver.list_llama_builds())
+            body = self._read_json()
+            return self._send_json(200, llmserver.discard_partial(
+                (body.get("filename") or "").strip()))
+        if path == "/api/llmserver/delete-model":
+            from . import llmserver
+            body = self._read_json()
+            return self._send_json(200, llmserver.delete_model(
+                (body.get("path") or "").strip()))
         if path == "/api/runtime/cancel":
             from . import llmserver
             return self._send_json(200, llmserver.cancel_llama_download())
+        if path == "/api/runtime/preference":
+            from . import llmserver
+            body = self._read_json()
+            return self._send_json(200, llmserver.set_engine_preference(
+                (body.get("preference") or "").strip()))
         if path == "/api/llmserver/download":
             # Download a curated pick from HF, streaming progress as NDJSON so
             # the GUI can render a real progress bar. {type:"progress", done, total}
