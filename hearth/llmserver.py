@@ -876,7 +876,6 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     Returns {ok, dir, tag} or {ok: False, error}."""
     import urllib.request
     import zipfile
-    import tempfile
     try:
         api = (f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases/"
                + (f"tags/{tag}" if tag else "latest"))
@@ -906,31 +905,30 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     total = int(bins.get("size", 0)) + int(runtime.get("size", 0))
     done = [0]
 
+    # Zips stage here (not tempfile) so an interrupted pull leaves a .part that
+    # the next attempt RESUMES from, same as model downloads.
+    cache = Path(os.path.expanduser("~/.hearth/llamacpp/.cache"))
+    cache.mkdir(parents=True, exist_ok=True)
+
     def _fetch(asset) -> None:
-        fd, tmp = tempfile.mkstemp(suffix=".zip")
-        os.close(fd)
-        try:
-            u = urllib.request.Request(asset["browser_download_url"],
-                                       headers={"User-Agent": "Hearth"})
-            with urllib.request.urlopen(u, timeout=60) as resp, open(tmp, "wb") as f:
-                while True:
-                    chunk = resp.read(262144)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    done[0] += len(chunk)
-                    if on_progress:
-                        try:
-                            on_progress(done[0], total)
-                        except Exception:
-                            pass
-            with zipfile.ZipFile(tmp) as z:
-                z.extractall(dest)   # exe + ggml DLLs + cudart all land together
-        finally:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+        name = asset.get("name") or "asset.zip"
+        zip_path, part = cache / name, cache / (name + ".part")
+        base = done[0]   # bytes from assets already finished
+
+        def _prog(d: int, _t: int) -> None:
+            if on_progress:
+                try:
+                    on_progress(base + d, total)
+                except Exception:
+                    pass
+
+        if not zip_path.exists():
+            _download_with_resume(asset["browser_download_url"], zip_path, part,
+                                  _prog, ua="Hearth")
+        done[0] = base + int(asset.get("size", 0))
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(dest)   # exe + ggml DLLs + cudart all land together
+        zip_path.unlink(missing_ok=True)
 
     try:
         _fetch(bins)
@@ -941,6 +939,18 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     exe = next(iter(dest.rglob("llama-server.exe")), None)
     if not exe:
         return {"ok": False, "error": "llama-server.exe not found after extract"}
+    if not _usable_server_exe(exe):
+        # Extracted but truncated: AVs flag the unsigned binary as IDP.generic
+        # and gut it. Reporting ok here leaves a stub that silently loses to the
+        # fallback engine, so the install looks like it worked and never did.
+        try:
+            size = exe.stat().st_size
+        except OSError:
+            size = 0
+        return {"ok": False, "stub": True, "dir": str(dest), "tag": tagname,
+                "error": (f"llama-server.exe was truncated to {size} bytes after "
+                          f"extract - antivirus quarantined it. Allow "
+                          f"{dest.parent} in your antivirus, then install again.")}
     return {"ok": True, "dir": str(dest), "tag": tagname}
 
 
