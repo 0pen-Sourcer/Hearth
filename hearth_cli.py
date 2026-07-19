@@ -1107,9 +1107,18 @@ class JarvisCLI:
         try:
             from hearth import llmserver as _ls
             if _ls._is_lite_edition():
-                print(f"  {C_DIM}Hearth Lite: after setup, open {C_RESET}{C_TOOL}/models{C_RESET}"
+                print(f"  {C_DIM}Hearth Lite: after setup, run {C_RESET}{C_TOOL}/models engine install{C_RESET}"
                       f"{C_DIM} to grab the GPU engine, or {C_RESET}{C_TOOL}/brain{C_RESET}{C_DIM} a cloud model.{C_RESET}\n")
                 return
+            # Full edition, but on a GPU the bundled engine has no kernels for.
+            try:
+                _adv = _ls.runtime_advice()
+                if _adv.get("nudge"):
+                    print(f"  {C_WARN}{_adv['short']}{C_RESET}")
+                    print(f"  {C_DIM}Run {C_RESET}{C_TOOL}/models engine install{C_RESET}"
+                          f"{C_DIM} after setup.{C_RESET}\n")
+            except Exception:
+                pass
             disk = _ls.scan_disk_for_models()
             if not disk:
                 print(f"  {C_DIM}No local models on disk yet. After setup, run {C_RESET}{C_TOOL}/models{C_RESET}"
@@ -1230,6 +1239,7 @@ class JarvisCLI:
           /models hf <query>     - search Hugging Face for GGUF repos
           /models get <pick-id>  - download a recommended pick + boot built-in server
           /models use <path|n>   - boot built-in server with a disk model (n = number from /models disk)
+          /models engine         - show the inference engine; `engine install` / `engine update` to fetch llama.cpp
           /models stop           - stop the built-in server
         """
         from hearth import llmserver
@@ -1243,6 +1253,49 @@ class JarvisCLI:
                 print(f"{C_OK}Built-in server stopped.{C_RESET}")
             else:
                 print(f"{C_DIM}{r.get('error') or 'no server was running'}{C_RESET}")
+            return
+
+        if sub == "engine":
+            info = llmserver.llama_runtime_info()
+            adv = llmserver.runtime_advice()
+            src = {"hearth": "Hearth's own", "lmstudio": "LM Studio's (signed)",
+                   "other": "detected copy", "wheel": "bundled with Hearth"}.get(
+                       info.get("source"), info.get("source") or "")
+            print(f"\n{C_BRAND}Inference engine{C_RESET}  {C_TOOL}{info.get('engine')}{C_RESET}"
+                  f"  {C_DIM}{info.get('version') or ''} · {src}{C_RESET}")
+            if info.get("exe"):
+                print(f"  {C_DIM}{info['exe']}{C_RESET}")
+            if adv.get("nudge"):
+                print(f"  {C_WARN}{adv['short']}{C_RESET}")
+            if info.get("stub"):
+                print(f"  {C_WARN}A previous engine download is on disk but truncated - "
+                      f"antivirus flags the unsigned llama-server.exe.{C_RESET}")
+                print(f"  {C_DIM}Allow ~/.hearth/llamacpp in your AV, then re-run "
+                      f"with {C_RESET}{C_TOOL}install{C_RESET}{C_DIM}.{C_RESET}")
+            if arg.strip().lower() not in ("install", "update"):
+                nxt = "update" if info.get("managed") else "install"
+                print(f"{C_DIM}Run {C_RESET}{C_TOOL}/models engine {nxt}{C_RESET}"
+                      f"{C_DIM} to fetch the official llama.cpp CUDA build "
+                      f"into ~/.hearth/llamacpp.{C_RESET}\n")
+                return
+            print(f"{C_DIM}Downloading llama.cpp runtime - this can take a while…{C_RESET}")
+            def _cb(done: int, total: int) -> None:
+                if total > 0:
+                    print(f"\r  {int(100*done/total):3d}%  {done/(1024**2):7.1f}"
+                          f" / {total/(1024**2):7.1f} MB", end="", flush=True)
+            try:
+                r = llmserver.download_llama_runtime(on_progress=_cb)
+                print()
+                if not r.get("ok"):
+                    print(f"{C_ERR}{r.get('error') or 'download failed'}{C_RESET}")
+                    return
+                llmserver.reset_native_cache()  # else the old choice stays cached
+                new = llmserver.llama_runtime_info()
+                print(f"{C_OK}Engine installed: {new.get('version') or r.get('tag')}{C_RESET}")
+                print(f"{C_DIM}Reboot the built-in server to use it: "
+                      f"{C_RESET}{C_TOOL}/models use <n>{C_RESET}\n")
+            except Exception as e:
+                print(f"{C_ERR}{type(e).__name__}: {e}{C_RESET}")
             return
 
         if sub == "disk":
