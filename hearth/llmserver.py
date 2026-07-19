@@ -562,9 +562,15 @@ def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
     return out
 
 
+class DownloadCancelled(Exception):
+    """Raised out of a download loop when the caller asks to stop. The .part
+    file is deliberately left behind so a later attempt resumes."""
+
+
 def _download_with_resume(url, dest, tmp,
                           on_progress: Optional[Callable[[int, int], None]] = None,
-                          ua: str = "Hearth/0.7 (HF-download)") -> int:
+                          ua: str = "Hearth/0.7 (HF-download)",
+                          cancel: Optional[Callable[[], bool]] = None) -> int:
     """Stream `url` into `tmp`, RESUMING from an existing .part via an HTTP Range
     request so a closed/interrupted download continues instead of restarting
     from zero (matters a lot on slow/metered links). Atomic rename to `dest` on
@@ -584,6 +590,9 @@ def _download_with_resume(url, dest, tmp,
             total, mode, done = clen, "wb", 0
         with open(tmp, mode) as f:
             while True:
+                # Checked per chunk so a cancel lands in well under a second.
+                if cancel and cancel():
+                    raise DownloadCancelled()
                 chunk = r.read(256 * 1024)
                 if not chunk:
                     break
@@ -1001,9 +1010,72 @@ def runtime_advice() -> Dict[str, Any]:
     }
 
 
+_llama_dl_cancel = _threading.Event()
+
+
+def cancel_llama_download() -> Dict[str, Any]:
+    """Stop an in-flight runtime download. The partial .part survives, so
+    starting again resumes rather than restarting."""
+    _llama_dl_cancel.set()
+    return {"ok": True}
+
+
+_LLAMA_LATEST_CACHE = Path(os.path.expanduser("~/.hearth/llamacpp_latest.json"))
+
+
+def latest_llama_tag(max_age: int = 21600, force: bool = False) -> Optional[str]:
+    """Newest llama.cpp release tag, cached 6h. None if GitHub is unreachable."""
+    if not force:
+        try:
+            rec = json.loads(_LLAMA_LATEST_CACHE.read_text(encoding="utf-8"))
+            if time.time() - rec.get("at", 0) < max_age and rec.get("tag"):
+                return rec["tag"]
+        except Exception:
+            pass
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases/latest",
+            headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            tag = (json.load(r).get("tag_name") or "").strip()
+    except Exception:
+        return None
+    if tag:
+        try:
+            _LLAMA_LATEST_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            _LLAMA_LATEST_CACHE.write_text(json.dumps({"tag": tag, "at": int(time.time())}),
+                                           encoding="utf-8")
+        except OSError:
+            pass
+    return tag or None
+
+
+def installed_llama_tags() -> List[str]:
+    """Tags of usable Hearth-managed runtimes on disk, newest first."""
+    root = Path(os.path.expanduser("~/.hearth/llamacpp"))
+    if not root.is_dir():
+        return []
+    out = [p.parent.name for p in root.glob("*/llama-server.exe") if _usable_server_exe(p)]
+    return sorted(out, reverse=True)
+
+
+def check_llama_update(max_age: int = 21600) -> Dict[str, Any]:
+    """Is a newer llama.cpp runtime available than the one installed?
+    Drives the update dot — nobody goes looking for this on their own."""
+    installed = installed_llama_tags()
+    latest = latest_llama_tag(max_age=max_age)
+    if not latest:
+        return {"ok": False, "installed": installed, "latest": None, "available": False}
+    return {"ok": True, "installed": installed, "latest": latest,
+            # Only meaningful once they have their own copy; otherwise the
+            # install nudge is the right prompt, not an update dot.
+            "available": bool(installed) and latest not in installed}
+
+
 def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
-                           on_progress: Optional[Callable[[int, int], None]] = None
-                           ) -> Dict[str, Any]:
+                           on_progress: Optional[Callable[[int, int], None]] = None,
+                           force: bool = False) -> Dict[str, Any]:
     """Download the official ggml-org llama.cpp Windows CUDA build (llama-server
     .exe + ggml DLLs) and its CUDA runtime into ~/.hearth/llamacpp/<tag>/. This
     is what lets Hearth's builtin run on any GPU without bundling a giant wheel
@@ -1012,6 +1084,10 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     Returns {ok, dir, tag} or {ok: False, error}."""
     import urllib.request
     import zipfile
+    import shutil
+    # A previous cancel must not kill this run — the flag is sticky otherwise
+    # and every later install aborts instantly.
+    _llama_dl_cancel.clear()
     try:
         api = (f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases/"
                + (f"tags/{tag}" if tag else "latest"))
@@ -1023,6 +1099,13 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         return {"ok": False, "error": f"couldn't reach GitHub releases: {e}"}
     tagname = rel.get("tag_name") or tag or "latest"
     assets = rel.get("assets") or []
+
+    # Already have this exact build — re-pulling 640 MB to land on the same
+    # files is pure waste. `force` is the explicit repair path.
+    _have = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tagname}"))
+    if not force and _usable_server_exe(_have / "llama-server.exe"):
+        reset_native_cache()
+        return {"ok": True, "dir": str(_have), "tag": tagname, "already": True}
 
     # NB: both "llama-<tag>-bin-win-cuda-X-x64.zip" (the binaries) and
     # "cudart-llama-bin-win-cuda-X-x64.zip" (the CUDA runtime) contain the
@@ -1045,6 +1128,16 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     # the next attempt RESUMES from, same as model downloads.
     cache = Path(os.path.expanduser("~/.hearth/llamacpp/.cache"))
     cache.mkdir(parents=True, exist_ok=True)
+    # A cancelled pull of an OLDER build would keep its .part forever once the
+    # tag moves on, so drop anything not part of this fetch (hundreds of MB).
+    _wanted = {bins.get("name", ""), runtime.get("name", "")}
+    for _f in cache.iterdir():
+        _base = _f.name[:-5] if _f.name.endswith(".part") else _f.name
+        if _base not in _wanted:
+            try:
+                _f.unlink()
+            except OSError:
+                pass
 
     def _fetch(asset) -> None:
         name = asset.get("name") or "asset.zip"
@@ -1060,7 +1153,8 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
 
         if not zip_path.exists():
             _download_with_resume(asset["browser_download_url"], zip_path, part,
-                                  _prog, ua="Hearth")
+                                  _prog, ua="Hearth",
+                                  cancel=_llama_dl_cancel.is_set)
         done[0] = base + int(asset.get("size", 0))
         with zipfile.ZipFile(zip_path) as z:
             z.extractall(dest)   # exe + ggml DLLs + cudart all land together
@@ -1069,8 +1163,23 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     try:
         _fetch(bins)
         _fetch(runtime)
+    except DownloadCancelled:
+        # .part files stay on purpose — starting again resumes.
+        return {"ok": False, "cancelled": True, "tag": tagname,
+                "error": "download cancelled (progress kept, it will resume)"}
     except Exception as e:
         return {"ok": False, "error": f"download/extract failed: {type(e).__name__}: {e}"}
+    # Each runtime is ~555 MB on disk; keep the newest two so a bad new build
+    # can still fall back, and drop the rest instead of stacking up forever.
+    try:
+        _root = Path(os.path.expanduser("~/.hearth/llamacpp"))
+        _vers = sorted((d for d in _root.iterdir()
+                        if d.is_dir() and not d.name.startswith(".")),
+                       key=lambda p: p.name, reverse=True)
+        for _old in _vers[2:]:
+            shutil.rmtree(_old, ignore_errors=True)
+    except OSError:
+        pass
     reset_native_cache()
     exe = next(iter(dest.rglob("llama-server.exe")), None)
     if not exe:
