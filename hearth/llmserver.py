@@ -765,7 +765,7 @@ def _engine_emits_token(api_base: str, timeout: float = 90.0) -> bool:
     text — the single check that catches an engine which loads fine and then
     generates nothing."""
     import urllib.request
-    body = json.dumps({"model": "local", "max_tokens": 4, "temperature": 0,
+    body = json.dumps({"model": "local", "max_tokens": 24, "temperature": 0,
                        "messages": [{"role": "user", "content": "Hi"}]}).encode()
     req = urllib.request.Request(
         api_base.rstrip("/") + "/chat/completions", data=body,
@@ -775,7 +775,12 @@ def _engine_emits_token(api_base: str, timeout: float = 90.0) -> bool:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = json.load(r)
         msg = (data.get("choices") or [{}])[0].get("message") or {}
-        return bool((msg.get("content") or "").strip())
+        # A reasoning model on current llama.cpp puts its thinking in
+        # reasoning_content and leaves content empty until it stops thinking.
+        # Either one proves the engine generates; checking only content marks
+        # a perfectly good engine dead.
+        text = (msg.get("content") or "") + (msg.get("reasoning_content") or "")
+        return bool(text.strip())
     except Exception:
         return False   # unreachable/erroring counts as not proven
 
