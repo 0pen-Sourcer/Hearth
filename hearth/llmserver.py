@@ -734,14 +734,26 @@ def server_extras_missing() -> Optional[str]:
 _native_server_cache: List[Optional[Dict[str, Any]]] = []
 
 
-# Floor that separates a real llama-server.exe (~20 KB+ thin launcher, the heavy
-# code is in the DLLs) from an AV-truncated stub (seen: 9 KB).
+# Size below which an exe carries no code of its own. Current upstream builds
+# ship every tool as a ~9 KB launcher next to a heavy <name>-impl.dll, so size
+# alone rejects them; older builds (and LM Studio's) put the code in the exe.
 _MIN_SERVER_EXE_BYTES = 15_000
 
 
 def _usable_server_exe(exe: Path) -> bool:
+    """True for a llama-server.exe that can actually run. Requires a PE header
+    (an AV-truncated file loses it), then accepts either a self-contained exe or
+    a thin launcher whose -impl.dll sits beside it."""
     try:
-        return exe.is_file() and exe.stat().st_size >= _MIN_SERVER_EXE_BYTES
+        if not exe.is_file():
+            return False
+        with open(exe, "rb") as f:
+            if f.read(2) != b"MZ":
+                return False
+        if exe.stat().st_size >= _MIN_SERVER_EXE_BYTES:
+            return True
+        impl = exe.with_name(exe.stem + "-impl.dll")
+        return impl.is_file() and impl.stat().st_size >= _MIN_SERVER_EXE_BYTES
     except OSError:
         return False
 
@@ -769,16 +781,11 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
         candidates += sorted(lms.glob("*nvidia-cuda12*/llama-server.exe"),
                              key=lambda p: p.parent.name, reverse=True)
     for exe in candidates:
-        try:
-            # Skip a missing exe OR an AV-quarantined stub. AVs flag the unsigned
-            # official llama-server.exe as IDP.generic and truncate it (seen: 9 KB).
-            # llama-server.exe is a thin launcher — the real one is ~20 KB+ (heavy
-            # code lives in the DLLs) — so a 15 KB floor drops the stub while
-            # keeping real builds, and we fall back to a signed copy (LM Studio's)
-            # that AV trusts.
-            if not exe.is_file() or exe.stat().st_size < _MIN_SERVER_EXE_BYTES:
-                continue
-        except OSError:
+        # Skip a missing exe or an AV-quarantined stub (AVs flag the unsigned
+        # official llama-server.exe as IDP.generic and truncate it). Current
+        # upstream ships a ~9 KB launcher + -impl.dll, so this must not be a
+        # bare size test or every official build gets rejected.
+        if not _usable_server_exe(exe):
             continue
         dll_dirs = [str(exe.parent)]
         # CUDA runtime DLLs live in a sibling vendor dir for LM Studio builds.
@@ -948,9 +955,10 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         except OSError:
             size = 0
         return {"ok": False, "stub": True, "dir": str(dest), "tag": tagname,
-                "error": (f"llama-server.exe was truncated to {size} bytes after "
-                          f"extract - antivirus quarantined it. Allow "
-                          f"{dest.parent} in your antivirus, then install again.")}
+                "error": (f"llama-server.exe is unusable after extract ({size} "
+                          f"bytes, no llama-server-impl.dll beside it). Antivirus "
+                          f"quarantine is the usual cause - allow {dest.parent} "
+                          f"and install again.")}
     return {"ok": True, "dir": str(dest), "tag": tagname}
 
 
