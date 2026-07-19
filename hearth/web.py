@@ -1462,6 +1462,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import llmserver
             _info = llmserver.llama_runtime_info()
             _info["advice"] = llmserver.runtime_advice()
+            _info["update"] = llmserver.check_llama_update()  # cached 6h
+            _info["preference"] = llmserver.get_engine_preference()
             return self._send_json(200, _info)
         if path == "/api/mcp/inbound":
             # Inbound MCP clients (Claude Desktop / LM Studio / Cursor …) that
@@ -2506,6 +2508,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
             return
+        if path == "/api/runtime/cancel":
+            from . import llmserver
+            return self._send_json(200, llmserver.cancel_llama_download())
         if path == "/api/llmserver/download":
             # Download a curated pick from HF, streaming progress as NDJSON so
             # the GUI can render a real progress bar. {type:"progress", done, total}
