@@ -1291,7 +1291,13 @@ class JarvisCLI:
                     return
                 llmserver.reset_native_cache()  # else the old choice stays cached
                 new = llmserver.llama_runtime_info()
-                print(f"{C_OK}Engine installed: {new.get('version') or r.get('tag')}{C_RESET}")
+                if new.get("source") != "hearth":
+                    # Extracted, but the picker still prefers something else -
+                    # don't report another engine's version as "installed".
+                    print(f"{C_WARN}Extracted to {r.get('dir')}, but Hearth is still "
+                          f"using {new.get('source')} ({new.get('version')}).{C_RESET}")
+                    return
+                print(f"{C_OK}Engine installed: {new.get('version')}{C_RESET}")
                 print(f"{C_DIM}Reboot the built-in server to use it: "
                       f"{C_RESET}{C_TOOL}/models use <n>{C_RESET}\n")
             except Exception as e:
