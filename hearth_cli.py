@@ -3586,6 +3586,36 @@ class JarvisCLI:
                 print(f"{C_DIM}● MCP: spawning {r['servers']} bridge(s){C_RESET}")
         except Exception as e:
             print(f"{C_DIM}● MCP client bootstrap skipped: {e}{C_RESET}")
+        # Passive update nudge: the GUI pops a modal on launch, the CLI only
+        # ever checked on /update. Do a background, non-blocking check and print
+        # ONE dim line if a newer release exists — never interrupt input, never
+        # auto-install. Throttled to once/day and skippable via
+        # HEARTH_NO_UPDATE_CHECK=1 (both handled in updater).
+        if not os.environ.get("HEARTH_NO_UPDATE_CHECK"):
+            import threading as _th
+            def _upd_nudge():
+                try:
+                    import time as _t, json as _j
+                    stamp = os.path.expanduser("~/.hearth/cli_update_check.json")
+                    try:
+                        if _t.time() - _j.load(open(stamp)).get("at", 0) < 86400:
+                            return
+                    except Exception:
+                        pass
+                    from hearth import updater
+                    r = updater.check_for_update(HEARTH_VERSION)
+                    try:
+                        os.makedirs(os.path.dirname(stamp), exist_ok=True)
+                        _j.dump({"at": _t.time()}, open(stamp, "w"))
+                    except Exception:
+                        pass
+                    if r.get("ok") and r.get("available"):
+                        print(f"\n{C_DIM}● update available: {C_RESET}{C_TOOL}{r['latest']}{C_RESET}"
+                              f"{C_DIM}  (you're on v{HEARTH_VERSION}) — run {C_RESET}"
+                              f"{C_TOOL}/update{C_RESET}{C_DIM} to install{C_RESET}", flush=True)
+                except Exception:
+                    pass
+            _th.Thread(target=_upd_nudge, daemon=True).start()
         # Sync subagents inherit the CLI's cancel signal so a Ctrl-C
         # during a respond() stream also aborts any active child loop.
         try:
