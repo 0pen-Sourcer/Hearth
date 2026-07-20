@@ -49,6 +49,34 @@ try:
 except ImportError:
     _PT_AVAILABLE = False
 
+
+def _enable_windows_vt_input() -> None:
+    """Turn on ENABLE_VIRTUAL_TERMINAL_INPUT on the Windows console's stdin.
+
+    Without it the Win32 console hands prompt_toolkit each pasted line as its
+    own Enter keydown, so a multi-line paste submits line by line. With it,
+    Windows Terminal delivers the paste as one bracketed-paste escape sequence
+    (\\x1b[200~ … \\x1b[201~) that prompt_toolkit coalesces into a single edit.
+    No-op off Windows or when stdin isn't a real console. Best-effort — a
+    failure just leaves the old line-splitting behavior, never crashes."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.windll.kernel32
+        STD_INPUT_HANDLE = -10
+        ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200
+        h = k32.GetStdHandle(STD_INPUT_HANDLE)
+        if not h or h == wintypes.HANDLE(-1).value:
+            return
+        mode = wintypes.DWORD()
+        if not k32.GetConsoleMode(h, ctypes.byref(mode)):
+            return  # not a real console (piped/redirected)
+        k32.SetConsoleMode(h, mode.value | ENABLE_VIRTUAL_TERMINAL_INPUT)
+    except Exception:
+        pass
+
 # ---- Brain ----------------------------------------------------------------
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if THIS_DIR not in sys.path:
@@ -611,9 +639,10 @@ class JarvisCLI:
                     self.context_tokens = detected
         # Single-line by default: Enter = send (the normal, expected behavior).
         # Esc+Enter inserts a newline for the occasional multi-line message.
-        # Tradeoff: on Windows, prompt_toolkit can't catch bracketed paste, so a
-        # pasted multi-line block splits into separate sends — toggle /multi
-        # before pasting to keep it as one block. (Linux/macOS paste fine.)
+        # Multi-line paste arrives as one block via bracketed paste — enabled on
+        # Windows by _enable_windows_vt_input(), native on Linux/macOS — so a
+        # pasted block no longer splits into line-by-line sends. /multi stays as
+        # a manual toggle for typing a multi-line message by hand.
         self.multiline_mode = False  # toggled with /multi
         # ONE thinking toggle:
         #   /think on  → model reasons AND we show the body inline
@@ -648,6 +677,7 @@ class JarvisCLI:
         if self._pt_init_attempted or not _PT_AVAILABLE:
             return
         self._pt_init_attempted = True
+        _enable_windows_vt_input()   # so a pasted multi-line block arrives whole
         try:
             hist_path = os.path.join(WORKSPACE, "logs", "input_history.txt")
             kb = KeyBindings()
