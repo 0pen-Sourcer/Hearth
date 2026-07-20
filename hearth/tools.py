@@ -7531,7 +7531,55 @@ def trim_to_budget(messages: List[Dict[str, Any]], context_window: int,
             "content": "Continue using the results above.",
         })
 
-    return msgs
+    # Final line of defense: enforce tool_call<->tool_result pairing on the
+    # exact array we return. Compaction/trim can drop a tool reply while keeping
+    # its assistant tool_calls turn (or vice-versa); llama.cpp and LM Studio's
+    # Qwen/Hermes Jinja templates reject either with a 400 bad_request. This is
+    # why a turn fails immediately AFTER auto-compact. Runs on every send path.
+    return sanitize_tool_pairing(msgs)
+
+
+def sanitize_tool_pairing(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Guarantee OpenAI/llama.cpp tool-protocol validity on an outgoing array.
+
+    Two orphan directions both trigger a 400 bad_request on strict servers:
+      1. a `tool` reply whose assistant `tool_calls` turn was dropped, and
+      2. an assistant `tool_calls` turn whose `tool` reply was dropped.
+    Earlier trimming only cleaned *leading* orphan tool messages, so an orphan
+    anywhere else (the case that fires right after compaction) slipped through.
+
+    Rules enforced:
+      - keep an assistant's tool_calls entry only if a matching `tool` reply
+        exists later in the array; drop the rest of that turn's calls,
+      - if none of a turn's calls survive, keep it as plain text (when it has
+        content) or drop it,
+      - keep a `tool` message only if a surviving assistant tool_call with the
+        same id appeared before it.
+    Idempotent: a already-valid array is returned unchanged. NEW list.
+    """
+    replied = {m.get("tool_call_id") for m in messages
+               if m.get("role") == "tool" and m.get("tool_call_id")}
+    declared: set = set()
+    out: List[Dict[str, Any]] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            kept = [tc for tc in m["tool_calls"] if tc.get("id") in replied]
+            if kept:
+                declared.update(tc.get("id") for tc in kept)
+                out.append({**m, "tool_calls": kept})
+            else:
+                content = m.get("content")
+                if isinstance(content, str) and content.strip():
+                    out.append({k: v for k, v in m.items() if k != "tool_calls"})
+                # else: bare orphan tool_calls turn -> drop
+        elif role == "tool":
+            if m.get("tool_call_id") in declared:
+                out.append(m)
+            # else: orphan tool reply -> drop
+        else:
+            out.append(m)
+    return out
 
 
 def _truncate_kept_tool_results(msgs: List[Dict[str, Any]],
