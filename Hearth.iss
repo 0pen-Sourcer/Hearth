@@ -11,7 +11,7 @@
 ; "Python.Runtime.Loader.Initialize" error).
 
 #define MyAppName "Hearth"
-#define MyAppVersion "0.7.1-preview"
+#define MyAppVersion "0.7.2-preview"
 #define MyAppPublisher "0pen-sourcer"
 #define MyAppExeName "Hearth.exe"
 
