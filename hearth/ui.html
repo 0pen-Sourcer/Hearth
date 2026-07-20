@@ -1260,6 +1260,14 @@
     min-width: 72px; text-align: right; white-space: nowrap;
     font-family: var(--mono); font-size: 12px; color: var(--fg);
   }
+  /* Typable mirror of a slider — reads like the label it replaced until focused. */
+  .ex-config .ex-slider-row input.v {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 3px 6px; width: 84px; min-width: 84px;
+  }
+  .ex-config .ex-slider-row input.v:focus {
+    outline: none; border-color: var(--accent-2); color: var(--fg);
+  }
   .ex-config .toggle-line {
     display: flex; align-items: center; gap: 10px;
   }
@@ -10618,7 +10626,7 @@ function modelsLoadConfigHTML(opts) {
         <label>Context length</label>
         <div class="ex-slider-row">
           <input type="range" min="4096" max="${maxCtx}" step="1024" value="${defCtx}" data-cfg="ctx" />
-          <span class="v ctx-v">${defCtx.toLocaleString()}</span>
+          <input type="number" class="v ctx-v" min="4096" max="${maxCtx}" step="1024" value="${defCtx}" aria-label="Context length" />
         </div>
         <div class="ex-hint">Max prompt + reply. Bigger = more VRAM. Model supports up to ${maxCtx.toLocaleString()} tokens.</div>
       </div>
@@ -10729,9 +10737,24 @@ function modelsWireLoadConfig(rootEl) {
   // Context slider: live token readout as it drags (LM Studio style).
   const ctxSlider = rootEl.querySelector('input[type="range"][data-cfg="ctx"]');
   if (ctxSlider) {
+    // Slider stays the source of truth (data-cfg is on it); the number box is a
+    // typable mirror, since dragging alone can't hit an exact value like 32768.
     const cv = ctxSlider.parentElement.querySelector('.ctx-v');
-    const updc = () => { if (cv) cv.textContent = (parseInt(ctxSlider.value, 10) || 0).toLocaleString(); };
+    const lo = parseInt(ctxSlider.min, 10), hi = parseInt(ctxSlider.max, 10);
+    const updc = () => { if (cv) cv.value = parseInt(ctxSlider.value, 10) || lo; };
     ctxSlider.addEventListener('input', updc); updc();
+    if (cv) {
+      const commit = () => {
+        let v = parseInt(cv.value, 10);
+        if (Number.isNaN(v)) v = parseInt(ctxSlider.value, 10);
+        v = Math.min(hi, Math.max(lo, v));
+        ctxSlider.value = v; cv.value = v;
+        // Fire input so the VRAM estimate recomputes off the slider.
+        ctxSlider.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      cv.addEventListener('change', commit);
+      cv.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); cv.blur(); } });
+    }
   }
   // Recompute the estimate when ctx or KV-cache quant changes too.
   rootEl.querySelectorAll('input[data-cfg="ctx"], select[data-cfg="cache_type_k"], select[data-cfg="cache_type_v"]')
