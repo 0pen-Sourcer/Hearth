@@ -48,9 +48,12 @@ ArchitecturesAllowed=x64compatible
 ; Updating over a running Hearth: Windows won't let files be replaced while the
 ; app holds them open. Hearth exits before handing off, and these let Setup
 ; close/restart anything still holding a file instead of failing the copy.
+; Restart Manager finds whatever is holding a file in the install folder, which
+; is what actually blocks an update or uninstall. No AppMutex here on purpose:
+; Hearth's single-instance lock is a port, not a named mutex, so an AppMutex
+; line would match nothing and only look like protection.
 CloseApplications=yes
 RestartApplications=yes
-AppMutex={#MyAppName}
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
@@ -72,6 +75,16 @@ Name: "{group}\{#MyAppName}";        Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{#MyAppName} CLI";    Filename: "{app}\Hearth-cli.bat"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[UninstallDelete]
+; Inno only removes files it put there itself. Hearth writes into its own folder
+; at runtime (downloaded engines, patch backups, logs), so the uninstaller left
+; those behind, then couldn't remove the directory or unins000.exe, and still
+; reported success. Sweep the app folder so uninstalling actually leaves nothing.
+; User data is untouched: chats, memory and models live in the workspace and in
+; %USERPROFILE%\.hearth, not here.
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}"
 
 [Run]
 ; Install the WebView2 runtime if missing (needed for the GUI). Silent.
