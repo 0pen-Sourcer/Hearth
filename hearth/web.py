@@ -1721,6 +1721,50 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/update/cancel":
             from . import updater
             return self._send_json(200, updater.cancel_installer_download())
+        if path == "/api/update/capability":
+            from . import updater
+            return self._send_json(200, {"can_patch": updater.can_patch()})
+        if path == "/api/update/restart":
+            from . import updater
+            return self._send_json(200, updater.restart_app())
+        if path == "/api/update/patch":
+            # Small code-only update: download the patch, apply it over the
+            # on-disk .py layer, and report. Same NDJSON shape as the installer
+            # download so the GUI can drive both with one progress path.
+            from . import updater
+            import time as _t
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            _last = [0.0]
+
+            def emit(obj: Dict[str, Any]) -> None:
+                try:
+                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def on_progress(done: int, total: int) -> None:
+                now = _t.time()
+                if now - _last[0] < 0.2 and done != total:
+                    return
+                _last[0] = now
+                emit({"type": "progress", "done": done, "total": total})
+
+            try:
+                got = updater.download_patch(on_progress=on_progress)
+                if not got.get("ok"):
+                    emit({"type": "done", **got})
+                    return
+                applied = updater.apply_patch(got["path"])
+                emit({"type": "done", **applied, "patched": bool(applied.get("ok")),
+                      "tag": got.get("tag")})
+            except Exception as e:
+                emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
         if path == "/api/update/download":
             # Download the installer matching THIS edition, streaming NDJSON
             # progress so the GUI shows the same bar/cancel as a model or engine

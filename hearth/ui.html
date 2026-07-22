@@ -12897,8 +12897,18 @@ const _updDl = { t0: 0, b0: 0 };
 
 async function downloadUpdate() {
   dlToggle(true);   // surface the overlay so the bar is visible immediately
+  // Prefer the code-only patch (well under a megabyte) and only fall back to
+  // the full installer when this build can't be patched, i.e. it predates the
+  // loose-.py layout. Nobody refetches a gigabyte for a few lines of code.
+  let usePatch = false;
   try {
-    const resp = await fetch('/api/update/download', { method: 'POST' });
+    const cap = await api('/api/update/capability', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    usePatch = !!(cap && cap.can_patch);
+  } catch {}
+  try {
+    const resp = await fetch(usePatch ? '/api/update/patch' : '/api/update/download',
+                             { method: 'POST' });
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
     for (;;) {
       const { done, value } = await reader.read();
@@ -12915,14 +12925,25 @@ async function downloadUpdate() {
           const secs = (now - _updDl.t0) / 1000;
           const speed = secs > 1 ? (ev.done - _updDl.b0) / secs : 0;
           dlUpsert(UPDATE_DL_ID, {
-            name: 'Hearth update', kind: 'update', status: 'downloading',
+            name: usePatch ? 'Hearth update (patch)' : 'Hearth update',
+            kind: 'update', status: 'downloading',
             pct: Math.round(ev.done / ev.total * 100),
             done: ev.done, total: ev.total, speed,
             eta: speed > 0 ? (ev.total - ev.done) / speed : 0,
           });
         } else if (ev.type === 'done') {
           _updDl.t0 = 0;
-          if (ev.ok) {
+          if (ev.ok && ev.patched) {
+            // Patch is already applied on disk; a restart is all that's left.
+            dlUpsert(UPDATE_DL_ID, { status: 'done', pct: 100 });
+            showModal('Update installed',
+              'Hearth will restart to load it.\n\nYour chats, memory and models are untouched.',
+              [{ label: 'Later' },
+               { label: 'Restart now', kind: 'primary', onclick: async () => {
+                 await api('/api/update/restart', { method: 'POST',
+                   headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+               } }]);
+          } else if (ev.ok) {
             dlUpsert(UPDATE_DL_ID, { status: 'done', pct: 100 });
             showModal('Update downloaded',
               'Hearth will close so the installer can replace the running files.\n\nYour chats, memory and models are untouched.',
