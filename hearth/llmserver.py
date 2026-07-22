@@ -1701,6 +1701,16 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                 hint = " — missing server extras; run: pip install fastapi 'uvicorn[standard]' sse-starlette pydantic-settings starlette-context"
             elif "out of memory" in tail.lower() or "CUDA error" in tail:
                 hint = " — out of VRAM; try a smaller model or lower n_ctx"
+            elif ("unknown model architecture" in tail.lower()
+                    or "unsupported model architecture" in tail.lower()
+                    or "unknown architecture" in tail.lower()):
+                # A brand-new model family the installed llama.cpp predates.
+                # Checked BEFORE the generic load failure because llama.cpp
+                # prints "error loading model" alongside this one. Reactive by
+                # design: no curated model-to-engine table to go stale, and it
+                # fires exactly when the engine is genuinely the problem.
+                hint = (". This model is newer than your engine, so it can't read it. "
+                        "Update the engine in Models > Engine, then load it again.")
             elif "could not load model" in tail.lower():
                 hint = " — model file unreadable or wrong format"
             elif "could not find module" in tail.lower():
