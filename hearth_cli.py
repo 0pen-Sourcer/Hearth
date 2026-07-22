@@ -93,6 +93,7 @@ try:
         ACTIVITY_LOG,
         system_prompt,
         trim_to_budget,
+        sanitize_tool_pairing,
         compact_history,
         estimate_tokens,
         CHARS_PER_TOKEN,
@@ -4143,6 +4144,11 @@ class JarvisCLI:
                 block = _mem.recall_for_prompt(last_user_text)
                 if block:
                     sent[0] = {**sent[0], "content": sent[0]["content"] + "\n\n" + block}
+        # Final send-boundary guard: enforce tool_call<->tool_result pairing
+        # unconditionally, no matter which trim/compact path ran. This is the
+        # authoritative fix — validate at the boundary, like a mature agent
+        # loop, instead of relying on a budget-gated trimmer that early-returns.
+        sent = sanitize_tool_pairing(sent)
         return sent
 
     def _cloud_reasoning_effort(self) -> Optional[str]:

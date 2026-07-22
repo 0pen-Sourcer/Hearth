@@ -603,6 +603,14 @@ def _download_with_resume(url, dest, tmp,
                         on_progress(done, total)
                     except Exception:
                         pass
+    # A dropped connection on a flaky link ends the loop with an empty read too,
+    # not only a finished download. Promoting a short .part to the final .gguf
+    # yields a valid-header-but-truncated file that loads and then emits garbage
+    # (the '????' / degenerate-token failure). Verify byte-completeness before
+    # the rename; leave the .part in place so the next attempt RESUMES.
+    if total and done < total:
+        raise IOError(f"incomplete download: {done}/{total} bytes — connection "
+                      f"closed early; kept .part for resume")
     tmp.rename(dest)
     return done
 
