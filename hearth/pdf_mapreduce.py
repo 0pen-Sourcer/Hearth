@@ -197,10 +197,10 @@ def _llm_complete(prompt: str, *, temperature: float = 0.3,
         base, key, model = _route_for_cost_class("cheap")
     except Exception:
         base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
-        key = os.environ.get("LOCAL_API_KEY", "") or "not-needed"
+        key = os.environ.get("LOCAL_API_KEY", "") or "hearth-builtin"
         model = os.environ.get("LOCAL_MODEL", "")
     try:
-        client = OpenAI(base_url=base, api_key=key or "not-needed", timeout=180.0)
+        client = OpenAI(base_url=base, api_key=key or "hearth-builtin", timeout=180.0)
         if not model:
             try:
                 for m in (client.models.list().data or []):

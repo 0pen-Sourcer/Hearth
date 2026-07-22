@@ -62,7 +62,7 @@ LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
 # Real API key for cloud endpoints (Gemini, OpenRouter, OpenAI, etc.).
 # Local LM Studio ignores it, so the harmless default is fine. To use a
 # cloud model: set LOCAL_API_BASE + LOCAL_API_KEY + LOCAL_MODEL.
-LOCAL_API_KEY = os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY") or "not-needed"
+LOCAL_API_KEY = os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY") or "hearth-builtin"
 
 
 def _is_local_endpoint(base: str) -> bool:
@@ -435,7 +435,7 @@ async def run_once(
 
     # If we're talking to Hearth's BUILTIN llama-cpp server, it was booted
     # with --api_key hearth-builtin. Any other key (including the default
-    # "not-needed") gets a 401 on the auto-detect probe + every chat request.
+    # "hearth-builtin") gets a 401 on the auto-detect probe + every chat request.
     # Detect by probing: does this base answer with our builtin's signature?
     _effective_key = LOCAL_API_KEY
     try:

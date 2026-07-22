@@ -1187,7 +1187,7 @@ class JarvisCLI:
         except Exception:
             pass
 
-    def _retarget_to(self, url: str, api_key: str = "not-needed",
+    def _retarget_to(self, url: str, api_key: str = "hearth-builtin",
                      model_path: Optional[str] = None) -> None:
         """Live-switch the running CLI to a new OpenAI-compatible endpoint
         without forcing a restart. Updates the global LOCAL_API_BASE +
@@ -1199,7 +1199,7 @@ class JarvisCLI:
         if not url:
             return
         LOCAL_API_BASE = url
-        LOCAL_API_KEY = api_key or "not-needed"
+        LOCAL_API_KEY = api_key or "hearth-builtin"
         os.environ["LOCAL_API_BASE"] = url
         os.environ["LOCAL_API_KEY"] = LOCAL_API_KEY
         # Mirror the headless module's globals too so any code path that
@@ -1266,7 +1266,7 @@ class JarvisCLI:
             return  # nothing to do / we already made this change
         if not key and provider:
             key = _read_brain_key(provider)
-        self._retarget_to(url, key or "not-needed", None)
+        self._retarget_to(url, key or "hearth-builtin", None)
         if model:
             self.current_model = model
         print(f"{C_DIM}↳ brain synced from GUI → {provider or url}{C_RESET}")
@@ -1993,7 +1993,7 @@ class JarvisCLI:
             # Mutate the runtime + env so the next chat call picks up the new
             # endpoint. (`global` already declared above.)
             LOCAL_API_BASE = url
-            LOCAL_API_KEY = key or "not-needed"
+            LOCAL_API_KEY = key or "hearth-builtin"
             if model_hint:
                 LOCAL_MODEL = model_hint
                 self.current_model = model_hint
@@ -2046,8 +2046,31 @@ class JarvisCLI:
             except Exception:
                 pass
 
+            # For a local brain the configured model name is often stale: it
+            # lingers in settings.json from an earlier session, so the CLI would
+            # cheerfully announce a model the user doesn't have and then fail
+            # every request against it. Ask the endpoint what it's actually
+            # serving and report that, or say plainly that nothing is up yet.
+            _shown = model_hint
+            if provider == "local":
+                _live = None
+                try:
+                    import urllib.request as _u
+                    _rq = _u.Request(url.rstrip("/") + "/models", headers={
+                        "Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
+                    with _u.urlopen(_rq, timeout=2) as _r:
+                        _ids = [m.get("id") for m in (_json.load(_r).get("data") or [])]
+                    _live = next((i for i in _ids if i), None)
+                except Exception:
+                    _live = None
+                if _live:
+                    LOCAL_MODEL = _live
+                    self.current_model = _live
+                    os.environ["LOCAL_MODEL"] = _live
+                _shown = _live
             print(f"{C_OK}brain → {provider}{C_RESET}  "
-                  f"{C_DIM}({url}{' · ' + model_hint if model_hint else ''}){C_RESET}")
+                  f"{C_DIM}({url}"
+                  f"{' · ' + _shown if _shown else ' · no model server running yet'}){C_RESET}")
             # Re-detect the context window for the NEW brain. Without this the
             # budget kept the previous model's value (e.g. a 32K local default),
             # so a 1M-ctx cloud model like grok-4.3 got compacted at 32K. /model
