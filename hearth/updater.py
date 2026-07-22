@@ -140,14 +140,46 @@ def download_installer(on_progress=None, tag: str = "") -> dict:
     return {"ok": True, "path": str(dest), "tag": asset.get("tag")}
 
 
-def launch_installer(path: str) -> dict:
-    """Run the downloaded installer and let it take over. Hearth should exit
-    right after so the installer can replace files that are otherwise locked."""
-    try:
-        os.startfile(path)  # type: ignore[attr-defined]  # Windows
-        return {"ok": True}
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+def launch_installer(path: str, restart: bool = True) -> dict:
+    """Hand off to the downloaded installer and step out of its way.
+
+    Windows won't let the installer replace Hearth.exe or its DLLs while this
+    process still holds them open, so simply spawning the installer from a
+    running Hearth leaves it to fail or silently skip files. The handoff is:
+    spawn DETACHED (so the installer outlives us), give it a moment to start,
+    then exit. Inno relaunches Hearth itself when it finishes, so the user gets
+    the app back on the new version without doing anything.
+    """
+    import subprocess
+    import threading
+    import time as _t
+    if not path or not os.path.isfile(path):
+        return {"ok": False, "error": "installer not found (download it first)"}
+
+    def _handoff():
+        try:
+            flags = 0
+            if sys.platform == "win32":
+                flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                         | 0x00000008)  # DETACHED_PROCESS
+            # /SILENT keeps it to a progress window instead of re-asking every
+            # install question; Inno's CloseApplications + RestartApplications
+            # then reopen Hearth once files are replaced.
+            subprocess.Popen([path, "/SILENT", "/NORESTART"],
+                             creationflags=flags, close_fds=True)
+        except Exception:
+            # Fall back to a plain launch — better a visible installer than none.
+            try:
+                os.startfile(path)  # type: ignore[attr-defined]
+            except Exception:
+                return
+        if restart:
+            # Release our file locks so the installer can overwrite them.
+            _t.sleep(1.0)
+            os._exit(0)
+
+    threading.Thread(target=_handoff, daemon=True).start()
+    return {"ok": True, "exiting": restart}
 
 
 def apply_update() -> str:
