@@ -14,7 +14,27 @@
 #  - PyWebView's Edge WebView2 runtime is assumed installed (Windows 10/11 ship it)
 
 import os
+import glob
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
+
+def _unfreeze_hearth(analysis):
+    """Keep Hearth's OWN modules out of the frozen PYZ archive.
+
+    The bundle is ~1 GB of payload (CUDA, llama.cpp, onnxruntime) that never
+    changes between releases, against ~4 MB of Hearth code that changes every
+    release. Frozen, a one-line fix costs the user a full reinstall. Shipped as
+    loose .py beside the exe, a release can hand out a small patch instead.
+
+    Safe because Analysis still *sees* these modules (so every third-party
+    dependency they import is discovered and bundled normally) — we only drop
+    them from the archive afterwards. At runtime PyInstaller's FrozenImporter
+    simply doesn't find `hearth`, so Python falls through to sys.path, which
+    includes the bundle directory where the loose files live.
+    """
+    analysis.pure = [e for e in analysis.pure
+                     if not (e[0] == "hearth" or e[0].startswith("hearth."))]
+    return analysis
 
 # HEARTH_LITE=1 builds a slim bundle (~0.8 GB) WITHOUT the built-in CUDA
 # llama.cpp server + nvidia CUDA wheels (~1.7 GB). Lite users run LM Studio /
@@ -40,6 +60,11 @@ if not os.path.isfile(VERSION_PATH):
 # Datas: bundle ui.html, persona, anything in hearth/ that isn't a .py
 DATAS = [
     (os.path.join(REPO_ROOT, "hearth", "ui.html"), "hearth"),
+    # Hearth's modules ride as loose .py (see _unfreeze_hearth) so an update can
+    # replace ~4 MB of code instead of forcing a ~1 GB reinstall. Only the
+    # top-level package has importable modules; hearth/skills/*/scripts are data
+    # and are collected separately below.
+    *[(p, "hearth") for p in glob.glob(os.path.join(REPO_ROOT, "hearth", "*.py"))],
     (os.path.join(REPO_ROOT, "README.md"), "."),
     # CLI script needs to be importable by _launch_cli.py at runtime
     (os.path.join(REPO_ROOT, "hearth_cli.py"), "."),
@@ -318,7 +343,7 @@ a_tray = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
-pyz_tray = PYZ(a_tray.pure, a_tray.zipped_data, cipher=block_cipher)
+pyz_tray = PYZ(_unfreeze_hearth(a_tray).pure, a_tray.zipped_data, cipher=block_cipher)
 exe_tray = EXE(
     pyz_tray,
     a_tray.scripts,
@@ -346,7 +371,7 @@ a_cli = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
-pyz_cli = PYZ(a_cli.pure, a_cli.zipped_data, cipher=block_cipher)
+pyz_cli = PYZ(_unfreeze_hearth(a_cli).pure, a_cli.zipped_data, cipher=block_cipher)
 exe_cli = EXE(
     pyz_cli,
     a_cli.scripts,
@@ -373,7 +398,7 @@ a_window = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
-pyz_window = PYZ(a_window.pure, a_window.zipped_data, cipher=block_cipher)
+pyz_window = PYZ(_unfreeze_hearth(a_window).pure, a_window.zipped_data, cipher=block_cipher)
 exe_window = EXE(
     pyz_window,
     a_window.scripts,

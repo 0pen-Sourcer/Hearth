@@ -45,6 +45,12 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
+; Updating over a running Hearth: Windows won't let files be replaced while the
+; app holds them open. Hearth exits before handing off, and these let Setup
+; close/restart anything still holding a file instead of failing the copy.
+CloseApplications=yes
+RestartApplications=yes
+AppMutex={#MyAppName}
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
@@ -72,9 +78,13 @@ Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\{#MyAppExeName}"; Tasks: d
 Filename: "{tmp}\MicrosoftEdgeWebView2Setup.exe"; Parameters: "/silent /install"; \
   StatusMsg: "Installing Edge WebView2 runtime (needed for the GUI)..."; \
   Flags: waituntilterminated; Check: WebView2Missing and FileExists(ExpandConstant('{tmp}\MicrosoftEdgeWebView2Setup.exe'))
-; Offer to launch after install.
+; Offer to launch after a normal install (checkbox on the final page).
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; \
   Flags: nowait postinstall skipifsilent
+; In-app update path: Hearth exits and runs this with /SILENT, so the postinstall
+; entry above is skipped and the user would be left with no app open. Relaunch it
+; explicitly in that case so an update ends with Hearth back on screen.
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent
 
 [Code]
 { Returns True if the Edge WebView2 Evergreen runtime is NOT installed. Checks
