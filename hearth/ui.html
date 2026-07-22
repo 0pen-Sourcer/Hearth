@@ -1005,11 +1005,13 @@
     background: var(--accent-bg); border-color: var(--accent-line);
     color: var(--accent-2); font-weight: 600;
   }
-  /* Advisory inside a models section, same weight as the Settings nudge. */
+  /* Informational callout inside a models section. Uses the same violet
+     treatment as the other in-pane banners so the Engine tab doesn't look
+     like a different app. */
   .engine-note {
     padding: 11px 13px;
-    background: rgba(251,191,36,.07);
-    border: 1px solid rgba(251,191,36,.25);
+    background: rgba(139,92,246,.08);
+    border: 1px solid var(--accent-line);
     border-radius: 8px;
     font-size: 12.5px;
     line-height: 1.55;
@@ -10873,7 +10875,7 @@ async function runtimeInstall(tag) {
           _engDl.t0 = 0;
           dlUpsert(ENGINE_DL_ID, { status: ev.ok ? 'done' : (ev.cancelled ? 'paused' : 'error'), pct: ev.ok ? 100 : undefined });
           if (ev.ok) toast('Engine ready', 'llama.cpp ' + (ev.tag || ''), 'ok');
-          else if (ev.cancelled) toast('Engine download cancelled', 'Progress kept — installing again resumes.', 'ok', 7000);
+          else if (ev.cancelled) toast('Engine download cancelled', 'Progress kept, installing again resumes.', 'ok', 7000);
           else toast('Engine download failed', ev.error || '', 'err', 8000);
           refreshRuntimeBar();
         }
@@ -10888,8 +10890,8 @@ async function runtimeInstall(tag) {
 }
 $('btn-runtime-update')?.addEventListener('click', () => {
   showModal('Download the inference engine?',
-    'Hearth downloads the official <b>llama.cpp</b> runtime (~800 MB) so the built-in server runs on your GPU — its own copy, no LM Studio needed.<br><br>' +
-    '<b>Heads-up:</b> some antivirus (AVG, Avast, Defender) may flag it as <code>IDP.generic</code> — a <b>known false positive</b> for open-source AI runtimes (llama.cpp, koboldcpp, ollama all trip it) because the binary is unsigned. If it gets quarantined, restore it + add an exclusion for <code>~/.hearth/llamacpp</code>. Hearth falls back to a signed copy if you have LM Studio.',
+    'Hearth downloads the official <b>llama.cpp</b> runtime (~800 MB) so the built-in server runs on your GPU. Its own copy, no LM Studio needed.<br><br>' +
+    '<b>Heads-up:</b> some antivirus (AVG, Avast, Defender) may flag it as <code>IDP.generic</code>, a <b>known false positive</b> for open-source AI runtimes (llama.cpp, koboldcpp, ollama all trip it) because the binary is unsigned. If it gets quarantined, restore it + add an exclusion for <code>~/.hearth/llamacpp</code>. Hearth falls back to a signed copy if you have LM Studio.',
     [ { label: 'Cancel' }, { label: 'Download', onclick: runtimeInstall } ]);
 });
 
@@ -10943,7 +10945,7 @@ async function refreshModelsView() {
 
   // Lite build has no built-in server — steer to cloud/LM Studio or Full.
   if (s.is_lite) {
-    head.innerHTML += '<div style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,.08);border:1px solid var(--accent-line);border-radius:8px;font-size:12.5px;color:var(--fg-dim)">You\'re on <b>Hearth Lite</b> — no built-in engine yet. Use a cloud brain (Settings → Chat brain) or LM Studio / Ollama — or <a href="#" onclick="document.getElementById(\'btn-runtime-update\').click();return false;" style="color:var(--accent-2)">download the GPU engine here ↓</a> to run local models in Hearth (just the engine, no app reinstall).</div>';
+    head.innerHTML += '<div style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,.08);border:1px solid var(--accent-line);border-radius:8px;font-size:12.5px;color:var(--fg-dim)">You\'re on <b>Hearth Lite</b>, no built-in engine yet. Use a cloud brain (Settings → Chat brain) or LM Studio / Ollama, or <a href="#" onclick="document.getElementById(\'btn-runtime-update\').click();return false;" style="color:var(--accent-2)">download the GPU engine here ↓</a> to run local models in Hearth (just the engine, no app reinstall).</div>';
   }
 
   // Disk-count badge on the "My Models" tab
@@ -11231,8 +11233,9 @@ async function modelsRenderEngine() {
   } else {
     const cap = bl.gpu_compute_cap;
     html += `<div class="models-section">
-      <div class="sec-head"><h3>Available builds</h3><span class="sub">official llama.cpp${cap ? ' &middot; your GPU is compute ' + cap : ''}</span></div>
-      <div class="sec-body">`;
+      <div class="sec-head"><h3>Available builds</h3><span class="sub">official llama.cpp</span></div>
+      <div class="sec-body">
+        <div class="engine-note" style="margin-bottom:10px">llama.cpp ships new builds most days. You don't need to keep up. Only change this if a model won't load, output looks wrong, or it's slow on a new GPU.</div>`;
     for (let i = 0; i < builds.length; i++) {
       const b = builds[i];
       let badges = i === 0 ? '<span class="model-badge badge-rec">latest</span>' : '';
@@ -11244,19 +11247,64 @@ async function modelsRenderEngine() {
       const btn = b.installed
         ? `<button class="model-action is-secondary" data-engine-use="${esc(b.tag)}">Use this</button>`
         : `<button class="model-action" data-engine-get="${esc(b.tag)}">Install</button>`;
+      const rowId = 'eng-' + i;
+      // Status on THIS machine, in plain language — the thing a user actually
+      // needs to decide whether to install or roll back to a build.
+      let verdict, verdictColor;
+      if (b.known_bad) {
+        verdict = 'Ran on this PC but produced no output. Not recommended.'; verdictColor = '#ff8080';
+      } else if (b.verified) {
+        verdict = 'Confirmed generating on this PC.'; verdictColor = 'var(--ok,#7dd3a8)';
+      } else if (b.installed) {
+        verdict = 'Downloaded, not yet exercised on this PC.'; verdictColor = 'var(--fg-dim)';
+      } else {
+        verdict = 'Not downloaded yet.'; verdictColor = 'var(--fg-faint)';
+      }
+      const capNote = cap ? `Your GPU is compute <b>${cap}</b>.`
+                          : 'No NVIDIA GPU here, so a CUDA build will not help.';
       html += `
-        <div class="model-row${b.installed ? ' is-loaded' : ''}">
+        <div class="model-row is-expandable${b.installed ? ' is-loaded' : ''}" data-row="${rowId}">
           <div class="model-info">
             <div class="model-name">${esc(b.tag)}${badges}</div>
             <div class="model-meta">${b.size_mb} MB &middot; released ${esc(b.published)}</div>
             <div class="cuda-chips">${chips}</div>
           </div>
+          <span class="model-row-chevron" aria-hidden="true">▾</span>
           ${btn}
+          <div class="model-expand" data-expand="${rowId}">
+            <div class="ex-head">About this build</div>
+            <div class="ex-desc">
+              Official llama.cpp release <b>${esc(b.tag)}</b>${b.prerelease ? ' (pre-release)' : ''}.
+              This is the program that actually runs your model; swapping it changes
+              speed and hardware support, not the model itself.
+            </div>
+            ${b.summary ? `<div class="ex-desc" style="margin-top:10px"><b>Changed:</b> ${esc(b.summary)}</div>` : ''}
+            <div class="ex-desc" style="margin-top:10px">
+              <b style="color:${verdictColor}">${esc(verdict)}</b><br>${capNote}
+            </div>
+            ${b.url ? `<div class="ex-desc" style="margin-top:8px"><a href="${esc(b.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">Full release notes on GitHub &#8599;</a></div>` : ''}
+            <div class="ex-actions">
+              <button class="model-action is-secondary" data-cancel="${rowId}">Close</button>
+              ${b.installed
+                ? `<button class="model-action" data-engine-use="${esc(b.tag)}">Use this build</button>`
+                : `<button class="model-action" data-engine-get="${esc(b.tag)}">Download &amp; install (${b.size_mb} MB)</button>`}
+            </div>
+          </div>
         </div>`;
     }
     html += '</div></div>';
   }
   pane.innerHTML = html;
+  // Same click-to-expand behaviour models have, so an engine build can be
+  // inspected before committing to a download.
+  modelsWireRowClicks(pane);
+  pane.querySelectorAll('[data-cancel]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const row = pane.querySelector(`.model-row[data-row="${b.dataset.cancel}"]`);
+      if (row) modelsToggleRow(row);
+    });
+  });
 
   const setPref = async (value, note) => {
     try {
@@ -11280,7 +11328,7 @@ async function modelsRenderEngine() {
   });
   pane.querySelectorAll('[data-engine-get]').forEach(b => {
     b.addEventListener('click', () => {
-      toast('Engine', 'Downloading ' + b.dataset.engineGet + ' — track it in Downloads.', 'ok', 6000);
+      toast('Engine', 'Downloading ' + b.dataset.engineGet + '. Track it in Downloads.', 'ok', 6000);
       runtimeInstall(b.dataset.engineGet);
     });
   });
@@ -11797,6 +11845,12 @@ function dlToggle(force) {
         dlUpsert(ds.dlcancel, { status: 'paused' });
         return;
       }
+      if (ds.dlupdcancel) {
+        api('/api/update/cancel', { method: 'POST' }).catch(() => {});
+        dlUpsert(UPDATE_DL_ID, { status: 'paused' });
+        return;
+      }
+      if (ds.dlupdresume) { downloadUpdate(); return; }
       if (ds.dlengresume) { runtimeInstall(); return; }
       if (ds.dlpause) {
         const d = _dls[ds.dlpause];
@@ -11835,7 +11889,13 @@ function dlRender() {
     const meta = d.total ? (_fmtGB(d.done) + ' / ' + _fmtGB(d.total) + (d.status === 'downloading' ? '  ·  ' + _fmtSpeed(d.speed) + '  ·  ETA ' + _fmtETA(d.eta) : '')) : '';
     const _btnCss = 'background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);font-size:11px;padding:3px 9px;cursor:pointer;flex-shrink:0';
     const isEngine = d.kind === 'engine';
-    const ctrlBtn = isEngine
+    const isUpdate = d.kind === 'update';
+    const ctrlBtn = isUpdate
+      ? (d.status === 'downloading'
+          ? `<button data-dlupdcancel="1" style="${_btnCss}">✕ Cancel</button>`
+          : (d.status === 'paused'
+            ? `<button data-dlupdresume="1" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : ''))
+      : isEngine
       ? (d.status === 'downloading'
           ? `<button data-dlcancel="${esc(id)}" style="${_btnCss}">✕ Cancel</button>`
           : (d.status === 'paused'
@@ -11846,7 +11906,9 @@ function dlRender() {
           ? `<button data-dlresume="${esc(id)}" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : ''));
     // Engine reads as infrastructure, models as content — different glyphs so
     // the row is identifiable at a glance.
-    const icon = isEngine
+    const icon = isUpdate
+      ? '<span title="Hearth update" style="opacity:.85;margin-right:6px">⬆</span>'
+      : isEngine
       ? '<span title="inference engine" style="opacity:.85;margin-right:6px">⚙</span>'
       : '<span title="model" style="opacity:.85;margin-right:6px">◆</span>';
     return `<div style="margin-bottom:14px">
@@ -12827,6 +12889,65 @@ document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
 // On-open update prompt. Returning users see "Update available - install?" the
 // moment they open Hearth, not only if they dig into Settings. Fail-silent (no
 // network / GitHub down shows nothing). Skipped while first-run onboarding is up.
+// The update installer downloads through the SAME Downloads overlay as models
+// and engines — real bar, speed, ETA, cancel — instead of handing the user off
+// to a browser download page. Resumable, so a dropped connection continues.
+const UPDATE_DL_ID = '__update__';
+const _updDl = { t0: 0, b0: 0 };
+
+async function downloadUpdate() {
+  dlToggle(true);   // surface the overlay so the bar is visible immediately
+  try {
+    const resp = await fetch('/api/update/download', { method: 'POST' });
+    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'progress' && ev.total) {
+          const now = Date.now();
+          if (!_updDl.t0) { _updDl.t0 = now; _updDl.b0 = ev.done; }
+          const secs = (now - _updDl.t0) / 1000;
+          const speed = secs > 1 ? (ev.done - _updDl.b0) / secs : 0;
+          dlUpsert(UPDATE_DL_ID, {
+            name: 'Hearth update', kind: 'update', status: 'downloading',
+            pct: Math.round(ev.done / ev.total * 100),
+            done: ev.done, total: ev.total, speed,
+            eta: speed > 0 ? (ev.total - ev.done) / speed : 0,
+          });
+        } else if (ev.type === 'done') {
+          _updDl.t0 = 0;
+          if (ev.ok) {
+            dlUpsert(UPDATE_DL_ID, { status: 'done', pct: 100 });
+            showModal('Update downloaded',
+              'Hearth will close so the installer can replace the running files.\n\nYour chats, memory and models are untouched.',
+              [{ label: 'Not now' },
+               { label: 'Run installer', kind: 'primary', onclick: async () => {
+                 await api('/api/update/launch', { method: 'POST',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({ path: ev.path }) }).catch(() => {});
+               } }]);
+          } else if (ev.cancelled) {
+            dlUpsert(UPDATE_DL_ID, { status: 'paused' });
+            toast('Update cancelled', 'Progress kept, installing again resumes.', 'ok', 7000);
+          } else {
+            dlUpsert(UPDATE_DL_ID, { status: 'error' });
+            toast('Update download failed', ev.error || '', 'err', 9000);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    dlUpsert(UPDATE_DL_ID, { status: 'error' });
+    toast('Update download failed', e.message, 'err', 9000);
+  }
+}
+
 async function promptUpdateIfAvailable() {
   try {
     const r = await api('/api/update/check', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
@@ -12836,14 +12957,9 @@ async function promptUpdateIfAvailable() {
     showModal('Update available: ' + (r.latest || ''),
       "You're on v" + (r.current || '') + '. A newer Hearth (' + (r.latest || '') + ') is out.\n\n' +
       (r.notes ? r.notes.slice(0, 360) + '\n\n' : '') +
-      'Install now? (Source build pulls the update and asks you to restart; packaged build opens the release page.)', [
+      'Downloading shows in Downloads (top right) and can be paused or cancelled.', [
       { label: 'Later' },
-      { label: 'Install now', kind: 'primary', onclick: async () => {
-        try {
-          const a = await api('/api/update/apply', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-          toast('Update', (a && a.result) || 'done', 'ok', 9000);
-        } catch (e) { toast('Update failed', e.message, 'err', 9000); }
-      }},
+      { label: 'Install now', kind: 'primary', onclick: () => downloadUpdate() },
     ]);
   } catch {}
 }

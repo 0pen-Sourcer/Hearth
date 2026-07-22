@@ -1718,6 +1718,46 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"ok": True, "result": updater.apply_update()})
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/update/cancel":
+            from . import updater
+            return self._send_json(200, updater.cancel_installer_download())
+        if path == "/api/update/download":
+            # Download the installer matching THIS edition, streaming NDJSON
+            # progress so the GUI shows the same bar/cancel as a model or engine
+            # download instead of dumping the user on a browser download page.
+            from . import updater
+            import time as _t
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            _last = [0.0]
+
+            def emit(obj: Dict[str, Any]) -> None:
+                try:
+                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def on_progress(done: int, total: int) -> None:
+                now = _t.time()
+                if now - _last[0] < 0.2 and done != total:
+                    return
+                _last[0] = now
+                emit({"type": "progress", "done": done, "total": total})
+
+            try:
+                result = updater.download_installer(on_progress=on_progress)
+                emit({"type": "done", **result})
+            except Exception as e:
+                emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if path == "/api/update/launch":
+            from . import updater
+            body = self._read_json()
+            return self._send_json(200, updater.launch_installer((body.get("path") or "").strip()))
         if path == "/api/announcements/check":
             # Poll the broadcast feed for announcements this build hasn't shown.
             try:
