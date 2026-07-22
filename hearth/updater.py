@@ -67,9 +67,93 @@ def check_for_update(current: str = "", timeout: float = 6.0) -> dict:
     }
 
 
+_dl_cancel = False
+
+
+def cancel_installer_download() -> dict:
+    """Stop an in-flight installer download. The .part is kept so a later
+    attempt resumes instead of restarting the (large) download."""
+    global _dl_cancel
+    _dl_cancel = True
+    return {"ok": True}
+
+
+def installer_asset(tag: str = "") -> dict:
+    """The release asset matching THIS build's edition (Full vs Lite).
+    Returns {name, url, size} or {error}. Downloading the wrong edition would
+    silently swap the user's build, so the edition match is not optional."""
+    import urllib.request
+    from . import edition
+    api = (f"https://api.github.com/repos/{REPO}/releases/"
+           + (f"tags/{tag}" if tag else "latest"))
+    try:
+        req = urllib.request.Request(api, headers={
+            "User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            rel = json.load(r)
+    except Exception as e:
+        return {"error": f"couldn't reach GitHub releases: {e}"}
+    lite = edition.is_lite()
+    for a in rel.get("assets") or []:
+        n = (a.get("name") or "")
+        if not n.lower().endswith(".exe"):
+            continue
+        is_lite_asset = "-lite-" in n.lower()
+        if is_lite_asset == lite:
+            return {"name": n, "url": a.get("browser_download_url"),
+                    "size": int(a.get("size") or 0), "tag": rel.get("tag_name")}
+    return {"error": f"no {edition.label()} installer in the latest release"}
+
+
+def download_installer(on_progress=None, tag: str = "") -> dict:
+    """Download the matching installer with resume + cancel, into
+    ~/Downloads. Returns {ok, path} or {ok: False, error/cancelled}.
+
+    Reuses llmserver's resumable downloader, so an interrupted pull continues
+    instead of restarting, and a truncated file is never treated as complete —
+    which matters a lot for a ~1 GB installer on a flaky link."""
+    global _dl_cancel
+    _dl_cancel = False
+    asset = installer_asset(tag)
+    if asset.get("error"):
+        return {"ok": False, "error": asset["error"]}
+    from pathlib import Path
+    from .llmserver import _download_with_resume, DownloadCancelled
+    dest_dir = Path(os.path.expanduser("~/Downloads"))
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        dest_dir = Path(os.path.expanduser("~"))
+    dest = dest_dir / asset["name"]
+    if dest.exists() and dest.stat().st_size == asset["size"]:
+        return {"ok": True, "path": str(dest), "already": True}
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    try:
+        _download_with_resume(asset["url"], dest, tmp, on_progress,
+                              ua="Hearth-updater",
+                              cancel=lambda: _dl_cancel)
+    except DownloadCancelled:
+        return {"ok": False, "cancelled": True,
+                "error": "download cancelled (progress kept, it will resume)"}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return {"ok": True, "path": str(dest), "tag": asset.get("tag")}
+
+
+def launch_installer(path: str) -> dict:
+    """Run the downloaded installer and let it take over. Hearth should exit
+    right after so the installer can replace files that are otherwise locked."""
+    try:
+        os.startfile(path)  # type: ignore[attr-defined]  # Windows
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 def apply_update() -> str:
-    """Update in place. Only meaningful for a git checkout; packaged builds are
-    pointed at the release download. Returns a human-readable status line."""
+    """Update in place. Only meaningful for a git checkout; packaged builds
+    download the matching installer via download_installer(). Returns a
+    human-readable status line."""
     if not is_git_checkout():
         return (f"This is a packaged build — download the latest release from "
                 f"https://github.com/{REPO}/releases and run the installer.")

@@ -1100,7 +1100,35 @@ def check_llama_update(max_age: int = 21600) -> Dict[str, Any]:
             "available": bool(installed) and latest not in installed}
 
 
-def list_llama_builds(limit: int = 8) -> Dict[str, Any]:
+def _release_summary(body: Optional[str], max_len: int = 140) -> str:
+    """One plain-text line describing what a llama.cpp build changed.
+
+    The release body is a short changelog line followed by an auto-generated
+    table of per-platform download links. Rendering it raw leaks markdown and
+    HTML into the UI and tells a Hearth user nothing, so take the first line
+    that actually reads like a change and strip the markup off it."""
+    import re as _re
+    if not body:
+        return ""
+    text = _re.sub(r"<[^>]+>", " ", body)               # drop HTML (<details> …)
+    text = _re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)  # [label](url) -> label
+    for raw in text.splitlines():
+        line = raw.strip().lstrip("#-*>| ").strip()
+        line = line.replace("**", "").replace("`", "").strip()
+        if len(line) < 12:
+            continue
+        low = line.lower()
+        # Skip the download-table scaffolding and bare URLs.
+        if low.startswith(("http", "www.", "website", "macos", "windows", "linux",
+                           "ios", "android", "download", "|", "---")):
+            continue
+        if "http" in low and len(line) - len(low.split("http")[0]) > 20:
+            continue
+        return line[:max_len].rstrip() + ("…" if len(line) > max_len else "")
+    return ""
+
+
+def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
     """Recent llama.cpp releases and the Windows CUDA variants each one ships,
     so a build that regresses on some GPU can be rolled back to a known-good
     tag instead of leaving the user stuck on latest."""
@@ -1133,11 +1161,38 @@ def list_llama_builds(limit: int = 8) -> Dict[str, Any]:
         builds.append({"tag": tag, "cuda": sorted(set(cudas)),
                        "size_mb": round(size / 1e6),
                        "published": (rel.get("published_at") or "")[:10],
+                       "summary": _release_summary(rel.get("body")),
+                       # One honest way out to the full notes. We deliberately
+                       # don't render the body: it's mostly a per-platform
+                       # download table, and a rendered link to a macOS tarball
+                       # sitting next to Hearth's Install button is a trap.
+                       "url": rel.get("html_url") or "",
+                       "prerelease": bool(rel.get("prerelease")),
                        "installed": tag in installed,
                        # Verified by actually generating on THIS machine, not
                        # inferred from the build name.
                        "verified": tag in {Path(k).parent.name
                                            for k, v in health.items() if v.get("ok")},
+                       "known_bad": tag in bad})
+    # llama.cpp ships most days, so a build the user actually installed falls
+    # off the recent-N window within a week and vanishes from this list — they
+    # end up unable to see (or roll back to) their own engine. Pin any installed
+    # build that the window missed, using what's known locally.
+    listed = {b["tag"] for b in builds}
+    verified_tags = {Path(k).parent.name for k, v in health.items() if v.get("ok")}
+    for tag in installed:
+        if tag in listed:
+            continue
+        size = 0
+        try:
+            d = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tag}"))
+            size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        except OSError:
+            pass
+        builds.append({"tag": tag, "cuda": [], "size_mb": round(size / 1e6),
+                       "published": "", "summary": "", "prerelease": False,
+                       "url": f"https://github.com/{_LLAMA_CPP_REPO}/releases/tag/{tag}",
+                       "installed": True, "verified": tag in verified_tags,
                        "known_bad": tag in bad})
     # No honest way to label a build with the GPU generations it supports: the
     # asset name only carries the CUDA toolkit version, and the real kernel list
