@@ -75,6 +75,10 @@ Name: "{group}\{#MyAppName}";        Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{#MyAppName} CLI";    Filename: "{app}\Hearth-cli.bat"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+; The CLI is a first-class surface, not an afterthought, but only the GUI got a
+; desktop shortcut so it looked like the app was GUI-only.
+Name: "{autodesktop}\{#MyAppName} CLI"; Filename: "{app}\Hearth-cli.bat"; \
+  IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [UninstallDelete]
 ; Inno only removes files it put there itself. Hearth writes into its own folder

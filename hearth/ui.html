@@ -10713,7 +10713,12 @@ function modelsUpdateVramEstimate(cfgEl) {
   else if (nglRaw === -1) {
     frac = (freeGb != null) ? Math.min(1, Math.max(0, (freeGb - 2.3) / footprint)) : 1;
   } else frac = layers ? Math.min(1, nglRaw / layers) : 1;
-  const vram = frac * footprint + (frac > 0 ? 1.5 : 0);   // + CUDA/compute overhead
+  // CUDA context + compute buffers. This scales with how much is actually on
+  // the GPU; a flat 1.5 GB was roughly right for a 9B at long context but
+  // massively overstated a 4B, which then got told it would spill to RAM while
+  // comfortably fitting.
+  const overhead = frac > 0 ? 0.3 + frac * footprint * 0.08 : 0;
+  const vram = frac * footprint + overhead;
   let cls = '', tag = '';
   if (freeGb != null && frac > 0) {
     if (vram > freeGb) { cls = 'est-bad'; tag = ` — over ${freeGb.toFixed(1)} GB free, will spill to RAM`; }
@@ -11656,6 +11661,11 @@ function modelsRestoreSavedCfg(expandEl, modelPath) {
   if (cfg.n_threads != null) set('input[data-cfg="n_threads"]', cfg.n_threads);
   const flash = expandEl.querySelector('.switch[data-cfg="flash_attn"]');
   if (flash) flash.classList.toggle('on', !!cfg.flash_attn);
+  // Recompute AFTER everything is restored. Only the layers slider fires an
+  // event above, and it fires before ctx and the KV selects are applied, so the
+  // estimate was being computed against default f16 KV and then never updated —
+  // it claimed a saved q8_0 config would overflow VRAM when it fits.
+  modelsUpdateVramEstimate(expandEl.querySelector('.ex-config') || expandEl);
 }
 
 // The backend's list_hf_files already
