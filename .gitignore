@@ -1,0 +1,63 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---- Virtual envs ----
+.venv/
+venv/
+env/
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+.claude/
+
+# ---- Secrets / local environment ----
+.env
+.env.*
+*.local
+secrets.*
+*-secret.*
+brain_keys.json
+
+# ---- Runtime artifacts (user data — never commit) ----
+voices/
+screenshots/
+logs/
+*.log
+*.jsonl
+*.onnx
+*.bin
+announcements.json
+
+# ---- Build / distribution ----
+build/
+build_*/
+dist/
+dist_*/
+Output/
+*.exe
+
+# ---- Local reference material kept beside the project (not ours to ship) ----
+*-main/
+*-dev/
+Windows Terminal/
+Terminal/
+
+# ---- Website / design scratch ----
+site/
+
+# Personal working notes and local-only paths are kept in .git/info/exclude,
+# not here, so this file stays free of private filenames.
