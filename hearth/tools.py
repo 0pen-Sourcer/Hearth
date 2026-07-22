@@ -7458,7 +7458,11 @@ def trim_to_budget(messages: List[Dict[str, Any]], context_window: int,
     msgs = [dict(m) for m in messages]
     total = sum(_msg_chars(m) for m in msgs)
     if total <= budget_chars:
-        return msgs
+        # Under budget still needs pairing enforced: compaction hands us a
+        # reduced array that skips all the trimming below, and an orphaned
+        # tool_call/tool_result pair here is exactly the 400 that fires right
+        # after compact. sanitize is idempotent on a valid array.
+        return sanitize_tool_pairing(msgs)
 
     # Greedy phase 1: while over budget, find the heaviest weight*size message
     # and cut its content to half (min 120 chars). Repeat.
@@ -7539,46 +7543,71 @@ def trim_to_budget(messages: List[Dict[str, Any]], context_window: int,
     return sanitize_tool_pairing(msgs)
 
 
+# Content stamped into a synthesized `tool` reply when an assistant's tool_call
+# has no result left in the array. Mirrors Claude Code's ensureToolResultPairing
+# (SYNTHETIC_TOOL_RESULT_PLACEHOLDER) — it satisfies pairing structurally so the
+# server accepts the turn, while telling the model the real result is gone.
+SYNTHETIC_TOOL_RESULT = "[Tool result missing — earlier turn was compacted]"
+
+
 def sanitize_tool_pairing(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Guarantee OpenAI/llama.cpp tool-protocol validity on an outgoing array.
 
-    Two orphan directions both trigger a 400 bad_request on strict servers:
-      1. a `tool` reply whose assistant `tool_calls` turn was dropped, and
-      2. an assistant `tool_calls` turn whose `tool` reply was dropped.
-    Earlier trimming only cleaned *leading* orphan tool messages, so an orphan
-    anywhere else (the case that fires right after compaction) slipped through.
+    Ported from Claude Code's ensureToolResultPairing (services/api/claude.ts →
+    utils/messages.ts), which runs at the send boundary, unconditionally, right
+    before the API call — the pattern this now follows. Two orphan directions
+    each cause a 400 bad_request on strict servers (llama.cpp, LM Studio's
+    Qwen/Hermes templates), and both appear right after compaction drops turns:
 
-    Rules enforced:
-      - keep an assistant's tool_calls entry only if a matching `tool` reply
-        exists later in the array; drop the rest of that turn's calls,
-      - if none of a turn's calls survive, keep it as plain text (when it has
-        content) or drop it,
-      - keep a `tool` message only if a surviving assistant tool_call with the
-        same id appeared before it.
-    Idempotent: a already-valid array is returned unchanged. NEW list.
+      1. an assistant `tool_calls` whose `tool` reply was dropped, and
+      2. a `tool` reply whose assistant `tool_calls` turn was dropped.
+
+    Handling (matches Claude Code):
+      - (1) INJECT a synthetic error `tool` reply for each missing id, rather
+        than dropping the call — the model keeps the record that it ran, which
+        matters for a parallel fan where only some replies survived,
+      - (2) STRIP a `tool` reply whose id was never declared by a preceding
+        assistant tool_calls.
+    Idempotent: a valid array is returned unchanged. Returns a NEW list.
     """
-    replied = {m.get("tool_call_id") for m in messages
-               if m.get("role") == "tool" and m.get("tool_call_id")}
-    declared: set = set()
-    out: List[Dict[str, Any]] = []
+    # Pass 1 — drop orphan tool replies (id never declared before them).
+    declared_so_far: set = set()
+    stage1: List[Dict[str, Any]] = []
     for m in messages:
         role = m.get("role")
         if role == "assistant" and m.get("tool_calls"):
-            kept = [tc for tc in m["tool_calls"] if tc.get("id") in replied]
-            if kept:
-                declared.update(tc.get("id") for tc in kept)
-                out.append({**m, "tool_calls": kept})
-            else:
-                content = m.get("content")
-                if isinstance(content, str) and content.strip():
-                    out.append({k: v for k, v in m.items() if k != "tool_calls"})
-                # else: bare orphan tool_calls turn -> drop
+            declared_so_far.update(tc.get("id") for tc in m["tool_calls"] if tc.get("id"))
+            stage1.append(m)
         elif role == "tool":
-            if m.get("tool_call_id") in declared:
-                out.append(m)
-            # else: orphan tool reply -> drop
+            if m.get("tool_call_id") in declared_so_far:
+                stage1.append(m)
+            # else: orphan reply -> drop
         else:
-            out.append(m)
+            stage1.append(m)
+
+    # Pass 2 — for each assistant tool_calls, fill any id missing a reply in the
+    # contiguous `tool` run that follows with a synthetic error result.
+    out: List[Dict[str, Any]] = []
+    i, n = 0, len(stage1)
+    while i < n:
+        m = stage1[i]
+        out.append(m)
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            call_ids = [tc.get("id") for tc in m["tool_calls"] if tc.get("id")]
+            j = i + 1
+            replied: set = set()
+            while j < n and stage1[j].get("role") == "tool":
+                out.append(stage1[j])
+                if stage1[j].get("tool_call_id"):
+                    replied.add(stage1[j]["tool_call_id"])
+                j += 1
+            for cid in call_ids:
+                if cid not in replied:
+                    out.append({"role": "tool", "tool_call_id": cid,
+                                "content": SYNTHETIC_TOOL_RESULT})
+            i = j
+        else:
+            i += 1
     return out
 
 
@@ -7604,7 +7633,12 @@ def _truncate_kept_tool_results(msgs: List[Dict[str, Any]],
 # compaction recognizes a prior summary by this prefix and folds it in instead of
 # re-summarizing it (which drifts into summary-of-a-summary). Single source of
 # truth — if this text drifts, iterative recovery silently breaks.
-_SUMMARY_PREFIX = "Earlier-conversation summary (compacted to save context):"
+# The summary rides in a USER message (templates 400 on a second system one), so
+# the prefix must make it unmistakable that this is an automated recap, NOT
+# something the user typed — otherwise the model may attribute it to the user.
+_SUMMARY_PREFIX = ("[Automated context recap — the earlier part of THIS "
+                   "conversation, summarized to save space. Not a new message "
+                   "from the user.]")
 
 
 def dedup_tool_results(messages: List[Dict[str, Any]],
@@ -7704,7 +7738,9 @@ def compact_history(messages: List[Dict[str, Any]],
     _kept_to_compact: List[Dict[str, Any]] = []
     for m in to_compact:
         c = m.get("content")
-        if (m.get("role") == "system" and isinstance(c, str)
+        # Accept both roles: new summaries are user-role, but a history saved by
+        # an older build may still carry a system-role summary to fold in.
+        if (m.get("role") in ("system", "user") and isinstance(c, str)
                 and c.startswith(_SUMMARY_PREFIX)):
             prev_summary = c[len(_SUMMARY_PREFIX):].lstrip(" :\n")
         else:
@@ -7734,8 +7770,14 @@ def compact_history(messages: List[Dict[str, Any]],
     except Exception as e:
         summary = f"[summary failed: {e}]"
 
+    # The summary is a USER message, not a second system message. Qwen/Qwythos
+    # (and other) chat templates 400 on two system messages ("Unable to generate
+    # parser for this template") — verified live against the builtin server —
+    # and that double-system, produced on every compaction, was the real cause
+    # of the post-compact bad_request. A user-role summary is universally
+    # accepted and survives the per-turn rebuild of system[0].
     summary_msg = {
-        "role": "system",
+        "role": "user",
         "content": _SUMMARY_PREFIX + "\n" + (summary or "[empty]"),
     }
     result = head + [summary_msg] + recent

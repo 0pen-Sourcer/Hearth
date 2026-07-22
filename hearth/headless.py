@@ -595,7 +595,9 @@ async def run_once(
     # drops the user turn ("No user query found in messages"). Tool schemas ride
     # every prompt, so reserve them + output. trim_to_budget structurally keeps a
     # surviving user turn, so no extra invariant is needed.
-    from .tools import trim_to_budget, estimate_tokens, CHARS_PER_TOKEN, compact_history, dedup_tool_results
+    from .tools import (trim_to_budget, estimate_tokens, CHARS_PER_TOKEN,
+                        compact_history, dedup_tool_results, sanitize_tool_pairing,
+                        _truncate_kept_tool_results)
     # Single source of truth — see resolve_context_tokens() above. Same call
     # is reused by the /api/context-budget endpoint so the GUI ring + bottom
     # bar agree with what the chat path actually uses.
@@ -821,6 +823,14 @@ async def run_once(
         if not any(m.get("role") == "user" for m in messages):
             messages.append({"role": "user",
                              "content": "Continue using the results above."})
+        # CRITICAL: enforce tool_call<->tool_result pairing on EVERY send,
+        # unconditionally. trim_to_budget (which also sanitizes) is gated on
+        # being over budget, but compact_history drops the array UNDER budget,
+        # so on the compaction turn the trim is skipped and an orphaned pairing
+        # ships straight to the server → 400 bad_request right after compact.
+        # This is the GUI-visible failure; the CLI trims unconditionally so it
+        # was already covered. Idempotent on a valid array.
+        messages[:] = sanitize_tool_pairing(messages)
         try:
             kwargs: Dict[str, Any] = {
                 "model": model,
@@ -888,10 +898,37 @@ async def run_once(
                 _max_retries = int(os.getenv("HEARTH_API_RETRIES", "3"))
                 while info.retryable and _retry_n < _max_retries:
                     _retry_n += 1
-                    _wait = min(2 ** _retry_n, 8)  # 2s, 4s, 8s
+                    # A context_overflow never recovers by re-sending the same
+                    # oversized prompt — a big tool result (file read / browse)
+                    # can blow past the limit in one step, and the proactive
+                    # top-of-loop compaction already ran. So HARD-shrink before
+                    # retrying: trim to a fraction of budget (truncates the fat
+                    # tool payloads), re-pair, and rebuild the request. Without
+                    # this the user just watches 2s+4s+8s of pointless retries
+                    # and then a dead turn.
+                    if info.category == "context_overflow":
+                        # estimate_tokens undercounts dense code/JSON, so a single
+                        # big file-read can overflow while the estimate still looks
+                        # "under budget" — trimming by estimate alone won't cut
+                        # enough. So: hard-cap every fat tool result, then trim to
+                        # an ESCALATING fraction (½ → ¼ → ⅛) so it provably
+                        # converges within the retry budget no matter how far off
+                        # the estimate was.
+                        _cap = max(400, 1200 // _retry_n)
+                        messages[:] = _truncate_kept_tool_results(messages, max_chars=_cap)
+                        _shrink = max(2048, int(_budget * (0.5 ** _retry_n)))
+                        messages[:] = trim_to_budget(messages, _shrink, RESERVED_OUTPUT)
+                        messages[:] = sanitize_tool_pairing(messages)
+                        kwargs["messages"] = (
+                            _to_manual_messages(messages, _tools_block_text)
+                            if _use_manual_tools else messages)
+                        _wait = 0  # already fixed the cause; don't stall
+                    else:
+                        _wait = min(2 ** _retry_n, 8)  # 2s, 4s, 8s
                     emit("retry", attempt=_retry_n, max_attempts=_max_retries,
                          wait_s=_wait, category=info.category, message=info.hint)
-                    await asyncio.sleep(_wait)
+                    if _wait:
+                        await asyncio.sleep(_wait)
                     try:
                         resp = await client.chat.completions.create(**kwargs)
                         info = None
