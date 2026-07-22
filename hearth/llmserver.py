@@ -97,6 +97,9 @@ BUILTIN_PORT = int(os.environ.get("JARVIS_BUILTIN_PORT", "1234"))
 BUILTIN_HOST = "127.0.0.1"
 # Key the builtin server is spawned with; every local caller must send it.
 BUILTIN_API_KEY = "hearth-builtin"
+# Smallest context Hearth's own server will boot at. Persona + tool schemas are
+# ~14K tokens, so below ~18K the prompt overflows with no room for a reply.
+MIN_USABLE_CTX = int(os.environ.get("JARVIS_MIN_CTX", "18432"))  # 18K
 
 # Hide the cmd-flash for any subprocess we spawn on Windows.
 _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -1295,6 +1298,19 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     Returns {ok, url, pid} or {ok: False, error}.
     """
     global _proc, _proc_info
+
+    # Floor the context Hearth boots its OWN server at: the persona + tool
+    # schemas are ~14K tokens, so below ~18K the prompt overflows immediately
+    # with no room for conversation. Better to use a bit more KV-cache VRAM than
+    # boot a server that can't hold a single turn.
+    if ctx and ctx < MIN_USABLE_CTX:
+        try:
+            print(f"  [hearth.llmserver] raising ctx {ctx} -> {MIN_USABLE_CTX} "
+                  f"(Hearth's prompt needs ~14K; below ~18K overflows instantly)",
+                  flush=True)
+        except Exception:
+            pass
+        ctx = MIN_USABLE_CTX
 
     if not llama_cpp_available():
         return {"ok": False, "error":
