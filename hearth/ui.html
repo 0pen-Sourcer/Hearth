@@ -10900,6 +10900,25 @@ $('btn-runtime-update')?.addEventListener('click', () => {
     [ { label: 'Cancel' }, { label: 'Download', onclick: runtimeInstall } ]);
 });
 
+// Force a real disk sweep and re-render once it lands. refreshModelsView alone
+// re-renders from the cached status, so after deleting a file the row stayed on
+// screen until the user hit Rescan by hand. Anything that changes what's on
+// disk should call this, not just re-render.
+async function modelsResyncFromDisk() {
+  try { await api('/api/llmserver/rescan'); } catch {}
+  const started = Date.now();
+  const watcher = setInterval(async () => {
+    try {
+      const st = await api('/api/llmserver/status');
+      if (!st.scanning || Date.now() - started > 15000) {
+        clearInterval(watcher);
+        _modelsState.status = st;
+        refreshModelsView();
+      }
+    } catch { clearInterval(watcher); }
+  }, 600);
+}
+
 async function refreshModelsView() {
   const head = $('models-server-line');
   // Stale-while-revalidate: if we already have a previous status snapshot,
@@ -11128,7 +11147,7 @@ function modelsRenderMine() {
              const r = await api('/api/llmserver/delete-model', { method: 'POST',
                headers: { 'Content-Type': 'application/json' },
                body: JSON.stringify({ path: delPath }) });
-             if (r.ok) { toast('Deleted', (r.freed_gb || 0) + ' GB freed', 'ok'); refreshModelsView(); }
+             if (r.ok) { toast('Deleted', (r.freed_gb || 0) + ' GB freed', 'ok'); modelsResyncFromDisk(); }
              else toast('Could not delete', r.error || '', 'err', 8000);
            } catch (err) { toast('Could not delete', err.message, 'err', 8000); }
          } }]);
@@ -12061,7 +12080,7 @@ function showResumableDownload(s) {
              const r = await api('/api/llmserver/discard-partial', { method: 'POST',
                headers: { 'Content-Type': 'application/json' },
                body: JSON.stringify({ filename: partials[0].filename }) });
-             if (r.ok) { toast('Discarded', (r.freed_gb || 0) + ' GB freed', 'ok'); refreshModelsView(); }
+             if (r.ok) { toast('Discarded', (r.freed_gb || 0) + ' GB freed', 'ok'); modelsResyncFromDisk(); }
              else toast('Could not discard', r.error || '', 'err', 7000);
            } catch (e) { toast('Could not discard', e.message, 'err', 7000); }
          } }]);
