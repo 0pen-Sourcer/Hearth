@@ -168,8 +168,14 @@ LOCAL_MODEL = os.getenv("LOCAL_MODEL") or _S_MODEL or "local-model"
 # fall straight to the dummy and 401 every request, forcing a /brain
 # <provider> re-run every launch.
 _BRAIN_KEY = _read_brain_key(_S_PROV)
+# Local servers ignore the key field, with one exception: Hearth's own builtin
+# server is started with --api-key hearth-builtin and enforces it. Using that as
+# the local placeholder satisfies every case, since LM Studio and Ollama don't
+# look at it. The old "jarvis-local" placeholder meant opening the CLI while the
+# GUI had the builtin running was rejected with an auth error.
+_LOCAL_PLACEHOLDER_KEY = "hearth-builtin"
 LOCAL_API_KEY = (os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY")
-                 or _S_KEY or _BRAIN_KEY or "jarvis-local")
+                 or _S_KEY or _BRAIN_KEY or _LOCAL_PLACEHOLDER_KEY)
 
 # Propagate resolved values into os.environ so downstream modules
 # (hearth.imagine reads os.environ["LOCAL_API_BASE"] at call time)
@@ -177,7 +183,7 @@ LOCAL_API_KEY = (os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY")
 # (not the dummy) - writing "jarvis-local" over a brain_keys.json
 # entry would re-introduce the auth-fail regression.
 os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
-if LOCAL_API_KEY and LOCAL_API_KEY != "jarvis-local":
+if LOCAL_API_KEY and LOCAL_API_KEY != _LOCAL_PLACEHOLDER_KEY:
     os.environ["LOCAL_API_KEY"] = LOCAL_API_KEY
 if _S_MODEL:
     os.environ.setdefault("LOCAL_MODEL", LOCAL_MODEL)
@@ -973,7 +979,7 @@ class JarvisCLI:
             _AGENT_NAME = "JARVIS"
         rows = [
             ("agent",     f"{_AGENT_NAME}"),
-            ("model",     self.current_model if self.current_model != "local-model"
+            ("model",     self._model_label() if self.current_model != "local-model"
                           else "(none detected yet - see below)"),
             ("endpoint",  f"{LOCAL_API_BASE}"),
             ("context",   f"{self.context_tokens} tokens, compact @ {int(COMPACT_AT*100)}%"),
@@ -2905,6 +2911,15 @@ class JarvisCLI:
             sys.stdout.flush()
 
     # -- Status footer ------------------------------------------------------
+    def _model_label(self) -> str:
+        """Short name for display. When Hearth boots a local GGUF the "model id"
+        is its full path, which swallows the whole prompt line and the banner
+        box. Show the filename; the full path is still in /about."""
+        m = self.current_model or ""
+        if ("\\" in m or "/" in m) and m.lower().endswith(".gguf"):
+            return os.path.basename(m)
+        return m
+
     def _footer_prompt(self) -> str:
         try:
             est = estimate_tokens(self.messages)
@@ -2929,7 +2944,7 @@ class JarvisCLI:
             self._agent_name = an
         # Compose status line then prompt symbol on next visual chunk
         return (
-            f"{C_DIM}┌─ {C_RESET}{C_BOT}{an}{C_RESET}{C_DIM} · {self.current_model} {C_RESET}"
+            f"{C_DIM}┌─ {C_RESET}{C_BOT}{an}{C_RESET}{C_DIM} · {self._model_label()} {C_RESET}"
             f"{bar} {C_DIM}{pct}%  {v_on}{l_on}{multi}{C_RESET}\n"
             f"{C_USER}❯ {C_RESET}"
         )

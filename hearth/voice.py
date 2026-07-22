@@ -471,6 +471,14 @@ def _clean_for_tts(text: str) -> str:
     s = text
     # Drop fenced code blocks entirely (sound like garbage)
     s = _re.sub(r"```[\s\S]*?```", " ", s)
+    # Tool-call payloads. Some models emit their calls as text rather than as a
+    # structured field, so the arguments survive into the spoken text and the
+    # user hears things like 'query: ... limit: 6' read out mid-sentence.
+    s = _re.sub(r"<tool_call>[\s\S]*?</tool_call>", " ", s, flags=_re.I)
+    s = _re.sub(r"<\|?tool_call\|?>[\s\S]*?(<\|?/?tool_call\|?>|$)", " ", s, flags=_re.I)
+    # A flat JSON object with a quoted key, i.e. the shape of tool arguments.
+    # Kept deliberately narrow so ordinary prose with braces survives.
+    s = _re.sub(r'\{\s*"[^"{}]+"\s*:[^{}]*\}', " ", s)
     # Inline code — KEEP the content, just strip the backticks. So `'Hello'`
     # or `path` becomes 'Hello' or path. Only drop content if it looks like
     # a Windows path or a long token (>20 chars, no spaces).
