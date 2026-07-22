@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import urllib.request
+from typing import Optional
 
 REPO = os.environ.get("HEARTH_UPDATE_REPO", "0pen-sourcer/hearth")
 
@@ -36,6 +37,151 @@ def is_git_checkout() -> bool:
     """True if Hearth is running from a git clone (so `git pull` can update it)."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.isdir(os.path.join(root, ".git"))
+
+
+# Name of the small code-only archive published alongside the installers.
+PATCH_ASSET = "hearth-code-{version}.zip"
+
+
+def code_dir() -> Optional[str]:
+    """Directory holding Hearth's patchable .py files, or None if this build
+    can't be patched.
+
+    A packaged build ships hearth/*.py loose beside the exe (see
+    _unfreeze_hearth in Hearth.spec) precisely so a release can replace ~4 MB of
+    code instead of a ~1 GB installer. Builds from before that layout have the
+    modules frozen inside the exe, so there is nothing on disk to replace and
+    they need one full install to get onto the patchable layout."""
+    base = getattr(sys, "_MEIPASS", None)
+    if not base:
+        return None                      # running from source -> git pull
+    if os.path.isfile(os.path.join(base, "hearth", "__init__.py")):
+        return base
+    return None
+
+
+def can_patch() -> bool:
+    return code_dir() is not None
+
+
+def patch_asset(tag: str = "") -> dict:
+    """The code-only patch asset for a release, if one was published."""
+    import urllib.request
+    api = (f"https://api.github.com/repos/{REPO}/releases/"
+           + (f"tags/{tag}" if tag else "latest"))
+    try:
+        req = urllib.request.Request(api, headers={
+            "User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            rel = json.load(r)
+    except Exception as e:
+        return {"error": f"couldn't reach GitHub releases: {e}"}
+    for a in rel.get("assets") or []:
+        n = (a.get("name") or "").lower()
+        if n.startswith("hearth-code-") and n.endswith(".zip"):
+            return {"name": a.get("name"), "url": a.get("browser_download_url"),
+                    "size": int(a.get("size") or 0), "tag": rel.get("tag_name")}
+    return {"error": "this release has no code patch; a full install is needed"}
+
+
+def download_patch(on_progress=None, tag: str = "") -> dict:
+    """Fetch the code-only patch. Same resumable downloader as everything else."""
+    global _dl_cancel
+    _dl_cancel = False
+    if not can_patch():
+        return {"ok": False, "error":
+                "this build stores its code inside the executable, so it can't "
+                "be patched; install the full release once to switch over"}
+    asset = patch_asset(tag)
+    if asset.get("error"):
+        return {"ok": False, "error": asset["error"]}
+    from pathlib import Path
+    from .llmserver import _download_with_resume, DownloadCancelled
+    dest_dir = Path(os.path.expanduser("~/.hearth/updates"))
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / asset["name"]
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    if not (dest.exists() and dest.stat().st_size == asset["size"]):
+        try:
+            _download_with_resume(asset["url"], dest, tmp, on_progress,
+                                  ua="Hearth-updater", cancel=lambda: _dl_cancel)
+        except DownloadCancelled:
+            return {"ok": False, "cancelled": True,
+                    "error": "cancelled (progress kept, it will resume)"}
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return {"ok": True, "path": str(dest), "tag": asset.get("tag"),
+            "size": asset["size"]}
+
+
+def apply_patch(path: str) -> dict:
+    """Replace the on-disk .py layer with the patch contents.
+
+    Backs the current files up first and restores them if anything fails, so a
+    bad or truncated patch leaves a working install rather than a half-updated
+    one. Only paths inside the code directory are written, so a crafted archive
+    can't escape and drop files elsewhere."""
+    import zipfile
+    import shutil
+    base = code_dir()
+    if not base:
+        return {"ok": False, "error": "this build isn't patchable"}
+    if not path or not os.path.isfile(path):
+        return {"ok": False, "error": "patch file not found"}
+    backup = os.path.join(base, "_patch_backup")
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = [n for n in z.namelist() if not n.endswith("/")]
+            # Refuse absolute paths and traversal before writing anything.
+            for n in names:
+                p = os.path.normpath(os.path.join(base, n))
+                if not p.startswith(os.path.normpath(base) + os.sep):
+                    return {"ok": False, "error": f"patch tried to write outside the app: {n}"}
+            shutil.rmtree(backup, ignore_errors=True)
+            os.makedirs(backup, exist_ok=True)
+            for n in names:                       # snapshot what we're replacing
+                cur = os.path.join(base, n)
+                if os.path.isfile(cur):
+                    dst = os.path.join(backup, n)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(cur, dst)
+            try:
+                for n in names:
+                    z.extract(n, base)
+            except Exception as e:                # roll back to the snapshot
+                for n in names:
+                    b = os.path.join(backup, n)
+                    if os.path.isfile(b):
+                        shutil.copy2(b, os.path.join(base, n))
+                return {"ok": False, "error": f"patch failed, rolled back: {e}"}
+    except zipfile.BadZipFile:
+        return {"ok": False, "error": "patch archive is corrupt; download it again"}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return {"ok": True, "files": len(names)}
+
+
+def restart_app() -> dict:
+    """Relaunch Hearth and exit, so the freshly patched code is loaded."""
+    import subprocess
+    import threading
+    import time as _t
+
+    def _go():
+        try:
+            exe = sys.executable
+            flags = 0
+            if sys.platform == "win32":
+                flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                         | 0x00000008)  # DETACHED_PROCESS
+            subprocess.Popen([exe], creationflags=flags, close_fds=True)
+        except Exception:
+            return
+        _t.sleep(0.6)
+        os._exit(0)
+
+    threading.Thread(target=_go, daemon=True).start()
+    return {"ok": True, "restarting": True}
 
 
 def check_for_update(current: str = "", timeout: float = 6.0) -> dict:
