@@ -10721,9 +10721,13 @@ function modelsUpdateVramEstimate(cfgEl) {
   const vram = frac * footprint + overhead;
   let cls = '', tag = '';
   if (freeGb != null && frac > 0) {
-    if (vram > freeGb) { cls = 'est-bad'; tag = ` — over ${freeGb.toFixed(1)} GB free, will spill to RAM`; }
-    else if (vram > freeGb - 0.8) { cls = 'est-warn'; tag = ' — tight'; }
-    else { cls = 'est-ok'; tag = ' — fits'; }
+    // This is an estimate, so treat a small overage as "tight" rather than
+    // announcing a spill. It was declaring "will spill to RAM" when the guess
+    // exceeded free VRAM by a few percent, on models that then loaded fine,
+    // which trains people to ignore the warning entirely.
+    if (vram > freeGb * 1.15) { cls = 'est-bad'; tag = `, more than the ${freeGb.toFixed(1)} GB free, some will run on CPU`; }
+    else if (vram > freeGb - 0.5) { cls = 'est-warn'; tag = ', close to the limit'; }
+    else { cls = 'est-ok'; tag = ', fits'; }
   }
   est.className = 'ex-vram-est ' + cls;
   est.textContent = frac === 0 ? '≈ CPU only (0 VRAM)' : `≈ ${vram.toFixed(1)} GB VRAM${tag}`;
