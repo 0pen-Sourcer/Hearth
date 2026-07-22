@@ -2273,7 +2273,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _hl.LOCAL_API_KEY = key
             else:
                 # No key supplied: keep harmless default so local servers still work
-                _hl.LOCAL_API_KEY = "not-needed"
+                _hl.LOCAL_API_KEY = "hearth-builtin"
             os.environ["LOCAL_API_BASE"] = url
             if key:
                 os.environ["LOCAL_API_KEY"] = key
@@ -2313,7 +2313,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _saved["llm_model"] = model
                 # If we recovered a banked key (none was supplied this switch),
                 # push it to the live runtime so the very next chat authenticates
-                # instead of using the "not-needed" placeholder set above.
+                # instead of using the "hearth-builtin" placeholder set above.
                 if _eff_key and not key:
                     _hl.LOCAL_API_KEY = _eff_key
                     os.environ["LOCAL_API_KEY"] = _eff_key
@@ -3544,7 +3544,7 @@ def _apply_saved_llm_endpoint() -> None:
         LOCAL_API_BASE = url
         from . import headless as _hl
         _hl.LOCAL_API_BASE = url
-        _hl.LOCAL_API_KEY = key or "not-needed"
+        _hl.LOCAL_API_KEY = key or "hearth-builtin"
         os.environ["LOCAL_API_BASE"] = url
         if key:
             os.environ["LOCAL_API_KEY"] = key

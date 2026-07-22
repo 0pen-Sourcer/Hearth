@@ -394,7 +394,7 @@ def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
                  wanted; if local, we don't auto-upgrade — no surprise bills).
     """
     base = os.environ.get("LOCAL_API_BASE", "")
-    key = os.environ.get("LOCAL_API_KEY", "") or "not-needed"
+    key = os.environ.get("LOCAL_API_KEY", "") or "hearth-builtin"
     model = os.environ.get("LOCAL_MODEL", "")
     if cost_class == "cheap":
         lower = base.lower()
