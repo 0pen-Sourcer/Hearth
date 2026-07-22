@@ -237,6 +237,11 @@ RESERVED_OUTPUT = int(os.getenv("JARVIS_RESERVED_OUTPUT", "2048"))
 # Compact when conversation hits this fraction of context. 0.75 = compact at
 # 75% of window, leaving room for the next turn.
 COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
+# Below this, Hearth's own prompt (persona ~11k + tool schemas ~3k = ~14k)
+# barely fits and there's no room left for conversation, so the model overflows
+# almost immediately. Used to floor Hearth's builtin server and to warn when a
+# user pins something too small.
+MIN_USABLE_CTX = int(os.getenv("JARVIS_MIN_CTX", "18432"))  # 18K
 # (Tool-loop control + malformed-markup stripping now live in
 # hearth/loop_guard.py - outcome-hash based, not a magic per-tool count.)
 
@@ -2275,10 +2280,27 @@ class JarvisCLI:
                 self.context_tokens = requested
                 self._context_pinned = True
                 print(f"{C_OK}context window → {self.context_tokens:,} tokens (pinned){C_RESET}")
+                if requested < MIN_USABLE_CTX:
+                    print(f"{C_WARN}  heads up: Hearth's persona + tools are ~14K tokens, so under "
+                          f"~{MIN_USABLE_CTX//1024}K leaves almost no room for chat and the model "
+                          f"will overflow fast. 24K+ is comfortable.{C_RESET}")
             else:
-                print(f"  current: {self.context_tokens:,} tokens ({'pinned' if self._context_pinned else 'auto-detected'})")
-                print(f"  usage:   /context <number>   (e.g. 20480, 32k, 1M; capped at {_CTX_MAX:,})")
-                print(f"           /context auto       (re-detect via per-provider table + endpoint probe)")
+                # Live usage, not just the limit — persona + tools + chat.
+                used = estimate_tokens(self.messages)
+                try:
+                    tool_tok = len(json.dumps(self.openai_tools)) // CHARS_PER_TOKEN
+                except Exception:
+                    tool_tok = 0
+                pct = int(100 * used / max(1, self.context_tokens))
+                free = max(0, self.context_tokens - used - tool_tok)
+                bar_n = min(20, pct * 20 // 100)
+                bar = "█" * bar_n + "·" * (20 - bar_n)
+                print(f"  window:  {self.context_tokens:,} tokens ({'pinned' if self._context_pinned else 'auto-detected'})")
+                print(f"  used:    {used:,} in messages + ~{tool_tok:,} tools = ~{used+tool_tok:,} ({pct}%)")
+                print(f"  free:    ~{free:,} tokens for more conversation  {C_DIM}{bar}{C_RESET}")
+                if self.context_tokens < MIN_USABLE_CTX:
+                    print(f"{C_WARN}  window is below ~{MIN_USABLE_CTX//1024}K — tight for Hearth's ~14K prompt; 24K+ recommended.{C_RESET}")
+                print(f"{C_DIM}  set: /context <number> (20480, 32k, 1M)  ·  /context auto (re-detect){C_RESET}")
             return True
         if low == "/listen" or low.startswith("/listen "):
             parts = cmd.split()

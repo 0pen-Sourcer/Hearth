@@ -3469,9 +3469,10 @@
             <div class="name">Default context window <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
             <div class="hint">Only applies when Hearth runs its <strong>own</strong> llama.cpp server and loads a GGUF that has no saved config yet. LM Studio / Ollama / cloud brains set their own context - this is ignored for them. Higher = more headroom but more KV-cache VRAM.</div>
           </div>
+          <!-- Floored at 18K: Hearth's persona + tools are ~14K, so anything
+               smaller overflows almost immediately with no room for chat. -->
           <select id="setting-server-ctx">
-            <option value="8192">8K (too small)</option>
-            <option value="16384">16K (tight - no headroom for long chats)</option>
+            <option value="18432">18K (minimum - tight)</option>
             <option value="24576">24K (leaner on VRAM)</option>
             <option value="32768" selected>32K (recommended)</option>
             <option value="65536">64K (uses noticeably more KV-cache VRAM)</option>
