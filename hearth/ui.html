@@ -12095,7 +12095,7 @@ function dlRender() {
   const list = Object.entries(_dls);
   const rows = list.length ? list.map(([id, d]) => {
     const pctTxt = d.status === 'done' ? '✓ done' : d.status === 'error' ? 'failed' : d.pct + '%';
-    const barCol = d.status === 'error' ? '#ff5c5c' : 'linear-gradient(90deg, var(--accent), #a78bfa)';
+    const barCol = d.status === 'error' ? 'var(--err)' : 'linear-gradient(90deg, var(--accent), var(--accent-2))';
     const meta = d.total ? (_fmtGB(d.done) + ' / ' + _fmtGB(d.total) + (d.status === 'downloading' ? '  ·  ' + _fmtSpeed(d.speed) + '  ·  ETA ' + _fmtETA(d.eta) : '')) : '';
     const _btnCss = 'background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);font-size:11px;padding:3px 9px;cursor:pointer;flex-shrink:0';
     const isEngine = d.kind === 'engine';
@@ -12124,7 +12124,7 @@ function dlRender() {
     return `<div style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:6px">
         <span style="color:var(--fg);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${icon}${esc(d.name)}</span>
-        <span style="color:${d.status === 'done' ? 'var(--ok,#7dd3a8)' : d.status === 'paused' ? 'var(--accent-2)' : 'var(--fg-dim)'};flex-shrink:0">${d.status === 'paused' ? 'paused' : pctTxt}</span>
+        <span style="color:${d.status === 'done' ? 'var(--ok)' : d.status === 'paused' ? 'var(--accent-2)' : 'var(--fg-dim)'};flex-shrink:0">${d.status === 'paused' ? 'paused' : pctTxt}</span>
       </div>
       <div style="height:7px;background:var(--bg-0);border-radius:4px;overflow:hidden;border:1px solid var(--border)"><div style="height:100%;width:${d.pct}%;background:${barCol};border-radius:4px"></div></div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">
@@ -12133,7 +12133,15 @@ function dlRender() {
       </div>
     </div>`;
   }).join('') : '<div style="color:var(--fg-dim);font-size:13px;padding:6px 0 14px">No downloads yet.</div>';
-  ov.innerHTML = `<div style="font-weight:700;font-size:15px;color:var(--fg);margin-bottom:12px">Downloads</div>${rows}<button data-act="discover" style="width:100%;padding:9px 0;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">Browse Hugging Face &rarr;</button>`;
+  // Only offer the model catalogue when this panel is actually about models.
+  // During an app update or an engine install it's an unrelated detour, and a
+  // stray button is what makes an update screen feel bolted together.
+  const _modelish = list.some(([id, d]) => d.kind !== 'update' && d.kind !== 'engine');
+  const _browse = (!list.length || _modelish)
+    ? `<button data-act="discover" style="width:100%;padding:9px 0;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">Browse Hugging Face &rarr;</button>`
+    : '';
+  const _title = (list.length && !_modelish) ? 'Updating Hearth' : 'Downloads';
+  ov.innerHTML = `<div style="font-weight:700;font-size:15px;color:var(--fg);margin-bottom:12px">${_title}</div>${rows}${_browse}`;
 }
 
 async function modelsHFSearch(query) {
