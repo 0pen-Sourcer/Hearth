@@ -1,8 +1,8 @@
-If you're already on v0.7.2, you don't need this download. Open Hearth and it'll offer you a patch that's under a megabyte instead. That's the thing I built last release, and this is the first time it actually gets used. If you're on v0.7.0 or v0.7.1 you'll need the installer one more time, and after that you're on the small updates for good.
-
 Most of this release is things that were quietly lying to you.
 
 The worst one was compaction. When a chat gets long Hearth summarizes the older turns to save room, and on reasoning models that summary was coming back empty, because the model's thinking ate the whole token budget and left nothing for the actual text. Hearth then replaced your entire earlier conversation with the words "summary unavailable". So the history was gone, nothing got smaller, and it just did it again on the next message. If you saw it compacting over and over, that was why. It now refuses to compact at all unless it got a real summary back, so a failure costs you tokens instead of costing you the conversation.
+
+If you're already on v0.7.2, you don't need this download. Open Hearth and it'll offer you a patch that's under a megabyte instead. That's the thing I built last release, and this is the first time it actually gets used. If you're on v0.7.0 or v0.7.1 you'll need the installer one more time, and after that you're on the small updates for good.
 
 Sub-agents also couldn't really run in parallel. Hearth never told llama.cpp to open more than one slot, so a team of agents was a queue in a costume. There's a Concurrent agents setting now. The catch worth knowing is that llama.cpp divides your context across slots, so two slots at 24K silently gives each agent 12K. Hearth treats the number you pick as per-agent and does the multiplication itself, then quietly steps back down if your card can't hold the extra. On 8 GB you'll likely sit at one or two and that's fine.
 
