@@ -15,7 +15,6 @@
   <a href="https://get-hearth.vercel.app"><img src="https://img.shields.io/badge/website-8b5cf6?style=flat-square" alt="Website"></a>
   <a href="docs/USER_GUIDE.md"><img src="https://img.shields.io/badge/docs-6b6b76?style=flat-square" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-6b6b76?style=flat-square" alt="MIT License"></a>
-  <a href="https://instagram.com/fissile_u235"><img src="https://img.shields.io/badge/%40fissile__u235-8b5cf6?style=flat-square&logo=instagram&logoColor=white" alt="Instagram"></a>
 </p>
 
 <p align="center">
