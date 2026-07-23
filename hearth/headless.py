@@ -769,13 +769,32 @@ async def run_once(
                                 {"role": "user", "content": chunk_text[:8000]},
                             ],
                             temperature=0.0,
-                            max_tokens=500,
+                            # Reasoning models spend tokens thinking BEFORE they
+                            # emit any content. At 500 the whole budget could go
+                            # to the reasoning trace and content came back empty,
+                            # which is what produced "[summary unavailable]".
+                            max_tokens=1200,
                         )
-                        return (r.choices[0].message.content or "").strip() or "[summary unavailable]"
+                        _msg = r.choices[0].message
+                        _out = (getattr(_msg, "content", None) or "").strip()
+                        if not _out:
+                            # Same models put the text in reasoning_content instead.
+                            # Reading only .content threw away a perfectly good
+                            # summary and then destroyed the history it described.
+                            _out = (getattr(_msg, "reasoning_content", None) or "").strip()
+                        # Strip an inline think block if the model emitted one.
+                        import re as _re2
+                        _out = _re2.sub(r"<think>[\s\S]*?</think>", "", _out,
+                                        flags=_re2.I).strip()
+                        return _out
                     except Exception as _e:
-                        # Don't crash the chat — degrade gracefully to a trivial
-                        # marker so the surviving recent turns still anchor.
-                        return f"[earlier conversation summary unavailable: {type(_e).__name__}]"
+                        # Return EMPTY, not a marker. compact_history treats an
+                        # empty summary as "don't compact" and keeps the real
+                        # history; a marker string would replace the whole
+                        # earlier conversation with a sentence saying it failed.
+                        print(f"  [hearth] compaction summary failed: "
+                              f"{type(_e).__name__}: {_e}", file=sys.stderr)
+                        return ""
                 # PASSIVE FACT EXTRACTION — runs BEFORE compact so the
                 # extractor sees the FULL chunk that's about to be summarized
                 # into oblivion. At every safe boundary (compact,

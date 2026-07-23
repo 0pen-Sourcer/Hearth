@@ -2117,6 +2117,46 @@
   /* Generated-media display: image / video + a toolbar with Open + Reveal-in-folder.
      Click image = open in new tab (full size). Double-click image OR click
      the Reveal button = open the OS file explorer with the file selected. */
+  /* Attachments on the USER's own bubble. Small on purpose: this is a receipt
+     that the file went with the message, not a viewer. Click to enlarge. */
+  .user-attach-tray {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .user-attach {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 200px;
+    padding: 6px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .user-attach img {
+    /* Hard cap so a 4000px screenshot renders as a chip, not a wall. The image
+       keeps its aspect ratio and never drives the bubble's width. */
+    max-width: 188px;
+    max-height: 130px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 5px;
+    display: block;
+    cursor: zoom-in;
+  }
+  .user-attach img:hover { box-shadow: 0 0 14px rgba(139, 92, 246, 0.35); }
+  .user-attach-name {
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    font-family: var(--mono, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 188px;
+  }
   .gen-media-wrap {
     margin-top: 6px;
     display: inline-flex;
@@ -5113,7 +5153,42 @@ function renderMessage(m) {
     // User messages render plain text. If `displayContent` was set (file
     // uploads etc.), show that instead so verbose tool-instruction prompts
     // don't leak onto the chat surface.
-    contentEl.textContent = m.displayContent || m.content || '';
+    // Drop the "[attached: x.png]" line when we have the real attachments to
+    // show. Naming a file the user can't see, right above a reply where the
+    // model clearly CAN see it, reads like the image never arrived.
+    let _userText = m.displayContent || m.content || '';
+    if (m.attachments && m.attachments.length) {
+      _userText = _userText.replace(/\n?\[attached:[^\]]*\]\s*$/, '').trimEnd();
+    }
+    contentEl.textContent = _userText;
+    if (m.attachments && m.attachments.length) {
+      const tray = document.createElement('div');
+      tray.className = 'user-attach-tray';
+      m.attachments.forEach((a) => {
+        const chip = document.createElement('div');
+        chip.className = 'user-attach' + (a.isImage ? ' is-img' : '');
+        if (a.isImage) {
+          const url = '/file?path=' + encodeURIComponent(a.path);
+          const im = document.createElement('img');
+          im.src = url;
+          im.alt = a.name;
+          im.loading = 'lazy';
+          im.title = a.name + ' · click to enlarge';
+          // Capped in CSS, not by the file's pixel size, so a 4000px screenshot
+          // stays a thumbnail instead of swallowing the whole conversation.
+          im.addEventListener('click', () => {
+            try { openLightbox(url, 'image', a.path); } catch {}
+          });
+          chip.appendChild(im);
+        }
+        const cap = document.createElement('span');
+        cap.className = 'user-attach-name';
+        cap.textContent = a.name;
+        chip.appendChild(cap);
+        tray.appendChild(chip);
+      });
+      contentEl.appendChild(tray);
+    }
     const editBtn = div.querySelector('.a-edit');
     if (editBtn) editBtn.addEventListener('click', () => editUserMessage(m));
     const copyBtnU = div.querySelector('.a-copy');
@@ -6225,6 +6300,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
   if (!_notify) {
     const userMsg = { role: 'user', content: prompt };
     if (displayAs && displayAs !== prompt) userMsg.displayContent = displayAs;
+    // Keep the attachment list on the message so the bubble can show the real
+    // thumbnail, and so it survives reload/re-render like any other content.
+    if (_attach.length && !forced) {
+      userMsg.attachments = _attach.map(a => ({
+        name: a.name, path: a.path, isImage: !!a.isImage,
+      }));
+    }
     if (_silent) userMsg.silent = true;  // skip rendering this bubble
     c.messages.push(userMsg);
     touch(c);
@@ -6280,6 +6362,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
         const p = r && r.progress;
         if (p && typeof p.progress === 'number' && p.progress < 1) {
           const pct = Math.round(p.progress * 100);
+          // The pill said "thinking…" through prompt processing, compaction and
+          // everything else, so it carried no information. Say what's happening.
+          setState(`processing prompt ${pct}%`);
           const box = liveContent.querySelector('.prompt-prog');
           if (box) {
             // Only swap the number span so the ppRoll keyframe replays -> the
@@ -6298,6 +6383,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         } else if (liveContent.querySelector('.prompt-prog')) {
           liveContent.innerHTML =
             '<div class="dot-bounce"><span></span><span></span><span></span></div>';  // prompt done -> thinking dots
+          setState('thinking…');   // prompt is in, the model is generating now
         }
       } catch {}
     }, 450);
@@ -6836,6 +6922,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'compacting') {
+      // Compaction can take several seconds on a long chat. Name it, otherwise
+      // the pill reads "thinking…" and the pause looks like a stall.
+      setState('compacting…');
       const wrap = document.getElementById('ctx-ring-wrap');
       if (wrap) {
         wrap.classList.add('compacting');
@@ -6862,6 +6951,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'compacted') {
+      setState('thinking…');   // back to the real work
       const wrap = document.getElementById('ctx-ring-wrap');
       const ring = document.getElementById('ctx-ring');
       const pct  = document.getElementById('ctx-ring-pct');
