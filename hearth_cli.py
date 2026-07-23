@@ -4249,12 +4249,23 @@ class JarvisCLI:
                     create_kwargs.pop("reasoning_effort", None)
                     continue  # immediate retry without the unsupported param
                 try:
-                    retryable = classify_api_error(e, _is_local).retryable
+                    _info = classify_api_error(e, _is_local)
+                    retryable = _info.retryable
                 except Exception:
-                    retryable = False
+                    _info, retryable = None, False
                 if retryable and attempt < 2:
                     delay = 0.5 * (2 ** attempt)
-                    print(f"{C_DIM}↻ server hiccup — retrying in {delay:.0f}s…{C_RESET}")
+                    # Name the actual failure. "hiccup" reads as a transient
+                    # blip and hides conditions a retry will never fix, like
+                    # nothing listening on the endpoint at all.
+                    _why = {
+                        "unreachable": "no answer from the model server",
+                        "timeout": "the model server is taking too long",
+                        "rate_limit": "rate-limited",
+                        "server_error": "the model server returned an error",
+                        "context_overflow": "prompt overflowed the context",
+                    }.get(getattr(_info, "category", ""), "the request failed")
+                    print(f"{C_DIM}↻ {_why}, retrying in {delay:.0f}s{C_RESET}")
                     await asyncio.sleep(delay)
                     continue
                 raise
