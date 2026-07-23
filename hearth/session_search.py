@@ -41,6 +41,13 @@ class Match:
     updated: float
 
 
+# Marks a row that came from the recency fallback rather than a real keyword
+# hit. Both used to render identically, so the model could not tell "these
+# messages answer your question" from "search matched nothing, here is whatever
+# was most recent" — and it would answer confidently off unrelated context.
+RECENCY_SCORE = 999.0
+
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(INDEX_PATH)
     conn.executescript("""
@@ -288,13 +295,13 @@ def _recent(limit: int = 8) -> List[Match]:
         cur = conn.execute(
             """
             SELECT conversation_id, title, message_index, role, content,
-                   substr(content, 1, 200), 0.0, updated
+                   substr(content, 1, 200), ?, updated
               FROM messages
              WHERE role IN ('user', 'assistant') AND length(trim(content)) > 0
           ORDER BY updated DESC, message_index DESC
              LIMIT ?
             """,
-            (limit,),
+            (RECENCY_SCORE, limit),
         )
         rows = cur.fetchall()
     except sqlite3.OperationalError:
@@ -356,7 +363,17 @@ def format_matches(matches: List[Match]) -> str:
                 f"indexed messages — try broader terms, fewer terms, or "
                 f"a different phrasing.)")
     import datetime
-    out: List[str] = [f"Top {len(matches)} match(es):"]
+    _fallback = all(getattr(m, "score", 0) == RECENCY_SCORE for m in matches)
+    if _fallback:
+        out: List[str] = [
+            "No message actually matched that query. Keyword search found "
+            "nothing, so these are simply the most RECENT messages, which may "
+            "be unrelated to what was asked. Do not present them as the answer "
+            "— if they don't cover it, say the search found nothing and ask "
+            "the user to name a specific term, file or topic."
+        ]
+    else:
+        out = [f"Top {len(matches)} match(es):"]
     for i, m in enumerate(matches, 1):
         when = datetime.datetime.fromtimestamp(m.updated / (1000 if m.updated > 1e12 else 1))
         when_s = when.strftime("%Y-%m-%d %H:%M")

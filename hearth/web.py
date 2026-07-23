@@ -3115,6 +3115,15 @@ class HearthHandler(BaseHTTPRequestHandler):
         think = bool(body.get("think"))
         model = body.get("model") or None
         history = body.get("history") or []
+        # First message of a chat: drop deferred tools the PREVIOUS conversation
+        # unlocked. They're process-global, so without this a fresh chat starts
+        # carrying whatever the last one happened to open.
+        if not history:
+            try:
+                from .tools import reset_unlocked_tools
+                reset_unlocked_tools()
+            except Exception:
+                pass
         # Diagnostic — print received history shape so we can see when the
         # GUI client is sending an empty or malformed history despite the
         # user being on turn 2+. Only logs when non-empty so it doesn't

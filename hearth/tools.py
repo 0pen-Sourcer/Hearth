@@ -11,6 +11,7 @@ Tighten reads too: set env JARVIS_LOCKDOWN=1 to confine reads to the workspace.
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 import re
 import sys
 import json
@@ -6967,6 +6968,10 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
     MCP-bridged tools (name starts with 'mcp_') route through the live
     MCP client session instead of the static _HANDLERS dict."""
     args = args or {}
+    # A deferred tool that's actively being CALLED shouldn't be the one evicted
+    # to make room for a newly-unlocked one, so calling it refreshes its slot.
+    if name in _unlocked_tools:
+        _touch_unlocked(name)
     if name.startswith("mcp_"):
         try:
             from . import mcp_client
@@ -7102,7 +7107,28 @@ for _td in TOOL_DEFINITIONS:
     if _td.get("_plugin") and not _td.get("core"):
         _DEFERRED_TOOLS.add(_td["name"])
 
-_unlocked_tools: "set[str]" = set()
+# Deferred tools the model has pulled in. Bounded + least-recently-used, because
+# as a plain unbounded set this only ever GREW: a long session that touched many
+# tools ratcheted the payload from ~9K tokens back up toward the full ~16K and
+# never came down, which is the opposite of what the tool diet is for. It's also
+# process-wide, so an unlock in one chat leaked into every other one until
+# restart — hence reset_unlocked_tools() on a new conversation.
+_UNLOCK_BUDGET = int(os.environ.get("HEARTH_UNLOCK_BUDGET", "12"))
+_unlocked_tools: "OrderedDict[str, None]" = OrderedDict()
+
+
+def _touch_unlocked(name: str) -> None:
+    """Mark a deferred tool as recently wanted, evicting the stalest if full."""
+    _unlocked_tools.pop(name, None)
+    _unlocked_tools[name] = None
+    while len(_unlocked_tools) > _UNLOCK_BUDGET:
+        _unlocked_tools.popitem(last=False)
+
+
+def reset_unlocked_tools() -> None:
+    """Forget every unlocked deferred tool, so a new conversation starts lean
+    instead of inheriting whatever the previous one happened to open."""
+    _unlocked_tools.clear()
 _TOOL_DIET = os.environ.get("HEARTH_ALL_TOOLS", "") not in ("1", "true", "yes")
 
 _LOAD_TOOLS_SCHEMA = {
@@ -7173,7 +7199,7 @@ def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
     deferred = [td for td in TOOL_DEFINITIONS if td["name"] in _DEFERRED_TOOLS]
     if not q or q == "all":
         for td in deferred:
-            _unlocked_tools.add(td["name"])
+            _touch_unlocked(td["name"])
         return deferred
     toks = [w for w in q.replace("-", " ").replace("/", " ").split() if w]
     meaningful = [w for w in toks if w not in _LOAD_STOPWORDS and len(w) > 1]
@@ -7198,7 +7224,7 @@ def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
     scored.sort(key=lambda x: -x[0])
     matched = [td for _, td in scored[:10]]   # cap — don't flood the context
     for td in matched:
-        _unlocked_tools.add(td["name"])
+        _touch_unlocked(td["name"])
     return matched
 
 
@@ -7790,8 +7816,20 @@ def compact_history(messages: List[Dict[str, Any]],
                       + "\n\n---\nNEWER TURNS TO FOLD IN:\n" + transcript)
     try:
         summary = summarize(transcript)
-    except Exception as e:
-        summary = f"[summary failed: {e}]"
+    except Exception:
+        summary = ""
+
+    # A compaction is only worth doing if we got a REAL summary back. Folding
+    # the earlier conversation into "[summary unavailable]" deletes it and
+    # replaces it with nothing, so the model loses the history AND the context
+    # barely shrinks — which then triggers another compaction on the next turn.
+    # Keeping the full history costs tokens; losing it costs the conversation.
+    _s = (summary or "").strip()
+    _failed = (not _s
+               or len(_s) < 40
+               or _s.lower().startswith(("[summary", "[earlier conversation summary")))
+    if _failed:
+        return list(messages)
 
     # The summary is a USER message, not a second system message. Qwen/Qwythos
     # (and other) chat templates 400 on two system messages ("Unable to generate
