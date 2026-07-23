@@ -168,6 +168,27 @@ def restart_app() -> dict:
     import time as _t
 
     def _go():
+        # os._exit(0) alone only ends the process running the web backend. The
+        # GUI lives in a separate window process and the built-in server is
+        # another child, so both survived and the user ended up staring at a
+        # dead window next to the freshly launched one. Tear the tree down the
+        # same way tray Quit does, THEN start the replacement.
+        try:
+            from . import llmserver
+            llmserver.stop_builtin()
+        except Exception:
+            pass
+        try:
+            import psutil as _ps
+            for _ch in _ps.Process(os.getpid()).children(recursive=True):
+                try:
+                    _ch.kill()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Spawn AFTER the cull. Launched first, the replacement is our own child
+        # and the loop above would kill the thing we just started.
         try:
             exe = sys.executable
             flags = 0
@@ -182,6 +203,31 @@ def restart_app() -> dict:
 
     threading.Thread(target=_go, daemon=True).start()
     return {"ok": True, "restarting": True}
+
+
+def _short_notes(body: str, limit: int = 900) -> str:
+    """Opening paragraphs of a release body, always ending on a whole one.
+
+    A flat [:600] slice cut mid-word, so the update dialog showed things like
+    "Most of this r" and then jumped to the next paragraph. Break on blank
+    lines instead: better to show two clean paragraphs than three and a stump.
+    """
+    text = (body or "").strip()
+    if not text:
+        return ""
+    kept, total = [], 0
+    for para in text.split("\n\n"):
+        p = para.strip()
+        if not p:
+            continue
+        if kept and total + len(p) > limit:
+            break
+        kept.append(p)
+        total += len(p) + 2
+    if kept:
+        return "\n\n".join(kept)
+    # Single paragraph longer than the limit: cut on a word, never mid-word.
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",.;:") + "..."
 
 
 def check_for_update(current: str = "", timeout: float = 6.0) -> dict:
@@ -209,7 +255,7 @@ def check_for_update(current: str = "", timeout: float = 6.0) -> dict:
         "latest": tag,
         "current": current,
         "url": data.get("html_url", f"https://github.com/{REPO}/releases"),
-        "notes": (data.get("body") or "").strip()[:600],
+        "notes": _short_notes(data.get("body") or ""),
     }
 
 
