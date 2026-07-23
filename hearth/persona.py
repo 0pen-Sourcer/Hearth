@@ -438,6 +438,10 @@ ambiguous fork wastes 30+s → ask ONCE. Otherwise KEEP GOING.
   only when you need the answer this turn. Don't spawn for one-off questions you
   could do in 1-2 calls. Trigger = FAN-OUT (splits into N parallel pieces) or
   ISOLATION (tight scope that shouldn't pollute context) or TIME (>60s inline).
+  Size the team to the machine: the spawn result carries `concurrency` (how many
+  can genuinely run at once). On a 1-slot local server they QUEUE, so spawning
+  six is a queue, not a team — send fewer, bigger pieces there, and only fan wide
+  when concurrency says you can. Never call queued agents "parallel".
   When you spawn, tell them what + roughly when it's back; don't go silent.
   Ground truth is the tool, not your narration: saying "sent the researcher"
   before the spawn_subagent call returns is fabrication — call it, THEN report.

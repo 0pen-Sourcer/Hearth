@@ -133,6 +133,26 @@ def _read_settings_endpoint():
         return None, None, None, None
 
 
+def _probe_live_model(url: str, key: str = "") -> Optional[str]:
+    """Ask an endpoint what it is ACTUALLY serving right now.
+
+    settings.json is not authoritative for the loaded model: the other surface
+    may have swapped it, or a saved name can outlive its download. Announcing a
+    model the server doesn't have makes every following request fail with a
+    confusing 404, so read it off the server instead of the file."""
+    if not url:
+        return None
+    try:
+        rq = urllib.request.Request(
+            url.rstrip("/") + "/models",
+            headers={"Authorization": f"Bearer {key or 'hearth-builtin'}"})
+        with urllib.request.urlopen(rq, timeout=2) as r:
+            ids = [m.get("id") for m in (json.load(r).get("data") or [])]
+        return next((i for i in ids if i), None)
+    except Exception:
+        return None
+
+
 def _read_brain_key(provider: str) -> str:
     """Look up a saved cloud key from ~/Jarvis/brain_keys.json.
     File shape: {"<provider>": {"url": ..., "key": "<api-key>", "model": ...}}
@@ -1262,13 +1282,24 @@ class JarvisCLI:
             return
         self._settings_mtime = mtime
         url, key, model, provider = _read_settings_endpoint()
-        if not url or url == LOCAL_API_BASE:
-            return  # nothing to do / we already made this change
+        if not url:
+            return
+        if url == LOCAL_API_BASE:
+            # Same endpoint, but the MODEL behind it can still have changed —
+            # swapping the built-in server's model keeps the URL identical, so
+            # returning here is why a GUI swap never reached the CLI. Trust the
+            # server over settings.json, which may name a model it isn't serving.
+            live = _probe_live_model(url, LOCAL_API_KEY) or model
+            if live and live != self.current_model:
+                self.current_model = live
+                print(f"{C_DIM}↳ model synced → {_model_label(live)}{C_RESET}")
+            return
         if not key and provider:
             key = _read_brain_key(provider)
         self._retarget_to(url, key or "hearth-builtin", None)
-        if model:
-            self.current_model = model
+        live = _probe_live_model(url, key) if provider in ("local", "lmstudio", "builtin") else None
+        if live or model:
+            self.current_model = live or model
         print(f"{C_DIM}↳ brain synced from GUI → {provider or url}{C_RESET}")
 
     async def _cmd_models(self, raw: str) -> None:
@@ -3466,11 +3497,21 @@ class JarvisCLI:
         # Reuses the /brain command so key storage + endpoint switch + context
         # re-detect all happen through one code path. Default stays local.
         try:
-            cur = "cloud" if not _is_local_endpoint(LOCAL_API_BASE) else "local"
-            print(f"  {C_TOOL}Which brain should I run on?{C_RESET}")
-            print(f"  {C_DIM}    Enter = local ({self.current_model} via {LOCAL_API_BASE}, "
-                  f"currently {cur}). Or pick a cloud model.{C_RESET}")
-            brain = ask("Enter for local, or: grok / gemini / openai / openrouter / groq / custom").lower()
+            # Never name a model from settings here: it may not be loaded, and
+            # a phantom name in the FIRST thing a new user reads makes every
+            # later failure look like Hearth lying. Ask the endpoint instead.
+            _live = _probe_live_model(LOCAL_API_BASE, LOCAL_API_KEY)
+            print(f"  {C_TOOL}Which model should I think with?{C_RESET}")
+            print(f"  {C_DIM}    Local means it runs on your own GPU. Free, private, "
+                  f"nothing leaves this machine.{C_RESET}")
+            print(f"  {C_DIM}    Cloud means a hosted model. Faster and stronger, but "
+                  f"it costs money and your messages go to that provider.{C_RESET}")
+            if _live:
+                print(f"  {C_DIM}    Running locally right now: {_model_label(_live)}{C_RESET}")
+            else:
+                print(f"  {C_DIM}    No local model is loaded yet. Pick local and I'll "
+                      f"help you get one with /models.{C_RESET}")
+            brain = ask("Enter to stay local, or type: grok / gemini / openai / openrouter / groq / custom").lower()
             if brain in ("grok", "gemini", "openai", "openrouter"):
                 key = ask(f"Paste your {brain} API key (saved locally, asked once)")
                 if key:
@@ -3489,8 +3530,8 @@ class JarvisCLI:
                 else:
                     print(f"  {C_DIM}need URL + key - staying local. Switch anytime with /brain custom <url> <key>.{C_RESET}")
             print()
-            # Staying local → help them pick + boot a model right now, so setup
-            # ends with a WORKING server, not "can't reach LM Studio".
+            # Staying local -> help them pick + boot a model right now, so setup
+            # ends with a WORKING server instead of a dead endpoint.
             if _is_local_endpoint(LOCAL_API_BASE):
                 await self._onboard_pick_local_model()
         except (KeyboardInterrupt, EOFError):
@@ -3509,7 +3550,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}How blunt should I be?{C_RESET}")
             print(f"  {C_DIM}    1 = polite & formal, 3 = friendly default, "
                   f"5 = brutally honest no filler{C_RESET}")
-            answers["tone"] = ask("Pick 1–5 or describe in your own words")
+            answers["tone"] = ask("Pick 1-5 or describe in your own words")
             answers["avoid"] = ask(
                 "Topics or language I should avoid? (or press Enter for none)"
             )
@@ -3580,6 +3621,19 @@ class JarvisCLI:
                 print()
         except Exception:
             pass  # migrate is opt-in, never block onboarding on its failure
+
+        # Land on something to DO. Setup used to end on the migrate prompt,
+        # which leaves a first-timer at a blank cursor with no idea what this
+        # thing accepts — the moment most people close it and don't come back.
+        print(f"  {C_BRAND}─ you're set ─{C_RESET}")
+        print(f"  {C_DIM}Talk to me in plain English. I can actually act on this "
+              f"machine, so try:{C_RESET}")
+        print(f"  {C_TOOL}    what's taking up space on my C drive?{C_RESET}")
+        print(f"  {C_TOOL}    summarise the newest PDF in my Downloads{C_RESET}")
+        print(f"  {C_DIM}Anything that touches your system asks first. "
+              f"{C_RESET}{C_TOOL}/help{C_RESET}{C_DIM} lists commands, "
+              f"{C_RESET}{C_TOOL}/models{C_RESET}{C_DIM} manages models.{C_RESET}")
+        print()
 
     async def _ask_user_interactive(self, question: str, options: list, allow_other: bool) -> dict:
         """CLI surface for the ask_user tool. Renders a numbered list, reads
@@ -4417,6 +4471,17 @@ class JarvisCLI:
             tail = speak_buffer[speak_cursor:]
             if not tail.strip():
                 return
+            # Same reason as the GUI: a model that writes its tool calls as text
+            # streams the tag in pieces, so flushing mid-marker speaks the raw
+            # arguments. Wait for the close tag; at end-of-turn nothing more is
+            # coming, so cut the marker and everything after it.
+            if re.search(r"<\|?tool_call\|?>", tail, re.I) and not re.search(
+                    r"<\s*/\s*\|?tool_call\|?>|<\|?/tool_call\|?>", tail, re.I):
+                if not force_tail:
+                    return
+                tail = re.sub(r"<\|?tool_call\|?>[\s\S]*$", "", tail, flags=re.I)
+                if not tail.strip():
+                    return
             # Find the FIRST sentence boundary in the tail. Earlier code
             # looked at the LAST boundary, which batched multi-sentence
             # chunks together - defeated streaming. Now: flush each

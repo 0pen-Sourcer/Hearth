@@ -3224,7 +3224,30 @@ def _run_command(p: Dict) -> str:
     # has already SEEN the exact command and approved it, the second
     # refusal here was pure UX friction, not safety).
     _approved = bool(p.get("_approved"))
-    if not _approved and os.environ.get("JARVIS_AUTO_APPROVE", "0") != "1":
+    # A sub-agent runs autonomously with nobody watching its tool calls, so it
+    # gets NEITHER escape hatch: it can't be "already approved" (no prompt was
+    # ever shown for it) and it can't ride the user's blanket auto-approve.
+    # Auto-approve is consent for commands the user sees, not a standing grant
+    # to a background agent. Destructive patterns are always refused here.
+    _autonomous = False
+    try:
+        from .subagents import in_subagent as _in_sub
+        _autonomous = _in_sub()
+    except Exception:
+        _autonomous = False
+    # HEARTH_ is the current prefix; JARVIS_ is still honoured so existing setups
+    # keep working. Neither renames when the agent is renamed — these are the
+    # framework's API, not the persona's.
+    _auto = os.environ.get("HEARTH_AUTO_APPROVE",
+                           os.environ.get("JARVIS_AUTO_APPROVE", "0")) == "1"
+    if _autonomous:
+        _approved = False   # no prompt was ever shown for a sub-agent's call
+        # Sub-agents need their OWN opt-in. Blanket auto-approve is consent for
+        # commands the user watches scroll past; silently extending it to
+        # unattended agents grants more than they asked for. Set this second
+        # flag to say yes, my background agents may run destructive commands.
+        _auto = os.environ.get("HEARTH_SUBAGENT_AUTO_APPROVE", "0") == "1"
+    if not _approved and not _auto:
         bad = _is_destructive(cmd)
         if bad:
             return (

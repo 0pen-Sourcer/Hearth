@@ -643,6 +643,20 @@ def _list_models() -> List[Dict]:
         _picked = (_load_settings().get("llm_model") or "").strip().lower()
     except Exception:
         _picked = ""
+    # Compare like-for-like. Ids below are basenamed (llama.cpp reports the full
+    # --model path), but llm_model is often stored AS a full path, so the raw
+    # comparison never matched and _loaded_idx silently kept its 0 default —
+    # marking whatever the server happened to list first as the loaded one.
+    _picked = os.path.basename(_picked.replace("\\", "/")) or _picked
+    # The running built-in server is better evidence than the settings file,
+    # which can still name the model that was loaded before the last swap.
+    try:
+        from . import llmserver as _lsv
+        _bi = _lsv.status().get("builtin_model") or ""
+        if _bi:
+            _picked = os.path.basename(_bi.replace("\\", "/")).lower()
+    except Exception:
+        pass
     rows = []
     for m in data.get("data", []):
         raw_id = m.get("id") or ""
@@ -955,6 +969,7 @@ def _load_settings() -> Dict:
         # Apply on the next start_builtin (settings persist; restart to act).
         "server_autoboot": True,        # auto-load preferred_model on Hearth launch
         "server_default_ctx": 24576,    # 24K. Persona+tools = ~18K; needs headroom for chat+output. 16K was tight, 8K silently OOM'd.
+        "server_parallel_slots": 1,     # concurrent request slots. 1 = sub-agents queue. Each slot costs another ctx worth of KV cache, so this is clamped to free VRAM at load.
         "keep_local_warm": False,       # when switching to cloud, keep the local builtin loaded? Off = free VRAM (default). On = leave it warm so quick swap-back doesn't reload (~10s tax). Power-user toggle.
         # ---- Toast quiet-mode toggles (user-controlled noise level) ----
         "toast_facts_saved": True,      # "Remembered N facts" on auto-extract
@@ -2459,6 +2474,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 from . import headless as _hl
                 LOCAL_API_BASE = result["url"]
                 _hl.LOCAL_API_BASE = LOCAL_API_BASE
+                # Drop the model-list cache so the sticker reflects the model
+                # that just loaded instead of serving the previous one until
+                # the TTL lapses.
+                _models_cache["ts"] = 0
+                _models_cache["data"] = None
                 _hl.LOCAL_API_KEY  = "hearth-builtin"
                 os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
                 # Builtin uses a fixed key; bake it in so chat works without

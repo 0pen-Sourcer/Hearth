@@ -12,8 +12,8 @@ What's different about Hearth's version:
     chunks doesn't cost real money
   - memory-aware briefing: parent's memory_recall(prompt) gets injected
     into the child's system prompt automatically
-  - depth guard: HEARTH_SUBAGENT_DEPTH env var blocks recursive fan-out
-    at depth >= 3 so a runaway subagent can't fork-bomb the local LLM
+  - depth guard: a per-thread counter blocks recursive fan-out at depth >= 3
+    so a runaway subagent can't fork-bomb the local LLM
 
 Modes:
   - sync       : spawn_subagent blocks until the child returns or hits max_turns
@@ -38,11 +38,45 @@ from typing import Any, Dict, List, Optional, Tuple
 # description; the body is the system prompt the child runs against.
 _PERSONA_DIR = Path(__file__).resolve().parent / "subagents"
 
-# Recursion guard — see module docstring. The depth counter rides in the
-# environment so it survives the fact that subagent execution can hop
-# between threads (the openai client + execute_tool both do).
+# Recursion guard — see module docstring.
 _DEPTH_ENV = "HEARTH_SUBAGENT_DEPTH"
 _MAX_DEPTH = 3
+
+# Depth is tracked per THREAD, not in os.environ. Background subagents each get
+# their own thread, so once the server has >1 slot they genuinely overlap, and a
+# process-global counter would let one agent's reset clear a sibling's depth
+# mid-run — the fork guard would then under-count and allow deeper nesting than
+# _MAX_DEPTH. The env var is still honoured as the seed so an externally set
+# depth (or a future subprocess) still starts in the right place.
+_DEPTH_TLS = threading.local()
+
+
+def _current_depth() -> int:
+    v = getattr(_DEPTH_TLS, "depth", None)
+    if v is not None:
+        return int(v)
+    try:
+        return int(os.environ.get(_DEPTH_ENV, "0"))
+    except ValueError:
+        return 0
+
+
+def _set_depth(n: int) -> None:
+    _DEPTH_TLS.depth = int(n)
+
+
+def in_subagent() -> bool:
+    """True while a sub-agent's own tool call is executing on this thread.
+
+    Sub-agents run with no human watching, so tools use this to refuse the
+    blanket auto-approve escape hatch. A user setting JARVIS_AUTO_APPROVE=1 is
+    consenting to skip prompts for commands THEY can see scroll past, not to
+    hand a background agent unreviewed shell access."""
+    return bool(getattr(_DEPTH_TLS, "in_tool", False))
+
+
+def _set_subagent_tool_ctx(active: bool) -> None:
+    _DEPTH_TLS.in_tool = bool(active)
 
 # Per-turn ceiling for any single subagent loop. Tight on purpose: the
 # parent should send focused work, not whole projects. 8 turns covers
@@ -429,6 +463,27 @@ _DANGEROUS_FOR_SUBAGENTS = {
 }
 
 
+def concurrency_capacity() -> Tuple[int, str]:
+    """(how many sub-agents can genuinely run at once, one-line reason).
+
+    A cloud endpoint serves concurrent requests, so fanning out wide is free.
+    A local llama.cpp server serves one request per slot and queues the rest,
+    so spawning six against a single slot isn't parallel, it's a queue with
+    extra steps. Surfaced to the model so it sizes the team to the machine."""
+    base = os.environ.get("LOCAL_API_BASE", "") or ""
+    if not ("localhost" in base or "127.0.0.1" in base):
+        return 4, "cloud endpoint, requests run concurrently"
+    try:
+        from . import llmserver as _ls
+        slots = _ls.current_slots()
+    except Exception:
+        return 1, "local server, assume one at a time"
+    if slots > 1:
+        return slots, f"local server has {slots} slots"
+    return 1, ("local server has 1 slot, so agents queue — raise "
+               "Settings > server_parallel_slots to overlap them")
+
+
 def _filter_tools(allowed: List[str]) -> List[Dict[str, Any]]:
     """Return TOOL_DEFINITIONS filtered to the persona's allowlist in
     OpenAI tool-call shape. `['*']` (wildcard) inherits the parent's
@@ -640,10 +695,15 @@ async def _run_subagent_async(
             # web_fetch → which URL, run_command → which cmd).
             used.append({"name": name, "args": args})
             try:
+                # Flag the thread for the duration of the call so tools can tell
+                # an autonomous sub-agent apart from the user-facing loop.
+                _set_subagent_tool_ctx(True)
                 result = execute_tool(name, args)
                 content = str(result) if result is not None else ""
             except Exception as e:
                 content = f"(tool {name} failed: {type(e).__name__}: {e})"
+            finally:
+                _set_subagent_tool_ctx(False)
             content_capped = content[:4000]
             messages.append({
                 "role": "tool",
@@ -696,7 +756,7 @@ def _bg_worker(p: Dict[str, Any], prompt: str, turns_cap: int,
     """Background subagent runner. Runs in a dedicated thread (not jobs.py
     because the loop is in-process, not a shell subprocess). Stashes the
     final result + fires the completion callback for the chat surface."""
-    os.environ[_DEPTH_ENV] = str(parent_depth + 1)
+    _set_depth(parent_depth + 1)
     persona_name = p.get("name") or p.get("slug") or ""
     label = p.get("_label") or ""
     try:
@@ -705,7 +765,7 @@ def _bg_worker(p: Dict[str, Any], prompt: str, turns_cap: int,
         result = {"ok": False, "error": f"{type(e).__name__}: {e}",
                   "agent_id": agent_id}
     finally:
-        os.environ[_DEPTH_ENV] = str(parent_depth)
+        _set_depth(parent_depth)
     # Stamp the persona name + human label onto the result so the toast +
     # notification can render "researcher (Alex) done" instead of
     # "unknown done".
@@ -771,7 +831,7 @@ def spawn_subagent(persona: str, prompt: str,
         return {"ok": False, "error": "persona and prompt are required"}
 
     try:
-        depth = int(os.environ.get(_DEPTH_ENV, "0"))
+        depth = _current_depth()
     except ValueError:
         depth = 0
     if depth >= _MAX_DEPTH:
@@ -794,6 +854,7 @@ def spawn_subagent(persona: str, prompt: str,
     p["_label"] = label
 
     if mode == "background":
+        _cap, _cap_why = concurrency_capacity()
         t = threading.Thread(
             target=_bg_worker, name=f"hearth-subagent-{agent_id}",
             args=(p, prompt, turns_cap, agent_id, depth), daemon=True,
@@ -810,18 +871,21 @@ def spawn_subagent(persona: str, prompt: str,
                      "message. You can also peek via "
                      f"read_file({str(_transcript_path(agent_id))!r}) or "
                      f"get_subagent_result(agent_id={agent_id!r})."),
+            # Tell the parent how wide it can usefully fan out. Without this it
+            # spawns six against a one-slot server and calls the queue a team.
+            "concurrency": _cap, "concurrency_note": _cap_why,
         }
 
     # Sync path — inherits the parent chat's cancel signal if one's
     # wired (web.py's _CANCEL event, CLI's interrupt handler). Background
     # subagents deliberately survive the parent pressing Stop.
     cancel_fn = _resolve_parent_cancel()
-    os.environ[_DEPTH_ENV] = str(depth + 1)
+    _set_depth(depth + 1)
     try:
         result = _run_one_sync(p, prompt, turns_cap, agent_id,
                                should_cancel=cancel_fn)
     finally:
-        os.environ[_DEPTH_ENV] = str(depth)
+        _set_depth(depth)
     result["persona"] = persona
     if label:
         result["name"] = label

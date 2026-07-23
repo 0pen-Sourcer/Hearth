@@ -124,6 +124,8 @@ Click the mic-with-circle icon top-right. The whole window goes black with a 15�
 
 **Why mic stays muted during TTS:** the speakers→mic feedback loop is worse than no interruption. Type any time though — keyboard always works in voice mode.
 
+**The desktop HUD.** When Hearth isn't the focused window, the same dot grid appears as a small always-on-top overlay so you can see it listening and talking while you work in other apps. It is **click-through by default**, so clicks pass straight to whatever is underneath and it never gets in your way. **Hold Ctrl to drag it** somewhere else. Without Ctrl it will feel like it can't be moved, which is deliberate rather than broken.
+
 ---
 
 ## Wake word — "Jarvis"
