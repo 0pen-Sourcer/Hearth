@@ -3483,6 +3483,19 @@
 
         <div class="field">
           <div class="label">
+            <div class="name">Concurrent agents <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
+            <div class="hint">How many requests the server handles at once. At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Hearth steps this back down at load time if your card can't hold it.</div>
+          </div>
+          <select id="setting-server-slots">
+            <option value="1" selected>1 · agents queue (lowest VRAM)</option>
+            <option value="2">2 · two at once</option>
+            <option value="3">3 · needs headroom</option>
+            <option value="4">4 · large VRAM only</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <div class="label">
             <div class="name">Idle auto-unload</div>
             <div class="hint">How long the server can sit idle before unloading the model to free VRAM. <code>0</code> = never unload. Same as <code>HEARTH_KEEP_ALIVE_MIN</code>.</div>
           </div>
@@ -4048,7 +4061,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
     </button>
   </div>
-  <div class="voice-bottom-text">Esc to exit · type any time, your keyboard still works</div>
+  <div class="voice-bottom-text">Esc to exit · type any time, your keyboard still works · the desktop HUD is click-through, hold Ctrl to drag it</div>
 </div>
 
 <!-- D3 v7 - vendored for the Memory tab's force-directed constellation
@@ -6321,6 +6334,18 @@ async function send(forced = null, displayAs = null, opts = {}) {
     if (!voiceModeOn) { ttsBuffer = ''; return; }
     if (!STATE.settings.voice_tts && !voiceModeOn) { ttsBuffer = ''; return; }
     if (!ttsBuffer) return;
+    // Hold while a tool-call marker is still open. Models that emit their calls
+    // as text stream them in pieces, so flushing mid-marker hands the arguments
+    // to TTS before the server-side cleaner ever sees a complete tag - that's
+    // how "query colon limit six" ends up spoken aloud. On the end-of-turn
+    // flush there's no more text coming, so drop the marker and everything after.
+    const openTool = /<\|?tool_call\|?>/i.test(ttsBuffer)
+                     && !/<\s*\/\s*\|?tool_call\|?>|<\|?\/tool_call\|?>/i.test(ttsBuffer);
+    if (openTool) {
+      if (!force) return;
+      ttsBuffer = ttsBuffer.replace(/<\|?tool_call\|?>[\s\S]*$/i, '').trim();
+      if (!ttsBuffer) return;
+    }
     const minChars = ttsFirstFlushDone ? 25 : 12;
     if (force || (ttsBuffer.length >= minChars && FLUSH_AT_CLAUSE.test(ttsBuffer))) {
       let cut = ttsBuffer.length;
@@ -6542,6 +6567,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
       assistantMsg.events.push(pendingToolEvent);
       insertUnderAssistant(pendingTool.div, live);
       setState(`calling ${ev.name}…`);
+      // Voice mode has no tool cards to look at, so mirror the tool name into
+      // the HUD. Without this the overlay sits on "thinking…" through a 30s
+      // file scan and looks stuck.
+      if (voiceModeOn) setVoiceStatus(`running ${ev.name}…`);
 
       // Generation placeholder - animated violet noise canvas + rotating
       // status text overlay. Why this and not "watch the image build":
@@ -6602,6 +6631,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'tool_result') {
+      // Tool done, back to thinking until the next call or the reply starts.
+      if (voiceModeOn) setVoiceStatus('thinking…');
       if (pendingTool) {
         // Stop the cycling beats, but keep the cooking panel on screen until the
         // real media loads, then crossfade it out so the image develops in place.
@@ -9320,6 +9351,13 @@ async function refreshSettings() {
     const portInput = $('setting-server-port');
     if (ctxSel)  { ctxSel.value  = String(s.server_default_ctx || 32768);
       ctxSel.onchange  = (e) => saveSetting('server_default_ctx', parseInt(e.target.value, 10)); }
+    const slotSel = $('setting-server-slots');
+    if (slotSel) { slotSel.value = String(s.server_parallel_slots || 1);
+      slotSel.onchange = (e) => {
+        saveSetting('server_parallel_slots', parseInt(e.target.value, 10));
+        // Slots are a launch argument, so a running server keeps its old count.
+        toast('Applies on next model load', 'Reload the model (or restart the server) for the new slot count.', 'ok', 5000);
+      }; }
     if (idleSel) { idleSel.value = String(s.server_idle_min ?? 15);
       idleSel.onchange = (e) => saveSetting('server_idle_min', parseInt(e.target.value, 10)); }
     if (portInput) { portInput.value = String(s.server_port || 1234);
@@ -9687,22 +9725,46 @@ const _UTTER_GAP = 900;
 //   idle      → calm center
 let _voiceState = 'idle';
 
+function _voiceGridWorking(s, cx, cy, maxDist) {
+  // Rotating sweep with a fading trail. Deliberately unlike the expanding rings
+  // of 'thinking': in voice mode a tool can run for many seconds with no text
+  // and no audio, and an unchanged grid there reads as a freeze. Motion that
+  // clearly differs says "still working, just not talking".
+  const head = (s * 2.2) % (Math.PI * 2);
+  const TAU = Math.PI * 2;
+  voiceDots.forEach((d, i) => {
+    const x = i % VOICE_GRID_COLS, y = Math.floor(i / VOICE_GRID_COLS);
+    const dx = x - cx, dy = y - cy;
+    const dist = Math.hypot(dx, dy);
+    // Angle BEHIND the sweep head, normalised so 1 = at the head, 0 = a full
+    // turn behind it. Gives the trail its falloff for free.
+    let a = Math.atan2(dy, dx) - head;
+    a = ((a % TAU) + TAU) % TAU;
+    const trail = 1 - a / TAU;
+    const hot = dist > 0.5 && trail > 0.88;
+    const on = dist < 0.7 || (dist > 0.5 && trail > 0.55);
+    d.classList.toggle('hot', hot);
+    d.classList.toggle('on', on && !hot);
+  });
+}
+
 function _voiceGridThinking(s, cx, cy, maxDist) {
-  // Two staggered rings so motion is continuous; front bright, short trail soft.
-  const period = 1.5;
-  const rings = [(s % period) / period, ((s + period / 2) % period) / period];
+  // ONE slow ring, and nothing is ever 'hot'. Two fast staggered rings lighting
+  // half the grid at full brightness read as an alarm, not as thinking. The
+  // point is a calm sign of life while the model works, so: long period, thin
+  // band, dim class only.
+  const period = 3.2;
+  const ph = (s % period) / period;
+  const ringR = ph * (maxDist + 1);
   voiceDots.forEach((d, i) => {
     const x = i % VOICE_GRID_COLS, y = Math.floor(i / VOICE_GRID_COLS);
     const dist = Math.hypot(x - cx, y - cy);
-    let hot = false, on = dist < 0.7;
-    for (const ph of rings) {
-      const ringR = ph * (maxDist + 1);
-      const near = Math.abs(dist - ringR);
-      if (near < 0.6 && ph < 0.85) hot = true;
-      else if (near < 1.25 && ph < 0.9) on = true;
-    }
-    d.classList.toggle('hot', hot);
-    d.classList.toggle('on', on && !hot);
+    const near = Math.abs(dist - ringR);
+    // Fade the band out over the last stretch so the ring dissolves at the
+    // edge instead of snapping off and restarting from the centre.
+    const on = dist < 0.7 || (near < 0.85 && ph < 0.9);
+    d.classList.remove('hot');
+    d.classList.toggle('on', on);
   });
 }
 
@@ -9710,6 +9772,12 @@ function _voiceGridFrame(t) {
   const s = t / 1000;
   const cx = (VOICE_GRID_COLS - 1) / 2, cy = (VOICE_GRID_ROWS - 1) / 2;
   const maxDist = Math.hypot(cx, cy);
+
+  if (_voiceState === 'working') {
+    _voiceGridWorking(s, cx, cy, maxDist);
+    voiceGridAnim = requestAnimationFrame(_voiceGridFrame);
+    return;
+  }
 
   if (_voiceState === 'thinking') {
     _voiceGridThinking(s, cx, cy, maxDist);
@@ -9720,12 +9788,15 @@ function _voiceGridFrame(t) {
   // speaking / listening / idle → amplitude-driven radial bloom.
   let target = 0;
   if (_voiceState === 'speaking') {
-    target = (t - _lastLevelAt < 220) ? _ttsLevel : 0.24;   // real TTS loudness
-  } else if (_voiceState === 'listening') {
-    // Legacy press-to-talk exposes a client mic level; realtime does not (mic is
-    // server-side), so fall back to a calm breathe that says "I'm here, listening".
-    target = recorder.recording ? Math.min(1, voiceMicLevel * 1.7)
-                                : (0.14 + 0.07 * Math.sin(s * 2.0));
+    // STRICTLY the agent's real TTS amplitude. The old fallback held a constant
+    // 0.24 bloom whenever level events stopped arriving, so the grid kept
+    // "talking" through silence — motion the voice wasn't driving. If there's
+    // no live amplitude, collapse to rest and let the silence show.
+    target = (t - _lastLevelAt < 220) ? _ttsLevel : 0;
+  } else if (_voiceState === 'listening' && recorder.recording) {
+    // Only YOUR mic drives it while listening. Idle listening gets no animation
+    // at all: nothing is being said, so nothing should move.
+    target = Math.min(1, voiceMicLevel * 1.7);
   }
   // Asymmetric smoothing: gentle attack, slower release — raw amplitude is spiky.
   voiceLevel += (target - voiceLevel) * (target > voiceLevel ? 0.22 : 0.08);
@@ -9784,7 +9855,22 @@ async function enterVoiceMode() {
   // then invite a tap. Either way we never show "listening"/"tap mic" against a
   // model that isn't loaded.
   const rt = await probeRealtimeVoice();
-  if (!rt) {
+  if (rt) {
+    // Kick the realtime listener HERE. The mic-button path calls enterVoiceMode
+    // on its own, and only the wake-word path called startRealtimeVoice, so
+    // clicking into voice mode parked on "starting…" forever with no mic ever
+    // opening and no error to explain it.
+    startRealtimeVoice().then((ok) => {
+      // Never leave the neutral placeholder on screen. If realtime declined to
+      // start, say so instead of implying something is still in progress.
+      if (voiceModeOn && ok === false
+          && ($('voice-status-text').textContent || '').startsWith('starting')) {
+        setVoiceStatus('tap mic to start talking');
+      }
+    }).catch(() => {
+      if (voiceModeOn) setVoiceStatus('voice failed to start — type instead, your keyboard works');
+    });
+  } else {
     setVoiceStatus('warming up the model…');
     const ready = await warmUpBrainForVoice();
     // On success invite a tap; on failure keep warm-up's diagnostic message.
@@ -9879,6 +9965,7 @@ function setVoiceStatus(s) {
   const low = (s || '').toLowerCase();
   let st = 'idle';
   if (low.includes('speak')) st = 'speaking';
+  else if (/running|calling|reading|writing|searching/.test(low)) st = 'working';
   else if (/think|transcrib|warming|starting/.test(low)) st = 'thinking';
   else if (/listen|your turn/.test(low)) st = 'listening';
   _voiceState = st;

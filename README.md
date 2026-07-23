@@ -19,8 +19,9 @@
 
 <p align="center">
   <a href="https://get-hearth.vercel.app"><img src="https://img.shields.io/badge/website-get--hearth.vercel.app-8b5cf6?style=flat-square" alt="Website"></a>
-  <a href="https://github.com/0pen-sourcer/hearth/releases"><img src="https://img.shields.io/badge/download-installer-8b5cf6?style=flat-square" alt="Download the installer"></a>
+  <a href="https://github.com/0pen-sourcer/hearth/releases"><img src="https://img.shields.io/github/downloads/0pen-Sourcer/Hearth/total?style=flat-square&color=8b5cf6&label=downloads" alt="Total downloads"></a>
   <a href="docs/USER_GUIDE.md"><img src="https://img.shields.io/badge/docs-user%20guide-6b6b76?style=flat-square" alt="Docs"></a>
+  <a href="https://instagram.com/fissile_u235"><img src="https://img.shields.io/badge/instagram-%40fissile__u235-8b5cf6?style=flat-square&logo=instagram&logoColor=white" alt="Instagram"></a>
 </p>
 
 <p align="center">

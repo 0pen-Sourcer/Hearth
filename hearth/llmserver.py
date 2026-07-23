@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 WORKSPACE = Path(os.environ.get("JARVIS_WORKSPACE", Path.home() / "Jarvis"))
 MODELS_DIR = WORKSPACE / "models"
@@ -100,6 +101,85 @@ BUILTIN_API_KEY = "hearth-builtin"
 # Smallest context Hearth's own server will boot at. Persona + tool schemas are
 # ~14K tokens, so below ~18K the prompt overflows with no room for a reply.
 MIN_USABLE_CTX = int(os.environ.get("JARVIS_MIN_CTX", "18432"))  # 18K
+
+# Concurrent request slots on the built-in server. llama.cpp splits --ctx-size
+# EVENLY across slots, so N slots that each hold a usable prompt need N *
+# per-slot ctx of KV cache. At 1 slot every request queues, which is why a team
+# of sub-agents on a local model runs one at a time. Raising this is what lets
+# them actually overlap, paid for in KV-cache VRAM.
+MAX_PARALLEL_SLOTS = 4
+
+
+# Cross-surface handoff. `_proc` only exists in the process that spawned the
+# server, so a GUI polling a server the CLI booted (or vice versa) sees its own
+# empty _proc and classifies Hearth's own server as a foreign endpoint — which
+# is how it ends up talking about LM Studio on a machine with no LM Studio. The
+# run-file lets any surface recognise the built-in and read its real config.
+_RUNFILE_PATH = Path(os.path.expanduser("~/.hearth/builtin_server.json"))
+
+
+def _write_runfile(info: Dict[str, Any]) -> None:
+    try:
+        _RUNFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = dict(info)
+        payload["pid"] = os.getpid()
+        with open(_RUNFILE_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def _clear_runfile() -> None:
+    try:
+        _RUNFILE_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def read_runfile(verify: bool = True) -> Dict[str, Any]:
+    """Config of a built-in server started by ANOTHER Hearth surface, or {} if
+    there isn't one. Verified live before being trusted, since a hard kill
+    leaves the file behind. Pass verify=False when the caller has already
+    confirmed something is answering, to skip a duplicate probe."""
+    try:
+        with open(_RUNFILE_PATH, encoding="utf-8") as f:
+            info = json.load(f) or {}
+    except (OSError, ValueError):
+        return {}
+    if not info.get("url"):
+        return {}
+    # Only ours answers to the built-in key, so this doubles as ownership proof.
+    if verify and not external_server_running(info["url"], timeout=0.5,
+                                              api_key=BUILTIN_API_KEY):
+        _clear_runfile()
+        return {}
+    return info
+
+
+def current_slots() -> int:
+    """Concurrent slots the RUNNING built-in server actually has. 1 means every
+    request queues, so a team of sub-agents finishes one at a time."""
+    try:
+        return max(1, int((_proc_info or {}).get("slots") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def get_parallel_slots() -> int:
+    """Slots the built-in server should boot with. Env wins, then the shared
+    settings.json the GUI writes, else 1 (queue everything)."""
+    raw = (os.environ.get("HEARTH_PARALLEL_SLOTS") or "").strip()
+    if not raw:
+        try:
+            import json as _j
+            with open(WORKSPACE / "settings.json", encoding="utf-8") as f:
+                raw = str((_j.load(f) or {}).get("server_parallel_slots") or "")
+        except (OSError, ValueError):
+            raw = ""
+    try:
+        return max(1, min(int(raw), MAX_PARALLEL_SLOTS))
+    except ValueError:
+        return 1
 
 # Hide the cmd-flash for any subprocess we spawn on Windows.
 _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -1336,6 +1416,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                   cache_type_v: Optional[str] = None,
                   flash_attn: bool = True,
                   force: bool = False,
+                  parallel_slots: Optional[int] = None,
                   _smoke_checked: bool = False) -> Dict[str, Any]:  # noqa: ARG001 — kept for caller compat; load no longer refuses on VRAM
     """Spawn llama-cpp-python's OpenAI-compatible server.
 
@@ -1426,6 +1507,36 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     _blackwell = (detect_gpu_compute_cap() or 0.0) >= 12.0
     _native = find_native_llama_server()
     _use_native = _native is not None
+
+    # Resolve concurrent slots. Only the standalone llama-server has them; the
+    # llama-cpp-python wheel wraps a single Llama instance and serialises no
+    # matter what, so asking for slots there would silently do nothing.
+    slots = (get_parallel_slots() if parallel_slots is None
+             else max(1, min(int(parallel_slots), MAX_PARALLEL_SLOTS)))
+    if slots > 1 and not _use_native:
+        slots = 1
+    # Slots multiply KV cache, so an over-ambitious setting has to degrade
+    # rather than OOM at load. Step down until the weights + KV fit free VRAM.
+    if slots > 1 and n_gpu_layers != 0:
+        try:
+            _free = detect_gpu_vram_free_gb()
+            _msize = os.path.getsize(model_path) / (1024 ** 3)
+            while slots > 1 and _free is not None:
+                if _msize + estimate_kv_cache_gb(_msize, ctx * slots,
+                                                 cache_type_k) <= _free - 0.4:
+                    break
+                slots -= 1
+        except OSError:
+            pass
+    # ctx is PER SLOT from the caller's point of view, because that's what has
+    # to hold one conversation. llama.cpp wants the total, so multiply.
+    total_ctx = ctx * slots
+    if slots > 1:
+        try:
+            print(f"  [hearth.llmserver] {slots} slots x {ctx} ctx "
+                  f"= {total_ctx} total (sub-agents can overlap)", flush=True)
+        except Exception:
+            pass
     if n_gpu_layers != 0:
         # The native llama-server has working Blackwell kernels → keep the
         # q8_0 + flash VRAM saver (fits a 9B on 8 GB, like LM Studio). Only the
@@ -1566,7 +1677,8 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             "--model", model_path,
             "--host", BUILTIN_HOST,
             "--port", str(port),
-            "--ctx-size", str(ctx),
+            "--ctx-size", str(total_ctx),
+            "--parallel", str(slots),
             "--n-gpu-layers", str(999 if n_gpu_layers == -1 else n_gpu_layers),
             "--api-key", BUILTIN_API_KEY,
             "--batch-size", "2048",
@@ -1783,7 +1895,9 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         _gpu_on = n_gpu_layers
     _proc_info = {"url": api_base, "model_path": model_path, "port": port, "ctx": ctx,
                   "gpu_layers_on": _gpu_on, "total_layers": _total_layers,
+                  "slots": slots, "total_ctx": total_ctx,
                   "engine": "native" if _use_native else "wheel"}
+    _write_runfile(_proc_info)
     # Remember the user's tuned config so the next "Use this" on the same
     # .gguf restores GPU offload / ctx / KV cache without them setting it again.
     save_model_config(model_path, {
@@ -1833,6 +1947,25 @@ def stop_builtin() -> Dict[str, Any]:
     if _proc is None or _proc.poll() is not None:
         _proc = None
         _proc_info = {}
+        # Not our subprocess, but the other surface may still be running one.
+        # Now that status() reports it as builtin, Eject has to actually eject
+        # it rather than silently no-op on the surface that didn't start it.
+        adopted = read_runfile()
+        pid = adopted.get("pid")
+        if pid:
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                   capture_output=True, timeout=10,
+                                   creationflags=0x08000000)
+                else:
+                    os.kill(int(pid), signal.SIGTERM)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                pass
+            _clear_runfile()
+            _status_cache["data"] = None
+            return {"ok": True, "was_running": True, "adopted": True}
+        _clear_runfile()
         return {"ok": True, "was_running": False}
     try:
         _proc.terminate()
@@ -1845,6 +1978,7 @@ def stop_builtin() -> Dict[str, Any]:
         pass
     _proc = None
     _proc_info = {}
+    _clear_runfile()
     # Invalidate the status cache so the next GUI poll reflects the stop
     # instantly instead of waiting for the 8s TTL.
     invalidate_status_cache()
@@ -2449,8 +2583,18 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
     except Exception:
         _is_local = True
     _key = os.environ.get("LOCAL_API_KEY") or ""
-    ext = external_server_running(api_base, timeout=0.5,
-                                  api_key=_key or BUILTIN_API_KEY) and not builtin
+    _responding = external_server_running(api_base, timeout=0.5,
+                                          api_key=_key or BUILTIN_API_KEY)
+    # A built-in server the OTHER surface started is still ours. Without this
+    # the CLI's server looks foreign to the GUI (and vice versa), so the UI
+    # falls through to its LM-Studio probes and starts naming a program that
+    # may not be installed. `_binfo` is whichever config describes it.
+    _binfo = _proc_info if builtin else {}
+    if _responding and not builtin:
+        adopted = read_runfile(verify=False)
+        if adopted and _is_local:
+            builtin, _binfo = True, adopted
+    ext = _responding and not builtin
     ext_id: Optional[str] = None
     ext_path: Optional[str] = None
     _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
@@ -2510,12 +2654,17 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
         "external_model_id": ext_id,
         "external_model_path": ext_path,
         "builtin_running": builtin,
-        "builtin_pid": (_proc.pid if (_proc and builtin) else None),
-        "builtin_url": _proc_info.get("url") if builtin else None,
-        "builtin_model": _proc_info.get("model_path") if builtin else None,
-        "builtin_gpu_layers": _proc_info.get("gpu_layers_on") if builtin else None,
-        "builtin_total_layers": _proc_info.get("total_layers") if builtin else None,
-        "builtin_engine": _proc_info.get("engine") if builtin else None,
+        # _binfo is _proc_info when we own the process, or the run-file when
+        # another Hearth surface booted it, so these read the same either way.
+        "builtin_pid": (_proc.pid if (_proc and _proc.poll() is None)
+                        else (_binfo.get("pid") if builtin else None)),
+        "builtin_url": _binfo.get("url") if builtin else None,
+        "builtin_model": _binfo.get("model_path") if builtin else None,
+        "builtin_gpu_layers": _binfo.get("gpu_layers_on") if builtin else None,
+        "builtin_total_layers": _binfo.get("total_layers") if builtin else None,
+        "builtin_engine": _binfo.get("engine") if builtin else None,
+        "builtin_slots": _binfo.get("slots") if builtin else None,
+        "builtin_owned": bool(_proc and _proc.poll() is None),
         "disk_models": _disk,
         "partial_downloads": list_partial_downloads(),
         "is_lite": _is_lite_edition(),
