@@ -121,6 +121,14 @@ def fetch_new(url: str = FEED_URL, mark: bool = True) -> list:
         data = _fetch(url)
     except Exception:
         return []
+    # First run on this machine: swallow the whole backlog instead of showing
+    # it. Announcements are written for whoever was already running an older
+    # build, so a brand-new install reading "you're on an old version, grab the
+    # installer" is both wrong and alarming. mark_all_seen() existed for this
+    # and was never wired to anything.
+    if not os.path.isfile(_SEEN_PATH):
+        _save_seen({str(e["id"]) for e in _entries(data)})
+        return []
     seen = _load_seen()
     new = [e for e in _entries(data) if str(e["id"]) not in seen]
     if mark and new:
