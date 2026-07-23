@@ -1,61 +1,21 @@
-# Hearth v0.7.3-preview
+If you're already on v0.7.2, you don't need this download. Open Hearth and it'll offer you a patch that's under a megabyte instead. That's the thing I built last release, and this is the first time it actually gets used. If you're on v0.7.0 or v0.7.1 you'll need the installer one more time, and after that you're on the small updates for good.
 
-This one is mostly about things that were quietly lying to you.
+Most of this release is things that were quietly lying to you.
 
-**If you're already on v0.7.2, you don't need this installer.** Open Hearth and it'll offer you a 0.7 MB patch instead of a gigabyte. That's the whole reason the patch system exists. If you're on v0.7.0 or v0.7.1 you'll need the installer once, and after that you're on the patchable layout for good.
+The worst one was compaction. When a chat gets long Hearth summarizes the older turns to save room, and on reasoning models that summary was coming back empty, because the model's thinking ate the whole token budget and left nothing for the actual text. Hearth then replaced your entire earlier conversation with the words "summary unavailable". So the history was gone, nothing got smaller, and it just did it again on the next message. If you saw it compacting over and over, that was why. It now refuses to compact at all unless it got a real summary back, so a failure costs you tokens instead of costing you the conversation.
 
-## Sub-agents can actually work in parallel now
+Sub-agents also couldn't really run in parallel. Hearth never told llama.cpp to open more than one slot, so a team of agents was a queue in a costume. There's a Concurrent agents setting now. The catch worth knowing is that llama.cpp divides your context across slots, so two slots at 24K silently gives each agent 12K. Hearth treats the number you pick as per-agent and does the multiplication itself, then quietly steps back down if your card can't hold the extra. On 8 GB you'll likely sit at one or two and that's fine.
 
-They never really did. Hearth never told llama.cpp to open more than one slot, so a "team" of sub-agents was a queue wearing a costume. It's a real setting now under Settings, Concurrent agents.
+Something else came out of that. If you'd turned on auto-approve, it was also applying to sub-agents, which run with nobody watching them. A background agent could have run a delete you never saw. Auto-approve now only covers commands that actually go past your eyes. If you want your agents to have it too there's a separate switch for that, so it's something you choose rather than something you inherit.
 
-The part everyone gets wrong is that llama.cpp splits your context window across slots, so asking for 2 slots at 24K silently hands each agent 12K. Hearth treats your context as per-slot and multiplies for the total, and steps back down on its own if your card can't hold the extra KV cache. On 8 GB you'll probably stay at 1 or 2, and that's fine.
+The CLI and the app can finally see each other. Load a model in one and the other knows about it, and Eject works from either side. Before this, a server started from the CLI looked like a stranger to the app, which is how people ended up reading an error about LM Studio on machines that have never had LM Studio installed. The model name in the top bar was wrong too when you had several models on disk, because it compared a full path against a filename and just highlighted whichever one was listed first.
 
-While wiring that up I found a race that only shows up once agents genuinely overlap: fork depth was tracked process-wide, so two agents running at once could clear each other's counter and nest deeper than the limit allows. Fixed.
+Voice mode could sit on "starting" forever and never open the mic, because the part that starts listening was only ever reached through the wake word. Clicking the mic button did nothing. The dot grid is honest now as well: when it's talking the movement is your model's real voice and nothing else, instead of a fixed pulse that kept going through silence, and when nothing is happening nothing moves. The little desktop grid stopped shimmering and now matches the one in the app instead of being a squashed rectangle a third the size. It's click-through so it never blocks what's underneath, and you hold Ctrl to drag it, which was never written down anywhere and is why it felt broken.
 
-## Sub-agents can't run destructive commands behind your back
+Images you attach show up as a thumbnail in your own message now rather than the text "attached: something.png", and a huge screenshot gets scaled down instead of eating the page. The little status readout used to say "thinking" for everything including compaction and prompt processing, and now says what's actually going on. Error messages stopped assuming you're running LM Studio. Chat search used to hand back the most recent messages when it couldn't find anything and present them like they matched, so it says when it found nothing. Tools the model pulls in mid-chat get released again, so a long session doesn't slowly drag the prompt back up to full size and a new chat doesn't inherit whatever the last one opened.
 
-If you'd turned on auto-approve, that also silently applied to sub-agents, which run with nobody watching. So a background agent could have run a delete you never saw.
+Onboarding stopped asking which "brain" you want, which meant nothing to anybody, and stopped naming a model that isn't loaded.
 
-Now auto-approve only covers commands you can actually see go past. If you genuinely want your agents to have that too, there's a separate switch, `HEARTH_SUBAGENT_AUTO_APPROVE=1`, so it's a thing you choose rather than a thing you inherit.
+Windows installer only. Full includes the GPU engine, Lite is for people already running Ollama or LM Studio. Linux runs from source. The installer still isn't signed so Windows will show the blue unknown-publisher box, and you click More info then Run anyway.
 
-## Compaction was deleting your conversation
-
-The worst bug in here. When a chat got long, Hearth summarizes the older turns to save room. On reasoning models that summary came back empty, because the whole token budget went to the model's thinking and nothing was left for the actual text. Hearth then replaced your entire earlier conversation with the words `[summary unavailable]`.
-
-So the history was gone, nothing shrank, and it just compacted again on the next message. That's why some of you saw it compacting over and over.
-
-Compaction now refuses to run at all unless it got a real summary back. If summarizing fails you keep the full history, which costs tokens but keeps the conversation.
-
-## The CLI and the GUI can finally see each other
-
-Load a model in one and the other knows. Before this, a server the CLI started looked like a stranger to the GUI, which is how you'd end up reading an error about LM Studio on a machine that has never had LM Studio installed. Eject works from either side now too.
-
-The model name in the top bar also showed the wrong model when you had more than one on disk. It was comparing a full path against a filename, so it just flagged whichever model happened to be listed first.
-
-## Voice
-
-Voice mode could sit on "starting…" forever and never open the mic, because the thing that starts listening was only ever called from the wake word path. Clicking the mic button did nothing at all.
-
-The dot grid is honest now. When it's speaking, the movement is your model's actual voice amplitude and nothing else, instead of a fixed pulse that kept going through silence. When nothing's happening, nothing moves. The desktop HUD stopped shimmering (it was repainting unbuffered, sixty times a second, with the background erased each frame) and it matches the in-app grid instead of being a squashed rectangle a third the size.
-
-It's click-through on purpose so it never blocks what's under it. **Hold Ctrl to drag it.** That was never written down anywhere, which is why it felt broken.
-
-## Smaller things
-
-Images you attach now show up as a thumbnail in your own message instead of the text `[attached: whatever.png]`, capped so a huge screenshot doesn't eat the page.
-
-The status readout said "thinking" for everything, including compaction and prompt processing. It says what's actually happening now.
-
-Error messages stopped assuming LM Studio. If nothing is answering it says so, and if a model isn't found it tells you it's probably a stale saved name rather than telling you to load a model you already loaded.
-
-Chat search used to return the most recent messages when it couldn't find anything, and present them as if they matched. It says when it found nothing now.
-
-Tools the model pulled in on demand were never released, so a long session slowly dragged the prompt back up to full size and a new chat inherited whatever the last one opened. They're capped and reset per chat now.
-
-Onboarding stopped asking which "brain" you want, which meant nothing to anyone, and stopped naming a model that isn't loaded.
-
-## Known
-
-The installer isn't code signed, so SmartScreen will show the blue unknown-publisher box. More info, then Run anyway.
-
-Windows installer only. Linux runs from source. I still don't own a Mac.
+Updating never touches your chats, memory or models.
