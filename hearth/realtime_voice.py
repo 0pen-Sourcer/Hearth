@@ -192,12 +192,51 @@ def _build_recorder():
     return rec
 
 
+_mic_warning = ""  # surfaced to the UI when a picked mic couldn't be opened
+
+
 def _mic_index():
+    """The user's chosen mic index, but ONLY if it can actually be opened.
+
+    A Bluetooth headset (boAt, AirPods, etc.) enumerates its mic even when its
+    HFP capture endpoint won't open, and handing that index to RealtimeSTT makes
+    it retry 'Selected device validation failed' forever with no way out. So we
+    probe the device first; if it fails we fall back to the OS default and leave
+    a message the voice UI can show, instead of a silent dead mic."""
+    global _mic_warning
+    _mic_warning = ""
     try:
         from .listen import input_device_index
-        return input_device_index()
+        idx = input_device_index()
     except Exception:
         return None
+    if idx is None:
+        return None
+    try:
+        import sounddevice as sd
+        # check_input_settings is too optimistic (it passed a Bluetooth HFP mic
+        # that RealtimeSTT then couldn't open), so actually START a stream for a
+        # moment. If the device can't be opened for capture, this throws here
+        # instead of inside RealtimeSTT's forever-retry loop.
+        with sd.InputStream(device=idx, channels=1, samplerate=16000,
+                            blocksize=1024):
+            pass
+        return idx
+    except Exception as e:
+        _mic_warning = ("Your selected mic couldn't be opened (Bluetooth mics "
+                        "often can't), so Hearth is using the system default. "
+                        "Pick a different mic in Settings > Voice if it can't "
+                        "hear you.")
+        try:
+            print(f"[voice] mic index {idx} failed to open ({e}); using default",
+                  flush=True)
+        except Exception:
+            pass
+        return None
+
+
+def mic_warning() -> str:
+    return _mic_warning
 
 
 def reset_recorder():

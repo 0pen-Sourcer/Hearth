@@ -117,8 +117,19 @@ def install(no_autostart: bool = False) -> int:
     # Prefer the PACKAGED tray exe if it's been built — that's what most users
     # actually run (no Python needed). It shows up cleanly in Task Manager's
     # Startup tab. Fall back to the dev venv `pythonw -m hearth.tray`.
-    packaged = os.path.join(repo_root, "dist", "Hearth", "Hearth.exe")
-    if os.path.isfile(packaged):
+    #
+    # In an INSTALLED build the modules live at %LOCALAPPDATA%\Hearth\_internal,
+    # so repo_root is that _internal dir and Hearth.exe sits ONE LEVEL UP, not
+    # under dist/. The old code only checked dist/Hearth/Hearth.exe, so on a real
+    # install it fell through to a .venv python that isn't there — the Startup
+    # shortcut pointed at a non-existent target and silently never booted.
+    exe_candidates = [
+        os.path.join(os.path.dirname(repo_root), "Hearth.exe"),  # installed: _internal's parent
+        os.path.join(repo_root, "Hearth.exe"),
+        os.path.join(repo_root, "dist", "Hearth", "Hearth.exe"),  # dev build output
+    ]
+    packaged = next((p for p in exe_candidates if os.path.isfile(p)), None)
+    if packaged:
         target, t_args, t_wd, t_pythonw = packaged, "", os.path.dirname(packaged), False
         icon_path = packaged  # exe carries its own icon
     else:

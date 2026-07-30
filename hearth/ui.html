@@ -6432,14 +6432,33 @@ async function send(forced = null, displayAs = null, opts = {}) {
       ttsBuffer = ttsBuffer.replace(/<\|?tool_call\|?>[\s\S]*$/i, '').trim();
       if (!ttsBuffer) return;
     }
-    const minChars = ttsFirstFlushDone ? 25 : 12;
-    if (force || (ttsBuffer.length >= minChars && FLUSH_AT_CLAUSE.test(ttsBuffer))) {
+    // Flush on whole SENTENCES, not every comma. Firing on clause breaks with a
+    // 25-char floor shattered long replies into two-word fragments, each its own
+    // synthesis with a gap between - the robotic stutter. So: the first utterance
+    // still fires early (on any clause break) so audio starts fast, but after
+    // that we wait for a real sentence end (. ! ?). A comma-heavy run-on that
+    // never ends only falls back to a clause break once it's long (>140 chars),
+    // so latency stays bounded without chopping normal sentences.
+    const SENTENCE_END = /[.!?](\s|$)/;
+    let ready;
+    if (force) {
+      ready = true;
+    } else if (!ttsFirstFlushDone) {
+      ready = ttsBuffer.length >= 12 && FLUSH_AT_CLAUSE.test(ttsBuffer);
+    } else {
+      ready = (ttsBuffer.length >= 20 && SENTENCE_END.test(ttsBuffer))
+              || (ttsBuffer.length >= 140 && FLUSH_AT_CLAUSE.test(ttsBuffer));
+    }
+    if (ready) {
       let cut = ttsBuffer.length;
       if (!force) {
-        // Find LAST clause break in buffer so we don't cut mid-phrase
-        const m = ttsBuffer.match(/[.!?,;:](\s|$)/g);
-        if (m) {
-          const last = ttsBuffer.lastIndexOf(m[m.length - 1]);
+        // Cut at the LAST sentence end (fall back to any clause break for the
+        // early first flush / the long run-on case), so we never split a phrase.
+        const breaks = (ttsFirstFlushDone && ttsBuffer.length < 140)
+          ? ttsBuffer.match(/[.!?](\s|$)/g)
+          : ttsBuffer.match(/[.!?,;:](\s|$)/g);
+        if (breaks) {
+          const last = ttsBuffer.lastIndexOf(breaks[breaks.length - 1]);
           if (last > 0) cut = last + 1;
         }
       }
@@ -9924,10 +9943,39 @@ function stopVoiceGridWave() {
 }
 
 async function enterVoiceMode() {
+  // No brain, no voice. Opening the mic against a model that can't answer is
+  // how you get a stale "listening" that never does anything. Say what's wrong
+  // and bail instead.
+  const _brainReady = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
+  if (!_brainReady) {
+    toast('Load a model first', 'Voice needs a model running. Open Models and load one, then try voice again.', 'warn', 6000);
+    return;
+  }
   voiceModeOn = true;
   $('voice-mode').classList.add('show');
   setVoiceStatus('starting…');     // neutral until we know the brain is ready
   startVoiceGridWave();  // continuous reactive loop (mic + AI voice)
+  // First-ever voice entry: point people at the mic picker. The OS default is
+  // often Stereo Mix or the wrong device, and someone whose mic isn't captured
+  // has no way to know the fix lives in Settings. A dismissable pop-in, with a
+  // "don't show again" so it never nags twice.
+  if (!localStorage.getItem('hearth_mic_hint_seen')) {
+    showModal('Quick voice tip',
+      '<div style="line-height:1.55">If Hearth never picks up your voice, it is almost always the '
+      + '<b>mic device</b>. The system default is often not the mic you are actually using.'
+      + '<br><br>Pick the right one in <b>Settings &rarr; Voice &rarr; Microphone</b>.'
+      + '<label style="display:flex;align-items:center;gap:8px;margin-top:16px;font-size:13px;color:var(--fg-dim);cursor:pointer">'
+      + '<input type="checkbox" id="mic-hint-hide" style="width:15px;height:15px"> Don\'t show this again</label></div>',
+      [
+        { label: 'Open Voice settings', kind: 'primary', onclick: () => {
+            if (document.getElementById('mic-hint-hide')?.checked) localStorage.setItem('hearth_mic_hint_seen', '1');
+            try { showView('settings'); document.querySelector('button.settings-side-btn[data-st="voice"]')?.click(); } catch {}
+          } },
+        { label: 'Got it', onclick: () => {
+            if (document.getElementById('mic-hint-hide')?.checked) localStorage.setItem('hearth_mic_hint_seen', '1');
+          } },
+      ]);
+  }
   // Ensure a real conversation exists BEFORE the user starts talking, so the
   // voice exchange is recorded in the sidebar and persisted to ~/Jarvis/
   // conversations like any other chat. Without this, voice-mode messages
@@ -10061,7 +10109,18 @@ function setVoiceStatus(s) {
   _voiceState = st;
   const vm = $('voice-mode'); if (vm) vm.dataset.vstate = st;
 }
-function setVoiceTranscript(s) { $('voice-transcript').textContent = s; }
+function setVoiceTranscript(s) {
+  // Models that emit tool calls as literal <tool_call>{...}</tool_call> text
+  // (Gemma, some Qwen builds) were dumping that raw markup into the voice
+  // caption. Strip any tool-call tags and their JSON, plus a trailing half-
+  // streamed one, so the caption shows only what's actually spoken.
+  let t = String(s || '')
+    .replace(/<\|?tool_call\|?>[\s\S]*?<\/?\|?tool_call\|?>/gi, ' ')
+    .replace(/<\|?tool_call\|?>[\s\S]*$/i, ' ')   // trailing, still streaming
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  $('voice-transcript').textContent = t;
+}
 
 $('btn-voice-mode').addEventListener('click', enterVoiceMode);
 $('voice-exit').addEventListener('click', exitVoiceMode);
