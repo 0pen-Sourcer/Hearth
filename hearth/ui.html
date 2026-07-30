@@ -2725,6 +2725,17 @@
     text-align: center;
     line-height: 1.4;
     min-height: 24px;
+    /* Cap the height and keep the LATEST text pinned to the bottom, so a long
+       reply scrolls up within this box instead of overflowing the whole
+       screen and swallowing the buttons. Overflow is clipped, not a scrollbar. */
+    max-height: 40vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    /* Fade the top edge so clipped text dissolves instead of a hard cut. */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 3.5em);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 3.5em);
   }
   .voice-controls {
     display: flex; gap: 10px; align-items: center;
@@ -4410,6 +4421,13 @@ function showInlinePermission(reqId, toolName, args) {
   $('perm-strip').hidden = false;
   document.getElementById('input').placeholder =
     'or type what to do instead… (1=Yes · 2=No · 3=Always · 4=Never · Esc=deny)';
+  // Voice mode: the inline strip is hidden behind the overlay, so surface the
+  // ask as clean text in the overlay itself. No box, on purpose — it stays in
+  // the minimal grid+text aesthetic, and a spoken yes/no answers it.
+  if (voiceModeOn) {
+    setVoiceStatus('needs permission');
+    setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?  Say "yes", "no", or "always".');
+  }
   setTimeout(() => document.getElementById('input').focus(), 0);
 }
 
@@ -4417,6 +4435,7 @@ function hideInlinePermission() {
   pendingPermId = null;
   pendingPermTool = null;
   $('perm-strip').hidden = true;
+  if (voiceModeOn) setVoiceTranscript('');
   document.getElementById('input').placeholder = `Message ${_agentName()}…`;
 }
 
@@ -4505,6 +4524,19 @@ document.querySelectorAll('#perm-strip .perm-key').forEach(el => {
   el.addEventListener('click', () => sendPermDecision(el.dataset.decision));
 });
 $('perm-close').addEventListener('click', () => sendPermDecision('deny'));
+
+// Map a spoken utterance to a permission decision while a prompt is pending in
+// voice mode. Returns true if it consumed the utterance (so it isn't sent as a
+// new chat message). Only fires on a CLEAR yes/no/always, otherwise the user's
+// words go through as a normal instruction (e.g. "no, do X instead").
+function maybeAnswerPermByVoice(text) {
+  if (!pendingPermId || !voiceModeOn) return false;
+  const t = (text || '').trim().toLowerCase().replace(/[.!?,]+$/, '');
+  if (/^(always|always allow|yes always)$/.test(t)) { sendPermDecision('always'); return true; }
+  if (/^(yes|yeah|yep|yup|sure|ok|okay|allow|do it|go ahead|confirm)$/.test(t)) { sendPermDecision('allow'); return true; }
+  if (/^(no|nope|nah|deny|don'?t|cancel|stop)$/.test(t)) { sendPermDecision('deny'); return true; }
+  return false;
+}
 
 // Number-key shortcut on the input while a perm is pending AND the input is empty.
 // Empty Enter = Allow (Enter defaults to the first option).
@@ -10130,6 +10162,12 @@ function setVoiceTranscript(s) {
   let t = String(s || '')
     .replace(/<\|?tool_call\|?>[\s\S]*?<\/?\|?tool_call\|?>/gi, ' ')
     .replace(/<\|?tool_call\|?>[\s\S]*$/i, ' ')   // trailing, still streaming
+    // Strip markdown so the spoken caption doesn't show raw **, ***, `, #, etc.
+    .replace(/```[\s\S]*?```/g, ' ')              // code fences
+    .replace(/`([^`]+)`/g, '$1')                  // inline code
+    .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')      // **bold** / *italic* / ***
+    .replace(/(^|\s)[*_]{1,3}(\s|$)/g, '$1$2')    // stray * *** _ markers
+    .replace(/^#{1,6}\s+/gm, '')                  // # headings
     .replace(/\s{2,}/g, ' ')
     .trim();
   $('voice-transcript').textContent = t;
@@ -10416,6 +10454,10 @@ function handleRealtimeEvent(ev) {
       _utterTimer = null;
       const msg = _utterBuf.trim(); _utterBuf = '';
       if (!msg || _voiceMuted || !voiceModeOn) return;
+      // If a permission prompt is open, a clean "yes"/"no" answers it instead
+      // of becoming a new message. Anything else (e.g. "no, do X instead")
+      // falls through and sends normally.
+      if (maybeAnswerPermByVoice(msg)) { setVoiceTranscript(''); return; }
       setVoiceStatus('thinking…');
       // Server pauses the mic during TTS playback so we won't hear our own voice.
       send(msg);

@@ -3141,6 +3141,15 @@ class HearthHandler(BaseHTTPRequestHandler):
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
             return self._send_json(400, {"error": "empty prompt"})
+        # A new user turn = TTS for this reply is allowed again. A barge-in on
+        # the PREVIOUS turn set voice._abort (to cut that reply's audio), and it
+        # is only cleared here — otherwise every reply after a barge-in was
+        # silently dropped by speak() and voice went permanently mute.
+        try:
+            from . import voice as _v
+            _v.reset_abort()
+        except Exception:
+            pass
         think = bool(body.get("think"))
         model = body.get("model") or None
         history = body.get("history") or []
