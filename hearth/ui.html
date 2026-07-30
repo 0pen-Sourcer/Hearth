@@ -6403,8 +6403,11 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // Track tool cards being filled in (by call index)
   let pendingTool = null;
   let pendingToolEvent = null;
-  // Streaming TTS buffer
-  let ttsBuffer = '';
+  // Streaming TTS buffer. Declared at MODULE scope (see below) because the
+  // barge-in callback in voiceCycle clears it too; a `let` here made it local
+  // to send() so barge-in threw "ttsBuffer is not defined" when you spoke over
+  // the AI. Here we only RESET it.
+  ttsBuffer = '';
   let ttsTimer = null;
   let ttsFirstFlushDone = false;  // first flush of this turn fires earlier
   // ANY clause break (period, question, exclam, comma, semicolon, colon, dash).
@@ -9620,6 +9623,9 @@ function _clearActiveTts() {
 let bargeStream = null, bargeCtx = null, bargeProcessor = null;
 let bargeActive = false;
 let onBargeIn = null;
+// Module-scope so send() (which fills it) and the barge-in callback (which
+// clears it) share ONE variable. Was a `let` inside send(), so barge-in threw.
+let ttsBuffer = '';
 
 async function startBargeIn(callback) {
   if (bargeStream) return;
