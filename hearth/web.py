@@ -2232,7 +2232,19 @@ class HearthHandler(BaseHTTPRequestHandler):
             if dec not in ("allow", "deny", "always", "never"):
                 return self._send_json(400, {"error": "decision must be allow/deny/always/never"})
             ok = _resolve_permission(rid, dec, reason)
-            return self._send_json(200 if ok else 404, {"ok": ok})
+            if not ok:
+                # The live request is gone (it timed out, or a barge-in / new
+                # message ended the turn before you clicked). "always"/"never"
+                # are durable preferences, so still honour them so the click
+                # isn't wasted, and report 'stale' instead of a scary 404. The
+                # tool name is encoded in the id: perm_<ts>_<name>.
+                nm = rid.split("_", 2)[2] if rid.count("_") >= 2 else ""
+                if nm and dec == "always":
+                    _always_allow.add(nm); _always_deny.discard(nm); _save_perms_to_disk()
+                elif nm and dec == "never":
+                    _always_deny.add(nm); _always_allow.discard(nm); _save_perms_to_disk()
+                return self._send_json(200, {"ok": True, "stale": True})
+            return self._send_json(200, {"ok": True})
         if path == "/api/permission/clear":
             # Reset always_allow / always_deny — also wipe disk so they don't come
             # back on restart. With {"name": "<tool>"} remove just that one rule
