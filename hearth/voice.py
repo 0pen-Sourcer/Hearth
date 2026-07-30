@@ -154,14 +154,22 @@ def _is_lite_build() -> bool:
         return False
 
 
-def _ensure_kokoro_models() -> bool:
-    """If the Kokoro model + voices aren't on disk, download them once.
-    Returns True when both are present. Honors JARVIS_NO_AUTODOWNLOAD=1, and on a
-    LITE build never silently pulls ~100MB — the user enables voice explicitly
-    (GUI Downloads pane) so a slim/API install stays slim."""
+def _ensure_kokoro_models(allow_download: bool = False) -> bool:
+    """True when the Kokoro model + voices are on disk.
+
+    allow_download defaults to FALSE so a mere status probe (is_available(),
+    the CLI banner, the GUI voice pill) NEVER pulls ~100MB. From a packaged
+    Windows build the models are bundled so this is moot, but from source
+    nothing is bundled, and booting used to download the whole engine just to
+    answer "is voice available?". Only an actual speak() passes allow_download
+    =True, so the download happens when the user genuinely uses voice, not on
+    launch. Honors JARVIS_NO_AUTODOWNLOAD=1 and never downloads on LITE."""
     global _last_load_error
     if _find("kokoro") and _find("voices"):
         return True
+    if not allow_download:
+        _last_load_error = "voice models not downloaded yet (use voice once to fetch them)"
+        return False
     if os.environ.get("JARVIS_NO_AUTODOWNLOAD") == "1":
         _last_load_error = "kokoro models missing and auto-download disabled (JARVIS_NO_AUTODOWNLOAD=1)"
         return False
@@ -183,9 +191,9 @@ def _ensure_kokoro_models() -> bool:
     return bool(_find("kokoro") and _find("voices"))
 
 
-def _try_kokoro():
+def _try_kokoro(allow_download: bool = False):
     global _last_load_error
-    if not _ensure_kokoro_models():
+    if not _ensure_kokoro_models(allow_download=allow_download):
         if not _last_load_error:
             _last_load_error = "kokoro: model/voices not found"
         return None
@@ -281,7 +289,7 @@ def _try_piper():
         return None
 
 
-def _load_engine() -> Optional[Tuple[str, object]]:
+def _load_engine(allow_download: bool = False) -> Optional[Tuple[str, object]]:
     global _engine, _last_load_error, _last_load_warning
     if _engine is not None:
         return _engine
@@ -291,7 +299,7 @@ def _load_engine() -> Optional[Tuple[str, object]]:
     # only clear it on a successful engine load WITHOUT a warning being set.
     pre_warning = _last_load_warning
     _last_load_warning = None
-    k = _try_kokoro()
+    k = _try_kokoro(allow_download=allow_download)
     if k is not None:
         _engine = ("kokoro", k)
         _last_load_error = None
@@ -572,7 +580,10 @@ def speak(text: str, blocking: bool = False,
     text = _clean_for_tts(text or "")
     if not text:
         return "empty"
-    if not is_available():
+    # A real speak() is the user genuinely using voice, so THIS is where the
+    # one-time model download is allowed. is_available() (status probes) never
+    # downloads. _engine caches, so the fetch happens at most once.
+    if _load_engine(allow_download=True) is None:
         return "no_voice"
     speed = speed if speed is not None else DEFAULT_SPEED
 

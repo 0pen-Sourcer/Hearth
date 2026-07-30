@@ -349,7 +349,11 @@ def main(argv: Optional[list] = None) -> int:
         pystray.MenuItem("Quit", on_quit),
     )
 
-    icon = pystray.Icon("hearth", img, "Hearth — local AI", menu)
+    # ASCII hyphen, NOT an em-dash: X11 encodes the window title as latin-1
+    # (via Xlib set_wm_name), and a U+2014 here crashes the tray on Linux
+    # before it ever appears. Windows uses a different pystray backend so it
+    # never surfaced there.
+    icon = pystray.Icon("hearth", img, "Hearth - local AI", menu)
     # Auto-open the window if --open OR running as a bundled exe (so users
     # who double-click Hearth.exe get a window, not just a tray icon).
     if args.open or getattr(sys, "frozen", False):
