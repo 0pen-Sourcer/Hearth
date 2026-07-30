@@ -1883,56 +1883,73 @@ class HearthHandler(BaseHTTPRequestHandler):
                                   "speed": "", "downloaded": "", "step": "resolving…"}
                 try:
                     import subprocess as _sp, re as _re, os as _os
+                    import tempfile as _tf, shutil as _sh
                     env = dict(_os.environ, PYTHONUNBUFFERED="1")
-                    # onnxruntime, -gpu and -directml all ship the SAME
-                    # `onnxruntime` module and collide — with the CPU one already
-                    # present pip stalls / "could not install" the GPU variant.
-                    # Remove every variant first so the GPU TTS install succeeds.
-                    if any("onnxruntime" in p for p in _pkgs):
-                        _VOICE_INSTALL["step"] = "clearing old onnxruntime…"
-                        _sp.run([sys.executable, "-m", "pip", "uninstall", "-y",
-                                 "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml"],
-                                capture_output=True, text=True,
-                                creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
-                    proc = _sp.Popen(
-                        [sys.executable, "-m", "pip", "install", "--progress-bar", "on", *_pkgs],
-                        stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, bufsize=1, env=env,
-                        creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
-                    # pip's rich progress updates a line in place via \r, e.g.
-                    #   "Downloading nvidia_cublas... (363 MB)"
-                    #   "  ----  231.4/363.3 MB 12.1 MB/s eta 0:00:11"
                     prog = _re.compile(r"([\d.]+)/([\d.]+)\s*(kB|MB|GB)")
                     spd = _re.compile(r"([\d.]+\s*[kKMG]?B/s)")
                     dl = _re.compile(r"Downloading\s+([\w.\-]+)")
                     tail = []
-                    buf = ""
-                    while True:
-                        ch = proc.stdout.read(1)
-                        if not ch:
-                            break
-                        if ch in ("\r", "\n"):
-                            line = buf.strip(); buf = ""
-                            if not line:
-                                continue
-                            tail.append(line); tail[:] = tail[-12:]
-                            d = dl.search(line)
-                            if d:
-                                _VOICE_INSTALL["step"] = "downloading " + d.group(1).split("-")[0]
-                                _VOICE_INSTALL["pct"] = None
-                            m = prog.search(line)
-                            if m:
-                                cur, tot = float(m.group(1)), float(m.group(2))
-                                if tot > 0:
-                                    _VOICE_INSTALL["pct"] = round(cur / tot * 100)
-                                    _VOICE_INSTALL["downloaded"] = f"{cur:.0f}/{tot:.0f} {m.group(3)}"
-                            sm = spd.search(line)
-                            if sm:
-                                _VOICE_INSTALL["speed"] = sm.group(1).replace(" ", "")
-                            if "Installing collected" in line:
-                                _VOICE_INSTALL.update(step="installing…", pct=None, speed="")
-                        else:
-                            buf += ch
-                    ok = proc.wait() == 0
+
+                    def _stream_pip(args):
+                        """Run pip, stream its progress into _VOICE_INSTALL, return rc."""
+                        proc = _sp.Popen(
+                            [sys.executable, "-m", "pip", *args],
+                            stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, bufsize=1,
+                            env=env, creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+                        buf = ""
+                        while True:
+                            ch = proc.stdout.read(1)
+                            if not ch:
+                                break
+                            if ch in ("\r", "\n"):
+                                line = buf.strip(); buf = ""
+                                if not line:
+                                    continue
+                                tail.append(line); tail[:] = tail[-12:]
+                                d = dl.search(line)
+                                if d:
+                                    _VOICE_INSTALL["step"] = "downloading " + d.group(1).split("-")[0]
+                                    _VOICE_INSTALL["pct"] = None
+                                m = prog.search(line)
+                                if m:
+                                    cur, tot = float(m.group(1)), float(m.group(2))
+                                    if tot > 0:
+                                        _VOICE_INSTALL["pct"] = round(cur / tot * 100)
+                                        _VOICE_INSTALL["downloaded"] = f"{cur:.0f}/{tot:.0f} {m.group(3)}"
+                                sm = spd.search(line)
+                                if sm:
+                                    _VOICE_INSTALL["speed"] = sm.group(1).replace(" ", "")
+                            else:
+                                buf += ch
+                        return proc.wait()
+
+                    # onnxruntime, -gpu and -directml ship the SAME `onnxruntime`
+                    # module and collide, so switching devices means removing the
+                    # old one. The naive "uninstall then install" left the user
+                    # with NO runtime if they closed the app mid-download. So:
+                    # DOWNLOAD first (the long part, non-destructive — the working
+                    # runtime stays put), and only swap once the wheels are fully
+                    # local, shrinking the broken window from minutes to seconds.
+                    if any("onnxruntime" in p for p in _pkgs):
+                        _tmp = _tf.mkdtemp(prefix="hearth_ort_")
+                        try:
+                            rc = _stream_pip(["download", "--progress-bar", "on",
+                                              "--dest", _tmp, *_pkgs])
+                            if rc != 0:
+                                raise RuntimeError("download failed (runtime untouched)")
+                            _VOICE_INSTALL.update(step="swapping runtime…", pct=None, speed="")
+                            _sp.run([sys.executable, "-m", "pip", "uninstall", "-y",
+                                     "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml"],
+                                    capture_output=True, text=True,
+                                    creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+                            rc = _stream_pip(["install", "--no-index",
+                                              "--find-links", _tmp, *_pkgs])
+                            ok = rc == 0
+                        finally:
+                            _sh.rmtree(_tmp, ignore_errors=True)
+                    else:
+                        ok = _stream_pip(["install", "--progress-bar", "on", *_pkgs]) == 0
+
                     _VOICE_INSTALL = {
                         "running": False, "done": True, "ok": ok, "device": _dev,
                         "msg": ("Installed — toggle voice off/on to use the GPU."

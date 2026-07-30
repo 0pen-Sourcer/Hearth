@@ -8664,6 +8664,13 @@ async function refreshSettings() {
       sel.onchange = async () => {
         const opt = sel.options[sel.selectedIndex];
         if (opt.dataset.ni === '1') {
+          // Confirm before a ~500MB download + runtime swap. DirectML is for
+          // AMD/Intel GPUs; on Nvidia it's strictly worse than CUDA and it
+          // replaces the CUDA runtime, so warn before someone trades down.
+          const isDml = opt.value === 'dml';
+          const msg = (isDml ? 'DirectML is for AMD / Intel GPUs. On an Nvidia card, GPU (CUDA) is faster and DirectML replaces it.\n\n' : '')
+            + 'This downloads a one-time GPU runtime (about 500MB). The download is safe to interrupt, but keep Hearth open during the final "swapping runtime" step.\n\nContinue?';
+          if (!confirm(msg)) { sel.value = prev; return; }
           sel.value = prev; sel.disabled = true;           // hold until installed
           inst.hidden = false; inst.className = 'gpu-installer';
           gmsg.textContent = 'downloading GPU runtime… (~500MB, one-time)';
