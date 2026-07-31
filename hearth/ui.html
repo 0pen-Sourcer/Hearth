@@ -6571,6 +6571,19 @@ async function send(forced = null, displayAs = null, opts = {}) {
     refreshState();
     // Flush any TTS leftover (only if voice mode is on - chat auto-TTS removed)
     if (voiceModeOn) maybeFlushTTS(true);
+    // Return the voice HUD to "listening" once the turn is done. The finally
+    // reset the CHAT state but not the voice status, so a turn that produced no
+    // speech left the HUD stuck on "thinking" forever. Checked shortly after so
+    // any TTS has a chance to start; if it did, _lastLevelAt is recent and the
+    // grid loop's level-timeout owns the revert instead.
+    if (voiceModeOn) {
+      setTimeout(() => {
+        if (voiceModeOn && !STATE.streaming
+            && (!_lastLevelAt || performance.now() - _lastLevelAt > 800)) {
+          setVoiceStatus('listening');
+        }
+      }, 900);
+    }
     // A notification flush that produced no text (the queue was already drained
     // by a real turn, or the model said nothing) leaves an empty assistant
     // placeholder — drop it so no blank bubble lingers.
@@ -9952,10 +9965,15 @@ function _voiceGridFrame(t) {
   // speaking / listening / idle → amplitude-driven radial bloom.
   let target = 0;
   if (_voiceState === 'speaking') {
-    // STRICTLY the agent's real TTS amplitude. The old fallback held a constant
-    // 0.24 bloom whenever level events stopped arriving, so the grid kept
-    // "talking" through silence — motion the voice wasn't driving. If there's
-    // no live amplitude, collapse to rest and let the silence show.
+    // TTS streams amplitude level events. When they stop for ~700ms the reply
+    // has finished playing (TTS is server-side, so this is how the client
+    // learns it ended), so drop back to listening instead of showing "speaking"
+    // forever. voiceModeOn guards against reverting a per-message Speak button.
+    if (voiceModeOn && _lastLevelAt && (t - _lastLevelAt > 700) && !STATE.streaming) {
+      setVoiceStatus('listening');
+    }
+    // STRICTLY the agent's real TTS amplitude. No live amplitude, collapse to
+    // rest and let the silence show, rather than a constant fake bloom.
     target = (t - _lastLevelAt < 220) ? _ttsLevel : 0;
   } else if (_voiceState === 'listening' && recorder.recording) {
     // Only YOUR mic drives it while listening. Idle listening gets no animation
@@ -10478,10 +10496,16 @@ function handleRealtimeEvent(ev) {
     setVoiceTranscript(_utterBuf);
     setVoiceStatus('listening…');
     if (_utterTimer) clearTimeout(_utterTimer);
+    const _fireStart = performance.now();
     const fire = () => {
-      // A reply is still streaming — wait rather than stacking a second send()
-      // on top of it (stacked sends were part of what jammed the loop).
-      if (STATE.streaming) { _utterTimer = setTimeout(fire, 300); return; }
+      // A reply is still streaming — wait rather than stacking a second send().
+      // But cap the wait: if streaming never clears (a wedged/errored stream),
+      // the old code retried forever and the utterance was stuck in "listening…"
+      // until the app was relaunched. After 8s, give up waiting and send anyway.
+      if (STATE.streaming && (performance.now() - _fireStart) < 8000) {
+        _utterTimer = setTimeout(fire, 300); return;
+      }
+      STATE.streaming = false;   // unwedge, so this and future turns aren't blocked
       _utterTimer = null;
       const msg = _utterBuf.trim(); _utterBuf = '';
       if (!msg || _voiceMuted || !voiceModeOn) return;
