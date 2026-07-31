@@ -3283,6 +3283,16 @@ class HearthHandler(BaseHTTPRequestHandler):
                 pass
 
         def _on_barge() -> None:
+            # Cut TTS HERE, server-side, the instant the VAD fires. Previously
+            # this only queued an event and waited for the client to POST
+            # /api/voice/stop back — a full round-trip before any audio stopped,
+            # which is why barge-in felt dead. Stopping locally makes it
+            # immediate; the queued event is just for the HUD.
+            try:
+                if _voice:
+                    _voice.stop()
+            except Exception:
+                pass
             try:
                 _rt_event_queue.put({"type": "barge"})
             except Exception:

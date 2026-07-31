@@ -44,10 +44,14 @@ _caption_cb: Optional[Callable[[str], None]] = None
 # starts speaking (silero VAD start). Lets the GUI kill TTS + abort the
 # LLM stream so a phone-call-like interrupt works.
 _barge_cb: Optional[Callable[[], None]] = None
-# Echo guard: HEARTH_BARGE_GUARD_MS>0 requires speech to sustain that long
-# before it counts as a barge (cancels echo blips). Default 0 = instant barge.
-_barge_guard_ms: int = int(os.environ.get("HEARTH_BARGE_GUARD_MS", "0") or "0")
+# Echo guard: speech must sustain this long before it counts as a barge, so a
+# blip of Jarvis's own voice bleeding through the speakers (VAD start then a
+# quick VAD stop cancels the timer) doesn't self-interrupt. Needed now that a
+# barge stops TTS directly server-side. 250ms rejects echo while staying
+# responsive; 0 disables it (fine on an echo-cancelled headset).
+_barge_guard_ms: int = int(os.environ.get("HEARTH_BARGE_GUARD_MS", "250") or "250")
 _barge_timer: Optional[threading.Timer] = None
+_barge_grace_until: float = 0.0  # capture user speech (skip echo-tail) until this time
 
 
 def is_available() -> bool:
@@ -122,6 +126,12 @@ def _build_recorder():
                 pass
 
     def _fire_barge() -> None:
+        # Open a grace window: the echo-tail guard below normally drops speech
+        # for 1.2s after TTS stops, but a barge IS the user actively talking, so
+        # bypass that window and capture the interrupting words instead of
+        # making them repeat.
+        global _barge_grace_until
+        _barge_grace_until = time.time() + 2.5
         cb = _barge_cb
         if cb is not None:
             try: cb()
@@ -309,7 +319,9 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
             # Drop anything captured while speaking or in the ~1.2s tail after, AND
             # flush the recorder buffer so buffered echo doesn't carry into the
             # next turn (clear_audio_queue is the RealtimeSTT reset for exactly this).
-            if _tts.is_speaking() or _tts.seconds_since_spoke() < 1.2:
+            if (_tts.is_speaking()
+                    or (_tts.seconds_since_spoke() < 1.2
+                        and time.time() >= _barge_grace_until)):
                 try: rec.clear_audio_queue()
                 except Exception: pass
                 continue
