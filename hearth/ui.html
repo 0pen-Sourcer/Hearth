@@ -2700,6 +2700,13 @@
     background: var(--accent);
     box-shadow: 0 0 6px var(--accent-line);
   }
+  /* Barge-in flash: a brief red pulse of the whole grid when the user
+     interrupts. Uses the app's existing --err red + a quick scale. */
+  .voice-grid.interrupted .d { background: rgba(248,113,113,0.18); }
+  .voice-grid.interrupted .d.on  { background: var(--err); box-shadow: 0 0 9px rgba(248,113,113,0.6); }
+  .voice-grid.interrupted .d.hot { background: #fca5a5; box-shadow: 0 0 13px var(--err); }
+  .voice-grid.interrupted { animation: grid-interrupt 0.5s var(--ease); }
+  @keyframes grid-interrupt { 0% { transform: scale(1); } 30% { transform: scale(1.04); } 100% { transform: scale(1); } }
   .voice-grid .d.hot {
     background: var(--accent-2);
     transform: scale(1.3);
@@ -9678,7 +9685,10 @@ async function startBargeIn(callback) {
       const rms = Math.sqrt(sum / input.length);
       if (rms > MIC_BARGE_THRESHOLD) {
         highStreak++;
-        if (highStreak >= 3) {
+        // 2 frames (~0.26s) instead of 3 (~0.38s): cut TTS sooner when you
+        // start talking. Echo cancellation on the barge stream keeps Hearth's
+        // own voice from self-triggering, so a shorter streak is safe.
+        if (highStreak >= 2) {
           highStreak = 0;
           bargeActive = false;
           if (onBargeIn) onBargeIn();
@@ -10004,7 +10014,16 @@ async function enterVoiceMode() {
   // often Stereo Mix or the wrong device, and someone whose mic isn't captured
   // has no way to know the fix lives in Settings. A dismissable pop-in, with a
   // "don't show again" so it never nags twice.
-  if (!localStorage.getItem('hearth_mic_hint_seen')) {
+  // Persist "seen" in settings.json, NOT localStorage — the desktop webview
+  // doesn't keep localStorage across restarts, so the tip kept reappearing
+  // every launch no matter how many times you ticked "don't show again".
+  if (!(STATE.settings && STATE.settings.voice_mic_hint_dismissed)) {
+    const _dismiss = () => {
+      if (document.getElementById('mic-hint-hide')?.checked) {
+        STATE.settings.voice_mic_hint_dismissed = true;
+        saveSetting('voice_mic_hint_dismissed', true);
+      }
+    };
     showModal('Quick voice tip',
       '<div style="line-height:1.55">If Hearth never picks up your voice, it is almost always the '
       + '<b>mic device</b>. The system default is often not the mic you are actually using.'
@@ -10013,12 +10032,10 @@ async function enterVoiceMode() {
       + '<input type="checkbox" id="mic-hint-hide" style="width:15px;height:15px"> Don\'t show this again</label></div>',
       [
         { label: 'Open Voice settings', kind: 'primary', onclick: () => {
-            if (document.getElementById('mic-hint-hide')?.checked) localStorage.setItem('hearth_mic_hint_seen', '1');
+            _dismiss();
             try { showView('settings'); document.querySelector('button.settings-side-btn[data-st="voice"]')?.click(); } catch {}
           } },
-        { label: 'Got it', onclick: () => {
-            if (document.getElementById('mic-hint-hide')?.checked) localStorage.setItem('hearth_mic_hint_seen', '1');
-          } },
+        { label: 'Got it', onclick: _dismiss },
       ]);
   }
   // Ensure a real conversation exists BEFORE the user starts talking, so the
@@ -10154,6 +10171,16 @@ function setVoiceStatus(s) {
   _voiceState = st;
   const vm = $('voice-mode'); if (vm) vm.dataset.vstate = st;
 }
+// Barge-in feedback: flash the grid amber for a beat instead of a caption.
+let _interruptTimer = null;
+function flashGridInterrupt() {
+  const g = document.getElementById('voice-grid');
+  if (!g) return;
+  g.classList.add('interrupted');
+  if (_interruptTimer) clearTimeout(_interruptTimer);
+  _interruptTimer = setTimeout(() => g.classList.remove('interrupted'), 550);
+}
+
 function setVoiceTranscript(s) {
   // Models that emit tool calls as literal <tool_call>{...}</tool_call> text
   // (Gemma, some Qwen builds) were dumping that raw markup into the voice
@@ -10204,7 +10231,9 @@ async function voiceCycle() {
       ttsBuffer = '';
       stopTTS().catch(() => {});
       if (typeof stopGen === 'function') stopGen();  // aborts /chat stream
-      setVoiceStatus('listening (you interrupted)');
+      STATE.streaming = false;   // so the interrupting utterance sends now, not after a wait
+      flashGridInterrupt();
+      setVoiceStatus('listening');
     });
     await send(text);
     stopBargeIn();
@@ -10435,7 +10464,9 @@ function handleRealtimeEvent(ev) {
     ttsBuffer = '';
     stopTTS().catch(() => {});
     if (typeof stopGen === 'function') stopGen();
-    setVoiceStatus('listening (you interrupted)');
+    STATE.streaming = false;   // let the interrupting utterance dispatch immediately
+    flashGridInterrupt();
+    setVoiceStatus('listening');
   } else if (ev.type === 'final') {
     const text = (ev.text || '').trim();
     if (!text) return;
