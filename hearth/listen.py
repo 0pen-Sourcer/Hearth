@@ -1,4 +1,4 @@
-"""J.A.R.V.I.S. voice input (STT).
+"""Hearth voice input (STT).
 
 Built on faster-whisper — CTranslate2 backend, real-time on CPU, ~150MB
 for the base.en model (auto-downloaded on first use via HuggingFace).

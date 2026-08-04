@@ -1,7 +1,8 @@
-"""J.A.R.V.I.S. voice — local TTS.
+"""Local text-to-speech.
 
 Primary engine:  Kokoro (~82M params, ONNX, sounds genuinely human, real-time
-                 on CPU, zero VRAM impact — won't fight your 10B LLM for the 5060).
+                 on CPU, zero VRAM impact, so it never competes with the LLM for
+                 the GPU).
 Fallback engine: Piper (smaller, faster, a touch more robotic).
 
 Both are 100% local, free, and offline.

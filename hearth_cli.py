@@ -1,4 +1,4 @@
-"""J.A.R.V.I.S. - local-only personal AI CLI.
+"""Hearth - local-only personal AI CLI.
 
 Runs against any OpenAI-compatible local server (LM Studio, Ollama with the
 OpenAI compat layer, llama.cpp, vLLM, etc.). No paid APIs. No cloud.

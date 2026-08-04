@@ -1652,8 +1652,8 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     # Auto-pick CPU thread counts when caller didn't specify. LM Studio uses
     # all logical cores by default for batch + worker counts; previously we
     # only passed --n_threads when explicitly set, leaving llama.cpp to fall
-    # back to a conservative min(4, hw_concurrency). On the user's 16-thread
-    # Ryzen, that's a 4x prefill slowdown vs LM Studio. Audit finding.
+    # back to a conservative min(4, hw_concurrency). On a many-core CPU that is
+    # a large prefill slowdown versus a server that uses every core.
     effective_threads = n_threads if (n_threads is not None and n_threads > 0) else (os.cpu_count() or 4)
     # In a PyInstaller build sys.executable is Hearth.exe (entrypoint = tray),
     # NOT a python interpreter — so `-m llama_cpp.server` gets handed to the

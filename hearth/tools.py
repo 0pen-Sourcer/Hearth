@@ -1,7 +1,7 @@
-"""J.A.R.V.I.S. tool layer.
+"""Hearth tool layer.
 
 Two trust zones:
-  - Reads can go anywhere on disk (Jarvis must KNOW your machine).
+  - Reads can go anywhere on disk (the assistant must KNOW your machine).
   - Writes / deletes / moves are sandboxed to WORKSPACE (~/Jarvis by default).
 
 Override sandbox: set env JARVIS_WORKSPACE to any folder.

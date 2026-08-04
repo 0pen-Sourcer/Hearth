@@ -1,4 +1,4 @@
-"""J.A.R.V.I.S. Brain — local-only tool layer for a personal AI assistant.
+"""Hearth — local-only tool layer for a personal AI assistant.
 
 Designed for use with LM Studio / Ollama / any OpenAI-compatible local API.
 No paid APIs, no cloud calls (except DuckDuckGo HTML for web search).
