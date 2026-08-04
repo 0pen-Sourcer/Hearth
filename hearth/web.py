@@ -2758,6 +2758,23 @@ class HearthHandler(BaseHTTPRequestHandler):
             "python_exe": sys.executable,
             "mcp_server_path": os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py"),
             "frozen": bool(getattr(sys, "frozen", False)),
+            # Ready-to-paste launcher for "Hearth as MCP server". Computed here
+            # because only the backend knows how it's running:
+            #  - packaged (frozen): sys.executable is Hearth.exe, so route the
+            #    module through the --hearth-run-python sentinel the exe handles.
+            #  - from source / editable: sys.executable is the venv python, so
+            #    hand it the ABSOLUTE mcp_server.py path (mcp_server.py adds its
+            #    own parent to sys.path, so it imports `hearth` from any cwd).
+            #    `python -m hearth.mcp_server` was wrong: it needs the repo as
+            #    cwd, which the launching client does not provide.
+            "mcp_launch": (
+                {"command": sys.executable,
+                 "args": ["--hearth-run-python", "-m", "hearth.mcp_server"]}
+                if getattr(sys, "frozen", False) else
+                {"command": sys.executable,
+                 "args": [os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "mcp_server.py")]}
+            ),
         })
 
     def _send_memory_one(self, name: str) -> None:
@@ -3301,8 +3318,25 @@ class HearthHandler(BaseHTTPRequestHandler):
         try:
             _rt_voice.set_caption_callback(_on_partial)
             _rt_voice.set_barge_callback(_on_barge)
+            def _on_ready() -> None:
+                # The recorder is built by now, so a mic-fallback (picked device
+                # wouldn't open, using the OS default) has already been recorded.
+                # Ship it with 'ready' so the UI can warn instead of the user
+                # staring at a "listening" grid that can't hear their real mic.
+                ev = {"type": "ready"}
+                try:
+                    w = _rt_voice.mic_warning()
+                    if w:
+                        ev["warning"] = w
+                except Exception:
+                    pass
+                _rt_event_queue.put(ev)
+            _rt_voice.set_ready_callback(_on_ready)
             if _voice:
                 _voice.set_level_sink(lambda v: _rt_event_queue.put({"type": "level", "v": v}))
+            # "warming" until the STT model finishes loading; the ready callback
+            # above flips it to listening once the recorder can actually hear.
+            emit({"type": "warming"})
             msg = _rt_voice.start_continuous(_on_final)
             emit({"type": "started", "detail": msg})
             # Raise the desktop HUD too. It self-hides whenever the Hearth GUI is

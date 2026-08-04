@@ -2732,11 +2732,14 @@
     text-align: center;
     line-height: 1.4;
     min-height: 24px;
-    /* Cap the height and keep the LATEST text pinned to the bottom, so a long
-       reply scrolls up within this box instead of overflowing the whole
-       screen and swallowing the buttons. Overflow is clipped, not a scrollbar. */
+    /* Cap the height and keep the latest text at the bottom, so a long reply
+       scrolls up within this box instead of pushing the buttons off-screen. */
     max-height: 40vh;
-    overflow: hidden;
+    /* Scrollable for long replies, but the scrollbar is hidden — the gradient
+       fade is the only cue that there's more above. */
+    overflow-y: auto;
+    scrollbar-width: none;       /* Firefox */
+    -ms-overflow-style: none;    /* legacy Edge */
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -2744,6 +2747,7 @@
     -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 3.5em);
     mask-image: linear-gradient(to bottom, transparent 0, #000 3.5em);
   }
+  .voice-transcript::-webkit-scrollbar { width: 0; height: 0; }
   .voice-controls {
     display: flex; gap: 10px; align-items: center;
   }
@@ -4119,7 +4123,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
     </button>
   </div>
-  <div class="voice-bottom-text">Esc to exit · type any time, your keyboard still works · the desktop HUD is click-through, hold Ctrl to drag it</div>
+  <div class="voice-bottom-text">Esc to exit · type any time · Ctrl-drag the desktop HUD to move it</div>
 </div>
 
 <!-- D3 v7 - vendored for the Memory tab's force-directed constellation
@@ -4368,7 +4372,7 @@ function showPermissionModal(reqId, toolName, argsStr) {
   $('modal-title').textContent = `Allow ${toolName}?`;
   // Use innerHTML to render the args block + a note
   $('modal-body').innerHTML = `
-    <div style="color:var(--fg);margin-bottom:8px">Jarvis wants to run a risky tool:</div>
+    <div style="color:var(--fg);margin-bottom:8px">${esc(_agentName())} wants to run a risky tool:</div>
     <pre style="background:var(--bg-0);padding:10px;border-radius:6px;color:var(--accent-2);font-size:11px;margin:0">${esc(argsStr)}</pre>
     <div style="margin-top:10px;font-size:11px;color:var(--fg-faint)">
       <strong>Always</strong> = allow this tool for the rest of the session.<br>
@@ -4895,6 +4899,14 @@ function setActiveId(id) {
   }
   STATE.activeId = id || null;
   try { localStorage.setItem('hearth.activeId', id || ''); } catch {}
+  // Changing chats drops any half-captured voice utterance and stale caption so
+  // a line spoken in the old chat doesn't carry into the new one.
+  if (typeof _utterBuf !== 'undefined') {
+    if (_utterTimer) { clearTimeout(_utterTimer); _utterTimer = null; }
+    _utterBuf = '';
+    if (typeof setVoiceTranscript === 'function') setVoiceTranscript('');
+    if (voiceModeOn && !STATE.streaming) setVoiceStatus('listening');
+  }
   updateChatHeader();
 }
 
@@ -5935,6 +5947,11 @@ async function refreshState() {
     const s = await api('/api/state');
     // Live endpoint is the source of truth for local-vs-cloud + the brand label.
     STATE.endpoint = s.endpoint || '';
+    // Stash the MCP launcher the backend computed for this build (source vs
+    // packaged), used by the "Hearth as MCP server" snippet.
+    if (s.mcp_launch) STATE.mcp_launch = s.mcp_launch;
+    if (s.python_exe) STATE.python_exe = s.python_exe;
+    if (s.mcp_server_path) STATE.mcp_server_path = s.mcp_server_path;
     const kind = deriveBrainKind();
 
     // Don't clobber the brain while a load/eject/swap is mid-flight — the
@@ -8620,6 +8637,14 @@ async function refreshSettings() {
     // Footer chip shows the agent name, not a hardcoded handle.
     const _sf = document.querySelector('.settings-side-footer .who');
     if (_sf) _sf.textContent = _agentName();
+    // Route every other user-facing "Jarvis" through the configured name so a
+    // rename doesn't leave stray "Jarvis" text that breaks the illusion.
+    const _nm = _agentName();
+    const _permLbl = document.querySelector('#perm-strip .perm-label');
+    if (_permLbl && _permLbl.id !== 'ask-question') _permLbl.textContent = `Allow ${_nm} to run`;
+    const _memSub = document.getElementById('mem-sub');
+    if (_memSub) _memSub.textContent = `facts ${_nm} remembers across sessions`;
+    document.querySelectorAll('[data-agent-name]').forEach(el => { el.textContent = _nm; });
     // Sync the sticker tooltip with the actual brain. "LM Studio model"
     // hardcoded was misleading on cloud - switched users away from
     // clicking the sticker thinking it'd swap their Grok model.
@@ -9291,25 +9316,37 @@ async function refreshSettings() {
     };
     const mcpSnippetBtn = $('btn-mcp-snippet');
     if (mcpSnippetBtn) mcpSnippetBtn.onclick = () => {
-      // Use the real interpreter + full script path the backend reports, so
-      // the config doesn't depend on bare `python` being on PATH or `-m`
-      // resolving the package from an unknown cwd (mcp_server.py adds its own
-      // parent to sys.path, so the absolute-path invocation works anywhere).
-      const py = STATE.python_exe || "python";
-      const srv = STATE.mcp_server_path || "-m hearth.mcp_server";
+      // The backend computes the correct launcher for how Hearth is actually
+      // running (packaged exe + sentinel, or venv python + absolute script
+      // path). Falling back to `python -m hearth.mcp_server` here would fail
+      // from a source checkout, so prefer the backend's mcp_launch.
+      const launch = STATE.mcp_launch
+        || { command: STATE.python_exe || 'python',
+             args: STATE.mcp_server_path ? [STATE.mcp_server_path] : ['-m', 'hearth.mcp_server'] };
+      // Include the env block: an MCP client (Claude Desktop, LM Studio, Cursor)
+      // has no way to show Hearth's approval prompt, so a write or a guarded
+      // command would just come back refused with no button to press. Setting
+      // JARVIS_AUTO_APPROVE lets those go through for that trusted session.
+      // Ship it as "1" so it works out of the box; the note says how to gate it.
       const snippet = JSON.stringify({
-        mcpServers: {
-          hearth: {
-            command: py,
-            args: [srv]
-          }
-        }
+        mcpServers: { hearth: {
+          command: launch.command,
+          args: launch.args,
+          env: { JARVIS_AUTO_APPROVE: '1' },
+        } }
       }, null, 2);
       showModal('Hearth as MCP server',
         `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
         `Paste this into the OTHER tool's mcp.json (LM Studio, Claude Desktop, Cursor, etc.). ` +
         `Hearth's full tool set becomes available there.</div>` +
-        `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:auto;max-height:360px">${esc(snippet)}</pre>`,
+        `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:auto;max-height:360px">${esc(snippet)}</pre>` +
+        `<div style="color:var(--fg-dim);font-size:11px;margin-top:8px;line-height:1.5">` +
+        `The <b>env</b> line matters: an MCP client can't pop Hearth's approval prompt, ` +
+        `so without it any write or guarded command comes back blocked with nothing to click. ` +
+        `<code>JARVIS_AUTO_APPROVE: "1"</code> trusts that session to run them, and to edit ` +
+        `files outside the default workspace. Set it to <code>"0"</code> to keep writes and ` +
+        `destructive commands blocked. To allow edits in specific folders only (without full ` +
+        `trust), add <code>"JARVIS_EXTRA_WORKSPACES": "E:\\\\Projects;D:\\\\Work"</code> to env instead.</div>`,
         [{ label: 'Close', primary: true }]);
     };
     // Live bridge status - pulled when the MCP pane is opened. Polled
@@ -9901,6 +9938,8 @@ const _UTTER_GAP = 900;
 //   thinking  → radar-ping rings expanding out (shows work, not a frozen dot)
 //   idle      → calm center
 let _voiceState = 'idle';
+let _voiceReady = false;  // STT model loaded + recorder actually listening
+let _bargeAwaitingUtterance = false;  // next final is the interrupting command
 
 function _voiceGridWorking(s, cx, cy, maxDist) {
   // Rotating sweep with a fading trail. Deliberately unlike the expanding rings
@@ -9949,6 +9988,13 @@ function _voiceGridFrame(t) {
   const s = t / 1000;
   const cx = (VOICE_GRID_COLS - 1) / 2, cy = (VOICE_GRID_ROWS - 1) / 2;
   const maxDist = Math.hypot(cx, cy);
+
+  if (_voiceState === 'warming') {
+    // STT model still loading: keep the grid dark so it doesn't look ready.
+    voiceDots.forEach(d => d.classList.remove('on', 'hot'));
+    voiceGridAnim = requestAnimationFrame(_voiceGridFrame);
+    return;
+  }
 
   if (_voiceState === 'working') {
     _voiceGridWorking(s, cx, cy, maxDist);
@@ -10183,8 +10229,9 @@ function setVoiceStatus(s) {
   const low = (s || '').toLowerCase();
   let st = 'idle';
   if (low.includes('speak')) st = 'speaking';
+  else if (/warming|starting/.test(low)) st = 'warming';   // grid stays dark until ready
   else if (/running|calling|reading|writing|searching/.test(low)) st = 'working';
-  else if (/think|transcrib|warming|starting/.test(low)) st = 'thinking';
+  else if (/think|transcrib/.test(low)) st = 'thinking';
   else if (/listen|your turn/.test(low)) st = 'listening';
   _voiceState = st;
   const vm = $('voice-mode'); if (vm) vm.dataset.vstate = st;
@@ -10206,12 +10253,15 @@ function setVoiceTranscript(s) {
   // streamed one, so the caption shows only what's actually spoken.
   let t = String(s || '')
     .replace(/<\|?tool_call\|?>[\s\S]*?<\/?\|?tool_call\|?>/gi, ' ')
+    .replace(/<\s*\/?\s*\|?\s*tool[_ ]?call\s*\|?\s*\/?\s*>/gi, ' ')  // lone/leaked tag
+    .replace(/<\|[^|>]*\|>/g, ' ')                // <|channel|> style markers
     .replace(/<\|?tool_call\|?>[\s\S]*$/i, ' ')   // trailing, still streaming
     // Strip markdown so the spoken caption doesn't show raw **, ***, `, #, etc.
     .replace(/```[\s\S]*?```/g, ' ')              // code fences
     .replace(/`([^`]+)`/g, '$1')                  // inline code
     .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')      // **bold** / *italic* / ***
-    .replace(/(^|\s)[*_]{1,3}(\s|$)/g, '$1$2')    // stray * *** _ markers
+    .replace(/\*+/g, '')                          // leftover / unclosed asterisks
+    .replace(/(^|\s)[_]{1,3}(\s|$)/g, '$1$2')     // stray _ markers
     .replace(/^#{1,6}\s+/gm, '')                  // # headings
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -10483,15 +10533,39 @@ function handleRealtimeEvent(ev) {
     stopTTS().catch(() => {});
     if (typeof stopGen === 'function') stopGen();
     STATE.streaming = false;   // let the interrupting utterance dispatch immediately
+    // The utterance that caused this barge is a deliberate new command. The
+    // normal gap-timer dispatch was racing the stream abort and dropping it,
+    // so mark the next final to send directly.
+    _bargeAwaitingUtterance = true;
     flashGridInterrupt();
     setVoiceStatus('listening');
   } else if (ev.type === 'final') {
     const text = (ev.text || '').trim();
     if (!text) return;
     if (_voiceMuted) { setVoiceTranscript(''); return; }  // muted — drop the utterance
+    // Barge utterance: dispatch it directly rather than through the gap timer
+    // that the abort race was eating. Short debounce so a quick continuation
+    // ("no, do X instead") still stitches, then send.
+    if (_bargeAwaitingUtterance) {
+      _bargeAwaitingUtterance = false;
+      _utterBuf = _utterBuf ? (_utterBuf + ' ' + text) : text;
+      setVoiceTranscript(_utterBuf);
+      setVoiceStatus('listening…');
+      if (_utterTimer) clearTimeout(_utterTimer);
+      _utterTimer = setTimeout(() => {
+        _utterTimer = null;
+        const msg = _utterBuf.trim(); _utterBuf = '';
+        if (!msg || _voiceMuted || !voiceModeOn) return;
+        if (maybeAnswerPermByVoice(msg)) { setVoiceTranscript(''); return; }
+        STATE.streaming = false;
+        setVoiceStatus('thinking…');
+        send(msg);
+      }, 500);
+      return;
+    }
     // Stitch fragments: append, show the running transcript, and (re)arm a gap
-    // timer. Only when you've paused for _UTTER_GAP with nothing new do we
-    // actually send — so "…math exam. On July 1. In six days." is ONE message.
+    // timer. Only after a pause of _UTTER_GAP with nothing new is the buffer
+    // sent, so several short recognitions become one message.
     _utterBuf = _utterBuf ? (_utterBuf + ' ' + text) : text;
     setVoiceTranscript(_utterBuf);
     setVoiceStatus('listening…');
@@ -10518,8 +10592,20 @@ function handleRealtimeEvent(ev) {
       send(msg);
     };
     _utterTimer = setTimeout(fire, _UTTER_GAP);
-  } else if (ev.type === 'started') {
+  } else if (ev.type === 'warming') {
+    // STT model still loading — don't imply it can hear yet.
+    _voiceReady = false;
+    setVoiceStatus('warming up the mic…');
+  } else if (ev.type === 'ready') {
+    _voiceReady = true;
     setVoiceStatus('listening');
+    // The chosen mic wouldn't open (common on Bluetooth) and Hearth fell back to
+    // the system default — say so, otherwise the grid reads "listening" while
+    // the mic they picked is dead.
+    if (ev.warning) toast('Mic fell back to default', ev.warning, 'warn', 8000);
+  } else if (ev.type === 'started') {
+    // Only claim "listening" once the model is actually loaded (ready fired).
+    if (_voiceReady) setVoiceStatus('listening');
   } else if (ev.type === 'stopped') {
     rtVoiceActive = false;
   } else if (ev.type === 'error') {
@@ -11054,7 +11140,16 @@ function modelsUpdateVramEstimate(cfgEl) {
   const footprint = sizeGb + kv;
   // fraction of the model on GPU: Auto(-1) estimates a VRAM-fit; explicit N uses N/layers.
   let frac;
-  const freeGb = STATE.gpuFreeGb;
+  // Hearth loads ONE model at a time, so booting a model first ejects whatever
+  // is running. Estimating against CURRENT free VRAM therefore cried "won't
+  // fit" for every model whenever one was already loaded (its own VRAM made the
+  // free number tiny). When a local model is loaded, estimate against
+  // free-after-eject (total minus a system reserve) instead.
+  let freeGb = STATE.gpuFreeGb;
+  if (STATE.gpuTotalGb && STATE.loadedModel && STATE.loadedModel.id
+      && STATE.brain.kind !== 'cloud') {
+    freeGb = Math.max(freeGb, STATE.gpuTotalGb - 1.2);
+  }
   if (nglRaw === 0) frac = 0;
   else if (nglRaw === -1) {
     frac = (freeGb != null) ? Math.min(1, Math.max(0, (freeGb - 2.3) / footprint)) : 1;
@@ -11469,7 +11564,15 @@ function modelsRenderMine() {
         <div class="model-expand" data-expand="${filenameId}">
           <div class="ex-head">Load configuration</div>
           <div class="ex-desc">Tune llama.cpp before booting. Saved per-model so you only set this once. "Use this" on the row always boots with these values.</div>
-          ${modelsLoadConfigHTML({ maxCtx: ctxMax, defaultCtx: Math.min((STATE.settings && STATE.settings.server_default_ctx) || 32768, ctxMax), layers: m.layers, sizeGb: m.size_gb })}
+          ${modelsLoadConfigHTML({ maxCtx: ctxMax, defaultCtx: (() => {
+              // Prefer this model's SAVED per-model ctx (what a sticker-load
+              // actually boots with) over the global default, so the panel and
+              // the running server agree instead of showing 24K while the model
+              // is really at its saved 18K.
+              const _sc = (_modelsState && _modelsState.status && _modelsState.status.model_configs
+                && _modelsState.status.model_configs[(m.path || '').toLowerCase()]) || {};
+              return Math.min(_sc.ctx || (STATE.settings && STATE.settings.server_default_ctx) || 32768, ctxMax);
+            })(), layers: m.layers, sizeGb: m.size_gb })}
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${filenameId}">Cancel</button>
             ${/^hearth$/i.test(m.source || '') && !loaded
