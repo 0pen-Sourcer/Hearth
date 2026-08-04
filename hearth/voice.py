@@ -62,6 +62,30 @@ _speaking_count = 0
 _last_spoke_at = 0.0
 _speaking_state_lock = threading.Lock()
 
+# Rolling log of what Jarvis recently said, so realtime voice can tell a real
+# barge (new words) from the mic picking up Jarvis's own voice off the speakers
+# (words that match what was just spoken). (timestamp, lowercased text) pairs.
+_spoken_log: "list[tuple[float, str]]" = []
+_spoken_log_lock = threading.Lock()
+
+
+def note_spoken(text: str) -> None:
+    """Record a line Jarvis is about to speak, for echo discrimination."""
+    if not text:
+        return
+    with _spoken_log_lock:
+        _spoken_log.append((time.time(), text.lower()))
+        if len(_spoken_log) > 40:
+            del _spoken_log[:-40]
+
+
+def recently_spoke_text(within_s: float = 6.0) -> str:
+    """Text Jarvis spoke in the last `within_s` seconds, joined + lowercased.
+    Empty if nothing recent."""
+    cutoff = time.time() - within_s
+    with _spoken_log_lock:
+        return " ".join(t for (ts, t) in _spoken_log if ts >= cutoff)
+
 
 def is_speaking() -> bool:
     """True while a speak() call is producing audio. listen.py gates STT on
@@ -484,6 +508,13 @@ def _clean_for_tts(text: str) -> str:
     # user hears things like 'query: ... limit: 6' read out mid-sentence.
     s = _re.sub(r"<tool_call>[\s\S]*?</tool_call>", " ", s, flags=_re.I)
     s = _re.sub(r"<\|?tool_call\|?>[\s\S]*?(<\|?/?tool_call\|?>|$)", " ", s, flags=_re.I)
+    # A lone tag can survive the pair-strip above when the opening was in a
+    # structured field and only the close leaked into the text. Kokoro reads the
+    # leftover "</tool_call>" aloud as "slash tool call", so drop any bare
+    # tool-call tag and pipe-delimited channel markers (<|channel|>, etc.).
+    s = _re.sub(r"<\s*/?\s*\|?\s*tool[_ ]?call\s*\|?\s*/?\s*>", " ", s, flags=_re.I)
+    s = _re.sub(r"<\|[^|>]*\|>", " ", s)
+    s = _re.sub(r"<｜[^｜>]*｜>", " ", s)
     # A flat JSON object with a quoted key, i.e. the shape of tool arguments.
     # Kept deliberately narrow so ordinary prose with braces survives.
     s = _re.sub(r'\{\s*"[^"{}]+"\s*:[^{}]*\}', " ", s)
@@ -734,6 +765,7 @@ def speak(text: str, blocking: bool = False,
     if _load_engine(allow_download=True) is None:
         return "no_voice"
     speed = speed if speed is not None else DEFAULT_SPEED
+    note_spoken(text)
 
     if not _TTS_GAPLESS:
         return _speak_legacy(text, blocking, voice, speed)
