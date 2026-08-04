@@ -61,3 +61,4 @@ site/
 
 # Personal working notes and local-only paths are kept in .git/info/exclude,
 # not here, so this file stays free of private filenames.
+promo_shots/

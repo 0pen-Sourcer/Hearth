@@ -3316,6 +3316,13 @@ class JarvisCLI:
         # finished onboarding in the desktop app, don't make them sit
         # through the CLI wizard on first CLI launch - that was the
         # "double onboarding" pain.
+        # Gate on the explicit `onboarded` flag ONLY, set at the END of a
+        # successful run. The old fallback counted MEMORY.md entries, but
+        # learn_environment writes ~3 entries near the START of onboarding, so a
+        # run that CRASHED after that (e.g. the Linux tray crash on a fresh VM)
+        # left MEMORY.md non-empty with no flag set, and every later launch of
+        # BOTH the CLI and GUI then skipped onboarding entirely. Flag not set =
+        # onboarding never completed = run it.
         try:
             from hearth.tools import WORKSPACE
             settings_path = os.path.join(WORKSPACE, "settings.json")
@@ -3325,16 +3332,7 @@ class JarvisCLI:
                         return False
         except Exception:
             pass
-        from hearth.tools import MEMORY_DIR
-        idx = os.path.join(MEMORY_DIR, "MEMORY.md")
-        if not os.path.exists(idx):
-            return True
-        try:
-            with open(idx, "r", encoding="utf-8") as f:
-                entries = [ln for ln in f if ln.strip().startswith("-")]
-            return len(entries) < 2
-        except OSError:
-            return False
+        return True
 
     def _persist_onboarding(self, answers: Dict[str, str]) -> None:
         """Write wizard answers to memory + rules.md additively."""
