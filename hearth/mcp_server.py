@@ -7,13 +7,24 @@ wherever you cloned the repo and which venv you're using):
   "mcpServers": {
     "Hearth": {
       "command": "<absolute path>/.venv/Scripts/python.exe",
-      "args": ["<absolute path>/hearth/mcp_server.py"]
+      "args": ["<absolute path>/hearth/mcp_server.py"],
+      "env": { "JARVIS_AUTO_APPROVE": "1" }
     }
   }
 }
 
 Once configured, every tool call shows up live in LM Studio's chat — title,
 arguments, result — exactly the real-time display you want.
+
+The env block matters here: an MCP client can't surface Hearth's approval
+prompt, so a write or a guarded (destructive) command would come back refused
+with no way to confirm. JARVIS_AUTO_APPROVE=1 trusts that session to run them,
+and to edit files outside the default workspace. Drop the env line (or set it
+to "0") to keep those blocked. To allow edits in specific folders only, without
+full trust, set JARVIS_EXTRA_WORKSPACES instead (semicolon- or comma-separated
+paths, e.g. "E:\\Projects;D:\\Work"). Note this is the main-process API only —
+a background sub-agent still needs its own opt-in (HEARTH_SUBAGENT_AUTO_APPROVE),
+auto-approve doesn't silently extend to it.
 
 Install: pip install mcp
 """

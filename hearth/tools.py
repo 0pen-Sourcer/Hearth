@@ -323,24 +323,45 @@ def _resolve_write(p: str) -> str:
         if _inside(extra):
             return p
 
-    # Outside any approved root. Ask the host if a prompt is available.
+    def _grant(path: str) -> str:
+        parent = path if os.path.isdir(path) else os.path.dirname(path) or path
+        if parent and parent not in EXTRA_WORKSPACES:
+            EXTRA_WORKSPACES.append(parent)
+        return path
+
+    # Outside any approved root. Ask the host if a prompt is available (CLI/GUI).
     if _extend_workspace_callback is not None:
         try:
             granted = bool(_extend_workspace_callback(p))
         except Exception:
             granted = False
         if granted:
-            parent = p if os.path.isdir(p) else os.path.dirname(p) or p
-            if parent and parent not in EXTRA_WORKSPACES:
-                EXTRA_WORKSPACES.append(parent)
-            return p
+            return _grant(p)
+    else:
+        # No host prompt (headless / MCP client). If the user gave this session
+        # blanket trust (JARVIS_AUTO_APPROVE=1) — the same opt-in that already
+        # lets run_command touch anything — honor writes too, so an MCP session
+        # isn't stuck able to DELETE via run_command yet blocked from a simple
+        # edit_file. A background sub-agent never rides this; it gets no trust.
+        _auto = os.environ.get("HEARTH_AUTO_APPROVE",
+                               os.environ.get("JARVIS_AUTO_APPROVE", "0")) == "1"
+        _sub = False
+        try:
+            from .subagents import in_subagent as _in_sub
+            _sub = _in_sub()
+        except Exception:
+            _sub = False
+        if _auto and not _sub:
+            return _grant(p)
 
     extras = "\n  ".join(EXTRA_WORKSPACES) if EXTRA_WORKSPACES else "(none)"
     raise PermissionError(
         f"Write blocked — '{p}' escapes workspace ({WORKSPACE}).\n"
         f"Extra allowed paths:\n  {extras}\n"
-        f"To allow this path, run /allow <path> in the CLI or set "
-        f"JARVIS_EXTRA_WORKSPACES."
+        f"To allow it: in the CLI/GUI run /allow <path>. From an MCP client or "
+        f"headless, add the folder to JARVIS_EXTRA_WORKSPACES (semicolon- or "
+        f"comma-separated) in the Hearth server's env, or set "
+        f"JARVIS_AUTO_APPROVE=1 to trust the whole session, then restart Hearth."
     )
 
 
@@ -629,11 +650,20 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "Poll a background subagent for its result. Normally you don't "
             "need this - the completion notification auto-arrives as the "
             "next user message. Use it only when you want to peek before "
-            "the notification surfaces (e.g. after a long pause). Returns "
+            "the notification surfaces (e.g. after a long pause). Pass the "
+            "agent_id that spawn_subagent returned (the 'sub_...' id). This is "
+            "NOT get_job_result - a subagent id is not a job_id. Returns "
             "{ok, status: 'running'|'done', result?: {...}}.",
         "parameters": {
             "type": "object",
-            "properties": {"agent_id": {"type": "string"}},
+            # agent_id is the real key; job_id/id are accepted as aliases so a
+            # model that carries over the get_job_result habit still works
+            # instead of silently querying an empty id.
+            "properties": {
+                "agent_id": {"type": "string",
+                             "description": "The 'sub_...' id from spawn_subagent."},
+                "job_id": {"type": "string", "description": "Alias for agent_id."},
+            },
             "required": ["agent_id"],
         },
     },
@@ -4807,7 +4837,9 @@ def _capture_active_window(p: Dict) -> str:
     else:
         hwnd = win32gui.GetForegroundWindow()
     if not hwnd:
-        return "Error: no foreground window found."
+        return ("Error: no foreground window to capture. Use the full-screen "
+                "'screenshot' tool instead, then view_image it — that works "
+                "regardless of which window is focused.")
     win_title = win32gui.GetWindowText(hwnd) or "(untitled)"
     try:
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
@@ -5783,7 +5815,7 @@ _HANDLERS = {
         mode=(p.get("mode") or "sync"),
         name=p.get("name", "")),
     "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
-    "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id", "")),
+    "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id") or p.get("job_id") or p.get("id") or ""),
     "list_directory": _list_directory,
     "create_directory": _create_directory,
     "delete_path": _delete_path,
@@ -6986,6 +7018,22 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
             return f"Error ({name}): {type(e).__name__}: {e}"
     handler = _HANDLERS.get(name)
     if not handler:
+        # A SKILL name reached here as if it were a tool. The model sees skills
+        # in the catalog (make-diagram, make-pdf, ...) and tries to invoke one
+        # directly; a skill is instructions, not a callable, so it misses, then
+        # loads the skill, then calls the name AGAIN and loops forever. Redirect
+        # to the skill mechanism explicitly so it stops retrying the same name.
+        try:
+            from .skills_loader import list_skills as _ls
+            _skill_names = {s["name"] for s in _ls()}
+        except Exception:
+            _skill_names = set()
+        if name in _skill_names:
+            return (f"'{name}' is a SKILL, not a tool — there is nothing to call "
+                    f"by that name. Call load_skill(\"{name}\") to get its steps, "
+                    f"then FOLLOW them yourself: they tell you to write a small "
+                    f"build script and run it with run_command. Do NOT call "
+                    f"'{name}' as a tool again — it will keep failing.")
         # Weak local models mangle tool names or reach for a tool they can't
         # see, then spiral into run_command python-import hacks. Recover them:
         # fuzzy-suggest the real name + tell them to call it directly / use
@@ -7047,13 +7095,13 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
 # default on — worst case the model uses a niche tool slightly less often, never
 # a hard break. Opt out entirely with HEARTH_ALL_TOOLS=1 (loads every schema).
 _DEFERRED_TOOLS = {
-    # image / video generation (cloud). forge_generate is intentionally NOT
-    # deferred: when a local Forge install is detected it surfaces directly so
-    # weaker local models can do local image gen without the load_tools hop
-    # (they tend to spiral instead of discovering deferred tools). Its
-    # secondary controls stay deferred.
+    # image / video generation. All deferred, including forge_generate: local
+    # Forge image-gen is niche (most turns aren't image gen), and its schema is
+    # one of the heavier ones, so it shouldn't sit in every prompt just because
+    # a Forge install exists. The model reveals it via load_tools('image') when
+    # the user actually asks for a picture.
     "generate_image", "generate_video", "check_video_task", "list_generations",
-    "forge_status", "forge_shutdown",
+    "forge_generate", "forge_status", "forge_shutdown",
     # self-extending
     "create_plugin", "list_plugins", "delete_plugin", "create_skill",
     # soul / persona editing
@@ -7096,6 +7144,16 @@ _DEFERRED_TOOLS = {
     "glob_files",          # find_file already accepts glob patterns + is fuzzier
     "clipboard_read", "clipboard_write",  # niche; rarely needed as a tool call
     "end_session",
+    # Each of these is covered by a busier sibling tool or the GUI, so it
+    # doesn't need a per-turn schema slot in the default prompt. The computer-use
+    # primitives (computer_*/desktop_*/smart_click) are deliberately kept live —
+    # a capable model driving the desktop needs them without a load_tools hop.
+    # Everything here is still callable and rediscoverable via load_tools.
+    "notify",              # a plain reply reaches the user
+    "install_skill",       # skills are added from the GUI / create_skill
+    "manage_window", "list_windows",  # window mgmt is niche; focus_window covers it
+    "cancel_reminder",     # reminders are managed in the GUI; set_reminder stays core
+    "browse_scroll",       # browse + browse_click cover normal page use
 }
 
 # User plugins are deferred by DEFAULT so the core prompt stays bounded no matter
