@@ -46,7 +46,7 @@ DEFAULT_RECENT_TURNS = 8
 EXTRACTION_PROMPT = """You are Hearth's memory extraction pass. Read the recent conversation below and extract DURABLE facts about the USER that would help a future assistant serve them better.
 
 # What counts as a durable fact
-Be GENEROUS here. The goal is "JARVIS feels like he knows me" — that comes
+Be GENEROUS here. The goal is "the assistant feels like it knows me" — that comes
 from remembering casual life details, not just formal preferences. If the
 user mentions it offhand, it's probably worth saving:
 

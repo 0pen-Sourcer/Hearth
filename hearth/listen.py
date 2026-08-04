@@ -11,7 +11,7 @@ Continuous mode:
     listen.stop_continuous()
 
 Continuous mode is interrupt-aware:
-    - While Jarvis is speaking (voice.is_speaking()), the listener watches
+    - While the assistant is speaking (voice.is_speaking()), the listener watches
       mic RMS. If sustained speech is detected → voice.stop() is called to
       mute TTS, then we record/transcribe the new input.
     - Between turns, listener waits for any speech then records.
@@ -96,10 +96,10 @@ _PUNCT_STRIP = re.compile(r"^[^\w]+|[^\w]+$")
 def _strip_wake_word(text: str, wake: str) -> Optional[str]:
     """If `text` STARTS with the wake word (position 0, punctuation-tolerant),
     return the text with the wake-word prefix removed. Otherwise return None
-    (caller should drop the utterance — not addressed to Jarvis).
+    (caller should drop the utterance — not addressed to the assistant).
 
     Position-0 matching only: 'the jarvis system is cool' does NOT match
-    wake='jarvis', because Jarvis is being talked about, not addressed."""
+    wake='jarvis', because the assistant is being talked about, not addressed."""
     raw_tokens = text.split()
     tokens = [_PUNCT_STRIP.sub("", t).lower() for t in raw_tokens]
     wake_tokens = wake.lower().split()
@@ -357,13 +357,13 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
     speech_run = 0
 
     # While TTS is playing, raise the trigger threshold so the mic doesn't
-    # pick up speaker echo and feedback-loop on Jarvis's own voice. Tunable
+    # pick up speaker echo and feedback-loop on the assistant's own voice. Tunable
     # via env var; default 5x makes normal-volume TTS not trigger but a
     # human speaking AT or louder than the speakers still interrupts.
     TTS_MULT = float(os.environ.get("JARVIS_STT_TTS_THRESHOLD_MULT", "5.0"))
     # Post-stop debounce: after we kill TTS, the speakers keep playing for
     # ~200-400ms (audio buffer). Wait that out before recording so we don't
-    # transcribe Jarvis's own tail.
+    # transcribe the assistant's own tail.
     POST_STOP_DEBOUNCE_S = float(os.environ.get("JARVIS_STT_POST_STOP_DEBOUNCE", "0.4"))
     # Hard-mute cooldown AFTER tts ends - the speaker buffer can keep playing
     # for ~0.5-1s and we don't want that to feed back as a phantom utterance.
@@ -385,7 +385,7 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
                     time.sleep(0.05)
                     continue
 
-                # Hard-mute while Jarvis is speaking AND for a brief cooldown
+                # Hard-mute while the assistant is speaking AND for a brief cooldown
                 # after - kills the speaker-to-mic feedback loop deterministically.
                 tts_active = False
                 tts_recent = False

@@ -2867,7 +2867,7 @@
       <!-- First-run welcome card. Click a chip to fire the prompt. Auto-hides
            after the first message; comes back via /welcome. No emojis by
            design - clean labels + hover does the visual work. -->
-      <!-- "Hey, I'm Jarvis" welcome card retired in v0.6 round 6 - the new
+      <!-- welcome card retired in v0.6 round 6 - the new
            onboarding overlay handles the same intro better and the chat view
            is now clean by default. Functions referencing it are kept as no-ops
            for backward compat (showWelcomeCard / hideWelcomeCard). -->
@@ -2882,13 +2882,13 @@
       </div>
       <div class="chat-body" id="chat-body"></div>
 
-      <!-- Inline permission strip - appears above the input when Jarvis wants
+      <!-- Inline permission strip - appears above the input when the assistant wants
            to run a risky tool. Keyboard-driven (1=allow / 2=deny / 3=always /
            4=never), and the input below becomes a free-text "type what to do
            instead" field. No center modal, no mouse required. -->
       <div class="perm-strip" id="perm-strip" hidden>
         <div class="perm-line">
-          <span class="perm-label">Allow Jarvis to run</span>
+          <span class="perm-label">Allow the assistant to run</span>
           <code class="perm-tool" id="perm-tool"></code>
           <span class="perm-args" id="perm-args"></span>
           <span class="perm-close" id="perm-close" title="Cancel">×</span>
@@ -2902,7 +2902,7 @@
         </div>
       </div>
 
-      <!-- Inline ask-user strip - appears above the input when Jarvis fires
+      <!-- Inline ask-user strip - appears above the input when the assistant fires
            an ask_user tool call. Same surface as the permission strip so the
            user always looks in one place when Hearth needs input. Reuses the
            perm-strip CSS for visual continuity. -->
@@ -2962,7 +2962,7 @@
     <section class="view" id="view-memory">
       <div class="view-head">
         <h2>Memory</h2>
-        <span class="sub" id="mem-sub">facts Jarvis remembers across sessions</span>
+        <span class="sub" id="mem-sub">facts the assistant remembers across sessions</span>
         <div class="grow"></div>
         <!-- View-mode toggle: List (flat search) vs Tree (grouped by sub-category).
              Tree view is the v0.6 hero - same data, hierarchical render. -->
@@ -3255,7 +3255,7 @@
           <div style="display:flex; align-items:center; gap:10px; min-width:300px;">
             <select id="setting-voice-name" style="flex:1; min-width:210px;">
               <optgroup label="Male">
-                <option value="am_michael">Michael — American, calm Jarvis baseline</option>
+                <option value="am_michael">Michael — American, calm neutral baseline</option>
                 <option value="bm_george">George — British, deep, formal butler</option>
                 <option value="bm_fable">Fable — British, warmer, conversational</option>
                 <option value="am_fenrir">Fenrir — American, gravelly, low</option>
@@ -3946,7 +3946,7 @@
         <div class="ob-status-row" id="ob-voice-status"><span class="ob-dot"></span><span>checking voice…</span></div>
 
         <!-- Voice picker - revealed only after the user picks "Yes". A small
-             curated set (6 Jarvis-leaning picks out of Kokoro's 54); the full
+             curated set (6 curated picks out of Kokoro's 54); the full
              list stays in Settings → Voice. Speed defaults to 1.5x because
              1.0 sounds like a turtle for daily-driver pace. The Test button
              actually speaks the chosen voice/speed combo so the user hears
@@ -3957,7 +3957,7 @@
               <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Voice</label>
               <select id="ob-voice-name" style="width:100%;">
                 <optgroup label="Male">
-                  <option value="am_michael">Michael — American, calm Jarvis baseline</option>
+                  <option value="am_michael">Michael — American, calm neutral baseline</option>
                   <option value="bm_george">George — British, deep, formal butler</option>
                   <option value="bm_fable">Fable — British, warmer, conversational</option>
                   <option value="am_fenrir">Fenrir — American, gravelly, low</option>
@@ -4405,7 +4405,7 @@ document.addEventListener('keydown', e => {
 // ============================================================
 // INLINE PERMISSION PROMPT - keyboard-driven, sits above the input.
 // 1=Yes(once)  2=No  3=Always  4=Never  or type any text to deny + tell
-// Jarvis what to do instead. Replaces the old center modal entirely.
+// the assistant what to do instead. Replaces the old center modal entirely.
 // ============================================================
 let pendingPermId = null;
 let pendingPermTool = null;
@@ -4468,7 +4468,7 @@ async function sendPermDecision(decision, reason) {
 }
 
 // ----- ask_user inline strip -----
-// Mirrors the permission strip: Jarvis fired an ask_user tool, we show the
+// Mirrors the permission strip: the assistant fired an ask_user tool, we show the
 // question + numbered options above the input. Number keys 1-N pick fast,
 // typing a free-text answer + Enter sends it as Other.
 let pendingAskId = null;
@@ -6795,13 +6795,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
       }
       // First-time hints for high-novelty tools.
       if (ev.name === 'browse') {
-        maybeHint('first_browse', 'Jarvis is driving a real browser',
+        maybeHint('first_browse', _agentName() + ' is driving a real browser',
           'A Chrome window will open and you will watch the violet dot click for you. Hit the red Stop button any time to cancel.');
       } else if (ev.name === 'create_plugin') {
-        maybeHint('first_plugin', 'Jarvis is writing its own tool',
+        maybeHint('first_plugin', _agentName() + ' is writing its own tool',
           'New plugins are saved to ~/Jarvis/plugins and auto-load on every restart. Use /tools later to see what it has built.');
       } else if (ev.name === 'memory_save') {
-        maybeHint('first_memory', 'Jarvis saved a memory',
+        maybeHint('first_memory', _agentName() + ' saved a memory',
           'Per-fact files live in ~/Jarvis/memory. The Memory tab on the left lets you browse, search, and delete.');
       }
       return;
@@ -7105,10 +7105,10 @@ async function handleSlash(raw) {
         '/help                 this list',
         '/welcome              show the first-run welcome card',
         '/clear                wipe THIS chat (keeps system prompt)',
-        '/compact              ask Jarvis to summarize older turns + extract facts to memory',
+        '/compact              ask the assistant to summarize older turns + extract facts to memory',
         '/perms                show which risky tools are currently allowed/denied (persisted to disk)',
         '/perms clear          reset both lists',
-        '/tools                show all tools Jarvis can call',
+        '/tools                show all tools the assistant can call',
         '/voice on|off         TTS auto-speak toggle (chat view)',
         '/think on|off         show model reasoning inline',
         '/allow <path>         extend write access to a folder this session',
@@ -10668,7 +10668,7 @@ const SLASH_COMMANDS = [
   { cmd: '/compact',      desc: 'summarize older turns + extract facts to memory' },
   { cmd: '/perms',        desc: 'show saved tool permissions (persist across restarts)' },
   { cmd: '/perms clear',  desc: 'forget every saved tool decision' },
-  { cmd: '/tools',        desc: 'list every tool Jarvis can call' },
+  { cmd: '/tools',        desc: 'list every tool the assistant can call' },
   { cmd: '/models',       desc: 'list models available on the server' },
   { cmd: '/model',        desc: 'load a model by id - /model <id>' },
   { cmd: '/voice on',     desc: 'enable TTS auto-speak in chat' },

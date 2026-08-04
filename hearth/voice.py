@@ -21,12 +21,12 @@ FALLBACK (Piper):
     Drop any voice .onnx + .json into ~/Jarvis/voices/
     From: https://huggingface.co/rhasspy/piper-voices
 
-Voice picks for Jarvis vibes:
+Voice picks:
   Kokoro: am_adam (US male), am_michael, bm_george (UK male), bf_emma
   Piper:  en_GB-alan-medium, en_US-ryan-high
 
 Module is import-safe even with no deps installed — speak() returns 'no_voice'
-and jarvis.py keeps working silently.
+and the rest of Hearth keeps working silently.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from .tools import WORKSPACE
 VOICES_DIR = os.path.join(WORKSPACE, "voices")
 os.makedirs(VOICES_DIR, exist_ok=True)
 
-# Default voice id for Kokoro — am_michael is calm and Jarvis-leaning.
+# Default voice id for Kokoro — am_michael is calm and neutral.
 DEFAULT_KOKORO_VOICE = os.environ.get("JARVIS_VOICE", "am_michael")
 # 1.0 = Kokoro's natural rate. Voiceover testing kept this at 1.0 (anything
 # higher starts to sound rushed during long answers). Override per session
@@ -55,7 +55,7 @@ _lock = threading.Lock()
 # Set when caller wants the in-flight speech aborted (new turn arrived).
 _abort = threading.Event()
 
-# TTS playback state - so listen.py can mute the mic while Jarvis speaks
+# TTS playback state - so listen.py can mute the mic while the assistant speaks
 # and avoid feedback-looping on its own voice through the speakers. Use a
 # COUNTER (not a bool) so streaming sentence-by-sentence play stays True for
 # the entire speak() call across multiple _play() chunks.
@@ -63,15 +63,15 @@ _speaking_count = 0
 _last_spoke_at = 0.0
 _speaking_state_lock = threading.Lock()
 
-# Rolling log of what Jarvis recently said, so realtime voice can tell a real
-# barge (new words) from the mic picking up Jarvis's own voice off the speakers
+# Rolling log of what the assistant recently said, so realtime voice can tell a real
+# barge (new words) from the mic picking up the assistant's own voice off the speakers
 # (words that match what was just spoken). (timestamp, lowercased text) pairs.
 _spoken_log: "list[tuple[float, str]]" = []
 _spoken_log_lock = threading.Lock()
 
 
 def note_spoken(text: str) -> None:
-    """Record a line Jarvis is about to speak, for echo discrimination."""
+    """Record a line the assistant is about to speak, for echo discrimination."""
     if not text:
         return
     with _spoken_log_lock:
@@ -81,7 +81,7 @@ def note_spoken(text: str) -> None:
 
 
 def recently_spoke_text(within_s: float = 6.0) -> str:
-    """Text Jarvis spoke in the last `within_s` seconds, joined + lowercased.
+    """Text the assistant spoke in the last `within_s` seconds, joined + lowercased.
     Empty if nothing recent."""
     cutoff = time.time() - within_s
     with _spoken_log_lock:
@@ -90,7 +90,7 @@ def recently_spoke_text(within_s: float = 6.0) -> str:
 
 def is_speaking() -> bool:
     """True while a speak() call is producing audio. listen.py gates STT on
-    this so the mic doesn't transcribe Jarvis's own voice through the speakers."""
+    this so the mic doesn't transcribe the assistant's own voice through the speakers."""
     return _speaking_count > 0
 
 
@@ -341,7 +341,7 @@ def _load_engine(allow_download: bool = False) -> Optional[Tuple[str, object]]:
 
 def reload() -> None:
     """Force re-detect the voice engine — call after dropping new files
-    into the voices/ directory without restarting Jarvis."""
+    into the voices/ directory without restarting the app."""
     global _engine, _last_load_error
     _engine = None
     _last_load_error = None

@@ -46,12 +46,12 @@ _caption_cb: Optional[Callable[[str], None]] = None
 _barge_cb: Optional[Callable[[], None]] = None
 _ready_cb: Optional[Callable[[], None]] = None  # fires once the STT model is loaded
 # Echo guard: speech must sustain this long before it counts as a barge, so a
-# blip of Jarvis's own voice bleeding through the speakers (VAD start then a
+# blip of the assistant's own voice bleeding through the speakers (VAD start then a
 # quick VAD stop cancels the timer) doesn't self-interrupt. Needed now that a
 # barge stops TTS directly server-side. 250ms rejects echo while staying
 # responsive; 0 disables it (fine on an echo-cancelled headset).
 # How long speech must sustain before it counts as a barge (not a stray echo
-# blip of Jarvis's own voice). Lower = TTS cuts on your first word instead of
+# blip of the assistant's own voice). Lower = TTS cuts on your first word instead of
 # mid-sentence; higher = safer against speaker->mic bleed. Set to 0 for an
 # instant cut (fine on a headset). 150ms is snappy but still eats a single frame.
 _barge_guard_ms: int = int(os.environ.get("HEARTH_BARGE_GUARD_MS", "150") or "150")
@@ -191,7 +191,7 @@ def _build_recorder():
         # Recorder entered its listen cycle ("speak now"). This is NOT speech
         # onset — that's _on_speech_start via on_recording_start — it fires at
         # cycle begin, before you talk. Use it only to drive the HUD to
-        # "listening" when Jarvis isn't the one holding the floor.
+        # "listening" when the assistant isn't the one holding the floor.
         if _BARGE_DEBUG:
             print(f"[barge] listen-cycle speaking={_tts.is_speaking()}", flush=True)
         if not _tts.is_speaking():
@@ -289,8 +289,8 @@ def mic_warning() -> str:
 
 
 def _looks_like_echo(text: str) -> bool:
-    """True if `text` is mostly words Jarvis just spoke — i.e. the mic picked up
-    Jarvis's own voice off the speakers rather than a real interrupt. Lets a
+    """True if `text` is mostly words the assistant just spoke — i.e. the mic picked up
+    the assistant's own voice off the speakers rather than a real interrupt. Lets a
     speaker user barge in without the assistant transcribing itself back into an
     endless loop. A headset never trips this: what the user says doesn't match
     what was just spoken, so the overlap stays low."""
@@ -391,19 +391,19 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
                 continue
             # Don't dispatch our own TTS playback as user input. With speaker->mic
             # bleed (common on shared/virtual audio devices like Steam's), the mic
-            # transcribes Jarvis's own voice and feeds it back as a "user" turn.
+            # transcribes the assistant's own voice and feeds it back as a "user" turn.
             # Drop anything captured while speaking or in the ~1.2s tail after, AND
             # flush the recorder buffer so buffered echo doesn't carry into the
             # next turn (clear_audio_queue is the RealtimeSTT reset for exactly this).
-            # During a barge grace the user is deliberately talking over Jarvis,
+            # During a barge grace the user is deliberately talking over the assistant,
             # so keep every word even though TTS may still be tailing off — this
             # is the interrupting message and it has to reach the LLM. Outside the
             # grace, drop anything captured while speaking or in the ~1.2s echo
             # tail after.
             if time.time() < _barge_grace_until:
                 # A barge fired and grabbed this utterance — but on speakers the
-                # "barge" can be Jarvis's own voice bleeding into the mic. If the
-                # words are mostly what Jarvis just said, it's echo: drop it so it
+                # "barge" can be the assistant's own voice bleeding into the mic. If the
+                # words are mostly what the assistant just said, it's echo: drop it so it
                 # isn't sent back as a user turn. Real interrupts (different words)
                 # pass straight through. Either way, consume the grace.
                 _barge_grace_until = 0.0

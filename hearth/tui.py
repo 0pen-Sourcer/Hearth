@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
+_NAME = os.environ.get("HEARTH_PERSONA_NAME", "JARVIS").strip() or "JARVIS"
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Input, RichLog, Static
@@ -91,7 +93,7 @@ class HearthTUI(App):
         label = "working…" if state == "working" else "ready"
         try:
             self.query_one("#status", Static).update(
-                f"{dot} [bold #b8a9e0]JARVIS[/] [dim]·[/] {model} [dim]·[/] "
+                f"{dot} [bold #b8a9e0]{_NAME}[/] [dim]·[/] {model} [dim]·[/] "
                 f"[#a98bff]{loc}[/] [dim]·[/] {label}"
             )
         except Exception:
@@ -125,7 +127,7 @@ class HearthTUI(App):
             content = fields.get("content") or ""
             if content.strip():
                 self._last_assistant = content
-                log.write(f"\n[bold #a98bff]JARVIS[/]  {content}\n")
+                log.write(f"\n[bold #a98bff]{_NAME}[/]  {content}\n")
         elif kind == "nudge":
             log.write(f"  [dim #6a6088]· {fields.get('reason','')}[/]")
         elif kind == "error":

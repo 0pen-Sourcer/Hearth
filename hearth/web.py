@@ -367,7 +367,7 @@ def _make_permission_check(emit_fn):
     def _extend(path: str) -> bool:
         # Re-uses the same permission queue + emit channel. The GUI keys
         # off name="__extend_workspace__" to render a different prompt
-        # ("allow JARVIS to write outside ~/Jarvis?") with the path as args.
+        # ("allow the assistant to write outside ~/Jarvis?") with the path as args.
         # "always" decision adds the parent dir to EXTRA_WORKSPACES via
         # tools._resolve_write's own logic; we just return True here.
         req_id = f"perm_{int(time.time()*1000)}_extend"
@@ -957,7 +957,7 @@ def _load_settings() -> Dict:
         "stt_device": "cpu",   # cpu / cuda
         "tts_device": "cpu",   # cpu / cuda / dml
         "voice_speed": 1.5,    # Kokoro playback rate (0.5x-2.5x). 1.5 is the snappier default that doesn't sound like a turtle.
-        "voice_name": "am_michael",  # Kokoro voice id (am_/af_/bm_/bf_ + name). am_michael = Jarvis-leaning baseline.
+        "voice_name": "am_michael",  # Kokoro voice id (am_/af_/bm_/bf_ + name). am_michael = calm neutral baseline.
         "agent_name": "JARVIS",      # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
         "stt_model": "base.en",  # base.en / small.en / medium.en
         "theme": "warm-flame",
@@ -2211,7 +2211,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                     with open(rules_path, "w", encoding="utf-8") as f:
                         f.write(
                             "# Your house rules for Jarvis\n\n"
-                            "This file is re-read every turn. Add anything Jarvis should always do\n"
+                            "This file is re-read every turn. Add anything the assistant should always do\n"
                             "or never do.\n"
                         )
                 os.startfile(rules_path)  # type: ignore[attr-defined]

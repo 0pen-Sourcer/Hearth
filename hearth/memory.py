@@ -1,4 +1,4 @@
-"""Long-term memory for Jarvis.
+"""Long-term memory for the assistant.
 
 Storage layout:
   ~/Jarvis/memory/MEMORY.md       — always-loaded index. One line per fact.
@@ -1145,13 +1145,13 @@ def recall_for_prompt(query: str, max_chars: int = 900, limit: int = 2) -> str:
 
 # ---------------------------------------------------------------------------
 # rules.md — Void's pattern. Plain text, user-editable, prepended fresh each
-# turn. Lets you tweak Jarvis behavior WITHOUT touching code.
+# turn. Lets you tweak the assistant's behavior WITHOUT touching code.
 # ---------------------------------------------------------------------------
 
 DEFAULT_RULES = """\
-# Jarvis house rules
+# House rules
 
-Edit this file freely — Jarvis re-reads it every turn. Add lines like:
+Edit this file freely — the assistant re-reads it every turn. Add lines like:
 
 - always answer in English
 - never run pip without asking first

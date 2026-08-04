@@ -2742,7 +2742,7 @@ def _glob_files(p: Dict) -> str:
 
 def _find_file(p: Dict) -> str:
     """Smart find: walk common locations for files matching a name or glob.
-    Replaces the 'jarvis, where is X' question that used to make Jarvis ask
+    Replaces the 'where is X' question that used to make the assistant ask
     the user for a path. Walks workspace → Desktop → Documents → Downloads →
     Pictures → Videos → Music → ~/Code → ~/Projects → cwd, shallow first."""
     name = (p.get("name") or "").strip()
@@ -2974,7 +2974,7 @@ class _HTMLText(HTMLParser):
 
 def _http_get(url: str, timeout: int = 15) -> Tuple[int, str, bytes]:
     req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Jarvis-Local)",
+        "User-Agent": "Mozilla/5.0 (Hearth-Local)",
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5",
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -4465,14 +4465,14 @@ def _validate_url(p: Dict) -> str:
     try:
         # Try HEAD first (cheap), fall back to GET if server doesn't allow it
         req = urllib.request.Request(raw_url, method="HEAD", headers={
-            "User-Agent": "Mozilla/5.0 (Jarvis-Local)",
+            "User-Agent": "Mozilla/5.0 (Hearth-Local)",
         })
         try:
             r = urllib.request.urlopen(req, timeout=10)
         except urllib.error.HTTPError as he:
             if he.code in (405, 400):
                 req = urllib.request.Request(raw_url, headers={
-                    "User-Agent": "Mozilla/5.0 (Jarvis-Local)",
+                    "User-Agent": "Mozilla/5.0 (Hearth-Local)",
                 })
                 r = urllib.request.urlopen(req, timeout=10)
             else:
@@ -5252,7 +5252,7 @@ if not (os.environ.get("HEARTH_ENABLE_FORGE", "0") == "1"
                            if t["name"] not in {"forge_generate", "forge_status", "forge_shutdown"}]
 
 # Track the subprocess so we can shut it down later. Module-level so it
-# survives across tool calls within a single Jarvis session.
+# survives across tool calls within a single Hearth session.
 _forge_proc: Optional[subprocess.Popen] = None
 
 # Auto-deload: Forge holds the whole SDXL checkpoint in VRAM (~6.5 GB) the entire

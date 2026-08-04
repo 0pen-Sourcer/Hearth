@@ -1,5 +1,5 @@
 """Wake-word listener — background thread that fires a callback when the
-user says a configured phrase ("Jarvis", "Hey Jarvis", "Wake up Jarvis", …).
+user says a configured phrase (the configured wake word).
 
 Resource budget: low.
   - Energy-gated: only does whisper inference when mic input crosses a

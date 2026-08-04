@@ -389,10 +389,10 @@ _LOW_LATENCY_DIRECTIVE = (
 
 # When voice is on, replies are SPOKEN. Long paragraphs, file paths, URLs, code
 # and markdown sound terrible read aloud and add latency. This flips the model
-# into a terse, conversational Jarvis register for the duration.
+# into a terse, conversational assistant register for the duration.
 _VOICE_MODE_DIRECTIVE = (
     "\n\n# VOICE MODE - your reply will be SPOKEN ALOUD.\n"
-    "Talk like Jarvis to Tony, not a chatbot reading an essay:\n"
+    "Talk like a sharp, familiar assistant, not a chatbot reading an essay:\n"
     "- ONE or TWO short sentences. No paragraphs, no bullet lists, no headers.\n"
     "- NEVER speak file paths, URLs, hashes, code, or markdown - they sound awful. "
     "Say 'saved it to your workspace', not the full path. Say 'opened the trailer', "
@@ -692,7 +692,7 @@ class JarvisCLI:
         # Per-tool permissions ([a]lways / [N]ever) - loaded from disk so they
         # survive restarts. Mutating choices write back via _save_persisted_perms.
         self.tool_perms: Dict[str, str] = _load_persisted_perms()
-        # /sleep mode - Jarvis stays silent until the user says the wake word.
+        # /sleep mode - the assistant stays silent until the user says the wake word.
         # Anything else is ignored. Use /wake to come back out.
         self.sleep_mode = False
         self._sleep_wake_word = (os.environ.get("JARVIS_WAKE_WORD", "jarvis")
@@ -948,7 +948,7 @@ class JarvisCLI:
                 })
                 i += 1
             data = {
-                "name": "Jarvis CLI",
+                "name": "Hearth CLI",
                 "pinned": True,
                 "createdAt": now_ms,
                 "messages": lm_messages,
@@ -1635,9 +1635,9 @@ class JarvisCLI:
             print(f"  {C_TOOL}/perms{C_RESET}                 show saved tool permissions (persist across restarts)")
             print(f"  {C_TOOL}/perms forget <tool>{C_RESET}   forget the saved decision for one tool")
             print(f"  {C_TOOL}/perms reset{C_RESET}           forget ALL saved tool decisions")
-            print(f"  {C_TOOL}/allow <path>{C_RESET}          let Jarvis write under <path> this session")
+            print(f"  {C_TOOL}/allow <path>{C_RESET}          let the assistant write under <path> this session")
             print(f"  {C_TOOL}/disallow <path>{C_RESET}       revoke an /allow")
-            print(f"  {C_TOOL}/allowed{C_RESET}               list paths Jarvis can write to")
+            print(f"  {C_TOOL}/allowed{C_RESET}               list paths the assistant can write to")
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
             print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
             print(f"  {C_TOOL}/phone{C_RESET}                 reach Hearth from your phone (Telegram + ntfy status)")
@@ -2538,7 +2538,7 @@ class JarvisCLI:
         if low == "/rules":
             memory.ensure_rules_exist()
             print(f"  {memory.RULES_PATH}")
-            print(f"  {C_DIM}edit freely - Jarvis re-reads it every turn{C_RESET}")
+            print(f"  {C_DIM}edit freely - the assistant re-reads it every turn{C_RESET}")
             return True
         if low == "/name" or low.startswith("/name "):
             # /name             - show current agent name
@@ -2629,7 +2629,7 @@ class JarvisCLI:
             if not items:
                 print(f"  {C_DIM}no {'active' if active_only else ''} jobs{C_RESET}")
                 print(f"  {C_DIM}(disk_usage on a drive root auto-backgrounds - "
-                      f"check this after asking JARVIS to scan something){C_RESET}")
+                      f"check this after asking the assistant to scan something){C_RESET}")
                 return True
             for j in items:
                 status = j.get("status", "?")
@@ -2827,7 +2827,7 @@ class JarvisCLI:
         if low == "/sleep":
             self.sleep_mode = True
             print(f"{C_OK}sleep mode ON{C_RESET}  "
-                  f"{C_DIM}Jarvis is silent until you say '{self._sleep_wake_word}' "
+                  f"{C_DIM}The assistant is silent until you say '{self._sleep_wake_word}' "
                   f"(or type /wake).{C_RESET}")
             return True
         if low == "/wake":
@@ -3896,7 +3896,7 @@ class JarvisCLI:
                 if await self.handle_command(user_input):
                     continue
             # /sleep mode: drop input that doesn't start with the wake word.
-            # Keeps Jarvis silent at the desk until you actually call him.
+            # Keeps the assistant silent at the desk until you actually call it.
             if self.sleep_mode:
                 w = self._sleep_wake_word
                 low = user_input.lower().lstrip()
@@ -4044,7 +4044,7 @@ class JarvisCLI:
             t = typ if typ in ("user", "feedback", "project", "reference") else "other"
             tree.setdefault(t, {}).setdefault(sub or "casual", []).append((name, desc))
         if not tree:
-            print(f"{C_DIM}(no memories yet - type something casual and JARVIS will start saving facts){C_RESET}")
+            print(f"{C_DIM}(no memories yet - type something casual and the assistant will start saving facts){C_RESET}")
             return
         # Render in canonical order - same as the GUI
         type_order = ["user", "project", "reference", "feedback", "other"]

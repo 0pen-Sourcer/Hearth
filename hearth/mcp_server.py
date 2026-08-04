@@ -68,7 +68,7 @@ from hearth.tools import (
     _DEFERRED_TOOLS,
 )
 
-mcp = FastMCP("Jarvis")
+mcp = FastMCP("Hearth")
 
 
 # ----------------------------------------------------------------------------
@@ -203,14 +203,14 @@ for td in TOOL_DEFINITIONS:
 
 
 # ----------------------------------------------------------------------------
-# Bonus: a status resource so LM Studio can show "Jarvis is alive" on connect.
+# Bonus: a status resource so LM Studio can show "Hearth is alive" on connect.
 # ----------------------------------------------------------------------------
 
 @mcp.resource("jarvis://status")
 def _status() -> str:
-    """Live status of the Jarvis brain."""
+    """Live status of the Hearth brain."""
     return json.dumps({
-        "name": "Jarvis",
+        "name": "Hearth",
         "workspace": WORKSPACE,
         "tools": _mcp_exposed,
         "started": datetime.now().isoformat(timespec="seconds"),
@@ -224,9 +224,9 @@ def _status() -> str:
 
 if __name__ == "__main__":
     _diet = "" if _MCP_ALL_TOOLS else f" (core diet; {len(TOOL_DEFINITIONS)} available — set HEARTH_MCP_ALL_TOOLS=1 for all)"
-    print(f"[Jarvis MCP] {_mcp_exposed} tools registered{_diet}", file=sys.stderr)
-    print(f"[Jarvis MCP] workspace: {WORKSPACE}", file=sys.stderr)
-    print(f"[Jarvis MCP] activity log: {ACTIVITY_LOG}", file=sys.stderr)
+    print(f"[Hearth MCP] {_mcp_exposed} tools registered{_diet}", file=sys.stderr)
+    print(f"[Hearth MCP] workspace: {WORKSPACE}", file=sys.stderr)
+    print(f"[Hearth MCP] activity log: {ACTIVITY_LOG}", file=sys.stderr)
     _log_activity("server_start", tools=_mcp_exposed, workspace=WORKSPACE)
     # Register this inbound connection so the Hearth GUI's MCP tab can show WHO'S
     # connected. stdio spawns one server process per client, so our pid + the

@@ -157,7 +157,7 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--open", action="store_true",
                         help="Open the desktop window immediately on launch.")
     parser.add_argument("--wake", action="store_true",
-                        help="Start with wake-word listener enabled (say 'Jarvis' to open).")
+                        help="Start with wake-word listener enabled (say the wake word to open).")
     args = parser.parse_args(argv)
 
     # Single-instance check FIRST — otherwise clicking Hearth.exe N times
@@ -225,7 +225,7 @@ def main(argv: Optional[list] = None) -> int:
     img = _icon_image()
 
     # Wake-word listener — optional, off by default. Fires _open_desktop_window
-    # when the user says "Jarvis" / "hey jarvis" etc.
+    # when the user says the wake word / "hey <name>" etc.
     wake_listener = None
     wake_state = {"on": False}
 

@@ -127,7 +127,7 @@ def cmd_log(n: int = 20) -> None:
 
 def repl() -> None:
     _enable_ansi()
-    print(f"{C_BRAND}Jarvis dev_tools — REPL{C_RESET}")
+    print(f"{C_BRAND}Hearth dev_tools — REPL{C_RESET}")
     print(f"{C_DIM}workspace: {WORKSPACE}{C_RESET}")
     print(f"{C_DIM}log: {ACTIVITY_LOG}{C_RESET}")
     print(f"{C_DIM}commands: list | info <name> | call <name> {{json}} | log [n] | workspace | quit{C_RESET}\n")
