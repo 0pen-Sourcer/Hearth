@@ -1,7 +1,7 @@
 <h1 align="center">Hearth</h1>
 
 <p align="center">
-  <strong>The local AI that actually runs your computer.</strong>
+  <strong>A local JARVIS that actually runs your computer.</strong>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <em>The framework is <strong>Hearth</strong>. The assistant it ships with is named <strong>JARVIS</strong>, rename it to anything. The resident, and the house.</em>
+  <em>Built solo, at 17. The framework is <strong>Hearth</strong>; the assistant it ships with is <strong>JARVIS</strong>, rename it to anything. The resident, and the house.</em>
 </p>
 
 <p align="center">
@@ -27,17 +27,11 @@
 
 ---
 
-## Why Hearth exists
+## What it is
 
-The smartest AI in the world lives in someone else's cloud. It's brilliant, and it can't touch your computer, it forgets you the moment the tab closes, and the meter never stops.
+Run a model locally and you get one of three things. A chat UI that can't touch your machine (LibreChat, Open WebUI). A coding agent boxed into a code folder (Aider, Cline, Open Interpreter). Or a cloud assistant that forgets you when the tab closes and never stops charging (ChatGPT, Claude, Gemini).
 
-So you ran a model locally. Now what? Most "local AI" projects are one of three things:
-
-1. **A chat UI** around a model (LibreChat, Open WebUI, big-AGI). Beautiful, but it's just chat. It can't open your files or *do* anything on your machine.
-2. **A coding agent** (Aider, Cline, Continue, Open Interpreter). Powerful, but scoped to "write code in this folder," not "be the AI on my PC."
-3. **A cloud-locked assistant** (ChatGPT, Claude, Gemini). Great, until they change the rules, deprecate your model, or you go offline.
-
-**Hearth is the fourth thing.** A local-first operator that runs on the model you already have, controls your actual Windows PC, files, shell, apps, browser, the desktop itself (clicks and types), screenshots, voice, talks back, listens, and remembers you across sessions. Nothing ever leaves your machine except a web search, and only when you ask.
+**Hearth is the fourth.** A local-first operator that runs on the model you already have and controls your actual Windows PC. Files, shell, apps, a browser you can watch, the desktop itself (it clicks and types), screenshots, voice that talks and listens, and a memory that persists across sessions. Nothing leaves your machine except a web search, and only when you ask.
 
 And it keeps growing: **skills are shareable.** A skill is a folder that teaches Hearth a workflow ("clean up my Downloads", "turn this folder of photos into a contact sheet"). Installing one someone else wrote is a single line, `/skill install someone/their-repo`, and writing your own is one command.
 
@@ -150,7 +144,7 @@ Hearth runs from source on macOS and Linux. The CLI and web UI work, and most to
 
 **MCP, both directions.** Hearth exposes its own tools as an MCP server, and it also consumes other MCP servers: drop an `mcp.json` in the workspace and their tools appear alongside the built-ins.
 
-**Voice.** Text-to-speech (Kokoro) streams sentence by sentence; speech-to-text (faster-whisper) supports a continuous-listen mode with mid-sentence barge-in, start talking and the current reply stops. Both auto-detect your hardware: text-to-speech runs on CUDA or DirectML, speech-to-text on CUDA, and either falls back to CPU. Preview-quality at v0.7.
+**Voice.** Text-to-speech (Kokoro) streams sentence by sentence; speech-to-text (faster-whisper) supports a continuous-listen mode with mid-sentence barge-in, talk over a reply and it cuts on your first word, then answers what you interrupted with. Both auto-detect your hardware, text-to-speech on CUDA or DirectML, speech-to-text on CUDA, either falling back to CPU. Solid on a headset; still sharpening for speaker setups.
 
 **Self-extending tools.** When Hearth hits a capability gap, it can write a new tool for itself with `create_plugin`, validated, saved to the workspace, and usable the same turn. You can also hand-write plugins (a `TOOL` dict plus a `run(args)` function); any `*.py` in the plugins folder auto-loads at startup.
 
