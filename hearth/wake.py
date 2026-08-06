@@ -80,6 +80,24 @@ def _matches_wake(transcript: str, phrases: List[str]) -> Optional[str]:
     return None
 
 
+def _wake_input_device() -> Optional[int]:
+    """The mic the user picked in Settings > Voice. Read from settings.json
+    DIRECTLY, not the JARVIS_VOICE_INPUT_DEVICE env var, because the wake
+    listener runs in the tray process where that env var is never set — so
+    without this, wake always listened on the OS default mic and missed a user
+    who talks into a different one."""
+    try:
+        from .web import _load_settings
+        v = int((_load_settings() or {}).get("voice_input_device", -1))
+        return v if v >= 0 else None
+    except Exception:
+        try:
+            from . import listen as _ll
+            return _ll.input_device_index()
+        except Exception:
+            return None
+
+
 # ----- Listener -----
 
 class WakeListener:
@@ -132,14 +150,29 @@ class WakeListener:
         in_voice = False
         quiet_since: Optional[float] = None
 
-        try:
-            stream = sd.InputStream(
+        _dev = _wake_input_device()
+
+        def _open(dev):
+            s = sd.InputStream(
                 samplerate=self.sample_rate, channels=1,
-                dtype="float32", blocksize=block_size,
+                dtype="float32", blocksize=block_size, device=dev,
             )
-            stream.start()
+            s.start()
+            return s
+
+        try:
+            stream = _open(_dev)
         except Exception:
-            return
+            # Picked mic wouldn't open (Bluetooth mics often can't) — fall back
+            # to the OS default instead of silently never listening.
+            if _dev is None:
+                return
+            try:
+                print(f"[hearth.wake] mic {_dev} failed to open; using default",
+                      flush=True)
+                stream = _open(None)
+            except Exception:
+                return
 
         try:
             while not self._stop.is_set():
@@ -191,6 +224,11 @@ class WakeListener:
             text = " ".join(s.text.strip() for s in segments).strip()
         except Exception:
             return
+        # Log what wake heard (goes to hearth_tray.log). If this line shows your
+        # words but nothing opens, it's a phrase mismatch; if it never appears
+        # while you speak, wake is on the wrong mic. Set HEARTH_WAKE_DEBUG=0 off.
+        if text and os.environ.get("HEARTH_WAKE_DEBUG", "1") not in ("0", "", "false"):
+            print(f"[hearth.wake] heard: {text!r}", flush=True)
         matched = _matches_wake(text, self.phrases)
         if matched:
             self._last_wake_ts = time.time()
