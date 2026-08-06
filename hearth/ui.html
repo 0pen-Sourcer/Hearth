@@ -1405,8 +1405,31 @@
   .pill-ok { background: var(--ok); color: var(--bg-0); }
   .pill-accent { background: var(--accent-2); color: var(--bg-0); }
   .pill-soft { background: var(--bg-3); color: var(--fg-dim); }
+  .pill-bad { background: var(--err, #ff5c5c); color: #fff; }
   .list-empty { color: var(--fg-faint); font-size: 13px; text-align: center;
     padding: 30px 14px; opacity: .8; }
+
+  /* Sub-agent transcript viewer (Reminders & tasks -> tap a task). The modal
+     body already scrolls and is monospaced/pre-wrap, so override to prose here
+     and let the modal own the single scrollbar. */
+  .tx-wrap { font-family: var(--sans); white-space: normal; }
+  .tx-task { color: var(--fg); font-weight: 600; font-size: 13px; margin-bottom: 12px; }
+  .tx-prompt { color: var(--fg-dim); font-weight: 400; font-size: 12.5px; margin-top: 5px;
+    line-height: 1.5; padding: 9px 11px; background: var(--bg-0); border: 1px solid var(--border);
+    border-radius: 8px; }
+  .tx-tool { color: var(--accent, #a78bfa); font-size: 12px; margin: 8px 0 2px;
+    font-family: var(--mono, ui-monospace, monospace); }
+  .tx-tool .tx-args { color: var(--fg-faint); }
+  .tx-res { color: var(--fg-dim); font-size: 12px; margin: 0 0 8px 16px; white-space: pre-wrap;
+    font-family: var(--mono); max-height: 130px; overflow: auto; border-left: 2px solid var(--border); padding-left: 11px; }
+  .tx-final { margin: 12px 0; color: var(--fg); font-size: 13.5px; line-height: 1.62; }
+  .tx-final h2, .tx-final h3, .tx-final h4 { margin: 12px 0 6px; }
+  .tx-final table { border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
+  .tx-final code { background: var(--bg-0); padding: 1px 5px; border-radius: 4px;
+    font-family: var(--mono, ui-monospace, monospace); }
+  .tx-end { font-weight: 600; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .tx-end.ok { color: var(--ok); }
+  .tx-end.bad { color: var(--err, #ff5c5c); }
 
   .item {
     display: flex; align-items: center; gap: 12px;
@@ -1757,6 +1780,15 @@
   .logs-tab.active {
     background: var(--bg-0); color: var(--accent-2);
   }
+  /* Reminders/Tasks sub-tabs. Same look as .logs-tab but a distinct class so
+     the logs click-handler (which targets .logs-tab) can't misfire on them. */
+  .rt-tab {
+    appearance: none; background: transparent; border: 0;
+    padding: 4px 10px; border-radius: 4px; color: var(--fg-dim);
+    cursor: pointer; font-size: 11px; font-weight: 600;
+  }
+  .rt-tab:hover { color: var(--fg); }
+  .rt-tab.active { background: var(--bg-0); color: var(--accent-2); }
   .logs-tab .logs-dot {
     display: inline-block; width: 6px; height: 6px;
     border-radius: 50%; background: var(--fg-faint);
@@ -2828,7 +2860,7 @@
         </button>
         <button class="nav-btn" data-view="reminders">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          Reminders
+          Reminders &amp; tasks
           <span class="count" id="nav-rem-count"></span>
         </button>
         <button class="nav-btn" data-view="skills">
@@ -2987,16 +3019,31 @@
     <!-- REMINDERS -->
     <section class="view" id="view-reminders">
       <div class="view-head">
-        <h2>Reminders</h2>
-        <span class="sub">one-shot &amp; recurring - set them in chat</span>
+        <h2>Reminders &amp; tasks</h2>
+        <span class="sub" id="rtab-sub">one-shot &amp; recurring - set them in chat</span>
+        <div class="grow"></div>
+        <div class="logs-tabs">
+          <button class="rt-tab active" data-rtab="reminders">Reminders</button>
+          <button class="rt-tab" data-rtab="tasks">Background tasks</button>
+        </div>
       </div>
-      <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
-        Just ask in chat - <i>"remind me to leave in 30 min"</i>, or
-        <i>"every Monday 9am, search for new GPU benchmarks"</i> (those run a tool, not just a toast).
-        Missed ones catch up next launch.
+      <div id="rtab-reminders">
+        <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
+          Just ask in chat - <i>"remind me to leave in 30 min"</i>, or
+          <i>"every Monday 9am, search for new GPU benchmarks"</i> (those run a tool, not just a toast).
+          Missed ones catch up next launch.
+        </div>
+        <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 4px;margin:0 4px;">
+          <div class="list-empty">loading reminders…</div>
+        </div>
       </div>
-      <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 190px);padding:2px 4px;margin:0 4px;">
-        <div class="list-empty">loading reminders…</div>
+      <div id="rtab-tasks" hidden>
+        <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
+          Sub-agents you spawn run in the background. Tap one to watch its transcript, tool by tool.
+        </div>
+        <div id="tasks-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 4px;margin:0 4px;">
+          <div class="list-empty">no background tasks yet</div>
+        </div>
       </div>
     </section>
 
@@ -3546,7 +3593,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Concurrent agents <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
-            <div class="hint">How many requests the server handles at once. At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Hearth steps this back down at load time if your card can't hold it.</div>
+            <div class="hint">How many requests the server handles at once. At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Hearth steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Hearth) — changing it mid-session does not touch the running server.</div>
           </div>
           <select id="setting-server-slots">
             <option value="1" selected>1 · agents queue (lowest VRAM)</option>
@@ -4198,6 +4245,21 @@ function renderMD(src) {
     inlineCodes.push(code);
     return `\x00IC${idx}\x00`;
   });
+  // Lightweight inline LaTeX: models emit $\rightarrow$, $\times$ etc. We don't
+  // ship a math engine (KaTeX is a heavy dep, against the self-contained build),
+  // so map the common symbols to unicode and drop the $-delimiters. Runs after
+  // code is set aside, so math inside code is left alone.
+  const _TEX = { rightarrow: '→', to: '→', longrightarrow: '→',
+    Rightarrow: '⇒', mapsto: '↦', leftarrow: '←', gets: '←',
+    Leftarrow: '⇐', leftrightarrow: '↔', uparrow: '↑', downarrow: '↓',
+    times: '×', cdot: '·', div: '÷', pm: '±', mp: '∓',
+    leq: '≤', le: '≤', geq: '≥', ge: '≥', neq: '≠',
+    approx: '≈', equiv: '≡', infty: '∞', deg: '°',
+    ldots: '…', dots: '…', cdots: '⋯', bullet: '•',
+    Rightarrow_: '⇒', land: '∧', lor: '∨', neg: '¬',
+    forall: '∀', exists: '∃', in: '∈', notin: '∉' };
+  src = src.replace(/\$([^$\n]{1,160})\$/g, (m, inner) =>
+    inner.replace(/\\([a-zA-Z]+)/g, (mm, cmd) => _TEX[cmd] || mm).replace(/[{}]/g, '').trim());
   // HTML-escape EVERYTHING else
   let html = esc(src);
   // Headings (only at start of line, 1-3 #s - keep level visual but flat)
@@ -6088,7 +6150,7 @@ function showView(name) {
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
   if (name === 'memory') refreshMemory();
-  if (name === 'reminders') refreshReminders();
+  if (name === 'reminders') setRemindersView(document.querySelector('.rt-tab.active')?.dataset.rtab || 'reminders');
   if (name === 'skills') refreshSkills();
   if (name === 'files') refreshFiles(STATE.filePath || '');
   if (name === 'logs') { refreshLogs(); startLogsAutoRefresh(); }
@@ -7517,7 +7579,17 @@ function renderMem(filter) {
       if (e.target.closest('.row-actions')) return;
       try {
         const r = await api(`/api/memory/${encodeURIComponent(m.name)}`);
-        showModal(m.name, r.body, [{ label: 'Close' }]);
+        showModal(m.name, r.body, [
+          { label: 'Close' },
+          { label: 'Delete', kind: 'danger', onclick: async () => {
+            try {
+              const dr = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
+              if (dr && dr.ok === false) { toast('Delete failed', dr.error || 'backend rejected', 'err'); return; }
+              toast('Deleted', m.name, 'ok');
+              refreshMemory(); refreshState();
+            } catch (e) { toast('Delete failed', e.message, 'err'); }
+          } },
+        ]);
       } catch (e) { toast('Read failed', e.message, 'err'); }
     });
     div.querySelector('.del').addEventListener('click', () => {
@@ -7643,7 +7715,17 @@ function renderMemTree(filter) {
         leaf.addEventListener('click', async () => {
           try {
             const r = await api(`/api/memory/${encodeURIComponent(m.name)}`);
-            showModal(m.name, r.body, [{ label: 'Close' }]);
+            showModal(m.name, r.body, [
+          { label: 'Close' },
+          { label: 'Delete', kind: 'danger', onclick: async () => {
+            try {
+              const dr = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
+              if (dr && dr.ok === false) { toast('Delete failed', dr.error || 'backend rejected', 'err'); return; }
+              toast('Deleted', m.name, 'ok');
+              refreshMemory(); refreshState();
+            } catch (e) { toast('Delete failed', e.message, 'err'); }
+          } },
+        ]);
           } catch (e) { toast('Read failed', e.message, 'err'); }
         });
         subBody.appendChild(leaf);
@@ -7841,7 +7923,17 @@ function renderMemGraph(filter) {
   nodeSel.on('click', async (event, d) => {
     try {
       const r = await api(`/api/memory/${encodeURIComponent(d.id)}`);
-      showModal(d.name, r.body, [{ label: 'Close' }]);
+      showModal(d.name, r.body, [
+        { label: 'Close' },
+        { label: 'Delete', kind: 'danger', onclick: async () => {
+          try {
+            const dr = await api(`/api/memory/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
+            if (dr && dr.ok === false) { toast('Delete failed', dr.error || 'backend rejected', 'err'); return; }
+            toast('Deleted', d.name, 'ok');
+            refreshMemory(); refreshState();
+          } catch (e) { toast('Delete failed', e.message, 'err'); }
+        } },
+      ]);
     } catch (e) { toast('Read failed', e.message, 'err'); }
   });
 
@@ -8092,6 +8184,95 @@ function stopLoadProgress() {
 // ============================================================
 // SERVER settings pane - live status card + actions
 // ============================================================
+// Reminders <-> Background tasks sub-tab switch (same UX as the Logs tabs).
+function setRemindersView(which) {
+  document.querySelectorAll('.rt-tab').forEach(b => b.classList.toggle('active', b.dataset.rtab === which));
+  const rv = document.getElementById('rtab-reminders'), tv = document.getElementById('rtab-tasks');
+  if (rv) rv.hidden = which !== 'reminders';
+  if (tv) tv.hidden = which !== 'tasks';
+  const sub = document.getElementById('rtab-sub');
+  if (sub) sub.textContent = which === 'tasks'
+    ? 'sub-agents you spawned - tap one to watch it'
+    : 'one-shot & recurring - set them in chat';
+  if (which === 'tasks') refreshTasks(); else refreshReminders();
+}
+document.querySelectorAll('.rt-tab').forEach(b =>
+  b.addEventListener('click', () => setRemindersView(b.dataset.rtab)));
+
+// Background tasks (sub-agents) for the Reminders & tasks tab. Reads the same
+// transcript activity the audit trail uses; clicking a row opens its transcript
+// so you can watch what a background agent actually did, tool by tool.
+async function refreshTasks() {
+  const box = document.getElementById('tasks-box');
+  if (!box) return;
+  try {
+    const r = await api('/api/subagent/activity?limit=40');
+    const agents = (r && r.agents) || [];
+    if (!agents.length) {
+      box.innerHTML = '<div class="list-empty">No background tasks yet.<br>Ask for one - <i>"research X in the background"</i>.</div>';
+      return;
+    }
+    const rel = (m) => { const s = Date.now() / 1000 - (m || 0);
+      return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + 'm ago'
+        : s < 86400 ? Math.round(s / 3600) + 'h ago' : Math.round(s / 86400) + 'd ago'; };
+    const statusPill = (s) => s === 'running' ? '<span class="pill pill-soft">⟳ running</span>'
+      : s === 'failed' ? '<span class="pill pill-bad">failed</span>'
+      : '<span class="pill pill-ok">done</span>';
+    box.innerHTML = agents.map(a => {
+      const title = a.name || a.prompt || ((a.persona || 'sub-agent') + ' task');
+      return `
+      <div class="lcard" data-agent="${esc(a.agent_id)}" style="cursor:pointer">
+        <div class="lc-main">
+          <div style="color:var(--fg);font-weight:600;font-size:13px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(title)}</div>
+          <div class="lc-badges" style="align-items:center">
+            ${a.persona ? '<span class="pill pill-soft">' + esc(a.persona) + '</span>' : ''}
+            ${statusPill(a.status)}
+            <span style="color:var(--fg-faint);font-size:11px">${rel(a.mtime)}</span>
+          </div>
+        </div>
+        <span class="model-row-chevron" aria-hidden="true">▾</span>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('[data-agent]').forEach(el =>
+      el.addEventListener('click', () => openTaskTranscript(el.getAttribute('data-agent'))));
+  } catch (e) {
+    box.innerHTML = '<div class="list-empty">Could not load tasks.</div>';
+  }
+}
+
+async function openTaskTranscript(agentId) {
+  try {
+    const r = await api('/api/subagent/transcript?agent_id=' + encodeURIComponent(agentId));
+    const lines = String((r && r.content) || '').split('\n').filter(Boolean);
+    const parts = [];
+    for (const ln of lines) {
+      let x; try { x = JSON.parse(ln); } catch { continue; }
+      if (x.kind === 'start')
+        parts.push(`<div class="tx-task">${esc(x.persona || 'agent')}<div class="tx-prompt">${esc(String(x.prompt || ''))}</div></div>`);
+      else if (x.kind === 'assistant_tool_call') {
+        if (x.content) parts.push(`<div class="tx-final">${renderMD(String(x.content))}</div>`);
+        for (const c of (x.calls || [])) {
+          let a = c.args;
+          if (typeof a === 'string') { try { a = JSON.stringify(JSON.parse(a)); } catch {} }
+          else a = JSON.stringify(a || {});
+          a = String(a || ''); if (a === '{}') a = '';
+          parts.push(`<div class="tx-tool">🔧 ${esc(c.name || 'tool')}${a ? ' <span class="tx-args">' + esc(a.slice(0, 220)) + '</span>' : ''}</div>`);
+        }
+      }
+      else if (x.kind === 'tool_result')
+        parts.push(`<div class="tx-res">${esc(String(x.preview || '').slice(0, 600)) || '(no output captured)'}</div>`);
+      else if (x.kind === 'assistant_final')
+        parts.push(`<div class="tx-final">${renderMD(String(x.text || x.content || ''))}</div>`);
+      else if (x.kind === 'end')
+        parts.push(`<div class="tx-end ${x.ok ? 'ok' : 'bad'}">${x.ok ? '✓ done' : '✗ failed'}${x.error ? ': ' + esc(String(x.error).slice(0, 240)) : ''}${x.elapsed_s ? ' · ' + x.elapsed_s + 's' : ''}</div>`);
+    }
+    const html = parts.length ? parts.join('') : '<div class="list-empty">Transcript is empty (the agent may still be starting).</div>';
+    showModal('Task transcript', `<div class="tx-wrap">${html}</div>`, [{ label: 'Close', primary: true }]);
+  } catch (e) {
+    toast('Could not load transcript', e.message || '', 'warn', 4000);
+  }
+}
+
 async function refreshReminders() {
   const box = document.getElementById('reminders-box');
   if (!box) return;
@@ -11031,6 +11212,16 @@ function modelsCapTags(name, hfTags) {
   return out;
 }
 
+// Best-effort parameter count from a model name/repo ("27B", "8x7B", "3.8B"),
+// so a Discover card shows scale at a glance instead of just a download count.
+function modelParamsLabel(name) {
+  const s = String(name || '');
+  const moe = s.match(/\b(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*b\b/i);
+  if (moe) return `${moe[1]}x${moe[2]}B`;
+  const m = s.match(/\b(\d+(?:\.\d+)?)\s*b\b/i);
+  return m ? `${m[1]}B` : '';
+}
+
 function modelsCapTagsHTML(caps) {
   if (!caps || !caps.length) return '';
   return '<div class="model-tags">' +
@@ -11851,12 +12042,13 @@ async function modelsRenderDiscover() {
   for (let i = 0; i < list.length; i++) {
     const it = list[i];
     const caps = modelsCapTags(it.hf_repo, it.tags || []);
+    const params = modelParamsLabel(it.hf_repo);
     const rowId = 'hf-' + i;
     html += `
       <div class="model-row is-expandable" data-row="${rowId}" data-hf-repo="${esc(it.hf_repo)}">
         <div class="model-info">
           <div class="model-name">${esc(it.hf_repo)}</div>
-          <div class="model-meta">${(it.downloads || 0).toLocaleString()} downloads · ${(it.tags || []).slice(0, 4).map(esc).join(' · ') || '-'}</div>
+          <div class="model-meta">${params ? params + ' · ' : ''}${(it.downloads || 0).toLocaleString()} downloads${it.likes ? ' · ' + it.likes.toLocaleString() + ' likes' : ''} · ${(it.tags || []).slice(0, 4).map(esc).join(' · ') || '-'}</div>
           ${modelsCapTagsHTML(caps)}
         </div>
         <!-- Click anywhere on the row to expand (modelsWireRowClicks handles

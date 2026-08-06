@@ -94,6 +94,10 @@ _TRANSCRIPT_DIR = Path(os.environ.get("JARVIS_WORKSPACE")
 # Cleared on Hearth restart - background subagents are session-scoped.
 _BG_RESULTS: Dict[str, Dict[str, Any]] = {}
 _BG_RESULTS_LOCK = threading.Lock()
+# agent_ids of background subagents currently in flight (added at launch, removed
+# when the worker finishes). Used to stop the parent from fanning out more
+# background agents than the server has slots, where extras only queue.
+_BG_RUNNING: "set[str]" = set()
 
 # Notifications from background subagents queue here. The chat surfaces
 # (web.py /chat and hearth_cli.py respond()) drain this queue before
@@ -221,9 +225,10 @@ def list_subagent_activity(limit: int = 50) -> List[Dict[str, Any]]:
             st = p.stat()
         except OSError:
             continue
-        # Read the kind:'start' line for persona/name, kind:'end' for status.
+        # Read the kind:'start' line for persona/name/prompt, kind:'end' for status.
         persona = ""
         label = ""
+        prompt = ""
         status = "running"
         try:
             with p.open("r", encoding="utf-8") as f:
@@ -237,6 +242,7 @@ def list_subagent_activity(limit: int = 50) -> List[Dict[str, Any]]:
                     if rec.get("kind") == "start":
                         persona = rec.get("persona") or persona
                         label = rec.get("name") or label
+                        prompt = (rec.get("prompt") or "").strip()[:160]
                     elif rec.get("kind") == "end":
                         status = "completed" if rec.get("ok") else "failed"
         except OSError:
@@ -245,6 +251,7 @@ def list_subagent_activity(limit: int = 50) -> List[Dict[str, Any]]:
             "agent_id": p.stem,
             "persona": persona,
             "name": label,
+            "prompt": prompt,
             "status": status,
             "mtime": st.st_mtime,
             "size_bytes": st.st_size,
@@ -516,11 +523,28 @@ def _filter_tools(allowed: List[str]) -> List[Dict[str, Any]]:
     return out
 
 
+# Prepended to every sub-agent's prompt. Background workers with no human
+# watching them tended to bail on the first hiccup — a not-found path, a tool
+# error — and hand the task back undone. A common one: the parent passes a single
+# path and the worker treats it as two and quits. This makes them push through.
+_SUBAGENT_RESILIENCE = (
+    "You are a focused worker running on your own. FINISH the task you were "
+    "given. Do not hand it back half-done.\n"
+    "- A tool error is a hurdle, not a stop sign. A path you were given is ONE "
+    "path, read it as written. If it is not found, do NOT quit: try it verbatim, "
+    "then use find_file / list_directory to locate the real one, then continue.\n"
+    "- Never end after a single failed attempt with an excuse like 'the path did "
+    "not match' or 'I could not find it'. Try at least two recovery routes first.\n"
+    "- Stop only when the task is genuinely done, or you are truly blocked after "
+    "real attempts. If blocked, state exactly what you tried and what you need.\n"
+)
+
+
 def _build_system_prompt(persona: Dict[str, Any], user_prompt: str) -> str:
     """Persona body + memory-aware briefing. The memory inject is the
     Hearth twist — child gets project-specific context the source agent
     frameworks don't auto-surface."""
-    body = persona.get("body", "")
+    body = _SUBAGENT_RESILIENCE + "\n" + persona.get("body", "")
     try:
         from . import memory as _mem
         mem_block = _mem.recall_for_prompt(user_prompt, max_chars=600, limit=2)
@@ -766,6 +790,8 @@ def _bg_worker(p: Dict[str, Any], prompt: str, turns_cap: int,
                   "agent_id": agent_id}
     finally:
         _set_depth(parent_depth)
+        with _BG_RESULTS_LOCK:
+            _BG_RUNNING.discard(agent_id)
     # Stamp the persona name + human label onto the result so the toast +
     # notification can render "researcher (Alex) done" instead of
     # "unknown done".
@@ -855,6 +881,22 @@ def spawn_subagent(persona: str, prompt: str,
 
     if mode == "background":
         _cap, _cap_why = concurrency_capacity()
+        # Don't let the parent stack more background agents than there are slots.
+        # Extra ones don't run in parallel, they queue behind the busy slot, which
+        # just looks like a hang. Make the parent wait or run this one inline.
+        with _BG_RESULTS_LOCK:
+            _running = len(_BG_RUNNING)
+        if _running >= _cap:
+            return {"ok": False, "error": (
+                f"{_running} background subagent(s) already running and there "
+                f"{'is' if _cap == 1 else 'are'} only {_cap} slot"
+                f"{'' if _cap == 1 else 's'} ({_cap_why}). Another background "
+                f"agent would just queue behind them, not run in parallel. Wait "
+                f"for one to finish (its result arrives as a notification), or "
+                f"run this one now with mode='sync', or raise "
+                f"Settings > server_parallel_slots.")}
+        with _BG_RESULTS_LOCK:
+            _BG_RUNNING.add(agent_id)
         t = threading.Thread(
             target=_bg_worker, name=f"hearth-subagent-{agent_id}",
             args=(p, prompt, turns_cap, agent_id, depth), daemon=True,
