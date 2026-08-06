@@ -30,6 +30,11 @@ if _WIN:
     _ME_MIDDLEDOWN, _ME_MIDDLEUP = 0x0020, 0x0040
     _ME_WHEEL = 0x0800
     _KEYUP, _UNICODE = 0x0002, 0x0004
+    _SCANCODE, _EXTENDEDKEY = 0x0008, 0x0001
+    # VKs whose scan code needs the EXTENDEDKEY flag to land on the right
+    # physical key (nav cluster + arrows). Without it, an arrow key's scan code
+    # collides with the numpad.
+    _EXTENDED_VK = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E}
     _PUL = ctypes.POINTER(ctypes.c_ulong)
 
     class _KBD(ctypes.Structure):
@@ -215,6 +220,24 @@ def _send_unicode(ch: str):
         _u.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
 
 
+def _scan_for_vk(vk: int) -> int:
+    """Scan code for a virtual key, or 0 if it has none. MapVirtualKey is more
+    complete than a hardcoded table — it covers every key the _VK map exposes."""
+    try:
+        return int(_u.MapVirtualKeyW(vk, 0))  # MAPVK_VK_TO_VSC
+    except Exception:
+        return 0
+
+
+def _send_scan(scan: int, up: bool, ext: bool = False):
+    """Press/release a key by SCAN CODE via SendInput. DirectX/canvas games read
+    input at the scan-code layer and drop virtual-key events (keybd_event), so
+    this is what makes a key actually register in a game."""
+    flags = _SCANCODE | (_KEYUP if up else 0) | (_EXTENDEDKEY if ext else 0)
+    inp = _INPUT(type=1, u=_UN(ki=_KBD(0, scan, flags, 0, None)))
+    _u.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+
+
 def type_text(text: str):
     if _WIN:
         for ch in text:
@@ -256,24 +279,69 @@ def _pyn_key(token: str):
     return token  # single char
 
 
-def press_key(key: str):
-    """Single named key (enter/tab/esc/f5/...) or a single character."""
+def key_down(key: str):
+    """Press and HOLD a key without releasing, so it stays down across frames
+    (hold a direction in a game, hold shift while dragging). Pair with key_up."""
     if _WIN:
         vk = _vk(key)
         if not vk:
             return
-        _u.keybd_event(vk, 0, 0, 0)
-        time.sleep(0.02)
-        _u.keybd_event(vk, 0, _KEYUP, 0)
+        scan = _scan_for_vk(vk)
+        if scan:
+            _send_scan(scan, up=False, ext=vk in _EXTENDED_VK)
+        else:
+            _u.keybd_event(vk, 0, 0, 0)
+    elif _PYN:
+        _pyn_k.press(_pyn_key(key))
+
+
+def key_up(key: str):
+    """Release a key held with key_down."""
+    if _WIN:
+        vk = _vk(key)
+        if not vk:
+            return
+        scan = _scan_for_vk(vk)
+        if scan:
+            _send_scan(scan, up=True, ext=vk in _EXTENDED_VK)
+        else:
+            _u.keybd_event(vk, 0, _KEYUP, 0)
+    elif _PYN:
+        _pyn_k.release(_pyn_key(key))
+
+
+def press_key(key: str, hold_ms: int = 40):
+    """Tap a named key (enter/tab/esc/f5/arrows/...) or a single character.
+
+    Sends the key by SCAN CODE so games and DirectX/canvas surfaces actually see
+    it (virtual-key events via keybd_event get dropped there). hold_ms controls
+    how long the key is held; one 60fps game frame is ~16ms, so the 40ms default
+    is comfortably long enough, and a caller can raise it to hold longer."""
+    if _WIN:
+        vk = _vk(key)
+        if not vk:
+            return
+        scan = _scan_for_vk(vk)
+        ext = vk in _EXTENDED_VK
+        if scan:
+            _send_scan(scan, up=False, ext=ext)
+            time.sleep(max(0, hold_ms) / 1000.0)
+            _send_scan(scan, up=True, ext=ext)
+        else:
+            _u.keybd_event(vk, 0, 0, 0)
+            time.sleep(max(0, hold_ms) / 1000.0)
+            _u.keybd_event(vk, 0, _KEYUP, 0)
     elif _PYN:
         k = _pyn_key(key)
         _pyn_k.press(k)
-        time.sleep(0.02)
+        time.sleep(max(0, hold_ms) / 1000.0)
         _pyn_k.release(k)
 
 
-def hotkey(combo: str):
-    """A chord like 'ctrl+s', 'alt+tab', 'ctrl+shift+esc', 'win+d'."""
+def hotkey(combo: str, hold_ms: int = 30):
+    """A chord like 'ctrl+s', 'alt+tab', 'ctrl+shift+esc', 'win+d'. Scan-code
+    based so in-game chords register; hold_ms is how long the chord is held
+    before releasing."""
     parts = [p for p in combo.replace(" ", "").split("+") if p]
     if not parts:
         return
@@ -282,16 +350,26 @@ def hotkey(combo: str):
         if not vks:
             return
         for v in vks:                      # press down in order
-            _u.keybd_event(v, 0, 0, 0)
-            time.sleep(0.02)
+            scan = _scan_for_vk(v)
+            if scan:
+                _send_scan(scan, up=False, ext=v in _EXTENDED_VK)
+            else:
+                _u.keybd_event(v, 0, 0, 0)
+            time.sleep(0.008)
+        time.sleep(max(0, hold_ms) / 1000.0)
         for v in reversed(vks):            # release in reverse
-            _u.keybd_event(v, 0, _KEYUP, 0)
-            time.sleep(0.02)
+            scan = _scan_for_vk(v)
+            if scan:
+                _send_scan(scan, up=True, ext=v in _EXTENDED_VK)
+            else:
+                _u.keybd_event(v, 0, _KEYUP, 0)
+            time.sleep(0.008)
     elif _PYN:
         keys = [_pyn_key(p) for p in parts]
         for k in keys:
             _pyn_k.press(k)
-            time.sleep(0.02)
+            time.sleep(0.008)
+        time.sleep(max(0, hold_ms) / 1000.0)
         for k in reversed(keys):
             _pyn_k.release(k)
-            time.sleep(0.02)
+            time.sleep(0.008)
