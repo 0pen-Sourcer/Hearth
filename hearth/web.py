@@ -3318,7 +3318,9 @@ class HearthHandler(BaseHTTPRequestHandler):
         try:
             _rt_voice.set_caption_callback(_on_partial)
             _rt_voice.set_barge_callback(_on_barge)
+            _ready_fired = threading.Event()
             def _on_ready() -> None:
+                _ready_fired.set()
                 # The recorder is built by now, so a mic-fallback (picked device
                 # wouldn't open, using the OS default) has already been recorded.
                 # Ship it with 'ready' so the UI can warn instead of the user
@@ -3332,6 +3334,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                     pass
                 _rt_event_queue.put(ev)
             _rt_voice.set_ready_callback(_on_ready)
+            _rt_voice.set_error_callback(
+                lambda m: _rt_event_queue.put({"type": "error", "message": m}))
             if _voice:
                 _voice.set_level_sink(lambda v: _rt_event_queue.put({"type": "level", "v": v}))
             # "warming" until the STT model finishes loading; the ready callback
@@ -3339,6 +3343,20 @@ class HearthHandler(BaseHTTPRequestHandler):
             emit({"type": "warming"})
             msg = _rt_voice.start_continuous(_on_final)
             emit({"type": "started", "detail": msg})
+            # Watchdog: if the recorder never reaches "ready" (a missing voice
+            # component in a packaged build, or a first-run model download that
+            # stalls), the UI would sit on "warming" forever with no clue. Fire a
+            # loud, mute-proof toast after a grace period instead.
+            def _warm_watchdog():
+                if not _ready_fired.is_set():
+                    _rt_event_queue.put({"type": "warn_slow", "message":
+                        "Voice is still starting. First run downloads a small "
+                        "speech model, which can take a minute. If it never "
+                        "starts, a voice component may be missing from this "
+                        "build - check hearth_window.log."})
+            _wt = threading.Timer(45.0, _warm_watchdog)
+            _wt.daemon = True
+            _wt.start()
             # Raise the desktop HUD too. It self-hides whenever the Hearth GUI is
             # the foreground window (focus-based handoff in voice_overlay), so
             # there's no double grid — it only appears when you've tabbed away to

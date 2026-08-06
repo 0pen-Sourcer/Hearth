@@ -45,6 +45,7 @@ _caption_cb: Optional[Callable[[str], None]] = None
 # LLM stream so a phone-call-like interrupt works.
 _barge_cb: Optional[Callable[[], None]] = None
 _ready_cb: Optional[Callable[[], None]] = None  # fires once the STT model is loaded
+_error_cb: Optional[Callable[[str], None]] = None  # fires if the recorder can't build
 # Echo guard: speech must sustain this long before it counts as a barge, so a
 # blip of the assistant's own voice bleeding through the speakers (VAD start then a
 # quick VAD stop cancels the timer) doesn't self-interrupt. Needed now that a
@@ -98,6 +99,11 @@ def _build_recorder():
     # voice mode forever (CLI question never gets an answer in a
     # GUI-spawned subprocess). Idempotent — sets a flag in
     # ~/.cache/torch/hub/trusted_list.
+    # This whole block is OPTIONAL — the recorder below runs silero via ONNX
+    # (silero_use_onnx=True), which needs neither torch nor torch.hub. So ANY
+    # failure here must be swallowed. The packaged build bundles torch but NOT
+    # torch.hub, so `torch.hub.set_dir` raises AttributeError (not ImportError);
+    # catching only ImportError let it escape and warm the recorder forever.
     try:
         import torch  # type: ignore
         torch.hub.set_dir(os.path.expanduser(os.environ.get(
@@ -111,8 +117,8 @@ def _build_recorder():
                             trust_repo=True, force_reload=False, verbose=False)
         except Exception:
             pass  # repo cached / offline / non-fatal
-    except ImportError:
-        pass
+    except Exception:
+        pass  # no torch / no torch.hub (packaged build) — ONNX silero covers it
 
     from RealtimeSTT import AudioToTextRecorder
 
@@ -342,6 +348,14 @@ def set_barge_callback(cb: Optional[Callable[[], None]]) -> None:
     _barge_cb = cb
 
 
+def set_error_callback(cb: Optional[Callable[[str], None]]) -> None:
+    """Register a function to fire with a message if the recorder can't build
+    (missing voice dependency, model that won't load) so the UI can surface it
+    instead of sitting on 'warming' until the watchdog trips."""
+    global _error_cb
+    _error_cb = cb
+
+
 def set_ready_callback(cb: Optional[Callable[[], None]]) -> None:
     """Register a function to fire once the STT model has finished loading and
     the recorder is actually listening (start_continuous returns before that)."""
@@ -357,6 +371,9 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
     except Exception as e:
         print(f"[hearth.realtime_voice] recorder init failed: {e}")
         _listening = False
+        if _error_cb is not None:
+            try: _error_cb(f"Voice recorder failed to start: {e}")
+            except Exception: pass
         return
 
     _listening = True

@@ -10789,8 +10789,13 @@ function handleRealtimeEvent(ev) {
     if (_voiceReady) setVoiceStatus('listening');
   } else if (ev.type === 'stopped') {
     rtVoiceActive = false;
+  } else if (ev.type === 'warn_slow') {
+    // Voice stuck warming (missing component / slow model download). force=true
+    // so it shows even with toasts muted — this is one you must not miss.
+    if (!_voiceReady) toast('Voice is taking a while', ev.message || '', 'warn', 12000, true);
   } else if (ev.type === 'error') {
-    toast('Realtime voice error', ev.message || '', 'warn', 5000);
+    // A real voice failure is mute-proof too, otherwise it fails silently.
+    toast('Voice error', ev.message || '', 'err', 9000, true);
     rtVoiceActive = false;
   }
 }
