@@ -7923,3 +7923,29 @@ def compact_history(messages: List[Dict[str, Any]],
 def estimate_tokens(messages: List[Dict[str, Any]]) -> int:
     """Cheap token estimate for the whole message list."""
     return sum(_msg_chars(m) for m in messages) // CHARS_PER_TOKEN
+
+
+# --- Keep the load_tools menu honest ----------------------------------------
+# Regenerate load_tools's description from the ACTUAL deferred tools, grouped by
+# category, so the model always sees a real menu of what it can pull in. The old
+# hardcoded list went stale and left out whole groups (email, clipboard,
+# reminders, jobs), which is why the model sometimes "forgot" it had a tool and
+# either gave up or reached for run_command instead of loading the right one.
+# Runs at import, after _DEFERRED_TOOLS, tools_by_category, and the schema exist.
+try:
+    _menu_parts = []
+    for _cat, _tds in tools_by_category():
+        _dn = [td["name"] for td in _tds if td["name"] in _DEFERRED_TOOLS]
+        if _dn:
+            _shown = ", ".join(_dn[:5]) + ("..." if len(_dn) > 5 else "")
+            _menu_parts.append(f"{_cat.lower()} ({_shown})")
+    if _menu_parts:
+        _LOAD_TOOLS_SCHEMA["function"]["description"] = (
+            "Reveal extra built-in tools kept off the default prompt to save "
+            "context. BEFORE assuming you can't do something, or reaching for "
+            "run_command, check here first, the tool you need is very likely one "
+            "call away. Pass a keyword naming what you need, then call the tool it "
+            "returns. Available on demand, by group: " + "; ".join(_menu_parts) +
+            ". Pass 'all' to load everything.")
+except Exception:
+    pass
