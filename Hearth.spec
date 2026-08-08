@@ -94,11 +94,30 @@ if os.path.isdir(_wt_dir):
 #   - kokoro_onnx  → config.json (TTS vocab)
 #   - faster_whisper → assets/*.onnx (Silero VAD model)
 for _pkg in ("kokoro_onnx", "espeakng_loader", "language_tags",
-             "faster_whisper", "onnxruntime", "matplotlib"):
+             "faster_whisper", "onnxruntime", "matplotlib",
+             # jsonschema_specifications ships its metaschema JSONs in a schemas/
+             # dir loaded via importlib.resources. Without them the MCP client's
+             # jsonschema validation dies with a FileNotFound on
+             # _internal/jsonschema_specifications/schemas (26 hits in the field
+             # logs). referencing is its sibling that also carries data files.
+             "jsonschema_specifications", "referencing"):
     try:
         DATAS += collect_data_files(_pkg)
     except Exception:
         pass
+
+# Belt-and-suspenders for kokoro_onnx's config.json (the TTS vocab). A build
+# where collect_data_files missed it left Kokoro dead with a FileNotFound on
+# _internal/kokoro_onnx/config.json. Add it explicitly so it always lands there.
+try:
+    import importlib.util as _ilu
+    _ko_spec = _ilu.find_spec("kokoro_onnx")
+    if _ko_spec and _ko_spec.submodule_search_locations:
+        _ko_cfg = os.path.join(list(_ko_spec.submodule_search_locations)[0], "config.json")
+        if os.path.isfile(_ko_cfg):
+            DATAS.append((_ko_cfg, "kokoro_onnx"))
+except Exception:
+    pass
 
 # webrtcvad (pulled in by RealtimeSTT's VAD) ships package metadata that's read
 # at runtime; the frozen app needs it copied or import fails. Doing it HERE in
