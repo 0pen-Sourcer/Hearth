@@ -167,9 +167,27 @@ def current_slots() -> int:
         return 1
 
 
+def _auto_slots_for_vram() -> int:
+    """Default concurrent slots picked from the card's total VRAM, so a big GPU
+    gets real sub-agent parallelism instead of everyone queuing at 1 like an 8GB
+    box. start_builtin() steps this back down at load time if the chosen model +
+    slots won't actually fit, so being generous here is safe."""
+    try:
+        vram = detect_gpu_vram_gb() or 0.0
+    except Exception:
+        vram = 0.0
+    if vram >= 40:
+        return MAX_PARALLEL_SLOTS     # 48GB+ pro cards
+    if vram >= 22:
+        return min(3, MAX_PARALLEL_SLOTS)   # 24GB (3090/4090)
+    if vram >= 14:
+        return min(2, MAX_PARALLEL_SLOTS)   # 16GB
+    return 1                          # 8-12GB: one at a time
+
+
 def get_parallel_slots() -> int:
-    """Slots the built-in server should boot with. Env wins, then the shared
-    settings.json the GUI writes, else 1 (queue everything)."""
+    """Slots the built-in server should boot with. An explicit choice wins (env
+    then the shared settings.json the GUI writes); otherwise auto-scale by VRAM."""
     raw = (os.environ.get("HEARTH_PARALLEL_SLOTS") or "").strip()
     if not raw:
         try:
@@ -178,10 +196,12 @@ def get_parallel_slots() -> int:
                 raw = str((_j.load(f) or {}).get("server_parallel_slots") or "")
         except (OSError, ValueError):
             raw = ""
-    try:
-        return max(1, min(int(raw), MAX_PARALLEL_SLOTS))
-    except ValueError:
-        return 1
+    if raw:
+        try:
+            return max(1, min(int(raw), MAX_PARALLEL_SLOTS))
+        except ValueError:
+            pass
+    return _auto_slots_for_vram()
 
 # Hide the cmd-flash for any subprocess we spawn on Windows.
 _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
