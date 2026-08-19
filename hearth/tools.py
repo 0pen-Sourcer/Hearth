@@ -5005,7 +5005,8 @@ def _capture_active_window(p: Dict) -> str:
     global _LAST_CAPTURE
     _LAST_CAPTURE = {"origin_x": left, "origin_y": top,
                      "src_w": right - left, "src_h": bottom - top,
-                     "img_w": img_w, "img_h": img_h, "path": out}
+                     "img_w": img_w, "img_h": img_h, "path": out,
+                     "ts": time.time()}
     return (
         f"Saved: {out} ({img_w}x{img_h}) — window {win_title!r}\n"
         f"COORDINATE CONTRACT: this image is {img_w}x{img_h} px, top-left = (0,0). "
@@ -6910,6 +6911,21 @@ def _computer_click(p: Dict) -> str:
     if err:
         return err
     x, y = p.get("x"), p.get("y")
+    # Coordinate-space fix: the #1 desktop-control bug was the model reading a
+    # pixel off the downscaled (<=1280) capture image and passing it to raw
+    # computer_click, which treats it as a real screen pixel (e.g. 2560 wide) and
+    # clicks the wrong place. If there's a RECENT capture and the point lands
+    # inside that image, it IS image-space — route through smart_click so it maps
+    # to real screen coords, snaps to the nearest control, and verifies.
+    try:
+        cap = _LAST_CAPTURE
+        if (cap and x is not None and y is not None
+                and time.time() - cap.get("ts", 0) < 45
+                and 0 <= float(x) <= cap.get("img_w", 0)
+                and 0 <= float(y) <= cap.get("img_h", 0)):
+            return _smart_click(p)
+    except Exception:
+        pass
     button = (p.get("button") or "left").lower()
     double = bool(p.get("double"))
     _c.click(int(x) if x is not None else None,
@@ -6924,7 +6940,10 @@ def _computer_type(p: Dict) -> str:
         return err
     text = p.get("text", "")
     _c.type_text(text)
-    return f"typed {len(text)} character(s) at the current focus"
+    return (f"typed {len(text)} character(s) at the current focus. "
+            f"NEXT STEP: this typed blind at whatever had focus — do NOT assume it "
+            f"landed in the right field. Call capture_active_window + view_image to "
+            f"CONFIRM the text actually appeared where you wanted before moving on.")
 
 
 def _computer_key(p: Dict) -> str:
