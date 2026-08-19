@@ -20,6 +20,7 @@ import shlex
 import shutil
 import socket
 import time
+import time as _t   # module-level alias; several tools use `_t.sleep/monotonic`
 import fnmatch
 import platform
 import subprocess

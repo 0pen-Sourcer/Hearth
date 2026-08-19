@@ -7290,8 +7290,15 @@ async function send(forced = null, displayAs = null, opts = {}) {
       }
       const argsEl = _partialTool.div.querySelector('.t-args');
       if (argsEl) {
-        const txt = String(ev.args_text || '');
-        argsEl.textContent = txt.length > 120 ? txt.slice(0, 120) + '…' : txt;
+        // For file writes the raw partial JSON (old_text/new_text) is ugly and
+        // becomes a diff the moment it finalizes, so show a clean "preparing…"
+        // instead of streaming the blob. Other tools stream their real args.
+        if (ev.name === 'edit_file' || ev.name === 'write_file') {
+          argsEl.textContent = 'preparing changes…';
+        } else {
+          const txt = String(ev.args_text || '');
+          argsEl.textContent = txt.length > 120 ? txt.slice(0, 120) + '…' : txt;
+        }
       }
       chatFollow();
       return;
