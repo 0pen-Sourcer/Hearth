@@ -504,6 +504,12 @@
     margin: 8px 0;
   }
   .msg .content pre code { background: transparent; padding: 0; border: none; }
+  /* Raw code shown WHILE a fence is still streaming (before its closing ```). */
+  .msg .content pre.live-raw {
+    background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r);
+    padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px;
+    margin: 8px 0; color: var(--fg-dim);
+  }
 
   /* Fenced code block chrome: a thin bar with the language + a copy button that
      surfaces on hover. Sits flush on top of the <pre>, matching Hearth's card
@@ -4464,6 +4470,19 @@ function renderMD(src) {
   });
   return html;
 }
+
+// Live-stream render: same markdown, but while a code fence is still OPEN (odd
+// number of ``` in the segment so far) show the raw text in a plain monospace
+// block instead of re-parsing a half-drawn fence every token — that half-parse
+// is what flickers/jumps mid-stream. The moment the closing ``` arrives it snaps
+// to a real rendered code block. Everything else renders markdown live as before.
+function renderLive(seg) {
+  const s = stripGarbageToolCalls(seg || '');
+  if ((s.match(/```/g) || []).length % 2 === 1) {
+    return `<pre class="live-raw">${esc(s)}</pre>`;
+  }
+  return renderMD(s);
+}
 const fmtBytes = (n) => !n ? '0B' : n < 1024 ? `${n}B` : n < 1048576 ? `${(n/1024).toFixed(1)}KB` : n < 1073741824 ? `${(n/1048576).toFixed(1)}MB` : `${(n/1073741824).toFixed(2)}GB`;
 const fmtRel = (t) => { if (!t) return '-'; const d = Date.now()/1000 - t; return d < 60 ? `${d|0}s ago` : d < 3600 ? `${(d/60)|0}m ago` : d < 86400 ? `${(d/3600)|0}h ago` : `${(d/86400)|0}d ago`; };
 const uuid = () => 'c_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -7469,7 +7488,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         liveContent = makeContentBlock('');
         appendPart(liveContent, live);
       }
-      liveContent.innerHTML = renderMD(stripGarbageToolCalls(assistantMsg.content.slice(_liveTextCursor)));
+      liveContent.innerHTML = renderLive(assistantMsg.content.slice(_liveTextCursor));
       ttsBuffer += ev.content;
       maybeFlushTTS(false);
       chatFollow();
