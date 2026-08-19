@@ -6625,6 +6625,37 @@ def _list_windows(p: Dict) -> str:
     return f"{len(rows)} open windows:\n" + "\n".join(lines)
 
 
+def _force_foreground_hwnd(hwnd) -> bool:
+    """Bring an arbitrary top-level window to the foreground, BEATING Windows'
+    foreground lock via AttachThreadInput. A bare SetForegroundWindow from a
+    background app (which Hearth is) usually just flashes the taskbar — this is
+    why alt+tab / focus attempts 'did nothing'. Returns True on the win32 path."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        k = ctypes.windll.kernel32
+        u.ShowWindow(hwnd, 5)   # SW_SHOW (un-hide)
+        u.ShowWindow(hwnd, 9)   # SW_RESTORE (un-minimize)
+        fg = u.GetForegroundWindow()
+        fg_thread = u.GetWindowThreadProcessId(fg, None) if fg else 0
+        cur_thread = k.GetCurrentThreadId()
+        attached = False
+        try:
+            if fg_thread and fg_thread != cur_thread:
+                attached = bool(u.AttachThreadInput(fg_thread, cur_thread, True))
+            u.BringWindowToTop(hwnd)
+            u.SetForegroundWindow(hwnd)
+            u.SetActiveWindow(hwnd)
+        finally:
+            if attached:
+                u.AttachThreadInput(fg_thread, cur_thread, False)
+        return True
+    except Exception:
+        return False
+
+
 def _focus_window(p: Dict) -> str:
     """Bring an already-open window to the front by (partial) title match.
     Like open_app, but for windows that are ALREADY open — raise/focus them."""
@@ -6659,15 +6690,11 @@ def _focus_window(p: Dict) -> str:
         sample = ", ".join(sorted({t for t in titles if t})[:12])
         return (f"No open window matching '{name}'. Open windows: {sample or '(none)'}")
     hwnd, title = matches[0]
-    try:
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # un-minimize if needed
-    except Exception:
-        pass
-    try:
-        win32gui.SetForegroundWindow(hwnd)
-    except Exception:
-        # Foreground-lock fallback: float it to top briefly, then release.
+    # Robust foreground via AttachThreadInput (beats the lock). Fall back to the
+    # topmost-toggle if that path somehow fails.
+    if not _force_foreground_hwnd(hwnd):
         try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
                                   win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
             win32gui.SetWindowPos(hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
@@ -6953,6 +6980,15 @@ def _computer_key(p: Dict) -> str:
     key = (p.get("key") or "").strip()
     if not key:
         return "Error: 'key' required (e.g. 'enter', 'ctrl+s', 'alt+tab', 'win+d')"
+    _norm = key.replace(" ", "").lower()
+    if _norm in ("alt+tab", "alt+shift+tab"):
+        # alt+tab from a background app is unreliable (the OS often swallows the
+        # synthetic hold), which is why window switching kept "doing nothing".
+        # Point at the tool that actually works.
+        return ("Note: alt+tab injected from Hearth is unreliable for switching "
+                "windows. To bring a specific window forward, use "
+                "focus_window(name='<part of its title>') instead — it uses the "
+                "reliable foreground path. (list_windows shows open titles.)")
     if "+" in key:
         _c.hotkey(key)
     else:
