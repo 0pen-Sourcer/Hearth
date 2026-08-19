@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import socket
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Optional, Tuple
@@ -78,13 +79,20 @@ def acquire_or_defer(preferred_port: int = DEFAULT_PORT) -> Tuple[bool, int]:
     """
     # Is port 8765 already taken?
     if _port_in_use(preferred_port):
-        # By Hearth?
-        if _is_hearth_at(preferred_port):
-            _focus_existing(preferred_port)
-            return (False, preferred_port)
-        # Some other app — fall through to a higher port and run secondary.
-        # We deliberately do NOT loop here; just bump by 1 and hand back so
-        # the caller's _free_port can handle the rest.
+        # By Hearth? A primary that's still doing its cold-boot warmup
+        # (voice/wake models, drive scan) holds the port bound while /api/state
+        # doesn't answer within a single 1s probe. Treating "no answer == foreign
+        # app" let a second FULL instance slip through during that window — the
+        # two-trays / ghost-tool-call bug. Retry across the boot window before
+        # giving up on it being Hearth; the caller's bind race-check is the final
+        # backstop if the primary is somehow slower than this.
+        for _ in range(8):   # ~8 * 1s probe = up to ~8s of boot slack
+            if _is_hearth_at(preferred_port):
+                _focus_existing(preferred_port)
+                return (False, preferred_port)
+            time.sleep(1.0)
+        # Still no Hearth response after the boot window — genuinely a foreign
+        # app on 8765. Fall through to a higher port and run as a secondary.
     return (True, preferred_port)
 
 

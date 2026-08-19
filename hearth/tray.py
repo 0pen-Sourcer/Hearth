@@ -65,6 +65,24 @@ _server_url: str = ""
 _desktop_proc: Optional[subprocess.Popen] = None
 
 
+def _signal_voice_open() -> None:
+    """Wake fired but a window is already open — ask the running GUI to enter
+    voice mode in place (it can't be done by spawning a second ?voice=1 window).
+    Sets a one-shot flag the GUI's /api/state poll picks up."""
+    if not _server_url:
+        return
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            _server_url.rstrip("/") + "/api/voice/open",
+            data=b"{}", method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=2).read()
+    except Exception as e:
+        print(f"[hearth.tray] voice-open signal failed: {e}", file=sys.stderr)
+
+
 def _open_desktop_window(voice: bool = False):
     """Open the PyWebView native window as a SUBPROCESS.
 
@@ -82,9 +100,12 @@ def _open_desktop_window(voice: bool = False):
     """
     global _desktop_proc
     if _desktop_proc and _desktop_proc.poll() is None:
-        # Window already open — bring it forward. (Auto-starting voice into an
-        # already-open window would need a backend signal; v1 just focuses it,
-        # the user hits the mic. Opening a CLOSED window into voice works below.)
+        # Window already open — we can't spawn a second ?voice=1 window. For a
+        # voice request (wake word / tray Voice mode) signal the running GUI to
+        # enter voice mode IN PLACE — it polls /api/state for the flag and flips
+        # itself into the HUD. Plain "Open" just no-ops; the window's already up.
+        if voice:
+            _signal_voice_open()
         return
 
     url = _server_url + ("?voice=1" if voice else "")
@@ -211,6 +232,15 @@ def main(argv: Optional[list] = None) -> int:
     server = web_backend.serve(host="127.0.0.1", port=port)
     _server_url = f"http://127.0.0.1:{port}/"
     time.sleep(0.3)
+
+    # Let /api/focus open the window when it's been closed to the tray (the
+    # window subprocess is dead, so the pending-focus flag has no one to read it).
+    # _open_desktop_window no-ops if a window is already up, so this is safe for
+    # the window-open case too.
+    try:
+        web_backend.set_surface_callback(lambda: _open_desktop_window(voice=False))
+    except Exception as e:
+        print(f"[hearth.tray] could not register surface callback: {e}", file=sys.stderr)
 
     print(f"[hearth.tray] backend on {_server_url}")
 

@@ -59,6 +59,27 @@ _barge_guard_ms: int = int(os.environ.get("HEARTH_BARGE_GUARD_MS", "150") or "15
 _barge_timer: Optional[threading.Timer] = None
 _barge_grace_until: float = 0.0  # capture user speech (skip echo-tail) until this time
 _barge_fired: bool = False  # a real barge fired this segment (vs an echo blip)
+
+# Speaker-safe HALF-DUPLEX — OPT-IN, default OFF. On a headset (the common case)
+# the mic can't hear the earpieces, so there's no echo and you WANT to interrupt
+# by voice (barge-in). Forcing half-duplex on everyone broke that — you couldn't
+# talk while Hearth spoke. The real self-loop cause (Hearth falling back to a
+# 'Stereo Mix' system-audio device) is fixed separately in _mic_index, and the
+# text-similarity echo guard catches speaker bleed. So barge stays ON by default;
+# a speaker+mic user who still loops turns half-duplex on in Settings > Voice
+# (or HEARTH_VOICE_HALF_DUPLEX=1), which holds the mic closed while Hearth speaks.
+def _half_duplex() -> bool:
+    v = os.environ.get("HEARTH_VOICE_HALF_DUPLEX")
+    if v is not None:
+        return v.strip().lower() not in ("0", "false", "no", "off")
+    try:
+        from .web import _load_settings
+        return bool(_load_settings().get("voice_half_duplex"))
+    except Exception:
+        return False
+# How long after TTS stops the mic stays deaf, to swallow the acoustic tail +
+# device/transcription buffering that arrives late on speakers.
+_ECHO_TAIL_S: float = float(os.environ.get("HEARTH_VOICE_ECHO_TAIL_S", "1.8") or "1.8")
 _BARGE_DEBUG: bool = os.environ.get("HEARTH_BARGE_DEBUG", "1") not in ("0", "", "false")
 
 
@@ -164,6 +185,14 @@ def _build_recorder():
         # guard timer to stop TTS on your first word.
         if not _tts.is_speaking():
             return
+        if _half_duplex():
+            # Speaker-safe: never let audio-over-TTS arm a barge. On speakers that
+            # "speech" is almost always Hearth's own voice bleeding back, and
+            # arming a barge is what opened the grace window that let the echo
+            # through as a user turn. No barge here → no self-loop.
+            if _BARGE_DEBUG:
+                print("[barge] speech_start over TTS ignored (half-duplex)", flush=True)
+            return
         global _barge_timer, _barge_grace_until, _barge_fired
         if _BARGE_DEBUG:
             print("[barge] speech_start over TTS -> arming", flush=True)
@@ -250,44 +279,94 @@ def _build_recorder():
 _mic_warning = ""  # surfaced to the UI when a picked mic couldn't be opened
 
 
-def _mic_index():
-    """The user's chosen mic index, but ONLY if it can actually be opened.
+class NoUsableMic(RuntimeError):
+    """Raised when there's no REAL, openable microphone. Voice refuses to start
+    rather than fall back to a system-audio device and transcribe the speakers."""
 
-    A Bluetooth headset (boAt, AirPods, etc.) enumerates its mic even when its
-    HFP capture endpoint won't open, and handing that index to RealtimeSTT makes
-    it retry 'Selected device validation failed' forever with no way out. So we
-    probe the device first; if it fails we fall back to the OS default and leave
-    a message the voice UI can show, instead of a silent dead mic."""
-    global _mic_warning
-    _mic_warning = ""
-    try:
-        from .listen import input_device_index
-        idx = input_device_index()
-    except Exception:
-        return None
-    if idx is None:
-        return None
+
+def _probe_device(idx) -> bool:
+    """True if the input device can actually be opened for capture. A Bluetooth
+    HFP mic often enumerates but won't open, so we START a stream briefly instead
+    of trusting check_input_settings."""
     try:
         import sounddevice as sd
-        # check_input_settings is too optimistic (it passed a Bluetooth HFP mic
-        # that RealtimeSTT then couldn't open), so actually START a stream for a
-        # moment. If the device can't be opened for capture, this throws here
-        # instead of inside RealtimeSTT's forever-retry loop.
-        with sd.InputStream(device=idx, channels=1, samplerate=16000,
-                            blocksize=1024):
+        with sd.InputStream(device=idx, channels=1, samplerate=16000, blocksize=1024):
             pass
-        return idx
-    except Exception as e:
-        _mic_warning = ("Your selected mic couldn't be opened (Bluetooth mics "
-                        "often can't), so Hearth is using the system default. "
-                        "Pick a different mic in Settings > Voice if it can't "
-                        "hear you.")
-        try:
-            print(f"[voice] mic index {idx} failed to open ({e}); using default",
-                  flush=True)
-        except Exception:
-            pass
+        return True
+    except Exception:
+        return False
+
+
+def _device_name(idx) -> str:
+    try:
+        import sounddevice as sd
+        return str(sd.query_devices(idx).get("name", ""))
+    except Exception:
+        return ""
+
+
+def _mic_index():
+    """Resolve the microphone to actually open — NEVER a system-audio/loopback
+    device. This is the fix for 'I have no mic yet it transcribed my speakers':
+    when a chosen mic can't open, the old code fell back to the OS default, which
+    on many machines is a loopback capture of whatever the speakers play. Now we
+    refuse that fallback and raise NoUsableMic so voice turns OFF with a clear
+    message instead of looping on system audio."""
+    global _mic_warning
+    _mic_warning = ""
+    from .listen import (input_device_index, is_system_audio_device,
+                         list_input_devices)
+    try:
+        sel = input_device_index()
+    except Exception:
+        sel = None
+
+    def _first_real_mic(skip=None):
+        for d in list_input_devices():
+            if d["index"] == skip or is_system_audio_device(d["name"]):
+                continue
+            if _probe_device(d["index"]):
+                return d
         return None
+
+    # 1) An explicitly-picked mic.
+    if sel is not None:
+        if is_system_audio_device(_device_name(sel)):
+            raise NoUsableMic("The selected input is a system-audio (loopback) "
+                              "device, not a microphone — it would transcribe your "
+                              "speakers. Pick a real mic in Settings > Voice.")
+        if _probe_device(sel):
+            return sel
+        # Picked mic won't open (Bluetooth HFP often won't). Fall back ONLY to a
+        # real mic, never a loopback.
+        alt = _first_real_mic(skip=sel)
+        if alt is not None:
+            _mic_warning = (f"Your selected mic couldn't open; using '{alt['name']}'. "
+                            "Pick another in Settings > Voice if needed.")
+            return alt["index"]
+        raise NoUsableMic("Your microphone couldn't be opened and there's no other "
+                          "real mic. Voice is off so Hearth doesn't transcribe your "
+                          "speakers — reconnect the mic (or fix the Bluetooth headset) "
+                          "and try again.")
+
+    # 2) No explicit pick — use the OS default only if it's a real mic.
+    try:
+        import sounddevice as sd
+        di = sd.query_devices(kind="input")
+        dname = str(di.get("name", "")) if isinstance(di, dict) else ""
+    except Exception:
+        dname = ""
+    if dname and not is_system_audio_device(dname):
+        return None   # PortAudio default is a real mic
+    alt = _first_real_mic()
+    if alt is not None:
+        if dname:
+            _mic_warning = (f"The system default input is a system-audio device; "
+                            f"using '{alt['name']}' so Hearth doesn't hear your speakers.")
+        return alt["index"]
+    raise NoUsableMic("No real microphone is available (the system default is a "
+                      "system-audio device). Voice is off so Hearth won't transcribe "
+                      "your speakers. Connect a mic and try again.")
 
 
 def mic_warning() -> str:
@@ -368,6 +447,15 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
     global _listening, _barge_grace_until
     try:
         rec = _get_recorder()
+    except NoUsableMic as e:
+        # No real mic — don't listen (would transcribe the speakers). Surface the
+        # plain reason, not a scary "recorder failed" stack.
+        print(f"[hearth.realtime_voice] {e}")
+        _listening = False
+        if _error_cb is not None:
+            try: _error_cb(str(e))
+            except Exception: pass
+        return
     except Exception as e:
         print(f"[hearth.realtime_voice] recorder init failed: {e}")
         _listening = False
@@ -385,19 +473,45 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
     if cb is not None:
         try: cb()
         except Exception: pass
+    # Discard whatever the recorder buffered BEFORE this session started. The mic
+    # keeps capturing while the window is closed / during wake-word listening; without
+    # this, the first rec.text() calls drain that backlog and the stray phrases get
+    # concatenated into a single spurious user turn. Start every session on a clean mic.
+    try:
+        rec.clear_audio_queue()
+    except Exception:
+        pass
+    _err_streak = 0   # consecutive rec.text() failures — a disconnected mic
     try:
         while not _stop_flag.is_set():
             try:
                 # Block until silero detects an endpoint and faster-whisper
                 # returns the finalized text. ~200-400ms after you stop talking.
                 text = rec.text()
+                _err_streak = 0
                 # Diagnostic: proves whether VAD is actually endpointing (a final
                 # utterance) vs blocking forever. If you SEE this line in the
                 # terminal after you stop talking, the final fired.
                 print(f"[hearth.realtime_voice] FINAL utterance -> {text!r}", flush=True)
             except Exception as e:
-                print(f"[hearth.realtime_voice] rec.text() error: {e}", flush=True)
-                time.sleep(0.2)
+                # A mid-session mic disconnect (unplugging a Bluetooth headset) makes
+                # the recorder spew 'Unanticipated host error' / 'device validation
+                # failed' forever. Don't spin on it — after a short streak, stop voice
+                # cleanly with a message instead of letting it silently recover onto
+                # some other (maybe system-audio) device.
+                _err_streak += 1
+                print(f"[hearth.realtime_voice] rec.text() error ({_err_streak}): {e}", flush=True)
+                if _err_streak >= 4:
+                    print("[hearth.realtime_voice] mic looks disconnected — stopping voice", flush=True)
+                    if _error_cb is not None:
+                        try:
+                            _error_cb("Your microphone disconnected, so voice mode stopped. "
+                                      "Reconnect it and start voice again.")
+                        except Exception:
+                            pass
+                    _stop_flag.set()
+                    break
+                time.sleep(0.3)
                 continue
             if _stop_flag.is_set():
                 break
@@ -417,7 +531,17 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
             # is the interrupting message and it has to reach the LLM. Outside the
             # grace, drop anything captured while speaking or in the ~1.2s echo
             # tail after.
-            if time.time() < _barge_grace_until:
+            if _half_duplex():
+                # Speaker-safe: while Hearth is speaking, or within the echo tail
+                # after, the mic is DEAF. Anything captured then is speaker bleed
+                # (Hearth's own voice, a video, music) — never a user turn. This is
+                # the hard stop against the self-reply loop on speakers. Flush the
+                # buffer too so accumulated echo can't ride into the next turn.
+                if _tts.is_speaking() or _tts.seconds_since_spoke() < _ECHO_TAIL_S:
+                    try: rec.clear_audio_queue()
+                    except Exception: pass
+                    continue
+            elif time.time() < _barge_grace_until:
                 # A barge fired and grabbed this utterance — but on speakers the
                 # "barge" can be the assistant's own voice bleeding into the mic. If the
                 # words are mostly what the assistant just said, it's echo: drop it so it
@@ -432,26 +556,59 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
                 try: rec.clear_audio_queue()
                 except Exception: pass
                 continue
+            # Final net for split speaker/headphone setups: echo cancellation can't
+            # cancel when playback and mic are on different devices, and the bleed
+            # often arrives late enough (transcription lag + device buffering) to
+            # slip past the timing gate above. If the words are mostly what the
+            # assistant just said, it's that echo, not a real turn — drop it. A
+            # headset user's words don't overlap, so they pass straight through.
+            if _tts.seconds_since_spoke() < 6.0 and _looks_like_echo(text):
+                try: rec.clear_audio_queue()
+                except Exception: pass
+                continue
             # Utterance accepted → LLM is about to work: HUD shows "thinking"
             # (brisk pulse) until the first TTS chunk flips it to "speaking".
             try: _tts.set_voice_state("thinking")
             except Exception: pass
+            # Dispatch to the CURRENT sink — reopening the overlay / switching
+            # chats rebinds this (below) without restarting the loop, so
+            # utterances reach the live stream, not a dead one.
             try:
-                on_utterance(text)
+                (_on_utterance_ref or on_utterance)(text)
             except Exception as e:
                 print(f"[hearth.realtime_voice] on_utterance error: {e}")
     finally:
         _listening = False
 
 
+# The live utterance sink. start_continuous rebinds this on every (re)entry so a
+# reopened overlay redirects to its NEW stream without restarting the recorder.
+_on_utterance_ref: Optional[Callable[[str], None]] = None
+
+
 def start_continuous(on_utterance: Callable[[str], None]) -> str:
-    """Begin continuous listening. Idempotent — second call is a no-op."""
-    global _listen_thread
+    """Begin continuous listening. Rebindable — if the recorder is already warm
+    (overlay reopened, chat switched) this repoints the sink and re-signals ready
+    instead of starting a second loop, so the UI never sticks on 'warming up'."""
+    global _listen_thread, _on_utterance_ref
     if not is_available():
         return "RealtimeSTT not installed — falling back to hearth.listen"
-    if _listening:
-        return "Realtime voice already listening"
+    _on_utterance_ref = on_utterance
+    # Clear the stop flag FIRST. A previous close set it; without clearing, the
+    # loop hits `if _stop_flag.is_set(): break` on the next utterance and DROPS
+    # it — that's the "FINAL printed but nothing reached the LLM" after a reopen.
     _stop_flag.clear()
+    # Rebind onto a loop that's GENUINELY still alive (chat switch / instant
+    # reopen on a warm recorder). Guard on thread liveness AND a live recorder so
+    # a stale _listening flag can never leave us signalling ready with no loop
+    # actually running (which reads as "stuck on warming").
+    if (_listening and _listen_thread is not None
+            and _listen_thread.is_alive() and _recorder is not None):
+        rc = _ready_cb
+        if rc is not None:
+            try: rc()
+            except Exception: pass
+        return "Realtime voice already listening"
     _listen_thread = threading.Thread(
         target=_continuous_loop, args=(on_utterance,), daemon=True,
     )
@@ -460,7 +617,10 @@ def start_continuous(on_utterance: Callable[[str], None]) -> str:
 
 
 def stop_continuous() -> str:
-    """Halt the listening loop. Safe to call when not running."""
+    """Halt the listening loop AND drop the recorder singleton so the next open
+    builds a fresh, working one. Reusing a .stop()'d recorder was what left voice
+    stuck on 'warming up' after a close and reopen. Also releases the mic so the
+    wake-word listener can take it back."""
     global _recorder
     _stop_flag.set()
     if _recorder is not None:
@@ -468,6 +628,7 @@ def stop_continuous() -> str:
             _recorder.stop()
         except Exception:
             pass
+    reset_recorder()
     return "Realtime voice stopped"
 
 

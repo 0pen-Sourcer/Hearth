@@ -50,6 +50,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from typing import Any, Dict, List, Optional
@@ -71,6 +72,26 @@ def _is_local_endpoint(base: str) -> bool:
     b = (base or "").lower()
     return any(h in b for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1",
                                 "192.168.", "10.", "host.docker.internal"))
+
+
+def bridge_reply_or_reason(reply_text: str, err_category=None, err_message=None) -> str:
+    """Turn a messaging-bridge (Discord/Telegram/WhatsApp) turn into ONE clean
+    reply. Return the assistant text when there is some; otherwise a phone-friendly
+    reason — never a raw '[error] ...' / '(run failed: ...)' dump or a GUI-only hint
+    like 'Pick a model in Models', which is meaningless to someone just texting."""
+    reply = (reply_text or "").strip()
+    if reply:
+        return reply
+    if err_category == "unreachable":
+        return ("I'm not up yet — there's no model loaded on the computer. Load one "
+                "in Hearth (or point it at a cloud brain) and message me again.")
+    if err_category == "rate_limit":
+        return "I'm rate-limited right now. Give it a moment and try me again."
+    if err_category == "auth":
+        return "My model connection isn't authorized at the moment. Ping whoever runs Hearth."
+    if err_message:
+        return err_message
+    return "I couldn't get a response that time. Try me again in a moment."
 
 
 # Cloud models that 400 on `reasoning_effort` (plain grok-4, grok-3 — only
@@ -406,6 +427,86 @@ def _to_manual_messages(msgs: List[Dict[str, Any]],
 # Core loop
 # ---------------------------------------------------------------------------
 
+_THINK_RE = re.compile(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", re.I)
+_OPEN_THINK_RE = re.compile(r"<think(?:ing)?>[\s\S]*$", re.I)
+
+
+def _strip_think(text: str) -> str:
+    """Remove inline reasoning blocks from text destined for HISTORY/context.
+    Some models fold <think>...</think> into content (not the reasoning channel);
+    left in, it rides back into every later prompt, bloating context and steering
+    the model on its own scratch-work. The live reply still shows reasoning via
+    the thinking events — this only cleans what gets RESENT."""
+    if not text or "<think" not in text.lower():
+        return text
+    out = _THINK_RE.sub("", text)
+    # An unclosed <think> (truncation) — drop from the open tag onward.
+    out = _OPEN_THINK_RE.sub("", out)
+    return out.strip()
+
+
+def _chunk_timings(chunk) -> Optional[Dict[str, Any]]:
+    """Real prompt-eval + decode tok/s from a single chunk's llama.cpp `timings`
+    block (present on every chunk when timings_per_token is on). None if absent."""
+    try:
+        me = getattr(chunk, "model_extra", None)
+        tmg = me.get("timings") if isinstance(me, dict) else None
+        if tmg is None:
+            tmg = getattr(chunk, "timings", None)
+        if not isinstance(tmg, dict):
+            return None
+        out: Dict[str, Any] = {}
+        pn, pms = tmg.get("prompt_n"), tmg.get("prompt_ms")
+        gn, gms = tmg.get("predicted_n"), tmg.get("predicted_ms")
+        if pn and pms:
+            out["prompt_tps"] = round(pn / pms * 1000, 1)
+        # Need >=2 predicted tokens: on token #1 predicted_ms is ~0, so the rate
+        # blows up to a garbage million. Skip it — the real rate lands on token 2.
+        if gn and gms and gn >= 2:
+            out["decode_tps"] = round(gn / gms * 1000, 1)
+            out["gen_tokens"] = int(gn)
+        return out or None
+    except Exception:
+        return None
+
+
+def _compute_gen_stats(t0: float, first_tok: Optional[float], content_chars: int,
+                       reason_chars: int, chunk) -> Dict[str, Any]:
+    """Best-effort tok/s stats for the badge: prefer llama.cpp's real `timings`
+    block (separate prompt-eval vs decode rates), else wall-clock + a chars/4
+    token estimate. Never raises."""
+    out: Dict[str, Any] = {}
+    try:
+        tmg = None
+        me = getattr(chunk, "model_extra", None)
+        if isinstance(me, dict):
+            tmg = me.get("timings")
+        if tmg is None:
+            tmg = getattr(chunk, "timings", None)
+        if isinstance(tmg, dict):
+            pn, pms = tmg.get("prompt_n"), tmg.get("prompt_ms")
+            gn, gms = tmg.get("predicted_n"), tmg.get("predicted_ms")
+            if pn and pms:
+                out["prompt_tokens"] = int(pn); out["prompt_tps"] = round(pn / pms * 1000, 1)
+            if gn and gms and gn >= 2:
+                out["gen_tokens"] = int(gn); out["decode_tps"] = round(gn / gms * 1000, 1)
+            if out:
+                return out
+    except Exception:
+        pass
+    try:
+        gen_tokens = max(1, (content_chars + reason_chars) // 4)
+        out["gen_tokens"] = gen_tokens
+        if first_tok:
+            out["ttft_s"] = round(max(0.0, first_tok - t0), 2)
+            dt = time.time() - first_tok
+            if dt > 0.05:
+                out["decode_tps"] = round(gen_tokens / dt, 1)
+    except Exception:
+        pass
+    return out
+
+
 async def run_once(
     prompt: str,
     *,
@@ -417,7 +518,9 @@ async def run_once(
     history: Optional[List[Dict[str, Any]]] = None,
     permission_check=None,
     should_cancel=None,
+    drain_steer=None,
     supervised: bool = True,
+    voice: bool = False,
 ) -> int:
     """Run a single prompt against the model. Returns process exit code.
 
@@ -451,7 +554,16 @@ async def run_once(
     # Only our builtin server uses the hearth-builtin key. That's the exclusive
     # signal to hand-inject tools as text instead of via the API `tools` param.
     _use_manual_tools = (_effective_key == "hearth-builtin")
-    client = AsyncOpenAI(base_url=LOCAL_API_BASE, api_key=_effective_key, timeout=180.0)
+    # No overall request deadline + a per-read (per-chunk) stall timeout: a slow
+    # local model can stream a large generation for many minutes, and a flat total
+    # timeout aborts it mid-stream. Per-read only trips if the server truly stalls;
+    # connect/pool stay short so a dead endpoint fails fast. httpx ships with openai.
+    try:
+        import httpx as _httpx
+        _timeout = _httpx.Timeout(None, connect=15.0, read=300.0, write=60.0, pool=15.0)
+    except Exception:
+        _timeout = 600.0  # fallback: a generous flat timeout beats a 3-minute cliff
+    client = AsyncOpenAI(base_url=LOCAL_API_BASE, api_key=_effective_key, timeout=_timeout)
 
     # Auto-pick the LOADED model (not just downloaded) — LM Studio's v1
     # /models endpoint returns everything it knows about, but only one is
@@ -498,14 +610,7 @@ async def run_once(
     # knows instead of ignoring the passive index. Bounded; adds nothing when
     # nothing matches. Same behavior as the CLI's _prepare_context.
     from . import memory as _mem
-    _sys = system_prompt()
-    # Inject the current local time on every turn so the model can reason about
-    # "what were we doing" / "is it late?" / "remind me tomorrow" without a
-    # get_time call, and read the passage of time across turns.
-    import datetime as _dt
-    _now = _dt.datetime.now().astimezone()
-    _sys += (f"\n\nCurrent local time: {_now.strftime('%Y-%m-%d %H:%M')} "
-             f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).")
+    _sys = system_prompt(voice=voice)
     # Where the brain lives — weigh resource vs cost for heavy tools.
     if _is_local_endpoint(os.environ.get("LOCAL_API_BASE", "")):
         _sys += ("\n\nRuntime: LOCAL model server — free + private, but it serves ONE "
@@ -517,15 +622,23 @@ async def run_once(
                  "money. Parallel agents run fast here, but each one multiplies spend. "
                  "Only fan out a team when the task genuinely needs it, and use the "
                  "smallest team that does the job.")
-    _block = _mem.recall_for_prompt(prompt)
-    if _block:
-        _sys += "\n\n" + _block
+    # Precise local time + prompt-specific recalled memory are NOT appended here.
+    # They change every turn, and anything that changes ahead of the conversation
+    # history invalidates the server's KV cache and forces a full re-prefill of
+    # all history each message. They ride the user turn instead (built below),
+    # which is new every turn anyway — so the system + history prefix stays
+    # byte-stable and the cache is reused.
     messages: List[Dict[str, Any]] = [{"role": "system", "content": _sys}]
     if history:
         # Drop any system entries the caller smuggled in — only ours is canonical.
+        # Strip inline <think> from resent turns: reasoning belongs to the moment
+        # it was produced, not to every future prompt's context.
         for h in history:
             if h.get("role") and h.get("role") != "system":
-                messages.append({"role": h["role"], "content": h.get("content", "")})
+                _hc = h.get("content", "")
+                if h.get("role") == "assistant" and isinstance(_hc, str):
+                    _hc = _strip_think(_hc)
+                messages.append({"role": h["role"], "content": _hc})
     # A "notification flush" turn carries no real user message — the GUI fires
     # it (idle) only to let the model surface a due reminder / finished subagent.
     # The notification itself becomes the trailing user-role message (Claude
@@ -585,6 +698,18 @@ async def run_once(
         # templates reject with "System message must be at the beginning"). The
         # GUI shows the clean prompt via emit().
         _user_content = ("\n\n".join(_notif_ctx) + "\n\n---\n\n" + prompt) if _notif_ctx else prompt
+        # Volatile context (precise local time + memory recalled for THIS prompt)
+        # rides the tail so it doesn't bust the cached system+history prefix. Time
+        # lets the model reason "is it late?" / "remind me tomorrow" for free;
+        # recall surfaces the most relevant saved facts. emit() still shows the
+        # clean prompt so the GUI renders no extra text.
+        import datetime as _dt
+        _now = _dt.datetime.now().astimezone()
+        _user_content += (f"\n\n[Current local time: {_now.strftime('%Y-%m-%d %H:%M')} "
+                          f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).]")
+        _mblock = _mem.recall_for_prompt(prompt)
+        if _mblock:
+            _user_content += "\n\n" + _mblock
         messages.append({"role": "user", "content": _user_content})
         emit("user", content=prompt)
 
@@ -667,6 +792,25 @@ async def run_once(
     # Fires exactly once when iterations crosses WRAP_UP_AT_FRACTION * max_depth.
     _wrapup_nudged: bool = False
     _wrapup_threshold = max(1, int(max_depth * WRAP_UP_AT_FRACTION))
+    _turn_stats: Dict[str, Any] = {}   # tok/s of the last generation this turn
+    # Ctx-ring calibration: the char-estimate undercounts (it ignores the tool
+    # schemas + dense JSON), so the ring reads low then jumps. Once the server
+    # reports real usage.prompt_tokens we learn the estimate's bias and add it to
+    # every subsequent estimate — the ring tracks the model's real context.
+    _ctx_bias = 0
+    _est_sent = 0
+    # Anti-thrash circuit breaker: if summarize-compaction runs but the context
+    # is STILL over the compaction threshold afterward, the chat is genuinely too
+    # full to rescue by summarizing. Count those; after 3, stop re-summarizing
+    # every turn (pure overhead) and fall to the hard trim + a one-time warning.
+    _compact_fails = 0
+    _compact_warned = False
+    # Vision delivery: view_image / screenshot / capture return a text marker
+    # (__JARVIS_IMAGE__ <path>). For a vision model we must turn that into a real
+    # image the model can SEE — otherwise it "reads" the marker text and reports
+    # the image as blank. Cloud endpoints reject a multimodal TOOL message, so we
+    # stash the block here and ride it on a user turn after the tool loop.
+    _pending_image_block: Optional[Dict[str, Any]] = None
 
     for depth in range(max_depth):
         iterations = depth + 1
@@ -674,6 +818,21 @@ async def run_once(
         if should_cancel is not None and should_cancel():
             emit("cancelled", message="stopped by user")
             break
+        # Steering: the user typed while the turn was still running. Drain any
+        # queued messages and inject them as user turns BEFORE the next
+        # generation, so the model course-corrects mid-task (Claude-Code style)
+        # instead of the input being dropped or forced into a new turn.
+        if drain_steer is not None:
+            try:
+                _steers = drain_steer() or []
+            except Exception:
+                _steers = []
+            for _s in _steers:
+                _s = (_s or "").strip()
+                if not _s:
+                    continue
+                messages.append({"role": "user", "content": _s})
+                emit("steered", text=_s)
         # Wrap-up nudge: at 75% of the cap, tell the model how many turns
         # it has left and ask it to write a STATE_SNAPSHOT if the task
         # isn't done. Without this, the cap fires silently at the limit
@@ -717,13 +876,15 @@ async def run_once(
         # LLM call — often shrinks context enough to avoid the lossy summarize
         # compaction entirely. Safe: keeps the newest copy + tool_call pairing.
         messages[:] = dedup_tool_results(messages)
-        _est = estimate_tokens(messages)
+        _est = max(0, estimate_tokens(messages) + _ctx_bias)
         _pct = int(_est * 100 / max(1, _budget))
         # Emit context state on every turn so the GUI can render a footer chip
-        # showing N% used + a 'Compacting...' badge when it kicks in.
+        # showing N% used + a 'Compacting...' badge when it kicks in. `measured`
+        # tells the client the number is server-truth (post-calibration), not a
+        # raw estimate.
         emit("context_state", used=_est, budget=_budget, pct=_pct,
-             messages=len(messages))
-        if _est > _budget * COMPACT_AT and len(messages) > 12:
+             messages=len(messages), measured=bool(_ctx_bias))
+        if _est > _budget * COMPACT_AT and len(messages) > 12 and _compact_fails < 3:
             _last_msg = messages[-1] if messages else {}
             _last_role = _last_msg.get("role")
             _last_has_tool_calls = bool(_last_msg.get("tool_calls"))
@@ -828,8 +989,25 @@ async def run_once(
                                               keep_recent=8,
                                               target_chars=_target)
                 _est = estimate_tokens(messages)
+                # Did it actually help? Still over threshold ⇒ count a failure so
+                # the breaker eventually stops re-summarizing a chat that can't be
+                # rescued by summarizing (huge un-droppable tail, etc.).
+                if _est > _budget * COMPACT_AT:
+                    _compact_fails += 1
+                else:
+                    _compact_fails = 0
                 emit("compacted", after=len(messages), used=_est,
                      pct=int(_est * 100 / max(1, _budget)))
+        elif _est > _budget * COMPACT_AT and _compact_fails >= 3 and not _compact_warned:
+            # Breaker tripped: summarizing isn't reclaiming space. Say so once —
+            # a fresh chat is the real fix, and the hard trim below keeps this one
+            # alive meanwhile.
+            _compact_warned = True
+            emit("context_warning",
+                 message=("This chat is too full to compact further — start a new "
+                          "chat to keep full context. I'll keep going here by "
+                          "trimming the oldest messages."),
+                 loaded_ctx=_budget)
         # Hard trim as last-resort guard if compact didn't fire (unsafe boundary
         # or already past budget). This is the truncate path — keeps the
         # invariant "prompt fits" but drops messages, so we'd rather compact.
@@ -856,6 +1034,11 @@ async def run_once(
                 "messages": messages,
                 "temperature": temperature,
                 "stream": True,
+                # Ask the server for a final usage block on the stream. Gives us
+                # the REAL prompt_tokens (what the model actually saw) instead of
+                # the char-estimate the ctx ring drifts on. Harmless where
+                # unsupported — the field just doesn't come back.
+                "stream_options": {"include_usage": True},
             }
             _tools_block_text = ""
             if _force_answer:
@@ -888,7 +1071,11 @@ async def run_once(
                 # on models that respect it. No stop=["<think>"] anymore: on a
                 # reasoning-FORCED model it halted at the first think tag (empty
                 # reply) and hid the reasoning we now surface.
-                kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": think}}
+                # timings_per_token makes llama.cpp attach a real `timings` block
+                # to EVERY streamed chunk, so the live tok/s is the true number the
+                # whole time (no wall-clock estimate that jumps on the final).
+                kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": think},
+                                        "timings_per_token": True}
             else:
                 # Cloud: actually disable reasoning at the API when think is
                 # off, not just drop the reasoning_content. Otherwise the model
@@ -896,13 +1083,23 @@ async def run_once(
                 eff = _cloud_reasoning_effort(LOCAL_API_BASE, think, model)
                 if eff is not None:
                     kwargs["reasoning_effort"] = eff
+            # Snapshot the estimate for THIS prompt so the usage block coming
+            # back on the stream lets us learn the estimate's bias.
+            _est_sent = estimate_tokens(messages)
             try:
                 resp = await client.chat.completions.create(**kwargs)
             except Exception as _re:
                 # Model doesn't expose reasoning_effort (plain grok-4, grok-3):
                 # strip it, remember, retry once. Other errors fall through to
                 # the outer handler's classify/backoff machinery.
-                if "reasoning_effort" in kwargs and _is_reasoning_param_error(_re):
+                _msg = str(_re).lower()
+                if "stream_options" in _msg and "stream_options" in kwargs:
+                    # A provider that rejects the usage-on-stream extra (some
+                    # OpenAI-compat shims). Drop it and retry — we just lose the
+                    # real token count and fall back to the estimate.
+                    kwargs.pop("stream_options", None)
+                    resp = await client.chat.completions.create(**kwargs)
+                elif "reasoning_effort" in kwargs and _is_reasoning_param_error(_re):
                     _NO_REASONING_EFFORT.add((model or "").lower())
                     kwargs.pop("reasoning_effort", None)
                     resp = await client.chat.completions.create(**kwargs)
@@ -967,9 +1164,24 @@ async def run_once(
         reasoning_buf: List[str] = []
         tool_calls_by_idx: Dict[int, Dict[str, Any]] = {}
         finish_reason: Optional[str] = None
+        _s_t0 = time.time()             # this generation's start (for TTFT + tok/s)
+        _s_first: Optional[float] = None   # time of first token
+        _s_last_chunk = None            # last chunk — may carry usage/timings
+        _s_live_last = 0.0              # throttle for the live tok/s event
+        _tc_live_last = 0.0            # throttle for the live tool-call-args event
 
         try:
             async for chunk in resp:
+                _s_last_chunk = chunk
+                # Real live tok/s: llama.cpp (with timings_per_token) attaches a
+                # `timings` block to each chunk. Forward it, throttled, so the GUI
+                # shows the TRUE number as it streams — never a guess that changes.
+                _lt = _chunk_timings(chunk)
+                if _lt:
+                    _now = time.time()
+                    if _now - _s_live_last >= 0.2:
+                        _s_live_last = _now
+                        emit("stats_live", stats=_lt)
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]
@@ -983,11 +1195,15 @@ async def run_once(
                 # showing it beats a blind wait. The GUI collapses it by default.
                 rc = getattr(delta, "reasoning_content", None)
                 if rc:
+                    if _s_first is None:
+                        _s_first = time.time()
                     reasoning_buf.append(rc)
                     emit("thinking_chunk", content=rc)
 
                 # Plain content chunks — emit as they arrive for live UI
                 if getattr(delta, "content", None):
+                    if _s_first is None:
+                        _s_first = time.time()
                     content_buf.append(delta.content)
                     emit("assistant_chunk", content=delta.content)
 
@@ -1010,6 +1226,18 @@ async def run_once(
                                 slot["function"]["name"] = (slot["function"]["name"] or "") + fn.name
                             if getattr(fn, "arguments", None):
                                 slot["function"]["arguments"] = (slot["function"]["arguments"] or "") + fn.arguments
+                    # Stream the args being built, throttled, so the GUI shows a live
+                    # "generating arguments…" card (LM-Studio style) instead of waiting
+                    # for the whole call to finish. Emit the highest-index slot (the one
+                    # currently streaming). The real `tool_call` finalizes it.
+                    _now = time.time()
+                    if _now - _tc_live_last >= 0.12 and tool_calls_by_idx:
+                        _tc_live_last = _now
+                        _sidx = max(tool_calls_by_idx)
+                        _sl = tool_calls_by_idx[_sidx]["function"]
+                        if _sl.get("name"):
+                            emit("tool_call_partial", index=_sidx,
+                                 name=_sl["name"], args_text=(_sl.get("arguments") or ""))
         except Exception as e:
             emit("error", message=f"Streaming failed at depth {depth}: {type(e).__name__}: {e}")
             return 4
@@ -1052,6 +1280,25 @@ async def run_once(
         msg_content = "".join(content_buf)
         msg_tool_calls = [tool_calls_by_idx[i] for i in sorted(tool_calls_by_idx)]
         msg_reasoning = "".join(reasoning_buf) if reasoning_buf else None
+        # tok/s of THIS generation — carried to the 'done' event (the last
+        # generation of the turn wins, which is the visible reply).
+        _turn_stats = _compute_gen_stats(
+            _s_t0, _s_first, len(msg_content), len(msg_reasoning or ""), _s_last_chunk)
+        # Learn the ctx-ring bias from the server's real prompt_tokens. The final
+        # stream chunk (empty choices) carries the usage block when the server
+        # honored stream_options; prompt_tokens is what the model actually saw.
+        try:
+            _u = getattr(_s_last_chunk, "usage", None)
+            _pt = int(getattr(_u, "prompt_tokens", 0) or 0) if _u else 0
+            if _pt > 0 and _est_sent > 0:
+                # Subtract the tool-schema tokens: the real prompt_tokens counts
+                # them, but the effective budget already EXCLUDES them (budget =
+                # ctx - tools). Counting them in `used` too would double-charge and
+                # make the ring read high mid-turn then drop when idle. With this,
+                # `used` = persona + conversation, matching the idle estimate.
+                _ctx_bias = (_pt - _tool_tokens) - _est_sent
+        except Exception:
+            pass
 
         # Build a tiny stand-in object so we don't have to refactor the rest
         # of the loop. Match attribute names used below.
@@ -1123,7 +1370,7 @@ async def run_once(
                 })
             assistant_entry: Dict[str, Any] = {
                 "role": "assistant",
-                "content": msg.content or "",
+                "content": _strip_think(msg.content or ""),
                 "tool_calls": tc_dicts,
             }
             messages.append(assistant_entry)
@@ -1317,11 +1564,44 @@ async def run_once(
                     _force_answer = True
 
                 emit("tool_result", name=name, content=display_result, ms=ms)
+                # Turn an image marker into a real image the vision model sees.
+                # (view_image already returns a plain "I can't see images" note
+                # for a text-only model, so a marker here means vision is on.)
+                _tool_content: Any = model_result
+                if isinstance(model_result, str) and model_result.startswith("__JARVIS_IMAGE__"):
+                    _im = re.match(r"__JARVIS_IMAGE__\s+(.+?)\s+\(\d+\s+bytes", model_result)
+                    _ip = _im.group(1).strip() if _im else ""
+                    if _ip and os.path.isfile(_ip):
+                        try:
+                            import base64 as _b64, mimetypes as _mt
+                            with open(_ip, "rb") as _f:
+                                _data = _b64.b64encode(_f.read()).decode("ascii")
+                            _mime = _mt.guess_type(_ip)[0] or "image/png"
+                            _block = {"type": "image_url",
+                                      "image_url": {"url": f"data:{_mime};base64,{_data}"}}
+                            if _is_local_endpoint(LOCAL_API_BASE) and not _use_manual_tools:
+                                # LM Studio / llama.cpp VLMs accept the image inline
+                                # in the tool result (OpenAI tool-calling path).
+                                _tool_content = [
+                                    {"type": "text", "text":
+                                     f"image loaded: {os.path.basename(_ip)} — look at it before describing"},
+                                    _block,
+                                ]
+                            else:
+                                # Cloud rejects a multimodal tool message; the
+                                # builtin server's manual-tools rewrite stringifies
+                                # list content and loses it. Either way, ack here
+                                # and ride the image on a user turn after the loop.
+                                _tool_content = (f"Image captured ({os.path.basename(_ip)}). "
+                                                 f"It's attached in the next message — look and answer.")
+                                _pending_image_block = _block
+                        except OSError:
+                            pass
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "name": name,
-                    "content": model_result,
+                    "content": _tool_content,
                 })
                 # Did the tool result hand back a "NEXT STEP:" directive?
                 # If yes, arm the auto-nudge so a yielding next turn fires
@@ -1356,6 +1636,17 @@ async def run_once(
                         "plainly and stop."
                     ),
                 })
+            # Cloud vision: the image couldn't ride the tool message, so hand it
+            # over on a user turn now that all tool results are in.
+            if _pending_image_block is not None:
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Here's the image — look at it and answer."},
+                        _pending_image_block,
+                    ],
+                })
+                _pending_image_block = None
             # Loop back for next model turn after tool results
             continue
 
@@ -1401,7 +1692,7 @@ async def run_once(
         ):
             _nextstep_nudged = True
             emit("nudge", reason="ignored NEXT STEP hint from tool result")
-            messages.append({"role": "assistant", "content": msg.content})
+            messages.append({"role": "assistant", "content": _strip_think(msg.content)})
             messages.append({
                 "role": "user",
                 "content": (
@@ -1490,21 +1781,22 @@ async def run_once(
         except Exception:
             pass  # never block the chat reply on a self-check exception
 
-        # PASSIVE FACT EXTRACTION on clean finish too — same pattern as the
-        # compaction-boundary hook above. Runs once per turn that actually
-        # completes (no max_depth bail) so durable facts accumulate naturally
-        # without the user ever saying "remember that".
-        try:
-            from . import memory_extract as _mx
-            import openai as _oai_module
-            _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-            _llm = _mx.make_openai_llm_call(_sync, model, max_tokens=600)
-            _saved, _warns = _mx.extract_and_save(messages, _llm, recent_turns=4)
-            if _saved:
-                emit("facts_saved", count=len(_saved),
-                     titles=[f["title"] for f in _saved])
-        except Exception:
-            pass  # fact extraction failure NEVER blocks the chat reply
+        # Last-chance steer drain: the model produced a final answer with no
+        # tool call, so the between-iterations drain never ran. If the user typed
+        # a steer during this reply, inject it and loop once more instead of
+        # ending — otherwise a steer sent during a plain text reply is lost.
+        if drain_steer is not None and iterations < max_depth:
+            try:
+                _late = [s for s in (drain_steer() or []) if (s or "").strip()]
+            except Exception:
+                _late = []
+            if _late:
+                if msg.content:
+                    messages.append({"role": "assistant", "content": _strip_think(msg.content)})
+                for _s in _late:
+                    messages.append({"role": "user", "content": _s.strip()})
+                    emit("steered", text=_s.strip())
+                continue
 
         # Reset the per-turn nudge flag so a fresh user message can trigger
         # the self-check again (we only block re-triggering within one user
@@ -1514,10 +1806,47 @@ async def run_once(
         except AttributeError:
             pass
 
+        # Complete the turn NOW — before the fact-extraction below, which is a
+        # SECOND ~600-token LLM call. It used to run synchronously here, so on a
+        # local model the reply finished but the turn hung ~20s on this invisible
+        # extra generation before 'done' ever fired.
         emit("done",
              duration_ms=int((time.time() - t_start) * 1000),
              iterations=iterations,
+             stats=(_turn_stats or None),
              reason="finished")
+
+        # PASSIVE FACT EXTRACTION — durable facts accumulate without the user
+        # saying "remember that". Fire it on a daemon thread AFTER 'done' so the
+        # turn completes instantly; it saves to memory itself and best-effort
+        # emits a toast if the stream is still listening.
+        def _bg_fact_extract(_msgs):
+            try:
+                from . import memory_extract as _mx
+                import openai as _oai_module
+                _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+                _llm = _mx.make_openai_llm_call(_sync, model, max_tokens=600)
+                _saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=4)
+                if _saved:
+                    try:
+                        emit("facts_saved", count=len(_saved),
+                             titles=[f["title"] for f in _saved])
+                    except Exception:
+                        pass
+                elif _warns:
+                    # Surface WHY nothing was saved instead of swallowing it —
+                    # goes to the log so a broken extractor is diagnosable.
+                    print("[hearth.memory_extract] nothing saved: "
+                          + "; ".join(_warns)[:300], flush=True)
+            except Exception as _ee:
+                print(f"[hearth.memory_extract] extract failed: "
+                      f"{type(_ee).__name__}: {_ee}", flush=True)
+        try:
+            import threading as _threading
+            _threading.Thread(target=_bg_fact_extract, args=(list(messages),),
+                              daemon=True).start()
+        except Exception:
+            pass
         return 0
 
     # We hit the cap. The wrap-up nudge at 75% should have prompted the
@@ -1562,6 +1891,7 @@ async def run_once(
     emit("done",
          duration_ms=int((time.time() - t_start) * 1000),
          iterations=iterations,
+         stats=(_turn_stats or None),
          reason="max_depth_reached",
          snapshot=snapshot_text or None,
          resume_hint=(

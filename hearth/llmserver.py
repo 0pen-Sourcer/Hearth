@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -98,9 +99,10 @@ BUILTIN_PORT = int(os.environ.get("JARVIS_BUILTIN_PORT", "1234"))
 BUILTIN_HOST = "127.0.0.1"
 # Key the builtin server is spawned with; every local caller must send it.
 BUILTIN_API_KEY = "hearth-builtin"
-# Smallest context Hearth's own server will boot at. Persona + tool schemas are
-# ~14K tokens, so below ~18K the prompt overflows with no room for a reply.
-MIN_USABLE_CTX = int(os.environ.get("JARVIS_MIN_CTX", "18432"))  # 18K
+# Smallest context Hearth's own server will boot at. Persona (~11K) + tool
+# schemas (~8K) are ~20K tokens, so below ~24K the prompt overflows with no room
+# for a reply.
+MIN_USABLE_CTX = int(os.environ.get("JARVIS_MIN_CTX", "24576"))  # 24K
 
 # Concurrent request slots on the built-in server. llama.cpp splits --ctx-size
 # EVENLY across slots, so N slots that each hold a usable prompt need N *
@@ -507,11 +509,19 @@ def detect_running_server(default_api_base: str = "http://localhost:1234/v1") ->
 
 
 def list_local_models() -> List[Dict[str, Any]]:
-    """List GGUF files in ~/Jarvis/models. Surfaced in the GUI Models panel."""
+    """List GGUF files under ~/Jarvis/models. Surfaced in the GUI Models panel.
+
+    Recurses into subfolders so an LM-Studio-style layout
+    (models/publisher/Model-GGUF/model.gguf) — e.g. a model you moved in with its
+    folder — is found, not just files dropped flat at the top. This is bounded to
+    the models dir (small, fast), NOT a disk scan, so it doesn't touch boot time.
+    mmproj vision-projector sidecars are skipped — they aren't chat models."""
     out = []
     if not MODELS_DIR.is_dir():
         return out
-    for p in sorted(MODELS_DIR.glob("*.gguf")):
+    for p in sorted(MODELS_DIR.rglob("*.gguf")):
+        if "mmproj" in p.name.lower():
+            continue
         try:
             out.append({
                 "filename": p.name,
@@ -694,7 +704,18 @@ def _download_with_resume(url, dest, tmp,
     if total and done < total:
         raise IOError(f"incomplete download: {done}/{total} bytes — connection "
                       f"closed early; kept .part for resume")
-    tmp.rename(dest)
+    # os.replace overwrites an existing dest atomically (Path.rename raises on
+    # Windows when dest already exists), and we retry because antivirus / the
+    # search indexer briefly locks the just-closed .part — that surfaces as
+    # WinError 32 ("used by another process") on the rename.
+    for _attempt in range(6):
+        try:
+            os.replace(tmp, dest)
+            break
+        except PermissionError:
+            if _attempt == 5:
+                raise
+            time.sleep(0.5)
     return done
 
 
@@ -1122,9 +1143,28 @@ _llama_dl_cancel = _threading.Event()
 
 def cancel_llama_download() -> Dict[str, Any]:
     """Stop an in-flight runtime download. The partial .part survives, so
-    starting again resumes rather than restarting."""
+    starting again resumes rather than restarting. This is the PAUSE."""
     _llama_dl_cancel.set()
     return {"ok": True}
+
+
+def discard_llama_download() -> Dict[str, Any]:
+    """Abandon a runtime download: stop it AND delete the partial from the cache
+    so it does NOT resume next time. The engine mirror of discard_partial (the
+    CANCEL, as opposed to cancel_llama_download's pause)."""
+    _llama_dl_cancel.set()
+    cache = Path(os.path.expanduser("~/.hearth/llamacpp/.cache"))
+    freed = 0
+    try:
+        for p in list(cache.glob("*.part")) + list(cache.glob("*.zip")):
+            try:
+                freed += p.stat().st_size
+                p.unlink()
+            except OSError:
+                pass
+    except Exception:
+        pass
+    return {"ok": True, "freed_gb": round(freed / (1024 ** 3), 2)}
 
 
 _LLAMA_LATEST_CACHE = Path(os.path.expanduser("~/.hearth/llamacpp_latest.json"))
@@ -1230,14 +1270,23 @@ def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
         tag = (rel.get("tag_name") or "").strip()
         if not tag:
             continue
-        cudas, size = [], 0
+        cudas, bins_size, cudart_size = [], 0, 0
         for a in rel.get("assets") or []:
-            m = re.search(r"bin-win-cuda-([\d.]+)-x64\.zip$", a.get("name", ""))
-            if m and "cudart" not in a.get("name", ""):
+            nm = a.get("name", "")
+            m = re.search(r"bin-win-cuda-([\d.]+)-x64\.zip$", nm)
+            if not m:
+                continue
+            if "cudart" in nm:
+                cudart_size = max(cudart_size, int(a.get("size") or 0))
+            else:
                 cudas.append(m.group(1))
-                size = max(size, int(a.get("size") or 0))
+                bins_size = max(bins_size, int(a.get("size") or 0))
         if not cudas:
             continue
+        # The install pulls BOTH the binaries AND the CUDA runtime (cudart), so the
+        # honest download size is their sum — counting only the bins made the
+        # section show ~200 MB while the download bar (bins+cudart) showed ~0.64 GB.
+        size = bins_size + cudart_size
         builds.append({"tag": tag, "cuda": sorted(set(cudas)),
                        "size_mb": round(size / 1e6),
                        "published": (rel.get("published_at") or "")[:10],
@@ -1360,13 +1409,27 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                 except Exception:
                     pass
 
+        # A stale/corrupt zip in cache (a truncated promotion, an AV-gutted file)
+        # would otherwise skip the download and then blow up in extractall with
+        # BadZipFile. Trust an existing zip only if it's a valid archive; else
+        # drop it (and any stale .part) and pull fresh.
+        if zip_path.exists() and not zipfile.is_zipfile(zip_path):
+            zip_path.unlink(missing_ok=True)
+            part.unlink(missing_ok=True)
         if not zip_path.exists():
             _download_with_resume(asset["browser_download_url"], zip_path, part,
                                   _prog, ua="Hearth",
                                   cancel=_llama_dl_cancel.is_set)
         done[0] = base + int(asset.get("size", 0))
-        with zipfile.ZipFile(zip_path) as z:
-            z.extractall(dest)   # exe + ggml DLLs + cudart all land together
+        try:
+            with zipfile.ZipFile(zip_path) as z:
+                z.extractall(dest)   # exe + ggml DLLs + cudart all land together
+        except zipfile.BadZipFile:
+            # Corrupt archive slipped through — nuke it + any .part so the NEXT
+            # attempt starts clean instead of re-failing on the same bad bytes.
+            zip_path.unlink(missing_ok=True)
+            part.unlink(missing_ok=True)
+            raise
         zip_path.unlink(missing_ok=True)
 
     try:
@@ -1409,6 +1472,79 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     return {"ok": True, "dir": str(dest), "tag": tagname}
 
 
+_MANAGED_SERVER_FLAGS = {
+    "--model", "--host", "--port", "--ctx-size", "--parallel", "--n-gpu-layers",
+    "--api-key", "--batch-size", "--ubatch-size", "--threads", "--flash-attn",
+    "--cache-type-k", "--cache-type-v", "--mmproj",
+}
+
+
+def _find_mmproj(model_path: str) -> Optional[str]:
+    """Find a vision projector (mmproj) sidecar next to the model so llama-server
+    can actually SEE images. Convention is an `*mmproj*.gguf` in the same folder;
+    when several exist, prefer the one whose name shares the model's stem. Returns
+    the path or None (text-only model / single-file GGUF with no projector)."""
+    try:
+        import glob
+        d = os.path.dirname(os.path.abspath(model_path))
+        cands = [p for p in glob.glob(os.path.join(d, "*.gguf"))
+                 if "mmproj" in os.path.basename(p).lower()]
+        if not cands:
+            return None
+        if len(cands) == 1:
+            return cands[0]
+        stem = os.path.splitext(os.path.basename(model_path))[0].lower()
+        stem = re.sub(r"[-_.]?(q\d.*|f16|bf16|iq\d.*|mtp)$", "", stem)
+        scored = sorted(cands, key=lambda p: -_stem_overlap(stem, os.path.basename(p).lower()))
+        return scored[0]
+    except Exception:
+        return None
+
+
+def _stem_overlap(a: str, b: str) -> int:
+    """Count shared alphanumeric tokens between two filenames — a cheap 'do these
+    belong together' score for picking the matching mmproj."""
+    ta = set(re.findall(r"[a-z0-9]+", a))
+    tb = set(re.findall(r"[a-z0-9]+", b))
+    return len(ta & tb)
+
+
+def _is_moe_model(model_path: str) -> bool:
+    """Heuristic: is this a Mixture-of-Experts GGUF (Qwen3-A3B, Mixtral, etc.)?
+    MoE wants a DIFFERENT offload than a dense model: attention/shared layers on
+    the GPU, the big expert tensors in system RAM (via --n-cpu-moe + --no-mmap),
+    not the dense partial-layer split. The 'A3B'/'A22B' active-param tag or a
+    'moe'/'mixtral' name is a reliable signal in practice."""
+    n = os.path.basename(model_path).lower()
+    if re.search(r"[-_.]a\d+b(\b|[-_.])", n):   # ...-A3B, -A22B active-expert tag
+        return True
+    return any(t in n for t in ("moe", "mixtral", "deepseek-v2", "deepseek-v3", "grok-1"))
+
+
+def _parse_extra_server_args(extra: Optional[str]) -> List[str]:
+    """Split a user's advanced-flags string into argv tokens for the native
+    llama-server, dropping any flag Hearth already sets so the two can't conflict.
+    shlex handles quoting; a stray token just reaches llama-server, which ignores
+    or errors on its own."""
+    if not extra or not str(extra).strip():
+        return []
+    try:
+        import shlex
+        toks = shlex.split(str(extra))
+    except Exception:
+        return []
+    out: List[str] = []
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t in _MANAGED_SERVER_FLAGS:
+            i += 2 if (i + 1 < len(toks) and not toks[i + 1].startswith("-")) else 1
+            continue
+        out.append(t)
+        i += 1
+    return out
+
+
 def start_builtin(model_path: str, port: Optional[int] = None,
                   ctx: int = 24576, n_gpu_layers: int = -1,
                   n_threads: Optional[int] = None,
@@ -1417,6 +1553,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                   flash_attn: bool = True,
                   force: bool = False,
                   parallel_slots: Optional[int] = None,
+                  extra_args: Optional[str] = None,
                   _smoke_checked: bool = False) -> Dict[str, Any]:  # noqa: ARG001 — kept for caller compat; load no longer refuses on VRAM
     """Spawn llama-cpp-python's OpenAI-compatible server.
 
@@ -1436,13 +1573,13 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     global _proc, _proc_info
 
     # Floor the context Hearth boots its OWN server at: the persona + tool
-    # schemas are ~14K tokens, so below ~18K the prompt overflows immediately
+    # schemas are ~20K tokens, so below ~24K the prompt overflows immediately
     # with no room for conversation. Better to use a bit more KV-cache VRAM than
     # boot a server that can't hold a single turn.
     if ctx and ctx < MIN_USABLE_CTX:
         try:
             print(f"  [hearth.llmserver] raising ctx {ctx} -> {MIN_USABLE_CTX} "
-                  f"(Hearth's prompt needs ~14K; below ~18K overflows instantly)",
+                  f"(Hearth's prompt needs ~20K; below ~24K overflows instantly)",
                   flush=True)
         except Exception:
             pass
@@ -1476,8 +1613,16 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         # different model from the dropdown).
         if _proc is not None and _proc.poll() is None:
             existing_path = _proc_info.get("model_path") or ""
-            if os.path.normcase(os.path.abspath(existing_path)) == normalized_path:
+            _same_model = os.path.normcase(os.path.abspath(existing_path)) == normalized_path
+            # Same model + same context → nothing to do. But if the user changed
+            # the context window in the load panel and hit "Save & use", the path
+            # matches yet ctx differs — restart with the new ctx instead of
+            # silently returning "already" (the "it said ready but kept the old
+            # context" bug). ctx is stored as-requested; n_gpu_layers / KV are
+            # stored post-resolution, so they aren't safe to compare here.
+            if _same_model and _proc_info.get("ctx") == ctx:
                 return {"ok": True, "url": _proc_info.get("url"), "pid": _proc.pid, "already": True}
+            # Different model, OR same model with a changed context → clean restart.
             try:
                 stop_builtin()
             except Exception:
@@ -1568,7 +1713,19 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             # Native llama-server spills gracefully → run a small reserve and
             # keep most layers on the GPU (fast). The wheel needs a big reserve
             # (its spill returns empty on Blackwell).
-            _reserve = 1.0 if _use_native else 2.3
+            # VRAM headroom kept free for the CUDA context + n_batch compute
+            # buffer. The native server spills gracefully, so keep this LEAN to
+            # pack as many layers as possible onto the GPU (the rest land on CPU
+            # RAM, which is fine when you have the RAM). Tunable via
+            # JARVIS_VRAM_RESERVE_GB — lower = more GPU layers, but too low can
+            # OOM at load. The old llama-cpp-python wheel still needs its big 2.3.
+            if _use_native:
+                try:
+                    _reserve = float(os.environ.get("JARVIS_VRAM_RESERVE_GB", "0.6"))
+                except (TypeError, ValueError):
+                    _reserve = 0.6
+            else:
+                _reserve = 2.3
             if n_gpu_layers == -1 and free_vram is not None:
                 est = estimate_safe_gpu_layers(sz, free_vram, ctx,
                                                layer_count=layers, cache_type=cache_type_k,
@@ -1664,6 +1821,15 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     _kv_quant = (str(cache_type_k or "f16").lower() not in ("", "f16", "f32")
                  or str(cache_type_v or "f16").lower() not in ("", "f16", "f32"))
     _flash = bool(flash_attn or _kv_quant)
+
+    # MoE offload is driven by the model's saved preset (Advanced flags), matching
+    # what works in LM Studio for these models: all layers to GPU (n_gpu_layers
+    # 999) + all experts to system RAM via --n-cpu-moe, mmap left ON. We don't
+    # force --no-mmap here — LM Studio's proven 35 tk/s config keeps mmap on, and
+    # the page cache handles the expert reads once the model is warm. A user who
+    # prefers weights locked in RAM adds --no-mmap --mlock in the Advanced flags.
+    _moe_flags: List[str] = []
+
     # No --chat_format / --jinja tool wiring on either engine: Hearth hand-injects
     # the <tools> spec and recovers <tool_call> via hearth.tool_call_parser
     # (headless._use_manual_tools) — the model's native template handles chat +
@@ -1690,6 +1856,14 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             cmd += ["--cache-type-k", str(cache_type_k)]
         if cache_type_v:
             cmd += ["--cache-type-v", str(cache_type_v)]
+        cmd += _moe_flags
+        _mmproj = _find_mmproj(model_path)
+        if _mmproj:
+            # Sidecar vision projector present → load it so the model can see
+            # images (view_image / screenshots). llama-server offloads it to GPU
+            # by default; harmless for a text-only chat.
+            cmd += ["--mmproj", _mmproj]
+        cmd += _parse_extra_server_args(extra_args)
     else:
         # PyInstaller: sys.executable is Hearth.exe (tray), so route via the
         # --hearth-run-llama-server sentinel; from source it's python → -m.
@@ -1716,6 +1890,10 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                 cmd += [_flag, str(_GGML_TYPE[str(_ct).lower()])]
         if _flash:
             cmd += ["--flash_attn", "true"]
+        _mmproj = _find_mmproj(model_path)
+        if _mmproj:
+            # llama_cpp.server exposes the projector as --clip_model_path.
+            cmd += ["--clip_model_path", _mmproj]
         cmd += ["--verbose", "false"]
 
     # Pipe stdout+stderr to a real log file so the user (and the GUI failure
@@ -1907,6 +2085,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         "cache_type_k": cache_type_k,
         "cache_type_v": cache_type_v,
         "flash_attn": flash_attn,
+        "extra_args": extra_args,
     })
     # First real use of a native engine: prove it emits a token before trusting
     # it. Booting and reporting ready is not proof — a build with no kernels for
@@ -2073,8 +2252,12 @@ def _estimate_gguf_size_gb(filename: str) -> Optional[float]:
 
 # Driver/OS overhead reserve on a fresh Windows desktop with a discrete
 # GPU. NVIDIA driver + Windows compositor + WebView2 each take a slice;
-# 2.29 GB is what we leave on the table by default. Tweakable.
-_VRAM_DRIVER_RESERVE_GB = 2.29
+# Headroom the fit LABEL leaves on the table. Was 2.29 GB — far more pessimistic
+# than the actual loader (which reserves ~0.6 GB), so a model that loads fine got
+# labeled as spilling. Since load no longer refuses on VRAM and partial offload is
+# framed as normal, keep this close to the loader's real reserve so the label
+# matches what actually happens. Tweakable.
+_VRAM_DRIVER_RESERVE_GB = 1.0
 
 
 _GGUF_FIXED_SZ = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
@@ -2223,6 +2406,32 @@ def estimate_kv_cache_gb(model_size_gb: Optional[float], ctx: int = 8192,
     return model_size_gb * 0.06 * (ctx / 4096.0) * _kv_quant_factor(cache_type)
 
 
+def _total_ram_gb() -> Optional[float]:
+    """Total system RAM in GB, or None if unreadable. Lets vram_fit_class tell a
+    model that merely partial-offloads to CPU (fits VRAM + RAM) apart from one
+    that genuinely won't load at all (bigger than VRAM + RAM combined)."""
+    try:
+        import psutil
+        return psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        pass
+    try:  # Windows fallback, no psutil needed
+        import ctypes
+
+        class _MEMSTAT(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        ms = _MEMSTAT()
+        ms.dwLength = ctypes.sizeof(_MEMSTAT)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms))
+        return ms.ullTotalPhys / (1024 ** 3)
+    except Exception:
+        return None
+
+
 def vram_fit_class(model_size_gb: Optional[float],
                    free_vram_gb: Optional[float] = None,
                    ctx: int = 8192) -> Dict[str, str]:
@@ -2251,10 +2460,17 @@ def vram_fit_class(model_size_gb: Optional[float],
     required = model_size_gb + estimate_kv_cache_gb(model_size_gb, ctx)
     usable = max(0.0, free_vram_gb - _VRAM_DRIVER_RESERVE_GB)
     if required <= usable:
-        return {"tier": "good",     "label": f"fits comfortably ({required:.1f} of {usable:.1f} GB)"}
+        return {"tier": "good",     "label": f"fits on GPU ({required:.1f} of {usable:.1f} GB)"}
     if required <= free_vram_gb:
-        return {"tier": "partial",  "label": f"tight — partial GPU offload ({required:.1f} > {usable:.1f} usable)"}
-    return {"tier": "overflow",     "label": f"likely too big — math says it exceeds {free_vram_gb:.1f} GB total VRAM (estimate)"}
+        return {"tier": "partial",  "label": f"partial offload — a few layers on CPU ({required:.1f} GB vs {usable:.1f} GB usable), still runs fine"}
+    # Genuinely "too big" ONLY when it won't fit VRAM + system RAM combined — then
+    # it really can't load (or would page off disk unusably). Short of that,
+    # llama.cpp runs it mostly on the CPU: slower, but it works. That distinction
+    # is the whole point — don't red-flag a usable model, DO flag an impossible one.
+    ram = _total_ram_gb()
+    if ram is not None and required > free_vram_gb + max(0.0, ram - 2.0):
+        return {"tier": "toobig",   "label": f"too big to load — needs ~{required:.1f} GB, over VRAM + system RAM combined"}
+    return {"tier": "overflow",     "label": f"mostly on CPU — needs ~{required:.1f} GB, {free_vram_gb:.1f} GB free; still runs, just slower"}
 
 
 _QUANT_PATTERNS = [

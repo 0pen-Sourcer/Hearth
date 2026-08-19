@@ -563,6 +563,24 @@ def auto_curate(min_hours: float = 24.0, min_new: int = 5,
         _autocurate_lock.release()
 
 
+def run_maintenance() -> Dict[str, Any]:
+    """One autonomous upkeep pass: expire time-stale facts (once/day gated) then
+    run the gated consolidation. Both steps self-throttle, so this is near-free
+    when nothing is due — safe to fire on a background timer so memory upkeep no
+    longer depends on the model happening to save a fact this turn. Local-only:
+    no LLM, no network. Never raises."""
+    out: Dict[str, Any] = {}
+    try:
+        out["expired"] = expire_stale(once_per_day=True)
+    except Exception:
+        out["expired"] = []
+    try:
+        out["curate"] = auto_curate()
+    except Exception:
+        out["curate"] = {"ran": False, "reason": "error"}
+    return out
+
+
 def list_index() -> str:
     lines = _read_index_lines()
     if not lines:

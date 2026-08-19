@@ -106,12 +106,14 @@ async def _run(prompt: str, history: list) -> str:
     parts = []
 
     events = []
+    err = {"cat": None, "msg": None}
 
     def emit(kind, **kw):
         if kind == "assistant":
             parts.append(kw.get("content") or "")
         elif kind == "error":
-            parts.append("[error] " + str(kw.get("message", "")))
+            err["cat"] = kw.get("category") or "error"
+            err["msg"] = str(kw.get("message", ""))
         elif kind == "tool_call":
             nm = kw.get("name")
             if nm:
@@ -123,8 +125,10 @@ async def _run(prompt: str, history: list) -> str:
                                 permission_check=lambda _n, _a: "allow",
                                 supervised=False)  # phone: destructive guard still fires
     except Exception as e:
-        return f"(run failed: {type(e).__name__}: {e})"
-    reply = "".join(parts).strip()
+        from .errors import classify_api_error
+        info = classify_api_error(e, headless._is_local_endpoint(headless.LOCAL_API_BASE))
+        err["cat"], err["msg"] = info.category, info.hint
+    reply = headless.bridge_reply_or_reason("".join(parts), err["cat"], err["msg"])
     # WhatsApp can't reliably edit a sent message, so no live tool feed — append a
     # one-line "used: ..." footer instead so the user still sees what ran.
     if events:

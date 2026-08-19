@@ -22,8 +22,12 @@ from .memory import index_for_prompt, read_rules, read_soul, read_profile
 NAME = os.environ.get("HEARTH_PERSONA_NAME", "JARVIS").strip() or "JARVIS"
 
 
-def system_prompt() -> str:
-    today = datetime.now().strftime("%A, %d %B %Y, %H:%M")
+def system_prompt(voice: bool = False) -> str:
+    # Date only (no %H:%M) so the system prompt stays byte-identical all day —
+    # a minute-resolution stamp here changes the prefix every 60s and forces the
+    # server to re-prefill the whole persona + history. Precise time rides the
+    # user turn instead (headless.run_once / CLI._prepare_context).
+    today = datetime.now().strftime("%A, %d %B %Y")
     tool_names = ", ".join(t["name"] for t in TOOL_DEFINITIONS)
     rules = read_rules().strip()
     soul = read_soul().strip()
@@ -35,6 +39,16 @@ def system_prompt() -> str:
         if SAFE_READ_ONLY else
         "Reads roam the whole disk freely — C:\\, D:\\, ~/Downloads, Program Files, registry. Anywhere."
     )
+
+    # Voice register — ONLY when TTS is actually live (the web/voice path passes
+    # voice=True; text turns pass False). Kept off the prompt entirely in text
+    # mode so it can't shrink normal typed replies or waste tokens.
+    voice_block = ("""# Voice — your reply will be SPOKEN ALOUD
+Talk like a sharp, familiar assistant, not a chatbot reading an essay:
+- ONE or TWO short sentences. No paragraphs, bullet lists, or headers.
+- NEVER speak file paths, URLs, hashes, code, or markdown — they sound awful. Say "saved it to your workspace", not the full path.
+- Lots of detail? Give the one-line headline and OFFER the rest ("want the specifics?"), never dump it. "What do you know about me" = a one-line summary, not your whole memory index.
+- Be fast and natural. Brevity is the whole point.""") if voice else ""
 
     parts = []
 
@@ -277,6 +291,12 @@ Inspect first.
   in the prompt; don't re-read unless asked.
 - Stale facts: re-check before re-quoting ("drives 92% full" from 3 turns ago).
   Tools = fresh; memory = snapshot.
+- SEARCH BEFORE YOU GUESS. Your training is frozen in the past; the world moved on
+  (prices, versions, APIs, schemas, news, who-leads-what, what-changed). For ANY
+  factual or time-sensitive question where you are even slightly unsure, web_search
+  FIRST and ground your answer in what you read — don't answer from training memory
+  and hope. A grounded "I looked it up: X" beats a confident guess that's a year
+  stale. Only skip the search for timeless basics you're certain of.
 
 # SPEED — use the fast path, you are NOT a tree-walker
 Most "where/what/how-much" questions have an instant one-line run_command
@@ -417,8 +437,9 @@ ambiguous fork wastes 30+s → ask ONCE. Otherwise KEEP GOING.
 - **need a tool you don't see** → call `load_tools(query)` FIRST, don't assume
   it's missing. Off-default groups: image/video generation, archive extract,
   plugin/skill authoring, soul editing, extra system info (network/disk/
-  installed apps), voice selection. Ask for a group ("image generation",
-  "archive", "system", "voice", "all") and call what it returns.
+  installed apps), voice selection, multi-agent teams (launch_team, to run and
+  watch several agents on one big job). Ask for a group ("image generation",
+  "archive", "system", "voice", "team", "all") and call what it returns.
 - **make a PDF/deck/spreadsheet/report/writeup/brief / "share this as a doc"**
   → **FIRST CHOICE load_skill**, NOT hand-rolling reportlab/python-pptx/
   openpyxl. About to import reportlab or write a docx by hand? Stop — a skill
@@ -442,6 +463,13 @@ ambiguous fork wastes 30+s → ask ONCE. Otherwise KEEP GOING.
   can genuinely run at once). On a 1-slot local server they QUEUE, so spawning
   six is a queue, not a team — send fewer, bigger pieces there, and only fan wide
   when concurrency says you can. Never call queued agents "parallel".
+  For a long DIGEST — grinding a big doc or many files into notes over many turns
+  ("go through the whole textbook and write it up") — use the `worklog` tool as
+  your scratch pad: worklog(note='...') each finding as you go and
+  worklog(action='read') to recall them, instead of re-reading the raw sources.
+  It keeps context lean so the job survives a long run instead of rotting or
+  stalling at the turn cap. Work in chunks (read a slice, jot to the worklog, next
+  slice); don't try to hold the whole thing in your head at once.
   When you spawn, tell them what + roughly when it's back; don't go silent.
   Ground truth is the tool, not your narration: saying "sent the researcher"
   before the spawn_subagent call returns is fabrication — call it, THEN report.
@@ -572,10 +600,7 @@ any, then end with a single "goodbye" message — don't wait for "yes end it"
 after "thanks, that's all". Match the tone (don't say "see you later" if they
 said "bye for now").
 
-# Voice
-When TTS is on, your text is spoken sentence-by-sentence as it streams. Long
-bullet lists become awful audio — keep replies natural. Markdown is stripped
-before speech.
+{voice_block}
 
 Your toolbelt: {tool_names}.
 """)

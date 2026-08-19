@@ -160,19 +160,61 @@ class WakeListener:
             s.start()
             return s
 
+        # Loopback guard: never let wake listen on a system-audio device. On this
+        # user's box the picked BT mic failed and the OLD code fell back to the OS
+        # default — a loopback of the speakers — so a reel saying "jarvis" woke
+        # Hearth. Resolve to a REAL mic; if none, don't listen to system audio.
         try:
-            stream = _open(_dev)
-        except Exception:
-            # Picked mic wouldn't open (Bluetooth mics often can't) — fall back
-            # to the OS default instead of silently never listening.
+            from .listen import is_system_audio_device
+            import sounddevice as _sd
+            def _name(ix):
+                try: return str(_sd.query_devices(ix).get("name", ""))
+                except Exception: return ""
+            if _dev is not None and is_system_audio_device(_name(_dev)):
+                print("[hearth.wake] selected wake device is system-audio; not listening", flush=True)
+                return
             if _dev is None:
-                return
+                _di = _sd.query_devices(kind="input")
+                _dn = str(_di.get("name", "")) if isinstance(_di, dict) else ""
+                if _dn and is_system_audio_device(_dn):
+                    _dev = -1   # default is a loopback — force the real-mic search below
+        except Exception:
+            pass
+
+        def _first_real_wake_mic(skip=None):
             try:
-                print(f"[hearth.wake] mic {_dev} failed to open; using default",
-                      flush=True)
-                stream = _open(None)
+                from .listen import is_system_audio_device, list_input_devices
+                for d in list_input_devices():
+                    if d["index"] == skip or is_system_audio_device(d["name"]):
+                        continue
+                    try:
+                        return _open(d["index"]), d["name"]
+                    except Exception:
+                        continue
             except Exception:
-                return
+                pass
+            return None, ""
+
+        stream = None
+        if _dev is not None and _dev >= 0:
+            try:
+                stream = _open(_dev)
+            except Exception:
+                print(f"[hearth.wake] mic {_dev} failed to open; trying a real mic", flush=True)
+        if stream is None and (_dev is None):
+            try:
+                stream = _open(None)   # OS default, already confirmed a real mic
+            except Exception:
+                pass
+        if stream is None:
+            s, nm = _first_real_wake_mic(skip=_dev if (_dev is not None and _dev >= 0) else None)
+            if s is not None:
+                stream = s
+                print(f"[hearth.wake] using '{nm}'", flush=True)
+        if stream is None:
+            print("[hearth.wake] no real mic available; wake off "
+                  "(won't listen to system audio)", flush=True)
+            return
 
         try:
             while not self._stop.is_set():

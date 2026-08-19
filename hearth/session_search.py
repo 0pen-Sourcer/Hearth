@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -235,6 +236,28 @@ def rebuild_index() -> int:
     return total
 
 
+# Phrases that mean "I'm asking about WHEN, or about recent talk" — for these,
+# recency has to beat text score. Otherwise BM25 ranks by keyword density, and the
+# generic words in a temporal question (were/doing/yesterday) match nearly
+# everywhere, so a pure relevance sort returns the OLDEST dense match instead of
+# the most recent one.
+_TEMPORAL_RE = re.compile(
+    r"\b("
+    r"yesterday|today|tonight|this morning|this afternoon|this evening|"
+    r"last night|earlier|recently|just now|moments? ago|a moment ago|"
+    r"last time|previously|the other day|(a\s+)?few\s+(days?|hours?)\s+ago|"
+    r"\d+\s+(days?|hours?|weeks?)\s+ago|this week|last week|a while ago|"
+    r"what were we|what did we|what was i|what have we|"
+    r"continue where|pick up where|where we left"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_temporal_query(q: str) -> bool:
+    return bool(_TEMPORAL_RE.search(q or ""))
+
+
 def search(query: str, limit: int = 8) -> List[Match]:
     """Top FTS5 matches across all past conversations. Auto-rebuilds index
     if any conversation file is newer than its last-indexed timestamp."""
@@ -248,16 +271,22 @@ def search(query: str, limit: int = 8) -> List[Match]:
     # Quote the query for FTS5 to handle phrases naturally — escape any
     # special chars. If the user passed an already-valid FTS query, no-op.
     fts_q = _safe_fts_query(query)
+    # Temporal/recency questions rank by RECENCY first (newest match wins, bm25
+    # only breaks ties); everything else ranks by relevance with recency breaking
+    # ties. Both ORDER BY strings are hardcoded constants — no user input reaches
+    # the SQL, so the f-string is injection-safe.
+    _order = ("updated DESC, bm25(messages)" if _is_temporal_query(query)
+              else "bm25(messages), updated DESC")
     conn = _connect()
     try:
         cur = conn.execute(
-            """
+            f"""
             SELECT conversation_id, title, message_index, role, content,
                    snippet(messages, 4, '', '', '…', 28),
                    bm25(messages), updated
               FROM messages
              WHERE messages MATCH ?
-          ORDER BY bm25(messages)
+          ORDER BY {_order}
              LIMIT ?
             """,
             (fts_q, limit),

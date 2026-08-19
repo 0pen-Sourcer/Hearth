@@ -177,12 +177,14 @@ async def _run(prompt: str, history: list, on_tool=None) -> str:
     from . import headless
     parts = []
     events = []
+    err = {"cat": None, "msg": None}
 
     def emit(kind, **kw):
         if kind == "assistant":
             parts.append(kw.get("content") or "")
         elif kind == "error":
-            parts.append("[error] " + str(kw.get("message", "")))
+            err["cat"] = kw.get("category") or "error"
+            err["msg"] = str(kw.get("message", ""))
         elif kind == "tool_call":
             nm = kw.get("name")
             if nm:
@@ -199,8 +201,10 @@ async def _run(prompt: str, history: list, on_tool=None) -> str:
                                 permission_check=_allow,
                                 supervised=False)  # phone: destructive guard still fires
     except Exception as e:
-        return f"(run failed: {type(e).__name__}: {e})"
-    return "".join(parts).strip()
+        from .errors import classify_api_error
+        info = classify_api_error(e, headless._is_local_endpoint(headless.LOCAL_API_BASE))
+        err["cat"], err["msg"] = info.category, info.hint
+    return headless.bridge_reply_or_reason("".join(parts), err["cat"], err["msg"])
 
 
 def run() -> None:

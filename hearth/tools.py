@@ -19,6 +19,7 @@ import glob as globmod
 import shlex
 import shutil
 import socket
+import time
 import fnmatch
 import platform
 import subprocess
@@ -1270,6 +1271,25 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {}},
     },
     {
+        "name": "worklog",
+        "description": (
+            "Your private scratch pad for a LONG or multi-step task. Jot findings, "
+            "extracted facts, progress, and where you are as you go, then read them "
+            "back — so you don't re-read the same files/sources over and over and "
+            "rot your context. Append a note: worklog(note='...'). Read it all: "
+            "worklog(action='read'). Start fresh for a new task: worklog(action='clear'). "
+            "Reach for this when grinding a big document or many files into an output "
+            "across many turns."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "note": {"type": "string", "description": "A line to append to the worklog."},
+                "action": {"type": "string", "description": "'append' (default when note is given), 'read', or 'clear'."},
+            },
+        },
+    },
+    {
         "name": "memory_forget",
         "description": "Delete a memory by title. Use only when explicitly told to forget something OR when a memory is clearly outdated and you've already saved a corrected version.",
         "parameters": {
@@ -1715,9 +1735,33 @@ def _loaded_model_is_vision() -> bool:
     when v0 endpoint isn't there (Ollama, vLLM, cloud)."""
     base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
     model_hint = os.environ.get("LOCAL_MODEL", "").lower()
+    host = base.rsplit("/v1", 1)[0]
+    # llama.cpp (Hearth's BUILTIN server) is authoritative: /props reports
+    # modalities.vision — TRUE only when an mmproj is actually loaded. This beats
+    # the id heuristic (a VLM served with no projector genuinely can't see). Try
+    # the caller's key, then the builtin's, then unauthed.
+    try:
+        import urllib.request, urllib.error
+        for _k in (os.environ.get("LOCAL_API_KEY") or "", "hearth-builtin", ""):
+            try:
+                _h = {"Authorization": f"Bearer {_k}"} if _k else {}
+                _rq = urllib.request.Request(f"{host}/props", headers=_h)
+                with urllib.request.urlopen(_rq, timeout=2) as r:
+                    _props = json.loads(r.read().decode("utf-8"))
+                _mod = _props.get("modalities")
+                if isinstance(_mod, dict) and "vision" in _mod:
+                    return bool(_mod.get("vision"))
+                break   # answered but no modalities block — not a llama.cpp server
+            except urllib.error.HTTPError as _he:
+                if _he.code in (401, 403):
+                    continue   # wrong key — try the next
+                break
+            except Exception:
+                break
+    except Exception:
+        pass
     try:
         import urllib.request
-        host = base.rsplit("/v1", 1)[0]
         _key = os.environ.get("LOCAL_API_KEY") or ""
         _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
         _req = urllib.request.Request(f"{host}/api/v0/models", headers=_hdr)
@@ -2659,6 +2703,20 @@ def _grep_search(p: Dict) -> str:
         return f"Error: bad regex: {e}"
 
     hits: List[str] = []
+    # A single FILE path: os.walk yields nothing for a file, so grepping one
+    # specific file silently returned "(no matches)" for text that was right
+    # there. Scan it directly instead of walking.
+    if os.path.isfile(base):
+        try:
+            with open(base, "r", encoding="utf-8", errors="replace") as f:
+                for ln, line in enumerate(f, 1):
+                    if rx.search(line):
+                        hits.append(f"{base}:{ln}: {line.rstrip()}")
+                        if len(hits) >= max_matches:
+                            break
+        except OSError as e:
+            return f"Error reading {base}: {e}"
+        return "\n".join(hits) if hits else "(no matches)"
     files_scanned = 0
     for root, dirs, files in os.walk(base):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
@@ -2981,7 +3039,44 @@ def _http_get(url: str, timeout: int = 15) -> Tuple[int, str, bytes]:
         return r.status, r.headers.get("Content-Type", ""), r.read()
 
 
+# Cooldown breaker for web_search. A small model can't tell "no results" from
+# "the search backend is rate-limiting me", so it hammers the same dead tool a
+# dozen times (a real, observed spiral). After 3 empty/blocked results in a row
+# we put web_search on a cooldown and return a typed "unavailable" message that
+# tells the model to STOP retrying and change approach — not another silent
+# "(no results)". A single good result resets the counter.
+_WEB_SEARCH_STATE = {"fails": 0, "cooldown_until": 0.0}
+_WEB_SEARCH_COOLDOWN_S = int(os.environ.get("HEARTH_WEB_SEARCH_COOLDOWN_S", "180") or "180")
+
+
 def _web_search(p: Dict) -> str:
+    now = time.time()
+    st = _WEB_SEARCH_STATE
+    if now < st["cooldown_until"]:
+        _wait = int(st["cooldown_until"] - now)
+        return (f"web_search is on cooldown for ~{_wait}s — it returned nothing several "
+                f"times in a row, which means it's rate-limited or blocked, not that the "
+                f"topic has no results. Do NOT call web_search again right now. Instead: "
+                f"answer from what you already found, call web_fetch/browse on a specific "
+                f"URL you know, or tell the user you couldn't verify it live.")
+    result = _web_search_raw(p)
+    _empty = (not result) or result.strip() == "(no results)" or result.lstrip().startswith("Error")
+    if _empty:
+        st["fails"] += 1
+        if st["fails"] >= 3:
+            st["cooldown_until"] = now + _WEB_SEARCH_COOLDOWN_S
+            st["fails"] = 0
+            return (f"web_search returned nothing 3 times in a row — it's rate-limited or "
+                    f"blocked, not just empty. It's now on a ~{_WEB_SEARCH_COOLDOWN_S // 60}-"
+                    f"minute cooldown, so STOP retrying it. Answer from what you already "
+                    f"have, use web_fetch/browse on a specific URL, or tell the user you "
+                    f"couldn't verify this live.")
+    else:
+        st["fails"] = 0
+    return result
+
+
+def _web_search_raw(p: Dict) -> str:
     """DuckDuckGo HTML scrape. They blacklist scripted GETs without a proper
     User-Agent and switched the /html/ endpoint to require POST. Both fixed
     here. If DDG ever blocks again, we fall back to Wikipedia for definitional
@@ -3301,6 +3396,17 @@ def _run_command(p: Dict) -> str:
     timeout = min(int(p.get("timeout") or 120), 300)
     shell_pref = (p.get("shell") or "").lower().strip()
     detached = bool(p.get("detached"))
+
+    # Repair the two PowerShell mistakes models make most (a leading quoted exe
+    # path needs the `&` call operator; a bare `python` off PATH → the running
+    # interpreter) so a valid command doesn't die on a shell technicality. Same
+    # normalizer the background-jobs path uses. PowerShell only, never cmd.
+    if sys.platform == "win32" and shell_pref != "cmd":
+        try:
+            from .jobs import _normalize_ps_command
+            cmd = _normalize_ps_command(cmd)
+        except Exception:
+            pass
 
     # Detached mode — for daemons / UIs / dev servers / launchers that
     # never exit on their own (Forge WebUI, npm run dev, ollama serve,
@@ -4230,8 +4336,8 @@ def _open_app(p: Dict) -> str:
     name = (p.get("name") or "").strip()
     if not name:
         return "Error: missing app name"
-    # Strip surrounding quotes — model sometimes wraps paths in literal quotes
-    # (e.g. `"G:\Assassins Creed II\Game.exe"`), which then never resolves.
+    # Strip surrounding quotes — the model sometimes wraps a path in literal
+    # quotes, which then never resolves.
     if (name.startswith('"') and name.endswith('"')) or (name.startswith("'") and name.endswith("'")):
         name = name[1:-1].strip()
     # Drop common UI suffixes that don't exist as executable names. Users say
@@ -4295,7 +4401,20 @@ def _open_app(p: Dict) -> str:
             _bring_newest_to_front(_before)
             return f"launched: {os.path.basename(lnk)[:-4]} (via Start Menu shortcut)"
 
-        # 5. Failure — surface a real error and suggest matches
+        # 5. Failure. If the input is clearly a FILE PATH rather than an app name,
+        # the app-oriented hints below (web service, .exe name) only mislead. The
+        # useful message is that the file isn't there — commonly a file a prior
+        # step was meant to create but didn't.
+        if (os.path.isabs(cand_path) or "\\" in name or "/" in name) \
+                and os.path.splitext(cand_path)[1]:
+            return (
+                f"Error: no file at '{cand_path}' — it does not exist. If a previous "
+                f"step was supposed to create it, that step failed or wrote elsewhere. "
+                f"Confirm the file exists (list_directory / read_file) before opening "
+                f"it, and don't report it as created without checking."
+            )
+
+        # Otherwise it's an app name we couldn't resolve — surface matches.
         suggestions: List[str] = []
         try:
             installed = _list_installed_apps({"name_filter": canonical, "limit": 5})
@@ -4688,6 +4807,20 @@ def _view_image(p: Dict) -> str:
     size = os.path.getsize(path)
     if size > 20 * 1024 * 1024:
         return f"Error: image too large ({size // 1024 // 1024}MB, max 20MB)"
+    # If the loaded model has no vision, the marker below is useless to it — it
+    # can't see the pixels, so it ends up saying "blank / empty / can't read it".
+    # Say so plainly instead, and point it at the real fallback: ask the user to
+    # describe the image, or load a vision model.
+    try:
+        if not _loaded_model_is_vision():
+            return (f"This model can't see images right now (no vision projector loaded), "
+                    f"so it can't read {path}. Ask the user to describe what's in it, or "
+                    f"switch to a vision model (e.g. a *-VL / Gemma-3-vision). On Hearth's "
+                    f"built-in server, dropping the model's matching `mmproj-*.gguf` next "
+                    f"to the .gguf and reloading turns vision on. Do NOT claim the image is "
+                    f"blank — you simply can't see it.")
+    except Exception:
+        pass
     # Return a structured marker. mcp_server.py detects this prefix and
     # converts the call to a real Image content. The CLI just shows the
     # text — its auto-attach handles vision separately.
@@ -5090,7 +5223,46 @@ def _memory_recall(p: Dict) -> str:
 
 def _memory_list(p: Dict) -> str:
     from . import memory
-    return memory.list_index()
+    idx = (memory.list_index() or "").rstrip()
+    # Steer the model to the right tool: memory is read via memory_recall, never
+    # by guessing file paths and read_file'ing them (which invents wrong paths and
+    # then wrongly concludes "I can't see my memory").
+    return (idx + "\n\n[To read a memory's full content, call memory_recall(query). "
+            "Do NOT read_file the memory folder — memory is managed only through "
+            "the memory_recall / memory_save tools.]")
+
+
+def _worklog(p: Dict) -> str:
+    """Private scratch pad for a long task: jot findings as you go and read them
+    back, so you don't re-read the same sources and rot context."""
+    wl = os.path.join(WORKSPACE, "scratch", "worklog.md")
+    try:
+        os.makedirs(os.path.dirname(wl), exist_ok=True)
+    except OSError:
+        pass
+    action = (p.get("action") or ("append" if p.get("note") else "read")).strip().lower()
+    if action == "clear":
+        try:
+            open(wl, "w", encoding="utf-8").close()
+        except OSError as e:
+            return f"Error clearing worklog: {e}"
+        return "worklog cleared — fresh scratch pad for this task."
+    if action == "read":
+        try:
+            txt = open(wl, encoding="utf-8").read().strip()
+        except OSError:
+            txt = ""
+        return txt or "(worklog is empty — nothing jotted yet)"
+    note = (p.get("note") or "").strip()
+    if not note:
+        return "Error: worklog needs a 'note' to append (or action='read' / 'clear')."
+    try:
+        with open(wl, "a", encoding="utf-8") as f:
+            f.write(note + "\n")
+        n = sum(1 for _ in open(wl, encoding="utf-8"))
+    except OSError as e:
+        return f"Error writing worklog: {e}"
+    return f"jotted ({n} lines in worklog). Read it back anytime with worklog(action='read')."
 
 
 def _memory_forget(p: Dict) -> str:
@@ -5864,6 +6036,7 @@ _HANDLERS = {
     "memory_save": _memory_save,
     "memory_recall": _memory_recall,
     "memory_list": _memory_list,
+    "worklog": _worklog,
     "memory_forget": _memory_forget,
     "edit_soul":   lambda p: __import__("hearth.memory", fromlist=["write_soul"]).write_soul(p.get("content", "")),
     "append_soul": lambda p: __import__("hearth.memory", fromlist=["append_soul"]).append_soul(p.get("line", "")),
@@ -6610,7 +6783,7 @@ TOOL_DEFINITIONS.append({
     "name": "focus_window",
     "description": (
         "Bring an ALREADY-OPEN window to the front / focus it, by a substring of "
-        "its title (e.g. 'Spotify', 'chrome', 'notepad', 'Elden Ring'). Use when "
+        "its title (e.g. 'Spotify', 'chrome', 'notepad', a game's name). Use when "
         "the user says 'switch to / bring up / show me / pull up X' and X is "
         "already running — this raises the existing window instead of launching a "
         "new one (that's open_app). Returns the windows it sees if none match."

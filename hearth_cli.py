@@ -29,6 +29,17 @@ from typing import Dict, List, Optional
 
 from openai import AsyncOpenAI
 
+
+def _stream_client_timeout():
+    """No overall request deadline + a generous per-read (per-chunk) timeout, so a
+    slow local generation is never aborted mid-stream; connect/pool stay short so a
+    dead endpoint still fails fast. httpx ships with openai."""
+    try:
+        import httpx
+        return httpx.Timeout(None, connect=15.0, read=300.0, write=60.0, pool=15.0)
+    except Exception:
+        return 600.0
+
 # Soft dependency: prompt_toolkit gives proper arrow keys, history, ctrl-r.
 # If installed, we use it. Otherwise we fall back to plain input().
 try:
@@ -263,11 +274,11 @@ RESERVED_OUTPUT = int(os.getenv("JARVIS_RESERVED_OUTPUT", "2048"))
 # Compact when conversation hits this fraction of context. 0.75 = compact at
 # 75% of window, leaving room for the next turn.
 COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
-# Below this, Hearth's own prompt (persona ~11k + tool schemas ~3k = ~14k)
+# Below this, Hearth's own prompt (persona ~11k + tool schemas ~8k = ~20k)
 # barely fits and there's no room left for conversation, so the model overflows
 # almost immediately. Used to floor Hearth's builtin server and to warn when a
 # user pins something too small.
-MIN_USABLE_CTX = int(os.getenv("JARVIS_MIN_CTX", "18432"))  # 18K
+MIN_USABLE_CTX = int(os.getenv("JARVIS_MIN_CTX", "24576"))  # 24K
 # (Tool-loop control + malformed-markup stripping now live in
 # hearth/loop_guard.py - outcome-hash based, not a magic per-tool count.)
 
@@ -343,6 +354,56 @@ C_ERR = "\033[1;31m"
 C_WARN = "\033[38;5;215m"
 C_ACCENT = C_BRAND
 _BOLD = "\033[1m"
+C_ADD = "\033[38;5;114m"   # green — added line
+C_DEL = "\033[38;5;210m"   # red — removed line
+
+
+def _cli_show_diffs() -> bool:
+    """Honor the shared show_diffs toggle (settings.json), default on — same
+    switch the GUI uses, so turning file-change diffs off applies to the CLI too."""
+    try:
+        import json as _json
+        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as _f:
+            return _json.load(_f).get("show_diffs") is not False
+    except Exception:
+        return True
+
+
+def _print_cli_diff(name: str, args: dict) -> bool:
+    """Print a green/red diff for edit_file / write_file instead of raw JSON args.
+    Trims the common head/tail so only the changed region shows. Returns True if
+    it printed a diff."""
+    def _emit(old, new):
+        oldL = str(old or "").split("\n"); newL = str(new or "").split("\n")
+        s = 0
+        while s < len(oldL) and s < len(newL) and oldL[s] == newL[s]:
+            s += 1
+        e = 0
+        while e < len(oldL) - s and e < len(newL) - s and oldL[-1 - e] == newL[-1 - e]:
+            e += 1
+        for l in oldL[max(0, s - 2):s]:
+            print(f"    {C_DIM}  {l}{C_RESET}")
+        for l in oldL[s:len(oldL) - e]:
+            print(f"    {C_DEL}- {l}{C_RESET}")
+        for l in newL[s:len(newL) - e]:
+            print(f"    {C_ADD}+ {l}{C_RESET}")
+        for l in oldL[len(oldL) - e:len(oldL) - e + 2]:
+            print(f"    {C_DIM}  {l}{C_RESET}")
+    if name == "write_file":
+        lines = str(args.get("content", "")).split("\n")
+        for l in lines[:60]:
+            print(f"    {C_ADD}+ {l}{C_RESET}")
+        if len(lines) > 60:
+            print(f"    {C_DIM}… +{len(lines) - 60} more lines{C_RESET}")
+        return True
+    edits = args.get("edits") if isinstance(args.get("edits"), list) else []
+    if not edits:
+        return False
+    for i, ed in enumerate(edits):
+        if len(edits) > 1:
+            print(f"    {C_DIM}edit {i + 1}/{len(edits)}{C_RESET}")
+        _emit(ed.get("old_text"), ed.get("new_text"))
+    return True
 
 # Terminal markdown rendering. We stream raw tokens live (fast), then re-render
 # the finished message once IF it contains markdown worth formatting (a table,
@@ -610,7 +671,7 @@ def autodetect_context(model_id: str) -> Optional[int]:
 class JarvisCLI:
     def __init__(self):
         self.openai_tools = to_openai_tools()
-        self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+        self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE, timeout=_stream_client_timeout())
         # Auto-detect unless the user explicitly overrode via env
         self.current_model = LOCAL_MODEL if os.getenv("LOCAL_MODEL") else autodetect_model()
         # Whether the user pinned context via env / /context. If they did,
@@ -1232,7 +1293,7 @@ class JarvisCLI:
             pass
         # Rebuild the OpenAI client so it uses the new base + key.
         try:
-            self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+            self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE, timeout=_stream_client_timeout())
         except Exception as e:
             print(f"{C_ERR}retarget: client rebuild failed: {e}{C_RESET}")
             return
@@ -2038,7 +2099,7 @@ class JarvisCLI:
 
             # Rebuild the AsyncOpenAI client so the next request uses new creds
             try:
-                self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+                self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE, timeout=_stream_client_timeout())
             except Exception as e:
                 print(f"{C_WARN}client rebuild warning: {e}{C_RESET}")
 
@@ -2341,7 +2402,7 @@ class JarvisCLI:
                 self._context_pinned = True
                 print(f"{C_OK}context window → {self.context_tokens:,} tokens (pinned){C_RESET}")
                 if requested < MIN_USABLE_CTX:
-                    print(f"{C_WARN}  heads up: Hearth's persona + tools are ~14K tokens, so under "
+                    print(f"{C_WARN}  heads up: Hearth's persona + tools are ~20K tokens, so under "
                           f"~{MIN_USABLE_CTX//1024}K leaves almost no room for chat and the model "
                           f"will overflow fast. 24K+ is comfortable.{C_RESET}")
             else:
@@ -2359,7 +2420,7 @@ class JarvisCLI:
                 print(f"  used:    {used:,} in messages + ~{tool_tok:,} tools = ~{used+tool_tok:,} ({pct}%)")
                 print(f"  free:    ~{free:,} tokens for more conversation  {C_DIM}{bar}{C_RESET}")
                 if self.context_tokens < MIN_USABLE_CTX:
-                    print(f"{C_WARN}  window is below ~{MIN_USABLE_CTX//1024}K — tight for Hearth's ~14K prompt; 24K+ recommended.{C_RESET}")
+                    print(f"{C_WARN}  window is below ~{MIN_USABLE_CTX//1024}K — tight for Hearth's ~20K prompt; 24K+ recommended.{C_RESET}")
                 print(f"{C_DIM}  set: /context <number> (20480, 32k, 1M)  ·  /context auto (re-detect){C_RESET}")
             return True
         if low == "/listen" or low.startswith("/listen "):
@@ -3058,15 +3119,28 @@ class JarvisCLI:
                 except OSError:
                     text_parts.append(f"\n[could not read image {cand}]")
             elif force_image:
-                # @<path> on a non-image file: splice as text
+                # @<path> on a non-image file: extract + splice as text. Use the
+                # smart read_file dispatcher (handles PDF/DOCX/XLSX/CSV/EPUB/…),
+                # not a raw text read — parity with the GUI attach. Raw read is the
+                # fallback for odd types the dispatcher declines.
+                body = ""
                 try:
-                    with open(cand, "r", encoding="utf-8", errors="replace") as f:
-                        body = f.read()
-                    if len(body) > 8000:
-                        body = body[:8000] + f"\n…[truncated, full {len(body)} chars]"
-                    text_parts.append(f"\n\n[attached file: {cand}]\n```\n{body}\n```")
-                except OSError:
-                    text_parts.append(f"\n[could not read {cand}]")
+                    from hearth import execute_tool as _et
+                    _r = _et("read_file", {"path": cand})
+                    if isinstance(_r, str) and _r.strip() and not _r.lstrip().startswith("Error"):
+                        body = _r
+                except Exception:
+                    body = ""
+                if not body:
+                    try:
+                        with open(cand, "r", encoding="utf-8", errors="replace") as f:
+                            body = f.read()
+                    except OSError:
+                        text_parts.append(f"\n[could not read {cand}]")
+                        return
+                if len(body) > 8000:
+                    body = body[:8000] + f"\n…[truncated, full {len(body)} chars]"
+                text_parts.append(f"\n\n[attached file: {cand}]\n```\n{body}\n```")
             # else: bare text-file path mentioned in a sentence - leave alone
 
         # Pass 1: explicit @<path> tokens (any file type, force inline)
@@ -4240,22 +4314,27 @@ class JarvisCLI:
         # passive index or re-asking/disk-scanning. Adds zero tokens when
         # nothing matches; bounded otherwise. See memory.recall_for_prompt.
         from hearth import memory as _mem
-        last_user_text = next((m.get("content", "") for m in reversed(sent)
-                               if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
-        if sent and sent[0].get("role") == "system":
-            # Inject current local time so the model gets it for free -
-            # "what should I do?" / "good morning" / "remind me tomorrow"
-            # all work without a get_time call. Mirrors headless.py for
-            # CLI/GUI parity. ~50 chars cost per turn.
+        # Precise local time + prompt-specific recalled memory ride the LAST USER
+        # turn, not the system head, so the system prompt + prior history stay
+        # byte-stable across turns and the server reuses its KV cache instead of
+        # re-prefilling everything each message. (A minute-resolution stamp in the
+        # system prompt invalidated the whole prefix every 60s.) Time lets the
+        # model reason "what should I do?" / "remind me tomorrow" for free; recall
+        # surfaces the most relevant saved facts. Replacing the list slot with a
+        # fresh dict (not mutating in place) keeps the suffix out of self.messages,
+        # so it never accumulates turn over turn.
+        _iu = next((i for i in range(len(sent) - 1, -1, -1)
+                    if sent[i].get("role") == "user"
+                    and isinstance(sent[i].get("content"), str)), None)
+        if _iu is not None:
             import datetime as _dt
             _now = _dt.datetime.now().astimezone()
-            time_line = (f"\n\nCurrent local time: {_now.strftime('%Y-%m-%d %H:%M')} "
-                         f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).")
-            sent[0] = {**sent[0], "content": sent[0]["content"] + time_line}
-            if last_user_text:
-                block = _mem.recall_for_prompt(last_user_text)
-                if block:
-                    sent[0] = {**sent[0], "content": sent[0]["content"] + "\n\n" + block}
+            suffix = (f"\n\n[Current local time: {_now.strftime('%Y-%m-%d %H:%M')} "
+                      f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).]")
+            block = _mem.recall_for_prompt(sent[_iu]["content"])
+            if block:
+                suffix += "\n\n" + block
+            sent[_iu] = {**sent[_iu], "content": sent[_iu]["content"] + suffix}
         # Final send-boundary guard: enforce tool_call<->tool_result pairing
         # unconditionally, no matter which trim/compact path ran. This is the
         # authoritative fix — validate at the boundary, like a mature agent
@@ -4296,6 +4375,9 @@ class JarvisCLI:
             try:
                 return await self.client.chat.completions.create(**create_kwargs)
             except Exception as e:
+                if "stream_options" in str(e).lower() and "stream_options" in create_kwargs:
+                    create_kwargs.pop("stream_options", None)
+                    continue  # provider rejects usage-on-stream — retry without it
                 if "reasoning_effort" in create_kwargs and _is_reasoning_param_error(e):
                     self._no_reasoning_effort.add((self.current_model or "").lower())
                     create_kwargs.pop("reasoning_effort", None)
@@ -4378,6 +4460,9 @@ class JarvisCLI:
                 "messages": send_messages,
                 "stream": True,
                 "temperature": 0.7,
+                # Real usage on the final stream chunk — feeds the tok/s footer's
+                # token count and the /context readout. Harmless where ignored.
+                "stream_options": {"include_usage": True},
             }
             if getattr(self, "_force_answer", False):
                 # Spiral guard tripped last turn: withhold tools so the model
@@ -4438,6 +4523,11 @@ class JarvisCLI:
 
         tool_calls_dict: Dict[int, Dict] = {}
         content_captured = ""
+        # tok/s timing for the footer — real llama.cpp timings if the last chunk
+        # carries them, else wall-clock decode rate + TTFT.
+        _s_t0 = time.time()
+        _s_first: Optional[float] = None
+        _s_last_chunk = None
         # Count the PHYSICAL terminal lines we actually print for the reply, so
         # the markdown re-render erases exactly those (recomputing from string
         # width after the fact mis-counts when a reasoning/tool frame sat above).
@@ -4576,6 +4666,7 @@ class JarvisCLI:
                 except Exception: pass
                 print(f"\r\033[K{C_DIM}● interrupted by user.{C_RESET}")
                 return
+            _s_last_chunk = chunk
             if not chunk.choices:
                 continue
             if first:
@@ -4605,12 +4696,16 @@ class JarvisCLI:
             reasoning = getattr(delta, "reasoning_content", None) \
                 or getattr(delta, "reasoning", None)
             if reasoning:
+                if _s_first is None:
+                    _s_first = time.time()
                 _open_reasoning()
                 _stream_reasoning(reasoning)
                 # don't add to content_captured - reasoning isn't part of
                 # the assistant message we send back next turn
 
             if delta.content:
+                if _s_first is None:
+                    _s_first = time.time()
                 text = delta.content
                 # Inline <think>...</think> path (Qwen3.5, etc.). When
                 # think_on=False we still need to swallow the bytes that
@@ -4697,6 +4792,34 @@ class JarvisCLI:
             sys.stdout.flush()
         else:
             sys.stdout.write(C_RESET)
+
+        # tok/s footer — only under the final visible reply (not tool-call turns),
+        # muted, one line. Real prompt-eval vs decode split when llama.cpp reports
+        # timings, else a wall-clock decode rate. Honors the GUI's shared
+        # "gen_stats" toggle (settings.json) so turning stats off applies here too.
+        _stats_on = True
+        try:
+            import json as _json
+            with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as _sf:
+                _stats_on = (_json.load(_sf).get("gen_stats") is not False)
+        except Exception:
+            _stats_on = True
+        if _stats_on and not tool_calls_dict and (content_captured or _s_first):
+            try:
+                from hearth.headless import _compute_gen_stats
+                _st = _compute_gen_stats(
+                    _s_t0, _s_first, len(content_captured), 0, _s_last_chunk)
+                bits = []
+                if _st.get("prompt_tps") is not None:
+                    bits.append(f"{_st['prompt_tps']} tok/s prompt")
+                if _st.get("decode_tps") is not None:
+                    bits.append(f"{_st['decode_tps']} tok/s gen")
+                if _st.get("ttft_s") is not None:
+                    bits.append(f"{_st['ttft_s']}s ttft")
+                if bits:
+                    print(f"{C_DIM}{' · '.join(bits)}{C_RESET}")
+            except Exception:
+                pass
 
         if first:
             spinner_task.cancel()
@@ -4820,7 +4943,15 @@ class JarvisCLI:
 
             _unfurl = _will_prompt and len(preview_full) > 100
             print(f"\n  {C_TOOL}●{C_RESET} {_BOLD}{name}{C_RESET}{C_DIM}({_arg_summary(args)}){C_RESET}")
-            if _unfurl:
+            # File writes → green/red diff (parity with the GUI), gated by the same
+            # show_diffs toggle. Falls back to the JSON unfurl for other tools.
+            _showed_diff = False
+            if name in ("edit_file", "write_file") and _cli_show_diffs():
+                try:
+                    _showed_diff = _print_cli_diff(name, args)
+                except Exception:
+                    _showed_diff = False
+            if _unfurl and not _showed_diff:
                 try:
                     pretty = json.dumps(args, ensure_ascii=False, indent=2)
                 except Exception:

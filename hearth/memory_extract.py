@@ -347,7 +347,7 @@ def make_openai_llm_call(client, model: str, *, temperature: float = 0.0,
     extract_and_save expects. Caller passes their own client so we don't
     have to know which endpoint/key combo is in use."""
     def _call(system: str, user: str) -> str:
-        r = client.chat.completions.create(
+        kwargs = dict(
             model=model,
             messages=[
                 {"role": "system", "content": system},
@@ -356,5 +356,14 @@ def make_openai_llm_call(client, model: str, *, temperature: float = 0.0,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        # Disable reasoning for the extractor. A model that "thinks" first burns
+        # the whole token budget on <think> and never emits the JSON (or the
+        # reasoning's brackets confuse the [...] slice), so nothing gets saved.
+        # Local servers honor this flag; if an endpoint 400s on it, retry without.
+        try:
+            r = client.chat.completions.create(
+                **kwargs, extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+        except Exception:
+            r = client.chat.completions.create(**kwargs)
         return (r.choices[0].message.content or "").strip()
     return _call

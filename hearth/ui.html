@@ -485,6 +485,10 @@
     word-wrap: break-word;
     line-height: 1.55;
   }
+  /* The bubble's original .content becomes an empty placeholder once a reply is
+     rebuilt as positioned text segments; hide it so it takes no space. A live
+     .content always holds the dot-bounce or text, so it never :empty-hides. */
+  .msg .content:empty { display: none; }
   .msg .content code {
     background: var(--bg-2); padding: 2px 6px; border-radius: 3px;
     font-family: var(--mono); font-size: 12px;
@@ -500,6 +504,30 @@
     margin: 8px 0;
   }
   .msg .content pre code { background: transparent; padding: 0; border: none; }
+
+  /* Fenced code block chrome: a thin bar with the language + a copy button that
+     surfaces on hover. Sits flush on top of the <pre>, matching Hearth's card
+     borders so it reads as one block, not a bolted-on widget. */
+  .msg .content .code-wrap { margin: 8px 0; }
+  .msg .content .code-wrap pre { margin: 0; border-top-left-radius: 0; border-top-right-radius: 0; border-top: none; }
+  .code-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-2);
+    border: 1px solid var(--border); border-bottom: none;
+    border-top-left-radius: var(--r); border-top-right-radius: var(--r);
+    padding: 3px 6px 3px 10px;
+    font-family: var(--mono); font-size: 10.5px;
+  }
+  .code-lang { color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.5px; }
+  .code-copy {
+    background: transparent; border: 1px solid transparent; color: var(--fg-faint);
+    font-family: var(--mono); font-size: 10.5px; cursor: pointer;
+    padding: 1px 8px; border-radius: 5px; opacity: 0;
+    transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .code-wrap:hover .code-copy { opacity: 1; }
+  .code-copy:hover { color: var(--fg); border-color: var(--border); }
+  .code-copy.copied { color: var(--ok); opacity: 1; }
   .msg .content h2 { font-size: 16px; font-weight: 600; margin: 12px 0 6px; color: var(--fg); }
   .msg .content h3 { font-size: 14px; font-weight: 600; margin: 10px 0 4px; color: var(--fg); }
   .msg .content h4 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.5px; }
@@ -594,6 +622,23 @@
   }
   .tool.open .t-body { display: block; }
 
+  /* A tool call still being written by the model — args stream into the header,
+     the name pulses so it reads as in-progress until the call finalizes. */
+  .tool.tc-generating .t-name { animation: tcPulse 1.2s ease-in-out infinite; }
+  .tool.tc-generating .t-args { color: var(--accent-2); opacity: 0.9; }
+  @keyframes tcPulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+  /* File-write diff inside a tool card: green additions, red removals. */
+  .t-body pre.diff { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .t-body pre.diff .diff-add,
+  .t-body pre.diff .diff-del,
+  .t-body pre.diff .diff-ctx { display: block; padding: 0 4px; border-radius: 2px; }
+  .t-body pre.diff .diff-add { color: #7ee787; background: rgba(63, 185, 80, 0.12); }
+  .t-body pre.diff .diff-del { color: #ff9492; background: rgba(248, 81, 73, 0.12); }
+  .t-body pre.diff .diff-ctx { color: var(--fg-faint); }
+  .t-body .diff-more { color: var(--fg-faint); font-style: italic; padding: 4px 4px 0; }
+  .t-body .diff-edithdr { color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; margin: 8px 0 3px; }
+
   /* Thinking block - collapsible, single block per turn */
   .think {
     margin: 6px 0;
@@ -654,6 +699,40 @@
   .meta.ok { color: var(--ok); opacity: 0.7; }
   .meta.err { color: var(--err); }
   .meta.warn { color: var(--warn); }
+
+  /* Per-message throughput footer (tok/s). Hidden by default — only fades in
+     when you hover THAT message, sitting just under its output. Never competes
+     with the prose; you look for it only when you want it. */
+  .gen-stats {
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    font-family: var(--mono);
+    letter-spacing: 0.2px;
+    margin: 4px 2px 0;
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: opacity 0.15s ease, max-height 0.15s ease;
+    user-select: text;
+    pointer-events: none;
+  }
+  .msg:hover .gen-stats { opacity: 0.6; max-height: 2em; }
+  .gen-stats .sep { opacity: 0.4; margin: 0 6px; }
+  /* The live counter shows WHILE generating (not hover-gated), with a soft
+     pulse so it reads as active. Removed on 'done' for the hover footer. */
+  .gen-stats.gen-stats-live { opacity: 0.7; max-height: 2em; pointer-events: none; animation: liveStatPulse 1.4s ease-in-out infinite; }
+  @keyframes liveStatPulse { 0%,100% { opacity: 0.45; } 50% { opacity: 0.8; } }
+
+  /* Inline "you steered mid-turn" chip. Muted, italic — reads as an aside, not a
+     full user bubble (the steer lands in the reply already streaming). */
+  .meta.steer-chip {
+    font-style: italic;
+    opacity: 0.75;
+    max-width: 80%;
+    margin-left: auto; margin-right: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 
   /* Input row */
   .input-row {
@@ -863,8 +942,14 @@
   }
   .mic-btn:hover { color: var(--accent-2); border-color: var(--accent-line); }
   .mic-btn.recording {
-    color: #fff; background: var(--err); border-color: var(--err);
-    animation: pulse 1.1s infinite;
+    color: #fff; background: var(--accent); border-color: var(--accent);
+    /* Amplitude-reactive, not a canned pulse. --mic-level (0..1) is written from
+       the live mic RMS every audio frame; a louder voice widens the violet halo
+       and brightens the core, so the motion IS the user's voice. No keyframe. */
+    box-shadow: 0 0 calc(4px + var(--mic-level, 0) * 26px)
+                     calc(1px + var(--mic-level, 0) * 5px) var(--accent);
+    filter: brightness(calc(0.82 + var(--mic-level, 0) * 0.6));
+    transition: box-shadow 70ms linear, filter 70ms linear;
   }
   .send-btn {
     background: var(--accent);
@@ -1255,6 +1340,21 @@
     width: 100%;
   }
   .ex-config input[type="range"] { width: 100%; }
+  /* Collapsed "Advanced flags" — zero height until opened, so the load button
+     stays on screen for everyone who doesn't need it. */
+  .ex-config details.ex-advanced {
+    margin-top: 4px; border-top: 1px solid var(--border); padding-top: 10px;
+  }
+  .ex-config details.ex-advanced summary {
+    cursor: pointer; user-select: none; list-style: none;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+    text-transform: uppercase; color: var(--fg-dim);
+  }
+  .ex-config details.ex-advanced summary::-webkit-details-marker { display: none; }
+  .ex-config details.ex-advanced summary::before { content: '▸ '; color: var(--fg-faint); }
+  .ex-config details.ex-advanced[open] summary::before { content: '▾ '; }
+  .ex-config details.ex-advanced summary:hover { color: var(--fg); }
+  .ex-config details.ex-advanced input[type="text"] { margin-top: 8px; }
   .ex-config .ex-slider-row {
     display: flex; align-items: center; gap: 10px;
   }
@@ -2593,6 +2693,9 @@
     transition: border-color 0.15s var(--ease);
   }
   .ob-input:focus, .ob-select:focus { border-color: var(--accent-2); }
+  /* Dark the dropdown option list — native <option>s default to OS white on
+     Windows unless set, which is the jarring white voice-picker on first run. */
+  .ob-select option { background: var(--bg-2); color: var(--fg); }
   .ob-choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 10px 0; }
   .ob-choice {
     background: var(--bg-2); border: 1px solid var(--border);
@@ -2973,7 +3076,7 @@
           <div id="ctx-ring" class="ctx-ring"></div>
           <div id="ctx-ring-pct" class="ctx-ring-pct">0%</div>
         </div>
-        <button class="mic-btn" id="btn-mic" title="Hold to talk (Whisper STT)">
+        <button class="mic-btn" id="btn-mic" title="Click to talk, click again to send (Whisper STT)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/><path d="M8 23h8"/></svg>
         </button>
         <button class="mic-btn" id="btn-attach" title="Attach files (or drag-drop them in)">
@@ -3072,6 +3175,7 @@
         <h2>Files</h2>
         <span class="sub" id="files-sub">~/Jarvis</span>
         <div class="crumb" id="file-crumb" style="margin-left:auto"></div>
+        <button class="btn-mini" id="btn-files-reveal" title="Open this folder in your file explorer" style="margin-left:8px">Open folder</button>
       </div>
       <div class="list-pane" id="file-list"></div>
     </section>
@@ -3285,6 +3389,13 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">Half-duplex (speaker mode)</div>
+            <div class="hint">On a headset, leave this OFF so you can interrupt by voice. Turn it ON only if you run on speakers and Hearth ever hears itself and loops - it then holds the mic closed while it speaks, so you can't barge in mid-sentence.</div>
+          </div>
+          <div class="switch" data-key="voice_half_duplex"></div>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">Speaking (text-to-speech)</div>
             <div class="hint">Where the spoken-aloud voice (Kokoro) runs. CPU is plenty fast for speaking — you rarely need GPU here. (Listening / transcription is the "Where to transcribe" setting below — that's the one that benefits from GPU.)</div>
           </div>
@@ -3468,6 +3579,22 @@
           <button type="button" class="btn-mini" id="btn-go-reminders">Open Reminders</button>
         </div>
 
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Chat</h4>
+        <div class="field">
+          <div class="label">
+            <div class="name">Generation stats</div>
+            <div class="hint">The tok/s counter while a reply streams and the speed + total-time footer under each message (hover to see it). Off hides both.</div>
+          </div>
+          <div class="switch" data-key="gen_stats"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">File-change diffs</div>
+            <div class="hint">Show a green/red diff of what changed when Hearth writes or edits a file, inside the tool card. Off shows the plain result text instead.</div>
+          </div>
+          <div class="switch" data-key="show_diffs"></div>
+        </div>
+
         <!-- Toast quiet-mode: user-controlled noise level for popups -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Toasts</h4>
         <div class="field">
@@ -3580,12 +3707,12 @@
             <div class="name">Default context window <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
             <div class="hint">Only applies when Hearth runs its <strong>own</strong> llama.cpp server and loads a GGUF that has no saved config yet. LM Studio / Ollama / cloud brains set their own context - this is ignored for them. Higher = more headroom but more KV-cache VRAM.</div>
           </div>
-          <!-- Floored at 18K: Hearth's persona + tools are ~14K, so anything
+          <!-- Floored at 24K: Hearth's persona + tools are ~20K, so anything
                smaller overflows almost immediately with no room for chat. -->
           <select id="setting-server-ctx">
-            <option value="18432">18K (minimum - tight)</option>
-            <option value="24576">24K (leaner on VRAM)</option>
+            <option value="24576">24K (minimum - tight)</option>
             <option value="32768" selected>32K (recommended)</option>
+            <option value="49152">48K (more room, more KV-cache VRAM)</option>
             <option value="65536">64K (uses noticeably more KV-cache VRAM)</option>
           </select>
         </div>
@@ -4195,17 +4322,14 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','
 // text instead of being parsed into proper OpenAI tool_calls. Strip the most
 // common patterns from display so the user doesn't see gibberish. The
 // underlying assistantMsg.content stays untouched for replay / history.
-function stripGarbageToolCalls(s) {
+function stripCompleteToolCalls(s) {
+  // Remove only COMPLETE tool-call blocks (both open and close present). Safe to
+  // run on a LIVE streaming buffer: unlike the orphaned-open strip below, it
+  // won't chop a call that's still mid-stream, whose JSON tail would otherwise
+  // arrive un-marked in the next chunk and slip through.
   if (!s) return s;
-  // The opening / closing markers are slippery - different fine-tunes emit
-  // `<|toolcall>`, `<|tool_call|>`, `<|toolcall|>`, etc. and the closing can
-  // be `<tool_call|>` or `</tool_call>` or missing entirely (truncated
-  // stream). Match each marker permissively + keep the inner-body match
-  // non-greedy. Final fallback strips any orphaned open marker too.
   return s
-    // Gemma 4 leak family - opening `<|toolcall>` / `<|toolcall|>` / `<|tool_call|>`
-    // through closing `<tool_call|>` / `</tool_call>` / `<|tool_call|>`. Non-greedy
-    // inside; case-insensitive markers.
+    // Gemma leak family - open through close, non-greedy, case-insensitive markers.
     .replace(/<\|tool[_ ]?call\|?>[\s\S]*?<\/?tool[_ ]?call\|?>/gi, '')
     // Hermes / Qwen ChatML <tool_call>...</tool_call>
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
@@ -4215,14 +4339,19 @@ function stripGarbageToolCalls(s) {
     .replace(/<\|python_tag\|>[\s\S]*?<\|eom_id\|>/gi, '')
     // Phi / Granite <|tool|>...</|tool|> or <|tool_call|>...<|tool_call_end|>
     .replace(/<\|tool(_call)?\|>[\s\S]*?<\|\/?tool(_call_end|_call|)\|>/gi, '')
-    // Stray ChatML markers
-    .replace(/<\|im_(start|end)\|>/gi, '')
     // Pipe-escaped quote tokens that leak when the chat template's quoting fails
-    .replace(/<\|"\|>/g, '"')
-    // ORPHANED open markers (model truncated mid-tool-call, or a live stream
-    // that hasn't reached the closing tag yet) - strip from the open marker
-    // through end-of-string so the user doesn't see half a call. The plain
-    // <tool_call> open is common now that the builtin server emits it live.
+    .replace(/<\|"\|>/g, '"');
+}
+
+function stripGarbageToolCalls(s) {
+  if (!s) return s;
+  // Complete blocks first, then the stragglers a live/truncated stream leaves:
+  // stray ChatML markers and an ORPHANED open marker (model truncated mid-call,
+  // or the stream hasn't reached the close yet) stripped through end-of-string so
+  // the user never sees half a call. This end-of-string strip is why it's NOT
+  // safe on a live TTS buffer — use stripCompleteToolCalls there.
+  return stripCompleteToolCalls(s)
+    .replace(/<\|im_(start|end)\|>/gi, '')
     .replace(/<\|tool[_ ]?call\|?>[\s\S]*$/i, '')
     .replace(/<tool_call>[\s\S]*$/i, '')
     .replace(/<\|python_tag\|>[\s\S]*$/i, '');
@@ -4258,8 +4387,9 @@ function renderMD(src) {
     ldots: '…', dots: '…', cdots: '⋯', bullet: '•',
     Rightarrow_: '⇒', land: '∧', lor: '∨', neg: '¬',
     forall: '∀', exists: '∃', in: '∈', notin: '∉' };
-  src = src.replace(/\$([^$\n]{1,160})\$/g, (m, inner) =>
-    inner.replace(/\\([a-zA-Z]+)/g, (mm, cmd) => _TEX[cmd] || mm).replace(/[{}]/g, '').trim());
+  const _texInner = (inner) => inner.replace(/\\([a-zA-Z]+)/g, (mm, cmd) => _TEX[cmd] || mm).replace(/[{}]/g, '').trim();
+  src = src.replace(/\$([^$\n]{1,160})\$/g, (m, inner) => _texInner(inner));      // $ ... $
+  src = src.replace(/\\\(([^\n]{1,160}?)\\\)/g, (m, inner) => _texInner(inner));   // \( ... \)
   // HTML-escape EVERYTHING else
   let html = esc(src);
   // Headings (only at start of line, 1-3 #s - keep level visual but flat)
@@ -4320,10 +4450,17 @@ function renderMD(src) {
   // Re-insert inline code (escaped)
   html = html.replace(/\x00IC(\d+)\x00/g, (_, i) =>
     `<code>${esc(inlineCodes[+i])}</code>`);
-  // Re-insert fenced code blocks (escaped)
+  // Re-insert fenced code blocks (escaped), each wrapped with a hover-reveal
+  // bar carrying the language and a copy button. The button copies from the
+  // <code> node's textContent via delegation (wired once, below), so no inline
+  // handler and it works for every block rendered after.
   html = html.replace(/\x00CB(\d+)\x00/g, (_, i) => {
     const { lang, code } = codeBlocks[+i];
-    return `<pre><code class="lang-${esc(lang || 'text')}">${esc(code)}</code></pre>`;
+    const L = esc(lang || 'text');
+    return `<div class="code-wrap"><div class="code-bar">` +
+           `<span class="code-lang">${L}</span>` +
+           `<button class="code-copy" type="button" title="Copy code">copy</button>` +
+           `</div><pre><code class="lang-${L}">${esc(code)}</code></pre></div>`;
   });
   return html;
 }
@@ -4832,6 +4969,13 @@ function touch(c) {
   renderConvoList();
 }
 async function deleteConversation(id) {
+  // If we're deleting the chat that's actively generating, stop the run first —
+  // otherwise the server keeps generating into a conversation that no longer
+  // exists (wasted compute + an orphaned re-save).
+  if (id === STATE.activeId && STATE.streaming) {
+    try { if (currentAbort) currentAbort.abort(); } catch {}
+    try { await fetch('/api/cancel', { method: 'POST' }); } catch {}
+  }
   STATE.conversations = STATE.conversations.filter(c => c.id !== id);
   try {
     await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -5000,17 +5144,28 @@ async function _updateCtxRingFromHistory() {
   const ring = document.getElementById('ctx-ring');
   const pct  = document.getElementById('ctx-ring-pct');
   if (!c || !wrap || !ring || !pct) return;
+  // No brain loaded → there is no real context window to measure against, so the
+  // ring would be comparing this chat's history to a stale ghost budget. Hide it
+  // entirely until a local model (with its ctx) or a cloud provider is active.
+  const brainLoaded = !!(STATE.loadedModel && STATE.loadedModel.id) ||
+                      (STATE.brain && STATE.brain.kind === 'cloud');
+  if (!brainLoaded) { wrap.hidden = true; wrap.classList.remove('warn', 'hot', 'compacting'); return; }
   let b = STATE._ctxBudget;
-  if (!b || !b.effective) {
+  // Re-fetch when base is missing too: the live context_budget SSE overwrites
+  // the stash each turn WITHOUT base, so the idle estimate would drop the persona
+  // overhead again right after a turn. /api/context-budget always carries it.
+  if (!b || !b.effective || b.base == null) {
     try {
       const r = await api('/api/context-budget');
-      b = STATE._ctxBudget = { total: r.total, tools: r.tools, effective: r.effective, source: r.source };
+      b = STATE._ctxBudget = { total: r.total, tools: r.tools, effective: r.effective, source: r.source, base: r.base };
     } catch { return; }
   }
   const eff = (b && (b.effective || b.total)) || 0;
   if (!eff) return;
   const chars = (c.messages || []).reduce((s, m) => s + ((m.content || '').length), 0);
-  const used = Math.round(chars / 4);
+  // Add the persona/system-prompt base the backend reports: the live ring counts
+  // it, so without it the idle ring reads low then jumps the instant a turn runs.
+  const used = Math.round(chars / 4) + ((b && b.base) || 0);
   const p = Math.max(0, Math.min(100, Math.round(100 * used / eff)));
   const shouldShow = p >= 70 || wrap.classList.contains('compacting');
   wrap.hidden = !shouldShow;
@@ -5044,47 +5199,59 @@ function renderChat() {
     const msgDiv = renderMessage(m);
     if (!msgDiv) continue;  // silent synthetic message (auto-fold)
     body.appendChild(msgDiv);
-    if (m.role === 'assistant' && Array.isArray(m.events)) {
-      let thinkBuf = '';
-      const flushThink = () => {
-        if (thinkBuf) {
-          const tb = makeThink(thinkBuf);
-          tb.classList.remove('open');
-          insertUnderAssistant(tb, msgDiv);
-          thinkBuf = '';
-        }
+    if (m.role === 'assistant') {
+      // Interleave text with tools/thinking by the position each event fired at
+      // (ev.pos = chars of content that existed then). Text BEFORE a tool renders
+      // above it, text after below — instead of all tools bunched on top and all
+      // text at the bottom. Empty the bubble's own .content (renderMessage put the
+      // whole reply there) and rebuild as positioned segments; it stays as an
+      // empty, :empty-hidden placeholder. Events with no pos (older chats) default
+      // to 0 and land before the text, matching the old behavior.
+      const content = m.content || '';
+      const events = Array.isArray(m.events) ? m.events : [];
+      const firstContent = msgDiv.querySelector('.content');
+      if (firstContent) firstContent.innerHTML = '';
+      let cursor = 0, thinkBuf = '';
+      const putText = (upto) => {
+        if (upto <= cursor) return;
+        const seg = content.slice(cursor, upto); cursor = upto;
+        if (!seg.trim()) return;
+        appendPart(makeContentBlock(renderMD(stripGarbageToolCalls(seg))), msgDiv);
       };
-      for (const ev of m.events) {
-        if (ev.kind === 'think_chunk') {
-          thinkBuf += ev.content || '';
-        } else {
-          flushThink();
-          if (ev.kind === 'tool') {
-            const t = makeToolCard(ev.name, ev.args || {});
-            t.body.textContent = ev.result || '';
-            if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
-            insertUnderAssistant(t.div, msgDiv);
-          } else if (ev.kind === 'media') {
-            // Re-render persisted media block (image or video). Same factory
-            // as the live path so DOM is identical regardless of when it's built.
-            insertUnderAssistant(makeMediaBlock(ev.mediaKind, ev.path), msgDiv);
-          } else if (ev.kind === 'subagent_done') {
-            // Same factory as the live path so DOM is identical regardless
-            // of when the card is built (in-stream vs re-render).
-            insertUnderAssistant(makeSubagentCard(ev), msgDiv);
-          } else if (ev.kind === 'nudge') {
-            // Internal-only - never shown in chat (see live handler).
-          } else if (ev.kind === 'error') {
-            insertUnderAssistant(makeMeta(ev.text || 'error', 'err'), msgDiv);
-          }
+      const flushThink = () => {
+        if (thinkBuf) { const tb = makeThink(thinkBuf); tb.classList.remove('open'); appendPart(tb, msgDiv); thinkBuf = ''; }
+      };
+      // Walk events in ORIGINAL (chronological) order; pos = how much text
+      // preceded each. Thinking renders where it started; a tool/media flushes the
+      // pending thinking FIRST, then the text up to it, then itself — so text lands
+      // AFTER the reasoning that preceded it, not above it.
+      for (const ev of events) {
+        const p = (ev.pos == null ? cursor : ev.pos);
+        if (ev.kind === 'think_chunk') { putText(p); thinkBuf += ev.content || ''; continue; }
+        if (ev.kind === 'nudge' || ev.kind === 'done') continue;
+        flushThink();
+        putText(p);
+        if (ev.kind === 'tool') {
+          const t = makeToolCard(ev.name, ev.args || {});
+          // Keep the green/red diff for file writes; the terse text result would
+          // clobber it. Other tools show their result as before.
+          if (!t.div.classList.contains('has-diff')) t.body.textContent = ev.result || '';
+          if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
+          appendPart(t.div, msgDiv);
+        } else if (ev.kind === 'media') {
+          appendPart(makeMediaBlock(ev.mediaKind, ev.path), msgDiv);
+        } else if (ev.kind === 'subagent_done') {
+          appendPart(makeSubagentCard(ev), msgDiv);
+        } else if (ev.kind === 'error') {
+          appendPart(makeMeta(ev.text || 'error', 'err'), msgDiv);
         }
       }
       flushThink();
-    }
-    // Render the "done" meta after the message
-    if (m.role === 'assistant' && Array.isArray(m.events)) {
-      for (const ev of m.events) {
-        if (ev.kind === 'done') body.appendChild(makeMeta(ev.text || '', 'ok'));
+      putText(content.length);
+      for (const ev of events) {
+        if (ev.kind !== 'done') continue;
+        if (ev.text) body.appendChild(makeMeta(ev.text, 'ok'));
+        attachStatsLine(msgDiv, ev.stats);
       }
     }
   }
@@ -5344,6 +5511,27 @@ function insertUnderAssistant(node, liveDiv) {
   else $('chat-body').appendChild(node);
 }
 
+// A standalone text block for one assistant segment (text between tool calls).
+// Same class as the bubble's main .content so markdown + styling match.
+function makeContentBlock(html) {
+  const c = document.createElement('div');
+  c.className = 'content';
+  if (html != null) c.innerHTML = html;
+  return c;
+}
+
+// Append a part (text block / tool card / thinking / media) at the END of the
+// assistant body — before the .actions row — so parts stack in chronological
+// order and text after a tool renders BELOW it (real interleave), instead of all
+// tools bunched on top and all text collapsed at the bottom.
+function appendPart(node, msgDiv) {
+  const body = (msgDiv && msgDiv.querySelector) ? msgDiv.querySelector('.body') : null;
+  if (!body) { $('chat-body').appendChild(node); return; }
+  const actions = body.querySelector(':scope > .actions');
+  if (actions) body.insertBefore(node, actions);
+  else body.appendChild(node);
+}
+
 // Per-tool icons so the card header isn't the same file glyph 10x in a row.
 // SVG only (no emoji), keyed by category; unknown tools fall back to the file.
 const _TOOL_ICONS = {
@@ -5382,6 +5570,64 @@ function _toolIcon(name) {
   return _TOOL_ICONS[key] || _TOOL_ICONS.file;
 }
 
+// A compact line diff: trims the common head/tail so only the CHANGED region
+// (plus a couple lines of context) shows, then colors removals red and additions
+// green. Beats dumping the raw old/new blobs into the card.
+function makeDiffView(oldStr, newStr) {
+  const oldL = String(oldStr == null ? '' : oldStr).split('\n');
+  const newL = String(newStr == null ? '' : newStr).split('\n');
+  let s = 0;
+  while (s < oldL.length && s < newL.length && oldL[s] === newL[s]) s++;
+  let e = 0;
+  while (e < oldL.length - s && e < newL.length - s &&
+         oldL[oldL.length - 1 - e] === newL[newL.length - 1 - e]) e++;
+  const rows = [];
+  oldL.slice(Math.max(0, s - 2), s).forEach(l => rows.push(['ctx', l]));
+  oldL.slice(s, oldL.length - e).forEach(l => rows.push(['del', l]));
+  newL.slice(s, newL.length - e).forEach(l => rows.push(['add', l]));
+  oldL.slice(oldL.length - e, oldL.length - e + 2).forEach(l => rows.push(['ctx', l]));
+  const pre = document.createElement('pre');
+  pre.className = 'diff';
+  pre.innerHTML = rows.map(([k, l]) => {
+    const cls = k === 'del' ? 'diff-del' : k === 'add' ? 'diff-add' : 'diff-ctx';
+    const sign = k === 'del' ? '-' : k === 'add' ? '+' : ' ';
+    return `<span class="${cls}">${sign} ${esc(l)}</span>`;
+  }).join('\n');
+  return pre;
+}
+
+// Fill an edit_file / write_file card body with a diff instead of raw JSON args.
+// edit_file → one diff per edit (old_text → new_text). write_file → the content
+// as an all-green add, truncated so a huge file doesn't blow up the card.
+function fillEditCard(name, args, body) {
+  body.innerHTML = '';
+  const MAXL = 60;
+  if (name === 'write_file') {
+    const lines = String(args.content || '').split('\n');
+    const shown = lines.slice(0, MAXL);
+    const pre = document.createElement('pre'); pre.className = 'diff';
+    pre.innerHTML = shown.map(l => `<span class="diff-add">+ ${esc(l)}</span>`).join('\n');
+    body.appendChild(pre);
+    if (lines.length > MAXL) {
+      const m = document.createElement('div'); m.className = 'diff-more';
+      m.textContent = `… +${lines.length - MAXL} more lines`;
+      body.appendChild(m);
+    }
+    return true;
+  }
+  const edits = Array.isArray(args.edits) ? args.edits : [];
+  if (!edits.length) return false;
+  edits.forEach((ed, i) => {
+    if (edits.length > 1) {
+      const h = document.createElement('div'); h.className = 'diff-edithdr';
+      h.textContent = `edit ${i + 1}/${edits.length}`;
+      body.appendChild(h);
+    }
+    body.appendChild(makeDiffView(ed.old_text, ed.new_text));
+  });
+  return true;
+}
+
 function makeToolCard(name, args) {
   // Every tool - including browse / browse_click / browse_scroll / browse_type /
   // browse_close - renders with the SAME card shape: header with name + args,
@@ -5408,7 +5654,15 @@ function makeToolCard(name, args) {
     <div class="t-body"></div>
   `;
   div.querySelector('.t-head').addEventListener('click', () => div.classList.toggle('open'));
-  return { div, body: div.querySelector('.t-body'), ms: div.querySelector('.t-ms') };
+  const body = div.querySelector('.t-body');
+  // File-writing tools render a green/red diff from their args instead of the raw
+  // tool result (which is a terse "edited N lines" and hides WHAT changed).
+  // Off when the user disables diffs in Settings (default on).
+  const _diffsOn = !(STATE.settings && STATE.settings.show_diffs === false);
+  if (_diffsOn && (name === 'edit_file' || name === 'write_file') && args) {
+    try { if (fillEditCard(name, args, body)) div.classList.add('has-diff'); } catch {}
+  }
+  return { div, body, ms: div.querySelector('.t-ms') };
 }
 // Subagent completion card - same shape as a tool pill. Body shows the
 // FULL agent result + a "tools used" footer so the user can audit what
@@ -5619,6 +5873,43 @@ function makeMeta(text, kind = '') {
   const d = document.createElement('div'); d.className = `meta ${kind}`; d.textContent = text; return d;
 }
 
+// Throughput footer for one assistant turn. Renders whatever the backend
+// measured — llama.cpp's real prompt-eval vs decode split when available, else a
+// wall-clock decode estimate. Returns null when there's nothing worth showing.
+function makeStatsLine(stats) {
+  if (!stats || typeof stats !== 'object') return null;
+  const parts = [];
+  if (stats.prompt_tps != null)
+    parts.push(`${stats.prompt_tps} tok/s prompt`);
+  if (stats.decode_tps != null)
+    parts.push(`${stats.decode_tps} tok/s gen`);
+  if (stats.ttft_s != null)
+    parts.push(`${stats.ttft_s}s to first token`);
+  if (stats.duration_ms != null)
+    parts.push(`${(stats.duration_ms / 1000).toFixed(1)}s total`);
+  if (!parts.length) return null;
+  const d = document.createElement('div');
+  d.className = 'gen-stats';
+  d.innerHTML = parts.map(p => `<span>${p}</span>`).join('<span class="sep">·</span>');
+  return d;
+}
+
+// Place the tok/s line INSIDE the message's .body column (below the reply text,
+// just above the copy/speak/regenerate row) — not on the flex .msg wrapper,
+// which would float it up to the header line on the right.
+// Off only when the user explicitly disabled the footer in Settings (default on).
+function _statsEnabled() { return !(STATE.settings && STATE.settings.gen_stats === false); }
+function attachStatsLine(msgEl, stats) {
+  if (!msgEl || !_statsEnabled()) return;
+  const body = msgEl.querySelector(':scope > .body') || msgEl.querySelector('.body');
+  if (!body || body.querySelector('.gen-stats')) return;
+  const line = makeStatsLine(stats);
+  if (!line) return;
+  const actions = body.querySelector('.actions');
+  if (actions) body.insertBefore(line, actions);
+  else body.appendChild(line);
+}
+
 // ============================================================
 // TOP BAR - models
 // ============================================================
@@ -5710,46 +6001,27 @@ async function refreshModels() {
     // a stale value (the "cloud grok-4.3 lingers" / flicker bug).
     if (STATE.brain.busy) return;
 
-    // Cloud brain: the user's picked model_id is authoritative. The refresh
-    // poll would otherwise overwrite their selection every 9s with whatever
-    // the provider's /v1/models lists first (typically grok-4.20).
-    const kind = deriveBrainKind();
-    const _isCloud = kind.kind === 'cloud';
-    const _userPicked = (STATE.settings && STATE.settings.llm_model) || '';
-
-    STATE.brain.kind = kind.kind;
-    STATE.brain.providerKey = kind.providerKey;
-    STATE.brain.providerLabel = kind.providerLabel;
-
-    if (_isCloud) {
-      // Make sure the picked cloud model is a selectable option even if the
-      // provider's /v1/models list didn't include it (custom/aliased ids),
-      // so the sticker can actually show it.
-      if (_userPicked && !Array.from(sel.options).some(o => o.value === _userPicked)) {
-        const opt = document.createElement('option');
-        opt.value = _userPicked;
-        opt.textContent = _userPicked.split(/[\/\\]/).pop() + '   ● active';
-        sel.insertBefore(opt, sel.firstChild);
-      }
-      STATE.brain.modelId = _userPicked;
-      STATE.brain.modelName = _userPicked ? _userPicked.split(/[\/\\]/).pop() : '-';
-      STATE.brain.loaded = !!_userPicked;
-      // ctxTotal for cloud is owned by refreshCtxBudget (don't zero it here).
-      STATE.loadedModel = _userPicked ? { id: _userPicked, state: 'loaded' } : null;
-    } else {
-      STATE.brain.modelId = loadedModel ? loadedModel.id : '';
-      STATE.brain.modelName = loadedModel ? loadedModel.id.split(/[\/\\]/).pop() : '-';
-      STATE.brain.loaded = !!loadedModel;
-      if (loadedModel && (loadedModel.loaded_context_length || loadedModel.max_context_length)) {
-        STATE.brain.ctxTotal = loadedModel.loaded_context_length || loadedModel.max_context_length;
-        STATE.brain.ctxSource = 'loaded model';
-      } else if (!loadedModel) {
-        STATE.brain.ctxTotal = 0;
-        STATE.brain.ctxEffective = 0;
-      }
-      STATE.loadedModel = loadedModel || null;
+    // This poll owns the <select> OPTION LIST + a repaint, nothing else.
+    // STATE.brain / STATE.loadedModel are derived by refreshState (the single
+    // owner, reading /api/state). Deriving them here too made the two polls
+    // (9s vs 12s, different backends) fight — whichever await resolved last won
+    // the cycle — which is the ejected-model / stale-.gguf / grok-default /
+    // ctx-pill flicker. So: read the OWNED kind, keep the cloud pick selectable,
+    // repaint. No STATE.brain writes here.
+    const _isCloud = STATE.brain.kind === 'cloud';
+    let _userPicked = (STATE.settings && STATE.settings.llm_model) || '';
+    // A .gguf is a LOCAL file, never a cloud model id — don't offer a stale one.
+    if (_isCloud && /\.gguf$/i.test(_userPicked)) _userPicked = '';
+    if (_isCloud && _userPicked && !Array.from(sel.options).some(o => o.value === _userPicked)) {
+      // Make the picked cloud model a selectable option even if the provider's
+      // /v1/models list didn't include it, so the sticker can show it.
+      const opt = document.createElement('option');
+      opt.value = _userPicked;
+      opt.textContent = _userPicked.split(/[\/\\]/).pop() + '   ● active';
+      sel.insertBefore(opt, sel.firstChild);
     }
-    // Repaint dropdown selection + sticker + eject + ctx from one place.
+    // Repaint dropdown selection + sticker + eject + ctx from the brain that
+    // refreshState owns.
     applyBrainState();
     // If the empty ("Getting Hearth ready…") screen is up, refresh it when the
     // model finishes loading so it flips to "ready" — only on CHANGE, so the
@@ -6007,6 +6279,18 @@ function providerFromEndpoint(url) {
 async function refreshState() {
   try {
     const s = await api('/api/state');
+    // Wake word fired while this window was already open: the tray couldn't spawn
+    // a new ?voice=1 window, so it flipped a one-shot flag. Enter voice mode in
+    // place — same as the ?voice=1 boot path.
+    if (s && s.enter_voice && !voiceModeOn) {
+      // Raise our own native window first — wake may have fired while it was
+      // buried, and only the window's own process wins Windows' foreground lock.
+      try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.focus_window)
+          window.pywebview.api.focus_window();
+      } catch (e) {}
+      enterVoiceMode().then(() => startRealtimeVoice()).catch(() => {});
+    }
     // Live endpoint is the source of truth for local-vs-cloud + the brand label.
     STATE.endpoint = s.endpoint || '';
     // Stash the MCP launcher the backend computed for this build (source vs
@@ -6026,7 +6310,10 @@ async function refreshState() {
       if (kind.kind === 'cloud') {
         // Cloud: the user's picked model id is authoritative (the server's
         // /api/state model row reflects whatever the provider lists first).
-        const picked = (STATE.settings && STATE.settings.llm_model) || (s.model && s.model.id) || '';
+        let picked = (STATE.settings && STATE.settings.llm_model) || (s.model && s.model.id) || '';
+        // A stale .gguf from the previous LOCAL brain is not a cloud model id —
+        // strip it so an ejected local file can't show as the active cloud model.
+        if (/\.gguf$/i.test(picked)) picked = '';
         STATE.brain.modelId = picked;
         STATE.brain.modelName = picked ? picked.split(/[\/\\]/).pop() : '-';
         STATE.brain.loaded = !!picked;
@@ -6038,8 +6325,8 @@ async function refreshState() {
         STATE.brain.modelName = m ? m.id.split(/[\/\\]/).pop() : '-';
         STATE.brain.loaded = !!m;
         // Local loaded models report their real loaded context — that is the truth.
-        if (m && m.loaded_context_length) {
-          STATE.brain.ctxTotal = m.loaded_context_length;
+        if (m && (m.loaded_context_length || m.max_context_length)) {
+          STATE.brain.ctxTotal = m.loaded_context_length || m.max_context_length;
           STATE.brain.ctxSource = 'loaded model';
         } else if (!m) {
           STATE.brain.ctxTotal = 0;
@@ -6089,7 +6376,7 @@ async function refreshCtxBudget() {
     // Keep the legacy stash for the chat-event tooltip path.
     STATE._ctxBudget = {
       total: b.total, tools: b.tools,
-      effective: b.effective, source: b.source,
+      effective: b.effective, source: b.source, base: b.base,
     };
     // Feed the single source of truth. For a LOCAL loaded model the real
     // loaded_context_length (set by refreshState) is the truth — don't let
@@ -6227,6 +6514,96 @@ async function stopGen() {
   if (currentAbort) { try { currentAbort.abort(); } catch {} }
 }
 
+// Stick-to-bottom that respects the reader: only auto-scroll while streaming if
+// you're already near the bottom. Scroll up to read earlier in a long tool chain
+// and it stops yanking you back down. Load/thread-switch still forces the bottom.
+function chatFollow(force = false) {
+  const b = $('chat-body');
+  if (!b) return;
+  const gap = b.scrollHeight - b.scrollTop - b.clientHeight;
+  if (force || gap < 120) b.scrollTop = b.scrollHeight;
+}
+
+// Live tok/s while a turn generates — driven by the backend's REAL per-chunk
+// llama.cpp timings (stats_live events), never a wall-clock guess. So the number
+// is true the whole time and the final footer is just its last value: no jump.
+// Stays hidden until the first real timing arrives (cloud models send none, so
+// nothing shows live there — the accurate footer still lands on 'done').
+let _liveStats = { el: null };
+function _liveStatsStop() {
+  if (_liveStats.el && _liveStats.el.parentNode) _liveStats.el.remove();
+  _liveStats = { el: null };
+}
+function _liveStatsBegin(msgEl) {
+  _liveStatsStop();
+  if (!_statsEnabled()) return;
+  const body = msgEl && msgEl.querySelector ? msgEl.querySelector('.body') : null;
+  if (!body) return;
+  const el = document.createElement('div');
+  el.className = 'gen-stats gen-stats-live';
+  el.style.display = 'none';
+  const act = body.querySelector('.actions');
+  if (act) body.insertBefore(el, act); else body.appendChild(el);
+  _liveStats = { el };
+}
+function _liveStatsUpdate(stats) {
+  const el = _liveStats.el;
+  if (!el || !el.isConnected || !stats) return;
+  let txt = '';
+  if (stats.decode_tps != null) txt = `${stats.decode_tps} tok/s`;
+  else if (stats.prompt_tps != null) txt = `${stats.prompt_tps} tok/s prompt`;
+  if (!txt) return;
+  el.textContent = txt;
+  el.style.display = '';
+}
+
+// Copy button on any fenced code block (delegated, so it covers every block
+// rendered now or later). Copies the raw code, flashes "copied" for a beat.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest ? e.target.closest('.code-copy') : null;
+  if (!btn) return;
+  const codeEl = btn.closest('.code-wrap')?.querySelector('code');
+  if (!codeEl) return;
+  navigator.clipboard.writeText(codeEl.textContent || '').then(() => {
+    btn.textContent = 'copied'; btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1200);
+  }).catch(() => {});
+});
+
+// Queue a message typed while a turn is still generating. The backend injects it
+// between tool iterations (run_once's drain_steer), so the model adjusts course
+// mid-task. Rendered as a lightweight inline chip — it lands in the CURRENT
+// reply, so it's not a separate history turn.
+// Pending steer chips, FIFO. Each is flushed when its 'steered' confirmation
+// arrives (the backend drains the queue in order, so oldest chip = first
+// delivered). Cleared at turn end so stale refs never pile up.
+let _steerChips = [];
+async function steerMessage(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  const chatBody = $('chat-body');
+  const chip = makeMeta('↩ steering · ' + text, 'ok');
+  chip.classList.add('steer-chip');
+  if (chatBody) { chatBody.appendChild(chip); chatBody.scrollTop = chatBody.scrollHeight; }
+  _steerChips.push(chip);
+  try {
+    const r = await fetch('/api/steer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!r.ok) throw new Error('steer ' + r.status);
+  } catch (e) {
+    _steerChips = _steerChips.filter(c => c !== chip);
+    chip.classList.remove('ok'); chip.classList.add('warn');
+    chip.textContent = '↩ steer failed — send again when it finishes';
+  }
+}
+// Flush the oldest pending steer chip — its message reached the model.
+function _flushSteerChip() {
+  const chip = _steerChips.shift();
+  if (chip && chip.parentNode) chip.remove();
+}
+
 thinkBtn.addEventListener('click', () => {
   STATE.thinking = !STATE.thinking;
   thinkBtn.classList.toggle('on', STATE.thinking);
@@ -6350,11 +6727,18 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // line telling the model exactly which paths to read/view.
   const _attach = _pendingAttachments.slice();
   if (_attach.length && !forced) {
-    const lines = _attach.map(a => a.isImage
-      ? `Attached image: "${a.path}" - call view_image on it if relevant to my message.`
-      : `Attached file: "${a.path}" - call read_file on it if relevant to my message.`);
+    const lines = _attach.map(a => {
+      if (a.isImage)
+        return `Attached image: "${a.path}" - call view_image on it if relevant to my message.`;
+      // Content pre-extracted at upload → inline it so the model has it without a
+      // read_file call (a weak model often skips the hint). read_file is still
+      // there if it wants the full/original file (the preview is capped).
+      if (a.preview)
+        return `Attached file "${a.name}" (full path "${a.path}"):\n"""\n${a.preview}\n"""`;
+      return `Attached file: "${a.path}" - call read_file on it if relevant to my message.`;
+    });
     if (!prompt) prompt = '(see attachments)';
-    prompt = `${prompt}\n\n${lines.join('\n')}`;
+    prompt = `${prompt}\n\n${lines.join('\n\n')}`;
     if (!displayAs) {
       const chips = _attach.map(a => a.name).join(', ');
       const usrText = (forced ?? input.value).trim();
@@ -6371,7 +6755,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
     sendPermDecision('deny', prompt);
     return;
   }
-  if (STATE.streaming) return;
+  if (STATE.streaming) {
+    // Mid-generation: don't drop the input — steer the running turn. The
+    // backend injects it as a user turn between tool iterations so the model
+    // course-corrects instead of the text being lost or forced into a new turn.
+    if (!_silent && !_notify && !forced) { steerMessage(prompt); input.value = ''; input.style.height = '42px'; }
+    return;
+  }
 
   // ----- Slash commands (parity with CLI) -----
   if (prompt.startsWith('/')) {
@@ -6453,9 +6843,28 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // Render the whole list (cleans up after re-renders, persists tools).
   renderChat();
   const chatBody = $('chat-body');
-  // Grab handles to the live assistant element + its content node.
-  const live = chatBody.lastElementChild;
-  const liveContent = live?.querySelector('.content');
+  // Grab handles to the live assistant element + its content node. `let`, not
+  // `const`: a mid-stream renderChat (thread switch, /clear, compaction) rebuilds
+  // chat-body's children and orphans these two nodes, so handleEvent re-acquires
+  // them when our convo is back on screen.
+  let live = chatBody.lastElementChild;
+  let liveContent = live?.querySelector('.content');
+  // Chronological live interleave: `_liveTextCursor` marks how many chars of the
+  // reply are already committed to SEALED text blocks. The open `liveContent`
+  // renders only the text SINCE the last seal, so when a tool/think lands mid-
+  // reply we seal the current text, drop the tool/think BELOW it, and open a
+  // fresh text block underneath — the live DOM matches the reload order, so
+  // there's no bundle-then-reformat jump on 'done'.
+  let _liveTextCursor = 0;
+  // Seal the open text block. If it never got real text (still the placeholder),
+  // empty it so :empty-hide removes it instead of leaving a gap between calls.
+  const _sealLiveText = () => {
+    if (liveContent && _liveTextCursor >= assistantMsg.content.length) {
+      liveContent.innerHTML = '';
+    }
+    _liveTextCursor = assistantMsg.content.length;
+    liveContent = null;
+  };
   // Drop the "thinking" dot-grid wave into the empty bubble. It gets overwritten
   // as soon as the first assistant_chunk arrives (liveContent.innerHTML = ...).
   if (liveContent) {
@@ -6464,6 +6873,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
     liveContent.innerHTML =
       '<div class="dot-bounce"><span></span><span></span><span></span></div>';
   }
+  // Start the live tok/s counter for this turn (ticks as tokens arrive).
+  _liveStatsBegin(live);
   // A local model can chew a big cold prompt for 10-15s before the first token.
   // Poll the built-in server's real processing progress and show "Processing
   // prompt X%" so it never looks frozen (LM Studio does the same). Cleared the
@@ -6472,7 +6883,19 @@ async function send(forced = null, displayAs = null, opts = {}) {
   const _clearPromptPoll = () => { if (_promptPoll) { clearInterval(_promptPoll); _promptPoll = null; } };
   if (liveContent) {
     _promptPoll = setInterval(async () => {
-      if (!liveContent.querySelector('.dot-bounce') && !liveContent.querySelector('.prompt-prog')) {
+      // A tab/thread switch mid-processing rebuilds the bubble and orphans
+      // liveContent, so the "Processing prompt %" vanished. Re-acquire the live
+      // bubble's content and re-seed the placeholder so progress keeps showing.
+      if ((!liveContent || !liveContent.isConnected) && STATE.activeId === c.id) {
+        const bubbles = chatBody.querySelectorAll('.msg.assistant');
+        const lb = bubbles.length ? bubbles[bubbles.length - 1] : null;
+        const cs = lb ? lb.querySelectorAll('.content') : [];
+        liveContent = cs.length ? cs[cs.length - 1] : null;
+        if (liveContent && !liveContent.querySelector('.dot-bounce') && !liveContent.querySelector('.prompt-prog')) {
+          liveContent.innerHTML = '<div class="dot-bounce"><span></span><span></span><span></span></div>';
+        }
+      }
+      if (!liveContent || (!liveContent.querySelector('.dot-bounce') && !liveContent.querySelector('.prompt-prog'))) {
         _clearPromptPoll(); return;   // real content took over the bubble
       }
       try {
@@ -6521,6 +6944,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // Track tool cards being filled in (by call index)
   let pendingTool = null;
   let pendingToolEvent = null;
+  let _partialTool = null;   // live "generating arguments…" card, pre-tool_call
   // Streaming TTS buffer. Declared at MODULE scope (see below) because the
   // barge-in callback in voiceCycle clears it too; a `let` here made it local
   // to send() so barge-in threw "ttsBuffer is not defined" when you spoke over
@@ -6540,6 +6964,11 @@ async function send(forced = null, displayAs = null, opts = {}) {
     // per-message "speak" button instead - no surprise audio.
     if (!voiceModeOn) { ttsBuffer = ''; return; }
     if (!STATE.settings.voice_tts && !voiceModeOn) { ttsBuffer = ''; return; }
+    if (!ttsBuffer) return;
+    // Never speak a tool call the model emitted as text: strip COMPLETE blocks
+    // here (a call still mid-stream is held by the openTool guard below). Without
+    // this, a finished <tool_call>{...}</tool_call> flushes straight to speakText.
+    ttsBuffer = stripCompleteToolCalls(ttsBuffer);
     if (!ttsBuffer) return;
     // Hold while a tool-call marker is still open. Models that emit their calls
     // as text stream them in pieces, so flushing mid-marker hands the arguments
@@ -6606,7 +7035,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(Object.assign({ prompt, think: _think, history },
+      body: JSON.stringify(Object.assign({ prompt, think: _think, history, voice: voiceModeOn },
                                          _chatModel ? { model: _chatModel } : {})),
       signal: currentAbort ? currentAbort.signal : undefined,
     });
@@ -6638,6 +7067,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
   } finally {
     _clearPromptPoll();  // stop the prompt-% poll if the turn ended before any event
+    _liveStatsStop();    // stop the live tok/s ticker on any stream end (error/abort too)
+    // Flush any steer chips whose confirmation never arrived (turn ended first),
+    // so none linger into the next turn.
+    for (const c of _steerChips) { if (c && c.parentNode) c.remove(); }
+    _steerChips = [];
+    // Drop a "generating tool call…" card that never got a matching tool_call.
+    if (_partialTool && _partialTool.div && _partialTool.div.parentNode) _partialTool.div.remove();
+    _partialTool = null;
     STATE.streaming = false; setSendStop(false); currentAbort = null;
     // If the user typed a "do this instead" during a permission prompt, fire it
     // now that the current turn is done. (No await - we want the finally to finish.)
@@ -6702,6 +7139,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
   function _closeActiveThink() {
     const activeThink = chatBody.querySelector('.think.active');
     if (!activeThink) return;
+    // An empty reasoning block (model opened one but emitted nothing) reads as a
+    // stray gap between tool calls — drop it instead of leaving a blank bar.
+    const _tb = activeThink.querySelector('.think-body');
+    if (_tb && !(_tb.textContent || '').trim()) { activeThink.remove(); return; }
     activeThink.classList.remove('active', 'open');
     const startedAt = activeThink._startedAt;
     if (startedAt) {
@@ -6714,12 +7155,40 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
   function handleEvent(ev) {
     if (ev.type === 'user') return;
+    // Re-acquire the live bubble if it got orphaned. A renderChat mid-stream
+    // (switching threads, /clear, compaction) replaces chat-body's children, so
+    // the nodes captured at stream start are detached and every write after that
+    // lands on an orphan — the reply looks frozen until 'done' re-renders it.
+    // chat-body itself is stable, and renderChat already reconstructed content +
+    // events into a fresh bubble, so when our convo is the one on screen re-point
+    // to the current last assistant bubble. isConnected keeps this a no-op on the
+    // common path (nothing rebuilt), and we skip it while a DIFFERENT thread is up
+    // (the stream keeps filling the data model; switch-back reconstructs it).
+    if (STATE.activeId === c.id && (!live || !live.isConnected)) {
+      const bubbles = chatBody.querySelectorAll('.msg.assistant');
+      live = bubbles.length ? bubbles[bubbles.length - 1] : null;
+      // Grab the LAST .content — a reply rebuilt into segments has several, and
+      // live text must continue in the newest one, not the empty placeholder.
+      if (live) { const cs = live.querySelectorAll('.content'); liveContent = cs.length ? cs[cs.length - 1] : null; }
+      else liveContent = null;
+    }
     // Stop the prompt-% poll only when GENERATION actually starts (a token,
     // reasoning, or a tool call). Clearing on *any* event killed it instantly —
     // context_budget/context_state fire at turn start, before the prompt even
     // finishes processing, which is exactly when we WANT the % visible.
     if (ev.type === 'thinking_chunk' || ev.type === 'thinking' ||
-        ev.type === 'assistant_chunk' || ev.type === 'tool_call') _clearPromptPoll();
+        ev.type === 'assistant_chunk' || ev.type === 'tool_call' ||
+        ev.type === 'tool_call_partial') _clearPromptPoll();
+
+    if (ev.type === 'model_loading') {
+      // No model was loaded when this turn started, so the backend is booting
+      // the default one on-demand (~8-40s). Show a cue instead of dead air —
+      // in voice mode the HUD says it, in chat a toast covers it.
+      const nm = ev.model ? ` (${ev.model})` : '';
+      if (voiceModeOn) setVoiceStatus('waking the model…');
+      toast('Waking the model', `Loading your default model${nm}… one moment.`, 'warn', 8000);
+      return;
+    }
 
     if (ev.type === 'slow_tool') {
       // Watchdog fires this when a tool takes >30s / >90s. Tell the user
@@ -6736,16 +7205,21 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // Background subagent finished. Render as a tool-pill-shaped card
       // (chevron + name + meta + expandable body with the FULL result).
       const card = makeSubagentCard(ev);
-      insertUnderAssistant(card, live);
+      _sealLiveText();
+      appendPart(card, live);
       // Persist on the assistant message so re-render keeps the card.
       assistantMsg.events.push({ kind: 'subagent_done',
         persona: ev.persona, name: ev.name, status: ev.status,
         summary: ev.summary, result_text: ev.result_text,
-        elapsed_s: ev.elapsed_s, used_tools: ev.used_tools || [] });
+        elapsed_s: ev.elapsed_s, used_tools: ev.used_tools || [],
+        pos: assistantMsg.content.length });
       return;
     }
 
+    if (ev.type === 'stats_live') { _liveStatsUpdate(ev.stats); return; }
+
     if (ev.type === 'thinking_chunk') {
+      setState('thinking…');   // reflect the CURRENT phase, not the last tool
       // Streaming delta. Resurrect the most-recent think block on this
       // assistant message (.active OR the last .think we made) so models
       // that go think→text→think don't render TWO think blocks per turn.
@@ -6758,10 +7232,11 @@ async function send(forced = null, displayAs = null, opts = {}) {
           thinkBlock = last;
           thinkBlock.classList.add('active');
         } else {
+          _sealLiveText();   // text before this reasoning is frozen above it
           thinkBlock = makeThink('');
           thinkBlock.classList.add('active');
           thinkBlock._startedAt = Date.now();
-          insertUnderAssistant(thinkBlock, live);
+          appendPart(thinkBlock, live);
         }
       } else if (!thinkBlock._startedAt) {
         thinkBlock._startedAt = Date.now();
@@ -6775,7 +7250,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         bodySpan.textContent += ev.content || '';
         if (follow) bodySpan.scrollTop = bodySpan.scrollHeight;
       }
-      assistantMsg.events.push({ kind: 'think_chunk', content: ev.content });
+      assistantMsg.events.push({ kind: 'think_chunk', content: ev.content, pos: assistantMsg.content.length });
       return;
     }
     if (ev.type === 'thinking') {
@@ -6787,13 +7262,38 @@ async function send(forced = null, displayAs = null, opts = {}) {
       let thinkBlock = chatBody.querySelector('.think.active')
                     || chatBody.querySelector('.think:last-of-type');
       if (!thinkBlock) {
+        _sealLiveText();
         thinkBlock = makeThink('');
         thinkBlock.classList.add('active');
         thinkBlock._startedAt = Date.now();
-        insertUnderAssistant(thinkBlock, live);
+        appendPart(thinkBlock, live);
       }
       const bodySpan = thinkBlock.querySelector('.think-body');
       if (bodySpan) { bodySpan.textContent = ev.content || ''; bodySpan.scrollTop = bodySpan.scrollHeight; }
+      return;
+    }
+
+    if (ev.type === 'tool_call_partial') {
+      // Live view of the tool call being generated — args stream in char by char
+      // (LM Studio style) instead of the card popping in fully-formed. A bare card
+      // showing the name + the raw partial args; the real tool_call replaces it.
+      setState(`writing ${ev.name} call…`);
+      if (!_partialTool || _partialTool._name !== ev.name) {
+        if (_partialTool && _partialTool.div && _partialTool.div.parentNode) _partialTool.div.remove();
+        _closeActiveThink();
+        _sealLiveText();
+        const t = makeToolCard(ev.name, {});
+        t.div.classList.add('tc-generating');
+        t._name = ev.name;
+        appendPart(t.div, live);
+        _partialTool = t;
+      }
+      const argsEl = _partialTool.div.querySelector('.t-args');
+      if (argsEl) {
+        const txt = String(ev.args_text || '');
+        argsEl.textContent = txt.length > 120 ? txt.slice(0, 120) + '…' : txt;
+      }
+      chatFollow();
       return;
     }
 
@@ -6801,10 +7301,17 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // think → tool transition: stamp the prior thinking block so the
       // next thinking_chunk opens a fresh block instead of appending.
       _closeActiveThink();
+      // Replace the live "generating…" card (if any) with the finished one, so
+      // the args render parsed (and a file-write shows its diff).
+      if (_partialTool) {
+        if (_partialTool.div && _partialTool.div.parentNode) _partialTool.div.remove();
+        _partialTool = null;
+      }
+      _sealLiveText();   // freeze text-so-far; the card drops BELOW it
       pendingTool = makeToolCard(ev.name, ev.args || {});
-      pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0 };
+      pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0, pos: assistantMsg.content.length };
       assistantMsg.events.push(pendingToolEvent);
-      insertUnderAssistant(pendingTool.div, live);
+      appendPart(pendingTool.div, live);
       setState(`calling ${ev.name}…`);
       // Voice mode has no tool cards to look at, so mirror the tool name into
       // the HUD. Without this the overlay sits on "thinking…" through a 30s
@@ -6844,7 +7351,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         panel.appendChild(tip);
         if (pendingTool && pendingTool.div && pendingTool.div.parentNode) {
           pendingTool.div.parentNode.insertBefore(panel, pendingTool.div.nextSibling);
-          chatBody.scrollTop = chatBody.scrollHeight;
+          chatFollow();
         }
         let idx = 0;
         const interval = setInterval(() => {
@@ -6871,6 +7378,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'tool_result') {
       // Tool done, back to thinking until the next call or the reply starts.
+      setState('thinking…');   // clear the stuck "calling X…" the moment X returns
       if (voiceModeOn) setVoiceStatus('thinking…');
       if (pendingTool) {
         // Stop the cycling beats, but keep the cooking panel on screen until the
@@ -6889,8 +7397,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
         // turn doesn't nuke any live <img> elements. Media render lives
         // separately, attached as a `kind: 'media'` event on the assistant
         // message AND rendered live below the tool card. Survives compact,
-        // survives re-render, survives chat-switch.
-        pendingTool.body.textContent = raw;
+        // survives re-render, survives chat-switch. A file-write card already
+        // shows its green/red diff — don't clobber it with the terse result.
+        if (!pendingTool.div.classList.contains('has-diff')) pendingTool.body.textContent = raw;
 
         // Detect media markers and surface them as a SEPARATE message-level
         // event + a live block under the tool card.
@@ -6900,7 +7409,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
           const kind = m[1].toLowerCase();
           const path = m[2].trim();
           // Persist on the assistant message - re-render-safe.
-          assistantMsg.events.push({ kind: 'media', mediaKind: kind, path });
+          assistantMsg.events.push({ kind: 'media', mediaKind: kind, path, pos: assistantMsg.content.length });
           // Live render NOW so the user sees it during the turn too. The
           // re-render later (renderMessage path) uses the same helper so
           // both paths produce identical DOM.
@@ -6915,7 +7424,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
             setTimeout(() => { try { _p.remove(); } catch {} }, 540);
             _firstMedia = false;
           } else {
-            insertUnderAssistant(block, live);
+            appendPart(block, live);
           }
         }
         // Generation returned no media (e.g. it failed) but a panel was up —
@@ -6945,11 +7454,18 @@ async function send(forced = null, displayAs = null, opts = {}) {
         _closeActiveThink();
       }
       // Live append to the in-progress assistant message
+      setState('writing…');   // tokens are streaming now — not "calling X" anymore
       assistantMsg.content += ev.content;
-      if (liveContent) liveContent.innerHTML = renderMD(stripGarbageToolCalls(assistantMsg.content));
+      // Render only the CURRENT segment (since the last tool/think seal) into the
+      // open text block, opening a fresh one below the prior part if needed.
+      if (!liveContent || !liveContent.isConnected) {
+        liveContent = makeContentBlock('');
+        appendPart(liveContent, live);
+      }
+      liveContent.innerHTML = renderMD(stripGarbageToolCalls(assistantMsg.content.slice(_liveTextCursor)));
       ttsBuffer += ev.content;
       maybeFlushTTS(false);
-      chatBody.scrollTop = chatBody.scrollHeight;
+      chatFollow();
       // Mirror the reply into the voice overlay + drive the grid.
       if (voiceModeOn) {
         voiceSpeaking = true;
@@ -6977,6 +7493,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
       return;
     }
 
+    if (ev.type === 'steered') {
+      // Backend confirmed the queued steer reached the model — flush its chip so
+      // it doesn't sit pinned at the bottom of the chat forever. The model's
+      // response now carries the redirect.
+      _flushSteerChip();
+      return;
+    }
+
     if (ev.type === 'permission_request') {
       // Inline strip above the input - keyboard-driven, no center modal.
       showInlinePermission(ev.id, ev.name, ev.args || {});
@@ -6997,13 +7521,36 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // footer was visually noisy + read as a system print on top of the
       // assistant's prose - making the chat look engineering-y. Keep the
       // numbers in the message events for the activity log + debugging.
+      // Fold total turn time into the stats so the footer can show "Ns total".
+      const _doneStats = ev.stats
+        ? { ...ev.stats, duration_ms: ev.duration_ms }
+        : (ev.duration_ms != null ? { duration_ms: ev.duration_ms } : null);
       assistantMsg.events.push({
         kind: 'done',
         iterations: ev.iterations,
         duration_ms: ev.duration_ms,
         reason: ev.reason,
+        stats: _doneStats,
       });
-      if (ev.reason && ev.reason !== 'finished' && ev.reason !== 'stopped') {
+      // Stop the live ticker and swap in the accurate hover footer (real
+      // prompt-eval vs decode split from the backend's timings).
+      _liveStatsStop();
+      // Instant throughput footer under the live reply (renderChat re-renders it
+      // from the stored event on any later rebuild, so this isn't the only path).
+      {
+        let _lm = live;
+        if (!_lm || !_lm.isConnected) {
+          const bs = chatBody.querySelectorAll('.msg.assistant');
+          _lm = bs.length ? bs[bs.length - 1] : null;
+        }
+        attachStatsLine(_lm, _doneStats);
+      }
+      if (ev.reason === 'end_session') {
+        // The model ended the session (a goodbye). Leave voice mode if we're in
+        // it — this is what "end this session" by voice should do. In text chat
+        // there's nothing to close, so it's a clean no-op (no error banner).
+        if (voiceModeOn) exitVoiceMode();
+      } else if (ev.reason && ev.reason !== 'finished' && ev.reason !== 'stopped') {
         chatBody.appendChild(makeMeta(`stopped: ${ev.reason}`, 'warn'));
       }
       return;
@@ -7065,7 +7612,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
         const total = b.total ? fmt(b.total) : '?';
         const tools = b.tools ? fmt(b.tools) : '?';
         const src = b.source ? ` · source: ${b.source}` : '';
-        wrap.title = `chat usage: ${fmt(ev.used||0)} / ${fmt(ev.budget||0)} effective (${p}%)\n` +
+        const meas = ev.measured ? ' (server-measured)' : ' (estimated)';
+        wrap.title = `chat usage: ${fmt(ev.used||0)} / ${fmt(ev.budget||0)} effective (${p}%)${meas}\n` +
                      `model context: ${total} total = ${fmt(ev.budget||0)} effective + ${tools} tool schemas${src}`;
         wrap.classList.toggle('hot',  p >= 90);
         wrap.classList.toggle('warn', p >= 70 && p < 90);
@@ -7127,7 +7675,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'error') {
       chatBody.appendChild(makeMeta(ev.message || 'error', 'err'));
-      assistantMsg.events.push({ kind: 'error', text: ev.message });
+      assistantMsg.events.push({ kind: 'error', text: ev.message, pos: assistantMsg.content.length });
       // ALSO toast so the user can't miss it. The chat inline meta is small
       // and the user reported "no responses" when an auth failure was
       // actually being rendered in red - they just didn't see it because
@@ -7143,7 +7691,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       );
       return;
     }
-    chatBody.scrollTop = chatBody.scrollHeight;
+    chatFollow();
   }
 }
 
@@ -7194,14 +7742,25 @@ async function handleSlash(raw) {
         toast('Nothing to compact', 'need a few messages first', 'warn');
         return true;
       }
-      // Inject a "summarize this conversation, save facts to memory" prompt
-      // - let the model decide what's worth keeping.
+      // Real, invisible compaction — no fake "Compact this conversation:" user
+      // message in the transcript. The backend summarizes older turns and
+      // REPLACES them with one compact marker, then we reload silently.
       input.value = '';
-      send(
-        "Compact this conversation: summarize the older turns in 3-5 lines (so the gist survives) " +
-        "and save any concrete facts about me or the project to memory via memory_save. " +
-        "Don't include greetings or filler. Reply with: 'compacted: <one-line summary>'."
-      );
+      toast('Compacting…', 'summarizing older turns', 'ok', 3000);
+      (async () => {
+        try {
+          const r = await api('/api/conversations/compact', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: c.id, keep: 6 }) });
+          if (r && r.ok) {
+            c.messages = r.messages;
+            touch(c); renderChat();
+            toast('Compacted', `${r.compacted} older turns summarized`, 'ok', 2500);
+          } else {
+            toast('Compact', (r && r.error) || 'could not compact', 'warn');
+          }
+        } catch (e) { toast('Compact failed', e.message, 'err'); }
+      })();
       return true;
     case '/perms': {
       if (arg === 'clear') {
@@ -7466,10 +8025,12 @@ async function uploadFile(file) {
       body: JSON.stringify({ name: file.name, content_b64: b64 }),
     });
     const ext = (file.name.split('.').pop() || '').toLowerCase();
-    const isImage = IMAGE_EXTS.has(ext);
+    const isImage = (typeof r.is_image === 'boolean') ? r.is_image : IMAGE_EXTS.has(ext);
     showView('chat');
-    // Queue as pending - silent. No toast, no auto-send.
-    _pendingAttachments.push({ name: file.name, path: r.path, isImage });
+    // Queue as pending - silent. No toast, no auto-send. `preview` is the text the
+    // backend pre-extracted (docs/code/etc.) so the content rides the prompt
+    // directly instead of relying on the model to call read_file.
+    _pendingAttachments.push({ name: file.name, path: r.path, isImage, preview: r.preview || '' });
     _renderAttachTray();
   } catch (e) {
     toast('Upload failed', e.message, 'err', 5000);
@@ -8019,10 +8580,27 @@ async function refreshFiles(path = '') {
   try {
     const r = await api('/api/files?path=' + encodeURIComponent(path));
     if (r.error) { toast('Files', r.error, 'err'); return; }
+    STATE.filePathAbs = r.abs || '';   // absolute path of the folder we're in (r.path is relative)
     renderCrumb(r.path);
     renderFiles(r.entries);
   } catch (e) { toast('Files', e.message, 'err'); }
 }
+// "Open folder" in the Files view — reveal the current folder in the OS
+// explorer. Files live in the workspace, so the sandboxed /api/file/reveal is fine.
+(function wireFilesReveal() {
+  const b = document.getElementById('btn-files-reveal');
+  if (!b) return;
+  b.addEventListener('click', async () => {
+    const p = STATE.filePathAbs;
+    if (!p) return;
+    try {
+      await api('/api/file/reveal', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: p }) });
+    } catch (err) { toast('Could not open folder', err.message, 'err'); }
+  });
+})();
+
 function renderCrumb(path) {
   const segs = (path || '').split(/[\\/]/).filter(Boolean);
   const c = $('file-crumb');
@@ -8848,7 +9426,8 @@ async function refreshSettings() {
     // so it's honest even when settings.llm_provider is stale/inconsistent).
     $$('.switch').forEach(sw => {
       const k = sw.dataset.key;
-      sw.classList.toggle('on', !!s[k]);
+      // gen_stats + show_diffs default ON (only off when explicitly disabled); the rest default off.
+      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs') ? (s[k] !== false) : !!s[k]);
     });
     // Agent name field - populated from current setting. The Rename button
     // triggers the full workspace rename (slow, restarts tray). Typing in
@@ -9816,6 +10395,7 @@ $$('.switch').forEach(sw => {
     const k = sw.dataset.key;
     const next = !sw.classList.contains('on');
     sw.classList.toggle('on', next);
+    if (STATE.settings) STATE.settings[k] = next;  // live, so gates react at once
     saveSetting(k, next);
     if (k === 'think_default') {
       STATE.thinking = next;
@@ -10036,25 +10616,20 @@ const MIC_VOICE_THRESHOLD = 0.018;   // RMS-ish; tune
 // false interrupts - the user needs to actually start talking.
 const MIC_BARGE_THRESHOLD = 0.030;
 
+// Click to start recording, click again to stop → transcribe + send. A silence
+// watchdog auto-stops if you go quiet for a while (so it never records forever if
+// you walk away), and a hard cap backstops both. The button glow is amplitude-
+// reactive, driven by the live mic RMS (the CSS reads --mic-level).
 async function micToggle() {
-  if (recorder.recording) {
-    // Stop early
-    await micFinish();
-    return;
-  }
+  if (recorder.recording) { await micFinish(); return; }
   $('btn-mic').classList.add('recording');
   await startRecording();
-  // Hook the audio level to silence detection (we already capture peak in
-  // the processor's onaudioprocess, intercept here)
   micLastVoice = performance.now();
   micWatchdog = setInterval(() => {
     if (!recorder.recording) return;
-    const elapsed = performance.now() - micLastVoice;
-    if (elapsed > MIC_SILENCE_MS) micFinish();
+    if (performance.now() - micLastVoice > MIC_SILENCE_MS) micFinish();
   }, 200);
-  // Hard cap
   setTimeout(() => { if (recorder.recording) micFinish(); }, MIC_MAX_MS);
-  // Wrap the existing processor onaudioprocess to track voice activity
   if (recorder.processor) {
     const orig = recorder.processor.onaudioprocess;
     recorder.processor.onaudioprocess = (e) => {
@@ -10064,13 +10639,20 @@ async function micToggle() {
       for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
       const rms = Math.sqrt(sum / input.length);
       if (rms > MIC_VOICE_THRESHOLD) micLastVoice = performance.now();
+      const level = Math.min(1, rms / 0.12);   // speech RMS ~0..0.12 → 0..1
+      try { $('btn-mic').style.setProperty('--mic-level', level.toFixed(3)); } catch {}
     };
   }
 }
 async function micFinish() {
   if (micWatchdog) { clearInterval(micWatchdog); micWatchdog = null; }
-  $('btn-mic').classList.remove('recording');
-  const text = await transcribe();
+  const btn = $('btn-mic');
+  btn.classList.remove('recording');
+  btn.style.setProperty('--mic-level', '0');
+  // Surface a real failure instead of silently doing nothing (the "doesn't work").
+  let text = '';
+  try { text = await transcribe(); }
+  catch (e) { toast('Voice input failed', (e && e.message) || 'transcription error', 'err'); return; }
   if (text) {
     input.value = text;
     input.dispatchEvent(new Event('input'));
@@ -11291,6 +11873,11 @@ function modelsLoadConfigHTML(opts) {
           <span class="ex-hint">Faster on RTX 30+ series. Leave on.</span>
         </div>
       </div>
+      <details class="ex-advanced">
+        <summary>Advanced flags</summary>
+        <input type="text" data-cfg="extra_args" placeholder="e.g. --n-cpu-moe 10 --temp 0.7 --no-mmap" spellcheck="false" autocomplete="off" />
+        <div class="ex-hint">Any extra <code>llama-server</code> flags, space-separated — <code>--n-cpu-moe</code>, <code>--override-tensor</code>, <code>--temp</code>, whatever you need. Hearth's own flags (ctx, layers, KV, port) always win, so those are ignored here.</div>
+      </details>
     </div>`;
 }
 
@@ -11348,13 +11935,13 @@ function modelsUpdateVramEstimate(cfgEl) {
   }
   if (nglRaw === 0) frac = 0;
   else if (nglRaw === -1) {
-    frac = (freeGb != null) ? Math.min(1, Math.max(0, (freeGb - 2.3) / footprint)) : 1;
+    frac = (freeGb != null) ? Math.min(1, Math.max(0, (freeGb - 1.0) / footprint)) : 1;
   } else frac = layers ? Math.min(1, nglRaw / layers) : 1;
   // CUDA context + compute buffers. This scales with how much is actually on
   // the GPU; a flat 1.5 GB was roughly right for a 9B at long context but
   // massively overstated a 4B, which then got told it would spill to RAM while
   // comfortably fitting.
-  const overhead = frac > 0 ? 0.3 + frac * footprint * 0.08 : 0;
+  const overhead = frac > 0 ? 0.2 + frac * footprint * 0.05 : 0;
   const vram = frac * footprint + overhead;
   let cls = '', tag = '';
   if (freeGb != null && frac > 0) {
@@ -11362,7 +11949,10 @@ function modelsUpdateVramEstimate(cfgEl) {
     // announcing a spill. It was declaring "will spill to RAM" when the guess
     // exceeded free VRAM by a few percent, on models that then loaded fine,
     // which trains people to ignore the warning entirely.
-    if (vram > freeGb * 1.15) { cls = 'est-bad'; tag = `, more than the ${freeGb.toFixed(1)} GB free, some will run on CPU`; }
+    // Spilling past free VRAM is NORMAL partial offload, not a failure — the
+    // extra layers run on the CPU (slower, still works). Amber + calm wording,
+    // never a red "too big" wall that scares people off a model that runs fine.
+    if (vram > freeGb * 1.15) { cls = 'est-warn'; tag = ` — over the ${freeGb.toFixed(1)} GB free, so some layers run on CPU (slower, still works)`; }
     else if (vram > freeGb - 0.5) { cls = 'est-warn'; tag = ', close to the limit'; }
     else { cls = 'est-ok'; tag = ', fits'; }
   }
@@ -11771,6 +12361,7 @@ function modelsRenderMine() {
             })(), layers: m.layers, sizeGb: m.size_gb })}
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${filenameId}">Cancel</button>
+            <button class="model-action is-secondary" data-reveal-model="${esc(m.path)}" title="Show this file in your file explorer">Show in folder</button>
             ${/^hearth$/i.test(m.source || '') && !loaded
               ? `<button class="model-action is-danger" data-del-path="${esc(m.path)}" data-del-name="${esc(m.filename)}" data-del-gb="${m.size_gb}">Delete file</button>`
               : ''}
@@ -11782,6 +12373,18 @@ function modelsRenderMine() {
   html += '</div></div>';
   pane.innerHTML = html;
   modelsWireRowClicks(pane);
+  // "Show in folder" — reveal the model file in the OS explorer (models live
+  // outside the workspace, so this hits the un-sandboxed /api/model/reveal).
+  pane.querySelectorAll('[data-reveal-model]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await api('/api/model/reveal', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: btn.dataset.revealModel }) });
+      } catch (err) { toast('Could not open folder', err.message, 'err'); }
+    });
+  });
   // Delete lives inside the expanded panel so it can't be hit by accident, and
   // only for files in Hearth's own models folder (see llmserver.delete_model).
   pane.querySelectorAll('[data-del-path]').forEach(btn => {
@@ -12328,6 +12931,7 @@ function modelsRestoreSavedCfg(expandEl, modelPath) {
   if (cfg.cache_type_k != null) set('select[data-cfg="cache_type_k"]', cfg.cache_type_k);
   if (cfg.cache_type_v != null) set('select[data-cfg="cache_type_v"]', cfg.cache_type_v);
   if (cfg.n_threads != null) set('input[data-cfg="n_threads"]', cfg.n_threads);
+  if (cfg.extra_args != null) set('input[data-cfg="extra_args"]', cfg.extra_args);
   const flash = expandEl.querySelector('.switch[data-cfg="flash_attn"]');
   if (flash) flash.classList.toggle('on', !!cfg.flash_attn);
   // Recompute AFTER everything is restored. Only the layers slider fires an
@@ -12345,11 +12949,17 @@ const FIT_ICONS = {
   good:     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-2);vertical-align:-2px"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H7"/></svg>',
   // Sliders - partial GPU offload
   partial:  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#f0b860;vertical-align:-2px"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
-  // Alert triangle - too big
-  overflow: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#e0786a;vertical-align:-2px"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  // CPU chip - runs mostly on CPU (still runs, just slower). NOT an alarm:
+  // partial/CPU offload is a normal, supported way to run a bigger model, and a
+  // red alert-triangle scared people off models that work fine (LM Studio shows
+  // this calmly). Amber, same family as partial.
+  overflow: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#f0b860;vertical-align:-2px"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
+  // Alert triangle - GENUINELY too big (exceeds VRAM + system RAM combined, so it
+  // truly won't load). This is the only case that earns a red alarm.
+  toobig:   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#e0786a;vertical-align:-2px"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   unknown:  '',
 };
-const FIT_LABELS = { good: 'Fits', partial: 'Tight', overflow: 'Likely too big', unknown: '' };
+const FIT_LABELS = { good: 'Fits', partial: 'Partial offload', overflow: 'Mostly CPU', toobig: 'Too big to load', unknown: '' };
 
 async function modelsLoadHFFilesInline(row) {
   const repo = row.dataset.hfRepo;
@@ -12517,29 +13127,34 @@ function dlToggle(force) {
     document.body.appendChild(ov);
     ov.addEventListener('click', (e) => {
       const ds = e.target.dataset || {};
-      if (ds.dlcancel) {
-        // Backend stops mid-chunk and keeps the .part, so this is a pause in
-        // everything but name — installing again resumes from where it stopped.
-        api('/api/runtime/cancel', { method: 'POST' }).catch(() => {});
-        dlUpsert(ds.dlcancel, { status: 'paused' });
-        return;
-      }
-      if (ds.dlupdcancel) {
-        api('/api/update/cancel', { method: 'POST' }).catch(() => {});
-        dlUpsert(UPDATE_DL_ID, { status: 'paused' });
-        return;
-      }
-      if (ds.dlupdresume) { downloadUpdate(); return; }
-      if (ds.dlengresume) { runtimeInstall(); return; }
-      if (ds.dlpause) {
-        const d = _dls[ds.dlpause];
-        if (d && d.abort) { try { d.abort.abort(); } catch {} }
-        dlUpsert(ds.dlpause, { status: 'paused' });   // .part stays on disk; Resume picks up
-        return;
-      }
-      if (ds.dlresume) {
-        const d = _dls[ds.dlresume];
-        if (d && d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {});
+      if (ds.dlact) {
+        // Unified pause / resume / cancel for every download kind. Pause keeps
+        // the .part (Resume continues); Cancel drops it (no resume). Routing by
+        // kind keeps this in ONE place instead of a branch per download type.
+        const kind = ds.dlkind || 'model';
+        const id = ds.dlid;
+        const d = _dls[id] || {};
+        if (ds.dlact === 'pause') {
+          if (kind === 'engine') api('/api/runtime/cancel', { method: 'POST' }).catch(() => {});
+          else if (kind === 'update') api('/api/update/cancel', { method: 'POST' }).catch(() => {});
+          else if (d.abort) { try { d.abort.abort(); } catch {} }   // model: client abort, .part stays
+          dlUpsert(id, { status: 'paused' });
+        } else if (ds.dlact === 'resume') {
+          if (kind === 'engine') runtimeInstall();
+          else if (kind === 'update') downloadUpdate();
+          else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {});
+        } else if (ds.dlact === 'cancel') {
+          if (kind === 'engine') api('/api/runtime/discard', { method: 'POST' }).catch(() => {});
+          else if (kind === 'update') api('/api/update/cancel', { method: 'POST' }).catch(() => {});
+          else {
+            if (d.abort) { try { d.abort.abort(); } catch {} }
+            if (d.filename) api('/api/llmserver/discard-partial', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filename: d.filename }) }).catch(() => {});
+          }
+          delete _dls[id]; dlSyncBadge();
+          if (_dlOpen) dlRender();
+        }
         return;
       }
       if (e.target.dataset && e.target.dataset.act === 'discover') {
@@ -12569,20 +13184,19 @@ function dlRender() {
     const _btnCss = 'background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);font-size:11px;padding:3px 9px;cursor:pointer;flex-shrink:0';
     const isEngine = d.kind === 'engine';
     const isUpdate = d.kind === 'update';
-    const ctrlBtn = isUpdate
-      ? (d.status === 'downloading'
-          ? `<button data-dlupdcancel="1" style="${_btnCss}">✕ Cancel</button>`
-          : (d.status === 'paused'
-            ? `<button data-dlupdresume="1" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : ''))
-      : isEngine
-      ? (d.status === 'downloading'
-          ? `<button data-dlcancel="${esc(id)}" style="${_btnCss}">✕ Cancel</button>`
-          : (d.status === 'paused'
-            ? `<button data-dlengresume="1" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : ''))
-      : (d.status === 'downloading' && d.repo
-        ? `<button data-dlpause="${esc(id)}" style="${_btnCss}">❚❚ Pause</button>`
-        : (d.status === 'paused' && d.repo
-          ? `<button data-dlresume="${esc(id)}" style="${_btnCss};color:var(--accent-2)">▶ Resume</button>` : ''));
+    // Unified controls — every download gets Pause/Resume (keeps the .part) AND
+    // Cancel (drops the .part). data-dlkind routes to the right backend, so the
+    // button markup lives in ONE place instead of a copy per kind.
+    const kind = d.kind || 'model';
+    const _da = `data-dlid="${esc(id)}" data-dlkind="${kind}"`;
+    let ctrlBtn = '';
+    if (d.status === 'downloading') {
+      ctrlBtn = `<button data-dlact="pause" ${_da} style="${_btnCss}">❚❚ Pause</button>`
+              + `<button data-dlact="cancel" ${_da} style="${_btnCss}">✕ Cancel</button>`;
+    } else if (d.status === 'paused') {
+      ctrlBtn = `<button data-dlact="resume" ${_da} style="${_btnCss};color:var(--accent-2)">▶ Resume</button>`
+              + `<button data-dlact="cancel" ${_da} style="${_btnCss}">✕ Cancel</button>`;
+    }
     // Engine reads as infrastructure, models as content — different glyphs so
     // the row is identifiable at a glance.
     const icon = isUpdate
@@ -12910,6 +13524,17 @@ async function downloadAndStart(pickId) {
     return;
   }
 
+  // Don't evict a model you're actively using. Only auto-start the just-
+  // downloaded model when nothing is loaded; otherwise say it's ready and let
+  // the user switch to it from the dropdown when THEY want to (this is why a
+  // background download used to surprise-swap the active model out).
+  if (STATE.brain && STATE.brain.loaded) {
+    label.textContent = 'Download complete';
+    detail.textContent = 'Pick it from the model dropdown above whenever you want to switch to it.';
+    opts.style.opacity = '1'; opts.style.pointerEvents = '';
+    setTimeout(() => { refreshModels(); }, 300);
+    return;
+  }
   label.textContent = 'Starting server...';
   detail.textContent = 'Loading model into memory (10-30s)';
   try {
@@ -13236,7 +13861,27 @@ async function obLoadVoiceStatus() {
       else gpuNote = ' Running on CPU (transcription may lag a few seconds).';
     }
     row.className = 'ob-status-row ' + cls;
-    row.innerHTML = `<span class="ob-dot"></span><span>${esc(txt)}${gpuNote}</span>`;
+    const needTTS = !tts;   // speakers (kokoro) not installed
+    row.innerHTML = `<span class="ob-dot"></span><span>${esc(txt)}${gpuNote}</span>`
+      + (needTTS ? ` <button type="button" id="ob-install-tts" class="ob-choice" style="margin-left:10px;padding:5px 12px;font-size:12px;">Install speakers</button>` : '');
+    const instBtn = document.getElementById('ob-install-tts');
+    if (instBtn) instBtn.onclick = async () => {
+      instBtn.disabled = true; instBtn.textContent = 'Installing…';
+      try {
+        // Speakers (Kokoro) = kokoro-onnx + sounddevice + numpy; the model files
+        // auto-download on first speak. /api/voice/install-gpu pip-installs the
+        // packages we pass and streams progress via /api/voice/install-status.
+        await api('/api/voice/install-gpu', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages: ['kokoro-onnx', 'sounddevice', 'numpy'] }) });
+        const poll = setInterval(async () => {
+          try {
+            const s = await fetch('/api/voice/install-status').then(x => x.json());
+            if (s.running) { instBtn.textContent = s.pct != null ? `Installing… ${s.pct}%` : 'Installing…'; return; }
+            if (s.done) { clearInterval(poll); instBtn.textContent = s.ok ? 'Installed ✓' : 'Install failed'; if (s.ok) obLoadVoiceStatus(); }
+          } catch { clearInterval(poll); instBtn.disabled = false; instBtn.textContent = 'Install speakers'; }
+        }, 2500);
+      } catch (e) { instBtn.disabled = false; instBtn.textContent = 'Install failed'; toast('Speakers install failed', e.message, 'err', 7000); }
+    };
     const gpuLink = document.getElementById('ob-voice-gpu');
     if (gpuLink) gpuLink.onclick = async (e) => {
       e.preventDefault();
@@ -13713,12 +14358,22 @@ async function pollAnnouncements() {
   // fall through to "External / Built-in / No brain". Without this, opening
   // Models in the first ~200ms after boot showed "pick a model" even when
   // the user was on Grok.
-  await refreshSettings();
-  await Promise.all([refreshModels(), refreshState(), refreshGpu()]);
-  // Initial drive-scan done — we now know the real state. Drop the startup
-  // "warming up" screen and repaint so it flips to ready / no-model.
+  // Gate the "Getting Hearth ready" screen on settings + /api/state, but never
+  // let a cold-boot backend strand the user on a blank screen. Even with a
+  // threaded server and the _list_models port pre-check, the first calls can
+  // stall for tens of seconds while the tray is still warming voice/wake models
+  // and scanning drives — that CPU work holds the GIL and starves the request
+  // threads (the ~30s "Getting Hearth ready" hang). Cap the wait at 3s, then
+  // show real state; the periodic refreshState/refreshModels polls reconcile a
+  // beat later if the first calls were still in flight. refreshModels + refreshGpu
+  // (nvidia-smi, ~20s cold) stay fully backgrounded off the critical path.
+  await Promise.race([
+    (async () => { await refreshSettings(); await refreshState(); })(),
+    new Promise(res => setTimeout(res, 3000)),
+  ]);
   _appBooting = false;
   _refreshEmptyIfShown();
+  Promise.all([refreshModels(), refreshGpu()]).catch(() => {});
   // Pull the real context window now so the bottom-bar ctx pill + ring tooltip
   // are correct on first paint (don't wait for the first chat turn).
   refreshCtxBudget().catch(() => {});
@@ -13735,6 +14390,16 @@ async function pollAnnouncements() {
   setInterval(refreshState, 12000);
   setInterval(refreshModels, 9000);
   setInterval(refreshGpu, 4000);
+  // Fast, cheap poll for cross-process window actions (a second launch asking us
+  // to surface). Only the window's OWN process can beat Windows' foreground lock,
+  // so the backend flags it and we raise ourselves here. 2s so it feels instant.
+  setInterval(async () => {
+    try {
+      const sig = await api('/api/window-signals');
+      if (sig && sig.focus && window.pywebview && window.pywebview.api && window.pywebview.api.focus_window)
+        window.pywebview.api.focus_window();
+    } catch {}
+  }, 2000);
   setInterval(() => { if (STATE.view === 'logs') refreshLogs(); }, 6000);
   // Keep the Models pane live while it's open (running badge, VRAM, which
   // model is loaded) - it used to only refresh on tab re-entry, so state

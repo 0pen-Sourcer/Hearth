@@ -73,11 +73,71 @@ _rt_event_queue: "_queue_mod.Queue[dict]" = _queue_mod.Queue()
 # launch attempt occurs.
 _window_ref = None
 
+# One-shot flag: the tray sets this (POST /api/voice/open) when the wake word
+# fires but a window is ALREADY open, so it can't spawn a fresh ?voice=1 window.
+# The GUI's /api/state poll reads-and-clears it and enters voice mode in place.
+_pending_voice_open = False
+
+# Same shape for "surface the window": a second launch POSTs /api/focus, but the
+# window lives in the desktop_attach SUBPROCESS so this process's _window_ref is
+# None and _focus_window() can't raise it. The GUI (running IN the window) reads
+# this flag off /api/state and calls its own pywebview focus bridge, which is the
+# only caller that beats Windows' foreground lock.
+_pending_focus = False
+
 
 def set_window_ref(win) -> None:
     """desktop.py calls this so /api/focus can surface the existing window."""
     global _window_ref
     _window_ref = win
+
+
+# The tray registers a callback here that OPENS the desktop window if none is
+# open. Closing the window to the tray kills the window subprocess, so the
+# `_pending_focus` flag alone can't surface anything — nobody's polling it. When
+# a second launch asks us to focus, we call this so the tray spawns a fresh
+# window (it no-ops if a window is already up). Backend + tray share a process,
+# so this direct call works.
+_surface_cb = None
+
+
+def set_surface_callback(cb) -> None:
+    """Tray hook: called on /api/focus to open the window if it's tray-hidden."""
+    global _surface_cb
+    _surface_cb = cb
+
+
+def _surface_window() -> None:
+    cb = _surface_cb
+    if cb is None:
+        return
+    try:
+        cb()
+    except Exception:
+        pass
+
+
+def _take_pending_voice_open() -> bool:
+    """Read-and-clear the wake-into-voice flag. The GUI's /api/state poll uses
+    this to enter voice mode in an already-open window (the tray can't spawn a
+    second ?voice=1 window when one is up)."""
+    global _pending_voice_open
+    if _pending_voice_open:
+        _pending_voice_open = False
+        return True
+    return False
+
+
+def _take_pending_focus() -> bool:
+    """Read-and-clear the surface-the-window flag. The GUI's /api/state poll uses
+    this to raise its own native window (via the pywebview bridge) when a second
+    launch asked the primary to come forward — the backend can't do it itself
+    because the window is in another process."""
+    global _pending_focus
+    if _pending_focus:
+        _pending_focus = False
+        return True
+    return False
 
 
 def _focus_window() -> dict:
@@ -118,6 +178,23 @@ CONVOS_DIR = os.path.join(WORKSPACE, "conversations")
 # bails. Cleared at the start of each /chat. Single-user local GUI = one
 # generation at a time, so a single shared flag is enough.
 _CANCEL = threading.Event()
+
+# Steering queue: messages the user typed while a generation was in flight.
+# run_once drains it between tool iterations and injects them as user turns.
+# Single shared queue (one generation at a time in the local GUI), guarded by a
+# lock since the HTTP handler thread appends while the run_once thread drains.
+_STEER_Q: List[str] = []
+_STEER_LOCK = threading.Lock()
+
+
+def _drain_steer() -> List[str]:
+    """Return and clear any queued steering messages. Passed to run_once."""
+    with _STEER_LOCK:
+        if not _STEER_Q:
+            return []
+        out = list(_STEER_Q)
+        _STEER_Q.clear()
+        return out
 
 # Suppress the brief cmd console flash on every subprocess we spawn under
 # a GUI/tray context. Worthless when running as CLI, harmless either way.
@@ -254,14 +331,37 @@ def _load_convo(cid: str) -> Optional[Dict]:
         return None
 
 
+def _atomic_write_json(path: str, data, **dump_kw) -> None:
+    """Write JSON atomically: dump to a temp file in the same dir, flush + fsync,
+    then os.replace onto the target (atomic on Windows and POSIX). A crash or kill
+    mid-write (e.g. tray Quit killing the process tree) then leaves the OLD file
+    intact instead of a half-written, NULL-padded, unparseable one — a plain
+    open('w') truncates first, so dying mid-dump is what corrupted a conversation
+    to 1 MB of valid JSON + zero-fill."""
+    import tempfile
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, **dump_kw)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _save_convo(data: Dict) -> bool:
     cid = data.get("id")
     if not cid:
         return False
     p = _convo_path(cid)
     try:
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(p, data, indent=2, ensure_ascii=False)
         return True
     except OSError:
         return False
@@ -503,6 +603,28 @@ def _models_probe_endpoint() -> str:
     return LOCAL_API_BASE or "http://localhost:1234/v1"
 
 
+def _port_reachable(base_url: str, timeout: float = 0.6) -> bool:
+    """Fast TCP pre-check for a model-server endpoint. Returns False quickly when
+    nothing accepts on host:port. On some Windows boxes a REFUSED loopback
+    connection is delayed ~2s (security software / a proxy on the network stack),
+    and _list_models otherwise probes 2-3x sequentially → ~6s of "Getting Hearth
+    ready" on every boot/poll when no server is up. A short connect timeout gives
+    up before that delayed refuse, so a dead endpoint costs ~0.5s, not ~6s."""
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(base_url)
+        host = u.hostname or "127.0.0.1"
+        port = u.port or (443 if u.scheme == "https" else 80)
+    except Exception:
+        return True   # unparseable — don't block; let the real probe decide
+    import socket as _sock
+    try:
+        with _sock.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 def _list_models() -> List[Dict]:
     """Return model list from whichever endpoint is currently active.
 
@@ -525,6 +647,19 @@ def _list_models() -> List[Dict]:
     # naive base + "/models" yields a double slash that Google 404s (the picker
     # then looked empty / stuck on a single preset model).
     probe_base = _models_probe_endpoint().rstrip("/")
+
+    # Fast-fail a dead LOCAL endpoint before the multi-second probe chain below.
+    # When no server is up, the status()/v0/v1 probes each stall ~2s on the
+    # delayed-refuse (see _port_reachable), which was the real "Getting Hearth
+    # ready" launch hang. Cloud endpoints answer on 443 and their /models is the
+    # signal we still want, so skip the pre-check for them.
+    _pb = probe_base.lower()
+    _is_local_probe = any(h in _pb for h in
+                          ("localhost", "127.0.0.1", "0.0.0.0", "::1"))
+    if _is_local_probe and not _port_reachable(probe_base, timeout=0.6):
+        _models_cache["ts"] = now
+        _models_cache["data"] = []
+        return []
 
     # 1) Built-in llama-cpp server is the active endpoint?
     # Match on port (not full URL) so we tolerate localhost vs 127.0.0.1
@@ -618,7 +753,17 @@ def _list_models() -> List[Dict]:
     # 3) Generic OpenAI-compatible /v1/models — assume the first one is loaded.
     # Try with the configured API key so an auth-gated server (builtin /
     # Gemini / etc.) actually answers instead of silently returning empty.
-    api_key = os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
+    # Fall back to the saved brain key. Env vars don't survive a restart, but the
+    # cloud key persists in settings (llm_key) — without this, after a relaunch a
+    # cloud provider (Groq/OpenAI/...) gets "hearth-builtin", 401s, and the model
+    # list comes back empty even though the brain itself works fine.
+    api_key = os.environ.get("LOCAL_API_KEY")
+    if not api_key:
+        try:
+            api_key = (_load_settings().get("llm_key") or "").strip() or None
+        except Exception:
+            api_key = None
+    api_key = api_key or "hearth-builtin"
     _raw_models = _http_get_json(f"{probe_base}/models",
                                  headers={"Authorization": f"Bearer {api_key}"})
     data = _raw_models or {"data": []}
@@ -1169,6 +1314,20 @@ class HearthHandler(BaseHTTPRequestHandler):
 
     # -------- routing --------
 
+    def _host_allowed(self) -> bool:
+        """DNS-rebinding / CSRF guard for state-changing requests. Accept only a
+        loopback Host header: a page that rebinds its domain to 127.0.0.1 still
+        sends `Host: evil.com`, so this blocks it while the local GUI (Host:
+        127.0.0.1:8765 / localhost:8765) passes. Users who deliberately expose the
+        web UI on their LAN opt out with JARVIS_ALLOW_LAN=1."""
+        if os.environ.get("JARVIS_ALLOW_LAN") in ("1", "true", "yes"):
+            return True
+        raw = (self.headers.get("Host") or "").strip().lower()
+        if not raw:
+            return True   # no Host (a non-browser local client) — not a rebind
+        host = (raw.split("]")[0] + "]") if raw.startswith("[") else raw.split(":")[0]
+        return host in ("127.0.0.1", "localhost", "[::1]", "::1")
+
     def do_OPTIONS(self) -> None:
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -1184,6 +1343,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_asset(path[len("/assets/"):])
         if path == "/api/state":
             return self._send_state()
+        if path == "/api/window-signals":
+            # Cheap, high-frequency poll for cross-process window actions the
+            # backend can't do itself (the window is in the desktop_attach
+            # subprocess). Kept OFF /api/state so it can poll every ~2s without
+            # the heavier state build — surfacing on a second launch has to feel
+            # instant, not wait out the 12s state poll.
+            return self._send_json(200, {"focus": _take_pending_focus()})
         if path == "/api/context-budget":
             # Live read of the current brain's context window so the GUI
             # ring + bottom bar update instantly on provider swap (don't
@@ -1200,11 +1366,20 @@ class HearthHandler(BaseHTTPRequestHandler):
                     tool_tokens = len(json.dumps(TOOL_DEFINITIONS)) // 4
                 except Exception:
                     tool_tokens = 0
+                # Persona / system-prompt overhead. The live context_state count
+                # includes it, so the GUI's idle ring estimate (history chars / 4)
+                # must add it too or the ring reads low at idle then jumps up the
+                # instant a turn starts. Surface it so both agree.
+                try:
+                    from . import system_prompt as _sp
+                    base_tokens = len(_sp()) // 4
+                except Exception:
+                    base_tokens = 0
                 effective = max(2048, tokens - tool_tokens)
                 return self._send_json(200, {
                     "total": tokens, "tools": tool_tokens,
                     "effective": effective, "source": source,
-                    "model": model,
+                    "model": model, "base": base_tokens,
                 })
             except Exception as e:
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
@@ -1590,6 +1765,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.send_error(404, "not found")
 
     def do_DELETE(self) -> None:
+        if not self._host_allowed():
+            return self._send_json(403, {"error": "forbidden host"})
         path = urllib.parse.urlparse(self.path).path
         if path.startswith("/api/memory/"):
             name = urllib.parse.unquote(path[len("/api/memory/"):])
@@ -1601,6 +1778,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.send_error(404, "not found")
 
     def do_POST(self) -> None:
+        if not self._host_allowed():
+            return self._send_json(403, {"error": "forbidden host"})
         # Hoisted: the brain-switch branch reassigns LOCAL_API_BASE, and other
         # branches (e.g. /api/memory/import) read it — so the global must be
         # declared before any use in this function, not mid-body.
@@ -1611,6 +1790,22 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/cancel":
             _CANCEL.set()  # run_once checks this between turns and bails out
             return self._send_json(200, {"cancelled": True})
+        if path == "/api/steer":
+            # Queue a message typed mid-generation. run_once drains it between
+            # tool iterations and injects it as a user turn (steering, not a new
+            # turn). Non-blocking: returns immediately, the running turn picks it
+            # up on its next iteration.
+            try:
+                body = self._read_json()
+            except Exception:
+                body = {}
+            text = (body.get("text") or "").strip()
+            if not text:
+                return self._send_json(400, {"error": "empty steer"})
+            with _STEER_LOCK:
+                _STEER_Q.append(text)
+                depth = len(_STEER_Q)
+            return self._send_json(200, {"queued": True, "pending": depth})
         if path == "/api/file/reveal":
             # Open the OS file explorer with the given file selected. Safety:
             # same workspace-sandbox check as /file so a chat-injected path
@@ -1618,6 +1813,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             # `explorer /select,<path>`, mac uses `open -R`, linux uses
             # whatever xdg-open does for the parent dir (no select equivalent).
             return self._reveal_in_folder()
+        if path == "/api/model/reveal":
+            # Reveal a MODEL file in Explorer. Models live outside the workspace
+            # (LM Studio / HF-cache / ~/.hearth), so this is NOT sandboxed — it
+            # only accepts an existing .gguf (or a directory) so it can't become a
+            # general "open any path" primitive from a chat-injected path.
+            return self._reveal_model_path()
         if path == "/api/agent/rename":
             return self._rename_agent()
         if path == "/api/workspace/relocate":
@@ -2096,6 +2297,67 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(400, {"error": "missing id"})
             ok = _save_convo(data)
             return self._send_json(200 if ok else 500, {"ok": ok})
+        if path == "/api/conversations/compact":
+            # Real, invisible compaction (the "subagent way"): summarize the older
+            # turns server-side and REPLACE them with one compact marker — no fake
+            # "Compact this conversation:" user message in the transcript, and the
+            # history actually shrinks. Keeps the recent tail intact.
+            body = self._read_json()
+            cid = (body.get("id") or "").strip()
+            keep = max(2, int(body.get("keep") or 6))
+            data = _load_convo(cid)
+            if not data:
+                return self._send_json(404, {"ok": False, "error": "conversation not found"})
+            msgs = data.get("messages") or []
+            if len(msgs) <= keep + 2:
+                return self._send_json(200, {"ok": False, "error": "not enough messages to compact"})
+            older, tail = msgs[:-keep], msgs[-keep:]
+
+            def _txt(m):
+                c = m.get("content")
+                return c if isinstance(c, str) else json.dumps(c, default=str)
+            transcript = "\n".join(f"{m.get('role','?')}: {_txt(m)[:2000]}"
+                                   for m in older if _txt(m).strip())
+            if not transcript.strip():
+                return self._send_json(200, {"ok": False, "error": "nothing to summarize"})
+            _s = _load_settings()
+            _model = (_s.get("llm_model") or "").strip()
+            _key = os.environ.get("LOCAL_API_KEY") or _s.get("llm_key") or "hearth-builtin"
+            if not _model:
+                try:
+                    import urllib.request as _ur
+                    _req = _ur.Request(f"{LM_STUDIO_V0}/models",
+                                       headers={"Authorization": f"Bearer {_key}"})
+                    with _ur.urlopen(_req, timeout=3) as r:
+                        for m in json.loads(r.read().decode()).get("data", []):
+                            if m.get("state") == "loaded" and m.get("type") in ("llm", "vlm"):
+                                _model = m.get("id"); break
+                except Exception:
+                    pass
+            if not _model:
+                return self._send_json(200, {"ok": False, "error": "no model loaded to summarize with"})
+            try:
+                import openai as _oai
+                from . import memory_extract as _mx
+                _sync = _oai.OpenAI(api_key=_key, base_url=LOCAL_API_BASE)
+                _llm = _mx.make_openai_llm_call(_sync, _model, max_tokens=500)
+                summary = (_llm(
+                    "You compress a conversation. Output ONLY a tight summary, no preamble.",
+                    "Summarize the older turns below in 4-6 short bullet lines. Keep concrete "
+                    "facts, decisions, names, file paths, numbers and open tasks; drop greetings "
+                    "and filler.\n\n" + transcript + "\n\nSummary:") or "").strip()
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"summarize failed: {type(e).__name__}: {e}"})
+            if not summary:
+                return self._send_json(200, {"ok": False, "error": "empty summary"})
+            marker = {"role": "assistant",
+                      "content": "**Earlier context (compacted):**\n" + summary,
+                      "compacted": True}
+            data["messages"] = [marker] + tail
+            data["updated"] = time.time()
+            _save_convo(data)
+            return self._send_json(200, {"ok": True, "compacted": len(older),
+                                         "messages": data["messages"]})
         if path == "/api/logs/clear":
             # Clears AGENT log (activity.jsonl). The Logs view's clear button
             # passes which=server when the dropdown is showing server logs,
@@ -2202,8 +2464,28 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {"ok": True})
         if path == "/api/focus":
             # Single-instance hook — another launch attempt asked us to surface
-            # the existing window instead of spawning a duplicate.
+            # the existing window instead of spawning a duplicate. Two cases:
+            #  - Window OPEN (in the desktop_attach subprocess): flag it, its
+            #    /api/state poll raises its own native window (the reliable path;
+            #    the backend can't cross the process boundary itself).
+            #  - Window CLOSED to the tray (subprocess dead → nobody polls the
+            #    flag): ask the tray to SPAWN a fresh window. Without this the
+            #    focus request silently dropped — the reported "clicking the exe
+            #    does nothing while it's in the tray" bug.
+            global _pending_focus
+            _pending_focus = True
+            _surface_window()
             return self._send_json(200, _focus_window())
+        if path == "/api/voice/open":
+            # Wake word / tray Voice-mode fired while a window was already open.
+            # The tray can't spawn a second ?voice=1 window, so it asks us to flip
+            # the open GUI into voice mode: set the one-shot flag (the next
+            # /api/state poll picks it up + enters voice mode) and best-effort
+            # surface the window.
+            global _pending_voice_open
+            _pending_voice_open = True
+            _focus_window()
+            return self._send_json(200, {"ok": True})
         if path == "/api/open-rules":
             rules_path = os.path.join(WORKSPACE, "rules.md")
             try:
@@ -2355,7 +2637,14 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _saved["llm_provider"] = provider or _saved.get("llm_provider", "")
                 _saved["llm_url"] = url
                 _saved["llm_key"] = _eff_key
-                _saved["llm_model"] = model
+                # A .gguf is a LOCAL model FILE, never a valid cloud model id — if it
+                # carried over from the previous local brain, saving it makes the
+                # sticker show a stale "gemma.gguf ● active" on a cloud endpoint (and
+                # a dead eject). Drop it so the sticker asks the user to pick a model.
+                _model_save = model
+                if provider and provider != "local" and _model_save.lower().endswith(".gguf"):
+                    _model_save = ""
+                _saved["llm_model"] = _model_save
                 # If we recovered a banked key (none was supplied this switch),
                 # push it to the live runtime so the very next chat authenticates
                 # instead of using the "hearth-builtin" placeholder set above.
@@ -2481,6 +2770,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             ck         = (_cfg("cache_type_k") or "").strip() or None
             cv         = (_cfg("cache_type_v") or "").strip() or None
             flash      = bool(_cfg("flash_attn", True))
+            extra_args = (_cfg("extra_args") or "").strip() or None
             # `force=true` from the GUI bypasses the VRAM guardrail — opt-in
             # only, after the user clicks "Force load anyway" in the modal.
             # llama.cpp will spill weights to system RAM (slow but boots).
@@ -2488,7 +2778,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             result = llmserver.start_builtin(
                 model_path, ctx=ctx, n_gpu_layers=n_gpu,
                 n_threads=n_threads, cache_type_k=ck, cache_type_v=cv,
-                flash_attn=flash, force=force,
+                flash_attn=flash, force=force, extra_args=extra_args,
             )
             # On successful start, retarget the GLOBAL LLM endpoint to the
             # builtin URL so the topbar dropdown + /api/models + chat all
@@ -2662,6 +2952,10 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/runtime/cancel":
             from . import llmserver
             return self._send_json(200, llmserver.cancel_llama_download())
+        if path == "/api/runtime/discard":
+            # Cancel the engine download AND drop its partial (does not resume).
+            from . import llmserver
+            return self._send_json(200, llmserver.discard_llama_download())
         if path == "/api/runtime/preference":
             from . import llmserver
             body = self._read_json()
@@ -2749,6 +3043,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             "context": context_window,
             "context_source": context_source,
             "tools": len(TOOL_DEFINITIONS),
+            # One-shot: wake fired while a window was already open. The GUI enters
+            # voice mode in place instead of the tray spawning a ?voice=1 window.
+            "enter_voice": _take_pending_voice_open(),
             "memories": len(_memory_index()),
             "workspace": WORKSPACE,
             "lms_cli": bool(_find_lms_cli()),
@@ -2819,24 +3116,29 @@ class HearthHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "name": name})
 
     def _reveal_in_folder(self) -> None:
-        """Open the OS file explorer with the given file selected. Workspace-
-        sandboxed (same rule as _serve_binary_file). Non-blocking spawn."""
-        from .tools import list_extra_workspaces
+        """Open the OS file explorer with the given path selected. Reveal follows
+        the READ policy, not the write policy: the Files view browses the whole
+        disk, so revealing what you're already looking at must work anywhere. Only
+        JARVIS_LOCKDOWN (which also confines reads) restricts it to the workspace.
+        Cross-site POSTs are already blocked by the Host guard, and reveal just
+        opens Explorer at an existing path (no data access). Non-blocking spawn."""
+        from .tools import list_extra_workspaces, SAFE_READ_ONLY
         body = self._read_json()
         path = (body.get("path") or "").strip()
         if not path:
             return self._send_json(400, {"error": "missing path"})
         try:
-            real = os.path.realpath(path)
+            real = os.path.realpath(os.path.expanduser(path))
         except Exception:
             return self._send_json(400, {"error": "bad path"})
-        ws_real = os.path.realpath(WORKSPACE)
-        allowed_roots = [ws_real] + [os.path.realpath(p) for p in list_extra_workspaces()]
-        if not any(real.lower().startswith(root.lower() + os.sep) or
-                   real.lower() == root.lower() for root in allowed_roots):
-            return self._send_json(403, {"error": "path outside allowed roots"})
         if not os.path.exists(real):
             return self._send_json(404, {"error": "not found"})
+        if SAFE_READ_ONLY:
+            ws_real = os.path.realpath(WORKSPACE)
+            allowed_roots = [ws_real] + [os.path.realpath(p) for p in list_extra_workspaces()]
+            if not any(real.lower().startswith(root.lower() + os.sep) or
+                       real.lower() == root.lower() for root in allowed_roots):
+                return self._send_json(403, {"error": "path outside allowed roots (lockdown)"})
         try:
             if sys.platform == "win32":
                 # explorer /select,<path> pops Explorer with file highlighted
@@ -2846,6 +3148,40 @@ class HearthHandler(BaseHTTPRequestHandler):
                 subprocess.Popen(["open", "-R", real])
             else:
                 # Linux: no portable "select file" — open the parent dir.
+                parent = real if os.path.isdir(real) else os.path.dirname(real)
+                subprocess.Popen(["xdg-open", parent])
+            return self._send_json(200, {"ok": True})
+        except Exception as e:
+            return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def _reveal_model_path(self) -> None:
+        """Open the OS file explorer with a MODEL file selected. NOT
+        workspace-sandboxed (models live in LM Studio / HF-cache / ~/.hearth
+        dirs), so it only accepts an existing .gguf file or a directory — a
+        reveal just opens Explorer, and restricting it to real model paths keeps
+        it from being a general 'open any path' primitive."""
+        body = self._read_json()
+        path = (body.get("path") or "").strip()
+        if not path:
+            return self._send_json(400, {"error": "missing path"})
+        try:
+            real = os.path.realpath(path)
+        except Exception:
+            return self._send_json(400, {"error": "bad path"})
+        if not os.path.exists(real):
+            return self._send_json(404, {"error": "not found"})
+        # Only ever a .gguf model FILE — never an arbitrary directory. A model
+        # reveal always targets a specific file, and allowing any dir would let a
+        # localhost POST pop Explorer anywhere on disk.
+        if not (os.path.isfile(real) and real.lower().endswith(".gguf")):
+            return self._send_json(403, {"error": "not a model file"})
+        try:
+            if sys.platform == "win32":
+                subprocess.Popen(["explorer", "/select,", real],
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", real])
+            else:
                 parent = real if os.path.isdir(real) else os.path.dirname(real)
                 subprocess.Popen(["xdg-open", parent])
             return self._send_json(200, {"ok": True})
@@ -3148,11 +3484,38 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(400, {"error": f"bad base64: {e}"})
         if len(blob) > 200 * 1024 * 1024:
             return self._send_json(400, {"error": "file too large (>200MB) — use a workspace path instead"})
-        dest = os.path.join(WORKSPACE, "uploads", name)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        up_dir = os.path.join(WORKSPACE, "uploads")
+        os.makedirs(up_dir, exist_ok=True)
+        # Collision-safe: two files named the same (e.g. screenshot.png) must not
+        # silently overwrite each other — the first's bytes were being lost. Keep
+        # the clean name when free; else suffix -2, -3, … so both survive.
+        stem, ext = os.path.splitext(name)
+        dest = os.path.join(up_dir, name)
+        _n = 2
+        while os.path.exists(dest):
+            dest = os.path.join(up_dir, f"{stem}-{_n}{ext}")
+            _n += 1
         with open(dest, "wb") as f:
             f.write(blob)
-        self._send_json(200, {"ok": True, "path": dest, "size": len(blob)})
+        # Pre-extract text so the CONTENT can ride the prompt directly instead of
+        # only "here's a path, please call read_file" — a weak local model often
+        # ignores that hint and the attach looks like it did nothing. Images/video
+        # skip this (they need a vision model via view_image, not text). Capped +
+        # size-guarded so a huge upload doesn't block the response.
+        _ext = os.path.splitext(dest)[1].lower()
+        _IMG = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico"}
+        _MEDIA = _IMG | {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav",
+                         ".flac", ".ogg", ".m4a", ".zip", ".7z", ".rar", ".exe", ".dll"}
+        preview = ""
+        if _ext not in _MEDIA and len(blob) <= 10 * 1024 * 1024:
+            try:
+                _txt = execute_tool("read_file", {"path": dest}) or ""
+                if isinstance(_txt, str) and _txt.strip() and not _txt.lstrip().startswith("Error"):
+                    preview = _txt[:6000]
+            except Exception:
+                preview = ""
+        self._send_json(200, {"ok": True, "path": dest, "size": len(blob),
+                              "is_image": _ext in _IMG, "preview": preview})
 
     def _stream_chat(self) -> None:
         body = self._read_json()
@@ -3171,6 +3534,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         think = bool(body.get("think"))
         model = body.get("model") or None
         history = body.get("history") or []
+        voice = bool(body.get("voice"))  # voice-mode turn → spoken-register prompt
         # First message of a chat: drop deferred tools the PREVIOUS conversation
         # unlocked. They're process-global, so without this a fresh chat starts
         # carrying whatever the last one happened to open.
@@ -3222,6 +3586,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 pass
 
         _CANCEL.clear()  # fresh generation — clear any prior stop request
+        with _STEER_LOCK:
+            _STEER_Q.clear()  # drop any steer left over from a prior turn
         # Wire the GUI as the ask_user surface for the lifetime of THIS chat
         # turn — the tool dispatcher will route ask_user calls through here,
         # blocking until the user clicks an option in the modal.
@@ -3230,11 +3596,36 @@ class HearthHandler(BaseHTTPRequestHandler):
             set_ask_user_callback(_make_ask_user_bridge(emit))
         except Exception:
             pass
+        # Local endpoint with NOTHING loaded: don't let run_once hit a dead
+        # endpoint and fail silently — that's the "say the wake word, overlay
+        # opens, then dead air" trap. Boot the user's default model on-demand
+        # (reusing the launch-time autoboot so the builtin-vs-LM-Studio matching
+        # lives in one place) and stream a "warming" cue so the HUD shows the
+        # model coming up instead of going quiet.
+        if _is_local_endpoint and not _detect_loaded():
+            _bs = _load_settings()
+            _pref = (_bs.get("preferred_model") or "").strip()
+            if _pref and _bs.get("server_autoboot", True):
+                emit("model_loading", model=os.path.basename(_pref))
+                try:
+                    _auto_boot_preferred_model_async()
+                except Exception:
+                    pass
+                for _ in range(80):           # up to ~40s for the server to come up
+                    if _CANCEL.is_set() or _detect_loaded():
+                        break
+                    time.sleep(0.5)
+            if not _detect_loaded():
+                emit("error", message=(
+                    "The model is still warming up, or none is loaded. Give it a "
+                    "few seconds and say it again — or load one in the Models tab."))
+                return
         try:
             asyncio.run(run_once(
                 prompt, emit=emit, think=think, model=model, history=history,
                 permission_check=_make_permission_check(emit),
-                should_cancel=_CANCEL.is_set,
+                should_cancel=_CANCEL.is_set, drain_steer=_drain_steer,
+                voice=voice,
             ))
         except Exception as e:
             emit("error", message=f"{type(e).__name__}: {e}")
@@ -3900,6 +4291,34 @@ class _QuietHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+_MEM_MAINT_STARTED = False
+
+
+def _start_memory_maintenance_loop(interval_s: int = 1800) -> None:
+    """Autonomous memory upkeep on a timer, so consolidation + expiry no longer
+    depend on the model happening to save a fact. memory.run_maintenance() is
+    self-throttling (24h/new-fact gates, once-per-day expiry, size-cap), so a
+    30-min tick is near-free when nothing's due. Local-only; never blocks the
+    server. Idempotent — a second call is a no-op."""
+    global _MEM_MAINT_STARTED
+    if _MEM_MAINT_STARTED:
+        return
+    _MEM_MAINT_STARTED = True
+
+    def _loop() -> None:
+        # First pass a bit after boot so it doesn't compete with model load.
+        time.sleep(120)
+        while True:
+            try:
+                from . import memory as _mem
+                _mem.run_maintenance()
+            except Exception:
+                pass
+            time.sleep(interval_s)
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
 def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     """Start the server (non-blocking) and return the server instance.
     Used by hearth.desktop to embed the same backend in a PyWebView window."""
@@ -3909,6 +4328,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     _start_reminder_watcher()
     _maybe_learn_environment_async()
     _auto_boot_preferred_model_async()
+    _start_memory_maintenance_loop()
     # Bring configured phone bridges (Discord/Telegram/WhatsApp) online so the
     # user doesn't have to flip a Start toggle every session. Backgrounded
     # because each spawn waits ~1.6s to fail-fast on a bad token.
@@ -3960,6 +4380,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     _start_reminder_watcher()
     _maybe_learn_environment_async()
     _auto_boot_preferred_model_async()
+    _start_memory_maintenance_loop()
 
     try:
         server.serve_forever()

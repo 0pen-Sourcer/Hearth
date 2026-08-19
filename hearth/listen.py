@@ -73,6 +73,28 @@ def input_device_index():
         idx = int(v)
         return idx if idx >= 0 else None
     return None
+
+
+# Windows/PulseAudio loopback + virtual-cable capture endpoints. These are NOT
+# microphones — they carry whatever the SPEAKERS are playing. If Hearth ever
+# opens one as its "mic" it transcribes system audio (its own TTS, a video,
+# music) and can loop on itself. Never fall back to one.
+_SYSTEM_AUDIO_HINTS = (
+    "stereo mix", "wave out mix", "what u hear", "what you hear",
+    "loopback", "cable output", "voicemeeter out", "vb-audio point",
+    "monitor of", "primary sound capture", "mixage stéréo", "mezcla est",
+    # 'Sound Mapper - Input' just ROUTES to the OS default device, so if the
+    # default is a loopback (Stereo Mix) it silently becomes one too — never pick
+    # it as a fallback. 'Streaming Speakers' is a Steam speaker-monitor, not a mic.
+    "sound mapper", "streaming speakers",
+)
+
+
+def is_system_audio_device(name: str) -> bool:
+    """True if a device NAME looks like a system-audio/loopback capture endpoint
+    rather than a real microphone."""
+    n = (name or "").lower()
+    return any(h in n for h in _SYSTEM_AUDIO_HINTS)
 DEVICE = os.environ.get("JARVIS_STT_DEVICE", "cpu")  # "cuda" if you want GPU
 SAMPLE_RATE = 16000  # Whisper input rate
 

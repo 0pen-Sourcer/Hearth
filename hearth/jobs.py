@@ -99,10 +99,36 @@ def _prune_old() -> None:
         pass
 
 
+def _normalize_ps_command(command: str) -> str:
+    """Fix the two PowerShell mistakes models make most when spawning jobs, so a
+    valid-looking command doesn't die on a shell technicality:
+
+    1. A command that starts with a quoted executable path. PowerShell reads a
+       leading "..." as a string to echo, not a program to run, then errors on the
+       next token ("Unexpected token '-c'"). It needs the call operator `&` in
+       front: `& "C:\\...\\python.exe" -c "..."`.
+    2. A bare `python` / `python3` that isn't on PATH ("The term 'python' is not
+       recognized"). Route it to the interpreter Hearth is running under — but only
+       when that IS a python; in a packaged build sys.executable is Hearth.exe, so
+       leave the command untouched rather than mangle it.
+    """
+    import re as _re
+    cmd = command.lstrip()
+    if not cmd:
+        return command
+    if cmd[0] == '"':
+        return "& " + cmd
+    m = _re.match(r'(python(?:3|\.exe)?)(?=\s|$)', cmd)
+    if m and "python" in os.path.basename(sys.executable).lower():
+        return '& "' + sys.executable + '"' + cmd[m.end():]
+    return command
+
+
 def _spawn(command: str, cwd: str, shell: str) -> subprocess.Popen:
     """Spawn the child with stdout+stderr both pointed at the .out file in
     line-buffered append mode. Hidden console on Windows."""
     if sys.platform == "win32" and shell != "cmd":
+        command = _normalize_ps_command(command)
         argv = ["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
         return subprocess.Popen(
             argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
