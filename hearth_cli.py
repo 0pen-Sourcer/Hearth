@@ -357,6 +357,34 @@ _BOLD = "\033[1m"
 C_ADD = "\033[38;5;114m"   # green — added line
 C_DEL = "\033[38;5;210m"   # red — removed line
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _vis_len(s: str) -> int:
+    """Visible length, ignoring ANSI color codes (for box padding)."""
+    return len(_ANSI_RE.sub("", s))
+
+
+def _render_update_box(current: str, latest: str, blurb: str = "") -> str:
+    """A rounded, framed 'update available' card for /update and the boot notice."""
+    import textwrap
+    W = 50  # inner content width
+    def _row(content: str = "") -> str:
+        pad = max(0, W - _vis_len(content))
+        return f"{C_FRAME}│{C_RESET}  {content}{' ' * pad}  {C_FRAME}│{C_RESET}"
+    title = f"{C_ACCENT}✦{C_RESET} {_BOLD}Update available{C_RESET}"
+    tlen = _vis_len(title)
+    top = f"{C_FRAME}╭─ {C_RESET}{title}{C_FRAME} {'─' * (W - tlen - 1)}╮{C_RESET}"
+    bot = f"{C_FRAME}╰{'─' * (W + 4)}╯{C_RESET}"
+    rows = [top, _row(), _row(f"{C_DIM}v{current}{C_RESET}   {C_FRAME}→{C_RESET}   {C_OK}{_BOLD}{latest}{C_RESET}")]
+    if blurb:
+        rows.append(_row())
+        for w in textwrap.wrap(blurb, W - 1):
+            rows.append(_row(f"{C_DIM}{w}{C_RESET}"))
+    rows.append(_row())
+    rows.append(bot)
+    return "\n".join(rows)
+
 
 def _cli_show_diffs() -> bool:
     """Honor the shared show_diffs toggle (settings.json), default on — same
@@ -1720,12 +1748,15 @@ class JarvisCLI:
                     note = r.get("note", "")
                     print(f"{C_OK}You're on the latest{C_RESET} {C_DIM}(v{HEARTH_VERSION}{'; ' + note if note else ''}){C_RESET}")
                     return True
-                print(f"\n{C_BOT}Update available:{C_RESET} {C_TOOL}{r['latest']}{C_RESET}  "
-                      f"{C_DIM}(you have v{HEARTH_VERSION}){C_RESET}")
+                # First line of the release body makes a decent one-line blurb.
+                _blurb = ""
+                if r.get("notes"):
+                    _blurb = next((ln.strip() for ln in str(r["notes"]).splitlines()
+                                   if ln.strip()), "")[:160]
+                print()
+                print(_render_update_box(HEARTH_VERSION, r["latest"], _blurb))
                 if r.get("url"):
                     print(f"  {C_DIM}{r['url']}{C_RESET}")
-                if r.get("notes"):
-                    print(f"{C_DIM}{r['notes'][:300]}{C_RESET}")
                 ans = (await self._read_choice(f"  {C_TOOL}Install now?{C_RESET} [y/N] ")).strip().lower()
                 if ans.startswith("y"):
                     print(f"{C_DIM}{updater.apply_update()}{C_RESET}")
@@ -3827,9 +3858,13 @@ class JarvisCLI:
                     except Exception:
                         pass
                     if r.get("ok") and r.get("available"):
-                        print(f"\n{C_DIM}● update available: {C_RESET}{C_TOOL}{r['latest']}{C_RESET}"
-                              f"{C_DIM}  (you're on v{HEARTH_VERSION}) — run {C_RESET}"
-                              f"{C_TOOL}/update{C_RESET}{C_DIM} to install{C_RESET}", flush=True)
+                        _blurb = ""
+                        if r.get("notes"):
+                            _blurb = next((ln.strip() for ln in str(r["notes"]).splitlines()
+                                           if ln.strip()), "")[:160]
+                        print("\n" + _render_update_box(HEARTH_VERSION, r["latest"], _blurb))
+                        print(f"  {C_DIM}run {C_RESET}{C_TOOL}/update{C_RESET}{C_DIM} to install{C_RESET}",
+                              flush=True)
                 except Exception:
                     pass
             _th.Thread(target=_upd_nudge, daemon=True).start()

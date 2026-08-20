@@ -1,82 +1,40 @@
-This release is about speed, honesty, and a stack of things that were broken. Hearth starts faster, answers faster on local models, shows you what it is actually doing while it works, and the rough edges around installing the GPU engine, connecting a cloud model, and voice mode are cleared up.
+v0.7.5 is the release where Hearth learned to use your whole desktop and stopped tripping over itself. It can see and act on the apps you actually use, keep its own replies from spiraling, and it clears a long run of rough edges around speed, voice, models, and setup.
 
-If you are on v0.7.2, v0.7.3 or v0.7.4, Hearth updates itself with a small patch, no reinstall. On v0.7.0 or v0.7.1 you need the installer one more time, and after that you are on the small updates for good. Updating never touches your chats, memory or models.
+If you are on v0.7.2, v0.7.3 or v0.7.4, Hearth patches itself, no reinstall. On v0.7.0 or v0.7.1 you need the installer one more time, then you are on the small updates for good. Updating never touches your chats, memory, or models.
 
-**Faster to open**
+## Watch it work your desktop
 
-On some machines Hearth would sit on a "getting ready" screen for five or six seconds every time it opened. That was it waiting on a model-server check that stalls when nothing is running yet. It gives up on a dead server in about half a second now, so the app is ready as soon as you open it, and it stays quicker while you use it because that same check runs on a loop the whole time.
+When Hearth drives your mouse and keyboard, the app it is controlling has focus, not Hearth, so before this you just saw the cursor move on its own. Now a small strip sits at the top of the screen while it works and tells you what it is doing, reading the screen, clicking Sign in, typing a reply. It never takes focus and never intercepts a click, so it cannot get in the way of what it is doing underneath.
 
-**Faster to answer on local models**
+It can also see inside the apps you actually use. Chrome, Edge, Slack, Discord, VS Code, and a Gmail tab all keep their real buttons and fields hidden until something asks, so Hearth used to find nothing but the window frame. It asks first now, then names and clicks the real control instead of guessing at pixels. Switching windows is reliable too, through the same path the taskbar uses rather than a flaky Alt Tab, and after it types into a field it checks the text actually landed.
 
-A running clock was baked into the prompt, and because it changed every minute it kept throwing away the model's cache and forcing a full re-read of your whole conversation on every message. The time still reaches the model, it just rides along without breaking the cache now, so a long back and forth stays fast instead of getting slower as it grows.
+## No more talking in circles
 
-**You can see how fast it is running**
+Thinking models had a habit of getting stuck repeating the same line until they filled the whole context and gave you nothing. That is fixed. If you want to shape how the model picks its words, temperature, top-p, top-k, min-p, and repeat penalty now live as sliders in the model's load panel, starting from that model's own defaults, so you set them once per model.
 
-While a reply streams you see the live tokens-per-second, and hovering a finished reply shows that turn's real prompt speed, generation speed, and total time, read straight from the engine rather than guessed. The context meter is honest too. It now reflects the tokens the model actually saw instead of a rough estimate that read low and then jumped. If you would rather not see any of it, there is a switch in Settings to hide the whole thing.
+## Faster, and honest about the numbers
 
-**You can redirect it mid-task**
+Hearth opens without the five second wait it used to spend probing a server that was not running yet. Long conversations stay fast instead of slowing down as they grow, because the clock in the prompt no longer throws away the model's cache every minute. While a reply streams you see the real tokens per second, and hovering a finished reply shows that turn's prompt speed, generation speed, and total time, read straight from the engine. The context meter reflects what the model actually saw rather than a guess that read low and then jumped.
 
-Type while Hearth is still working and your message folds into the job it is already doing, the way you would nudge someone mid-sentence, instead of being dropped or forced to wait for the turn to finish. A long job is also saved as it goes now, so if you stop it partway through or close the app in the middle of a big task, everything it already did is still there when you come back instead of the whole turn vanishing. Long chats stay alive longer too. When a conversation grows too big to summarise any further, Hearth says so once and keeps going by trimming the oldest turns rather than spinning on it.
+## Steer it, and never lose a long run
 
-**The built-in GPU engine installs cleanly**
+Type while Hearth is working and your message folds into the job it is already doing, instead of being dropped or forced to wait. A long task is saved as it goes now, so stopping partway or closing the app mid-run keeps everything it already did, rather than the whole turn vanishing. When a chat grows too large to summarize any further, Hearth says so once and keeps going by trimming the oldest turns instead of spinning on it.
 
-It used to fail partway with a "file in use" or "bad zip" error and then get stuck failing on the same broken download forever. It retries the file lock that Windows and antivirus cause, checks the download is a real archive before opening it, and throws a bad one away so the next try starts clean. The size it shows before you download now matches what it really pulls.
+## Voice that stays out of its own way
 
-**Cloud models are smoother**
+If you had no microphone, Hearth could grab a system audio device and start transcribing your speakers, waking on stray audio and looping on its own voice. It refuses those devices outright now and only ever opens a real mic, or turns voice off with a clear message if there is not one. On speakers, a half-duplex switch in Settings holds the mic closed while it speaks, for anyone who still hears an echo. And if your mic disconnects mid-conversation, voice stops cleanly and tells you, instead of spinning on errors.
 
-Pointing Hearth at something like Groq now lists the provider's real models instead of coming up empty after a restart, which was Hearth losing your saved API key every relaunch. Switching to a cloud brain frees the local model's VRAM, and the top bar stops showing the old local model as if it were still active.
+## Models and the engine
 
-**Voice mode is steadier**
+Big mixture-of-experts models like Qwen3 A3B run on a modest card now. Hearth keeps their weights in memory and runs the attention layers on the GPU with the experts in system RAM, so a model far larger than your VRAM still works. The built-in GPU engine installs cleanly, retrying the file locks that antivirus causes and checking the download is a real archive before opening it. You can manage it all without leaving Hearth, showing any model or engine build in your file explorer and deleting the ones you are done with to free disk. Changing a model's context size while it is loaded actually reloads it, the top bar shows what is really running, and switching to a cloud brain frees the local model's VRAM.
 
-The wake word takes you into voice mode even when a window is already open, closing and reopening voice no longer gets stuck on "warming up the mic," and a fresh session starts on a clean mic instead of dumping every stray thing it heard while the window was closed. It never reads a tool call's raw text out loud anymore, and a spoken question gets a short spoken answer instead of a whole screen read at you.
+## Files, vision, and email
 
-**Voice no longer talks to itself, and never listens to your speakers**
+Drop in a document, spreadsheet, PDF, or code file and its text rides straight into your message, so even a small local model uses it without a nudge. When Hearth writes or edits a file, the tool card shows a green and red diff of what changed, in both the app and the CLI. When the loaded model has no vision, asking it to look at an image gets a plain "I cannot see this" and how to fix it, rather than a made-up description. And you can now connect an inbox from Settings, Connectors, with an app password that stays on your machine, so Hearth reads your mail and sends replies when you ask.
 
-If you had no microphone connected, Hearth could fall back to a "Stereo Mix" style device that captures whatever your speakers are playing, so it transcribed videos and music, woke on a stray "hey Jarvis" from a clip, and could loop on its own voice. Hearth now refuses those system-audio devices outright and only ever opens a real microphone, or turns voice off with a clear message if there isn't one. You can still interrupt it by voice as normal; if you run on speakers instead of a headset and it ever hears itself, there is a half-duplex switch in Settings that holds the mic closed while it speaks. And if your microphone disconnects mid-conversation, voice stops cleanly and tells you, instead of spinning on errors.
+## Smaller fixes
 
-**See exactly what a file edit changed**
-
-When Hearth writes or edits a file, the tool card now shows a green and red diff of what actually changed instead of a wall of raw text, in both the app and the CLI. A large write is trimmed so it never floods the view. There is a switch in Settings to turn diffs off if you prefer the plain result. And a model or model folder you dropped into a subfolder of your models directory now shows up in the list, not just files sitting flat at the top.
-
-**Drop a file in and it just gets read**
-
-Attach a document, spreadsheet, PDF, or code file and its text now rides straight into your message, so even a small local model uses it without you having to nudge it to open the file. Two files with the same name no longer overwrite each other. Images still go to a vision model to actually be seen.
-
-**Honest about what it can see**
-
-When the loaded model has no vision, asking Hearth to look at an image now gets a plain "I cannot see this" and how to fix it, instead of the model inventing a description of a blank. On the built-in server, dropping a model's matching projector file beside it turns real image understanding on.
-
-**It works your desktop, and you can watch it**
-
-When Hearth clicks and types across your actual screen, the app it is driving has focus, not Hearth, so you used to just see the cursor move on its own with no idea what it was up to. Now a small strip sits at the top of the screen while it works and tells you what it is doing, reading the screen, clicking Sign in, typing a message. It never takes focus and never intercepts a click, so it cannot get in the way of the very thing it is doing underneath it, and there is a switch in Settings to turn it off.
-
-It can also see inside the apps you actually use now. Chrome, Edge, Slack, Discord, VS Code and Spotify only build the map of their own buttons and fields when something asks for it, so Hearth would look at one of them and find nothing but the window frame. It asks for that map first now, so it names and clicks the real controls inside a browser tab or a chat window instead of guessing at pixels.
-
-Switching between windows is reliable too. It brings the right one to the front through the same path the taskbar uses instead of a flaky Alt Tab that the system often swallows, its clicks land on one consistent set of screen coordinates rather than two that disagreed, and after it types into a field it checks the text actually went in instead of assuming it did.
-
-**Looks after its own memory**
-
-Hearth merges duplicate notes and drops stale ones on a quiet background schedule, instead of only tidying up when it happens to save something. Asking what you were doing recently or yesterday brings back your recent chats now, not the oldest thing that matched the words.
-
-**Models tell the truth about their state**
-
-Changing the context size on a model that is already loaded restarts it on the new size, where before it would claim it was ready and quietly keep the old one. The top bar no longer shows a model that has already been swapped out for a cloud brain, so what you see loaded is what is really loaded. Hearth also won't boot a model at a context so small its own prompt can't fit, which used to fail on the first message.
-
-**Big mixture-of-experts models on a small card**
-
-A mixture-of-experts model like Qwen3 A3B is huge on disk but only runs a slice of itself per word, so a modest GPU can handle it if the experts sit in system RAM. Hearth's built-in server now recognises these models and keeps their weights in memory instead of reading them off your drive mid-word, which is what otherwise thrashes the disk and crawls. The attention layers run on the GPU and the experts stay in RAM. Advanced flags let you tune the split.
-
-**Manage your models and the engine without leaving Hearth**
-
-The Models tab can now show any model in your file explorer and delete one you are finished with, so you can clear disk space without hunting through folders yourself. It only ever removes files inside Hearth's own models folder, never a model you keep somewhere else. The built-in GPU engine gets the same handling, each downloaded engine build has a show-in-folder and a delete, and Hearth refuses to delete the build that is currently powering a running model so you cannot pull the floor out from under yourself. On a bigger graphics card the built-in server also runs more requests at once on its own, scaled to how much VRAM you have.
-
-**Commands and bridges**
-
-Two PowerShell quirks used to sink otherwise-fine commands, a program path in quotes that needs a special prefix, and a plain "python" that is not on the system path. Both get fixed up automatically now. And if you message Hearth on Discord, Telegram or WhatsApp while no model is running, it replies that it is not up yet and how to wake it, instead of a raw error dump.
-
-**Smaller edges**
-
-When a web search gets rate-limited and keeps coming back empty, Hearth now notices and stops hammering it, telling the model to answer from what it has or try another way instead of retrying the same dead search over and over. A reply that contains code no longer flickers while it streams, because Hearth stopped re-parsing the half-written code block on every token. Clicking Hearth while it is tucked in the system tray now opens the window instead of doing nothing. The desktop window stopped occasionally opening as a plain browser tab on machines where it should have come up as its own window. The show-in-folder button only opens a real model file, and Hearth now ignores requests to its local server that come from other sites on your network, so a page you happen to have open cannot reach in and poke at it.
+A rate-limited web search backs off instead of hammering the same dead query. Clicking Hearth in the tray reliably surfaces the window. A reply with code no longer flickers while it streams. On a bigger card the built-in server runs more requests at once on its own. Hearth ignores requests to its local server from other sites on your network, so a page you have open cannot poke at it. And a couple of PowerShell quirks that sank otherwise-fine commands get fixed up automatically.
 
 ---
 
