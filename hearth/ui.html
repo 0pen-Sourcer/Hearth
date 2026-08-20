@@ -11975,14 +11975,14 @@ function modelsLoadConfigHTML(opts) {
       </div>
       <details class="ex-advanced">
         <summary>Advanced options &amp; flags</summary>
-        <div class="ex-samp-label">Sampling <span>how it picks each word, sent every reply</span></div>
+        <div class="ex-samp-label">Sampling <span>how it picks its words</span></div>
         <div class="ex-row">
           <label>Temperature</label>
           <div class="ex-slider-row">
             <input type="range" data-cfg="sampling_temperature" data-float min="0" max="2" step="0.05" value="0.7" />
             <input type="number" class="v" data-samp-num="sampling_temperature" min="0" max="2" step="0.05" value="0.7" aria-label="Temperature" />
           </div>
-          <div class="ex-hint">Randomness. Lower is focused and repeatable, higher is more varied.</div>
+          <div class="ex-hint">How random the replies are. Lower is focused, higher is creative.</div>
         </div>
         <div class="ex-row">
           <label>Top-P</label>
@@ -11990,7 +11990,7 @@ function modelsLoadConfigHTML(opts) {
             <input type="range" data-cfg="sampling_top_p" data-float min="0" max="1" step="0.01" value="0.95" />
             <input type="number" class="v" data-samp-num="sampling_top_p" min="0" max="1" step="0.01" value="0.95" aria-label="Top-P" />
           </div>
-          <div class="ex-hint">Nucleus sampling. Keeps the smallest set of tokens whose probabilities sum to P.</div>
+          <div class="ex-hint">Keeps the most likely words. Lower is safer, higher is more varied.</div>
         </div>
         <div class="ex-row">
           <label>Top-K</label>
@@ -11998,7 +11998,7 @@ function modelsLoadConfigHTML(opts) {
             <input type="range" data-cfg="sampling_top_k" min="0" max="200" step="1" value="40" />
             <input type="number" class="v" data-samp-num="sampling_top_k" min="0" max="200" step="1" value="40" aria-label="Top-K" />
           </div>
-          <div class="ex-hint">Keeps only the K most likely tokens each step. 0 turns it off.</div>
+          <div class="ex-hint">How many word choices it weighs each step. 0 is off.</div>
         </div>
         <div class="ex-row">
           <label>Min-P</label>
@@ -12006,7 +12006,7 @@ function modelsLoadConfigHTML(opts) {
             <input type="range" data-cfg="sampling_min_p" data-float min="0" max="0.5" step="0.01" value="0.05" />
             <input type="number" class="v" data-samp-num="sampling_min_p" min="0" max="0.5" step="0.01" value="0.05" aria-label="Min-P" />
           </div>
-          <div class="ex-hint">Drops tokens below this fraction of the top token's probability.</div>
+          <div class="ex-hint">Ignores unlikely words. Higher trims more.</div>
         </div>
         <div class="ex-row">
           <label>Repeat penalty</label>
@@ -12014,11 +12014,11 @@ function modelsLoadConfigHTML(opts) {
             <input type="range" data-cfg="sampling_repeat_penalty" data-float min="1" max="1.5" step="0.01" value="1.1" />
             <input type="number" class="v" data-samp-num="sampling_repeat_penalty" min="1" max="1.5" step="0.01" value="1.1" aria-label="Repeat penalty" />
           </div>
-          <div class="ex-hint">Discourages repeating itself. 1.0 is off; ~1.1 stops thinking models from looping.</div>
+          <div class="ex-hint">Stops it repeating itself. Higher pushes harder.</div>
         </div>
-        <div class="ex-samp-label" style="margin-top:14px;">Extra flags <span>raw llama-server load flags</span></div>
+        <div class="ex-samp-label" style="margin-top:14px;">Extra flags <span>advanced, optional</span></div>
         <input type="text" data-cfg="extra_args" placeholder="e.g. --n-cpu-moe 40 --no-mmap --mlock" spellcheck="false" autocomplete="off" />
-        <div class="ex-hint">Space-separated. Common: <code>--n-cpu-moe N</code> (experts on CPU for big MoE), <code>--no-mmap --mlock</code> (lock weights in RAM). Hearth's own flags (ctx, layers, KV) always win.</div>
+        <div class="ex-hint">Extra load flags for the engine, space-separated. Leave empty unless you know what you need.</div>
       </details>
     </div>`;
 }
