@@ -1343,6 +1343,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_asset(path[len("/assets/"):])
         if path == "/api/state":
             return self._send_state()
+        if path == "/api/email":
+            try:
+                from . import email_tools
+                return self._send_json(200, email_tools.status())
+            except Exception as e:
+                return self._send_json(200, {"configured": False, "error": str(e)})
         if path == "/api/window-signals":
             # Cheap, high-frequency poll for cross-process window actions the
             # backend can't do itself (the window is in the desktop_attach
@@ -1868,6 +1874,28 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _eject_model())
         if path == "/api/settings":
             return self._send_json(200, _save_settings(self._read_json()))
+        if path == "/api/email/save":
+            b = self._read_json()
+            try:
+                from . import email_tools
+                return self._send_json(200, email_tools.save_config(
+                    b.get("address", ""), b.get("password", ""),
+                    b.get("imap_host", ""), b.get("smtp_host", ""),
+                    b.get("imap_port"), b.get("smtp_port")))
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "error": str(e)})
+        if path == "/api/email/test":
+            try:
+                from . import email_tools
+                return self._send_json(200, email_tools.test_connection())
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "error": str(e)})
+        if path == "/api/email/clear":
+            try:
+                from . import email_tools
+                return self._send_json(200, email_tools.clear_config())
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "error": str(e)})
         if path == "/api/migrate/run":
             body = self._read_json()
             source = (body.get("source") or "").strip().lower()

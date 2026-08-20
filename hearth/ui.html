@@ -3312,8 +3312,8 @@
             <span>MCP servers</span>
           </button>
           <button class="settings-side-btn" data-st="connect">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M12 18h.01"/></svg>
-            <span>Reach from phone</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span>Connectors</span>
           </button>
           <button class="settings-side-btn" data-st="about">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
@@ -3832,12 +3832,11 @@
         </div><!-- /pane mcp -->
 
         <div class="settings-pane" data-st="connect" hidden>
-        <h3>Reach Hearth from your phone</h3>
+        <h3>Connectors</h3>
         <p class="settings-sub" style="color:var(--fg-faint);font-size:12px;margin:-4px 0 14px;">
-          Message Hearth from your phone and it runs the full agent on this PC, then
-          replies. Set the token and your id, then hit Save once. Hearth keeps the bot
-          running and starts it automatically every time it launches. No commands to run.
-          Official channels (Telegram, Discord) have no ban risk, so prefer them.
+          Reach Hearth from your phone, or give it your inbox. A phone message runs the
+          full agent on this PC and replies. Set it up once and Hearth keeps it running,
+          starting automatically every launch. Everything below is optional.
         </p>
 
         <!-- Telegram -->
@@ -3937,6 +3936,23 @@
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bc-publish">Publish</button>
               <span id="bc-status" style="font-size:11px;color:var(--fg-faint)"></span>
+            </div>
+          </div>
+        </div>
+        <!-- Email -->
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">Email <span style="color:var(--fg-faint);font-size:11px;font-weight:400">· read + send</span></div>
+            <div class="hint">Let JARVIS read your inbox and send replies when you ask. Use an <b>app password</b>, not your login one (Gmail: Account, Security, App passwords, needs 2-step on). Servers auto-detect for Gmail, Outlook, Yahoo, iCloud and Fastmail. Stays on this PC, and nothing is read until you ask.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
+            <input type="email" id="email-address" placeholder="you@gmail.com" spellcheck="false" autocomplete="off" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="password" id="email-password" placeholder="app password" autocomplete="new-password" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn-mini" id="email-save">Save</button>
+              <button class="btn-mini" id="email-test">Test</button>
+              <button class="btn-mini" id="email-clear">Disconnect</button>
+              <span id="email-status" style="font-size:11px;color:var(--fg-faint)"></span>
             </div>
           </div>
         </div>
@@ -4284,7 +4300,7 @@
         <p class="ob-sub">Type whatever you'd ask a friend. I do real things - open apps, read
           files, browse the web, control your PC. The more specific you are, the better.</p>
         <div class="ob-tipline">Type <code>/help</code> any time for slash commands, <code>/tools</code> for the full tool list, or just talk.</div>
-        <div class="ob-tipline" style="margin-top:8px">Want me on your phone? <b>Settings → Reach from phone</b> (Telegram or Discord). Add community skills in the <b>Skills</b> tab.</div>
+        <div class="ob-tipline" style="margin-top:8px">Want me on your phone or reading your email? <b>Settings → Connectors</b>. Add community skills in the <b>Skills</b> tab.</div>
       </div>
     </div>
 
@@ -9330,7 +9346,7 @@ async function refreshPhoneLog() {
     const pre = $('phone-log');
     const lines = Array.isArray(r.lines) ? r.lines : [];
     if (!lines.length) {
-      pre.innerHTML = '<span class="dim">No phone activity yet. Set up a bot in Settings → Reach from phone, then message it — incoming traffic shows here, tagged by channel.</span>';
+      pre.innerHTML = '<span class="dim">No phone activity yet. Set up a bot in Settings → Connectors, then message it, and incoming traffic shows here, tagged by channel.</span>';
       LOGS_PHONE_LAST_LEN = 0;
       return;
     }
@@ -9481,6 +9497,63 @@ async function refreshMcpInbound() {
     ).join('<br>');
   } catch { el.textContent = 'no clients connected right now'; }
 }
+// Email setup panel. Loads connection status and wires Save/Test/Disconnect on
+// first call (guarded), so an inbox is set up from Settings instead of a hidden
+// ~/.hearth/email.json. The password is never sent back from the server.
+let _emailWired = false;
+async function refreshEmail() {
+  const status = document.getElementById('email-status');
+  if (!status) return;
+  let st = null;
+  try { st = await api('/api/email'); } catch {}
+  const addrEl = document.getElementById('email-address');
+  if (st && st.configured) {
+    status.innerHTML = `<span style="color:var(--ok)">✓ Connected</span> as ${esc(st.address || '')}${st.from_env ? ' <span style="color:var(--fg-faint)">(set by environment variables)</span>' : ''}`;
+    if (addrEl && !addrEl.value) addrEl.value = st.address || '';
+  } else {
+    status.textContent = 'Not connected yet.';
+  }
+  if (_emailWired) return;
+  _emailWired = true;
+  const busy = (btn, on, label) => { if (btn) { btn.disabled = on; if (on) { btn.dataset.txt = btn.textContent; btn.textContent = label; } else if (btn.dataset.txt) btn.textContent = btn.dataset.txt; } };
+  const saveBtn = document.getElementById('email-save');
+  const testBtn = document.getElementById('email-test');
+  const clearBtn = document.getElementById('email-clear');
+  const gather = () => ({
+    address: (document.getElementById('email-address').value || '').trim(),
+    password: document.getElementById('email-password').value || '',
+  });
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    const b = gather();
+    if (!b.address || !b.password) { toast('Missing info', 'Enter your email and an app password.', 'warn'); return; }
+    busy(saveBtn, true, 'Saving…');
+    try {
+      const r = await api('/api/email/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      if (!r.ok) { toast('Could not save', r.error || 'unknown', 'err', 7000); return; }
+      const t = await api('/api/email/test', { method: 'POST' });
+      if (t.ok) toast('Email connected', `Signed in as ${t.address}`, 'ok', 5000);
+      else toast('Saved, but sign-in failed', t.error || 'check the app password', 'err', 9000);
+      document.getElementById('email-password').value = '';
+      refreshEmail();
+    } finally { busy(saveBtn, false); }
+  });
+  if (testBtn) testBtn.addEventListener('click', async () => {
+    busy(testBtn, true, 'Testing…');
+    try {
+      const t = await api('/api/email/test', { method: 'POST' });
+      if (t.ok) toast('Connection works', `Signed in as ${t.address}`, 'ok', 5000);
+      else toast('Not connected', t.error || 'set it up first', 'err', 9000);
+    } finally { busy(testBtn, false); }
+  });
+  if (clearBtn) clearBtn.addEventListener('click', async () => {
+    await api('/api/email/clear', { method: 'POST' });
+    document.getElementById('email-address').value = '';
+    document.getElementById('email-password').value = '';
+    toast('Email disconnected', 'The saved inbox was removed.', 'ok', 4000);
+    refreshEmail();
+  });
+}
+
 async function refreshSettings() {
   refreshRuntimeBar();  // engine status lives in Settings → Built-in server now
   refreshMcpInbound();  // live inbound MCP clients (Claude Desktop etc.)
@@ -9529,6 +9602,7 @@ async function refreshSettings() {
       // gen_stats + show_diffs + activity_hud default ON (only off when explicitly disabled); the rest default off.
       sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud') ? (s[k] !== false) : !!s[k]);
     });
+    refreshEmail();
     // Agent name field - populated from current setting. The Rename button
     // triggers the full workspace rename (slow, restarts tray). Typing in
     // the field without clicking Rename does nothing - that's intentional,

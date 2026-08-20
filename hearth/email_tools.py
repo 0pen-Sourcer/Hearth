@@ -84,6 +84,79 @@ def is_configured() -> bool:
     return bool(c["address"] and c["password"] and c["imap_host"] and c["smtp_host"])
 
 
+def save_config(address: str, password: str, imap_host: str = "",
+                smtp_host: str = "", imap_port=None, smtp_port=None) -> Dict[str, Any]:
+    """Write ~/.hearth/email.json. Blank host/port auto-detect from the address
+    domain at read time, so a Gmail/Outlook/Yahoo/iCloud/Fastmail user only needs
+    the address + app password."""
+    address = (address or "").strip()
+    if not address or not password:
+        return {"ok": False, "error": "address and app password are required"}
+    data: Dict[str, Any] = {"address": address, "password": password}
+    if (imap_host or "").strip():
+        data["imap_host"] = imap_host.strip()
+    if (smtp_host or "").strip():
+        data["smtp_host"] = smtp_host.strip()
+    try:
+        if imap_port:
+            data["imap_port"] = int(imap_port)
+        if smtp_port:
+            data["smtp_port"] = int(smtp_port)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "ports must be numbers"}
+    try:
+        os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
+        with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except OSError as e:
+        return {"ok": False, "error": f"could not save: {e}"}
+    return {"ok": True}
+
+
+def clear_config() -> Dict[str, Any]:
+    """Remove ~/.hearth/email.json (env vars, if set, still apply)."""
+    try:
+        os.remove(_CONFIG_PATH)
+    except OSError:
+        pass
+    return {"ok": True}
+
+
+def status() -> Dict[str, Any]:
+    """What the setup UI needs: whether email is usable, the address, and whether
+    it's pinned by env vars (which the GUI can't edit)."""
+    c = _config()
+    return {
+        "configured": is_configured(),
+        "address": c.get("address", ""),
+        "imap_host": c.get("imap_host", ""),
+        "smtp_host": c.get("smtp_host", ""),
+        "from_env": bool(_env("HEARTH_EMAIL_ADDRESS", "JARVIS_EMAIL_ADDRESS")),
+        "has_file": os.path.exists(_CONFIG_PATH),
+    }
+
+
+def test_connection() -> Dict[str, Any]:
+    """Log in over IMAP with the saved/env config to prove the app password works,
+    then log straight out. The single most useful setup check."""
+    c = _config()
+    if not is_configured():
+        return {"ok": False, "error": _missing_msg(c)}
+    try:
+        ctx = ssl.create_default_context()
+        M = imaplib.IMAP4_SSL(c["imap_host"], c["imap_port"], ssl_context=ctx)
+        M.login(c["address"], c["password"])
+        M.logout()
+        return {"ok": True, "address": c["address"], "imap_host": c["imap_host"]}
+    except imaplib.IMAP4.error as e:
+        return {"ok": False, "error": (
+            f"login rejected ({e}). For Gmail/Outlook this must be an APP "
+            "PASSWORD, not your normal login password, and 2-step verification "
+            "has to be on to create one.")}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 def _missing_msg(c: Dict[str, Any]) -> str:
     miss = [k for k in ("address", "password", "imap_host", "smtp_host") if not c.get(k)]
     return ("email not set up — missing " + ", ".join(miss) + ". Set HEARTH_EMAIL_ADDRESS "
