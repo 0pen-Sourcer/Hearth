@@ -16,7 +16,7 @@ While a reply streams you see the live tokens-per-second, and hovering a finishe
 
 **You can redirect it mid-task**
 
-Type while Hearth is still working and your message folds into the job it is already doing, the way you would nudge someone mid-sentence, instead of being dropped or forced to wait for the turn to finish. Long chats also stay alive longer. When a conversation grows too big to summarise any further, Hearth says so once and keeps going by trimming the oldest turns rather than spinning on it.
+Type while Hearth is still working and your message folds into the job it is already doing, the way you would nudge someone mid-sentence, instead of being dropped or forced to wait for the turn to finish. A long job is also saved as it goes now, so if you stop it partway through or close the app in the middle of a big task, everything it already did is still there when you come back instead of the whole turn vanishing. Long chats stay alive longer too. When a conversation grows too big to summarise any further, Hearth says so once and keeps going by trimming the oldest turns rather than spinning on it.
 
 **The built-in GPU engine installs cleanly**
 
@@ -52,6 +52,8 @@ When Hearth clicks and types across your actual screen, the app it is driving ha
 
 It can also see inside the apps you actually use now. Chrome, Edge, Slack, Discord, VS Code and Spotify only build the map of their own buttons and fields when something asks for it, so Hearth would look at one of them and find nothing but the window frame. It asks for that map first now, so it names and clicks the real controls inside a browser tab or a chat window instead of guessing at pixels.
 
+Switching between windows is reliable too. It brings the right one to the front through the same path the taskbar uses instead of a flaky Alt Tab that the system often swallows, its clicks land on one consistent set of screen coordinates rather than two that disagreed, and after it types into a field it checks the text actually went in instead of assuming it did.
+
 **Looks after its own memory**
 
 Hearth merges duplicate notes and drops stale ones on a quiet background schedule, instead of only tidying up when it happens to save something. Asking what you were doing recently or yesterday brings back your recent chats now, not the oldest thing that matched the words.
@@ -64,13 +66,17 @@ Changing the context size on a model that is already loaded restarts it on the n
 
 A mixture-of-experts model like Qwen3 A3B is huge on disk but only runs a slice of itself per word, so a modest GPU can handle it if the experts sit in system RAM. Hearth's built-in server now recognises these models and keeps their weights in memory instead of reading them off your drive mid-word, which is what otherwise thrashes the disk and crawls. The attention layers run on the GPU and the experts stay in RAM. Advanced flags let you tune the split.
 
+**Manage your models and the engine without leaving Hearth**
+
+The Models tab can now show any model in your file explorer and delete one you are finished with, so you can clear disk space without hunting through folders yourself. It only ever removes files inside Hearth's own models folder, never a model you keep somewhere else. The built-in GPU engine gets the same handling, each downloaded engine build has a show-in-folder and a delete, and Hearth refuses to delete the build that is currently powering a running model so you cannot pull the floor out from under yourself. On a bigger graphics card the built-in server also runs more requests at once on its own, scaled to how much VRAM you have.
+
 **Commands and bridges**
 
 Two PowerShell quirks used to sink otherwise-fine commands, a program path in quotes that needs a special prefix, and a plain "python" that is not on the system path. Both get fixed up automatically now. And if you message Hearth on Discord, Telegram or WhatsApp while no model is running, it replies that it is not up yet and how to wake it, instead of a raw error dump.
 
 **Smaller edges**
 
-When a web search gets rate-limited and keeps coming back empty, Hearth now notices and stops hammering it, telling the model to answer from what it has or try another way instead of retrying the same dead search over and over. Clicking Hearth while it is tucked in the system tray now opens the window instead of doing nothing. The desktop window stopped occasionally opening as a plain browser tab on machines where it should have come up as its own window. The show-in-folder button only opens a real model file, and Hearth now ignores requests to its local server that come from other sites on your network, so a page you happen to have open cannot reach in and poke at it.
+When a web search gets rate-limited and keeps coming back empty, Hearth now notices and stops hammering it, telling the model to answer from what it has or try another way instead of retrying the same dead search over and over. A reply that contains code no longer flickers while it streams, because Hearth stopped re-parsing the half-written code block on every token. Clicking Hearth while it is tucked in the system tray now opens the window instead of doing nothing. The desktop window stopped occasionally opening as a plain browser tab on machines where it should have come up as its own window. The show-in-folder button only opens a real model file, and Hearth now ignores requests to its local server that come from other sites on your network, so a page you happen to have open cannot reach in and poke at it.
 
 ---
 
