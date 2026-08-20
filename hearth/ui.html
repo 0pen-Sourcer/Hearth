@@ -4968,6 +4968,21 @@ async function persistConvo(c) {
   } catch (e) { console.error('persistConvo', e); }
 }
 
+// Mid-turn incremental save. The turn only used to hit disk on 'done', so a long
+// agent run (computer-use, a big tool chain) that the user stopped — or an app
+// restart mid-run — lost everything after the user's message. Persist as tool
+// results and text stream in, debounced so a fast chain doesn't hammer the disk
+// (at most one save per window; always within the window of the latest event).
+let _partialSaveTimer = null;
+function schedulePartialSave(c) {
+  if (!c || _partialSaveTimer) return;
+  _partialSaveTimer = setTimeout(() => {
+    _partialSaveTimer = null;
+    c.updated = Date.now();
+    persistConvo(c);
+  }, 1200);
+}
+
 function newConversation() {
   // Don't stack up blank sessions — clicking "New chat" repeatedly used to make
   // infinitely many empty chats. If an empty one already exists, jump to it.
@@ -7102,6 +7117,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
     if (_partialTool && _partialTool.div && _partialTool.div.parentNode) _partialTool.div.remove();
     _partialTool = null;
     STATE.streaming = false; setSendStop(false); currentAbort = null;
+    // The final touch(c) below is the authoritative save — cancel any pending
+    // debounced mid-turn save so it doesn't redundantly re-fire after it.
+    if (_partialSaveTimer) { clearTimeout(_partialSaveTimer); _partialSaveTimer = null; }
     // If the user typed a "do this instead" during a permission prompt, fire it
     // now that the current turn is done. (No await - we want the finally to finish.)
     if (pendingFollowup) {
@@ -7476,6 +7494,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
         pendingTool = null;
         pendingToolEvent = null;
       }
+      // Checkpoint to disk after each tool result, so stopping a long agent run
+      // (or an app restart) keeps everything done so far.
+      schedulePartialSave(c);
       return;
     }
 
@@ -7499,6 +7520,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
       ttsBuffer += ev.content;
       maybeFlushTTS(false);
       chatFollow();
+      // Checkpoint long replies too (debounced), so stopping mid-reply keeps it.
+      schedulePartialSave(c);
       // Mirror the reply into the voice overlay + drive the grid.
       if (voiceModeOn) {
         voiceSpeaking = true;
