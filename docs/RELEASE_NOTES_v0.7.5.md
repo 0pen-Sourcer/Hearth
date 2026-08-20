@@ -46,6 +46,12 @@ Attach a document, spreadsheet, PDF, or code file and its text now rides straigh
 
 When the loaded model has no vision, asking Hearth to look at an image now gets a plain "I cannot see this" and how to fix it, instead of the model inventing a description of a blank. On the built-in server, dropping a model's matching projector file beside it turns real image understanding on.
 
+**It works your desktop, and you can watch it**
+
+When Hearth clicks and types across your actual screen, the app it is driving has focus, not Hearth, so you used to just see the cursor move on its own with no idea what it was up to. Now a small strip sits at the top of the screen while it works and tells you what it is doing, reading the screen, clicking Sign in, typing a message. It never takes focus and never intercepts a click, so it cannot get in the way of the very thing it is doing underneath it, and there is a switch in Settings to turn it off.
+
+It can also see inside the apps you actually use now. Chrome, Edge, Slack, Discord, VS Code and Spotify only build the map of their own buttons and fields when something asks for it, so Hearth would look at one of them and find nothing but the window frame. It asks for that map first now, so it names and clicks the real controls inside a browser tab or a chat window instead of guessing at pixels.
+
 **Looks after its own memory**
 
 Hearth merges duplicate notes and drops stale ones on a quiet background schedule, instead of only tidying up when it happens to save something. Asking what you were doing recently or yesterday brings back your recent chats now, not the oldest thing that matched the words.
