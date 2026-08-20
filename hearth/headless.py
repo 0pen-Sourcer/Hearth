@@ -1806,11 +1806,12 @@ async def run_once(
         except AttributeError:
             pass
 
-        # Fade the desktop-activity overlay once the turn is done, so it doesn't
-        # linger showing the last click after JARVIS has already replied.
+        # Close out the desktop-activity overlay with a brief "Done" tick (only
+        # if it was actually up this turn), so a computer-use task ends cleanly
+        # instead of the last click just lingering.
         try:
             from . import activity_hud
-            activity_hud.hide()
+            activity_hud.done()
         except Exception:
             pass
 

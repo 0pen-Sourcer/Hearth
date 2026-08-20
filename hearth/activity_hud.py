@@ -154,8 +154,10 @@ def _run_loop():
                        font=("Segoe UI", -_px(15), "normal"), padx=_px(2))
         lbl.pack(side="left", padx=(0, _px(14)), pady=_px(9))
 
+        DONE_COLOR = "#7bd88f"
         state = {"visible": False, "last": 0.0, "alpha": 0.0,
-                 "target_alpha": 0.0, "pulse": 0.0}
+                 "target_alpha": 0.0, "pulse": 0.0,
+                 "done": False, "done_until": 0.0}
 
         def _place():
             root.update_idletasks()
@@ -202,6 +204,9 @@ def _run_loop():
                         lbl.config(text=payload or "Working")
                         state["last"] = time.time()
                         state["target_alpha"] = 0.94
+                        if state["done"]:
+                            state["done"] = False
+                            dot.itemconfig(_dot_id, fill=ACCENT)
                         if not state["visible"]:
                             state["visible"] = True
                             root.deiconify()
@@ -211,6 +216,20 @@ def _run_loop():
                                 _clickthrough_done["v"] = True
                         else:
                             _place()
+                    elif cmd == "done":
+                        # Only mark done if the overlay is actually up — a turn
+                        # with no desktop action never pops a "Done" pill.
+                        if state["visible"] and state["alpha"] > 0.05:
+                            lbl.config(text=payload or "Done")
+                            state["done"] = True
+                            state["done_until"] = time.time() + 1.2
+                            state["target_alpha"] = 0.94
+                            dot.itemconfig(_dot_id, fill=DONE_COLOR)
+                            dot.coords(_dot_id, _dc - _dr, _dc - _dr,
+                                       _dc + _dr, _dc + _dr)
+                            _place()
+                        else:
+                            state["target_alpha"] = 0.0
                     elif cmd == "hide":
                         state["target_alpha"] = 0.0
                     elif cmd == "quit":
@@ -219,10 +238,13 @@ def _run_loop():
             except queue.Empty:
                 pass
 
-            # Idle auto-hide.
-            if state["visible"] and state["target_alpha"] > 0 \
-                    and (time.time() - state["last"]) > _IDLE_HIDE_S:
-                state["target_alpha"] = 0.0
+            # Auto-hide: a short hold after a "Done" tick, else the idle timeout.
+            if state["visible"] and state["target_alpha"] > 0:
+                if state["done"]:
+                    if time.time() > state["done_until"]:
+                        state["target_alpha"] = 0.0
+                elif (time.time() - state["last"]) > _IDLE_HIDE_S:
+                    state["target_alpha"] = 0.0
 
             # Fade toward target.
             a = state["alpha"]
@@ -237,9 +259,13 @@ def _run_loop():
                 if ta == 0.0 and a < 0.03 and state["visible"]:
                     state["visible"] = False
                     root.withdraw()
+                    # Reset for the next run so it starts on the gold pulse.
+                    if state["done"]:
+                        state["done"] = False
+                        dot.itemconfig(_dot_id, fill=ACCENT)
 
-            # Pulse the dot while visible.
-            if state["visible"] and ta > 0:
+            # Pulse the dot while working (frozen green during the Done tick).
+            if state["visible"] and ta > 0 and not state["done"]:
                 state["pulse"] = (state["pulse"] + 0.14) % (2 * 3.14159)
                 import math
                 s = 0.5 + 0.5 * math.sin(state["pulse"])
@@ -291,8 +317,19 @@ def for_tool(name: str, args: Optional[dict] = None) -> None:
     activity(label_for(name, args))
 
 
+def done(text: str = "Done") -> None:
+    """End a desktop task with a brief green completion tick, then fade. No-op if
+    the overlay isn't currently up (a turn with no desktop action stays silent)."""
+    if _disabled or not _started:
+        return
+    try:
+        _q.put_nowait(("done", str(text)))
+    except Exception:
+        pass
+
+
 def hide() -> None:
-    """Begin fading the overlay out."""
+    """Begin fading the overlay out immediately."""
     if _disabled or not _started:
         return
     try:
