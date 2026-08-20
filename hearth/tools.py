@@ -7224,6 +7224,16 @@ _DRYRUN_GUARDED = {
 }
 
 
+# Computer-use tools that drive the real desktop — these light up the activity
+# HUD (defined literally here to keep execute_tool free of an import at load).
+_HUD_TOOLS = {
+    "computer_click", "computer_type", "computer_key", "computer_scroll",
+    "computer_drag", "computer_move", "computer_screen",
+    "desktop_click", "desktop_type", "desktop_snapshot",
+    "smart_click", "focus_window", "screenshot",
+}
+
+
 def execute_tool(name: str, args: Optional[Dict] = None) -> str:
     """Run a tool by name. Returns a string (truncated to per-tool cap).
     MCP-bridged tools (name starts with 'mcp_') route through the live
@@ -7286,6 +7296,14 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         _log_activity("call", tool=name, args=args)
         return f"[dry-run] {name} would run with {json.dumps(args, ensure_ascii=False, default=str)[:200]} — skipped (benchmark)."
     _log_activity("call", tool=name, args=args)
+    # Surface the desktop-activity overlay for computer-use tools, so the user
+    # can see what JARVIS is doing while it drives another (focused) window.
+    if name in _HUD_TOOLS:
+        try:
+            from . import activity_hud
+            activity_hud.for_tool(name, args)
+        except Exception:
+            pass
     t0 = datetime.now()
     try:
         result = handler(args)

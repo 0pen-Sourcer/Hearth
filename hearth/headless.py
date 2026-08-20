@@ -1929,6 +1929,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Output format: jsonl (default) or pretty text.")
     args = parser.parse_args(argv)
 
+    # One-shot CLI runs have no chat window watching — keep the desktop-activity
+    # overlay out of the way (unless explicitly forced on).
+    os.environ.setdefault("JARVIS_NO_GUI", "1")
+
     emit = emit_json if args.format == "json" else emit_text
     try:
         return asyncio.run(run_once(

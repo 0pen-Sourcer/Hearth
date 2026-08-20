@@ -25,6 +25,10 @@ from __future__ import annotations
 import json
 import os
 
+# A remote chat message has no one at this screen following along — keep the
+# desktop-activity overlay off for bridge-driven runs.
+os.environ.setdefault("JARVIS_NO_GUI", "1")
+
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "discord_bridge.json")
 _DISCORD_MAX = 2000  # Discord's hard per-message character cap
 _LOG_PATH = os.path.join(os.path.expanduser("~"), "Jarvis", "logs", "discord_bridge.log")

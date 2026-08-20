@@ -3600,6 +3600,13 @@
           </div>
           <div class="switch" data-key="show_diffs"></div>
         </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Activity overlay</div>
+            <div class="hint">While JARVIS controls the desktop (clicking, typing, reading the screen) a small pill floats at the top of the screen showing what it's doing, so you can follow along even when another window is focused. It never takes focus or blocks clicks.</div>
+          </div>
+          <div class="switch" data-key="activity_hud"></div>
+        </div>
 
         <!-- Toast quiet-mode: user-controlled noise level for popups -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Toasts</h4>
@@ -9452,8 +9459,8 @@ async function refreshSettings() {
     // so it's honest even when settings.llm_provider is stale/inconsistent).
     $$('.switch').forEach(sw => {
       const k = sw.dataset.key;
-      // gen_stats + show_diffs default ON (only off when explicitly disabled); the rest default off.
-      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs') ? (s[k] !== false) : !!s[k]);
+      // gen_stats + show_diffs + activity_hud default ON (only off when explicitly disabled); the rest default off.
+      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud') ? (s[k] !== false) : !!s[k]);
     });
     // Agent name field - populated from current setting. The Rename button
     // triggers the full workspace rename (slow, restarts tray). Typing in
