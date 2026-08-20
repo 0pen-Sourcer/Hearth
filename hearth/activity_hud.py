@@ -122,18 +122,37 @@ def _run_loop():
         except Exception:
             pass
 
+        # DPI scale as THIS process sees it. winfo_fpixels reflects the effective
+        # DPI after the process's own awareness, so scaling by it can't double up:
+        # a DPI-aware host reads ~144 at 150% (we scale up, no OS scaling), a
+        # DPI-unaware one reads 96 (we don't scale, the OS bitmap-scales instead).
+        try:
+            sc = max(1.0, float(root.winfo_fpixels("1i")) / 96.0)
+        except Exception:
+            sc = 1.0
+
+        def _px(n):
+            return max(1, int(round(n * sc)))
+
         BG = "#141118"
         FG = "#f4ecff"
         ACCENT = "#c9a86a"
+        _cvs = _px(16)
         frame = tk.Frame(root, bg=BG, highlightthickness=1,
                          highlightbackground="#2c2634")
         frame.pack(fill="both", expand=True)
-        dot = tk.Canvas(frame, width=14, height=14, bg=BG, highlightthickness=0)
-        dot.pack(side="left", padx=(12, 6), pady=8)
-        _dot_id = dot.create_oval(3, 3, 11, 11, fill=ACCENT, outline="")
+        dot = tk.Canvas(frame, width=_cvs, height=_cvs, bg=BG,
+                        highlightthickness=0)
+        dot.pack(side="left", padx=(_px(12), _px(6)), pady=_px(9))
+        _dc = _cvs / 2
+        _dr = _px(4)
+        _dot_id = dot.create_oval(_dc - _dr, _dc - _dr, _dc + _dr, _dc + _dr,
+                                  fill=ACCENT, outline="")
+        # Negative font size = pixels (bypasses tk's point auto-scaling), so DPI
+        # scaling stays entirely under _px().
         lbl = tk.Label(frame, text="", bg=BG, fg=FG,
-                       font=("Segoe UI", 10, "normal"), padx=2)
-        lbl.pack(side="left", padx=(0, 14), pady=8)
+                       font=("Segoe UI", -_px(15), "normal"), padx=_px(2))
+        lbl.pack(side="left", padx=(0, _px(14)), pady=_px(9))
 
         state = {"visible": False, "last": 0.0, "alpha": 0.0,
                  "target_alpha": 0.0, "pulse": 0.0}
@@ -144,7 +163,7 @@ def _run_loop():
             h = frame.winfo_reqheight()
             sw = root.winfo_screenwidth()
             x = int((sw - w) / 2)
-            y = 24
+            y = _px(22)
             root.geometry(f"{w}x{h}+{x}+{y}")
 
         def _make_clickthrough():
@@ -224,9 +243,8 @@ def _run_loop():
                 state["pulse"] = (state["pulse"] + 0.14) % (2 * 3.14159)
                 import math
                 s = 0.5 + 0.5 * math.sin(state["pulse"])
-                r = 3 + int(s * 2)
-                cx = cy = 7
-                dot.coords(_dot_id, cx - r, cy - r, cx + r, cy + r)
+                r = _dr + _px(2) * s
+                dot.coords(_dot_id, _dc - r, _dc - r, _dc + r, _dc + r)
 
             root.after(33, _pump)
 
