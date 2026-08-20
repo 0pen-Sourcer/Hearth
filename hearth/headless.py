@@ -1074,8 +1074,14 @@ async def run_once(
                 # timings_per_token makes llama.cpp attach a real `timings` block
                 # to EVERY streamed chunk, so the live tok/s is the true number the
                 # whole time (no wall-clock estimate that jumps on the final).
+                # repeat_penalty matches what LM Studio applies by default (~1.1).
+                # Without it, thinking models (Qwen3) degenerate into a repeating
+                # reasoning loop — the same reply/line emitted over and over until
+                # the context fills. 1.0 = off; env-tunable.
+                _rep = float(os.environ.get("HEARTH_REPEAT_PENALTY", "1.1") or "1.1")
                 kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": think},
-                                        "timings_per_token": True}
+                                        "timings_per_token": True,
+                                        "repeat_penalty": _rep}
             else:
                 # Cloud: actually disable reasoning at the API when think is
                 # off, not just drop the reasoning_content. Otherwise the model
