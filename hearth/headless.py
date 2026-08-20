@@ -445,6 +445,42 @@ def _strip_think(text: str) -> str:
     return out.strip()
 
 
+def _sampling_cfg() -> Dict[str, Any]:
+    """User-tunable sampling from Settings (GUI Sampling section), with safe
+    fallbacks. A blank/unset field falls through to the built-in default, so an
+    empty Settings leaves behaviour exactly as before."""
+    out: Dict[str, Any] = {}
+    try:
+        from .web import _load_settings
+        s = _load_settings()
+    except Exception:
+        return out
+    def _num(key):
+        v = s.get(key)
+        if v is None or str(v).strip() == "":
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+    t = _num("sampling_temperature")
+    if t is not None:
+        out["temperature"] = t
+    tk = _num("sampling_top_k")
+    if tk is not None:
+        out["top_k"] = int(tk)
+    tp = _num("sampling_top_p")
+    if tp is not None:
+        out["top_p"] = tp
+    mp = _num("sampling_min_p")
+    if mp is not None:
+        out["min_p"] = mp
+    rp = _num("sampling_repeat_penalty")
+    if rp is not None:
+        out["repeat_penalty"] = rp
+    return out
+
+
 def _chunk_timings(chunk) -> Optional[Dict[str, Any]]:
     """Real prompt-eval + decode tok/s from a single chunk's llama.cpp `timings`
     block (present on every chunk when timings_per_token is on). None if absent."""
@@ -1029,10 +1065,11 @@ async def run_once(
         # was already covered. Idempotent on a valid array.
         messages[:] = sanitize_tool_pairing(messages)
         try:
+            _scfg = _sampling_cfg()
             kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": messages,
-                "temperature": temperature,
+                "temperature": _scfg.get("temperature", temperature),
                 "stream": True,
                 # Ask the server for a final usage block on the stream. Gives us
                 # the REAL prompt_tokens (what the model actually saw) instead of
@@ -1078,10 +1115,16 @@ async def run_once(
                 # Without it, thinking models (Qwen3) degenerate into a repeating
                 # reasoning loop — the same reply/line emitted over and over until
                 # the context fills. 1.0 = off; env-tunable.
-                _rep = float(os.environ.get("HEARTH_REPEAT_PENALTY", "1.1") or "1.1")
-                kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": think},
-                                        "timings_per_token": True,
-                                        "repeat_penalty": _rep}
+                _rep = _scfg.get(
+                    "repeat_penalty",
+                    float(os.environ.get("HEARTH_REPEAT_PENALTY", "1.1") or "1.1"))
+                _xb = {"chat_template_kwargs": {"enable_thinking": think},
+                       "timings_per_token": True,
+                       "repeat_penalty": _rep}
+                for _sp in ("top_k", "top_p", "min_p"):
+                    if _sp in _scfg:
+                        _xb[_sp] = _scfg[_sp]
+                kwargs["extra_body"] = _xb
             else:
                 # Cloud: actually disable reasoning at the API when think is
                 # off, not just drop the reasoning_content. Otherwise the model

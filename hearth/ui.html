@@ -3608,6 +3608,13 @@
           <div class="switch" data-key="activity_hud"></div>
         </div>
 
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px; display:flex; justify-content:space-between; align-items:center;">
+          <span>Sampling</span>
+          <button id="sampling-reset" type="button" style="font-size:11px; text-transform:none; letter-spacing:0; background:none; border:1px solid var(--border); color:var(--fg-dim); border-radius:6px; padding:3px 8px; cursor:pointer;">Reset to model defaults</button>
+        </h4>
+        <div id="sampling-caption" class="hint" style="margin:-4px 0 10px 0;">How the model picks each word. Sliders start at the loaded model's own defaults; move one to override it, and it applies to your next reply. Local models only.</div>
+        <div id="sampling-panel"><!-- populated by refreshSampling() from /api/sampling --></div>
+
         <!-- Toast quiet-mode: user-controlled noise level for popups -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Toasts</h4>
         <div class="field">
@@ -9470,6 +9477,75 @@ async function refreshMcpInbound() {
     ).join('<br>');
   } catch { el.textContent = 'no clients connected right now'; }
 }
+// Sampling panel — sliders built from the loaded model's REAL /props defaults
+// (falling back to Hearth's built-ins when the server doesn't report them). A
+// slider left at its default is treated as "inherit", so only genuine overrides
+// persist and headless sends them per reply.
+let _samplingResetWired = false;
+async function refreshSampling() {
+  const panel = document.getElementById('sampling-panel');
+  if (!panel) return;
+  let data = null;
+  try { data = await api('/api/sampling'); } catch {}
+  if (!data || !Array.isArray(data.params)) {
+    panel.innerHTML = '<div class="hint">Sampling controls appear when a local model is loaded.</div>';
+    return;
+  }
+  const cap = document.getElementById('sampling-caption');
+  if (cap) {
+    cap.textContent = data.has_model_defaults
+      ? `Sliders start at ${data.model || 'the loaded model'}'s own defaults. Move one to override it; it applies to your next reply.`
+      : `The model didn't report its defaults, so these are Hearth's fallbacks. Move one to override it; it applies to your next reply.`;
+  }
+  panel.innerHTML = '';
+  data.params.forEach(p => {
+    const key = 'sampling_' + p.name;
+    const overridden = p.override !== null && p.override !== undefined;
+    const val = overridden ? Number(p.override) : Number(p.default);
+    const isInt = p.step >= 1;
+    const fmt = v => isInt ? String(Math.round(v)) : Number(v).toFixed(2);
+    const row = document.createElement('div');
+    row.className = 'field';
+    row.style.cssText = 'flex-direction:column; align-items:stretch; gap:6px;';
+    row.innerHTML =
+      `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
+         <div class="name">${p.label}</div>
+         <div style="display:flex; align-items:center; gap:8px;">
+           <span class="samp-val" style="font-variant-numeric:tabular-nums; font-size:13px;">${fmt(val)}</span>
+           <span style="font-size:11px; color:var(--fg-faint);">${p.from_model ? 'model' : 'default'} ${fmt(p.default)}</span>
+         </div>
+       </div>
+       <input type="range" class="samp-range" min="${p.min}" max="${p.max}" step="${p.step}" value="${val}" style="width:100%;">
+       <div class="hint" style="margin:0;">${p.hint}</div>`;
+    const range = row.querySelector('.samp-range');
+    const valEl = row.querySelector('.samp-val');
+    const paint = (ov) => { valEl.style.color = ov ? 'var(--accent)' : 'var(--fg-dim)'; };
+    paint(overridden);
+    range.addEventListener('input', () => { valEl.textContent = fmt(Number(range.value)); paint(true); });
+    range.addEventListener('change', () => {
+      const raw = Number(range.value);
+      const v = isInt ? Math.round(raw) : Number(raw.toFixed(2));
+      // Sitting on the model default = inherit (clear the override) so the model
+      // stays authoritative if it changes; otherwise persist the override.
+      if (Math.abs(v - Number(p.default)) < (p.step / 2)) {
+        saveSetting(key, ''); paint(false);
+      } else {
+        saveSetting(key, v); paint(true);
+      }
+    });
+    panel.appendChild(row);
+  });
+  if (!_samplingResetWired) {
+    _samplingResetWired = true;
+    const rb = document.getElementById('sampling-reset');
+    if (rb) rb.addEventListener('click', async () => {
+      const names = ['temperature', 'top_p', 'top_k', 'min_p', 'repeat_penalty'];
+      await Promise.all(names.map(n => saveSetting('sampling_' + n, '')));
+      refreshSampling();
+    });
+  }
+}
+
 async function refreshSettings() {
   refreshRuntimeBar();  // engine status lives in Settings → Built-in server now
   refreshMcpInbound();  // live inbound MCP clients (Claude Desktop etc.)
@@ -9518,6 +9594,8 @@ async function refreshSettings() {
       // gen_stats + show_diffs + activity_hud default ON (only off when explicitly disabled); the rest default off.
       sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud') ? (s[k] !== false) : !!s[k]);
     });
+    // Sampling: a real panel built from the model's actual /props defaults.
+    refreshSampling();
     // Agent name field - populated from current setting. The Rename button
     // triggers the full workspace rename (slow, restarts tray). Typing in
     // the field without clicking Rename does nothing - that's intentional,
@@ -11964,8 +12042,8 @@ function modelsLoadConfigHTML(opts) {
       </div>
       <details class="ex-advanced">
         <summary>Advanced flags</summary>
-        <input type="text" data-cfg="extra_args" placeholder="e.g. --n-cpu-moe 10 --temp 0.7 --no-mmap" spellcheck="false" autocomplete="off" />
-        <div class="ex-hint">Any extra <code>llama-server</code> flags, space-separated — <code>--n-cpu-moe</code>, <code>--override-tensor</code>, <code>--temp</code>, whatever you need. Hearth's own flags (ctx, layers, KV, port) always win, so those are ignored here.</div>
+        <input type="text" data-cfg="extra_args" placeholder="e.g. --n-cpu-moe 40 --no-mmap --mlock" spellcheck="false" autocomplete="off" />
+        <div class="ex-hint">Extra <code>llama-server</code> <b>load</b> flags, space-separated. Useful ones: <code>--n-cpu-moe N</code> (keep N layers' experts on CPU, for big MoE models on a small card), <code>--no-mmap</code> + <code>--mlock</code> (lock weights in RAM instead of paging from disk), <code>--override-tensor</code>, <code>--split-mode</code>. Hearth's own flags (ctx, layers, KV, port) always win. Sampling (temperature, top-k, repeat penalty) is <b>not</b> set here — Hearth sends those per reply, so use the Sampling section in Settings; a <code>--temp</code> here is ignored.</div>
       </details>
     </div>`;
 }
