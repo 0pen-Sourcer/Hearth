@@ -3071,6 +3071,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             # One-shot: wake fired while a window was already open. The GUI enters
             # voice mode in place instead of the tray spawning a ?voice=1 window.
             "enter_voice": _take_pending_voice_open(),
+            # One-shot: a second launch asked us to surface. The open window raises
+            # itself through its own process (voice's reliable foreground path).
+            "surface": _take_pending_focus(),
             "memories": len(_memory_index()),
             "workspace": WORKSPACE,
             "lms_cli": bool(_find_lms_cli()),

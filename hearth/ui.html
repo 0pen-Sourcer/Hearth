@@ -6332,6 +6332,16 @@ async function refreshState() {
       } catch (e) {}
       enterVoiceMode().then(() => startRealtimeVoice()).catch(() => {});
     }
+    // A second launch (tray --open / clicking the exe) asked us to surface. Raise
+    // the window through the window's OWN process — the same path voice uses,
+    // which reliably wins Windows' foreground lock. The backend's pywebview ref
+    // is null in the subprocess build, so this is the only path that works.
+    if (s && s.surface) {
+      try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.focus_window)
+          window.pywebview.api.focus_window();
+      } catch (e) {}
+    }
     // Live endpoint is the source of truth for local-vs-cloud + the brand label.
     STATE.endpoint = s.endpoint || '';
     // Stash the MCP launcher the backend computed for this build (source vs
