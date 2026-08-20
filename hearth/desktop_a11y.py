@@ -105,29 +105,56 @@ def snapshot(max_elements: int = 50) -> dict:
 
 
 # ---------------------------------------------------------------- Windows (UIA)
-def _snapshot_win(max_elements: int) -> dict:
-    global _last
-    _last = []
-    try:
-        import uiautomation as auto
-    except Exception as e:
-        return {"error": f"uiautomation unavailable: {e}", "elements": []}
-    try:
-        auto.SetGlobalSearchTimeout(1.5)
-    except Exception:
-        pass
-    try:
-        root = auto.GetForegroundControl()
-    except Exception:
-        root = None
-    if root is None:
-        return {"window": "", "elements": []}
-    try:
-        win_name = (root.Name or "").strip()
-    except Exception:
-        win_name = ""
+# Chromium (Chrome/Edge/Brave) and every Electron app (Slack, Discord, VS Code,
+# Spotify, ...) build their a11y tree LAZILY — a fresh window exposes only the
+# native frame, so the walk finds nothing inside the page. They turn the tree on
+# when an assistive client asks the render widget for it. We poke that once per
+# process; after that the tree stays live for the session.
+_native_a11y_enabled = False
 
+
+def _enable_chromium_a11y(root) -> bool:
+    """If the foreground window is Chromium/Electron, signal its render widget to
+    expose accessibility. Returns True if a poke was sent (caller then waits for
+    the tree to build). Best-effort; any failure is swallowed."""
+    if not _WIN:
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = int(getattr(root, "NativeWindowHandle", 0) or 0)
+        if not hwnd:
+            return False
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, buf, 256)
+        # Chromium top-levels AND Electron apps are all "Chrome_WidgetWin_1".
+        if "Chrome_WidgetWin" not in buf.value:
+            return False
+        WM_GETOBJECT = 0x003D
+        OBJID_CLIENT = 0xFFFFFFFC  # -4, unsigned
+        poked = {"n": 0}
+        proto = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p,
+                                   ctypes.c_void_p)
+
+        def _cb(child, _lparam):
+            cb = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(child, cb, 256)
+            if "Chrome_RenderWidgetHostHWND" in cb.value:
+                user32.SendMessageW(child, WM_GETOBJECT, 0, OBJID_CLIENT)
+                poked["n"] += 1
+            return True
+
+        user32.EnumChildWindows(hwnd, proto(_cb), 0)
+        return poked["n"] > 0
+    except Exception:
+        return False
+
+
+def _walk_win(root, max_elements: int) -> list:
+    """DFS the UIA subtree, collecting on-screen interactive controls."""
+    global _last
     out: list = []
+    _last = []
     stack = [(root, 0)]
     visited = 0
     while stack and len(out) < max_elements and visited < 2500:
@@ -161,6 +188,52 @@ def _snapshot_win(max_elements: int) -> dict:
                 kids = []
             for k in reversed(kids):
                 stack.append((k, depth + 1))
+    return out
+
+
+def _snapshot_win(max_elements: int) -> dict:
+    global _native_a11y_enabled
+    try:
+        import uiautomation as auto
+    except Exception as e:
+        return {"error": f"uiautomation unavailable: {e}", "elements": []}
+    try:
+        auto.SetGlobalSearchTimeout(1.5)
+    except Exception:
+        pass
+    try:
+        root = auto.GetForegroundControl()
+    except Exception:
+        root = None
+    if root is None:
+        return {"window": "", "elements": []}
+    try:
+        win_name = (root.Name or "").strip()
+    except Exception:
+        win_name = ""
+
+    # Chromium/Electron: enable the a11y tree, then give it a beat to build so
+    # the first walk already sees page content instead of a bare frame.
+    poked = _enable_chromium_a11y(root)
+    if poked and not _native_a11y_enabled:
+        _native_a11y_enabled = True
+        try:
+            import time as _t
+            _t.sleep(0.45)
+        except Exception:
+            pass
+
+    out = _walk_win(root, max_elements)
+    # If a Chromium window still came back with essentially nothing (the tree was
+    # mid-build), poke + wait once more, then re-walk. Only when it looks empty,
+    # so a normal app never pays the retry cost.
+    if poked and len(out) < 3:
+        try:
+            import time as _t
+            _t.sleep(0.6)
+        except Exception:
+            pass
+        out = _walk_win(root, max_elements)
     return {"window": win_name[:90], "elements": out}
 
 
