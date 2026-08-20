@@ -6707,7 +6707,19 @@ function editUserMessage(userMsg) {
   const idx = c.messages.indexOf(userMsg);
   if (idx < 0) return;
   if (typeof stopGen === 'function') { try { stopGen(); } catch {} }  // don't edit mid-stream
-  const original = userMsg.displayContent || userMsg.content || '';
+  let original = userMsg.displayContent || userMsg.content || '';
+  // Strip the trailing "[attached: ...]" marker — the real attachments are put
+  // back into the tray below so they edit as thumbnails/chips, not as raw text.
+  original = original.replace(/\s*\n?\[attached:[^\]]*\]\s*$/i, '').trim();
+  // Re-load the message's attachments into the pending tray so editing a message
+  // keeps its images (shown as chips) and re-weaves them on re-send, instead of
+  // the bare "[Attached: image.png]" line the raw content carried.
+  if (userMsg.attachments && userMsg.attachments.length) {
+    _pendingAttachments = userMsg.attachments.map(a => ({
+      name: a.name, path: a.path, isImage: !!a.isImage,
+    }));
+    _renderAttachTray();
+  }
   // Enter edit mode — do NOT slice/destroy anything yet. The tail is dropped
   // only when (and if) the user re-sends, inside send().
   editState = { convoId: c.id, idx, original };
@@ -6731,7 +6743,13 @@ function cancelEdit(clearInput = true) {
   editState = null;
   const banner = $('edit-banner');
   if (banner) banner.hidden = true;
-  if (clearInput) { input.value = ''; input.style.height = '42px'; }
+  if (clearInput) {
+    input.value = ''; input.style.height = '42px';
+    // Cancelling an edit (X / Escape) also drops the attachments we re-loaded
+    // into the tray when entering edit mode, so they don't linger for the next
+    // message. On a commit (clearInput=false) send() consumes them instead.
+    if (_pendingAttachments.length) { _pendingAttachments = []; _renderAttachTray(); }
+  }
 }
 
 // Set when a commit-edit turn is in flight; the finally captures the new tail.
@@ -8143,6 +8161,11 @@ function _wireDropTarget(el) {
     const files = ev.dataTransfer && ev.dataTransfer.files ? Array.from(ev.dataTransfer.files) : [];
     if (!files.length) return;
     ev.preventDefault();
+    // These drop targets are NESTED (input inside the row inside the chat view),
+    // and there's a document-level drop handler too. Without this, one drop
+    // bubbles through every ancestor target and uploads the same file 3-5 times,
+    // which then land as name, name_1, name_2 collision copies. Stop here.
+    ev.stopPropagation();
     for (const f of files) await uploadFile(f);
   });
 }
