@@ -1819,6 +1819,31 @@ class HearthHandler(BaseHTTPRequestHandler):
             # only accepts an existing .gguf (or a directory) so it can't become a
             # general "open any path" primitive from a chat-injected path.
             return self._reveal_model_path()
+        if path == "/api/runtime/reveal":
+            # Show an installed engine build's folder in Explorer — mirrors the
+            # model reveal. Only ever a real Hearth-managed build dir (resolved
+            # from the tag), never an arbitrary path.
+            from . import llmserver
+            _tag = (self._read_json().get("tag") or "").strip()
+            _d = llmserver.engine_build_dir(_tag)
+            if not _d:
+                return self._send_json(404, {"error": "no such engine build"})
+            try:
+                if sys.platform == "win32":
+                    subprocess.Popen(["explorer", os.path.realpath(_d)],
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", _d])
+                else:
+                    subprocess.Popen(["xdg-open", _d])
+                return self._send_json(200, {"ok": True})
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/runtime/remove":
+            # Delete an installed engine build by tag — mirrors deleting a model.
+            from . import llmserver
+            _tag = (self._read_json().get("tag") or "").strip()
+            return self._send_json(200, llmserver.remove_llama_build(_tag))
         if path == "/api/agent/rename":
             return self._rename_agent()
         if path == "/api/workspace/relocate":

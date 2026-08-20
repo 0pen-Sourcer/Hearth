@@ -1227,6 +1227,42 @@ def installed_llama_tags() -> List[str]:
     return sorted(out, reverse=True)
 
 
+def engine_build_dir(tag: str) -> Optional[str]:
+    """Absolute path to a managed engine build's folder (for 'show in folder').
+    None if the tag isn't a real installed build."""
+    tag = (tag or "").strip().strip("/").strip("\\")
+    if not tag or "/" in tag or "\\" in tag or ".." in tag:
+        return None
+    d = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tag}"))
+    return str(d) if d.is_dir() else None
+
+
+def remove_llama_build(tag: str) -> Dict[str, Any]:
+    """Delete a Hearth-managed llama.cpp runtime by tag. Refuses to delete the one
+    currently powering the running server (Windows would lock it anyway)."""
+    tag = (tag or "").strip().strip("/").strip("\\")
+    if not tag or "/" in tag or "\\" in tag or ".." in tag:
+        return {"ok": False, "error": "bad tag"}
+    target = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tag}"))
+    if not target.is_dir():
+        return {"ok": False, "error": f"no engine build '{tag}' on disk"}
+    try:
+        running = (_proc_info or {}).get("exe") or ""
+        if running and _proc is not None and _proc.poll() is None:
+            if os.path.normcase(str(target)) in os.path.normcase(str(running)):
+                return {"ok": False, "error": "That engine is running — eject the "
+                        "model first (Models tab), then delete it."}
+    except Exception:
+        pass
+    try:
+        import shutil as _sh
+        _sh.rmtree(target)
+    except Exception as e:
+        return {"ok": False, "error": f"Couldn't delete it ({type(e).__name__}): {e}. "
+                "If a model is loaded on this engine, eject it first."}
+    return {"ok": True, "removed": tag, "remaining": installed_llama_tags()}
+
+
 def check_llama_update(max_age: int = 21600) -> Dict[str, Any]:
     """Is a newer llama.cpp runtime available than the one installed?
     Drives the update dot — nobody goes looking for this on their own."""
@@ -2094,6 +2130,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     _proc_info = {"url": api_base, "model_path": model_path, "port": port, "ctx": ctx,
                   "gpu_layers_on": _gpu_on, "total_layers": _total_layers,
                   "slots": slots, "total_ctx": total_ctx,
+                  "exe": (_native or {}).get("exe") if _use_native else None,
                   "engine": "native" if _use_native else "wheel"}
     _write_runfile(_proc_info)
     # Remember the user's tuned config so the next "Use this" on the same

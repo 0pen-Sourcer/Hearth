@@ -12588,7 +12588,9 @@ async function modelsRenderEngine() {
             <div class="ex-actions">
               <button class="model-action is-secondary" data-cancel="${rowId}">Close</button>
               ${b.installed
-                ? `<button class="model-action" data-engine-use="${esc(b.tag)}">Use this build</button>`
+                ? `<button class="model-action" data-engine-use="${esc(b.tag)}">Use this build</button>
+                   <button class="model-action is-secondary" data-engine-reveal="${esc(b.tag)}" title="Show this build's folder in your file explorer">Show in folder</button>
+                   <button class="model-action is-danger" data-engine-del="${esc(b.tag)}">Delete</button>`
                 : `<button class="model-action" data-engine-get="${esc(b.tag)}">Download &amp; install (${b.size_mb} MB)</button>`}
             </div>
           </div>
@@ -12605,6 +12607,35 @@ async function modelsRenderEngine() {
       e.stopPropagation();
       const row = pane.querySelector(`.model-row[data-row="${b.dataset.cancel}"]`);
       if (row) modelsToggleRow(row);
+    });
+  });
+  // Engine "Show in folder" — same idea as a model's, opens the build's folder.
+  pane.querySelectorAll('[data-engine-reveal]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await api('/api/runtime/reveal', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tag: btn.dataset.engineReveal }) });
+      } catch (err) { toast('Could not open folder', err.message, 'err'); }
+    });
+  });
+  // Engine Delete — mirrors deleting a model file; confirms first, and the
+  // backend refuses if that engine is currently powering a loaded model.
+  pane.querySelectorAll('[data-engine-del]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const tag = btn.dataset.engineDel;
+      if (!confirm(`Delete engine build ${tag}? This removes it from ~/.hearth/llamacpp. You can re-download it anytime.`)) return;
+      btn.disabled = true; btn.textContent = 'Deleting…';
+      try {
+        const r = await api('/api/runtime/remove', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tag }) });
+        if (r && r.ok === false) { toast('Engine', r.error || 'could not delete', 'err', 8000); btn.disabled = false; btn.textContent = 'Delete'; return; }
+        toast('Engine', `Deleted ${tag}`, 'ok', 5000);
+        modelsRenderEngine(); refreshRuntimeBar();
+      } catch (err) { toast('Engine', err.message, 'err', 7000); btn.disabled = false; btn.textContent = 'Delete'; }
     });
   });
 
