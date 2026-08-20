@@ -1806,6 +1806,14 @@ async def run_once(
         except AttributeError:
             pass
 
+        # Fade the desktop-activity overlay once the turn is done, so it doesn't
+        # linger showing the last click after JARVIS has already replied.
+        try:
+            from . import activity_hud
+            activity_hud.hide()
+        except Exception:
+            pass
+
         # Complete the turn NOW — before the fact-extraction below, which is a
         # SECOND ~600-token LLM call. It used to run synchronously here, so on a
         # local model the reply finished but the turn hung ~20s on this invisible
