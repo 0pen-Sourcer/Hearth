@@ -1361,9 +1361,20 @@
   .ex-config details.ex-advanced[open] summary::before { content: '▾ '; }
   .ex-config details.ex-advanced summary:hover { color: var(--fg); }
   .ex-config details.ex-advanced input[type="text"] { margin-top: 8px; }
+  .ex-config .ex-samp-label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+    text-transform: uppercase; color: var(--fg-dim);
+    margin: 12px 0 8px; display: flex; align-items: baseline; gap: 8px;
+  }
+  .ex-config .ex-samp-label span {
+    font-weight: 400; letter-spacing: 0; text-transform: none;
+    color: var(--fg-faint); font-size: 11px;
+  }
   .ex-config .ex-slider-row {
     display: flex; align-items: center; gap: 10px;
   }
+  /* Keep the typable number box compact next to the slider. */
+  .ex-config .ex-slider-row input[type="number"].v { min-width: 72px; width: 84px; flex: 0 0 auto; text-align: right; }
   .ex-config .ex-slider-row .v {
     min-width: 72px; text-align: right; white-space: nowrap;
     font-family: var(--mono); font-size: 12px; color: var(--fg);
@@ -3607,13 +3618,6 @@
           </div>
           <div class="switch" data-key="activity_hud"></div>
         </div>
-
-        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px; display:flex; justify-content:space-between; align-items:center;">
-          <span>Sampling</span>
-          <button id="sampling-reset" type="button" style="font-size:11px; text-transform:none; letter-spacing:0; background:none; border:1px solid var(--border); color:var(--fg-dim); border-radius:6px; padding:3px 8px; cursor:pointer;">Reset to model defaults</button>
-        </h4>
-        <div id="sampling-caption" class="hint" style="margin:-4px 0 10px 0;">How the model picks each word. Sliders start at the loaded model's own defaults; move one to override it, and it applies to your next reply. Local models only.</div>
-        <div id="sampling-panel"><!-- populated by refreshSampling() from /api/sampling --></div>
 
         <!-- Toast quiet-mode: user-controlled noise level for popups -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Toasts</h4>
@@ -9477,75 +9481,6 @@ async function refreshMcpInbound() {
     ).join('<br>');
   } catch { el.textContent = 'no clients connected right now'; }
 }
-// Sampling panel — sliders built from the loaded model's REAL /props defaults
-// (falling back to Hearth's built-ins when the server doesn't report them). A
-// slider left at its default is treated as "inherit", so only genuine overrides
-// persist and headless sends them per reply.
-let _samplingResetWired = false;
-async function refreshSampling() {
-  const panel = document.getElementById('sampling-panel');
-  if (!panel) return;
-  let data = null;
-  try { data = await api('/api/sampling'); } catch {}
-  if (!data || !Array.isArray(data.params)) {
-    panel.innerHTML = '<div class="hint">Sampling controls appear when a local model is loaded.</div>';
-    return;
-  }
-  const cap = document.getElementById('sampling-caption');
-  if (cap) {
-    cap.textContent = data.has_model_defaults
-      ? `Sliders start at ${data.model || 'the loaded model'}'s own defaults. Move one to override it; it applies to your next reply.`
-      : `The model didn't report its defaults, so these are Hearth's fallbacks. Move one to override it; it applies to your next reply.`;
-  }
-  panel.innerHTML = '';
-  data.params.forEach(p => {
-    const key = 'sampling_' + p.name;
-    const overridden = p.override !== null && p.override !== undefined;
-    const val = overridden ? Number(p.override) : Number(p.default);
-    const isInt = p.step >= 1;
-    const fmt = v => isInt ? String(Math.round(v)) : Number(v).toFixed(2);
-    const row = document.createElement('div');
-    row.className = 'field';
-    row.style.cssText = 'flex-direction:column; align-items:stretch; gap:6px;';
-    row.innerHTML =
-      `<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
-         <div class="name">${p.label}</div>
-         <div style="display:flex; align-items:center; gap:8px;">
-           <span class="samp-val" style="font-variant-numeric:tabular-nums; font-size:13px;">${fmt(val)}</span>
-           <span style="font-size:11px; color:var(--fg-faint);">${p.from_model ? 'model' : 'default'} ${fmt(p.default)}</span>
-         </div>
-       </div>
-       <input type="range" class="samp-range" min="${p.min}" max="${p.max}" step="${p.step}" value="${val}" style="width:100%;">
-       <div class="hint" style="margin:0;">${p.hint}</div>`;
-    const range = row.querySelector('.samp-range');
-    const valEl = row.querySelector('.samp-val');
-    const paint = (ov) => { valEl.style.color = ov ? 'var(--accent)' : 'var(--fg-dim)'; };
-    paint(overridden);
-    range.addEventListener('input', () => { valEl.textContent = fmt(Number(range.value)); paint(true); });
-    range.addEventListener('change', () => {
-      const raw = Number(range.value);
-      const v = isInt ? Math.round(raw) : Number(raw.toFixed(2));
-      // Sitting on the model default = inherit (clear the override) so the model
-      // stays authoritative if it changes; otherwise persist the override.
-      if (Math.abs(v - Number(p.default)) < (p.step / 2)) {
-        saveSetting(key, ''); paint(false);
-      } else {
-        saveSetting(key, v); paint(true);
-      }
-    });
-    panel.appendChild(row);
-  });
-  if (!_samplingResetWired) {
-    _samplingResetWired = true;
-    const rb = document.getElementById('sampling-reset');
-    if (rb) rb.addEventListener('click', async () => {
-      const names = ['temperature', 'top_p', 'top_k', 'min_p', 'repeat_penalty'];
-      await Promise.all(names.map(n => saveSetting('sampling_' + n, '')));
-      refreshSampling();
-    });
-  }
-}
-
 async function refreshSettings() {
   refreshRuntimeBar();  // engine status lives in Settings → Built-in server now
   refreshMcpInbound();  // live inbound MCP clients (Claude Desktop etc.)
@@ -9594,8 +9529,6 @@ async function refreshSettings() {
       // gen_stats + show_diffs + activity_hud default ON (only off when explicitly disabled); the rest default off.
       sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud') ? (s[k] !== false) : !!s[k]);
     });
-    // Sampling: a real panel built from the model's actual /props defaults.
-    refreshSampling();
     // Agent name field - populated from current setting. The Rename button
     // triggers the full workspace rename (slow, restarts tray). Typing in
     // the field without clicking Rename does nothing - that's intentional,
@@ -12041,9 +11974,51 @@ function modelsLoadConfigHTML(opts) {
         </div>
       </div>
       <details class="ex-advanced">
-        <summary>Advanced flags</summary>
+        <summary>Advanced options &amp; flags</summary>
+        <div class="ex-samp-label">Sampling <span>how it picks each word, sent every reply</span></div>
+        <div class="ex-row">
+          <label>Temperature</label>
+          <div class="ex-slider-row">
+            <input type="range" data-cfg="sampling_temperature" data-float min="0" max="2" step="0.05" value="0.7" />
+            <input type="number" class="v" data-samp-num="sampling_temperature" min="0" max="2" step="0.05" value="0.7" aria-label="Temperature" />
+          </div>
+          <div class="ex-hint">Randomness. Lower is focused and repeatable, higher is more varied.</div>
+        </div>
+        <div class="ex-row">
+          <label>Top-P</label>
+          <div class="ex-slider-row">
+            <input type="range" data-cfg="sampling_top_p" data-float min="0" max="1" step="0.01" value="0.95" />
+            <input type="number" class="v" data-samp-num="sampling_top_p" min="0" max="1" step="0.01" value="0.95" aria-label="Top-P" />
+          </div>
+          <div class="ex-hint">Nucleus sampling. Keeps the smallest set of tokens whose probabilities sum to P.</div>
+        </div>
+        <div class="ex-row">
+          <label>Top-K</label>
+          <div class="ex-slider-row">
+            <input type="range" data-cfg="sampling_top_k" min="0" max="200" step="1" value="40" />
+            <input type="number" class="v" data-samp-num="sampling_top_k" min="0" max="200" step="1" value="40" aria-label="Top-K" />
+          </div>
+          <div class="ex-hint">Keeps only the K most likely tokens each step. 0 turns it off.</div>
+        </div>
+        <div class="ex-row">
+          <label>Min-P</label>
+          <div class="ex-slider-row">
+            <input type="range" data-cfg="sampling_min_p" data-float min="0" max="0.5" step="0.01" value="0.05" />
+            <input type="number" class="v" data-samp-num="sampling_min_p" min="0" max="0.5" step="0.01" value="0.05" aria-label="Min-P" />
+          </div>
+          <div class="ex-hint">Drops tokens below this fraction of the top token's probability.</div>
+        </div>
+        <div class="ex-row">
+          <label>Repeat penalty</label>
+          <div class="ex-slider-row">
+            <input type="range" data-cfg="sampling_repeat_penalty" data-float min="1" max="1.5" step="0.01" value="1.1" />
+            <input type="number" class="v" data-samp-num="sampling_repeat_penalty" min="1" max="1.5" step="0.01" value="1.1" aria-label="Repeat penalty" />
+          </div>
+          <div class="ex-hint">Discourages repeating itself. 1.0 is off; ~1.1 stops thinking models from looping.</div>
+        </div>
+        <div class="ex-samp-label" style="margin-top:14px;">Extra flags <span>raw llama-server load flags</span></div>
         <input type="text" data-cfg="extra_args" placeholder="e.g. --n-cpu-moe 40 --no-mmap --mlock" spellcheck="false" autocomplete="off" />
-        <div class="ex-hint">Extra <code>llama-server</code> <b>load</b> flags, space-separated. Useful ones: <code>--n-cpu-moe N</code> (keep N layers' experts on CPU, for big MoE models on a small card), <code>--no-mmap</code> + <code>--mlock</code> (lock weights in RAM instead of paging from disk), <code>--override-tensor</code>, <code>--split-mode</code>. Hearth's own flags (ctx, layers, KV, port) always win. Sampling (temperature, top-k, repeat penalty) is <b>not</b> set here — Hearth sends those per reply, so use the Sampling section in Settings; a <code>--temp</code> here is ignored.</div>
+        <div class="ex-hint">Space-separated. Common: <code>--n-cpu-moe N</code> (experts on CPU for big MoE), <code>--no-mmap --mlock</code> (lock weights in RAM). Hearth's own flags (ctx, layers, KV) always win.</div>
       </details>
     </div>`;
 }
@@ -12054,7 +12029,9 @@ function modelsReadLoadConfig(rootEl) {
     const k = el.dataset.cfg;
     if (el.tagName === 'SELECT' || el.tagName === 'INPUT') {
       if (el.type === 'number' || el.type === 'range') {
-        const v = parseInt(el.value, 10);
+        // data-float (sampling temperature/top-p/min-p/repeat) must NOT be
+        // truncated by parseInt — 0.7 would become 0.
+        const v = el.hasAttribute('data-float') ? parseFloat(el.value) : parseInt(el.value, 10);
         if (!Number.isNaN(v)) out[k] = v;
       } else {
         out[k] = el.value;
@@ -12071,7 +12048,7 @@ function modelsReadLoadConfig(rootEl) {
 // KV-cache memory multiplier vs f16 — mirrors llmserver._kv_quant_factor.
 function _kvFactor(t) { return ({ '': 1, 'q8_0': 0.53, 'q4_0': 0.27, 'q4_1': 0.29 })[t || ''] ?? 1; }
 
-// Live VRAM estimate for the current load-config settings, LM-Studio style.
+// Live VRAM estimate for the current load-config settings.
 // Mirrors llmserver's math: footprint = weights + KV; offloaded slice + ~1.5 GB
 // overhead. Flags a spill against free VRAM so the user sees "99 layers 🤡"
 // won't fit BEFORE they boot.
@@ -12162,6 +12139,27 @@ function modelsWireLoadConfig(rootEl) {
       cv.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); cv.blur(); } });
     }
   }
+  // Sampling sliders each mirror a typable number box (data-samp-num == the
+  // slider's data-cfg). The slider carries data-cfg, so it's the value saved;
+  // the box just lets you type an exact number instead of dragging.
+  rootEl.querySelectorAll('input[type="range"][data-cfg^="sampling_"]').forEach(sl => {
+    const num = rootEl.querySelector(`input[data-samp-num="${sl.dataset.cfg}"]`);
+    const isFloat = sl.hasAttribute('data-float');
+    const parse = (v) => isFloat ? parseFloat(v) : parseInt(v, 10);
+    const lo = parse(sl.min), hi = parse(sl.max);
+    const push = () => { if (num) num.value = sl.value; };
+    sl.addEventListener('input', push); push();
+    if (num) {
+      const commit = () => {
+        let v = parse(num.value);
+        if (Number.isNaN(v)) v = parse(sl.value);
+        v = Math.min(hi, Math.max(lo, v));
+        sl.value = v; num.value = v;
+      };
+      num.addEventListener('change', commit);
+      num.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); num.blur(); } });
+    }
+  });
   // Recompute the estimate when ctx or KV-cache quant changes too.
   rootEl.querySelectorAll('input[data-cfg="ctx"], select[data-cfg="cache_type_k"], select[data-cfg="cache_type_v"]')
     .forEach(el => el.addEventListener('input', () => modelsUpdateVramEstimate(cfgEl)));
@@ -13130,6 +13128,13 @@ function modelsRestoreSavedCfg(expandEl, modelPath) {
   if (cfg.cache_type_v != null) set('select[data-cfg="cache_type_v"]', cfg.cache_type_v);
   if (cfg.n_threads != null) set('input[data-cfg="n_threads"]', cfg.n_threads);
   if (cfg.extra_args != null) set('input[data-cfg="extra_args"]', cfg.extra_args);
+  // Restore saved sampling — set the slider and fire input so the number box mirrors.
+  ['sampling_temperature', 'sampling_top_p', 'sampling_top_k', 'sampling_min_p', 'sampling_repeat_penalty'].forEach(k => {
+    if (cfg[k] != null) {
+      const sl = expandEl.querySelector(`input[data-cfg="${k}"]`);
+      if (sl) { sl.value = cfg[k]; sl.dispatchEvent(new Event('input')); }
+    }
+  });
   const flash = expandEl.querySelector('.switch[data-cfg="flash_attn"]');
   if (flash) flash.classList.toggle('on', !!cfg.flash_attn);
   // Recompute AFTER everything is restored. Only the layers slider fires an

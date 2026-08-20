@@ -1092,97 +1092,6 @@ def _memory_index() -> List[Dict]:
     return out
 
 
-# Sampling controls the GUI panel exposes, in display order. Each: the settings
-# key, a label, min/max/step for the slider, and Hearth's built-in fallback used
-# when the model's /props doesn't report one (and when the field is left blank).
-_SAMPLING_SPEC = [
-    {"name": "temperature", "label": "Temperature", "min": 0.0, "max": 2.0,
-     "step": 0.05, "fallback": 0.7,
-     "hint": "Randomness. Lower is focused and repeatable, higher is varied."},
-    {"name": "top_p", "label": "Top-P", "min": 0.0, "max": 1.0, "step": 0.01,
-     "fallback": 0.95,
-     "hint": "Nucleus sampling. Keeps the smallest set of tokens whose probability sums to P."},
-    {"name": "top_k", "label": "Top-K", "min": 0, "max": 200, "step": 1,
-     "fallback": 40,
-     "hint": "Keeps only the K most likely tokens each step. 0 disables it."},
-    {"name": "min_p", "label": "Min-P", "min": 0.0, "max": 0.5, "step": 0.01,
-     "fallback": 0.05,
-     "hint": "Drops tokens below this fraction of the top token's probability."},
-    {"name": "repeat_penalty", "label": "Repeat penalty", "min": 1.0, "max": 1.5,
-     "step": 0.01, "fallback": 1.1,
-     "hint": "Discourages repeating itself. 1.0 is off; ~1.1 stops thinking models looping."},
-]
-
-
-def _read_sampler_defaults() -> Dict:
-    """Read the loaded model's real default sampler params from llama.cpp /props
-    (default_generation_settings). Normalized + robust to key-name variance across
-    llama.cpp versions. Returns {} if the server is off or doesn't expose them —
-    the panel then shows Hearth's built-in fallbacks instead."""
-    host = LOCAL_API_BASE.rsplit("/v1", 1)[0]
-    props = None
-    for _k in (os.environ.get("LOCAL_API_KEY") or "", "hearth-builtin", ""):
-        try:
-            h = {"Authorization": f"Bearer {_k}"} if _k else {}
-            rq = urllib.request.Request(f"{host}/props", headers=h)
-            with urllib.request.urlopen(rq, timeout=2) as r:
-                props = json.loads(r.read().decode("utf-8"))
-            break
-        except urllib.error.HTTPError as e:
-            if getattr(e, "code", None) in (401, 403):
-                continue
-            break
-        except Exception:
-            break
-    if not isinstance(props, dict):
-        return {}
-    dgs = props.get("default_generation_settings")
-    src: Dict = {}
-    if isinstance(dgs, dict):
-        src.update(dgs)
-        p = dgs.get("params")
-        if isinstance(p, dict):
-            src.update(p)
-    def _pick(*keys):
-        for k in keys:
-            v = src.get(k)
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                return v
-        return None
-    out: Dict = {}
-    for name, keys in (
-        ("temperature", ("temperature", "temp")),
-        ("top_p", ("top_p",)),
-        ("top_k", ("top_k",)),
-        ("min_p", ("min_p",)),
-        ("repeat_penalty", ("repeat_penalty", "penalty_repeat")),
-    ):
-        v = _pick(*keys)
-        if v is not None:
-            out[name] = v
-    return out
-
-
-def _sampling_panel_data() -> Dict:
-    """Everything the Sampling panel needs: the spec (labels/ranges), the model's
-    real defaults (or Hearth fallbacks), and the user's saved overrides."""
-    model_defaults = _read_sampler_defaults()
-    s = _load_settings()
-    params = []
-    for spec in _SAMPLING_SPEC:
-        n = spec["name"]
-        default = model_defaults.get(n, spec["fallback"])
-        ov = s.get(f"sampling_{n}")
-        params.append({
-            **spec,
-            "default": default,
-            "from_model": n in model_defaults,
-            "override": (None if ov is None or str(ov).strip() == "" else ov),
-        })
-    return {"params": params, "has_model_defaults": bool(model_defaults),
-            "model": (s.get("preferred_model") or "").split("\\")[-1].split("/")[-1]}
-
-
 def _load_settings() -> Dict:
     defaults = {
         "think_default": False,
@@ -1434,8 +1343,6 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_asset(path[len("/assets/"):])
         if path == "/api/state":
             return self._send_state()
-        if path == "/api/sampling":
-            return self._send_json(200, _sampling_panel_data())
         if path == "/api/window-signals":
             # Cheap, high-frequency poll for cross-process window actions the
             # backend can't do itself (the window is in the desktop_attach
@@ -4265,8 +4172,8 @@ def _auto_boot_preferred_model_async() -> None:
                     LOCAL_API_BASE = builtin_api
                     _hl.LOCAL_API_BASE = LOCAL_API_BASE
                     os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
-                    # External servers like LM Studio don't require a key;
-                    # clear ours so we don't 401 against them.
+                    # A user-pointed external server usually needs no key;
+                    # clear ours so we don't 401 against it.
                     os.environ.pop("LOCAL_API_KEY", None)
                     _models_cache["ts"] = 0
                     print(

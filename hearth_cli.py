@@ -4494,9 +4494,8 @@ class JarvisCLI:
                 # do NOT add stop=["<think>"] anymore: on a reasoning-FORCED model it
                 # halted generation at the first think tag — truncating the reply to
                 # empty — and it fought showing the reasoning we now surface live.
-                # repeat_penalty matches LM Studio's default (~1.1) so thinking
-                # models don't degenerate into a repeating reasoning loop. 1.0 =
-                # off; env-tunable.
+                # repeat_penalty ~1.1 so thinking models don't degenerate into a
+                # repeating reasoning loop. 1.0 = off; HEARTH_REPEAT_PENALTY tunes it.
                 _rep = float(os.environ.get("HEARTH_REPEAT_PENALTY", "1.1") or "1.1")
                 create_kwargs["extra_body"] = {
                     "chat_template_kwargs": {"enable_thinking": self.think_on},

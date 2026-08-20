@@ -446,15 +446,20 @@ def _strip_think(text: str) -> str:
 
 
 def _sampling_cfg() -> Dict[str, Any]:
-    """User-tunable sampling from Settings (GUI Sampling section), with safe
-    fallbacks. A blank/unset field falls through to the built-in default, so an
-    empty Settings leaves behaviour exactly as before."""
+    """User-tunable sampling from the LOADED model's per-model config (set in the
+    Models load panel, saved in model_configs.json), with safe fallbacks. A
+    blank/unset field falls through to the built-in default, so an unconfigured
+    model behaves exactly as before. Only the built-in server exposes a loaded
+    model_path here; other backends fall back to defaults."""
     out: Dict[str, Any] = {}
+    s: Dict[str, Any] = {}
     try:
-        from .web import _load_settings
-        s = _load_settings()
+        from . import llmserver
+        mp = (getattr(llmserver, "_proc_info", None) or {}).get("model_path") or ""
+        if mp:
+            s = llmserver.get_model_config(mp) or {}
     except Exception:
-        return out
+        s = {}
     def _num(key):
         v = s.get(key)
         if v is None or str(v).strip() == "":
@@ -1111,10 +1116,10 @@ async def run_once(
                 # timings_per_token makes llama.cpp attach a real `timings` block
                 # to EVERY streamed chunk, so the live tok/s is the true number the
                 # whole time (no wall-clock estimate that jumps on the final).
-                # repeat_penalty matches what LM Studio applies by default (~1.1).
-                # Without it, thinking models (Qwen3) degenerate into a repeating
-                # reasoning loop — the same reply/line emitted over and over until
-                # the context fills. 1.0 = off; env-tunable.
+                # repeat_penalty ~1.1: without a penalty, thinking models (Qwen3)
+                # degenerate into a repeating reasoning loop — the same line
+                # emitted over and over until context fills. 1.0 = off; tunable
+                # per-model in the load config, or via HEARTH_REPEAT_PENALTY.
                 _rep = _scfg.get(
                     "repeat_penalty",
                     float(os.environ.get("HEARTH_REPEAT_PENALTY", "1.1") or "1.1"))
@@ -1284,7 +1289,7 @@ async def run_once(
                             if getattr(fn, "arguments", None):
                                 slot["function"]["arguments"] = (slot["function"]["arguments"] or "") + fn.arguments
                     # Stream the args being built, throttled, so the GUI shows a live
-                    # "generating arguments…" card (LM-Studio style) instead of waiting
+                    # "generating arguments…" card instead of waiting
                     # for the whole call to finish. Emit the highest-index slot (the one
                     # currently streaming). The real `tool_call` finalizes it.
                     _now = time.time()

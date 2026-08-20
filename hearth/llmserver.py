@@ -1740,7 +1740,7 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             pass
     if n_gpu_layers != 0:
         # The native llama-server has working Blackwell kernels → keep the
-        # q8_0 + flash VRAM saver (fits a 9B on 8 GB, like LM Studio). Only the
+        # q8_0 + flash VRAM saver (fits a 9B on 8 GB). Only the
         # old llama-cpp-python wheel needs the f16 + flash-off workaround on
         # Blackwell, where its flash kernel returns empty on long context.
         _needs_bw_workaround = _blackwell and not _use_native
@@ -2429,8 +2429,8 @@ def estimate_safe_gpu_layers(model_size_gb: Optional[float],
     `reserve_gb` is headroom kept free for the CUDA context + n_batch compute
     buffer. The old llama-cpp-python wheel needed a big reserve (2.3) because a
     spill there returned empty/garbage — but the native llama-server spills
-    gracefully (slow, not broken), like LM Studio, so it can run a smaller
-    reserve and keep far more layers on the GPU (much faster on a tight 8 GB)."""
+    gracefully (slow, not broken), so it can run a smaller reserve and keep far
+    more layers on the GPU (much faster on a tight 8 GB)."""
     if not model_size_gb or not free_vram_gb or model_size_gb <= 0:
         return 0
     kv_gb = estimate_kv_cache_gb(model_size_gb, ctx, cache_type)
