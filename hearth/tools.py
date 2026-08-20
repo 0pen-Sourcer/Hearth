@@ -6549,13 +6549,19 @@ def _focus_window_linux(name: str) -> str:
 
 
 def _manage_window(p: Dict) -> str:
-    """Minimize / maximize / restore / close a window by a substring of its title."""
-    name = (p.get("name") or "").strip()
+    """Minimize / maximize / restore / close / focus a window by a title substring."""
+    # Accept name / title / window — the model routinely passes `title` (siblings
+    # like capture_active_window use it), so reading only `name` failed silently.
+    name = (p.get("name") or p.get("title") or p.get("window") or "").strip()
     action = (p.get("action") or "").strip().lower()
     if not name:
         return "Error: window name required (a substring of the title)."
+    # 'focus'/'front'/'raise' is a natural thing to ask manage_window for — route
+    # it to the reliable foreground path instead of rejecting it.
+    if action in ("focus", "front", "raise", "activate", "show"):
+        return _focus_window({"name": name})
     if action not in ("minimize", "maximize", "restore", "close"):
-        return "Error: action must be minimize | maximize | restore | close."
+        return "Error: action must be minimize | maximize | restore | close | focus."
     if sys.platform != "win32":
         return "manage_window: Windows only for now."
     try:
@@ -6676,7 +6682,11 @@ def _force_foreground_hwnd(hwnd) -> bool:
 def _focus_window(p: Dict) -> str:
     """Bring an already-open window to the front by (partial) title match.
     Like open_app, but for windows that are ALREADY open — raise/focus them."""
-    name = (p.get("name") or "").strip()
+    # Accept name / title / window — sibling desktop tools (capture_active_window,
+    # manage_window) take `title`, so the model routinely passes `title` here. If
+    # this only read `name`, every such call failed with an empty name and the
+    # window never came forward (why a focus-then-keypress silently did nothing).
+    name = (p.get("name") or p.get("title") or p.get("window") or "").strip()
     if not name:
         return "Error: window name required (a substring of the window title)."
     if sys.platform == "darwin":
@@ -6837,9 +6847,9 @@ TOOL_DEFINITIONS.append({
     "parameters": {
         "type": "object",
         "properties": {
-            "name": {"type": "string", "description": "Substring of the target window's title."},
+            "title": {"type": "string", "description": "Substring of the target window's title (e.g. 'Gmail', 'chrome')."},
         },
-        "required": ["name"],
+        "required": ["title"],
     },
 })
 
@@ -6866,10 +6876,10 @@ TOOL_DEFINITIONS.append({
     "parameters": {
         "type": "object",
         "properties": {
-            "name": {"type": "string", "description": "Substring of the target window's title."},
-            "action": {"type": "string", "description": "minimize | maximize | restore | close"},
+            "title": {"type": "string", "description": "Substring of the target window's title."},
+            "action": {"type": "string", "description": "minimize | maximize | restore | close | focus"},
         },
-        "required": ["name", "action"],
+        "required": ["title", "action"],
     },
 })
 
