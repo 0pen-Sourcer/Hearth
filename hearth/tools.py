@@ -4893,6 +4893,14 @@ def _screenshot(p: Dict) -> str:
         capture_overlay.flash(cue)
     except Exception:
         pass
+    # Fade the activity pill out too, so JARVIS's own status HUD isn't sitting in
+    # the screenshot it's about to read (it would see "Reading the screen" text
+    # floating over the app and get confused). It comes back on the next action.
+    try:
+        from . import activity_hud
+        activity_hud.hide()
+    except Exception:
+        pass
     _t.sleep(cue)         # wait out the delay (or the brief cue when delay==0)
     # The cue fades to fully transparent by the end of `cue`; this extra settle
     # guarantees it's off-screen + destroyed before we grab, so it's never in
@@ -4957,6 +4965,15 @@ def _capture_active_window(p: Dict) -> str:
         except Exception:
             pass
         _t.sleep(delay + 0.35)
+    # Fade the activity pill so it isn't sitting in the captured window (a prior
+    # action may still have it up). When there's no delay, give it a beat to fade.
+    try:
+        from . import activity_hud
+        activity_hud.hide()
+    except Exception:
+        pass
+    if delay <= 0:
+        _t.sleep(0.3)
     # Resolve target: explicit title substring, else the foreground window.
     hwnd = None
     if title:
