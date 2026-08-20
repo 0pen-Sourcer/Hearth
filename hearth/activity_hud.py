@@ -1,36 +1,43 @@
-"""Activity HUD — a small always-on-top overlay that shows what JARVIS is doing
-on the real desktop during computer-use.
+"""Activity HUD — a small always-on-top pill that shows what JARVIS is doing on
+the real desktop during computer-use.
 
 When the agent drives the mouse/keyboard, the app it's controlling is focused,
 not Hearth, so the chat window can't tell the user "I'm clicking Login" — they'd
-just see the cursor move on its own. This floats a compact pill over everything,
-top-center, with a pulsing dot and a one-line status ("Looking at the screen",
-"Clicking Sign in", "Typing..."). It never takes focus and is click-through on
-Windows, so it can't intercept the very clicks JARVIS is making underneath it.
+just see the cursor move on its own. This floats a compact pill top-center with a
+pulsing dot and a one-line status ("Clicking Sign in", "Typing…", "Reading the
+screen", "Thinking…"). It never takes focus and is click-through, so it can't
+intercept the very clicks JARVIS is making underneath it.
 
-Runs its own tk thread; show()/hide() are queued so any thread can call them
-safely. Any failure disables the HUD permanently and is swallowed — the overlay
-is cosmetic and must never break a tool call.
+Raw win32 (pywin32), the SAME plumbing as voice_overlay / capture_overlay —
+NOT tkinter, which is excluded from the packaged build and would silently no-op
+in the shipped app. Windows-only, best-effort throughout: any failure disables
+the HUD and is swallowed. show()/done()/hide() are safe to call from any thread.
 """
 from __future__ import annotations
 
 import os
-import queue
+import sys
 import threading
 import time
-from typing import Optional
 
-_thread: Optional[threading.Thread] = None
-_q: "queue.Queue[tuple]" = queue.Queue()
-_started = False
-_disabled = False  # set True on any fatal error; never retried after that
+_disabled = False
+_thread = None
 _lock = threading.Lock()
 
-# Auto-hide the pill this many seconds after the last activity() call, so it
-# doesn't linger after the agent is done touching the desktop.
+# Shared render state, written by the public API from any thread, read by the
+# render loop. text/kind/last are guarded together by _lock.
+_state = {
+    "text": "",
+    "kind": "work",     # "work" | "done"
+    "want": False,      # should the pill be visible
+    "last": 0.0,        # ts of the most recent activity()
+    "done_until": 0.0,  # hold the green tick until this ts, then fade
+}
+
+# Auto-hide the pill this many seconds after the last activity() call.
 _IDLE_HIDE_S = 4.0
 
-# Which tools count as "on the desktop" — used by callers to decide whether to
+# Which tools count as "on the desktop" — callers use this to decide whether to
 # surface the HUD at all. Kept here so tools.py and web.py agree on the set.
 DESKTOP_TOOLS = {
     "computer_click", "computer_type", "computer_key", "computer_scroll",
@@ -39,8 +46,6 @@ DESKTOP_TOOLS = {
     "smart_click", "focus_window", "screenshot", "view_image",
 }
 
-# Short, human phrasing per tool. The label the model passes (a button name, a
-# window title) is appended when present.
 _VERB = {
     "computer_click": "Clicking",
     "desktop_click": "Clicking",
@@ -58,17 +63,22 @@ _VERB = {
     "view_image": "Looking",
 }
 
+# Colors are win32 COLORREF (0x00BBGGRR).
+_BG_KEY = 0x00010101      # near-black, painted transparent via color-key
+_PILL = 0x00181114        # dark pill background (#141118)
+_FG = 0x00ECECEC          # near-white text
+_ACCENT = 0x006AA8C9      # gold dot (#c9a86a in BGR)
+_DONE = 0x008FD87B        # green dot (#7bd88f in BGR)
+
 
 def _enabled() -> bool:
-    """HUD is on unless explicitly disabled, and only where a desktop exists.
-
-    Off automatically for the phone/chat bridges and any headless batch run —
-    there's no one at the screen to see it, and tk has no display to draw on.
-    """
+    """HUD is on unless disabled, and only where a real desktop exists. Off for
+    the phone/chat bridges and one-shot headless runs (JARVIS_NO_GUI=1)."""
+    if sys.platform != "win32":
+        return False
     v = os.environ.get("JARVIS_ACTIVITY_HUD")
     if v is not None:
         return v.strip().lower() not in ("0", "false", "no", "off")
-    # A bridge / headless-batch context sets this; skip the overlay there.
     if os.environ.get("JARVIS_NO_GUI") == "1":
         return False
     try:
@@ -81,7 +91,7 @@ def _enabled() -> bool:
     return True
 
 
-def label_for(name: str, args: Optional[dict]) -> str:
+def label_for(name: str, args) -> str:
     """Build the one-line status for a desktop tool call."""
     verb = _VERB.get(name, "Working")
     hint = ""
@@ -102,237 +112,329 @@ def label_for(name: str, args: Optional[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# tk side (all of this runs on _thread only)
+# public API (safe from any thread)
 # ---------------------------------------------------------------------------
-def _run_loop():
+def activity(text: str) -> None:
+    """Show/refresh the pill with a one-line status. No-op if disabled."""
+    if _disabled or not _enabled():
+        return
+    with _lock:
+        _state["text"] = str(text) or "Working"
+        _state["kind"] = "work"
+        _state["want"] = True
+        _state["last"] = time.time()
+        _state["done_until"] = 0.0
+    _ensure_started()
+
+
+def for_tool(name: str, args=None) -> None:
+    """Convenience: surface the HUD for a desktop tool call by name."""
+    if name in DESKTOP_TOOLS:
+        activity(label_for(name, args))
+
+
+def thinking() -> None:
+    """Show a 'Thinking…' state — used between desktop actions so the gap while
+    the model reasons doesn't read as the agent having stalled. Only refreshes an
+    already-visible pill; it won't pop one on its own for a non-desktop turn."""
+    if _disabled or not _enabled():
+        return
+    with _lock:
+        if not _state["want"] or _state["kind"] == "done":
+            return
+        _state["text"] = "Thinking…"
+        _state["last"] = time.time()
+
+
+def done(text: str = "Done") -> None:
+    """End a desktop task with a brief green tick, then fade. No-op if the pill
+    isn't up (a turn with no desktop action stays silent)."""
+    if _disabled or _thread is None:
+        return
+    with _lock:
+        if not _state["want"]:
+            return
+        _state["text"] = str(text) or "Done"
+        _state["kind"] = "done"
+        _state["done_until"] = time.time() + 1.2
+
+
+def hide() -> None:
+    """Begin fading the pill out immediately."""
+    if _disabled or _thread is None:
+        return
+    with _lock:
+        _state["want"] = False
+
+
+# ---------------------------------------------------------------------------
+# win32 render thread
+# ---------------------------------------------------------------------------
+def _ensure_started() -> None:
+    global _thread
+    if _disabled:
+        return
+    if _thread is not None and _thread.is_alive():
+        return
+    with _lock:
+        if _thread is not None and _thread.is_alive():
+            return
+        try:
+            _thread = threading.Thread(target=_run, name="hearth-activity-hud",
+                                       daemon=True)
+            _thread.start()
+        except Exception:
+            pass
+
+
+def _run() -> None:
     global _disabled
     try:
-        import tkinter as tk
+        import ctypes
+        import math
+        from ctypes import wintypes
+        import win32api
+        import win32con
+        import win32gui
     except Exception:
         _disabled = True
         return
 
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        root.overrideredirect(True)
-        root.attributes("-topmost", True)
-        try:
-            root.attributes("-alpha", 0.0)  # start invisible, fade in
-        except Exception:
-            pass
+    def _scale_color(cref: int, k: float) -> int:
+        """Scale a COLORREF (0x00BBGGRR) brightness by k (0..1)."""
+        k = max(0.0, min(1.0, k))
+        b = (cref >> 16) & 0xFF
+        g = (cref >> 8) & 0xFF
+        r = cref & 0xFF
+        return (int(b * k) << 16) | (int(g * k) << 8) | int(r * k)
 
-        # DPI scale as THIS process sees it. winfo_fpixels reflects the effective
-        # DPI after the process's own awareness, so scaling by it can't double up:
-        # a DPI-aware host reads ~144 at 150% (we scale up, no OS scaling), a
-        # DPI-unaware one reads 96 (we don't scale, the OS bitmap-scales instead).
+    try:
+        # DPI scale (physical px per logical) so the pill isn't tiny on a scaled
+        # display. LOGPIXELSX = 88; a DPI-aware host reports the real DPI here.
         try:
-            sc = max(1.0, float(root.winfo_fpixels("1i")) / 96.0)
+            _dc0 = ctypes.windll.user32.GetDC(0)
+            dpi = ctypes.windll.gdi32.GetDeviceCaps(_dc0, 88) or 96
+            ctypes.windll.user32.ReleaseDC(0, _dc0)
+            sc = max(1.0, dpi / 96.0)
         except Exception:
             sc = 1.0
 
         def _px(n):
             return max(1, int(round(n * sc)))
 
-        BG = "#141118"
-        FG = "#f4ecff"
-        ACCENT = "#c9a86a"
-        _cvs = _px(16)
-        frame = tk.Frame(root, bg=BG, highlightthickness=1,
-                         highlightbackground="#2c2634")
-        frame.pack(fill="both", expand=True)
-        dot = tk.Canvas(frame, width=_cvs, height=_cvs, bg=BG,
-                        highlightthickness=0)
-        dot.pack(side="left", padx=(_px(12), _px(6)), pady=_px(9))
-        _dc = _cvs / 2
-        _dr = _px(4)
-        _dot_id = dot.create_oval(_dc - _dr, _dc - _dr, _dc + _dr, _dc + _dr,
-                                  fill=ACCENT, outline="")
-        # Negative font size = pixels (bypasses tk's point auto-scaling), so DPI
-        # scaling stays entirely under _px().
-        lbl = tk.Label(frame, text="", bg=BG, fg=FG,
-                       font=("Segoe UI", -_px(15), "normal"), padx=_px(2))
-        lbl.pack(side="left", padx=(0, _px(14)), pady=_px(9))
+        PAD_L, GAP, PAD_R = _px(15), _px(9), _px(17)
+        HEIGHT = _px(38)
+        DOT_BOX = _px(18)
+        TXT_H = _px(15)
+        Y = _px(24)
 
-        DONE_COLOR = "#7bd88f"
-        state = {"visible": False, "last": 0.0, "alpha": 0.0,
-                 "target_alpha": 0.0, "pulse": 0.0,
-                 "done": False, "done_until": 0.0}
+        hinst = win32api.GetModuleHandle(None)
+        cls = "HearthActivityHUD"
 
-        def _place():
-            root.update_idletasks()
-            w = frame.winfo_reqwidth()
-            h = frame.winfo_reqheight()
-            sw = root.winfo_screenwidth()
-            x = int((sw - w) / 2)
-            y = _px(22)
-            root.geometry(f"{w}x{h}+{x}+{y}")
-
-        def _make_clickthrough():
-            # Windows: add WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE so
-            # the overlay never eats a click and never steals foreground focus
-            # from the app JARVIS is driving.
-            if os.name != "nt":
-                return
+        # Two fonts: text (Segoe UI) + dot glyph (Segoe UI Symbol).
+        def _mkfont(h, face):
             try:
-                import ctypes
-                from ctypes import wintypes
-                hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
-                if not hwnd:
-                    hwnd = root.winfo_id()
-                GWL_EXSTYLE = -20
-                WS_EX_LAYERED = 0x00080000
-                WS_EX_TRANSPARENT = 0x00000020
-                WS_EX_NOACTIVATE = 0x08000000
-                WS_EX_TOOLWINDOW = 0x00000080
-                gwl = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                ctypes.windll.user32.SetWindowLongW(
-                    hwnd, GWL_EXSTYLE,
-                    gwl | WS_EX_LAYERED | WS_EX_TRANSPARENT
-                    | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+                lf = win32gui.LOGFONT()
+                lf.lfHeight = h
+                lf.lfFaceName = face
+                lf.lfQuality = 5  # CLEARTYPE
+                return win32gui.CreateFontIndirect(lf)
             except Exception:
-                pass
+                return None
 
-        _clickthrough_done = {"v": False}
+        txt_font = _mkfont(-TXT_H, "Segoe UI")
+        dot_font = _mkfont(_px(16), "Segoe UI Symbol")
 
-        def _pump():
-            # Drain queued commands.
+        # A cached screen DC to measure text width (GetTextExtentPoint32W).
+        class _SIZE(ctypes.Structure):
+            _fields_ = [("cx", wintypes.LONG), ("cy", wintypes.LONG)]
+
+        _measure_dc = ctypes.windll.user32.GetDC(0)
+
+        def _text_w(s: str) -> int:
+            if not s:
+                return 0
             try:
-                while True:
-                    cmd, payload = _q.get_nowait()
-                    if cmd == "show":
-                        lbl.config(text=payload or "Working")
-                        state["last"] = time.time()
-                        state["target_alpha"] = 0.94
-                        if state["done"]:
-                            state["done"] = False
-                            dot.itemconfig(_dot_id, fill=ACCENT)
-                        if not state["visible"]:
-                            state["visible"] = True
-                            root.deiconify()
-                            _place()
-                            if not _clickthrough_done["v"]:
-                                _make_clickthrough()
-                                _clickthrough_done["v"] = True
-                        else:
-                            _place()
-                    elif cmd == "done":
-                        # Only mark done if the overlay is actually up — a turn
-                        # with no desktop action never pops a "Done" pill.
-                        if state["visible"] and state["alpha"] > 0.05:
-                            lbl.config(text=payload or "Done")
-                            state["done"] = True
-                            state["done_until"] = time.time() + 1.2
-                            state["target_alpha"] = 0.94
-                            dot.itemconfig(_dot_id, fill=DONE_COLOR)
-                            dot.coords(_dot_id, _dc - _dr, _dc - _dr,
-                                       _dc + _dr, _dc + _dr)
-                            _place()
-                        else:
-                            state["target_alpha"] = 0.0
-                    elif cmd == "hide":
-                        state["target_alpha"] = 0.0
-                    elif cmd == "quit":
-                        root.destroy()
-                        return
-            except queue.Empty:
-                pass
+                old = ctypes.windll.gdi32.SelectObject(_measure_dc, txt_font)
+                sz = _SIZE()
+                ctypes.windll.gdi32.GetTextExtentPoint32W(
+                    _measure_dc, s, len(s), ctypes.byref(sz))
+                ctypes.windll.gdi32.SelectObject(_measure_dc, old)
+                return int(sz.cx)
+            except Exception:
+                return int(len(s) * TXT_H * 0.6)
 
-            # Auto-hide: a short hold after a "Done" tick, else the idle timeout.
-            if state["visible"] and state["target_alpha"] > 0:
-                if state["done"]:
-                    if time.time() > state["done_until"]:
-                        state["target_alpha"] = 0.0
-                elif (time.time() - state["last"]) > _IDLE_HIDE_S:
-                    state["target_alpha"] = 0.0
+        # Render-frame snapshot, refreshed from _state each tick.
+        frame = {"text": "", "kind": "work", "pulse": 0.0}
 
-            # Fade toward target.
-            a = state["alpha"]
-            ta = state["target_alpha"]
-            if abs(a - ta) > 0.01:
-                a += (ta - a) * 0.28
-                state["alpha"] = a
-                try:
-                    root.attributes("-alpha", max(0.0, min(0.94, a)))
-                except Exception:
-                    pass
-                if ta == 0.0 and a < 0.03 and state["visible"]:
-                    state["visible"] = False
-                    root.withdraw()
-                    # Reset for the next run so it starts on the gold pulse.
-                    if state["done"]:
-                        state["done"] = False
-                        dot.itemconfig(_dot_id, fill=ACCENT)
+        def _wnd_proc(hwnd, msg, wparam, lparam):
+            if msg == win32con.WM_ERASEBKGND:
+                return 1
+            if msg == win32con.WM_PAINT:
+                hdc, ps = win32gui.BeginPaint(hwnd)
+                rect = win32gui.GetClientRect(hwnd)
+                w, h = rect[2], rect[3]
+                mem = win32gui.CreateCompatibleDC(hdc)
+                bmp = win32gui.CreateCompatibleBitmap(hdc, w, h)
+                old_bmp = win32gui.SelectObject(mem, bmp)
+                # transparent key everywhere, then the pill body over it
+                key = win32gui.CreateSolidBrush(_BG_KEY)
+                win32gui.FillRect(mem, (0, 0, w, h), key)
+                win32gui.DeleteObject(key)
+                pill = win32gui.CreateSolidBrush(_PILL)
+                win32gui.FillRect(mem, (0, 0, w, h), pill)
+                win32gui.DeleteObject(pill)
+                win32gui.SetBkMode(mem, win32con.TRANSPARENT)
+                # pulsing dot
+                if dot_font:
+                    of = win32gui.SelectObject(mem, dot_font)
+                    is_done = frame["kind"] == "done"
+                    if is_done:
+                        dot_col = _DONE
+                    else:
+                        k = 0.55 + 0.45 * math.sin(frame["pulse"])
+                        dot_col = _scale_color(_ACCENT, k)
+                    win32gui.SetTextColor(mem, dot_col)
+                    win32gui.DrawText(mem, "●", -1,
+                                      (PAD_L, 0, PAD_L + DOT_BOX, h),
+                                      win32con.DT_CENTER | win32con.DT_VCENTER
+                                      | win32con.DT_SINGLELINE)
+                    win32gui.SelectObject(mem, of)
+                # text
+                if txt_font:
+                    of = win32gui.SelectObject(mem, txt_font)
+                    win32gui.SetTextColor(mem, _FG)
+                    tx = PAD_L + DOT_BOX + GAP
+                    win32gui.DrawText(mem, frame["text"], -1,
+                                      (tx, 0, w - PAD_R, h),
+                                      win32con.DT_LEFT | win32con.DT_VCENTER
+                                      | win32con.DT_SINGLELINE
+                                      | win32con.DT_END_ELLIPSIS)
+                    win32gui.SelectObject(mem, of)
+                win32gui.BitBlt(hdc, 0, 0, w, h, mem, 0, 0, win32con.SRCCOPY)
+                win32gui.SelectObject(mem, old_bmp)
+                win32gui.DeleteObject(bmp)
+                win32gui.DeleteDC(mem)
+                win32gui.EndPaint(hwnd, ps)
+                return 0
+            if msg == win32con.WM_NCHITTEST:
+                return win32con.HTTRANSPARENT   # click-through
+            if msg == win32con.WM_DESTROY:
+                win32gui.PostQuitMessage(0)
+                return 0
+            return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
-            # Pulse the dot while working (frozen green during the Done tick).
-            if state["visible"] and ta > 0 and not state["done"]:
-                state["pulse"] = (state["pulse"] + 0.14) % (2 * 3.14159)
-                import math
-                s = 0.5 + 0.5 * math.sin(state["pulse"])
-                r = _dr + _px(2) * s
-                dot.coords(_dot_id, _dc - r, _dc - r, _dc + r, _dc + r)
-
-            root.after(33, _pump)
-
-        root.after(33, _pump)
-        root.mainloop()
-    except Exception:
-        _disabled = True
-
-
-def _ensure_started():
-    global _thread, _started
-    if _disabled or _started or not _enabled():
-        return
-    with _lock:
-        if _started or _disabled:
-            return
+        wc = win32gui.WNDCLASS()
+        wc.lpszClassName = cls
+        wc.hInstance = hinst
+        wc.lpfnWndProc = _wnd_proc
         try:
-            _thread = threading.Thread(target=_run_loop, name="activity-hud",
-                                       daemon=True)
-            _thread.start()
-            _started = True
+            win32gui.RegisterClass(wc)
         except Exception:
             pass
 
+        sw = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+        ex = (win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST
+              | win32con.WS_EX_TOOLWINDOW | win32con.WS_EX_NOACTIVATE)
+        hwnd = win32gui.CreateWindowEx(ex, cls, None, win32con.WS_POPUP,
+                                       0, Y, 10, HEIGHT, 0, 0, hinst, None)
+        win32gui.SetLayeredWindowAttributes(
+            hwnd, _BG_KEY, 0, win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
 
-# ---------------------------------------------------------------------------
-# public API (call from any thread)
-# ---------------------------------------------------------------------------
-def activity(text: str) -> None:
-    """Show/refresh the overlay with a one-line status. No-op if disabled."""
-    if _disabled or not _enabled():
-        return
-    _ensure_started()
-    try:
-        _q.put_nowait(("show", str(text)))
+        MAX_A = 235
+        alpha = 0.0
+        cur_w = 0
+        shown_win = False
+        last_topmost = 0.0
+
+        while True:
+            with _lock:
+                want = _state["want"]
+                text = _state["text"]
+                kind = _state["kind"]
+                last = _state["last"]
+                done_until = _state["done_until"]
+
+            now = time.time()
+            # Auto-hide: short hold after a Done tick, else the idle timeout.
+            if want:
+                if kind == "done":
+                    if now > done_until:
+                        want = False
+                        with _lock:
+                            _state["want"] = False
+                elif (now - last) > _IDLE_HIDE_S:
+                    want = False
+                    with _lock:
+                        _state["want"] = False
+
+            frame["text"] = text
+            frame["kind"] = kind
+
+            # Resize + recenter when the text (width) changes.
+            desired = PAD_L + DOT_BOX + GAP + _text_w(text) + PAD_R
+            desired = max(_px(120), min(_px(560), desired))
+            if want and desired != cur_w:
+                cur_w = desired
+                x = int((sw - cur_w) / 2)
+                try:
+                    win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, x, Y,
+                                          cur_w, HEIGHT,
+                                          win32con.SWP_NOACTIVATE)
+                except Exception:
+                    pass
+
+            # Ease alpha toward target.
+            target = MAX_A if want else 0.0
+            alpha += (target - alpha) * 0.30
+            if want and not shown_win:
+                try:
+                    win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
+                except Exception:
+                    pass
+                shown_win = True
+            try:
+                win32gui.SetLayeredWindowAttributes(
+                    hwnd, _BG_KEY, int(max(0, min(MAX_A, alpha))),
+                    win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
+            except Exception:
+                pass
+            if not want and alpha < 2 and shown_win:
+                try:
+                    win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+                except Exception:
+                    pass
+                shown_win = False
+                cur_w = 0  # force a resize+recenter on next show
+
+            # Advance the dot pulse (frozen on Done).
+            if want and kind != "done":
+                frame["pulse"] += 0.16
+
+            try:
+                if shown_win:
+                    win32gui.InvalidateRect(hwnd, None, False)
+                if now - last_topmost > 1.0:
+                    last_topmost = now
+                    if shown_win:
+                        win32gui.SetWindowPos(
+                            hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                            win32con.SWP_NOSIZE | win32con.SWP_NOMOVE
+                            | win32con.SWP_NOACTIVATE)
+                win32gui.PumpWaitingMessages()
+            except Exception:
+                break
+            time.sleep(0.033)   # ~30fps
     except Exception:
-        pass
-
-
-def for_tool(name: str, args: Optional[dict] = None) -> None:
-    """Convenience: surface the HUD for a desktop tool call by name."""
-    if name not in DESKTOP_TOOLS:
-        return
-    activity(label_for(name, args))
-
-
-def done(text: str = "Done") -> None:
-    """End a desktop task with a brief green completion tick, then fade. No-op if
-    the overlay isn't currently up (a turn with no desktop action stays silent)."""
-    if _disabled or not _started:
-        return
-    try:
-        _q.put_nowait(("done", str(text)))
-    except Exception:
-        pass
-
-
-def hide() -> None:
-    """Begin fading the overlay out immediately."""
-    if _disabled or not _started:
-        return
-    try:
-        _q.put_nowait(("hide", None))
-    except Exception:
-        pass
+        _disabled = True
+    finally:
+        try:
+            ctypes.windll.user32.ReleaseDC(0, _measure_dc)
+        except Exception:
+            pass
+        for _f in (locals().get("txt_font"), locals().get("dot_font")):
+            try:
+                if _f:
+                    win32gui.DeleteObject(_f)
+            except Exception:
+                pass

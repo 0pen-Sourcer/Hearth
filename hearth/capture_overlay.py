@@ -22,6 +22,7 @@ from math import ceil as _ceil
 _PURPLE = 0x00E060A0  # win32 COLORREF is 0x00BBGGRR — this is a violet (a0,60,e0)
 _DIM = 0x00603040     # spent-dot color (dim violet)
 _BG_KEY = 0x00010101  # near-black color-key painted transparent
+_PILL = 0x00181114    # dark pill background (#141118), matches the activity HUD
 _MAX_DOTS = 5         # hard cap so a huge delay can't carpet the screen with dots
 
 
@@ -57,7 +58,9 @@ def _run(duration: float) -> None:
             if msg == win32con.WM_PAINT:
                 hdc, ps = win32gui.BeginPaint(hwnd)
                 rect = win32gui.GetClientRect(hwnd)
-                bg = win32gui.CreateSolidBrush(_BG_KEY)
+                # Dark pill body (not the transparent key) so the dots read as a
+                # deliberate HUD element, matching the activity overlay.
+                bg = win32gui.CreateSolidBrush(_PILL)
                 win32gui.FillRect(hdc, rect, bg)
                 win32gui.DeleteObject(bg)
                 # Dots are a countdown: `lit` = dots still remaining, capped.

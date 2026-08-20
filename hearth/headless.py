@@ -1086,6 +1086,14 @@ async def run_once(
             # Snapshot the estimate for THIS prompt so the usage block coming
             # back on the stream lets us learn the estimate's bias.
             _est_sent = estimate_tokens(messages)
+            # If the desktop-activity pill is up (a computer-use tool fired this
+            # turn), show "Thinking…" during this generation so the gap between
+            # actions doesn't read as a stall. No-op otherwise.
+            try:
+                from . import activity_hud
+                activity_hud.thinking()
+            except Exception:
+                pass
             try:
                 resp = await client.chat.completions.create(**kwargs)
             except Exception as _re:
