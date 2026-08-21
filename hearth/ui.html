@@ -3946,6 +3946,13 @@
           </div>
           <button class="btn-mini" id="btn-update-check">Check for updates</button>
         </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Repair install</div>
+            <div class="hint">Restore Hearth's code and voice files if something got deleted or corrupted, by re-downloading and re-applying this version. The bundled engine still needs a reinstall. <span id="repair-status"></span></div>
+          </div>
+          <button class="btn-mini" id="btn-repair">Repair</button>
+        </div>
         <div class="field" id="broadcast-field" style="display:none; align-items:flex-start;">
           <div class="label">
             <div class="name">Broadcast to all builds <span style="color:var(--accent-2);font-size:11px;font-weight:400">· author</span></div>
@@ -10144,6 +10151,37 @@ async function refreshSettings() {
       obStep = 1; obState = { brain: '', voice: '' };
       obShow();
     };
+    // Repair: re-fetch + re-apply this version's patch to restore deleted or
+    // corrupted loose files (code + voice). Mirrors the CLI /repair.
+    const repairBtn = $('btn-repair');
+    if (repairBtn) repairBtn.onclick = async () => {
+      const st = $('repair-status');
+      repairBtn.disabled = true; const _rt = repairBtn.textContent; repairBtn.textContent = 'Repairing…';
+      if (st) st.textContent = 'downloading this version…';
+      try {
+        const resp = await fetch('/api/update/repair', { method: 'POST' });
+        const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+            if (!line) continue;
+            let ev; try { ev = JSON.parse(line); } catch { continue; }
+            if (ev.type === 'progress' && ev.total) {
+              if (st) st.textContent = Math.round(ev.done / 1e6) + '/' + Math.round(ev.total / 1e6) + ' MB';
+            } else if (ev.type === 'done') {
+              if (ev.ok) { if (st) st.textContent = 'restored ' + (ev.restored || 0) + ' files'; toast('Repaired', 'Restart Hearth to load the restored files.', 'ok', 8000); }
+              else { if (st) st.textContent = ''; toast('Repair failed', ev.error || 'unknown', 'err', 9000); }
+            }
+          }
+        }
+      } catch (e) { if (st) st.textContent = ''; toast('Repair failed', e.message, 'err', 9000); }
+      finally { repairBtn.disabled = false; repairBtn.textContent = _rt; }
+    };
+
     // Update check - opt-in, never auto-installs. Mirrors the CLI /update.
     const updateBtn = $('btn-update-check');
     if (updateBtn) updateBtn.onclick = async () => {

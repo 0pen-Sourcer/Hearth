@@ -2016,6 +2016,37 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/update/restart":
             from . import updater
             return self._send_json(200, updater.restart_app())
+        if path == "/api/update/repair":
+            # Restore deleted/corrupted loose files (code + voice) by re-fetching
+            # and re-applying this version's patch. Same NDJSON progress shape.
+            from . import updater
+            import time as _t
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            _last = [0.0]
+
+            def emit(obj: Dict[str, Any]) -> None:
+                try:
+                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def on_progress(done: int, total: int) -> None:
+                now = _t.time()
+                if now - _last[0] < 0.2 and done != total:
+                    return
+                _last[0] = now
+                emit({"type": "progress", "done": done, "total": total})
+            try:
+                r = updater.repair(on_progress=on_progress)
+                emit({"type": "done", **r, "repaired": bool(r.get("ok"))})
+            except Exception as e:
+                emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
         if path == "/api/update/patch":
             # Small code-only update: download the patch, apply it over the
             # on-disk .py layer, and report. Same NDJSON shape as the installer

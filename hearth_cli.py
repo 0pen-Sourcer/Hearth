@@ -1745,6 +1745,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/allowed{C_RESET}               list paths the assistant can write to")
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
             print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
+            print(f"  {C_TOOL}/repair{C_RESET}                restore deleted/corrupted files by re-applying this version")
             print(f"  {C_TOOL}/phone{C_RESET}                 reach Hearth from your phone (Telegram + ntfy status)")
             print(f"  {C_TOOL}/skill [install <src>]{C_RESET}  list / install / remove shareable skills (GitHub or local)")
             print(f"  {C_TOOL}/exit{C_RESET}                  quit (or just say bye)")
@@ -1780,6 +1781,29 @@ class JarvisCLI:
                     print(f"{C_DIM}skipped. run /update anytime.{C_RESET}")
             except Exception as e:
                 print(f"{C_ERR}update unavailable: {type(e).__name__}: {e}{C_RESET}")
+            return True
+        if low == "/repair":
+            # Restore a fouled-up install by re-applying this version's patch
+            # (Hearth's code + the voice files). Bundled engine deps aren't in
+            # the patch, so those still need a reinstall.
+            try:
+                from hearth import updater
+                if not updater.can_patch():
+                    print(f"{C_DIM}This build keeps its code inside the exe, so it can't self-repair. Reinstall the release to restore it.{C_RESET}")
+                    return True
+                print(f"{C_DIM}Repairing: re-fetching this version's files (one-time large download)…{C_RESET}")
+                def _rp(done, total):
+                    if total:
+                        sys.stdout.write(f"\r{C_DIM}  {done/1e6:.0f}/{total/1e6:.0f} MB{C_RESET}")
+                        sys.stdout.flush()
+                r = updater.repair(on_progress=_rp)
+                print()
+                if r.get("ok"):
+                    print(f"{C_OK}Repaired {r.get('restored', 0)} files.{C_RESET} {C_DIM}Restart Hearth to load them.{C_RESET}")
+                else:
+                    print(f"{C_ERR}Repair failed: {r.get('error')}{C_RESET}")
+            except Exception as e:
+                print(f"{C_ERR}repair unavailable: {type(e).__name__}: {e}{C_RESET}")
             return True
         if low == "/phone":
             # Discoverability for the two opt-in phone features. Full setup in

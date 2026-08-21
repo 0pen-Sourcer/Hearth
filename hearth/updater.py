@@ -114,6 +114,31 @@ def download_patch(on_progress=None, tag: str = "") -> dict:
             "size": asset["size"]}
 
 
+def repair(on_progress=None) -> dict:
+    """Restore a fouled-up install by re-fetching THIS version's patch and
+    re-applying it. The patch carries Hearth's code plus the loose voice stack
+    (torch/scipy/soundfile/halo), so a file someone deleted or corrupted in that
+    layer comes back. It does NOT restore the bundled engine / onnxruntime (too
+    big to patch) — those need a full reinstall. apply_patch is atomic (it backs
+    up and rolls back), so a failed repair leaves the install as it was."""
+    if not can_patch():
+        return {"ok": False, "error":
+                "this build keeps its code inside the exe, so it can't self-repair; "
+                "reinstall the release to restore it"}
+    tag = HEARTH_VERSION if HEARTH_VERSION.startswith("v") else "v" + HEARTH_VERSION
+    got = download_patch(on_progress=on_progress, tag=tag)
+    if not got.get("ok"):
+        # This version's release/patch may be gone — fall back to the latest.
+        got = download_patch(on_progress=on_progress)
+    if not got.get("ok"):
+        return got
+    r = apply_patch(got["path"])
+    if r.get("ok"):
+        return {"ok": True, "restored": r.get("files", 0),
+                "note": "restored the code + voice files; restart Hearth to load them"}
+    return r
+
+
 def apply_patch(path: str) -> dict:
     """Replace the on-disk .py layer with the patch contents.
 
