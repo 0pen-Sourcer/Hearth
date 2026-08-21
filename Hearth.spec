@@ -95,6 +95,10 @@ if os.path.isdir(_wt_dir):
 #   - faster_whisper → assets/*.onnx (Silero VAD model)
 for _pkg in ("kokoro_onnx", "espeakng_loader", "language_tags",
              "faster_whisper", "onnxruntime", "matplotlib",
+             # RealtimeSTT.audio_recorder imports soundfile (needs the libsndfile
+             # DLL in _soundfile_data) and halo (its spinner frames live in the
+             # `spinners` package). Missing either crashes the recorder on import.
+             "_soundfile_data", "spinners",
              # jsonschema_specifications ships its metaschema JSONs in a schemas/
              # dir loaded via importlib.resources. Without them the MCP client's
              # jsonschema validation dies with a FileNotFound on
@@ -170,14 +174,18 @@ HIDDEN = [
     "hearth.desktop_a11y",        # desktop a11y snapshot/click/type
     "hearth.team",                # watch-a-team multi-agent panes
     "hearth.voice_overlay",       # desktop voice HUD (win32 dot grid)
-    "hearth.activity_hud",        # computer-use activity overlay (tk pill)
+    "hearth.activity_hud",        # computer-use activity overlay (win32 pill)
     # Desktop control needs the UI Automation COM bridge bundled, or
     # desktop_snapshot/click/type fail in the packaged exe with ImportError.
     # (comtypes.gen is generated at runtime — collect_all("comtypes") below
     # pulls what's needed; don't list it here or PyInstaller warns.)
     "uiautomation", "comtypes", "comtypes.client",
-    # RealtimeSTT + silero VAD for "ChatGPT voice mode" feel
-    "RealtimeSTT", "silero_vad",
+    # RealtimeSTT + silero VAD for streaming voice mode. RealtimeSTT's recorder
+    # imports torch at module load, so torch must be present (it's no longer in
+    # excludes); list it so the tree-shaker never drops it and the contrib hook
+    # collects its libs.
+    "RealtimeSTT", "silero_vad", "torch", "scipy", "scipy.signal",
+    "soundfile", "halo", "spinners", "log_symbols", "cursor",
     # llama_cpp.server's runtime extras — without these the builtin
     # server exits code 1 with ModuleNotFoundError. Belt + suspenders
     # with collect_all("llama_cpp") below.
@@ -359,7 +367,11 @@ a_tray = Analysis(
     hiddenimports=HIDDEN + collect_submodules("hearth"),
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter", "tcl", "tk", "scipy", "torch"],
+    # torch AND scipy are NOT excluded: RealtimeSTT.AudioToTextRecorder imports
+    # both at module load, so dropping either left voice dead in the packaged app
+    # (torch -> stuck "warming up mic"; scipy -> ModuleNotFoundError). CPU torch
+    # is enough (VAD via ONNX, STT via faster-whisper); COLLECT dedupes to one copy.
+    excludes=["tkinter", "tcl", "tk"],
     cipher=block_cipher,
     noarchive=False,
 )
@@ -387,7 +399,11 @@ a_cli = Analysis(
     binaries=PW_BINARIES,
     datas=DATAS,
     hiddenimports=HIDDEN + collect_submodules("hearth"),
-    excludes=["tkinter", "tcl", "tk", "scipy", "torch"],
+    # torch AND scipy are NOT excluded: RealtimeSTT.AudioToTextRecorder imports
+    # both at module load, so dropping either left voice dead in the packaged app
+    # (torch -> stuck "warming up mic"; scipy -> ModuleNotFoundError). CPU torch
+    # is enough (VAD via ONNX, STT via faster-whisper); COLLECT dedupes to one copy.
+    excludes=["tkinter", "tcl", "tk"],
     cipher=block_cipher,
     noarchive=False,
 )
@@ -414,7 +430,11 @@ a_window = Analysis(
     binaries=PW_BINARIES,
     datas=DATAS,
     hiddenimports=HIDDEN + collect_submodules("hearth"),
-    excludes=["tkinter", "tcl", "tk", "scipy", "torch"],
+    # torch AND scipy are NOT excluded: RealtimeSTT.AudioToTextRecorder imports
+    # both at module load, so dropping either left voice dead in the packaged app
+    # (torch -> stuck "warming up mic"; scipy -> ModuleNotFoundError). CPU torch
+    # is enough (VAD via ONNX, STT via faster-whisper); COLLECT dedupes to one copy.
+    excludes=["tkinter", "tcl", "tk"],
     cipher=block_cipher,
     noarchive=False,
 )

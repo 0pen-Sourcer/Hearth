@@ -49,6 +49,8 @@ dist/
 dist_*/
 Output/
 *.exe
+build_log.txt
+build_release_log.txt
 
 # ---- Local reference material kept beside the project (not ours to ship) ----
 *-main/

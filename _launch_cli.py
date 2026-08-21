@@ -3,6 +3,13 @@ from __future__ import annotations
 import os
 import runpy
 import sys
+import multiprocessing
+
+# PyInstaller + multiprocessing: RealtimeSTT spawns its STT recorder as a child
+# process that re-launches this exe with --multiprocessing-fork. Without
+# freeze_support() the child crashes and voice hangs on "warming up mic". Must
+# run before any argparse/sentinel handling; no-op for a normal launch.
+multiprocessing.freeze_support()
 
 # Frozen multi-entry: the built-in LLM server re-invokes THIS exe with a
 # sentinel because sys.executable is the bundle, not python. Route it to

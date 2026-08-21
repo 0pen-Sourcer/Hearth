@@ -14,6 +14,16 @@ file BEFORE importing anything else.
 from __future__ import annotations
 import os
 import sys
+import multiprocessing
+
+# PyInstaller + multiprocessing: RealtimeSTT spawns its STT recorder as a CHILD
+# process, which on frozen Windows re-launches THIS exe with
+# `--multiprocessing-fork parent_pid=… pipe_handle=…`. Without freeze_support()
+# that child falls through to argparse ("unrecognized arguments") and crashes, so
+# the recorder never starts and voice sits on "warming up mic" forever. This
+# intercepts and runs the child worker; it MUST come before any sentinel /
+# argparse handling. A no-op for a normal (non-child) launch.
+multiprocessing.freeze_support()
 
 # Frozen multi-entry: the built-in LLM server can't be launched as
 # `python -m llama_cpp.server` because in the bundle sys.executable is THIS

@@ -12,6 +12,11 @@ Usage (from the tray):
 from __future__ import annotations
 import os
 import sys
+import multiprocessing
+
+# PyInstaller + multiprocessing safety (see _launch_tray): intercept a spawned
+# child re-launch before anything else. No-op for a normal launch.
+multiprocessing.freeze_support()
 
 # Same null-stderr safety as the tray launcher
 if getattr(sys, "frozen", False) and (sys.stderr is None or sys.stdout is None):

@@ -26,6 +26,24 @@ sys.path.insert(0, ROOT)
 
 from hearth.updater import HEARTH_VERSION  # noqa: E402
 
+# Code-only patch. A release that adds a bundled DEPENDENCY (v0.7.5 adds torch +
+# scipy for voice) can only patch it if that dependency ships LOOSE in _internal.
+# torch does, but scipy/soundfile/halo keep their Python code in the frozen PYZ
+# INSIDE the exe, which a patch can't replace. Voice needs all of them, so it
+# cannot be delivered by a patch this release: Full/Lite users get working voice
+# from the INSTALLER. (To patch voice later, unfreeze those packages like hearth's
+# own code so they ship loose, then list their _internal subpaths here.)
+_BINARY_INCLUDES: list = []
+# build_release.ps1 moves the Full bundle to dist_full; a plain build lands in
+# dist. Prefer the Full edition (the patch's binaries are identical across
+# editions, so either works).
+_DIST_CANDIDATES = [
+    os.path.join(ROOT, "dist_full", "Hearth", "_internal"),
+    os.path.join(ROOT, "dist", "Hearth", "_internal"),
+]
+_DIST_INTERNAL = next((d for d in _DIST_CANDIDATES if os.path.isdir(d)),
+                      _DIST_CANDIDATES[0])
+
 
 def main() -> int:
     out_dir = os.path.join(ROOT, "Output")
@@ -44,17 +62,48 @@ def main() -> int:
     if os.path.isfile(cli):
         members.append((cli, "hearth_cli.py"))
 
+    code_count = len(members)
+
+    # Bundled-dependency additions for this release, pulled from the built dist so
+    # they are the exact files the installer ships (right DLLs, right layout).
+    bin_count = 0
+    bin_bytes = 0
+    if _BINARY_INCLUDES:
+        if not os.path.isdir(_DIST_INTERNAL):
+            print(f"WARNING: {_DIST_INTERNAL} not found. Run the full build first,\n"
+                  f"         or the patch will ship WITHOUT {', '.join(_BINARY_INCLUDES)} "
+                  f"(voice stays broken on a patched Full install).", file=sys.stderr)
+        else:
+            for sub in _BINARY_INCLUDES:
+                base = os.path.join(_DIST_INTERNAL, sub)
+                if not os.path.exists(base):
+                    print(f"WARNING: '{sub}' not in the build at {base} — skipped.", file=sys.stderr)
+                    continue
+                for dirpath, _dirs, files in os.walk(base):
+                    for f in files:
+                        src = os.path.join(dirpath, f)
+                        arc = os.path.relpath(src, _DIST_INTERNAL).replace(os.sep, "/")
+                        members.append((src, arc))
+                        bin_count += 1
+                        bin_bytes += os.path.getsize(src)
+
     if not members:
         print("nothing to package", file=sys.stderr)
         return 1
 
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for src, arc in members:
             z.write(src, arc)
 
     size = os.path.getsize(out)
     print(f"{out}")
-    print(f"  {len(members)} files, {size / 1e6:.2f} MB  (version {HEARTH_VERSION})")
+    print(f"  code: {code_count} files")
+    if bin_count:
+        print(f"  bundled deps ({', '.join(_BINARY_INCLUDES)}): "
+              f"{bin_count} files, {bin_bytes / 1e6:.0f} MB uncompressed")
+    print(f"  patch zip: {size / 1e6:.1f} MB  (version {HEARTH_VERSION})")
+    if _BINARY_INCLUDES and not bin_count:
+        print("  NOTE: no bundled deps in this patch — build the full dist first.")
     print("  upload beside the installers; the in-app updater finds it by name")
     return 0
 
