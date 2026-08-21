@@ -33,6 +33,12 @@ from hearth.updater import HEARTH_VERSION  # noqa: E402
 # scipy/halo/spinners/_soundfile_data are dirs; soundfile is a single file.
 _BINARY_INCLUDES = ["torch", "scipy", "halo", "spinners",
                     "_soundfile_data", "soundfile.py"]
+# Pure-Python packages the voice recorder imports that PyInstaller freezes into
+# the exe rather than shipping loose, so they are absent from the dist tree and
+# from any base install that never had torch. Sourced straight from the venv and
+# dropped loose so a patched older install can resolve them. torchgen ships inside
+# the torch wheel; both are import-only, no compiled files.
+_VENV_PURE_INCLUDES = ["torchgen", "typing_extensions"]
 # build_release.ps1 moves the Full bundle to dist_full; a plain build lands in
 # dist. Prefer the Full edition (the patch's binaries are identical across
 # editions, so either works).
@@ -91,6 +97,35 @@ def main() -> int:
                         members.append((src, arc))
                         bin_count += 1
                         bin_bytes += os.path.getsize(src)
+
+    # Pure-Python voice deps that are frozen into the exe (not in the dist tree),
+    # sourced from the venv so a patched older install can import them.
+    import importlib.util as _ilu
+    for _mod in _VENV_PURE_INCLUDES:
+        try:
+            _spec = _ilu.find_spec(_mod)
+        except Exception:
+            _spec = None
+        if _spec is None:
+            print(f"WARNING: '{_mod}' not importable in this venv - skipped.", file=sys.stderr)
+            continue
+        if _spec.submodule_search_locations:                # package dir
+            _pkg = list(_spec.submodule_search_locations)[0]
+            for dirpath, _dirs, files in os.walk(_pkg):
+                if "__pycache__" in dirpath:
+                    continue
+                for f in files:
+                    if f.endswith((".pyc", ".pyo")):
+                        continue
+                    src = os.path.join(dirpath, f)
+                    rel = os.path.relpath(src, os.path.dirname(_pkg))
+                    members.append((src, rel.replace(os.sep, "/")))
+                    bin_count += 1
+                    bin_bytes += os.path.getsize(src)
+        elif _spec.origin and os.path.isfile(_spec.origin):  # single module
+            members.append((_spec.origin, os.path.basename(_spec.origin)))
+            bin_count += 1
+            bin_bytes += os.path.getsize(_spec.origin)
 
     if not members:
         print("nothing to package", file=sys.stderr)
