@@ -14718,17 +14718,78 @@ async function promptUpdateIfAvailable() {
 // Broadcast announcements: poll the feed and toast anything this build hasn't
 // shown yet (the author pushes them to announcements.json). Backend dedups, so
 // each fires once per machine. Staggered if several land at once.
+// Signed developer broadcasts render as a persistent card matching the update
+// panel, not a 13s toast — a broadcast is usually something to act on (a hotfix,
+// a new release), so it sits until dismissed, ignores toast-mute, and can carry
+// an action button. Dedup is server-side (marked seen on fetch) + client-side.
+const _bcSeen = new Set();
+function showBroadcast(items) {
+  let ov = document.getElementById('broadcast-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'broadcast-overlay';
+    ov.style.cssText = 'position:fixed;top:112px;right:34px;width:368px;max-height:70vh;overflow:auto;background:var(--bg-1);border:1px solid var(--border);border-radius:12px;box-shadow:0 26px 64px rgba(0,0,0,0.62);padding:14px 16px;z-index:10000;display:none;';
+    document.body.appendChild(ov);
+  }
+  (items || []).forEach(a => {
+    const id = String(a.id || '');
+    if (!id || _bcSeen.has(id)) return;
+    _bcSeen.add(id);
+    const kind = a.kind === 'warn' ? 'warn' : (a.kind === 'err' ? 'err' : 'info');
+    const dot = kind === 'warn' ? 'var(--accent-2)' : kind === 'err' ? 'var(--err)' : 'var(--accent)';
+    const act = (a.action && a.action.label) ? a.action : null;
+    const card = document.createElement('div');
+    card.className = 'bc-card';
+    card.dataset.bcid = id;
+    card.style.cssText = 'border:1px solid var(--border);border-radius:10px;background:var(--bg-0,rgba(0,0,0,.22));padding:12px 13px;margin-bottom:10px';
+    const actBtn = act
+      ? `<button data-bcact="1" style="margin-top:11px;padding:7px 13px;background:var(--accent);border:none;border-radius:7px;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer">${esc(act.label)}</button>`
+      : '';
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div style="display:flex;gap:8px;align-items:center;min-width:0">
+          <span style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0"></span>
+          <span style="font-weight:700;font-size:13.5px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((a.title || 'Hearth').slice(0, 90))}</span>
+        </div>
+        <button data-bcdismiss="1" title="Dismiss" style="background:none;border:none;color:var(--fg-dim);font-size:18px;line-height:1;cursor:pointer;flex-shrink:0;padding:0 2px">&times;</button>
+      </div>
+      <div style="font-size:12.5px;color:var(--fg-dim);margin-top:7px;line-height:1.5;white-space:pre-wrap">${esc((a.body || '').slice(0, 400))}</div>
+      ${actBtn}`;
+    card.querySelector('[data-bcdismiss]').addEventListener('click', () => {
+      card.remove();
+      if (!ov.querySelector('.bc-card')) ov.style.display = 'none';
+    });
+    const ab = card.querySelector('[data-bcact]');
+    if (ab && act) ab.addEventListener('click', async () => {
+      if (act.url) { try { window.open(act.url, '_blank'); } catch {} return; }
+      if (act.act === 'repair') {
+        ab.disabled = true; ab.textContent = 'Repairing…';
+        try {
+          const resp = await fetch('/api/update/repair', { method: 'POST' });
+          const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+          for (;;) {
+            const { done, value } = await reader.read(); if (done) break;
+            buf += dec.decode(value, { stream: true }); let nl;
+            while ((nl = buf.indexOf('\n')) >= 0) {
+              const ln = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); if (!ln) continue;
+              let ev; try { ev = JSON.parse(ln); } catch { continue; }
+              if (ev.error) { ab.textContent = 'Repair failed'; ab.disabled = false; }
+              if (ev.done) { ab.textContent = 'Repaired ✓ — restart Hearth'; }
+            }
+          }
+        } catch (e) { ab.textContent = 'Repair failed'; ab.disabled = false; }
+      }
+    });
+    ov.appendChild(card);
+  });
+  if (ov.querySelector('.bc-card')) ov.style.display = 'block';
+}
+
 async function pollAnnouncements() {
   try {
     const r = await api('/api/announcements/check', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
     const items = (r && r.items) || [];
-    items.forEach((a, i) => {
-      setTimeout(() => {
-        const kind = a.kind === 'warn' ? 'warn' : (a.kind === 'err' ? 'err' : 'ok');
-        // Display-only + escaped by toast(); cap length so a bad feed can't spam.
-        toast((a.title || 'Hearth').slice(0, 80), (a.body || '').slice(0, 280), kind, 13000);
-      }, i * 1300);
-    });
+    if (items.length) showBroadcast(items);
   } catch {}
 }
 
