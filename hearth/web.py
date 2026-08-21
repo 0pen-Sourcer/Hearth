@@ -3917,39 +3917,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return False
 
         try:
-            import sounddevice as sd  # type: ignore
-            import numpy as np  # type: ignore
-            import queue as _queue
-            import time as _t
             from . import listen as _listen
-            idx = _listen.input_device_index()
-            q: "_queue.Queue" = _queue.Queue()
-
-            def _cb(indata, frames, tinfo, status):
-                try:
-                    q.put_nowait(float(np.abs(indata).max()))
-                except Exception:
-                    pass
-
-            name = ""
-            try:
-                _qd = idx if idx is not None else sd.default.device[0]
-                name = str(sd.query_devices(_qd).get("name", ""))
-            except Exception:
-                pass
-            with sd.InputStream(device=idx, channels=1, samplerate=16000,
-                                blocksize=1600, dtype="float32", callback=_cb):
-                if not emit({"start": True, "device": name}):
-                    return
-                end = _t.time() + 6.0
-                while _t.time() < end:
-                    try:
-                        lvl = q.get(timeout=0.15)
-                    except Exception:
-                        lvl = 0.0
-                    if not emit({"level": round(min(1.0, lvl), 4)}):
-                        return
-                emit({"done": True})
+            # Capture runs in an isolated subprocess with its own fresh PortAudio,
+            # so a mic plugged in after launch is actually seen (the main process's
+            # device table is a stale startup snapshot). emit() relays each line.
+            _listen.stream_mic_levels(emit, seconds=6.0)
         except Exception as e:
             emit({"error": f"{type(e).__name__}: {e}"})
 

@@ -144,6 +144,82 @@ def rescan_devices() -> list:
     return list_input_devices()
 
 
+_MIC_METER_CODE = (
+    "import os, sys, json, time\n"
+    "try:\n"
+    "    import sounddevice as sd, numpy as np, queue\n"
+    "    try: sd._terminate(); sd._initialize()\n"     # fresh PortAudio -> sees a just-plugged mic
+    "    except Exception: pass\n"
+    "    v=(os.environ.get('JARVIS_VOICE_INPUT_DEVICE','') or '').strip()\n"
+    "    idx=int(v) if v.lstrip('-').isdigit() and int(v)>=0 else None\n"
+    "    q=queue.Queue()\n"
+    "    def cb(indata, frames, t, s):\n"
+    "        try: q.put_nowait(float(np.abs(indata).max()))\n"
+    "        except Exception: pass\n"
+    "    name=''\n"
+    "    try:\n"
+    "        qd=idx if idx is not None else sd.default.device[0]\n"
+    "        name=str(sd.query_devices(qd).get('name',''))\n"
+    "    except Exception: pass\n"
+    "    with sd.InputStream(device=idx, channels=1, samplerate=16000, blocksize=1600, dtype='float32', callback=cb):\n"
+    "        print(json.dumps({'start':True,'device':name}), flush=True)\n"
+    "        end=time.time()+SECONDS\n"
+    "        while time.time()<end:\n"
+    "            try: lvl=q.get(timeout=0.15)\n"
+    "            except Exception: lvl=0.0\n"
+    "            print(json.dumps({'level':round(min(1.0,lvl),4)}), flush=True)\n"
+    "        print(json.dumps({'done':True}), flush=True)\n"
+    "except Exception as e:\n"
+    "    print(json.dumps({'error': type(e).__name__+': '+str(e)}), flush=True)\n"
+)
+
+
+def stream_mic_levels(emit, seconds: float = 6.0) -> None:
+    """Stream live input levels from the SELECTED mic by running the capture in an
+    ISOLATED subprocess (its own fresh PortAudio), so a headset plugged in after
+    launch is actually seen — the main process's device table is a stale startup
+    snapshot and re-initializing it in-process crashes the app. `emit(obj)` is
+    called per line ({start|level|done|error}); it returns False when the client
+    is gone, which tears the subprocess down."""
+    import subprocess
+    import json as _json
+    code = _MIC_METER_CODE.replace("SECONDS", repr(float(seconds)))
+    args = ([sys.executable, "--hearth-run-python", "-c", code]
+            if getattr(sys, "frozen", False)
+            else [sys.executable, "-c", code])
+    flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    try:
+        p = subprocess.Popen(args, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True,
+                             creationflags=flags)
+    except Exception as e:
+        emit({"error": f"{type(e).__name__}: {e}"})
+        return
+    try:
+        for line in p.stdout:  # blocks per line; subprocess flushes each
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = _json.loads(line)
+            except Exception:
+                continue
+            if not emit(obj):
+                break
+    finally:
+        try:
+            p.terminate()
+        except Exception:
+            pass
+        try:
+            p.wait(timeout=2)
+        except Exception:
+            try:
+                p.kill()
+            except Exception:
+                pass
+
+
 def mic_test(seconds: float = 1.6) -> dict:
     """Record a short clip from the SELECTED mic and report its level, so the user
     can confirm the right device is picked and see the meter move when they talk.
