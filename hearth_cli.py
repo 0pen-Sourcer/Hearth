@@ -1098,21 +1098,37 @@ class JarvisCLI:
             ("memories",  f"{mem_lines}"),
             ("voice",     v_label),
         ]
-        # frame
-        width = 64
-        sys.stdout.write(f"{C_FRAME}╭{'─' * (width - 2)}╮{C_RESET}\n")
-        for label, value in rows:
-            line = f"{label:<10} {value}"
-            line = line[: width - 4]
-            pad = width - 4 - len(line)
-            sys.stdout.write(
-                f"{C_FRAME}│ {C_DIM}{label:<10}{C_RESET} {C_BOT}{value}{C_RESET}"
-                f"{' ' * (width - 4 - 11 - len(value))}{C_FRAME} │{C_RESET}\n"
-                if len(value) <= width - 16
-                else f"{C_FRAME}│ {C_DIM}{label:<10}{C_RESET} {C_BOT}{value[:width-16]}…{C_RESET}{C_FRAME} │{C_RESET}\n"
-            )
-            _ = pad  # placeholder; visual padding handled in the f-string
-        sys.stdout.write(f"{C_FRAME}╰{'─' * (width - 2)}╯{C_RESET}\n")
+        # Status panel — rich Table inside a rounded Panel for clean alignment
+        # (no hand-computed padding), with an ANSI-box fallback if rich is absent.
+        _used_rich = False
+        if _RICH is not None:
+            try:
+                from rich.table import Table as _RTable
+                from rich.panel import Panel as _RPanel
+                from rich import box as _rbox
+                _t = _RTable.grid(padding=(0, 2))
+                _t.add_column(justify="right", style="color(240)", no_wrap=True)
+                _t.add_column(style="color(183)", overflow="fold")
+                for label, value in rows:
+                    _t.add_row(label, str(value))
+                _RICH.print(_RPanel(_t, border_style="color(103)",
+                                    box=_rbox.ROUNDED, padding=(0, 1),
+                                    expand=False))
+                _used_rich = True
+            except Exception:
+                _used_rich = False
+        if not _used_rich:
+            width = 64
+            sys.stdout.write(f"{C_FRAME}╭{'─' * (width - 2)}╮{C_RESET}\n")
+            for label, value in rows:
+                value = str(value)
+                sys.stdout.write(
+                    f"{C_FRAME}│ {C_DIM}{label:<10}{C_RESET} {C_BOT}{value}{C_RESET}"
+                    f"{' ' * (width - 4 - 11 - len(value))}{C_FRAME} │{C_RESET}\n"
+                    if len(value) <= width - 16
+                    else f"{C_FRAME}│ {C_DIM}{label:<10}{C_RESET} {C_BOT}{value[:width-16]}…{C_RESET}{C_FRAME} │{C_RESET}\n"
+                )
+            sys.stdout.write(f"{C_FRAME}╰{'─' * (width - 2)}╯{C_RESET}\n")
         # Connectivity + model sanity. A fresh user should instantly know
         # whether to go start LM Studio, load a model, or just start chatting.
         if not _is_local_endpoint(LOCAL_API_BASE):
@@ -1128,7 +1144,7 @@ class JarvisCLI:
                     chat_models, reachable = self._probe_local_models()
             if not reachable:
                 print(f"{C_WARN}● no local model server running{C_RESET}")
-                print(f"{C_DIM}  Pick one with {C_RESET}{C_TOOL}/models use <n>{C_RESET}{C_DIM} — that boots Hearth's built-in server (no LM Studio needed). Or start LM Studio, or {C_RESET}{C_TOOL}/brain{C_RESET}{C_DIM} a cloud model.{C_RESET}")
+                print(f"{C_DIM}  Pick one with {C_RESET}{C_TOOL}/models use <n>{C_RESET}{C_DIM} to run it locally, or {C_RESET}{C_TOOL}/brain{C_RESET}{C_DIM} for a cloud model.{C_RESET}")
                 try:
                     from hearth import llmserver as _ls
                     if _ls._is_lite_edition():
@@ -1275,7 +1291,7 @@ class JarvisCLI:
                 print(f"  {C_DIM}No local models on disk yet. After setup, run {C_RESET}{C_TOOL}/models{C_RESET}"
                       f"{C_DIM} — I'll recommend one that fits your GPU and download it.{C_RESET}\n")
                 return
-            print(f"  {C_TOOL}Pick a model to run locally{C_RESET}{C_DIM} (boots Hearth's OWN server — no LM Studio needed):{C_RESET}")
+            print(f"  {C_TOOL}Pick a model to run locally{C_RESET}{C_DIM}:{C_RESET}")
             for i, m in enumerate(disk[:6], 1):
                 print(f"  {C_DIM}[{i}] {m.get('filename')}  ({m.get('size_gb')} GB · {m.get('source')}){C_RESET}")
             choice = input(f"  {C_DIM}number to load now, or Enter to skip (pick later with "
@@ -2030,7 +2046,7 @@ class JarvisCLI:
                 print(f"\n{C_BOT}Switch with:{C_RESET}")
                 print(f"  {C_TOOL}/brain local{C_RESET}                     auto: whatever's at localhost:1234")
                 print(f"  {C_TOOL}/brain lmstudio{C_RESET}                  use LM Studio (download.lmstudio.ai)")
-                print(f"  {C_TOOL}/brain builtin{C_RESET}                   use Hearth's bundled llama.cpp (no LM Studio needed)")
+                print(f"  {C_TOOL}/brain builtin{C_RESET}                   use Hearth's bundled llama.cpp server")
                 print(f"  {C_TOOL}/brain grok [api-key]{C_RESET}            xAI Grok       (key optional if saved)")
                 print(f"  {C_TOOL}/brain gemini [api-key]{C_RESET}          Google Gemini  (key optional if saved)")
                 print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")

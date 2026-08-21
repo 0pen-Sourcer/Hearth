@@ -3459,14 +3459,24 @@
             <span id="setting-voice-speed-label" style="min-width:36px; text-align:right; font-variant-numeric:tabular-nums; opacity:0.8;">1.5x</span>
           </div>
         </div>
-        <div class="field">
+        <div class="field" style="flex-direction:column; align-items:stretch; gap:6px;">
           <div class="label">
             <div class="name">Microphone</div>
-            <div class="hint">Which mic Hearth listens through. Pick your Steam Link / headset / virtual mic if the system default isn't capturing your voice.</div>
+            <div class="hint">Which mic Hearth listens through. Pick your headset or virtual mic if the system default isn't capturing your voice. Plugged one in just now? Hit Refresh.</div>
           </div>
-          <select id="setting-mic-device" style="min-width:240px;">
-            <option value="-1">System default</option>
-          </select>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select id="setting-mic-device" style="flex:1; min-width:200px;">
+              <option value="-1">System default</option>
+            </select>
+            <button class="btn-mini" id="btn-mic-refresh" title="Re-scan devices">Refresh</button>
+            <button class="btn-mini" id="btn-mic-test">Test mic</button>
+          </div>
+          <div id="mic-test-result" style="display:none; align-items:center; gap:8px;">
+            <div style="flex:1; height:8px; background:var(--bg-1); border-radius:4px; overflow:hidden;">
+              <div id="mic-test-bar" style="height:100%; width:0%; background:var(--accent); transition:width .12s;"></div>
+            </div>
+            <span id="mic-test-label" class="hint" style="margin:0; white-space:nowrap;"></span>
+          </div>
         </div>
         <div class="field">
           <div class="label">
@@ -3771,9 +3781,20 @@
         <div class="field">
           <div class="label">
             <div class="name">Server port</div>
-            <div class="hint">Default 1234 to match LM Studio. Change only if you have a conflict.</div>
+            <div class="hint">Default 1234. Change only if you have a port conflict.</div>
           </div>
           <input type="number" id="setting-server-port" min="1024" max="65535" value="1234" style="width:120px"/>
+        </div>
+
+        <div class="field" style="flex-direction:column; align-items:stretch; gap:6px;">
+          <div class="label">
+            <div class="name">Models folder</div>
+            <div class="hint">Where models are downloaded and scanned. Point it at a drive with space if your C is full, and your chats and memory stay where they are. Applies on the next launch; move existing models there or drop new ones in.</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="setting-models-dir" placeholder="e.g. D:\Hearth\models" spellcheck="false" style="flex:1"/>
+            <button class="btn-mini" id="btn-models-dir-save">Save</button>
+          </div>
         </div>
 
         <div class="hint" style="margin-top:18px; color:var(--fg-faint)">
@@ -10486,6 +10507,24 @@ async function refreshSettings() {
     $('setting-workspace').textContent = st.workspace;
     $('setting-lms').textContent = st.lms_cli ? 'yes (model load works via CLI)' : 'no - model load needs LM Studio REST';
 
+    // Models folder (relocatable to a drive with space). Loads the current path;
+    // Save writes the pointer and takes effect on next launch.
+    const mdInput = $('setting-models-dir');
+    if (mdInput) {
+      if (st.models_dir && document.activeElement !== mdInput) mdInput.value = st.models_dir;
+      const mdBtn = $('btn-models-dir-save');
+      if (mdBtn && !mdBtn._wired) {
+        mdBtn._wired = true;
+        mdBtn.addEventListener('click', async () => {
+          const p = (mdInput.value || '').trim();
+          if (!p) { toast('Enter a folder path', 'e.g. D:\\Hearth\\models', 'warn'); return; }
+          const r = await api('/api/models/set-dir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
+          if (r.ok) toast('Models folder set', 'Applies on the next launch: ' + r.path, 'ok', 7000);
+          else toast('Could not set folder', r.error || 'unknown', 'err', 7000);
+        });
+      }
+    }
+
     // ----- Server pane: live status + settings binding -----
     refreshServerCard();
     const ctxSel = $('setting-server-ctx');
@@ -11112,22 +11151,66 @@ window.addEventListener('load', () => {
 window.addEventListener('load', () => {
   const sel = document.getElementById('setting-mic-device');
   if (!sel) return;
-  (async () => {
+  async function populate(rescan) {
     try {
-      const r = await fetch('/api/voice/devices').then(x => x.json());
+      const r = await fetch('/api/voice/devices' + (rescan ? '?rescan=1' : '')).then(x => x.json());
       const devs = (r && r.devices) || [];
-      const cur = (r && typeof r.selected === 'number') ? r.selected : -1;
+      const cur = (r && typeof r.selected === 'number') ? r.selected : parseInt(sel.value, 10) || -1;
       sel.innerHTML = '<option value="-1">System default</option>' +
-        devs.map(d => `<option value="${d.index}">${String(d.name || ('input ' + d.index)).replace(/</g, '&lt;')}</option>`).join('');
+        devs.map(d => `<option value="${d.index}">${String(d.name || ('input ' + d.index)).replace(/</g, '&lt;')}${d.default ? ' (default)' : ''}</option>`).join('');
       sel.value = String(cur);
     } catch (e) {}
-  })();
+  }
+  populate();
   sel.addEventListener('change', async () => {
     const idx = parseInt(sel.value, 10);
     try {
       await api('/api/settings', { method: 'POST', body: JSON.stringify({ voice_input_device: isNaN(idx) ? -1 : idx }) });
       if (typeof toast === 'function') toast('Mic set', 'restart voice mode to use it', 'ok', 2500);
     } catch (e) {}
+  });
+  const refreshBtn = document.getElementById('btn-mic-refresh');
+  if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+    const _t = refreshBtn.textContent; refreshBtn.disabled = true; refreshBtn.textContent = 'Scanning…';
+    try { await populate(true); if (typeof toast === 'function') toast('Rescanned mics', '', 'ok', 1500); }
+    finally { refreshBtn.disabled = false; refreshBtn.textContent = _t; }
+  });
+  const testBtn = document.getElementById('btn-mic-test');
+  const row = document.getElementById('mic-test-result');
+  const bar = document.getElementById('mic-test-bar');
+  const lbl = document.getElementById('mic-test-label');
+  if (testBtn) testBtn.addEventListener('click', async () => {
+    if (row) row.style.display = 'flex';
+    testBtn.disabled = true; const _t = testBtn.textContent; testBtn.textContent = 'Speak now…';
+    if (lbl) lbl.textContent = 'listening…';
+    if (bar) { bar.style.width = '0%'; bar.style.background = 'var(--accent)'; }
+    let peak = 0;
+    try {
+      // Live meter: the backend streams the mic level ~10x/sec and the bar
+      // bounces with your voice, a real mic check rather than a yes/no summary.
+      const resp = await fetch('/api/voice/mic-meter');
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+          if (!line) continue;
+          let ev; try { ev = JSON.parse(line); } catch { continue; }
+          if (ev.error) { if (lbl) lbl.textContent = ev.error; if (bar) bar.style.width = '0%'; }
+          else if (typeof ev.level === 'number') {
+            peak = Math.max(peak, ev.level);
+            const pct = Math.min(100, Math.round(ev.level * 160));
+            if (bar) { bar.style.width = pct + '%'; bar.style.background = ev.level > 0.02 ? 'var(--ok)' : 'var(--accent)'; }
+          }
+        }
+      }
+      if (lbl) lbl.textContent = peak > 0.02 ? `mic works, peak ${Math.round(peak * 100)}%` : 'heard nothing, try another mic';
+      if (bar) bar.style.width = Math.min(100, Math.round(peak * 160)) + '%';
+    } catch (e) { if (lbl) lbl.textContent = 'test failed'; }
+    finally { testBtn.disabled = false; testBtn.textContent = _t; }
   });
 });
 

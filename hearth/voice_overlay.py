@@ -183,8 +183,13 @@ def _run() -> None:
                 fg = win32gui.GetWindowText(win32gui.GetForegroundWindow()) or ""
             except Exception:
                 fg = ""
-            # Hide over any Hearth-titled window (avoid a double grid).
-            if "hearth" in fg.lower():
+            # Hide over any Hearth window to avoid a double grid. Match the title
+            # AND the localhost URL, because when the native window fails and the
+            # UI opens in a browser, the tab title is the address, not "Hearth" —
+            # that mismatch is what left both grids on screen (the reported dupe).
+            _fgl = fg.lower()
+            if ("hearth" in _fgl or "127.0.0.1:8765" in _fgl
+                    or "localhost:8765" in _fgl):
                 if _shown:
                     try:
                         win32gui.SetLayeredWindowAttributes(hwnd, _BG_KEY, 0,

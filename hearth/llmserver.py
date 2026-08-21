@@ -34,8 +34,59 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 WORKSPACE = Path(os.environ.get("JARVIS_WORKSPACE", Path.home() / "Jarvis"))
-MODELS_DIR = WORKSPACE / "models"
-MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Models can live on a different drive than the workspace, so a user whose C: is
+# full can keep GGUFs on D:/E:/X: without moving their chats + memory too.
+# Resolution: HEARTH_MODELS_DIR env, then the pointer ~/.hearth/models_dir.txt
+# (written by Settings), then the default <workspace>/models. The pointer lives
+# outside the workspace, same reasoning as workspace.txt.
+_MODELS_POINTER = Path(os.path.expanduser("~")) / ".hearth" / "models_dir.txt"
+
+
+def _resolve_models_dir() -> Path:
+    env = os.environ.get("HEARTH_MODELS_DIR")
+    if env and env.strip():
+        return Path(env.strip()).expanduser()
+    try:
+        if _MODELS_POINTER.is_file():
+            p = _MODELS_POINTER.read_text(encoding="utf-8").strip()
+            if p:
+                return Path(p).expanduser()
+    except OSError:
+        pass
+    return WORKSPACE / "models"
+
+
+def set_models_dir(path: str) -> Dict[str, Any]:
+    """Point Hearth at a models folder (e.g. on a drive with space). Writes the
+    pointer + creates the dir. Takes effect on the next launch (MODELS_DIR is read
+    at import); existing models can be moved there or re-scanned in place."""
+    global MODELS_DIR
+    try:
+        p = Path(os.path.abspath(os.path.expanduser((path or "").strip())))
+        if not str(p) or p == p.parent and not p.drive:
+            return {"ok": False, "error": "invalid path"}
+        p.mkdir(parents=True, exist_ok=True)
+        _MODELS_POINTER.parent.mkdir(parents=True, exist_ok=True)
+        _MODELS_POINTER.write_text(str(p), encoding="utf-8")
+        MODELS_DIR = p
+        return {"ok": True, "path": str(p)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def get_models_dir() -> str:
+    return str(MODELS_DIR)
+
+
+MODELS_DIR = _resolve_models_dir()
+try:
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # A pointed-at drive that isn't mounted right now — fall back so import
+    # still succeeds; the user fixes the path in Settings.
+    MODELS_DIR = WORKSPACE / "models"
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 FULL_DOWNLOAD_URL = "https://github.com/0pen-sourcer/hearth/releases"
 

@@ -1594,12 +1594,18 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "pid": pid,
                 "text": text,
             })
+        if path == "/api/voice/mic-meter":
+            return self._mic_meter_stream()
         if path == "/api/voice/devices":
             # List audio INPUT devices for the mic picker (Settings → Voice).
+            # ?rescan=1 re-enumerates out-of-process to catch a just-plugged mic.
+            _q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            _rescan = _q.get("rescan", ["0"])[0] in ("1", "true", "yes")
             devs = []
             try:
                 if _listen:
-                    devs = _listen.list_input_devices()
+                    devs = (_listen.rescan_devices() if _rescan
+                            else _listen.list_input_devices())
             except Exception:
                 devs = []
             cur = -1
@@ -1874,6 +1880,19 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _eject_model())
         if path == "/api/settings":
             return self._send_json(200, _save_settings(self._read_json()))
+        if path == "/api/voice/mic-test":
+            try:
+                from . import listen as _listen
+                return self._send_json(200, _listen.mic_test())
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "error": str(e)})
+        if path == "/api/models/set-dir":
+            from . import llmserver
+            b = self._read_json()
+            r = llmserver.set_models_dir(b.get("path", ""))
+            if r.get("ok"):
+                _models_cache["ts"] = 0  # force a rescan against the new folder
+            return self._send_json(200, r)
         if path == "/api/email/save":
             b = self._read_json()
             try:
@@ -3087,6 +3106,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 context_window, context_source = _hl.resolve_context_tokens(model_id)
             except Exception:
                 context_window, context_source = None, None
+        try:
+            from . import llmserver as _lsm
+            _models_dir = _lsm.get_models_dir()
+        except Exception:
+            _models_dir = ""
         self._send_json(200, {
             "model": loaded,
             "endpoint": endpoint,
@@ -3104,6 +3128,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             "surface": _take_pending_focus(),
             "memories": len(_memory_index()),
             "workspace": WORKSPACE,
+            "models_dir": _models_dir,
             "lms_cli": bool(_find_lms_cli()),
             # For the "Hearth as MCP server" snippet — the real interpreter +
             # full script path so the config doesn't rely on bare `python` being
@@ -3841,6 +3866,61 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _vo.stop()
             except Exception:
                 pass
+
+    def _mic_meter_stream(self) -> None:
+        """Stream the live input level from the SELECTED mic as NDJSON so the GUI
+        can bounce a meter in real time (a real 'speak and watch it move' test).
+        Runs ~6s, then ends. Best-effort; a mic in use elsewhere just errors."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        def emit(obj) -> bool:
+            try:
+                self.wfile.write((json.dumps(obj) + "\n").encode("utf-8"))
+                self.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return False
+
+        try:
+            import sounddevice as sd  # type: ignore
+            import numpy as np  # type: ignore
+            import queue as _queue
+            import time as _t
+            from . import listen as _listen
+            idx = _listen.input_device_index()
+            q: "_queue.Queue" = _queue.Queue()
+
+            def _cb(indata, frames, tinfo, status):
+                try:
+                    q.put_nowait(float(np.abs(indata).max()))
+                except Exception:
+                    pass
+
+            name = ""
+            try:
+                _qd = idx if idx is not None else sd.default.device[0]
+                name = str(sd.query_devices(_qd).get("name", ""))
+            except Exception:
+                pass
+            with sd.InputStream(device=idx, channels=1, samplerate=16000,
+                                blocksize=1600, dtype="float32", callback=_cb):
+                if not emit({"start": True, "device": name}):
+                    return
+                end = _t.time() + 6.0
+                while _t.time() < end:
+                    try:
+                        lvl = q.get(timeout=0.15)
+                    except Exception:
+                        lvl = 0.0
+                    if not emit({"level": round(min(1.0, lvl), 4)}):
+                        return
+                emit({"done": True})
+        except Exception as e:
+            emit({"error": f"{type(e).__name__}: {e}"})
 
     def _tts(self) -> None:
         body = self._read_json()
