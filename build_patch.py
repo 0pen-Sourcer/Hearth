@@ -26,14 +26,13 @@ sys.path.insert(0, ROOT)
 
 from hearth.updater import HEARTH_VERSION  # noqa: E402
 
-# Code-only patch. A release that adds a bundled DEPENDENCY (v0.7.5 adds torch +
-# scipy for voice) can only patch it if that dependency ships LOOSE in _internal.
-# torch does, but scipy/soundfile/halo keep their Python code in the frozen PYZ
-# INSIDE the exe, which a patch can't replace. Voice needs all of them, so it
-# cannot be delivered by a patch this release: Full/Lite users get working voice
-# from the INSTALLER. (To patch voice later, unfreeze those packages like hearth's
-# own code so they ship loose, then list their _internal subpaths here.)
-_BINARY_INCLUDES: list = []
+# The new voice stack v0.7.5 adds, pulled from the built dist so they match the
+# installer exactly. These now ship LOOSE in _internal (see _unfreeze_hearth +
+# the loose-dep loop in Hearth.spec), so the patch can deliver working voice to an
+# older install instead of forcing a full reinstall. torch is a big loose tree;
+# scipy/halo/spinners/_soundfile_data are dirs; soundfile is a single file.
+_BINARY_INCLUDES = ["torch", "scipy", "halo", "spinners",
+                    "_soundfile_data", "soundfile.py"]
 # build_release.ps1 moves the Full bundle to dist_full; a plain build lands in
 # dist. Prefer the Full edition (the patch's binaries are identical across
 # editions, so either works).
@@ -76,7 +75,13 @@ def main() -> int:
         else:
             for sub in _BINARY_INCLUDES:
                 base = os.path.join(_DIST_INTERNAL, sub)
-                if not os.path.exists(base):
+                if os.path.isfile(base):                    # single file (soundfile.py)
+                    arc = os.path.relpath(base, _DIST_INTERNAL).replace(os.sep, "/")
+                    members.append((base, arc))
+                    bin_count += 1
+                    bin_bytes += os.path.getsize(base)
+                    continue
+                if not os.path.isdir(base):
                     print(f"WARNING: '{sub}' not in the build at {base} — skipped.", file=sys.stderr)
                     continue
                 for dirpath, _dirs, files in os.walk(base):

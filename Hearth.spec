@@ -18,22 +18,35 @@ import glob
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 
+# Third-party packages the update patch must be able to deliver. Voice's deps
+# (scipy/soundfile/halo/spinners) are ADDED in v0.7.5, and frozen inside the exe
+# archive a patch can't replace them (a patched older install would import-fail).
+# Shipped LOOSE like hearth's own code, the patch delivers them. torch is already
+# loose (its hook collects it as loose files), so it isn't listed here.
+_LOOSE_DEP_PREFIXES = ("scipy", "soundfile", "halo", "spinners")
+
+
 def _unfreeze_hearth(analysis):
-    """Keep Hearth's OWN modules out of the frozen PYZ archive.
+    """Keep Hearth's OWN modules — and the patchable voice deps — out of the
+    frozen PYZ archive, so a small update patch can replace them loose.
 
     The bundle is ~1 GB of payload (CUDA, llama.cpp, onnxruntime) that never
-    changes between releases, against ~4 MB of Hearth code that changes every
+    changes between releases, against a few MB of code that changes every
     release. Frozen, a one-line fix costs the user a full reinstall. Shipped as
-    loose .py beside the exe, a release can hand out a small patch instead.
+    loose files beside the exe, a release can hand out a small patch instead.
 
-    Safe because Analysis still *sees* these modules (so every third-party
-    dependency they import is discovered and bundled normally) — we only drop
-    them from the archive afterwards. At runtime PyInstaller's FrozenImporter
-    simply doesn't find `hearth`, so Python falls through to sys.path, which
-    includes the bundle directory where the loose files live.
+    Safe because Analysis still *sees* these modules (so every dependency they
+    import is discovered and bundled normally) — we only drop them from the
+    archive afterwards. At runtime the FrozenImporter doesn't find them, so
+    Python falls through to sys.path, which includes the bundle directory where
+    the loose files live.
     """
-    analysis.pure = [e for e in analysis.pure
-                     if not (e[0] == "hearth" or e[0].startswith("hearth."))]
+    def _loose(name):
+        if name == "hearth" or name.startswith("hearth."):
+            return True
+        return any(name == p or name.startswith(p + ".")
+                   for p in _LOOSE_DEP_PREFIXES)
+    analysis.pure = [e for e in analysis.pure if not _loose(e[0])]
     return analysis
 
 # HEARTH_LITE=1 builds a slim bundle (~0.8 GB) WITHOUT the built-in CUDA
@@ -87,6 +100,34 @@ if os.path.isdir(os.path.join(REPO_ROOT, "assets")):
 _wt_dir = os.path.join(REPO_ROOT, "Windows Terminal")
 if os.path.isdir(_wt_dir):
     DATAS.append((_wt_dir, "Windows Terminal"))
+
+# Ship the voice deps LOOSE (their .py + data) so the update patch can deliver
+# them — _unfreeze_hearth drops them from the PYZ, this puts the files beside the
+# exe. Their compiled .pyd come from Analysis binaries (the hooks), so skip those
+# here to avoid a double-collect. scipy adds tens of MB of loose .py, which is the
+# cost of voice being patchable instead of a full reinstall.
+import importlib.util as _ilu_loose
+for _lp in _LOOSE_DEP_PREFIXES:
+    try:
+        _sp = _ilu_loose.find_spec(_lp)
+    except Exception:
+        _sp = None
+    if _sp is None:
+        continue
+    if _sp.submodule_search_locations:                 # a package (dir)
+        _dir = list(_sp.submodule_search_locations)[0]
+        for _root, _d, _files in os.walk(_dir):
+            if "__pycache__" in _root:
+                continue
+            for _f in _files:
+                if _f.endswith((".pyc", ".pyd", ".so", ".dll", ".lib")):
+                    continue
+                _src = os.path.join(_root, _f)
+                _rel = os.path.relpath(_src, _dir)
+                _sub = os.path.dirname(_rel)
+                DATAS.append((_src, os.path.join(_lp, _sub) if _sub else _lp))
+    elif _sp.origin and os.path.isfile(_sp.origin):    # single module (soundfile.py)
+        DATAS.append((_sp.origin, "."))
 
 # Bundle data files PyInstaller misses by default for packages that ship
 # runtime assets (config JSON, ONNX VAD models, vocab tables). Without this
@@ -185,7 +226,7 @@ HIDDEN = [
     # excludes); list it so the tree-shaker never drops it and the contrib hook
     # collects its libs.
     "RealtimeSTT", "silero_vad", "torch", "scipy", "scipy.signal",
-    "soundfile", "halo", "spinners", "log_symbols", "cursor",
+    "soundfile", "halo", "spinners", "log_symbols",
     # llama_cpp.server's runtime extras — without these the builtin
     # server exits code 1 with ModuleNotFoundError. Belt + suspenders
     # with collect_all("llama_cpp") below.
