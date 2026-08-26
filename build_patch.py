@@ -31,7 +31,7 @@ from hearth.updater import HEARTH_VERSION  # noqa: E402
 # the loose-dep loop in Hearth.spec), so the patch can deliver working voice to an
 # older install instead of forcing a full reinstall. torch is a big loose tree;
 # scipy/halo/spinners/_soundfile_data are dirs; soundfile is a single file.
-_BINARY_INCLUDES = ["torch", "scipy", "halo", "spinners",
+_BINARY_INCLUDES = ["torch", "scipy", "scipy.libs", "numpy.libs", "halo", "spinners",
                     "_soundfile_data", "soundfile.py"]
 # Pure-Python packages the voice recorder imports that PyInstaller freezes into
 # the exe rather than shipping loose, so they are absent from the dist tree and
