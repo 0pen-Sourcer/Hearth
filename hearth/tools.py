@@ -1734,9 +1734,26 @@ def _loaded_model_is_vision() -> bool:
     vision capability. Probes /api/v0/models for type=='vlm' or capabilities
     array containing 'vision'/'image_input'. Falls back to name heuristic
     when v0 endpoint isn't there (Ollama, vLLM, cloud)."""
-    base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
+    base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1").rstrip("/")
     model_hint = os.environ.get("LOCAL_MODEL", "").lower()
     host = base.rsplit("/v1", 1)[0]
+    # Cloud catalog (OpenRouter): GET /models is public (no auth) and lists each
+    # model's architecture.input_modalities. Authoritative for ANY OpenRouter
+    # model — including stealth/aliased ones no name heuristic will ever match.
+    if "openrouter.ai" in base:
+        try:
+            import urllib.request as _ur
+            _rq = _ur.Request(f"{base}/models")
+            with _ur.urlopen(_rq, timeout=10) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            for m in (data.get("data") or []):
+                mid = (m.get("id") or "").lower()
+                if mid == model_hint or mid.endswith("/" + model_hint):
+                    ins = [str(x).lower() for x in
+                           ((m.get("architecture") or {}).get("input_modalities") or [])]
+                    return "image" in ins
+        except Exception:
+            pass   # catalog unreachable/unlisted — fall through to probes below
     # llama.cpp (Hearth's BUILTIN server) is authoritative: /props reports
     # modalities.vision — TRUE only when an mmproj is actually loaded. This beats
     # the id heuristic (a VLM served with no projector genuinely can't see). Try
@@ -5078,6 +5095,7 @@ def _smart_click(p: Dict) -> str:
             clicked = f"pixel ({sx},{sy}) [no UI control within 90px — raw click]"
         except Exception as e:
             return f"Error: click failed: {type(e).__name__}: {e}"
+    _record_focus_target()   # the click focused a window — a later type verifies against it
     # Verify-after-click: re-capture so the model must SEE the result.
     _t.sleep(0.4)
     vpath = ""
@@ -6730,6 +6748,7 @@ def _focus_window(p: Dict) -> str:
         except Exception:
             pass
     extra = f" ({len(matches)} matched; brought the first)" if len(matches) > 1 else ""
+    _record_focus_target(hwnd)   # keystrokes now verify focus against this window
     return f"Brought '{title}' to the front.{extra}"
 
 
@@ -6984,20 +7003,67 @@ def _computer_click(p: Dict) -> str:
     double = bool(p.get("double"))
     _c.click(int(x) if x is not None else None,
              int(y) if y is not None else None, button=button, double=double)
+    _record_focus_target()   # the click focused a window — type verifies against it
     where = f" at ({int(x)},{int(y)})" if x is not None and y is not None else " (at current position)"
     return f"{'double-' if double else ''}{button} click{where} — done"
+
+
+# Which window the agent last deliberately focused/clicked. A keystroke checks
+# this so it never lands in the wrong place — Hearth's own window (the reply box),
+# or whatever the user tabbed to while a slow cloud turn was mid-flight.
+_LAST_FOCUS_HWND = None
+
+
+def _record_focus_target(hwnd=None) -> None:
+    """Remember the window the agent means to act on. Pass an hwnd, or None to
+    snapshot the current foreground (a click focuses whatever it lands on)."""
+    global _LAST_FOCUS_HWND
+    if os.name != "nt":
+        return
+    try:
+        import win32gui
+        _LAST_FOCUS_HWND = hwnd or win32gui.GetForegroundWindow()
+    except Exception:
+        _LAST_FOCUS_HWND = None
+
+
+def _foreground_guard():
+    """Error string if injecting keystrokes right now is unsafe, else None.
+    Refuses typing into Hearth's OWN window (it would land in the chat), and — once
+    a target was focused — refuses if focus has since drifted (user grabbed the
+    wheel, or cloud latency let focus move between click and type)."""
+    if os.name != "nt":
+        return None
+    try:
+        import win32gui
+        fg = win32gui.GetForegroundWindow()
+        title = win32gui.GetWindowText(fg) or ""
+    except Exception:
+        return None   # can't tell — don't block a legitimate action
+    tl = title.lower()
+    if "hearth" in tl or "127.0.0.1:8765" in tl or "localhost:8765" in tl:
+        return ("Refused: the foreground is Hearth's OWN window, so keystrokes "
+                "would go into the chat, not the target app. Focus the target "
+                "first: focus_window(name='<part of its title>'), then type.")
+    if _LAST_FOCUS_HWND and fg != _LAST_FOCUS_HWND:
+        return (f"Refused: focus drifted to '{title[:40]}' since you targeted the "
+                f"app, so typing now would hit the wrong window. Re-focus the "
+                f"target (focus_window or click it) and verify before typing.")
+    return None
 
 
 def _computer_type(p: Dict) -> str:
     _c, err = _computer_check()
     if err:
         return err
+    guard = _foreground_guard()
+    if guard:
+        return guard
     text = p.get("text", "")
     _c.type_text(text)
-    return (f"typed {len(text)} character(s) at the current focus. "
-            f"NEXT STEP: this typed blind at whatever had focus — do NOT assume it "
-            f"landed in the right field. Call capture_active_window + view_image to "
-            f"CONFIRM the text actually appeared where you wanted before moving on.")
+    return (f"typed {len(text)} character(s) into the focused window. Focus was "
+            f"verified before typing, but confirm the text landed where you wanted "
+            f"(capture_active_window + view_image) before moving on.")
 
 
 def _computer_key(p: Dict) -> str:
@@ -7016,6 +7082,9 @@ def _computer_key(p: Dict) -> str:
                 "windows. To bring a specific window forward, use "
                 "focus_window(name='<part of its title>') instead — it uses the "
                 "reliable foreground path. (list_windows shows open titles.)")
+    guard = _foreground_guard()
+    if guard:
+        return guard
     if "+" in key:
         _c.hotkey(key)
     else:
