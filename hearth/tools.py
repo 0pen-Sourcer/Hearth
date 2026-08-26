@@ -1169,7 +1169,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "to real screen coords, snaps it to the nearest real UI control from "
             "the accessibility tree (so the click lands on the actual button, not "
             "a guessed pixel), clicks it, and takes a fresh screenshot to verify. "
-            "Pass label = what you think it is (helps logging). Prefer this over "
+            "Pass label = what you think it is (helps logging). Pass text to type "
+            "into the control right after clicking, in the SAME call — atomic, so "
+            "focus can't drift between the click and the type. Prefer this over "
             "computer_click for anything you located visually."
         ),
         "parameters": {
@@ -1178,6 +1180,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "x": {"type": "integer", "description": "Pixel X of the target's center IN THE LAST capture image."},
                 "y": {"type": "integer", "description": "Pixel Y of the target's center IN THE LAST capture image."},
                 "label": {"type": "string", "description": "What the target is (e.g. 'Send button'). Optional."},
+                "text": {"type": "string", "description": "Optional: type this into the control immediately after clicking, in one atomic op (no focus-drift gap)."},
                 "button": {"type": "string", "enum": ["left", "right", "middle"]},
                 "double": {"type": "boolean", "description": "true = double-click."},
             },
@@ -5106,6 +5109,23 @@ def _smart_click(p: Dict) -> str:
         except Exception as e:
             return f"Error: click failed: {type(e).__name__}: {e}"
     _record_focus_target()   # the click focused a window — a later type verifies against it
+    # Atomic type: if `text` is given, type it into the just-clicked control in the
+    # SAME tool call, so no cloud round-trip lets focus drift between click and
+    # type — the blind-typing failure class. Focus was just set by the click, so
+    # the guard passes; if something stole it in the last beat, refuse cleanly.
+    typed_note = ""
+    _txt = p.get("text")
+    if _txt not in (None, ""):
+        _g = _foreground_guard()
+        if _g:
+            return f"Clicked {clicked}, but did NOT type — {_g}"
+        try:
+            from . import computer as _cmp
+            _t.sleep(0.15)
+            _cmp.type_text(str(_txt))
+            typed_note = f", then typed {len(str(_txt))} char(s)"
+        except Exception as _e:
+            typed_note = f" (but typing failed: {type(_e).__name__}: {_e})"
     # Verify-after-click: re-capture so the model must SEE the result.
     _t.sleep(0.4)
     vpath = ""
@@ -5117,7 +5137,7 @@ def _smart_click(p: Dict) -> str:
     except Exception:
         pass
     return (
-        f"Clicked {clicked}" + (f" (you called it {label!r})" if label else "") + ".\n"
+        f"Clicked {clicked}" + (f" (you called it {label!r})" if label else "") + typed_note + ".\n"
         + (f"VERIFY: fresh screenshot at {vpath} — call view_image on it to confirm "
            f"the click did what you expected before continuing." if vpath else
            "Re-capture with capture_active_window to verify the result.")
