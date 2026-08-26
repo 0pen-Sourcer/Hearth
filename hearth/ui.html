@@ -7657,6 +7657,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // it doesn't sit pinned at the bottom of the chat forever. The model's
       // response now carries the redirect.
       _flushSteerChip();
+      // Seal the current text block so the redirected continuation opens a FRESH
+      // block below the chip, instead of running straight into the previous
+      // sentence ("...let me know.Got it, I will see through...").
+      _sealLiveText();
       return;
     }
 

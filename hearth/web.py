@@ -4036,9 +4036,16 @@ class HearthHandler(BaseHTTPRequestHandler):
         payload = {
             "model": model_id,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 16,
+            # Headroom for a reasoning model to think AND still emit the title. At
+            # the old max_tokens=16, a reasoning model spent the whole budget on
+            # its reasoning pass and returned empty content, so every title fell
+            # back to the raw first message (the "all chats titled Yo!" bug).
+            "max_tokens": 512,
             "temperature": 0.3,
             "stream": False,
+            # Skip the reasoning pass where the server honors it (local Qwen etc.).
+            # Cloud models that ignore this still have the token headroom above.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         # Pass Authorization header so cloud endpoints (and our authed
         # builtin) actually accept the call instead of 401'ing.
