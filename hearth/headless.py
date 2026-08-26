@@ -147,6 +147,47 @@ RESERVED_OUTPUT = int(os.getenv("JARVIS_RESERVED_OUTPUT", "2048"))
 COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
 
 
+_OR_CATALOG_CACHE = {}   # model_id -> context_length (or None = known miss)
+_OR_CATALOG_TS = 0.0     # when the cache was last written
+
+
+def _openrouter_catalog_context(model_id: str) -> Optional[int]:
+    """Real per-model context_length from OpenRouter's PUBLIC /api/v1/models
+    catalog (no auth). OpenRouter ids are vendor-prefixed ('stealth/ox-alpha')
+    while configs usually say just 'ox-alpha', so match prefix-tolerantly.
+    Cached for the process lifetime; misses retried after 10 min so an
+    offline blip doesn't wedge the value in until restart."""
+    global _OR_CATALOG_TS
+    import time as _time
+    import urllib.request as _ur
+    now = _time.time()
+    if model_id in _OR_CATALOG_CACHE and (
+            _OR_CATALOG_CACHE[model_id] is not None or now - _OR_CATALOG_TS < 600):
+        return _OR_CATALOG_CACHE[model_id]
+    try:
+        req = _ur.Request("https://openrouter.ai/api/v1/models",
+                          headers={"User-Agent": "hearth-context-probe"})
+        with _ur.urlopen(req, timeout=4) as r:
+            data = json.loads(r.read().decode())
+        want = (model_id or "").lower()
+        best = None
+        for m in data.get("data", []):
+            mid = str(m.get("id", "")).lower()
+            cl = m.get("context_length")
+            if not isinstance(cl, int) or cl <= 0:
+                continue
+            if mid == want or mid.endswith("/" + want):
+                best = cl
+                break
+        _OR_CATALOG_CACHE[model_id] = best
+        _OR_CATALOG_TS = now
+        return best
+    except Exception:
+        _OR_CATALOG_CACHE[model_id] = None
+        _OR_CATALOG_TS = now
+        return None
+
+
 def autodetect_context(model_id: str) -> Optional[int]:
     """Ask LM Studio for the loaded context length of the active model. Copied
     verbatim from hearth_cli.autodetect_context so the bridge uses the SAME logic
@@ -157,6 +198,14 @@ def autodetect_context(model_id: str) -> Optional[int]:
     `hearth-builtin` API key) don't generate a 401 storm in the server log
     every time chat turns over. Without this every chat call leaked one 401.
     """
+    # OpenRouter first: the generic probes below do exact-id matching against
+    # LOCAL_API_BASE (/api/v1/models), but OpenRouter's catalog ids are
+    # vendor-prefixed, so they miss and the caller falls back to the 128K
+    # guess. Ask the public catalog directly (prefix-tolerant, cached).
+    if "openrouter.ai" in (LOCAL_API_BASE or "").lower():
+        hit = _openrouter_catalog_context(model_id)
+        if hit:
+            return hit
     import urllib.request
     _key = os.environ.get("LOCAL_API_KEY") or LOCAL_API_KEY or ""
     _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
@@ -266,7 +315,9 @@ def resolve_context_tokens(model_id: str) -> tuple:
         # but we don't set that; conservative default).
         known = 200_000
     elif "openrouter.ai" in base:
-        # OpenRouter is a passthrough — assume 128K conservatively.
+        # Fallback only — the real per-model number comes from the public
+        # catalog via _openrouter_catalog_context(); this catches a catalog
+        # outage so the ring never lies about MORE than we know.
         known = 128_000
     if known:
         return known, f"provider table ({known // 1024}K)"
@@ -1142,6 +1193,18 @@ async def run_once(
                 eff = _cloud_reasoning_effort(LOCAL_API_BASE, think, model)
                 if eff is not None:
                     kwargs["reasoning_effort"] = eff
+                elif "openrouter.ai" in (LOCAL_API_BASE or "").lower():
+                    # think=True: OpenRouter defaults some models (stealth/
+                    # ox-alpha, verified live 2026-08-26) to a SILENT reasoning
+                    # stream — the model reasons server-side but ships zero
+                    # reasoning deltas, so the GUI's think panel stays empty
+                    # while the toggle says ON. Explicitly request the stream.
+                    # Must ride extra_body: the openai SDK TypeErrors on
+                    # unknown top-level kwargs, and extra_body merges into the
+                    # JSON body verbatim.
+                    _eb = kwargs.setdefault("extra_body", {})
+                    _eb["include_reasoning"] = True
+                    _eb["reasoning"] = {"effort": os.getenv("HEARTH_CLOUD_REASONING", "medium")}
             # Snapshot the estimate for THIS prompt so the usage block coming
             # back on the stream lets us learn the estimate's bias.
             _est_sent = estimate_tokens(messages)
