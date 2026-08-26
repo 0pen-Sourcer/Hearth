@@ -980,10 +980,15 @@ async def run_once(
                         _msg = r.choices[0].message
                         _out = (getattr(_msg, "content", None) or "").strip()
                         if not _out:
-                            # Same models put the text in reasoning_content instead.
-                            # Reading only .content threw away a perfectly good
-                            # summary and then destroyed the history it described.
-                            _out = (getattr(_msg, "reasoning_content", None) or "").strip()
+                            # Same models put the text in reasoning_content (or
+                            # OpenRouter's `reasoning`) instead. Reading only
+                            # .content threw away a good summary and then destroyed
+                            # the history it described.
+                            _ex = getattr(_msg, "model_extra", None) or {}
+                            _out = (getattr(_msg, "reasoning_content", None)
+                                    or getattr(_msg, "reasoning", None)
+                                    or _ex.get("reasoning")
+                                    or _ex.get("reasoning_content") or "").strip()
                         # Strip an inline think block if the model emitted one.
                         import re as _re2
                         _out = _re2.sub(r"<think>[\s\S]*?</think>", "", _out,
@@ -1251,11 +1256,15 @@ async def run_once(
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
 
-                # Reasoning chunks (some LM Studio backends stream this). Emit
-                # whenever they arrive — with think off we asked the model to skip
-                # reasoning, so anything that streams here is a FORCED model, and
-                # showing it beats a blind wait. The GUI collapses it by default.
-                rc = getattr(delta, "reasoning_content", None)
+                # Reasoning chunks. LM Studio streams `reasoning_content`;
+                # OpenRouter (and some others) stream `reasoning`. The OpenAI SDK
+                # keeps provider-specific fields on `model_extra`, so check there
+                # too — otherwise a cloud reasoning model shows no thinking at all.
+                rc = (getattr(delta, "reasoning_content", None)
+                      or getattr(delta, "reasoning", None))
+                if not rc:
+                    _ex = getattr(delta, "model_extra", None) or {}
+                    rc = _ex.get("reasoning") or _ex.get("reasoning_content")
                 if rc:
                     if _s_first is None:
                         _s_first = time.time()
