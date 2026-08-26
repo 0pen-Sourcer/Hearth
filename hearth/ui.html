@@ -6095,11 +6095,15 @@ async function refreshModels() {
         if (al !== bl) return al ? -1 : 1;
         return _short(a).localeCompare(_short(b));
       });
+      // A cloud brain is a remote API, not a model held in VRAM — say "online",
+      // not "loaded", so the sticker doesn't imply a local load that never happened.
+      const _cloudBrain = !!(STATE.brain && STATE.brain.kind === 'cloud');
+      const _activeWord = _cloudBrain ? '   ● online' : '   ● loaded';
       for (const m of _sorted) {
         const opt = document.createElement('option');
         opt.value = m.id;
         const short = m.id.split(/[\/\\]/).pop();
-        opt.textContent = short + (m.state === 'loaded' ? '   ● loaded' : '');
+        opt.textContent = short + (m.state === 'loaded' ? _activeWord : '');
         sel.appendChild(opt);
         // Seed dedupe keys from path AND filename AND slug. When LM Studio's
         // v0/models omits `path` (older builds), the filename / slug fallback
