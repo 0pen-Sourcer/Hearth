@@ -5747,6 +5747,28 @@ function fillEditCard(name, args, body) {
   return true;
 }
 
+// Compact, human-readable one-line preview of tool args for the card header.
+// Raw JSON.stringify dumps escaped \n and backslashes (a file body reads as
+// "\"\"\"Probe...\n...\\n") — collapse whitespace, truncate each value, and cap
+// the whole line so the header stays a glanceable summary. Full JSON still lives
+// in the hover title + the expandable body.
+function _argPreview(args) {
+  if (!args || typeof args !== 'object') return '';
+  const keys = Object.keys(args);
+  const parts = [];
+  for (const k of keys) {
+    const v = args[k];
+    if (v == null) continue;
+    let s = (typeof v === 'string') ? v : (() => { try { return JSON.stringify(v); } catch { return String(v); } })();
+    s = s.replace(/\s+/g, ' ').trim();               // kill raw newlines/indentation
+    if (s.length > 60) s = s.slice(0, 60) + '…';
+    parts.push(keys.length > 1 ? `${k}: ${s}` : s);   // single arg = just the value
+  }
+  let out = parts.join('  ·  ');
+  if (out.length > 140) out = out.slice(0, 140) + '…';
+  return out;
+}
+
 function makeToolCard(name, args) {
   // Every tool - including browse / browse_click / browse_scroll / browse_type /
   // browse_close - renders with the SAME card shape: header with name + args,
@@ -5761,7 +5783,7 @@ function makeToolCard(name, args) {
   // it but hover + opening the card both reveal the full text.
   let fullArgs = '';
   try { fullArgs = JSON.stringify(args || {}, null, 2); } catch { fullArgs = String(args); }
-  const headerArgs = JSON.stringify(args || {});
+  const headerArgs = _argPreview(args);   // clean one-liner, not raw escaped JSON
   div.innerHTML = `
     <div class="t-head">
       <svg class="t-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
