@@ -1808,6 +1808,16 @@ def _loaded_model_is_vision() -> bool:
                       "gemini", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-sonnet",
                       "claude-opus", "claude-haiku", "pixtral", "grok-2-vision")):
         return True
+    # Remote/cloud endpoint we couldn't classify from a catalog or probe (a
+    # stealth codename like 'ox-alpha', a new Gemini/GPT id): most modern cloud
+    # models are multimodal, and if one isn't the API rejects the image with a
+    # clear error — far better than silently refusing to look. Only a local
+    # loopback server stays a hard "no", because the /props + /api/v0 probes above
+    # are authoritative there (a builtin with no mmproj already returned False).
+    _hl = host.lower()
+    _is_loopback = any(h in _hl for h in ("localhost", "127.0.0.1", "0.0.0.0", "[::1]"))
+    if not _is_loopback:
+        return True
     return False
 
 
@@ -7376,6 +7386,15 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
                     f"then FOLLOW them yourself: they tell you to write a small "
                     f"build script and run it with run_command. Do NOT call "
                     f"'{name}' as a tool again — it will keep failing.")
+        # Common hallucination: a "switch browser tab" tool. There isn't one —
+        # Chrome tabs live inside ONE window, so switch them with keystrokes.
+        # focus_window switches OS windows, not tabs.
+        _nl = name.lower()
+        if "tab" in _nl and ("switch" in _nl or "select" in _nl or "browser" in _nl):
+            return ("Error: there is no browser_switch_tab tool. Chrome tabs live "
+                    "inside one window — switch them with computer_key(key='ctrl+Tab') "
+                    "or ctrl+<1-9> for a specific tab (ctrl+PageDown/Up also work). "
+                    "focus_window switches OS windows, not tabs.")
         # Weak local models mangle tool names or reach for a tool they can't
         # see, then spiral into run_command python-import hacks. Recover them:
         # fuzzy-suggest the real name + tell them to call it directly / use
