@@ -113,12 +113,19 @@ def _is_reasoning_param_error(e: Exception) -> bool:
     return False
 
 
-def _cloud_reasoning_effort(base: str, think: bool, model: str):
-    """`reasoning_effort` value for a cloud model when /think is off (skip the
-    reasoning pass), or None to send nothing. /think on → None (default).
-    OpenAI bottoms out at "minimal"; xAI/Gemini/OpenRouter accept "none"."""
-    if think or (model or "").lower() in _NO_REASONING_EFFORT:
+_EFFORT_LEVELS = {"minimal", "low", "medium", "high"}
+
+
+def _cloud_reasoning_effort(base: str, think: bool, model: str, level: str = ""):
+    """`reasoning_effort` for a cloud model. /think OFF → skip the reasoning pass
+    ("minimal" on OpenAI, "none" elsewhere). /think ON → the user's chosen effort
+    LEVEL (low/medium/high) if they picked one, else None to use the model's own
+    default. Models that 400 on the field are remembered and sent nothing."""
+    if (model or "").lower() in _NO_REASONING_EFFORT:
         return None
+    if think:
+        lv = (level or "").strip().lower()
+        return lv if lv in _EFFORT_LEVELS else None
     return "minimal" if "openai.com" in (base or "").lower() else "none"
 
 
@@ -605,6 +612,7 @@ async def run_once(
     emit,
     model: Optional[str] = None,
     think: bool = False,
+    think_level: str = "",
     max_depth: int = DEFAULT_MAX_DEPTH,
     temperature: float = 0.7,
     history: Optional[List[Dict[str, Any]]] = None,
@@ -1190,7 +1198,7 @@ async def run_once(
                 # Cloud: actually disable reasoning at the API when think is
                 # off, not just drop the reasoning_content. Otherwise the model
                 # reasons server-side and the latency is spent invisibly.
-                eff = _cloud_reasoning_effort(LOCAL_API_BASE, think, model)
+                eff = _cloud_reasoning_effort(LOCAL_API_BASE, think, model, think_level)
                 if eff is not None:
                     kwargs["reasoning_effort"] = eff
                 elif "openrouter.ai" in (LOCAL_API_BASE or "").lower():

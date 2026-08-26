@@ -3644,6 +3644,10 @@ class HearthHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
         think = bool(body.get("think"))
+        # Reasoning effort level when think is on (low/medium/high). From the
+        # request, else the saved setting, else the model's own default.
+        think_level = (body.get("think_level")
+                       or (_load_settings().get("think_level") or "")).strip().lower()
         model = body.get("model") or None
         history = body.get("history") or []
         voice = bool(body.get("voice"))  # voice-mode turn → spoken-register prompt
@@ -3734,7 +3738,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return
         try:
             asyncio.run(run_once(
-                prompt, emit=emit, think=think, model=model, history=history,
+                prompt, emit=emit, think=think, think_level=think_level, model=model, history=history,
                 permission_check=_make_permission_check(emit),
                 should_cancel=_CANCEL.is_set, drain_steer=_drain_steer,
                 voice=voice,

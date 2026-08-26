@@ -3551,6 +3551,19 @@
           </div>
           <div class="switch" data-key="think_default"></div>
         </div>
+
+        <div class="field">
+          <div class="label">
+            <div class="name">Reasoning effort</div>
+            <div class="hint">When reasoning is on, how hard a supporting model thinks (cloud models that accept it). Model default lets the model decide.</div>
+          </div>
+          <select id="setting-think-level" style="min-width:150px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:7px 10px;font-size:12px;outline:none;">
+            <option value="">Model default</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
         <div class="field">
           <div class="label">
             <div class="name">House rules</div>
@@ -10696,6 +10709,12 @@ async function refreshSettings() {
     // Reflect think setting into chat toggle
     STATE.thinking = !!s.think_default;
     thinkBtn.classList.toggle('on', STATE.thinking);
+    // Reasoning-effort dropdown (persists think_level; web.py reads it per turn)
+    const _tl = document.getElementById('setting-think-level');
+    if (_tl) {
+      _tl.value = s.think_level || '';
+      if (!_tl._wired) { _tl._wired = true; _tl.addEventListener('change', () => saveSetting('think_level', _tl.value)); }
+    }
   } catch (e) { toast('Settings', e.message, 'err'); }
 }
 async function saveSetting(key, value) {
