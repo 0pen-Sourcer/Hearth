@@ -3996,6 +3996,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(400, {"error": "empty text"})
 
         def _fallback(text: str) -> str:
+            # Only the opener line — `first` may now carry the assistant reply too
+            # (for topic context), which must never leak into a fallback title.
+            text = (text.split("\n", 1)[0]).strip()
             words = text.split()
             if len(words) <= 6:
                 return text[:50]
@@ -4024,9 +4027,10 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "openai": "gpt-4o-mini",
             }.get(provider, "gpt-4o-mini")
         prompt = (
-            f"Output ONLY a 3-5 word title (no quotes, no preamble) for this "
-            f"chat message. Nothing else.\n\n"
-            f"Message: {first[:300]}\n\n"
+            f"Output ONLY a 3-5 word title (no quotes, no preamble) that captures "
+            f"what this conversation is about. Ignore greetings like 'hi'/'yo'. "
+            f"Nothing else.\n\n"
+            f"Conversation:\n{first[:500]}\n\n"
             f"Title:"
         )
         payload = {

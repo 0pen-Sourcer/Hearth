@@ -5086,6 +5086,17 @@ async function deleteConversation(id) {
 function renderConvoList() {
   const list = $('convo-list');
   list.innerHTML = '';
+  // Dedup by id. A mid-turn checkpoint save (or a reload while a chat was still
+  // generating) can re-add the active chat to the list, so it renders as two
+  // identical rows that delete together — the reported "two Yo! chats". Collapse
+  // to the first occurrence; the on-disk file was never actually duplicated.
+  {
+    const _seen = new Set();
+    STATE.conversations = STATE.conversations.filter(c => {
+      if (!c || _seen.has(c.id)) return false;
+      _seen.add(c.id); return true;
+    });
+  }
   if (!STATE.conversations.length) {
     list.innerHTML = `<div style="padding:18px 12px;color:var(--fg-faint);font-size:11px;text-align:center">No chats yet.</div>`;
     return;
@@ -6063,7 +6074,16 @@ async function refreshModels() {
       };
       const addKeys = (path, id) => keysFor(path, id).forEach(k => seenKeys.add(k));
       const anyKeyMatch = (path, id) => keysFor(path, id).some(k => seenKeys.has(k));
-      for (const m of models) {
+      // Cloud endpoints (OpenRouter) return 100+ models in arbitrary order, so
+      // the dropdown reads as a jumble. Sort alphabetically by the short name,
+      // with the loaded model pinned to the top so it's easy to find.
+      const _short = m => (m.id || '').split(/[\/\\]/).pop().toLowerCase();
+      const _sorted = [...models].sort((a, b) => {
+        const al = a.state === 'loaded', bl = b.state === 'loaded';
+        if (al !== bl) return al ? -1 : 1;
+        return _short(a).localeCompare(_short(b));
+      });
+      for (const m of _sorted) {
         const opt = document.createElement('option');
         opt.value = m.id;
         const short = m.id.split(/[\/\\]/).pop();
@@ -7982,11 +8002,25 @@ async function handleSlash(raw) {
 
 async function generateTitle(c) {
   if (!c.messages.length) return;
-  const first = c.messages[0].content;
+  // Title off the first real exchange, not just the opener. A chat that starts
+  // with a bare "Yo!" must still get a topic title from what followed —
+  // otherwise every greeting-opened chat collapses to the same "Yo!" and they
+  // read as duplicates in the sidebar.
+  const textOf = m => {
+    const ct = m && m.content;
+    if (typeof ct === 'string') return ct;
+    if (Array.isArray(ct)) return ct.filter(p => p && p.type === 'text').map(p => p.text || '').join(' ');
+    return '';
+  };
+  const firstUser = c.messages.find(m => m.role === 'user');
+  const firstAsst = c.messages.find(m => m.role === 'assistant' && textOf(m).trim());
+  let ctx = (firstUser ? textOf(firstUser) : textOf(c.messages[0])).trim();
+  if (firstAsst) ctx += '\n\nAssistant: ' + textOf(firstAsst).trim().slice(0, 400);
+  if (!ctx.trim()) return;
   try {
     const r = await api('/api/title', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ text: first }),
+      body: JSON.stringify({ text: ctx }),
     });
     if (r.title) {
       _animateTitleChange(c, r.title);
