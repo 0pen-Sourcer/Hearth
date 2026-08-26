@@ -7177,13 +7177,13 @@ def _desktop_snapshot(p: Dict) -> str:
     from . import desktop_a11y as _a
     if not _a.available():
         return f"Error: desktop UI inspection unavailable — {_a.unsupported_reason()}."
-    snap = _a.snapshot(int(p.get("max_elements", 50)))
+    snap = _a.snapshot(int(p.get("max_elements", 50)), window=(p.get("window") or ""))
     if snap.get("error"):
         return f"Error: {snap['error']}"
     els = snap.get("elements", [])
     if not els:
-        return (f"Foreground window: {snap.get('window', '?')!r}. No interactive "
-                f"elements exposed — fall back to screenshot + computer_click.")
+        return (f"Window: {snap.get('window', '?')!r}. No interactive elements "
+                f"exposed — fall back to screenshot + computer_click.")
     lines = [f"Window: {snap.get('window', '?')}  ({len(els)} interactive elements)"]
     for e in els:
         lines.append(f"  [{e['idx']}] {e['type']}: {e['name'] or '(no name)'}  @({e['x']},{e['y']})")
@@ -7217,13 +7217,18 @@ _HANDLERS["desktop_type"] = _desktop_type
 
 for _cd in (
     {"name": "desktop_snapshot", "description":
-        "Read the FOREGROUND window's interactive UI elements (buttons, fields, "
-        "menu items, list items, checkboxes) as a numbered list with exact "
-        "positions — an accessibility snapshot of the app. PREFER this over "
-        "screenshot+computer_click: it's precise and costs no vision tokens. Then "
-        "act with desktop_click / desktop_type.",
+        "Read a window's interactive UI elements (buttons, fields, menu items, "
+        "list items, checkboxes) as a numbered list with exact positions — an "
+        "accessibility snapshot of the app. PREFER this over screenshot+"
+        "computer_click: it's precise and costs no vision tokens. Pass "
+        "window='<part of a title>' to target a SPECIFIC window even in the "
+        "background (e.g. 'Visual Studio Code'); omit for the foreground window. "
+        "Then act with desktop_click / desktop_type.",
      "parameters": {"type": "object", "properties": {
-        "max_elements": {"type": "integer", "description": "cap (default 50)"}}}},
+        "max_elements": {"type": "integer", "description": "cap (default 50)"},
+        "window": {"type": "string", "description":
+            "target a top-level window by title substring (background OK); "
+            "empty = foreground"}}}},
     {"name": "desktop_click", "description":
         "Click a UI element from the last desktop_snapshot, by idx (preferred) or "
         "a name substring. button left|right|middle; double:true to double-click. "
@@ -7233,8 +7238,10 @@ for _cd in (
         "button": {"type": "string", "enum": ["left", "right", "middle"]},
         "double": {"type": "boolean"}}}},
     {"name": "desktop_type", "description":
-        "Focus a UI element (by idx or name from the last desktop_snapshot) and "
-        "type text into it.",
+        "Write text into a UI element from the last desktop_snapshot (by idx or "
+        "name). Sets the value DIRECTLY where the control supports it — no focus "
+        "change, works even if the window is in the background (paste-equivalent); "
+        "falls back to click-to-focus + keystrokes for fields that don't.",
      "parameters": {"type": "object", "properties": {
         "idx": {"type": "integer"}, "name": {"type": "string"},
         "text": {"type": "string"}}, "required": ["text"]}},

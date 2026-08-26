@@ -91,11 +91,13 @@ def unsupported_reason() -> str:
     return "not supported on this OS"
 
 
-def snapshot(max_elements: int = 50) -> dict:
-    """Walk the FOREGROUND window's a11y tree; return interactive elements as
-    {window, elements:[{idx,type,name,x,y}]}. Caches element refs for click()."""
+def snapshot(max_elements: int = 50, window: str = "") -> dict:
+    """Walk a window's a11y tree; return interactive elements as
+    {window, elements:[{idx,type,name,x,y}]}. Caches element refs for click().
+    `window` (Windows only) targets a top-level window by name substring so a
+    BACKGROUND window can be inspected + written to; empty = foreground window."""
     if _WIN:
-        return _snapshot_win(max_elements)
+        return _snapshot_win(max_elements, window)
     if _LINUX:
         return _snapshot_linux(max_elements)
     if _MAC:
@@ -191,7 +193,7 @@ def _walk_win(root, max_elements: int) -> list:
     return out
 
 
-def _snapshot_win(max_elements: int) -> dict:
+def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
     global _native_a11y_enabled
     try:
         import uiautomation as auto
@@ -201,10 +203,34 @@ def _snapshot_win(max_elements: int) -> dict:
         auto.SetGlobalSearchTimeout(1.5)
     except Exception:
         pass
-    try:
-        root = auto.GetForegroundControl()
-    except Exception:
-        root = None
+    root = None
+    if window_name:
+        # Target a specific top-level window by name substring, so a BACKGROUND
+        # window (VS Code, a chat app) can be read + written to without being
+        # pulled to the foreground.
+        try:
+            w = auto.WindowControl(searchDepth=1, SubName=window_name)
+            if w.Exists(1.0):
+                root = w
+        except Exception:
+            root = None
+        if root is None:
+            try:
+                wl = window_name.lower()
+                for w in auto.GetRootControl().GetChildren():
+                    if wl in (w.Name or "").lower():
+                        root = w
+                        break
+            except Exception:
+                pass
+        if root is None:
+            return {"window": "", "elements": [],
+                    "error": f"no open window matching {window_name!r}"}
+    if root is None:
+        try:
+            root = auto.GetForegroundControl()
+        except Exception:
+            root = None
     if root is None:
         return {"window": "", "elements": []}
     try:
@@ -474,7 +500,24 @@ def click(idx=None, name=None, double=False, button="left"):
 
 
 def focus_and_type(idx=None, name=None, text="") -> bool:
-    """Click an element to focus it, then type into it."""
+    """Put `text` into an element. Prefers UIA ValuePattern.SetValue, which writes
+    DIRECTLY into the control with no focus change and no need for the window to be
+    foreground (paste-equivalent) — so a backgrounded editor field or message box
+    gets the text with zero focus race. Falls back to click-to-focus + real
+    keystrokes for controls with no value pattern (contenteditable, canvas)."""
+    target = _find(idx=idx, name=name)
+    if target is None:
+        return False
+    # 1) Direct value set — no focus, works even if the window is in the background.
+    if target.get("backend") == "uia":
+        try:
+            vp = target["ctrl"].GetValuePattern()
+            if vp is not None and not getattr(vp, "IsReadOnly", False):
+                vp.SetValue(text)
+                return True
+        except Exception:
+            pass   # no value pattern (contenteditable/canvas) — fall back below
+    # 2) Fallback: click to focus, then type real keystrokes.
     if click(idx=idx, name=name) is None:
         return False
     try:
