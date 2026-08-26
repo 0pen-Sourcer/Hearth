@@ -729,15 +729,27 @@
   .gen-stats.gen-stats-live { opacity: 0.7; max-height: 2em; pointer-events: none; animation: liveStatPulse 1.4s ease-in-out infinite; }
   @keyframes liveStatPulse { 0%,100% { opacity: 0.45; } 50% { opacity: 0.8; } }
 
-  /* Inline "you steered mid-turn" chip. Muted, italic — reads as an aside, not a
-     full user bubble (the steer lands in the reply already streaming). */
+  /* "You steered mid-turn" — renders as a labeled divider (———— ↩ steering ————)
+     INSIDE the same reply bubble, so the redirected continuation is clearly
+     separated from the text before it without spawning a whole new JARVIS bubble
+     + avatar. Muted + italic so it reads as an aside, not a user turn. */
   .meta.steer-chip {
     font-style: italic;
-    opacity: 0.75;
-    max-width: 80%;
-    margin-left: auto; margin-right: auto;
+    opacity: 0.7;
+    width: 92%;
+    margin: 10px auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+  .meta.steer-chip::before,
+  .meta.steer-chip::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
   }
 
   /* Input row */
