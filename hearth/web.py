@@ -1343,6 +1343,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_asset(path[len("/assets/"):])
         if path == "/api/state":
             return self._send_state()
+        if path == "/api/lockdown":
+            from . import tools as _t
+            return self._send_json(200, {"on": _t._read_locked()})
         if path == "/api/email":
             try:
                 from . import email_tools
@@ -1893,6 +1896,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             if r.get("ok"):
                 _models_cache["ts"] = 0  # force a rescan against the new folder
             return self._send_json(200, r)
+        if path == "/api/lockdown":
+            from . import tools as _t
+            b = self._read_json()
+            return self._send_json(200, {"on": _t.set_lockdown(bool(b.get("on")))})
         if path == "/api/email/save":
             b = self._read_json()
             try:

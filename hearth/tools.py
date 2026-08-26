@@ -81,6 +81,37 @@ WORKSPACE = os.path.abspath(_resolve_workspace())
 os.environ["JARVIS_WORKSPACE"] = WORKSPACE
 SAFE_READ_ONLY = os.environ.get("JARVIS_LOCKDOWN", "").strip() in ("1", "true", "yes")
 
+# Lockdown pointer so a GUI/CLI toggle can confine reads without a restart or an
+# env var (there was no way to turn lockdown on from the app). Env still wins.
+_LOCKDOWN_POINTER = os.path.join(os.path.expanduser("~"), ".hearth", "lockdown")
+
+
+def _read_locked() -> bool:
+    """Confine reads to the workspace? Checked live per read. Env JARVIS_LOCKDOWN
+    wins (1/0); otherwise the persisted pointer set by the in-app toggle."""
+    v = (os.environ.get("JARVIS_LOCKDOWN", "") or "").strip().lower()
+    if v in ("1", "true", "yes"):
+        return True
+    if v in ("0", "false", "no"):
+        return False
+    try:
+        with open(_LOCKDOWN_POINTER, encoding="utf-8") as f:
+            return f.read().strip().lower() in ("1", "true", "yes")
+    except Exception:
+        return False
+
+
+def set_lockdown(on: bool) -> bool:
+    """Persist the read-lockdown toggle (in-app). Returns the new state."""
+    try:
+        os.makedirs(os.path.dirname(_LOCKDOWN_POINTER), exist_ok=True)
+        with open(_LOCKDOWN_POINTER, "w", encoding="utf-8") as f:
+            f.write("1" if on else "0")
+    except Exception:
+        pass
+    os.environ["JARVIS_LOCKDOWN"] = "1" if on else "0"
+    return bool(on)
+
 # Extra writeable roots — paths the user has explicitly opted in to,
 # either via the JARVIS_EXTRA_WORKSPACES env var (semicolon- or
 # comma-separated) or via the /allow runtime command in the CLI.
@@ -284,7 +315,7 @@ def _resolve_read(p: str) -> str:
             p = cwd_candidate
     else:
         p = os.path.abspath(p)
-    if SAFE_READ_ONLY and not p.startswith(WORKSPACE):
+    if _read_locked() and not p.startswith(WORKSPACE):
         raise PermissionError(f"Read locked to workspace: {WORKSPACE}")
     return p
 
@@ -2873,7 +2904,7 @@ def _find_file(p: Dict) -> str:
         ap = os.path.abspath(path)
         if ap in seen_loc or not os.path.isdir(ap):
             return
-        if SAFE_READ_ONLY and not ap.startswith(WORKSPACE):
+        if _read_locked() and not ap.startswith(WORKSPACE):
             return
         seen_loc.add(ap)
         locations.append(ap)

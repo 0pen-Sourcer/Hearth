@@ -3564,6 +3564,16 @@
             <option value="high">High</option>
           </select>
         </div>
+
+        <div class="field">
+          <div class="label">
+            <div class="name">Lock reads to workspace</div>
+            <div class="hint">By default JARVIS can READ anywhere on your disk (writes are always confined to the workspace). Turn this on to confine reads too. Takes effect immediately, no restart.</div>
+          </div>
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="setting-lockdown" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;"/>
+          </label>
+        </div>
         <div class="field">
           <div class="label">
             <div class="name">House rules</div>
@@ -10714,6 +10724,22 @@ async function refreshSettings() {
     if (_tl) {
       _tl.value = s.think_level || '';
       if (!_tl._wired) { _tl._wired = true; _tl.addEventListener('change', () => saveSetting('think_level', _tl.value)); }
+    }
+    // Read-lockdown toggle (its own endpoint, not settings.json — it flips a live
+    // guard in tools.py + a persisted pointer).
+    const _ld = document.getElementById('setting-lockdown');
+    if (_ld) {
+      try { const r = await fetch('/api/lockdown').then(x => x.json()); _ld.checked = !!(r && r.on); } catch {}
+      if (!_ld._wired) {
+        _ld._wired = true;
+        _ld.addEventListener('change', async () => {
+          try {
+            const r = await fetch('/api/lockdown', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ on: _ld.checked }) }).then(x => x.json());
+            _ld.checked = !!(r && r.on);
+            toast('Lockdown', _ld.checked ? 'Reads confined to your workspace.' : 'Reads unrestricted (writes stay workspace-only).', 'ok', 3500);
+          } catch (e) { toast('Lockdown', 'Failed to change', 'err'); }
+        });
+      }
     }
   } catch (e) { toast('Settings', e.message, 'err'); }
 }
