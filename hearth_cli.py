@@ -1343,7 +1343,7 @@ class JarvisCLI:
             return [], False
 
     # -- Slash commands -----------------------------------------------------
-    async def fetch_models(self):
+    async def fetch_models(self, filter_q: str = "", free_only: bool = False):
         try:
             req = urllib.request.Request(
                 f"{LOCAL_API_BASE}/models",
@@ -1358,11 +1358,41 @@ class JarvisCLI:
             ids = [m["id"] for m in data.get("data", [])
                    if m.get("id") and not any(p in m["id"].lower() for p in _NON_CHAT)]
             self.last_model_list = ids
-            print(f"\n{C_BRAND}Models on {LOCAL_API_BASE}:{C_RESET}")
-            for i, m in enumerate(ids, 1):
-                star = " ←" if m == self.current_model else ""
-                print(f"  [{i}] {m}{star}")
-            print()
+            free_ids = [m for m in ids if m.lower().endswith(":free")]
+
+            # A cloud catalog (OpenRouter lists 400+) is useless when dumped. Bare
+            # /models on a large list gets a summary + a search hint, not a wall
+            # of 400 lines — a good CLI searches, it doesn't page everything.
+            if not free_only and not filter_q and len(ids) > 30:
+                print(f"\n{C_BRAND}{len(ids)} models{C_RESET} on {C_DIM}{LOCAL_API_BASE}{C_RESET}"
+                      f"  {C_DIM}· {len(free_ids)} free{C_RESET}")
+                print(f"  {C_DIM}current {C_RESET}{C_TOOL}{self.current_model or '?'}{C_RESET}")
+                print(f"  {C_DIM}find    {C_RESET}{C_TOOL}/models <name>{C_RESET}{C_DIM}  ·  {C_RESET}"
+                      f"{C_TOOL}/models free{C_RESET}{C_DIM}  ·  switch with {C_RESET}{C_TOOL}/brain{C_RESET}\n")
+                return ids
+
+            if free_only:
+                shown, label = free_ids, "Free models"
+            elif filter_q:
+                toks = filter_q.lower().split()
+                shown = [m for m in ids if all(t in m.lower() for t in toks)]
+                label = f"Models matching {filter_q!r}"
+            else:
+                shown, label = ids, f"Models on {LOCAL_API_BASE}"
+
+            if not shown:
+                extra = "" if free_only else f" matching {filter_q!r}"
+                print(f"\n{C_DIM}No {'free ' if free_only else ''}models{extra}.{C_RESET}\n")
+                return ids
+            print(f"\n{C_BRAND}{label}{C_RESET}  {C_DIM}({len(shown)}){C_RESET}")
+            cap = 40
+            for i, m in enumerate(shown[:cap], 1):
+                star = f" {C_TOOL}←{C_RESET}" if m == self.current_model else ""
+                free = f" {C_DIM}free{C_RESET}" if m.lower().endswith(":free") else ""
+                print(f"  {C_DIM}[{i}]{C_RESET} {m}{free}{star}")
+            if len(shown) > cap:
+                print(f"  {C_DIM}…{len(shown)-cap} more — narrow with /models <name>{C_RESET}")
+            print(f"  {C_DIM}switch with {C_RESET}{C_TOOL}/brain{C_RESET}\n")
             return ids
         except Exception as e:
             print(f"{C_ERR}Could not reach {LOCAL_API_BASE}/models: {e}{C_RESET}")
@@ -1790,6 +1820,15 @@ class JarvisCLI:
                 print(f"{C_ERR}{type(e).__name__}: {e}{C_RESET}")
             return
 
+        # Free tier, or a free-text SEARCH against the catalog — so a 400-model
+        # cloud endpoint is browsable instead of dumped.
+        if sub == "free":
+            await self.fetch_models(free_only=True)
+            return
+        if sub:  # any leftover word is treated as a search query
+            await self.fetch_models(filter_q=(sub + (" " + arg if arg else "")).strip())
+            return
+
         # No subcommand - overview. Cache the status (which disk-scans + probes
         # the endpoint) for 8s so hitting /models repeatedly is instant instead
         # of re-scanning every time - same idea the GUI uses.
@@ -1834,7 +1873,7 @@ class JarvisCLI:
             print(f"  {C_DIM}{rec.get('description')}{C_RESET}")
 
         print()
-        print(f"{C_DIM}Subcommands:  /models disk  ·  picks  ·  hf <q>  ·  get <id>  ·  use <path|n>  ·  stop{C_RESET}\n")
+        print(f"{C_DIM}Subcommands:  /models <search>  ·  free  ·  disk  ·  picks  ·  hf <q>  ·  get <id>  ·  use <path|n>  ·  stop{C_RESET}\n")
 
     async def handle_command(self, text: str) -> bool:
         # `global` MUST sit at the very top of this function, BEFORE any
