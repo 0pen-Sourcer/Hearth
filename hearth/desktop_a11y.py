@@ -37,6 +37,11 @@ _INTERACTIVE = {
     "ListItemControl", "SplitButtonControl", "TreeItemControl", "SliderControl",
 }
 
+# Non-interactive containers that still carry the on-screen CONTENT (list rows,
+# labels, file/chat names). Reported so a snapshot reflects what is visible.
+_TEXTLIKE = {"TextControl", "DataItemControl", "ListControl", "TreeControl",
+             "DocumentControl", "HeaderItemControl", "StatusBarControl"}
+
 # AT-SPI (Linux) interactive role names (Atspi.get_role_name()).
 _ATSPI_ROLES = {
     "push button", "toggle button", "text", "entry", "password text",
@@ -115,6 +120,23 @@ def snapshot(max_elements: int = 50, window: str = "") -> dict:
 _native_a11y_enabled = False
 
 
+def _is_chromium_window(root) -> bool:
+    """True if this top-level is Chromium/Electron/WebView2 (its page content is
+    only in the tree when the renderer has accessibility on)."""
+    if not _WIN:
+        return False
+    try:
+        import ctypes
+        hwnd = int(getattr(root, "NativeWindowHandle", 0) or 0)
+        if not hwnd:
+            return False
+        buf = ctypes.create_unicode_buffer(256)
+        ctypes.windll.user32.GetClassNameW(hwnd, buf, 256)
+        return "Chrome_WidgetWin" in buf.value
+    except Exception:
+        return False
+
+
 def _enable_chromium_a11y(root) -> bool:
     """If the foreground window is Chromium/Electron, signal its render widget to
     expose accessibility. Returns True if a poke was sent (caller then waits for
@@ -177,7 +199,13 @@ def _walk_win(root, max_elements: int) -> list:
         except Exception:
             pass
         on_screen = (r > l and b > t)
-        if tname in _INTERACTIVE and on_screen and (name or tname == "EditControl"):
+        # Named TEXT is kept too, not just interactive controls. A webview app
+        # (Hearth's own GUI, Electron apps) renders its lists, labels and file
+        # names as text nodes, so an interactive-only filter reported "3 elements"
+        # for a window full of visible content. Text rows are still clickable by
+        # coordinate, so they are worth reporting.
+        _keep = (tname in _INTERACTIVE or (tname in _TEXTLIKE and 1 < len(name) <= 80))
+        if _keep and on_screen and (name or tname == "EditControl"):
             cx, cy = (l + r) // 2, (t + b) // 2
             out.append({"idx": len(out), "type": tname.replace("Control", ""),
                         "name": name[:70], "x": cx, "y": cy})
@@ -266,7 +294,7 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
     # an assistive client. A caller then sees a healthy-looking element list with
     # none of the page in it and clicks the wrong thing. Flag that case explicitly
     # so the caller can fall back to vision instead of trusting a partial tree.
-    if poked and out and not _has_page_content(out):
+    if out and not _has_page_content(out) and (poked or _is_chromium_window(root)):
         res["chrome_only"] = True
     return res
 
@@ -274,8 +302,10 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
 # Control types that only ever come from a real web page, never from the browser's
 # own frame. Seeing none of these in a Chromium window means the page is not in
 # the tree.
-_PAGE_TYPES = {"Edit", "Document", "Text", "ComboBox", "CheckBox", "RadioButton",
-               "List", "ListItem", "Table", "Image", "Group"}
+# "Document" and "Group" are the webview's own container nodes, present even when
+# the page inside is not exposed, so they are NOT evidence of page content.
+_PAGE_TYPES = {"Edit", "Text", "ComboBox", "CheckBox", "RadioButton",
+               "List", "ListItem", "Table", "Image"}
 # Browser-frame controls, ignored when deciding whether the PAGE is exposed.
 _CHROME_HINTS = ("new tab", "bookmark", "back", "forward", "reload", "address and search",
                  "minimize", "maximize", "close", "extensions", "profile", "downloads",

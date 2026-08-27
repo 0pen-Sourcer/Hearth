@@ -5918,6 +5918,27 @@ def _whoami(p: Dict) -> str:
     return json.dumps(info, indent=2)
 
 
+def _disk_models_lines(loaded_ids=()) -> list:
+    """Extra lines listing on-disk GGUFs the server has not loaded. Empty on any
+    failure or when nothing else is on disk."""
+    try:
+        from . import llmserver
+        disk = llmserver.scan_disk_for_models() or []
+    except Exception:
+        return []
+    seen = {str(i).lower() for i in (loaded_ids or [])}
+    rows = []
+    for m in disk:
+        path = m.get("path") or ""
+        fn = m.get("filename") or ""
+        if path.lower() in seen or fn.lower() in seen:
+            continue
+        rows.append(f"  - {fn}  ({m.get('size_gb')} GB, not loaded)  {path}")
+    if not rows:
+        return []
+    return ["", f"Also on disk ({len(rows)}, load it in the Models tab or /models use):"] + rows[:12]
+
+
 def _list_models(p: Dict) -> str:
     import urllib.request
     base = (_RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
@@ -5933,6 +5954,10 @@ def _list_models(p: Dict) -> str:
         cur = _RUNTIME_INFO.get("model")
         lines = [f"Models available at {base}:"]
         lines += [f"  - {i}" + ("  (current)" if i == cur else "") for i in ids]
+        # A local server only reports what is LOADED, so the rest of the
+        # user's models looked like they did not exist. List disk models too,
+        # including ones nested in a publisher folder.
+        lines += _disk_models_lines(ids)
         return "\n".join(lines)
     except Exception as e:
         # Tailor the hint to whatever the user is currently pointed at. The
