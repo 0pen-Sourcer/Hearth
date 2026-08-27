@@ -1176,11 +1176,16 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "`screenshot` when answering 'what's happening in the game / on "
             "this screen right now' — it's tighter and cleaner for vision. "
             "Pass window_title to grab a named window that isn't in front. "
-            "Chain view_image on the returned path to actually see it."
+            "Chain view_image on the returned path to actually see it. "
+            "Pass mark=true to draw a NUMBER on every control the accessibility "
+            "tree can see, then click one with smart_click(mark=N) instead of "
+            "estimating a pixel — far more reliable when the tree has the window."
         ),
         "parameters": {
             "type": "object",
             "properties": {
+                "mark": {"type": "boolean", "description":
+                    "Draw numbered boxes over detected controls, then click by number with smart_click(mark=N)."},
                 "window_title": {"type": "string", "description":
                     "Optional: capture the visible window whose title contains "
                     "this text, instead of the foreground one."},
@@ -1208,9 +1213,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "x": {"type": "integer", "description": "Pixel X of the target's center IN THE LAST capture image."},
+                "x": {"type": "integer", "description": "Pixel X of the target's center IN THE LAST capture image. Not needed when using mark."},
                 "y": {"type": "integer", "description": "Pixel Y of the target's center IN THE LAST capture image."},
                 "label": {"type": "string", "description": "What the target is (e.g. 'Send button'). Optional."},
+                "mark": {"type": "integer", "description": "Click the control NUMBERED N on the last capture_active_window(mark=true) image. Uses that control's real centre, so no pixel estimation. Preferred when numbers are on the image."},
                 "text": {"type": "string", "description": "Optional: type this into the control immediately after clicking, in one atomic op (no focus-drift gap)."},
                 "button": {"type": "string", "enum": ["left", "right", "middle"]},
                 "double": {"type": "boolean", "description": "true = double-click."},
@@ -5001,6 +5007,45 @@ def _screenshot(p: Dict) -> str:
     )
 
 
+def _draw_marks(img, origin_x: int, origin_y: int, src_w: int, src_h: int) -> list:
+    """Overlay numbered boxes for on-screen controls onto `img` (in place). Returns
+    [{n, name, type, x, y}] in SCREEN coords so a later click uses the control's
+    real centre. Best-effort; [] when the tree is empty."""
+    try:
+        from PIL import ImageDraw
+        from . import desktop_a11y as _a
+        if not _a.available():
+            return []
+        els = (_a.snapshot(40) or {}).get("elements") or []
+    except Exception:
+        return []
+    if not els:
+        return []
+    iw, ih = img.size
+    kx = iw / float(src_w or iw)
+    ky = ih / float(src_h or ih)
+    d = ImageDraw.Draw(img)
+    out = []
+    for e in els:
+        try:
+            sx, sy = int(e["x"]), int(e["y"])
+        except Exception:
+            continue
+        ix = int((sx - origin_x) * kx)
+        iy = int((sy - origin_y) * ky)
+        if not (0 <= ix < iw and 0 <= iy < ih):
+            continue
+        n = len(out) + 1
+        r = 11
+        d.rectangle([ix - r, iy - r, ix + r, iy + r], outline=(157, 123, 255), width=2)
+        d.rectangle([ix - r, iy - r, ix - r + 17, iy - r + 13], fill=(157, 123, 255))
+        d.text((ix - r + 3, iy - r + 2), str(n), fill=(10, 10, 12))
+        out.append({"n": n, "name": e.get("name") or "", "type": e.get("type") or "",
+                    "x": sx, "y": sy})
+    return out
+
+
+
 def _capture_active_window(p: Dict) -> str:
     """Screenshot ONLY the foreground window (the game/app in focus), not the
     whole desktop. The core primitive for the overlay HUD: one grab of exactly
@@ -5074,8 +5119,15 @@ def _capture_active_window(p: Dict) -> str:
         if _le > 1280:
             _k = 1280.0 / _le
             img = img.resize((max(1, int(img.size[0] * _k)), max(1, int(img.size[1] * _k))))
-        img.save(out)
         img_w, img_h = img.size
+        # Set-of-Mark: draw a numbered box over each control the accessibility
+        # tree reports, so the model picks a NUMBER instead of estimating a pixel.
+        # Uses the tree Hearth already reads, so it stays local and costs nothing
+        # extra. Silently falls back to a plain shot when the tree is empty.
+        marks = []
+        if p.get("mark"):
+            marks = _draw_marks(img, left, top, right - left, bottom - top)
+        img.save(out)
     except ImportError:
         return "Error: needs Pillow. Run: pip install pillow"
     except Exception as e:
@@ -5085,6 +5137,17 @@ def _capture_active_window(p: Dict) -> str:
                      "src_w": right - left, "src_h": bottom - top,
                      "img_w": img_w, "img_h": img_h, "path": out,
                      "ts": time.time()}
+    if marks:
+        _LAST_CAPTURE["marks"] = marks
+        _rows = []
+        for m in marks[:25]:
+            _rows.append('  [%d] %s: %s' % (m['n'], m['type'], m['name'][:40]))
+        _hdr = 'Saved: %s (%dx%d) - window %r' % (out, img_w, img_h, win_title)
+        _mid = '%d controls are numbered on the image:' % len(marks)
+        _tip = ('NEXT STEP: view_image on it to SEE the numbers, then click one with '
+                'smart_click(mark=N) - that uses the control real centre, so no '
+                'pixel estimation is involved.')
+        return chr(10).join([_hdr, _mid] + _rows + [_tip])
     return (
         f"Saved: {out} ({img_w}x{img_h}) — window {win_title!r}\n"
         f"COORDINATE CONTRACT: this image is {img_w}x{img_h} px, top-left = (0,0). "
@@ -5100,6 +5163,41 @@ def _smart_click(p: Dict) -> str:
     """Vision-point fused with the a11y tree: (x,y) is a pixel in the last
     capture_active_window image. Map to screen, snap to the nearest control,
     click, re-capture. Raw pixel fallback if nothing's near."""
+    # mark=N clicks the control numbered N on the last marked capture. That is a
+    # real accessibility centre, so it removes pixel estimation from the loop.
+    _mk = p.get('mark')
+    if _mk is not None:
+        _cap = _LAST_CAPTURE or {}
+        _marks = _cap.get('marks') or []
+        try:
+            _n = int(_mk)
+        except Exception:
+            _n = -1
+        _hit = next((m for m in _marks if m.get('n') == _n), None)
+        if not _hit:
+            return ('Error: no mark %s on the last capture. Call '
+                    'capture_active_window(mark=true) first, then view_image to see '
+                    'the numbers.' % _mk)
+        try:
+            from . import computer as _cmp
+            _cmp.click(int(_hit['x']), int(_hit['y']),
+                       button=(p.get('button') or 'left'), double=bool(p.get('double')))
+        except Exception as _e:
+            return 'Error: click failed: %s: %s' % (type(_e).__name__, _e)
+        _record_focus_target()
+        _txt = p.get('text')
+        if _txt:
+            _g = _foreground_guard()
+            if _g:
+                return 'Clicked mark %d (%s), but did NOT type - %s' % (_n, _hit.get('name',''), _g)
+            try:
+                import time as _tt
+                _tt.sleep(0.15)
+                _cmp.type_text(str(_txt))
+            except Exception:
+                pass
+        return 'Clicked mark %d: %s %r at its real centre (%d,%d).' % (
+            _n, _hit.get('type',''), _hit.get('name','')[:40], _hit['x'], _hit['y'])
     cap = _LAST_CAPTURE
     if not cap:
         return ("Error: no recent capture to click into. Call "
