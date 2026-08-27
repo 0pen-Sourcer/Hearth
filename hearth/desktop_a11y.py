@@ -260,7 +260,38 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
         except Exception:
             pass
         out = _walk_win(root, max_elements)
-    return {"window": win_name[:90], "elements": out}
+    res = {"window": win_name[:90], "elements": out}
+    # Chromium can expose its OWN chrome (tabs, bookmarks, toolbar) while the page
+    # inside stays invisible, because the renderer only turns accessibility on for
+    # an assistive client. A caller then sees a healthy-looking element list with
+    # none of the page in it and clicks the wrong thing. Flag that case explicitly
+    # so the caller can fall back to vision instead of trusting a partial tree.
+    if poked and out and not _has_page_content(out):
+        res["chrome_only"] = True
+    return res
+
+
+# Control types that only ever come from a real web page, never from the browser's
+# own frame. Seeing none of these in a Chromium window means the page is not in
+# the tree.
+_PAGE_TYPES = {"Edit", "Document", "Text", "ComboBox", "CheckBox", "RadioButton",
+               "List", "ListItem", "Table", "Image", "Group"}
+# Browser-frame controls, ignored when deciding whether the PAGE is exposed.
+_CHROME_HINTS = ("new tab", "bookmark", "back", "forward", "reload", "address and search",
+                 "minimize", "maximize", "close", "extensions", "profile", "downloads",
+                 "search tabs", "tab strip", "customize and control", "toolbar")
+
+
+def _has_page_content(elements: list) -> bool:
+    """True if the walked tree includes controls from the PAGE, not just the
+    browser's own frame."""
+    for e in elements:
+        nm = (e.get("name") or "").lower()
+        if any(h in nm for h in _CHROME_HINTS):
+            continue
+        if e.get("type") in _PAGE_TYPES:
+            return True
+    return False
 
 
 # ------------------------------------------------------------- Linux (AT-SPI)

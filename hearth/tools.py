@@ -6809,8 +6809,44 @@ def _focus_window(p: Dict) -> str:
         except Exception:
             pass
     extra = f" ({len(matches)} matched; brought the first)" if len(matches) > 1 else ""
-    _record_focus_target(hwnd)   # keystrokes now verify focus against this window
-    return f"Brought '{title}' to the front.{extra}"
+    # VERIFY, don't assume. Windows can accept the activation calls and still not
+    # move focus (foreground lock, a modal elsewhere, the window mid-restore), and
+    # reporting success anyway is what made the model click and type into whatever
+    # was actually in front. Poll briefly, then retry once, then report honestly.
+    def _fg_is_target() -> bool:
+        try:
+            fg = win32gui.GetForegroundWindow()
+            if fg == hwnd:
+                return True
+            # A child/owned window of the target counts (dialogs, Chrome popups).
+            try:
+                return bool(win32gui.GetAncestor(fg, 2) == hwnd)  # GA_ROOTOWNER
+            except Exception:
+                return False
+        except Exception:
+            return False
+
+    ok = False
+    for _attempt in range(2):
+        for _ in range(10):                 # ~1s of polling; activation is async
+            if _fg_is_target():
+                ok = True
+                break
+            time.sleep(0.1)
+        if ok or _attempt:
+            break
+        _force_foreground_hwnd(hwnd)        # one more try before giving up
+    if not ok:
+        try:
+            fg_title = win32gui.GetWindowText(win32gui.GetForegroundWindow()) or "(unknown)"
+        except Exception:
+            fg_title = "(unknown)"
+        return (f"Could NOT bring '{title}' to the front - '{fg_title[:40]}' still has "
+                f"focus (Windows refused the activation). Do NOT click or type yet: "
+                f"the input would go to the wrong window. Try focus_window again, or "
+                f"ask the user to click the window once.")
+    _record_focus_target(hwnd)   # keystrokes verify focus against this window
+    return f"Brought '{title}' to the front (focus verified).{extra}"
 
 
 def _send_to_phone(p: Dict) -> str:
@@ -7248,7 +7284,17 @@ def _desktop_snapshot(p: Dict) -> str:
     lines = [f"Window: {snap.get('window', '?')}  ({len(els)} interactive elements)"]
     for e in els:
         lines.append(f"  [{e['idx']}] {e['type']}: {e['name'] or '(no name)'}  @({e['x']},{e['y']})")
-    lines.append("→ act with desktop_click(idx=N) or desktop_type(idx=N, text=...).")
+    if snap.get("chrome_only"):
+        # Browser frame only: the page's own controls are NOT in this list, so
+        # clicking from it would hit the wrong thing. Say so and route to vision.
+        lines.append("")
+        lines.append("NOTE: these are the BROWSER's own controls (tabs, toolbar) — the PAGE "
+                     "content is not exposed (Chromium keeps its renderer tree off). Do NOT "
+                     "look for page buttons or text boxes here. To act inside the page: "
+                     "capture_active_window -> view_image to SEE it -> smart_click(x, y, "
+                     "text=...) with a pixel from that image.")
+    else:
+        lines.append("→ act with desktop_click(idx=N) or desktop_type(idx=N, text=...).")
     return "\n".join(lines)
 
 
