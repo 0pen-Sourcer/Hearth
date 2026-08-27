@@ -202,6 +202,10 @@ def _sync_registry_version() -> None:
             try:
                 k = winreg.OpenKey(root, key, 0, winreg.KEY_SET_VALUE)
                 winreg.SetValueEx(k, "DisplayVersion", 0, winreg.REG_SZ, HEARTH_VERSION)
+                # Inno bakes the version into the display NAME too ("Hearth version
+                # 0.7.2-preview"), so sync it or Control Panel still reads old.
+                winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ,
+                                  f"Hearth version {HEARTH_VERSION}")
                 winreg.CloseKey(k)
                 return
             except FileNotFoundError:
