@@ -688,17 +688,14 @@
   .t-body .diffbox .dl-hdr { padding: 3px 10px; background: var(--bg-2); color: var(--fg-dim); font-size: 11px; border-bottom: 1px solid var(--border); }
   .t-body .diffbox .dl-hdr .add { color: #7ee787; }
   .t-body .diffbox .dl-hdr .del { color: #ff9492; }
-  /* run_command transcript inside a tool card */
+  /* run_command body: the full command in a quiet tinted row, its output below.
+     No labels or chips, matching the other tool cards. */
   .t-body .cmdbox { margin: 6px 0 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-family: var(--mono); font-size: 12px; }
-  .t-body .cmd-row { display: flex; gap: 8px; padding: 6px 9px; align-items: flex-start; }
-  .t-body .cmd-row code { white-space: pre-wrap; word-break: break-word; flex: 1; background: none; padding: 0; border: none; }
-  .t-body .cmd-tag { flex: 0 0 auto; font-size: 9.5px; letter-spacing: .06em; padding: 1px 5px; border-radius: 3px; margin-top: 1px; }
-  .t-body .cmd-in { background: rgba(157,123,255,.07); border-bottom: 1px solid var(--border); }
-  .t-body .cmd-in .cmd-tag { background: rgba(157,123,255,.18); color: var(--accent-2); }
+  .t-body .cmd-row { padding: 7px 10px; }
+  .t-body .cmd-row code { white-space: pre-wrap; word-break: break-word; background: none; padding: 0; border: none; display: block; }
+  .t-body .cmd-in { background: rgba(157,123,255,.06); border-bottom: 1px solid var(--border); }
   .t-body .cmd-in code { color: var(--fg); }
-  .t-body .cmd-out .cmd-tag { background: var(--bg-2); color: var(--fg-dim); }
-  .t-body .cmd-out code { color: var(--fg-dim); max-height: 40vh; overflow-y: auto; display: block; }
-  .t-body .cmd-out.bad .cmd-tag { background: rgba(248,81,73,.18); color: #ff9492; }
+  .t-body .cmd-out code { color: var(--fg-dim); max-height: 40vh; overflow-y: auto; }
   .t-body .cmd-out.bad code { color: #ff9492; }
   .t-body .diff-more { color: var(--fg-faint); font-style: italic; padding: 4px 8px; }
   .t-body .diff-edithdr { color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; margin: 8px 0 3px; }
@@ -5926,8 +5923,8 @@ function fillCommandCard(args, result, body) {
   const wrap = document.createElement('div');
   wrap.className = 'cmdbox';
   wrap.innerHTML =
-    (cmd ? `<div class="cmd-row cmd-in"><span class="cmd-tag">IN</span><code>${esc(cmd)}</code></div>` : '') +
-    `<div class="cmd-row cmd-out${failed ? ' bad' : ''}"><span class="cmd-tag">${failed ? 'ERR' : 'OUT'}</span><code>${esc(out || '(no output)')}</code></div>`;
+    (cmd ? `<div class="cmd-row cmd-in"><code>${esc(cmd)}</code></div>` : '') +
+    `<div class="cmd-row cmd-out${failed ? ' bad' : ''}"><code>${esc(out || '(no output)')}</code></div>`;
   body.appendChild(wrap);
   return true;
 }
