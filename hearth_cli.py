@@ -356,6 +356,7 @@ C_ACCENT = C_BRAND
 _BOLD = "\033[1m"
 C_ADD = "\033[38;5;114m"   # green — added line
 C_DEL = "\033[38;5;210m"   # red — removed line
+C_META = "\033[38;5;246m"  # muted grey — arg values / result body (reads under the name)
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -432,6 +433,141 @@ def _print_cli_diff(name: str, args: dict) -> bool:
             print(f"    {C_DIM}edit {i + 1}/{len(edits)}{C_RESET}")
         _emit(ed.get("old_text"), ed.get("new_text"))
     return True
+
+
+# ---- tool-call rendering --------------------------------------------------
+# A single monochrome glyph per tool family so a run reads at a glance without a
+# rainbow of color. The glyph carries "what kind of action this is"; the color
+# stays restrained (violet glyph, bold name, muted args + result body) so a
+# transcript looks like a designed CLI, not a debug log. One accent (violet) +
+# green/rose only for the ok/error result head — nothing else competes.
+_TOOL_GLYPH = {
+    "read": "◇", "edit": "◆", "run": "❯", "web": "◈",
+    "memory": "❖", "screen": "⧉", "media": "✦", "comms": "✉",
+}
+
+
+def _tool_family(name: str) -> str:
+    """Classify a tool into a display family by name KEYWORDS, not a hardcoded
+    list of tool names. This deliberately enumerates NO specific tools — so a
+    user's own plugins/custom tools are never named in shipped code and still
+    classify (or fall back to the neutral dot) automatically."""
+    n = (name or "").lower()
+
+    def has(*ks):
+        return any(k in n for k in ks)
+
+    if n == "search_chats" or has("memory", "recall", "worklog"):
+        return "memory"
+    if has("browse", "web_", "fetch", "open_url", "open_in_browser"):
+        return "web"
+    if has("screenshot", "view_image", "capture", "computer", "desktop",
+           "smart_click", "focus_window", "manage_window", "vision", "mouse"):
+        return "screen"
+    if has("image", "video", "voice", "speak", "tts", "forge", "generat"):
+        return "media"
+    if has("email", "inbox", "notify", "phone", "reminder", "discord",
+           "telegram", "ask_user", "send"):
+        return "comms"
+    if n.startswith("set_") or has("write", "edit", "create", "delete", "move",
+                                   "append", "install", "draft"):
+        return "edit"
+    if has("run_", "start", "job_kill", "spawn", "launch", "open_app",
+           "end_session", "learn_env", "shutdown"):
+        return "run"
+    if has("read", "list", "find", "locate", "glob", "grep", "get_", "disk",
+           "info", "status", "whoami", "time", "load_skill", "vibe", "clipboard_read"):
+        return "read"
+    return ""
+
+
+def _tool_glyph(name: str) -> str:
+    return _TOOL_GLYPH.get(_tool_family(name), "●")
+
+
+# Args most worth seeing first — a preview should say what the call is ABOUT
+# (which file / which query / which command), not the first key alphabetically.
+_ARG_PRIORITY = ("path", "command", "cmd", "query", "url", "pattern", "name",
+                 "text", "prompt", "app", "message", "to", "title")
+
+
+def _tool_arg_summary(args, max_val: int = 48, max_total: int = 96) -> str:
+    """Compact, colored one-line arg preview for a tool card. Whitespace is
+    collapsed, long values elided with '…', private/control keys ('_approved')
+    dropped, and the most descriptive args are shown first. Returns text with
+    ANSI already applied (keys dim, values muted); '' when there's nothing to
+    show. Never dumps a 600-char blob or raw `\\n` soup onto one line."""
+    if not isinstance(args, dict):
+        sv = re.sub(r"\s+", " ", str(args)).strip()
+        if not sv:
+            return ""
+        if len(sv) > max_total:
+            sv = sv[:max_total] + "…"
+        return f"{C_META}{sv}{C_RESET}"
+    keys = [k for k in args.keys() if not str(k).startswith("_")]
+    keys.sort(key=lambda k: (_ARG_PRIORITY.index(k) if k in _ARG_PRIORITY
+                             else len(_ARG_PRIORITY), list(args).index(k)))
+    out, used, hidden = [], 0, 0
+    for i, k in enumerate(keys):
+        v = args[k]
+        sv = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+        sv = re.sub(r"\s+", " ", sv).strip()
+        if len(sv) > max_val:
+            sv = sv[:max_val] + "…"
+        seg = len(str(k)) + 1 + len(sv)
+        if used and used + seg + 2 > max_total:
+            hidden = len(keys) - i
+            break
+        out.append(f"{C_DIM}{k}={C_RESET}{C_META}{sv}{C_RESET}")
+        used += seg + 2
+    s = f"{C_DIM}, {C_RESET}".join(out)
+    if hidden:
+        s += f" {C_DIM}+{hidden} more{C_RESET}"
+    return s
+
+
+def _tool_result_meta(result: str, dt: float) -> str:
+    """A tiny '1.2k · 3L · 42ms' footer for a tool result — size, line count,
+    wall time — so big output is quantified without being dumped."""
+    n = len(result)
+    size = f"{n / 1000:.1f}k" if n >= 1000 else f"{n}c"
+    nl = result.count("\n")
+    bits = [size]
+    if nl:
+        bits.append(f"{nl + 1}L")
+    bits.append(f"{dt:.0f}ms")
+    return " · ".join(bits)
+
+
+def _render_tool_result(display, result, dt: float) -> None:
+    """Render a tool result under its card: a green/rose head line, a compact
+    meta footer, and (for multi-line output) a bounded 3-line peek at the body
+    so a 500-line read_file informs without flooding the transcript. `display`
+    is a pre-built synthetic label (declined/skipped); when set we trust it and
+    skip the real-result parsing."""
+    if display is not None:
+        print(f"  {C_DIM}└ {display} · {dt:.0f}ms{C_RESET}")
+        return
+    text = result if isinstance(result, str) else str(result)
+    nonempty = [ln.rstrip() for ln in text.split("\n") if ln.strip()]
+    head = nonempty[0].strip() if nonempty else "(no output)"
+    low = head.lower()
+    is_err = (low.startswith("error") or low.startswith("failed")
+              or "could not" in low or "traceback" in low or low.startswith("denied"))
+    color = C_WARN if is_err else C_OK
+    if len(head) > 100:
+        head = head[:100] + "…"
+    print(f"  {C_DIM}└{C_RESET} {color}{head}{C_RESET}  "
+          f"{C_DIM}· {_tool_result_meta(text, dt)}{C_RESET}")
+    body = nonempty[1:]
+    for ln in body[:3]:
+        ln = ln.strip()
+        if len(ln) > 100:
+            ln = ln[:100] + "…"
+        print(f"    {C_DIM}{ln}{C_RESET}")
+    if len(body) > 3:
+        print(f"    {C_DIM}… +{len(body) - 3} more lines{C_RESET}")
+
 
 # Terminal markdown rendering. We stream raw tokens live (fast), then re-render
 # the finished message once IF it contains markdown worth formatting (a table,
@@ -5001,27 +5137,15 @@ class JarvisCLI:
                             and not _path_safe
                             and self.tool_perms.get(name) not in ("always", "never"))
 
-            # Tool card, Claude-Code style: "● name(key: val, …)" then a dim
-            # "└ result" continuation. Bold name, dim args — distinct at a glance
+            # Tool card: a per-family violet glyph + bold name + a compact,
+            # muted "key=val, …" arg preview (whitespace collapsed, long values
+            # elided) then a dim "└ result" continuation. Distinct at a glance
             # from thinking (dim italic) and the rich-rendered answer. The full
             # pretty-printed args only unfurl when we're about to prompt.
-            def _arg_summary(a) -> str:
-                if not isinstance(a, dict):
-                    return ""
-                bits = []
-                for k, v in a.items():
-                    if k.startswith("_"):
-                        continue
-                    sv = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-                    sv = sv.replace("\n", " ")
-                    if len(sv) > 44:
-                        sv = sv[:44] + "…"
-                    bits.append(f"{k}: {sv}")
-                s = ", ".join(bits)
-                return s if len(s) <= 90 else s[:90] + "…"
-
             _unfurl = _will_prompt and len(preview_full) > 100
-            print(f"\n  {C_TOOL}●{C_RESET} {_BOLD}{name}{C_RESET}{C_DIM}({_arg_summary(args)}){C_RESET}")
+            _argstr = _tool_arg_summary(args)
+            print(f"\n  {C_BRAND}{_tool_glyph(name)}{C_RESET} {_BOLD}{name}{C_RESET}"
+                  + (f"  {_argstr}" if _argstr else ""))
             # File writes → green/red diff (parity with the GUI), gated by the same
             # show_diffs toggle. Falls back to the JSON unfurl for other tools.
             _showed_diff = False
@@ -5120,16 +5244,8 @@ class JarvisCLI:
                     self._force_answer = True
 
             # Screen preview: clean dim label for synthetic results, else the
-            # real result head (green ok / orange error).
-            if display is not None:
-                print(f"  {C_DIM}└ {display} · {dt:.0f}ms{C_RESET}")
-            else:
-                head = result.split("\n", 1)[0][:140]
-                is_err = head.startswith("Error") or "could not" in head.lower()
-                head_color = C_WARN if is_err else C_OK
-                extra_lines = result.count("\n")
-                size_label = f"{len(result)}c" + (f", +{extra_lines}L" if extra_lines else "")
-                print(f"  {C_DIM}└ {head_color}{head}{C_RESET}  {C_DIM}({size_label} · {dt:.0f}ms){C_RESET}")
+            # real result head (green ok / rose error) plus a bounded body peek.
+            _render_tool_result(display, result, dt)
 
             tool_msg: Dict = {
                 "role": "tool",
