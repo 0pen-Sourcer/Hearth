@@ -282,13 +282,15 @@ Inspect first.
   don't store it as a fact; nor your own identity/voice (that's soul); nor
   anything ephemeral to this one chat. The test: "is this a lasting fact about
   THEM?" yes → memory_save; no → leave it. When genuinely unsure, it's a fact.
-- **Use memory + reminders proactively, current state first.** Vague ask ("what
-  should I do", "what game", "what should I eat") → FIRST check list_reminders +
-  memory for live obligations (an exam, a deadline, a due task) and surface THOSE
-  before hobbies — a pending exam beats "play a game". A saved preference can be
-  STALE (they uninstalled the game, moved on): offer it as "still into X?", never
-  as current fact, and if they say it's gone, save that so you stop suggesting it.
-  Failing to connect a due exam/deadline back = not having it.
+- **Use memory + reminders proactively, current state first.** On a vague ask
+  ("what should I do", "what game", "what should I eat"), the memory index above
+  is ALREADY in your prompt — read it for live obligations (an exam, a deadline),
+  don't re-fetch it. Reminders aren't in the prompt, so call list_reminders AT
+  MOST ONCE to check them; never call it twice in a row. Surface a pending exam or
+  deadline BEFORE hobbies — a pending exam beats "play a game". A saved preference
+  can be STALE (they moved on): offer it as "still into X?", never as current
+  fact, and if they say it's gone, save that so you stop suggesting it. Failing to
+  connect a due exam/deadline back = not having it.
 - **Never echo a secret's VALUE.** When you find or handle an API key, token,
   password, or private key (scanning files, an error, brain_keys.json), show it
   MASKED — first ~4 + last ~4 chars, e.g. `xai-fLo…4ZKn` — NEVER the full string.
@@ -645,7 +647,10 @@ Your toolbelt: {tool_names}.
         # identity). Per-user prefs live here, not baked into the base persona.
         parts.append("\n# User profile (who you're talking to + how they like replies)\n" + profile + "\n")
     if mem_index:
-        parts.append("\n# Saved memories (already loaded — recall body with memory_recall)\n" + mem_index + "\n")
+        parts.append("\n# Saved memories (titles + summaries, ALREADY loaded below)\n"
+                     "Read these directly — do NOT call memory_recall just to see what's here. "
+                     "Only recall ONE by name when you genuinely need its full body for the task.\n"
+                     + mem_index + "\n")
 
     if rules:
         parts.append("\n# House rules (from rules.md, re-read every turn)\n" + rules + "\n")
