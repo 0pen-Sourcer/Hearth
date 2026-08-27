@@ -477,8 +477,18 @@
     text-transform: lowercase;
     letter-spacing: 0.3px;
   }
-  .msg.user .role-name { color: var(--info); }
+  .msg.user .role-name { color: var(--info); text-align: right; }
   .msg.assistant .role-name { color: var(--accent-2); }
+  /* User turns read as a chat app, not a log: pushed to the right in a capped,
+     accent-tinted bubble (assistant stays full-width for its tool cards + code). */
+  .msg.user { flex-direction: row-reverse; }
+  .msg.user .body { flex: 0 1 auto; max-width: min(80%, 60ch); }
+  .msg.user .content {
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.16);
+    border-radius: 13px;
+    padding: 9px 13px;
+  }
   .msg .content {
     color: var(--fg);
     white-space: pre-wrap;
