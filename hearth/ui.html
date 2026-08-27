@@ -4677,6 +4677,7 @@ function _playSound(kind) {
       o.start(now + start); o.stop(now + start + dur + 0.02);
     };
     if (kind === 'error') { tone(233, 0, 0.16, 0.08); tone(175, 0.11, 0.2, 0.08); }
+    else if (kind === 'permission') { tone(523, 0, 0.1, 0.06); tone(523, 0.15, 0.12, 0.06); }  // gentle double-knock: "I need your OK"
     else { tone(659, 0, 0.09, 0.05); tone(880, 0.085, 0.13, 0.05); }
   } catch {}
 }
@@ -4815,6 +4816,7 @@ let pendingFollowup = null;  // text the user typed during a perm prompt; sent a
 function showInlinePermission(reqId, toolName, args) {
   pendingPermId = reqId;
   pendingPermTool = toolName;
+  _playSound('permission');  // gentle double-knock so you notice it needs your OK (settings-gated)
   // Special case: extend-workspace request from tools._resolve_write.
   // Show the actual path being requested instead of dumping {"path":...} JSON.
   if (toolName === '__extend_workspace__') {
