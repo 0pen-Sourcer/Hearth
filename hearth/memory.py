@@ -904,8 +904,25 @@ def expire_stale(now: Optional[datetime] = None, *, once_per_day: bool = False) 
     return archived
 
 
+# Parsed-file cache keyed by (path, mtime, size). One recall re-reads the SAME
+# files many times — _score_memories walks every memory, then each result's
+# sibling lookup walks them all again — which was ~900 file opens for one recall
+# on 60 memories. On Windows every open is antivirus-scanned, so that turned a
+# 200ms call into tens of seconds. Cache the parse; a changed file (new mtime or
+# size) misses and re-reads, so saves/edits are still picked up immediately.
+_BODY_CACHE: Dict[str, Tuple[float, int, Dict[str, str], str]] = {}
+_BODY_CACHE_MAX = 512
+
+
 def _read_body(path: str) -> Tuple[Dict[str, str], str]:
-    """Return (frontmatter_dict, body_text)."""
+    """Return (frontmatter_dict, body_text). Cached by path+mtime+size."""
+    try:
+        st = os.stat(path)
+        hit = _BODY_CACHE.get(path)
+        if hit and hit[0] == st.st_mtime and hit[1] == st.st_size:
+            return hit[2], hit[3]
+    except OSError:
+        st = None
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
     fm: Dict[str, str] = {}
@@ -919,6 +936,10 @@ def _read_body(path: str) -> Tuple[Dict[str, str], str]:
                     k, _, v = ln.partition(":")
                     fm[k.strip()] = v.strip()
             body = text[end + 4:].lstrip("\n")
+    if st is not None:
+        if len(_BODY_CACHE) >= _BODY_CACHE_MAX:
+            _BODY_CACHE.clear()          # tiny store; a full reset beats LRU bookkeeping
+        _BODY_CACHE[path] = (st.st_mtime, st.st_size, fm, body)
     return fm, body
 
 
