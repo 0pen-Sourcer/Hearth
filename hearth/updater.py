@@ -183,7 +183,33 @@ def apply_patch(path: str) -> dict:
         return {"ok": False, "error": "patch archive is corrupt; download it again"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    _sync_registry_version()
     return {"ok": True, "files": len(names)}
+
+
+def _sync_registry_version() -> None:
+    """Point Windows' uninstall entry at the patched version. Inno only writes
+    DisplayVersion at install time, so a patched install otherwise shows the OLD
+    installer's version in Control Panel (e.g. stuck at 0.7.2 after patching to
+    0.7.5). Best-effort, Windows-only; the Hearth AppId matches Hearth.iss."""
+    if os.name != "nt":
+        return
+    key = (r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
+           r"\{B7E2B6A4-1C9F-4F3D-9A6E-7E5C2F0A1D34}_is1")
+    try:
+        import winreg
+        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                k = winreg.OpenKey(root, key, 0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(k, "DisplayVersion", 0, winreg.REG_SZ, HEARTH_VERSION)
+                winreg.CloseKey(k)
+                return
+            except FileNotFoundError:
+                continue
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 
 def restart_app() -> dict:
