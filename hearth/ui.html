@@ -79,6 +79,32 @@
     height: 100vh;
   }
 
+  /* Hamburger — hidden on desktop, shown only in the narrow drawer mode below. */
+  .side-toggle {
+    display: none; background: none; border: none; color: var(--fg-dim);
+    cursor: pointer; padding: 6px; border-radius: 7px; align-items: center;
+  }
+  .side-toggle:hover { background: var(--bg-2); color: var(--fg); }
+  .side-backdrop {
+    position: fixed; inset: 50px 0 26px 0; background: rgba(0,0,0,0.45);
+    z-index: 49; opacity: 0; transition: opacity .2s ease; display: none;
+  }
+  .side-backdrop.show { opacity: 1; }
+
+  /* Narrow window (e.g. half-snapped): collapse the fixed 240px sidebar into an
+     off-canvas drawer so the layout doesn't break. Desktop is untouched — the
+     rules only apply below 760px. */
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; grid-template-areas: "top" "main" "status"; }
+    .side {
+      position: fixed; top: 50px; bottom: 26px; left: 0; width: 250px;
+      transform: translateX(-100%); transition: transform .22s ease;
+      z-index: 50; box-shadow: 8px 0 30px rgba(0,0,0,0.5);
+    }
+    .side.open { transform: translateX(0); }
+    .side-toggle { display: inline-flex; }
+  }
+
   /* ============================================================
      TOP BAR
      ============================================================ */
@@ -2955,6 +2981,9 @@
 
   <!-- ============= TOP ============= -->
   <header class="top">
+    <button class="side-toggle" id="side-toggle" title="Menu" aria-label="Toggle sidebar">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
     <div class="brand">
       <div class="brand-mark" id="brand-mark">H</div>
       <span>Hearth</span>
@@ -14946,6 +14975,30 @@ async function pollAnnouncements() {
     if (items.length) showBroadcast(items);
   } catch {}
 }
+
+// Responsive sidebar drawer: below 760px the sidebar is off-canvas; the hamburger
+// slides it in over a backdrop. A no-op on desktop (the button is display:none).
+window.addEventListener('load', function initSidebarDrawer() {
+  const btn = document.getElementById('side-toggle');
+  const side = document.querySelector('.side');
+  if (!btn || !side) return;
+  let backdrop = null;
+  const close = () => { side.classList.remove('open'); if (backdrop) backdrop.classList.remove('show'); if (backdrop) backdrop.style.display = 'none'; };
+  const open = () => {
+    side.classList.add('open');
+    if (!backdrop) {
+      backdrop = document.createElement('div');
+      backdrop.className = 'side-backdrop';
+      document.body.appendChild(backdrop);
+      backdrop.addEventListener('click', close);
+    }
+    backdrop.style.display = 'block';
+    requestAnimationFrame(() => backdrop.classList.add('show'));
+  };
+  btn.addEventListener('click', () => side.classList.contains('open') ? close() : open());
+  // Picking a chat or a tab inside the drawer should close it, not leave it over the content.
+  side.addEventListener('click', (e) => { if (e.target.closest('.convo, .nav-item, [data-tab], #new-chat, .convo-toggle')) close(); });
+});
 
 (async function boot() {
   await loadConversations();
