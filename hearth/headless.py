@@ -1580,6 +1580,19 @@ async def run_once(
                                 f"file/output was produced. Tell the user it is "
                                 f"still waiting on their approval, then stop."
                             )
+                        elif _deny_reason:
+                            # Declined WITH a redirect: the user isn't saying "stop
+                            # everything", they're steering to something ELSE. Tell
+                            # the model to DO the new thing, and do NOT force an
+                            # answer — forcing it here is the "guillotine" that let
+                            # a redirect needing tool calls (copy files, check
+                            # downloads) only be talked about, never done.
+                            tool_result = (
+                                f"The user declined THAT specific action and redirected "
+                                f"you. Do NOT retry the declined call or a workaround for "
+                                f"it. Instead, follow their instruction now, using "
+                                f"whatever tools it needs: \"{_deny_reason}\"."
+                            )
                         else:
                             tool_result = (
                                 f"The user DECLINED this action - it did NOT run, "
@@ -1590,15 +1603,8 @@ async def run_once(
                                 f"brief reply that you've stopped, and ask them what "
                                 f"they'd like instead."
                             )
-                            if _deny_reason:
-                                tool_result += (
-                                    f"\n\nWhat they said when they declined: "
-                                    f"\"{_deny_reason}\". Follow that as a direct "
-                                    f"instruction."
-                                )
-                            # A decline is the user taking the wheel — end the tool
-                            # loop now so the model asks, instead of grinding through
-                            # retries or workarounds they never asked for.
+                            # Bare decline, no redirect = user taking the wheel; end
+                            # the loop so the model asks instead of grinding retries.
                             _force_answer = True
                         # Run the decline through the loop guard so a
                         # second identical retry trips FAILURE_WARN and

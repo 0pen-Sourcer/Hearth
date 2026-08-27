@@ -7641,6 +7641,11 @@ async function send(forced = null, displayAs = null, opts = {}) {
         for (const m of [...raw.matchAll(mediaRe)]) {
           const kind = m[1].toLowerCase();
           const path = m[2].trim();
+          // False positive: the marker appears INSIDE grepped/read source code
+          // (reading Hearth's own files, where "__JARVIS_IMAGE__ {path} (...)" is a
+          // literal code string) — that's not a real image. A real path has a
+          // separator and no template braces or a "file.py:12:" grep prefix.
+          if (/[{}]/.test(path) || !/[\\/]/.test(path) || /^[^\\/]*\.\w+:\d+:/.test(path)) continue;
           // Persist on the assistant message - re-render-safe.
           assistantMsg.events.push({ kind: 'media', mediaKind: kind, path, pos: assistantMsg.content.length });
           // Live render NOW so the user sees it during the turn too. The
