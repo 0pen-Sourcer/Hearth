@@ -3287,6 +3287,8 @@ class JarvisCLI:
         is its full path, which swallows the whole prompt line and the banner
         box. Show the filename; the full path is still in /about."""
         m = self.current_model or ""
+        if not m or m == "local-model":
+            return "no model"   # the placeholder id — don't imply a model is loaded
         if ("\\" in m or "/" in m) and m.lower().endswith(".gguf"):
             return os.path.basename(m)
         return m
