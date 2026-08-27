@@ -5087,7 +5087,15 @@ function applyBrainState() {
 
   // Bottom-bar `model` pill.
   const stModel = $$id('st-model');
-  if (stModel) stModel.textContent = b.loaded ? (b.modelName || '-') : '-';
+  if (stModel) {
+    // Truly nothing active (local, not loaded, no id) reads as red "no model" —
+    // not a bare "-" that looks like a value. A cloud brain always has a model id
+    // so it keeps showing that.
+    const noModel = !b.loaded && !b.modelId;
+    stModel.textContent = noModel ? 'no model' : (b.modelName || '-');
+    stModel.style.color = noModel ? '#f87171' : '';
+    stModel.style.fontWeight = noModel ? '600' : '';
+  }
 
   // Bottom-bar `ctx` pill — the REAL window of the active model.
   const stCtx = $$id('st-ctx');
