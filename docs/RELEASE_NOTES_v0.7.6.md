@@ -1,38 +1,38 @@
-v0.7.6 is the release where Hearth stops fumbling the things it claimed to do. Desktop control no longer types into the wrong window, memory actually remembers on its own, and cloud models finally behave like the models they are.
+v0.7.6 is a fix release across desktop control, memory, cloud models, and the interface.
 
 If you are on v0.7.2 or newer, Hearth patches itself, no reinstall. On v0.7.0 or v0.7.1 you need the installer one more time, then you are on the small updates for good. Updating never touches your chats, memory, or models.
 
-## Desktop control that lands where you meant
+## Desktop control
 
-The biggest failure in older builds was invisible. Hearth would decide to click something, the click would land, and then seconds later it typed into whatever window happened to have focus by then, which was often your editor or Hearth's own chat box. Now every keystroke checks first. If focus drifted, or if the front window is Hearth itself, the typing is refused and Hearth re-targets instead of spraying text somewhere you did not ask for. The same guard means Hearth stops the moment you grab the mouse or keyboard mid-task.
+Every keystroke Hearth sends now checks the target window first. If focus moved since it clicked, or if the front window is Hearth itself, the typing is refused and Hearth re-targets rather than putting text somewhere you did not ask for. The same check means Hearth stops as soon as you take the mouse or keyboard back mid task.
 
-Clicking and typing can also happen as one action now, so there is no gap for focus to move through at all. And Hearth can write into an app without yanking it to the front. Point it at a window by name, even one sitting in the background, and it reads that window's real controls and fills the field directly, the way pasting works, rather than stealing your screen to do it.
+Clicking and typing can run as a single action, so nothing can slip in between the two. Hearth can also write into an app without pulling it to the front. Point it at a window by name, including one in the background, and it reads that window's real controls and fills the field directly instead of taking over your screen.
 
-## Memory that keeps up
+Declining an action and telling Hearth what to do instead now makes it do that thing, rather than only acknowledging it.
 
-Recalling a memory could take the better part of a minute on a healthy machine. A single lookup was opening hundreds of files, and on Windows every one of those gets scanned by antivirus on the way past. Hearth now reads each file once and reuses it, so recall is quick again and stays quick as your memory grows.
+## Memory
 
-Saving is instant too. The housekeeping that archives older facts used to run inside the save itself, which is why saving a single fact could stall for several seconds. That work moved into the background where it belongs, and it now runs on its own schedule instead of only when something happened to be saved.
+Recall reads each memory file once and reuses it, so a lookup stays fast as your memory grows. Saving a fact returns immediately, with the archiving of older facts moved into the background and running on its own schedule.
 
-Passive memory was quietly broken for anyone on a reasoning model, and this is the fix most people will feel. Hearth is supposed to notice durable facts on its own without you saying "remember that". Instead the model would spend its whole budget thinking and hand back nothing, or get cut off halfway through, and nothing was ever saved. Extraction now has the room it needs, reads the reply even when a model buries it in its reasoning, and never competes with you for the model. If you send a message while it is working, your message wins and the facts get picked up on the next pass.
+Passive memory works on reasoning models. Hearth notices durable facts on its own without you saying "remember that", and it now has the room to finish writing them and can read the reply even when a model buries it in its reasoning. It also never competes with you for the model. If you send a message while it is working, your message goes first and the facts are picked up on the next pass.
 
-## Cloud models behave like themselves
+## Cloud models
 
-Reasoning is visible again on OpenRouter and other providers that stream their thinking in a different field than local servers do. You can choose how hard a model thinks, low, medium, or high, for models that support it. A cloud model reports its real context window instead of a flat guess, so a million token model no longer claims a fraction of that. Images reach cloud models that can see, rather than being refused by a check meant for local servers. The model list is sorted and searchable instead of hundreds of unordered lines. And a cloud brain reads as online rather than loaded, because nothing is sitting in your VRAM.
+Reasoning is visible on OpenRouter and other providers that stream their thinking in a different field than local servers do. You can set how hard a model thinks, low, medium or high, on models that support it. A cloud model reports its real context window rather than a fixed guess, so a large context model shows what it actually has. Images reach cloud models that can see them. The model list is sorted and searchable instead of hundreds of unordered lines, and a cloud brain reads as online rather than loaded, since nothing is held in your VRAM.
 
-## Voice, again, properly
+## Voice
 
-Voice failed to start on updated installs because the update was missing pieces of its speech stack. Both gaps are closed, so voice comes up on a patched install the same as a fresh one. The microphone test also runs in its own process now, which means a headset you plug in after opening Hearth is actually seen instead of ignored until restart.
+Voice starts on an updated install. The update now carries the maths library the speech stack loads at startup, along with the rest of its dependencies, so a patched install behaves the same as a fresh one. The microphone test runs in its own process, so a headset you plug in after opening Hearth is picked up without a restart.
 
 ## Reading a run
 
-File edits render as a real diff, tight rows with line numbers and a change count, instead of loose colored blocks with gaps between them. Tool cards show a clean one line summary of what was passed rather than raw escaped JSON. The terminal got the same treatment, with a glyph per kind of action, compact arguments, and a short peek at long output instead of flooding your scrollback. When you steer Hearth mid answer, the redirected part is clearly separated instead of running into the previous sentence. Announcements from the developer sit as a card you dismiss when you are ready, instead of a toast that vanishes.
+File edits render as a diff with line numbers and a change count, in tight rows. Tool cards show a one line summary of what was passed rather than raw escaped JSON, and the terminal does the same with a glyph per kind of action and a short peek at long output. Steering Hearth mid answer separates the redirected part from what came before. Announcements from the developer stay as a card until you dismiss them.
 
-The window is responsive now, so a narrow or half snapped window collapses the sidebar into a drawer instead of breaking the layout. Chat titles come from the first real exchange, so a chat that opens with "hey" gets a title about what you actually discussed. Optional sound cues can tell you when a turn finished, when something failed, or when Hearth needs your permission, all off by default.
+The window is responsive, so a narrow or half snapped window moves the sidebar into a drawer. Chat titles come from the first real exchange, so a chat that opens with a greeting still gets a title about the actual subject. Optional sound cues mark a finished turn, an error, or a permission request, all off by default, and user messages can sit in chat bubbles if you prefer, also off by default.
 
-## Smaller things
+## Elsewhere
 
-Hearth can confine reads to your workspace from Settings now, no environment variable needed. Declining an action and telling Hearth what to do instead makes it do that thing, rather than only talking about it. Windows shows the version you actually have after an update. People running from a git clone get told when there is something worth pulling. And when no model is loaded, both the app and the terminal say so plainly in red, instead of showing a placeholder that looked like a loaded model.
+Reads can be confined to your workspace from Settings without setting an environment variable. Windows shows the version you actually have after an update. People running from a git clone are told when there is something worth pulling. When no model is loaded, the app and the terminal both say so in red instead of showing a placeholder that looked like a model.
 
 ---
 
