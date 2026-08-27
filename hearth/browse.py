@@ -102,6 +102,44 @@ class _BrowserWorker(threading.Thread):
         self._browser = None
         self._context = None
         self._page = None
+        # True when driving a Chrome the user already had open (CDP attach)
+        # rather than Hearth's own profile. Changes teardown: we detach, never
+        # close their windows.
+        self.attached = False
+
+
+def _cdp_endpoint() -> str:
+    """DevTools endpoint of an already-running Chrome, or "" if none.
+
+    Enabled by HEARTH_BROWSE_CDP: a full URL, a bare port, or 1/true for the
+    default 9222. Returns "" unless something actually answers, so a stale
+    setting can never stall a browse call.
+    """
+    raw = (os.getenv("HEARTH_BROWSE_CDP") or "").strip()
+    if not raw:
+        try:    # also honour the GUI setting, without importing the web layer
+            import json as _j
+            sp = os.path.join(os.environ.get("JARVIS_WORKSPACE")
+                              or os.path.expanduser("~/Jarvis"), "settings.json")
+            if os.path.isfile(sp):
+                with open(sp, encoding="utf-8") as f:
+                    raw = str((_j.load(f) or {}).get("browse_cdp") or "").strip()
+        except Exception:
+            raw = ""
+    if not raw or raw.lower() in ("0", "false", "no", "off"):
+        return ""
+    if raw.lower() in ("1", "true", "yes", "on"):
+        url = "http://127.0.0.1:9222"
+    elif raw.isdigit():
+        url = f"http://127.0.0.1:{raw}"
+    else:
+        url = raw if raw.startswith("http") else f"http://{raw}"
+    try:    # confirm something is actually listening before handing it to Playwright
+        import urllib.request
+        with urllib.request.urlopen(url.rstrip("/") + "/json/version", timeout=1.5):
+            return url
+    except Exception:
+        return ""
 
     def run(self) -> None:
         try:
@@ -139,6 +177,28 @@ class _BrowserWorker(threading.Thread):
                 x, y, w, h = win.split(",")
                 args += [f"--window-position={x},{y}", f"--window-size={w},{h}"]
             self._pw = sync_playwright().start()
+            # ATTACH to a Chrome the user already has open, when one is listening
+            # on the DevTools port. That gives the real profile (logins, cookies,
+            # extensions) and, more importantly, the page's DOM — so typing into a
+            # contenteditable composer is a selector write instead of a click and
+            # a blind keystroke. Sites also see a normal browser rather than a
+            # fresh automated one, which is what triggers bot checks. Falls
+            # through to launching Hearth's own profile when nothing is listening.
+            cdp = _cdp_endpoint()
+            if cdp:
+                try:
+                    self._browser = self._pw.chromium.connect_over_cdp(cdp)
+                    ctxs = self._browser.contexts
+                    self._context = ctxs[0] if ctxs else self._browser.new_context()
+                    pages = self._context.pages
+                    self._page = pages[0] if pages else self._context.new_page()
+                    self.attached = True
+                    self._ready.set()
+                    self._serve()
+                    return
+                except Exception:
+                    self._browser = None
+                    self._context = None   # port not usable — launch our own below
             # DEDICATED, PERSISTENT Hearth Chrome profile. It lives in its own
             # user-data-dir (separate from the user's everyday Chrome) so it
             # NEVER hits Chrome's "profile already open in another window" lock.
@@ -218,6 +278,10 @@ class _BrowserWorker(threading.Thread):
             self._ready.set()
             return
         self._ready.set()
+        self._serve()
+
+    def _serve(self) -> None:
+        """Run browser commands until stopped, then clean up."""
         while True:
             fn, args, rq = self._cmds.get()
             if fn is None:  # stop signal
@@ -227,8 +291,13 @@ class _BrowserWorker(threading.Thread):
             except Exception as e:
                 rq.put(("err", f"{type(e).__name__}: {e}"))
         try:
-            # Persistent profile uses a context (no separate browser handle).
-            if self._context is not None:
+            if self.attached:
+                # Attached to the USER's browser: detach, never close it. Closing
+                # here would take their real windows and tabs down with us.
+                if self._browser is not None:
+                    self._browser.close()      # closes the CDP connection only
+            elif self._context is not None:
+                # Persistent profile uses a context (no separate browser handle).
                 self._context.close()
             elif self._browser is not None:
                 self._browser.close()

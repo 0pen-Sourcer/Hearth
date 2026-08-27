@@ -6788,6 +6788,85 @@ def _work_area():
         return 0, 0, 1920, 1080
 
 
+def _browser_attach(p: Dict) -> str:
+    """Drive the user's REAL Chrome (their profile, logins, tabs) over the
+    DevTools port instead of a separate automated browser.
+
+    Why it matters: attached, the page's DOM is readable, so a field is filled by
+    selector rather than click-then-type-blind, which is where visual web control
+    usually fails. Sites also see an ordinary browser session instead of a fresh
+    automated one.
+
+    Chrome only opens the port at launch, so if it is already running it has to be
+    restarted. This never force-closes it; that is the user's call.
+    """
+    action = (p.get("action") or "status").strip().lower()
+    port = int(p.get("port") or 9222)
+    url = f"http://127.0.0.1:{port}"
+
+    def _listening() -> bool:
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url + "/json/version", timeout=1.5):
+                return True
+        except Exception:
+            return False
+
+    def _chrome_running() -> bool:
+        try:
+            out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq chrome.exe"],
+                                 capture_output=True, text=True, timeout=10,
+                                 creationflags=0x08000000).stdout.lower()
+            return "chrome.exe" in out
+        except Exception:
+            return False
+
+    if action == "status":
+        if _listening():
+            return (f"Attached browser is available on {url}. browse/browse_click/"
+                    f"browse_type will drive the user's real Chrome, with its DOM.")
+        return (f"No Chrome is listening on {url}. "
+                + ("Chrome IS running but was started without the debugging port, so it "
+                   "must be restarted to enable this. "
+                   if _chrome_running() else "Chrome does not appear to be running. ")
+                + "Call browser_attach(action='start') to launch it with the port "
+                  "enabled (asks the user first if Chrome must close).")
+
+    if action != "start":
+        return "Error: action must be status | start."
+    if _listening():
+        return f"Already attached on {url}; nothing to do."
+    if _chrome_running():
+        return ("Chrome is already running WITHOUT the debugging port. Chrome can only "
+                "open that port at launch, so it has to be restarted. Ask the user to "
+                "save their work and close Chrome, then call browser_attach"
+                "(action='start') again. Do NOT kill Chrome yourself.")
+    exe = ""
+    for cand in (
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ):
+        if os.path.isfile(cand):
+            exe = cand
+            break
+    if not exe:
+        return "Could not find chrome.exe in the usual install locations."
+    try:
+        subprocess.Popen([exe, f"--remote-debugging-port={port}", "--restore-last-session"],
+                         creationflags=0x08000000)
+    except Exception as e:
+        return f"Failed to launch Chrome: {type(e).__name__}: {e}"
+    for _ in range(20):          # give it a moment to open the port
+        time.sleep(0.5)
+        if _listening():
+            os.environ["HEARTH_BROWSE_CDP"] = str(port)
+            return (f"Chrome relaunched with the debugging port and attached on {url}. "
+                    f"Browser tools now drive the real profile, with DOM access.")
+    return (f"Chrome launched but nothing is listening on {url} yet. It may still be "
+            f"starting; call browser_attach(action='status') again in a moment.")
+
+
 def _arrange_windows(p: Dict) -> str:
     """Place several windows at named regions (or exact rects) in one call.
 
@@ -7249,6 +7328,24 @@ TOOL_DEFINITIONS.append({
     ),
     "parameters": {"type": "object", "properties": {}},
 })
+
+TOOL_DEFINITIONS.append({
+    "name": "browser_attach",
+    "description": (
+        "Drive the user's REAL Chrome (their profile, logins and open tabs) "
+        "instead of a separate automated browser. Attached, the browse tools can "
+        "read the page's DOM, so a text box is filled by selector rather than "
+        "clicking and typing blind, which is where web control usually fails. "
+        "action='status' reports whether it is available; action='start' launches "
+        "Chrome with the port enabled. Chrome can only open that port at launch, "
+        "so if it is already running the user must close it first."
+    ),
+    "parameters": {"type": "object", "properties": {
+        "action": {"type": "string", "enum": ["status", "start"]},
+        "port": {"type": "integer", "description": "DevTools port (default 9222)"},
+    }},
+})
+_HANDLERS["browser_attach"] = _browser_attach
 
 TOOL_DEFINITIONS.append({
     "name": "arrange_windows",
