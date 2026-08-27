@@ -6854,6 +6854,14 @@ def _arrange_windows(p: Dict) -> str:
             except Exception:
                 failed.append(f"{title[:30]} (unknown region {region!r})")
                 continue
+        # Never park a window where it can't be reached. Windows stores a
+        # MINIMIZED window at (-25600,-25600), so a caller that reads a rect and
+        # writes it back can strand a window off-screen with no way to drag it
+        # home. Clamp every target into the work area, and keep a usable size.
+        w = max(200, min(w, ww))
+        h = max(150, min(h, wh))
+        x = max(wx, min(x, wx + ww - w))
+        y = max(wy, min(y, wy + wh - h))
         try:
             # Un-maximize/un-minimize first: SetWindowPos cannot move a maximized
             # window, and a minimized one sits off-screen. pywin32 has no
