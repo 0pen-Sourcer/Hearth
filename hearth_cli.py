@@ -3288,7 +3288,7 @@ class JarvisCLI:
         box. Show the filename; the full path is still in /about."""
         m = self.current_model or ""
         if not m or m == "local-model":
-            return "no model"   # the placeholder id — don't imply a model is loaded
+            return f"{C_ERR}no model{C_RESET}"   # red + explicit — nothing's loaded, don't imply it is
         if ("\\" in m or "/" in m) and m.lower().endswith(".gguf"):
             return os.path.basename(m)
         return m
