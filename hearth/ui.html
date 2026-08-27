@@ -3714,6 +3714,13 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">Sounds</div>
+            <div class="hint">A soft cue when a turn finishes, and a low one on an error. Off by default.</div>
+          </div>
+          <div class="switch" data-key="sounds"></div>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">Activity overlay</div>
             <div class="hint">While JARVIS controls the desktop (clicking, typing, reading the screen) a small pill floats at the top of the screen showing what it's doing, so you can follow along even when another window is focused. It never takes focus or blocks clicks.</div>
           </div>
@@ -4651,6 +4658,29 @@ async function api(path, opts = {}) {
 }
 
 const _toastLast = {};
+// Optional audio cues (Settings → Sounds, default off): a soft rising two-note on
+// a completed turn, a low two-tone on error. Generated with the Web Audio API so
+// there are NO asset files to bundle or load, and it stays silent unless enabled.
+let _audioCtx = null;
+function _playSound(kind) {
+  try {
+    if (!(STATE.settings && STATE.settings.sounds)) return;
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _audioCtx, now = ctx.currentTime;
+    const tone = (freq, start, dur, vol) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0, now + start);
+      g.gain.linearRampToValueAtTime(vol, now + start + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(now + start); o.stop(now + start + dur + 0.02);
+    };
+    if (kind === 'error') { tone(233, 0, 0.16, 0.08); tone(175, 0.11, 0.2, 0.08); }
+    else { tone(659, 0, 0.09, 0.05); tone(880, 0.085, 0.13, 0.05); }
+  } catch {}
+}
+
 function toast(title, body = '', kind = 'ok', ms = 3500, force = false) {
   // force = a signed admin broadcast; it overrides Mute-all (rare + trusted, the
   // one toast the user should never miss). Normal status toasts still honor mute.
@@ -7811,6 +7841,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'done') {
+      _playSound('done');
       // Only surface "done" line when something noteworthy happened (an
       // abnormal stop reason, or an error). The default `X step(s) · Yms`
       // footer was visually noisy + read as a system print on top of the
@@ -7969,6 +8000,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'error') {
+      _playSound('error');
       chatBody.appendChild(makeMeta(ev.message || 'error', 'err'));
       assistantMsg.events.push({ kind: 'error', text: ev.message, pos: assistantMsg.content.length });
       // ALSO toast so the user can't miss it. The chat inline meta is small
