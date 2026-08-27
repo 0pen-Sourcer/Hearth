@@ -6750,6 +6750,144 @@ def _focus_window_linux(name: str) -> str:
             "under a pure Wayland session.)")
 
 
+# Named screen regions as (x, y, w, h) fractions of the WORK AREA (the desktop
+# minus the taskbar). Covers the layouts people actually ask for by name, so a
+# request like "put the browser left and the editor right" is one deterministic
+# call instead of a pixel-guessing loop.
+_REGIONS = {
+    "full": (0, 0, 1, 1), "maximize": (0, 0, 1, 1),
+    "left": (0, 0, .5, 1), "right": (.5, 0, .5, 1),
+    "top": (0, 0, 1, .5), "bottom": (0, .5, 1, .5),
+    "top-left": (0, 0, .5, .5), "top-right": (.5, 0, .5, .5),
+    "bottom-left": (0, .5, .5, .5), "bottom-right": (.5, .5, .5, .5),
+    "left-third": (0, 0, 1 / 3, 1), "center-third": (1 / 3, 0, 1 / 3, 1),
+    "right-third": (2 / 3, 0, 1 / 3, 1),
+    "left-two-thirds": (0, 0, 2 / 3, 1), "right-two-thirds": (1 / 3, 0, 2 / 3, 1),
+    "center": (.15, .1, .7, .8),
+}
+
+
+def _work_area():
+    """Desktop rect minus the taskbar, so a tiled window never hides behind it."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        r = wintypes.RECT()
+        # SPI_GETWORKAREA = 0x0030
+        ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0)
+        if r.right > r.left and r.bottom > r.top:
+            return r.left, r.top, r.right - r.left, r.bottom - r.top
+    except Exception:
+        pass
+    try:
+        import win32api
+        import win32con as _wc
+        return (0, 0, win32api.GetSystemMetrics(_wc.SM_CXSCREEN),
+                win32api.GetSystemMetrics(_wc.SM_CYSCREEN))
+    except Exception:
+        return 0, 0, 1920, 1080
+
+
+def _arrange_windows(p: Dict) -> str:
+    """Place several windows at named regions (or exact rects) in one call.
+
+    Deterministic: no screenshot, no pixel estimation, no vision model. This is
+    the reliable half of desktop control, so a layout request should never go
+    through the click loop.
+    """
+    if sys.platform != "win32":
+        return "arrange_windows: Windows only for now."
+    try:
+        import win32con
+        import win32gui
+    except Exception:
+        return "arrange_windows needs pywin32 (pip install pywin32)."
+    items = p.get("layout") or p.get("windows") or []
+    if isinstance(items, dict):
+        items = [items]
+    if not items:
+        return ("Error: layout required, e.g. "
+                "[{\"window\": \"Chrome\", \"region\": \"left\"}, "
+                "{\"window\": \"Code\", \"region\": \"right\"}]. "
+                f"Regions: {', '.join(sorted(_REGIONS))}.")
+    wx, wy, ww, wh = _work_area()
+    # One enumeration for all items, so two entries can't fight over the same window.
+    open_wins: List = []
+
+    def _cb(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd):
+            t = win32gui.GetWindowText(hwnd)
+            if t and t.strip():
+                open_wins.append((hwnd, t))
+    try:
+        win32gui.EnumWindows(_cb, None)
+    except Exception as e:
+        return f"Error enumerating windows: {e}"
+
+    used, done, failed = set(), [], []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        want = str(it.get("window") or it.get("name") or it.get("title") or "").strip()
+        region = str(it.get("region") or it.get("position") or "").strip().lower()
+        if not want:
+            failed.append("(entry with no window name)")
+            continue
+        hit = next(((h, t) for h, t in open_wins
+                    if h not in used and want.lower() in t.lower()), None)
+        if not hit:
+            failed.append(f"{want} (no open window matches)")
+            continue
+        hwnd, title = hit
+        used.add(hwnd)
+        if region in _REGIONS:
+            fx, fy, fw, fh = _REGIONS[region]
+            x, y = wx + int(ww * fx), wy + int(wh * fy)
+            w, h = int(ww * fw), int(wh * fh)
+        else:
+            try:    # explicit rect: fractions (<=1) or raw pixels
+                x, y = int(it["x"]), int(it["y"])
+                w, h = int(it["w"]), int(it["h"])
+                if max(w, h) <= 1:      # given as fractions
+                    x, y = wx + int(ww * float(it["x"])), wy + int(wh * float(it["y"]))
+                    w, h = int(ww * float(it["w"])), int(wh * float(it["h"]))
+            except Exception:
+                failed.append(f"{title[:30]} (unknown region {region!r})")
+                continue
+        try:
+            # Un-maximize/un-minimize first: SetWindowPos cannot move a maximized
+            # window, and a minimized one sits off-screen. pywin32 has no
+            # IsZoomed, so read the placement's showCmd instead.
+            # Twice, deliberately: restoring a window that was minimized FROM
+            # maximized brings it back maximized, and SetWindowPos cannot move a
+            # maximized window, so it would silently end up full-screen.
+            for _ in range(2):
+                try:
+                    _show = win32gui.GetWindowPlacement(hwnd)[1]
+                except Exception:
+                    _show = 0
+                if _show in (win32con.SW_SHOWMAXIMIZED, win32con.SW_SHOWMINIMIZED) \
+                        or win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    time.sleep(0.06)
+                else:
+                    break
+            if region in ("full", "maximize"):
+                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+            else:
+                win32gui.SetWindowPos(hwnd, 0, x, y, w, h,
+                                      win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+            done.append(f"{title[:38]} -> {region or f'{w}x{h}'}")
+        except Exception as e:
+            failed.append(f"{title[:30]} ({type(e).__name__})")
+    out = []
+    if done:
+        out.append("Arranged:" + "".join("\n  " + d for d in done))
+    if failed:
+        out.append("Could not place:" + "".join("\n  " + f for f in failed))
+    return "\n".join(out) or "Nothing to arrange."
+
+
 def _manage_window(p: Dict) -> str:
     """Minimize / maximize / restore / close / focus a window by a title substring."""
     # Accept name / title / window — the model routinely passes `title` (siblings
@@ -7103,6 +7241,33 @@ TOOL_DEFINITIONS.append({
     ),
     "parameters": {"type": "object", "properties": {}},
 })
+
+TOOL_DEFINITIONS.append({
+    "name": "arrange_windows",
+    "description": (
+        "Lay windows out on screen in ONE call: position and size several windows "
+        "at named regions. Use for 'put the browser on the left and the editor on "
+        "the right', 'chat top-right, game bottom-right', 'tile these three'. "
+        "Deterministic, no screenshot or clicking involved, so prefer it over the "
+        "vision loop for anything about window placement. Regions: full, left, "
+        "right, top, bottom, top-left, top-right, bottom-left, bottom-right, "
+        "left-third, center-third, right-third, left-two-thirds, right-two-thirds, "
+        "center. An entry may instead give x/y/w/h (fractions of the screen, or "
+        "pixels). Windows are matched by a substring of the title (list_windows "
+        "shows them)."
+    ),
+    "parameters": {"type": "object", "properties": {
+        "layout": {"type": "array", "description":
+            "One entry per window, e.g. [{\"window\": \"Chrome\", \"region\": \"left\"}, "
+            "{\"window\": \"Code\", \"region\": \"right\"}]",
+            "items": {"type": "object", "properties": {
+                "window": {"type": "string", "description": "substring of the window title"},
+                "region": {"type": "string", "description": "named region (see description)"},
+                "x": {"type": "number"}, "y": {"type": "number"},
+                "w": {"type": "number"}, "h": {"type": "number"}}}},
+    }, "required": ["layout"]},
+})
+_HANDLERS["arrange_windows"] = _arrange_windows
 
 TOOL_DEFINITIONS.append({
     "name": "manage_window",
