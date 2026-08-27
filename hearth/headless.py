@@ -52,6 +52,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -114,6 +115,20 @@ def _is_reasoning_param_error(e: Exception) -> bool:
 
 
 _EFFORT_LEVELS = {"minimal", "low", "medium", "high"}
+
+# Background fact-extraction is a SECOND LLM call. On a local single-slot server
+# it competes with the user's own next turn, so the chat would sit waiting behind
+# an invisible extraction. Two guards: a turn-active flag (a real user turn always
+# wins) and a single-flight lock (several quick turns can't stack up N concurrent
+# extractions). Skipping is safe — the extractor reads the last few turns, so the
+# next run picks up whatever this one missed.
+_TURN_ACTIVE = threading.Event()
+_EXTRACT_LOCK = threading.Lock()
+
+
+def turn_is_active() -> bool:
+    """True while a user-facing generation is running."""
+    return _TURN_ACTIVE.is_set()
 
 
 def _cloud_reasoning_effort(base: str, think: bool, model: str, level: str = ""):
@@ -874,6 +889,9 @@ async def run_once(
     except Exception:
         pass
     t_start = time.time()
+    # A user turn owns the model from here until 'done'. Background extraction
+    # checks this so it never queues a second generation behind the user's.
+    _TURN_ACTIVE.set()
     iterations = 0
     # Tool-loop guard (outcome-hash based, tiered skip/warn/stop). Shared with
     # the CLI — see hearth/loop_guard.py for the full rationale. Replaces the
@@ -1977,7 +1995,27 @@ async def run_once(
         # saying "remember that". Fire it on a daemon thread AFTER 'done' so the
         # turn completes instantly; it saves to memory itself and best-effort
         # emits a toast if the stream is still listening.
+        # Turn is over ('done' already emitted) — release the model so the
+        # extractor below may use it, and so a NEW user turn can claim it.
+        _TURN_ACTIVE.clear()
+
         def _bg_fact_extract(_msgs):
+            # Single-flight: several quick turns must not stack up concurrent
+            # extractions (each is a full LLM call). Skip rather than queue.
+            if not _EXTRACT_LOCK.acquire(blocking=False):
+                return
+            try:
+                # Let a real turn win. Give the user a beat to start typing/sending,
+                # then bail if a new turn claimed the model — its facts get picked
+                # up by the next extraction anyway (it reads the last few turns).
+                time.sleep(1.5)
+                if _TURN_ACTIVE.is_set():
+                    return
+                _run_extract(_msgs)
+            finally:
+                _EXTRACT_LOCK.release()
+
+        def _run_extract(_msgs):
             try:
                 from . import memory_extract as _mx
                 import openai as _oai_module

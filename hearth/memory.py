@@ -365,13 +365,12 @@ def save(title: str, mtype: str, description: str, body: str = "",
     # archive the coldest facts. Coldness combines recall_count with
     # last_recalled_at. Archived facts stay readable + warmable via
     # sibling pull, but stop bloating the hot list / system prompt.
+    # Run it in the BACKGROUND: eviction walks + rewrites the whole bucket, which
+    # made every memory_save a multi-second tool call, and it tied housekeeping to
+    # "did the model happen to save something" instead of the harness just doing
+    # it. The save itself is already durable on disk before this runs.
     if sub_category:
-        try:
-            archived = _evict_if_over_cap(mtype, sub_category, protect_slug=slug)
-            if archived:
-                msg += f"  [archived {len(archived)} cold: {', '.join(archived[:3])}{'...' if len(archived) > 3 else ''}]"
-        except Exception:
-            pass
+        _run_maintenance_async(mtype, sub_category, protect_slug=slug)
     # Supersede: this fact replaces an earlier one the user moved on from
     # ("now in college" replaces "in class 12"). Archive the old one so the
     # model never serves stale info, but keep it recoverable.
@@ -740,6 +739,30 @@ def _coldness(fm: Dict[str, str]) -> float:
         return 1e6  # malformed → maximally cold so it sheds first
     days = (datetime.now() - last).total_seconds() / 86400.0
     return days / (n + 1)
+
+
+# Housekeeping (bucket eviction/archiving) runs OFF the save path. Only one
+# maintenance pass at a time — several saves in a turn would otherwise each
+# rewrite the same bucket concurrently. Non-blocking: if a pass is already
+# running, the next save just skips (the bucket gets swept by that pass anyway).
+_maint_lock = threading.Lock()
+
+
+def _run_maintenance_async(mtype: str, sub_category: str, protect_slug: str = "") -> None:
+    """Archive cold facts in the background so memory_save returns immediately."""
+    def _work():
+        if not _maint_lock.acquire(blocking=False):
+            return          # a sweep is already in flight; it covers this bucket
+        try:
+            _evict_if_over_cap(mtype, sub_category, protect_slug=protect_slug)
+        except Exception:
+            pass
+        finally:
+            _maint_lock.release()
+    try:
+        threading.Thread(target=_work, daemon=True).start()
+    except Exception:
+        pass
 
 
 def _evict_if_over_cap(mtype: str, sub_category: str,
