@@ -688,6 +688,18 @@
   .t-body .diffbox .dl-hdr { padding: 3px 10px; background: var(--bg-2); color: var(--fg-dim); font-size: 11px; border-bottom: 1px solid var(--border); }
   .t-body .diffbox .dl-hdr .add { color: #7ee787; }
   .t-body .diffbox .dl-hdr .del { color: #ff9492; }
+  /* run_command transcript inside a tool card */
+  .t-body .cmdbox { margin: 6px 0 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-family: var(--mono); font-size: 12px; }
+  .t-body .cmd-row { display: flex; gap: 8px; padding: 6px 9px; align-items: flex-start; }
+  .t-body .cmd-row code { white-space: pre-wrap; word-break: break-word; flex: 1; background: none; padding: 0; border: none; }
+  .t-body .cmd-tag { flex: 0 0 auto; font-size: 9.5px; letter-spacing: .06em; padding: 1px 5px; border-radius: 3px; margin-top: 1px; }
+  .t-body .cmd-in { background: rgba(157,123,255,.07); border-bottom: 1px solid var(--border); }
+  .t-body .cmd-in .cmd-tag { background: rgba(157,123,255,.18); color: var(--accent-2); }
+  .t-body .cmd-in code { color: var(--fg); }
+  .t-body .cmd-out .cmd-tag { background: var(--bg-2); color: var(--fg-dim); }
+  .t-body .cmd-out code { color: var(--fg-dim); max-height: 40vh; overflow-y: auto; display: block; }
+  .t-body .cmd-out.bad .cmd-tag { background: rgba(248,81,73,.18); color: #ff9492; }
+  .t-body .cmd-out.bad code { color: #ff9492; }
   .t-body .diff-more { color: var(--fg-faint); font-style: italic; padding: 4px 8px; }
   .t-body .diff-edithdr { color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; margin: 8px 0 3px; }
 
@@ -5903,6 +5915,23 @@ function fillEditCard(name, args, body) {
   return true;
 }
 
+// run_command card body: the command under an IN label, then its output, so an
+// expanded card reads like a terminal transcript rather than one undifferentiated
+// blob. Failure text tints the output rose, success leaves it neutral.
+function fillCommandCard(args, result, body) {
+  body.innerHTML = '';
+  const cmd = String((args && (args.command || args.cmd)) || '').trim();
+  const out = String(result == null ? '' : result);
+  const failed = /^(error|traceback)|exit code [1-9]|command failed|is not recognized/i.test(out.slice(0, 400));
+  const wrap = document.createElement('div');
+  wrap.className = 'cmdbox';
+  wrap.innerHTML =
+    (cmd ? `<div class="cmd-row cmd-in"><span class="cmd-tag">IN</span><code>${esc(cmd)}</code></div>` : '') +
+    `<div class="cmd-row cmd-out${failed ? ' bad' : ''}"><span class="cmd-tag">${failed ? 'ERR' : 'OUT'}</span><code>${esc(out || '(no output)')}</code></div>`;
+  body.appendChild(wrap);
+  return true;
+}
+
 // Compact, human-readable one-line preview of tool args for the card header.
 // Raw JSON.stringify dumps escaped \n and backslashes (a file body reads as
 // "\"\"\"Probe...\n...\\n") — collapse whitespace, truncate each value, and cap
@@ -5934,6 +5963,7 @@ function makeToolCard(name, args) {
   // would be a nice-to-have UI touch but they belong as a presentation tweak
   // on top of the same card, not a different code path.
   const div = document.createElement('div'); div.className = 'tool';
+  div._toolName = name; div._toolArgs = args;   // used by the run_command transcript render
   // Pretty-printed JSON for the title (hover tooltip). For run_command in
   // particular the cmd arg often runs long; ellipsis in the header hides
   // it but hover + opening the card both reveal the full text.
@@ -7747,7 +7777,16 @@ async function send(forced = null, displayAs = null, opts = {}) {
         // message AND rendered live below the tool card. Survives compact,
         // survives re-render, survives chat-switch. A file-write card already
         // shows its green/red diff — don't clobber it with the terse result.
-        if (!pendingTool.div.classList.contains('has-diff')) pendingTool.body.textContent = raw;
+        if (!pendingTool.div.classList.contains('has-diff')) {
+          // run_command reads as a terminal transcript: the command that ran,
+          // then its output. A bare blob hid WHAT was executed once the card was
+          // expanded, which is the thing you actually want to check.
+          if (pendingTool.div._toolName === 'run_command' && pendingTool.div._toolArgs) {
+            fillCommandCard(pendingTool.div._toolArgs, raw, pendingTool.body);
+          } else {
+            pendingTool.body.textContent = raw;
+          }
+        }
 
         // Detect media markers and surface them as a SEPARATE message-level
         // event + a live block under the tool card.
