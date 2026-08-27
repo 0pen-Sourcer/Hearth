@@ -4088,9 +4088,10 @@ class JarvisCLI:
                     src = updater.check_source_update()
                     if src.get("source"):
                         if src.get("available"):
-                            print(f"\n  {C_TOOL}● Hearth {src.get('latest')}{C_RESET}{C_DIM} is out "
-                                  f"(you're on {src.get('current')}). Run {C_RESET}{C_TOOL}git pull{C_RESET}"
-                                  f"{C_DIM} to update this clone.{C_RESET}", flush=True)
+                            print(f"\n  {C_TOOL}● flagged update on main{C_RESET}{C_DIM}: "
+                                  f"{src.get('subject', '')} ({src.get('sha', '')}). Run "
+                                  f"{C_RESET}{C_TOOL}git pull{C_RESET}{C_DIM} to update this clone.{C_RESET}",
+                                  flush=True)
                         return
                     r = updater.check_for_update(HEARTH_VERSION)
                     if r.get("ok") and r.get("available"):

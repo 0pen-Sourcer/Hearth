@@ -314,20 +314,47 @@ def check_for_update(current: str = "", timeout: float = 6.0) -> dict:
     }
 
 
-def check_source_update(timeout: float = 4.0) -> dict:
-    """For a git-clone (source) install: is a newer RELEASE tagged than this
-    checkout? Reuses check_for_update, which compares the latest release TAG to
-    HEARTH_VERSION — so only tagged releases (deliberate, maintainer-made) ever
-    nudge, never day-to-day commits. Returns {source: bool, available, latest}.
-    Best-effort and network-safe: a non-git or frozen build returns source=False.
+# Commit-message marker the maintainer puts in a commit to flag it for source
+# (git-clone) users. Only flagged commits ever nudge — normal commits never do.
+SOURCE_UPDATE_MARKER = "[upgradeable]"
+
+
+def check_source_update(timeout: float = 5.0, marker: str = SOURCE_UPDATE_MARKER) -> dict:
+    """For a git-clone (source) install: is there a newer commit on origin/main
+    that the maintainer FLAGGED for source users (its message contains `marker`),
+    and which this checkout doesn't have yet? Only flagged commits nudge — never
+    every push. Returns {source, available, sha, subject}. Network/git-safe: a
+    frozen or non-git build returns source=False.
     """
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if getattr(sys, "frozen", False) or not os.path.isdir(os.path.join(root, ".git")):
         return {"source": False}
-    r = check_for_update(timeout=timeout)
-    return {"source": True, "available": bool(r.get("available")),
-            "latest": r.get("latest", ""), "current": r.get("current", HEARTH_VERSION),
-            "error": r.get("error")}
+    try:
+        url = f"https://api.github.com/repos/{REPO}/commits?sha=main&per_page=30"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Hearth/0.7", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            commits = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return {"source": True, "available": False, "error": f"{type(e).__name__}: {e}"}
+    flagged = next((c for c in commits
+                    if marker.lower() in ((c.get("commit") or {}).get("message") or "").lower()),
+                   None)
+    if not flagged:
+        return {"source": True, "available": False}
+    sha = flagged.get("sha") or ""
+    subject = (((flagged.get("commit") or {}).get("message") or "").splitlines() or [""])[0]
+    subject = subject.replace(marker, "").strip(" -:") or "a flagged update"
+    # Does this checkout already contain the flagged commit? (is-ancestor is 0 when
+    # HEAD already has it; non-zero when it's missing or on another branch → behind.)
+    try:
+        import subprocess
+        rc = subprocess.run(["git", "-C", root, "merge-base", "--is-ancestor", sha, "HEAD"],
+                            capture_output=True, timeout=timeout).returncode
+        have_it = (rc == 0)
+    except Exception:
+        have_it = False
+    return {"source": True, "available": not have_it, "sha": sha[:8], "subject": subject}
 
 
 _dl_cancel = False
