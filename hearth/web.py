@@ -1989,7 +1989,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                         "ok": False,
                         "error": "no model loaded — load a model first, then import."})
                 _sync = _oai.OpenAI(api_key=_key, base_url=LOCAL_API_BASE)
-                _llm = _mx.make_openai_llm_call(_sync, _model, max_tokens=900)
+                _llm = _mx.make_openai_llm_call(_sync, _model)
                 _msgs = [{"role": "user",
                           "content": "Here is everything another AI remembered about me — "
                                      "save the durable facts:\n\n" + text}]
@@ -2450,7 +2450,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 import openai as _oai
                 from . import memory_extract as _mx
                 _sync = _oai.OpenAI(api_key=_key, base_url=LOCAL_API_BASE)
-                _llm = _mx.make_openai_llm_call(_sync, _model, max_tokens=500)
+                _llm = _mx.make_openai_llm_call(_sync, _model)
                 summary = (_llm(
                     "You compress a conversation. Output ONLY a tight summary, no preamble.",
                     "Summarize the older turns below in 4-6 short bullet lines. Keep concrete "

@@ -342,10 +342,16 @@ def extract_and_save(
 
 
 def make_openai_llm_call(client, model: str, *, temperature: float = 0.0,
-                        max_tokens: int = 800) -> Callable[[str, str], str]:
+                        max_tokens: int = 2000) -> Callable[[str, str], str]:
     """Convenience: wrap an OpenAI-compatible client into the llm_call shape
     extract_and_save expects. Caller passes their own client so we don't
-    have to know which endpoint/key combo is in use."""
+    have to know which endpoint/key combo is in use.
+
+    The budget is deliberately generous: a facts array is easily >600 tokens, and
+    a truncated reply dies as 'Unterminated string' with NOTHING saved. A
+    reasoning model also spends part of the budget thinking before it emits any
+    JSON, so a tight cap silently disabled extraction entirely.
+    """
     def _call(system: str, user: str) -> str:
         kwargs = dict(
             model=model,
@@ -359,11 +365,30 @@ def make_openai_llm_call(client, model: str, *, temperature: float = 0.0,
         # Disable reasoning for the extractor. A model that "thinks" first burns
         # the whole token budget on <think> and never emits the JSON (or the
         # reasoning's brackets confuse the [...] slice), so nothing gets saved.
-        # Local servers honor this flag; if an endpoint 400s on it, retry without.
+        # Local servers honor chat_template_kwargs; cloud ones ignore it, so ask
+        # for minimal reasoning_effort too. Both are best-effort: if an endpoint
+        # rejects either field, retry clean rather than losing the extraction.
         try:
             r = client.chat.completions.create(
-                **kwargs, extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+                **kwargs,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False},
+                            "reasoning": {"enabled": False}})
         except Exception:
-            r = client.chat.completions.create(**kwargs)
-        return (r.choices[0].message.content or "").strip()
+            try:
+                r = client.chat.completions.create(
+                    **kwargs,
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+            except Exception:
+                r = client.chat.completions.create(**kwargs)
+        _msg = r.choices[0].message
+        out = (getattr(_msg, "content", None) or "").strip()
+        if not out:
+            # Reasoning model that put everything in its reasoning channel and
+            # left content empty (the 'raw head: ""' failure). The JSON is often
+            # sitting in there, so use it rather than saving nothing.
+            _ex = getattr(_msg, "model_extra", None) or {}
+            out = (getattr(_msg, "reasoning_content", None)
+                   or getattr(_msg, "reasoning", None)
+                   or _ex.get("reasoning") or _ex.get("reasoning_content") or "").strip()
+        return out
     return _call

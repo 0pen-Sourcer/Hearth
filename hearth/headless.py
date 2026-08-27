@@ -1075,7 +1075,7 @@ async def run_once(
                     _sync = _oai_module.OpenAI(
                         api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE
                     )
-                    _llm = _mx.make_openai_llm_call(_sync, model, max_tokens=600)
+                    _llm = _mx.make_openai_llm_call(_sync, model)
                     _saved, _warns = _mx.extract_and_save(
                         messages, _llm, recent_turns=6
                     )
@@ -1982,7 +1982,7 @@ async def run_once(
                 from . import memory_extract as _mx
                 import openai as _oai_module
                 _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-                _llm = _mx.make_openai_llm_call(_sync, model, max_tokens=600)
+                _llm = _mx.make_openai_llm_call(_sync, model)
                 _saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=4)
                 if _saved:
                     try:

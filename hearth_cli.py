@@ -2541,7 +2541,7 @@ class JarvisCLI:
                 from hearth import memory_extract as _mx
                 import openai as _oai
                 _sync = _oai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-                _llm = _mx.make_openai_llm_call(_sync, self.current_model, max_tokens=900)
+                _llm = _mx.make_openai_llm_call(_sync, self.current_model)
                 _msgs = [{"role": "user",
                           "content": "Here is everything another AI remembered about me - "
                                      "save the durable facts:\n\n" + text}]
@@ -3755,7 +3755,7 @@ class JarvisCLI:
             from hearth import memory_extract as _mx
             import openai as _oai
             _sync = _oai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-            _llm = _mx.make_openai_llm_call(_sync, self.current_model, max_tokens=600)
+            _llm = _mx.make_openai_llm_call(_sync, self.current_model)
             _msgs = list(self.messages)
             # Save SILENTLY - this runs fire-and-forget, so any print lands at a
             # random time (mid-prompt) and is jarring in a terminal. Facts still
