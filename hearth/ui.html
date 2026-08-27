@@ -4826,11 +4826,38 @@ function showInlinePermission(reqId, toolName, args) {
     $('perm-args').title = (args && args.path) || p;
   } else {
     $('perm-tool').textContent = toolName;
-    let argsStr = '';
-    try { argsStr = JSON.stringify(args); } catch {}
-    if (argsStr.length > 160) argsStr = argsStr.slice(0, 160) + '…';
-    $('perm-args').textContent = argsStr;
-    $('perm-args').title = argsStr;  // hover to see full
+    // Show the FULL request on demand. The strip stays one line so it doesn't
+    // shove the input around, but you must be able to read exactly what will run
+    // before approving it, so hover carries the whole thing and clicking expands
+    // it in place (the old code truncated to 160 chars AND set the tooltip to
+    // that same truncated string, so the rest was simply unreachable).
+    let argsFull = '';
+    try {
+      argsFull = (args && typeof args === 'object' && Object.keys(args).length === 1)
+        ? String(Object.values(args)[0])            // single arg (a command) reads cleaner raw
+        : JSON.stringify(args, null, 2);
+    } catch { argsFull = String(args); }
+    const argsOneLine = argsFull.replace(/\s+/g, ' ').trim();
+    const el = $('perm-args');
+    const short = argsOneLine.length > 160 ? argsOneLine.slice(0, 160) + '…' : argsOneLine;
+    el.textContent = short;
+    el.title = argsFull;   // hover shows the WHOLE request, untruncated
+    el.style.cursor = argsOneLine.length > 160 ? 'zoom-in' : '';
+    el.dataset.expanded = '';
+    if (!el._expandWired) {
+      el._expandWired = true;
+      el.addEventListener('click', () => {
+        const isOpen = el.dataset.expanded === '1';
+        el.dataset.expanded = isOpen ? '' : '1';
+        el.textContent = isOpen ? (el._short || '') : (el._full || '');
+        el.style.whiteSpace = isOpen ? 'nowrap' : 'pre-wrap';
+        el.style.maxHeight = isOpen ? '' : '38vh';
+        el.style.overflowY = isOpen ? '' : 'auto';
+        el.style.cursor = isOpen ? 'zoom-in' : 'zoom-out';
+      });
+    }
+    el._short = short;
+    el._full = argsFull;
   }
   $('perm-strip').hidden = false;
   document.getElementById('input').placeholder =
