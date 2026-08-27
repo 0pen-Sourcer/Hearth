@@ -4078,12 +4078,21 @@ class JarvisCLI:
                     except Exception:
                         pass
                     from hearth import updater
-                    r = updater.check_for_update(HEARTH_VERSION)
                     try:
                         os.makedirs(os.path.dirname(stamp), exist_ok=True)
                         _j.dump({"at": _t.time()}, open(stamp, "w"))
                     except Exception:
                         pass
+                    # A git-clone install updates with `git pull`, not an installer —
+                    # nudge only on a tagged RELEASE, never on day-to-day commits.
+                    src = updater.check_source_update()
+                    if src.get("source"):
+                        if src.get("available"):
+                            print(f"\n  {C_TOOL}● Hearth {src.get('latest')}{C_RESET}{C_DIM} is out "
+                                  f"(you're on {src.get('current')}). Run {C_RESET}{C_TOOL}git pull{C_RESET}"
+                                  f"{C_DIM} to update this clone.{C_RESET}", flush=True)
+                        return
+                    r = updater.check_for_update(HEARTH_VERSION)
                     if r.get("ok") and r.get("available"):
                         _blurb = ""
                         if r.get("notes"):

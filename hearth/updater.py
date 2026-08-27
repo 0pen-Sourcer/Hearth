@@ -314,6 +314,22 @@ def check_for_update(current: str = "", timeout: float = 6.0) -> dict:
     }
 
 
+def check_source_update(timeout: float = 4.0) -> dict:
+    """For a git-clone (source) install: is a newer RELEASE tagged than this
+    checkout? Reuses check_for_update, which compares the latest release TAG to
+    HEARTH_VERSION — so only tagged releases (deliberate, maintainer-made) ever
+    nudge, never day-to-day commits. Returns {source: bool, available, latest}.
+    Best-effort and network-safe: a non-git or frozen build returns source=False.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if getattr(sys, "frozen", False) or not os.path.isdir(os.path.join(root, ".git")):
+        return {"source": False}
+    r = check_for_update(timeout=timeout)
+    return {"source": True, "available": bool(r.get("available")),
+            "latest": r.get("latest", ""), "current": r.get("current", HEARTH_VERSION),
+            "error": r.get("error")}
+
+
 _dl_cancel = False
 
 
