@@ -485,6 +485,16 @@ def _tool_glyph(name: str) -> str:
     return _TOOL_GLYPH.get(_tool_family(name), "●")
 
 
+def _model_name_short(model: str) -> str:
+    """Short display name for a model id — the filename for a local GGUF path,
+    else the id as-is. Module-level twin of JarvisCLI._model_label, so the
+    brain-sync and status lines can format a model they're handed."""
+    m = model or ""
+    if ("\\" in m or "/" in m) and m.lower().endswith(".gguf"):
+        return os.path.basename(m)
+    return m
+
+
 # Args most worth seeing first — a preview should say what the call is ABOUT
 # (which file / which query / which command), not the first key alphabetically.
 _ARG_PRIORITY = ("path", "command", "cmd", "query", "url", "pattern", "name",
@@ -1533,7 +1543,7 @@ class JarvisCLI:
             live = _probe_live_model(url, LOCAL_API_KEY) or model
             if live and live != self.current_model:
                 self.current_model = live
-                print(f"{C_DIM}↳ model synced → {_model_label(live)}{C_RESET}")
+                print(f"{C_DIM}↳ model synced → {_model_name_short(live)}{C_RESET}")
             return
         if not key and provider:
             key = _read_brain_key(provider)
@@ -3786,7 +3796,7 @@ class JarvisCLI:
             print(f"  {C_DIM}    Cloud means a hosted model. Faster and stronger, but "
                   f"it costs money and your messages go to that provider.{C_RESET}")
             if _live:
-                print(f"  {C_DIM}    Running locally right now: {_model_label(_live)}{C_RESET}")
+                print(f"  {C_DIM}    Running locally right now: {_model_name_short(_live)}{C_RESET}")
             else:
                 print(f"  {C_DIM}    No local model is loaded yet. Pick local and I'll "
                       f"help you get one with /models.{C_RESET}")
