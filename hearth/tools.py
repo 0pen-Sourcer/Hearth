@@ -6081,8 +6081,18 @@ def _list_models(p: Dict) -> str:
             return (f"Cloud endpoint {base} unreachable ({err_kind}: {e}). "
                     f"Hearth's /v1/models proxy isn't responding. If the user wants "
                     f"local models, suggest `/brain local`. Don't scan the disk.")
+        # No local server answering is exactly when the user's own models matter
+        # most, so list them rather than saying there is nothing. (The old text
+        # told the model NOT to look at the disk, which read as "you have no
+        # models" to someone whose models were sitting right there.)
+        _disk = _disk_models_lines()
+        if _disk:
+            return (f"No model server is running at {base} ({err_kind}), so nothing is "
+                    f"loaded right now." + "\n".join(_disk)
+                    + "\nStart one from the Models tab, or /models use <n> in the CLI.")
         return (f"Couldn't reach the local server at {base}: {err_kind}: {e}. "
-                f"Is LM Studio (or your endpoint) running? Don't scan the disk for model files.")
+                f"Is LM Studio (or your endpoint) running? No .gguf models found on "
+                f"disk either - the Models tab can download one.")
 
 
 def _learn_environment(p: Dict) -> str:
