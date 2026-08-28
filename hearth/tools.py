@@ -6863,7 +6863,12 @@ def _browser_attach(p: Dict) -> str:
     if not exe:
         return "Could not find chrome.exe in the usual install locations."
     try:
-        subprocess.Popen([exe, f"--remote-debugging-port={port}", "--restore-last-session"],
+        # --force-renderer-accessibility makes Chrome expose the PAGE in the
+        # accessibility tree. Without it Chrome keeps the renderer tree off until
+        # a screen reader asks, so desktop_snapshot on a browser returns only
+        # tabs and toolbar buttons with none of the page in it.
+        subprocess.Popen([exe, f"--remote-debugging-port={port}",
+                          "--force-renderer-accessibility", "--restore-last-session"],
                          creationflags=0x08000000)
     except Exception as e:
         return f"Failed to launch Chrome: {type(e).__name__}: {e}"

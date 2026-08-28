@@ -12403,6 +12403,34 @@ function modelParamsLabel(name) {
   return m ? `${m[1]}B` : '';
 }
 
+// Where to read about a model that's already on disk. GGUFs downloaded from
+// Hugging Face keep their "<publisher>/<repo>" folders (LM Studio and the HF
+// cache both do this), so link straight to the repo when the path still carries
+// it; otherwise fall back to a search for the filename. Either way the user can
+// see the licence and what the model is actually for, which the row cannot show.
+function hfLinkForModel(m) {
+  const parts = String((m && m.path) || '').split(/[\\/]/).filter(Boolean);
+  // Hugging Face's own cache stores repos as "models--<publisher>--<repo>".
+  const cached = parts.find(s => /^models--.+--.+/.test(s));
+  if (cached) {
+    const bits = cached.replace(/^models--/, '').split('--');
+    if (bits.length >= 2) return `https://huggingface.co/${bits[0]}/${bits.slice(1).join('-')}`;
+  }
+  const i = parts.length - 2;                 // the folder holding the .gguf
+  if (i >= 1) {
+    const repo = parts[i], publisher = parts[i - 1];
+    // A real repo folder looks like a model name, not a drive or a generic dir.
+    if (/^[\w.-]+$/.test(repo) && /^[\w.-]+$/.test(publisher)
+        && !/^(models|gguf|cache|downloads|hearth\w*|blobs|snapshots)$/i.test(publisher)
+        && !/:$/.test(publisher)) {
+      return `https://huggingface.co/${publisher}/${repo}`;
+    }
+  }
+  const q = String((m && m.filename) || '').replace(/\.gguf$/i, '')
+    .replace(/[.-](Q\d[_\w]*|f16|bf16|iq\d\w*)$/i, '');
+  return 'https://huggingface.co/models?search=' + encodeURIComponent(q);
+}
+
 function modelsCapTagsHTML(caps) {
   if (!caps || !caps.length) return '';
   return '<div class="model-tags">' +
@@ -13018,6 +13046,10 @@ function modelsRenderMine() {
                 && _modelsState.status.model_configs[(m.path || '').toLowerCase()]) || {};
               return Math.min(_sc.ctx || (STATE.settings && STATE.settings.server_default_ctx) || 32768, ctxMax);
             })(), layers: m.layers, sizeGb: m.size_gb })}
+          <div class="ex-desc" style="margin-top:8px">
+            <a href="${esc(hfLinkForModel(m))}" target="_blank" rel="noopener" style="color:var(--accent-2)">Look this model up on Hugging Face &#8599;</a>
+            <span style="color:var(--fg-faint)"> &middot; licence, benchmarks and what it was trained for</span>
+          </div>
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${filenameId}">Cancel</button>
             <button class="model-action is-secondary" data-reveal-model="${esc(m.path)}" title="Show this file in your file explorer">Show in folder</button>
@@ -13105,6 +13137,10 @@ function modelsRenderPicks() {
         <button class="model-action" data-pick="${esc(p.id)}">Download &amp; use</button>
         <div class="model-expand" data-expand="${rowId}">
           <div class="ex-desc">Downloads the file, then loads it with sensible defaults. Tune context / GPU layers anytime in <b>My Models</b> — set once, right where you load it.</div>
+          ${p.hf_repo ? `<div class="ex-desc" style="margin-top:8px">
+            <a href="https://huggingface.co/${esc(p.hf_repo)}" target="_blank" rel="noopener" style="color:var(--accent-2)">View ${esc(p.hf_repo)} on Hugging Face &#8599;</a>
+            <span style="color:var(--fg-faint)"> &middot; licence, benchmarks and what it was trained for</span>
+          </div>` : ''}
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
             <button class="model-action" data-apply-pick="${esc(p.id)}" data-apply-id="${rowId}">Download</button>
@@ -13357,6 +13393,10 @@ async function modelsRenderDiscover() {
           <div class="ex-desc">Bigger Q = better quality but slower + more VRAM. Q4_K_M is the usual sweet spot.</div>
           <div class="ex-files" data-hf-files="${rowId}">Loading files…</div>
           <div class="ex-desc" style="margin-top:12px">Pick a quant, download, and it loads with sensible defaults. Tune context / GPU layers in <b>My Models</b> — set once, right where you load it.</div>
+          <div class="ex-desc" style="margin-top:8px">
+            <a href="https://huggingface.co/${esc(it.hf_repo)}" target="_blank" rel="noopener" style="color:var(--accent-2)">View ${esc(it.hf_repo)} on Hugging Face &#8599;</a>
+            <span style="color:var(--fg-faint)"> &middot; licence, benchmarks and what it was trained for</span>
+          </div>
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
             <button class="model-action" data-apply-hf-repo="${esc(it.hf_repo)}" data-apply-id="${rowId}" disabled>Download</button>
