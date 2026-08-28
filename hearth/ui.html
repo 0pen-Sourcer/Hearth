@@ -144,6 +144,23 @@
     transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
   }
   .model-picker:hover { border-color: var(--border-strong); }
+  /* Load progress, shown ON the sticker so the thing being loaded is the thing
+     that fills. A violet wash sweeps left to right behind the name, with a hard
+     2px line at the bottom edge for a precise read when the name is long. Both
+     disappear when the load finishes. */
+  .model-picker { position: relative; overflow: hidden; }
+  .model-picker > * { position: relative; z-index: 1; }
+  .model-picker::before,
+  .model-picker::after { content: ""; position: absolute; left: 0; opacity: 0;
+    transition: width .35s var(--ease), opacity .25s var(--ease); pointer-events: none; z-index: 0; }
+  .model-picker::before { top: 0; bottom: 0; width: 0;
+    background: linear-gradient(90deg, rgba(139,92,246,.22), rgba(167,139,250,.10)); }
+  .model-picker::after { bottom: 0; height: 2px; width: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .model-picker.is-loading::before,
+  .model-picker.is-loading::after { opacity: 1; width: var(--load-pct, 0%); }
+  .model-pct { font-size: 10.5px; color: var(--accent-2); font-family: var(--mono);
+    margin-left: 2px; white-space: nowrap; }
   .model-state {
     width: 7px; height: 7px; border-radius: 50%;
     background: var(--fg-faint);
@@ -9117,7 +9134,35 @@ const _PHASE_LABEL = {
   error:                 'error',
   idle:                  '',
 };
+// Mirror load progress onto the model sticker itself, so the thing being loaded
+// is the thing that fills. A wash sweeps across the pill with a hard line along
+// its bottom edge (the line stays readable when a long GGUF name fills the pill),
+// plus a small percentage. All of it clears when the load finishes.
+function _stickerProgress(phase, percent) {
+  const pick = document.querySelector('.model-picker');
+  if (!pick) return;
+  if (percent == null) {                       // done: clear everything
+    pick.classList.remove('is-loading');
+    pick.style.removeProperty('--load-pct');
+    const old = pick.querySelector('.model-pct');
+    if (old) old.remove();
+    return;
+  }
+  const pct = Math.max(2, Math.min(100, percent));
+  pick.classList.add('is-loading');
+  pick.style.setProperty('--load-pct', pct + '%');
+  let el = pick.querySelector('.model-pct');
+  if (!el) {
+    el = document.createElement('span');
+    el.className = 'model-pct';
+    pick.appendChild(el);
+  }
+  el.textContent = Math.round(pct) + '%';
+  el.title = _PHASE_LABEL[phase] || phase || 'loading';
+}
+
 function showLoadProgress(phase, percent, marker) {
+  _stickerProgress(phase, percent);
   const box = $('st-loading');
   if (!box) return;
   box.hidden = false;
@@ -9127,6 +9172,7 @@ function showLoadProgress(phase, percent, marker) {
   if (marker) box.title = marker;
 }
 function hideLoadProgress() {
+  _stickerProgress(null, null);
   const box = $('st-loading');
   if (box) box.hidden = true;
 }
