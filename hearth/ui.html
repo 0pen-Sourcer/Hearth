@@ -12409,6 +12409,9 @@ function modelParamsLabel(name) {
 // it; otherwise fall back to a search for the filename. Either way the user can
 // see the licence and what the model is actually for, which the row cannot show.
 function hfLinkForModel(m) {
+  // Hearth records the repo when IT downloaded the file, so use that rather than
+  // inferring anything. Only models that arrived some other way need the guess.
+  if (m && m.hf_repo) return `https://huggingface.co/${m.hf_repo}`;
   const parts = String((m && m.path) || '').split(/[\\/]/).filter(Boolean);
   // Hugging Face's own cache stores repos as "models--<publisher>--<repo>".
   const cached = parts.find(s => /^models--.+--.+/.test(s));

@@ -599,6 +599,9 @@ def list_local_models() -> List[Dict[str, Any]]:
                 "path": str(p),
                 "size_gb": round(p.stat().st_size / (1024 ** 3), 2),
                 "source": "Hearth",
+                # Repo it was downloaded from, when Hearth fetched it, so the UI
+                # can link the real model page instead of guessing from a name.
+                "hf_repo": model_source(p.name),
             })
         except OSError:
             continue
@@ -703,6 +706,9 @@ def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
                     "path": sp,
                     "size_gb": size_gb,
                     "source": _source_label(p),
+                    # Repo it was downloaded from, when Hearth fetched it. Lets the
+                    # UI link the real model page instead of guessing from a name.
+                    "hf_repo": model_source(p.name),
                 })
                 count += 1
         except (OSError, PermissionError):
@@ -829,11 +835,13 @@ def download_model(pick_id: str,
     url = f"https://huggingface.co/{pick['hf_repo']}/resolve/main/{pick['hf_file']}"
     dest = MODELS_DIR / pick["hf_file"]
     if dest.exists():
+        record_model_source(str(dest), pick["hf_repo"])
         return {"ok": True, "path": str(dest), "already": True, "source": "Hearth"}
 
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
         done = _download_with_resume(url, dest, tmp, on_progress)
+        record_model_source(str(dest), pick["hf_repo"])
         return {"ok": True, "path": str(dest), "bytes": done}
     except Exception as e:
         # Keep the .part so the next attempt RESUMES instead of restarting.
@@ -2666,6 +2674,51 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
     return out
 
 
+_SOURCES_FILE = "sources.json"
+
+
+def _sources_path() -> Path:
+    return MODELS_DIR / _SOURCES_FILE
+
+
+def record_model_source(path: str, repo: str) -> None:
+    """Remember which Hugging Face repo a downloaded GGUF came from.
+
+    The file is saved flat in the models folder, so the repo it came from was
+    lost the moment the download finished, and the UI could only guess it back
+    from the filename. Keep a small sidecar map instead. Best-effort: a failure
+    here must never break a download.
+    """
+    if not path or not repo:
+        return
+    try:
+        import json as _j
+        p = _sources_path()
+        data = {}
+        if p.is_file():
+            try:
+                data = _j.loads(p.read_text(encoding="utf-8")) or {}
+            except Exception:
+                data = {}
+        data[os.path.basename(str(path)).lower()] = repo
+        p.write_text(_j.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def model_source(filename: str) -> str:
+    """Repo a downloaded model came from, or "" if unknown."""
+    try:
+        import json as _j
+        p = _sources_path()
+        if not p.is_file():
+            return ""
+        data = _j.loads(p.read_text(encoding="utf-8")) or {}
+        return str(data.get(os.path.basename(str(filename)).lower()) or "")
+    except Exception:
+        return ""
+
+
 def download_from_hf_repo(repo: str, filename: str,
                           on_progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
     """Download an arbitrary GGUF picked from search_huggingface() results.
@@ -2678,11 +2731,13 @@ def download_from_hf_repo(repo: str, filename: str,
     safe_name = filename.split("/")[-1]
     dest = MODELS_DIR / safe_name
     if dest.exists():
+        record_model_source(str(dest), repo)   # backfill if it predates the map
         return {"ok": True, "path": str(dest), "already": True}
     url = f"https://huggingface.co/{repo}/resolve/main/{filename}"
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
         done = _download_with_resume(url, dest, tmp, on_progress)
+        record_model_source(str(dest), repo)
         return {"ok": True, "path": str(dest), "bytes": done}
     except Exception as e:
         # Keep the .part so the next attempt RESUMES instead of restarting.
