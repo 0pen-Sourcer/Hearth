@@ -10530,9 +10530,29 @@ async function refreshSettings() {
             let ev; try { ev = JSON.parse(line); } catch { continue; }
             if (ev.type === 'progress' && ev.total) {
               if (st) st.textContent = Math.round(ev.done / 1e6) + '/' + Math.round(ev.total / 1e6) + ' MB';
+              // Mirror into the downloads overlay so a repair is visible (and
+              // pausable/cancellable) in the same place as engine and model
+              // pulls, instead of only as a line of text in Settings.
+              if (!_repairT0) _repairT0 = { t: Date.now(), b: ev.done || 0 };
+              const _s = Math.max(0.001, (Date.now() - _repairT0.t) / 1000);
+              dlUpsert(REPAIR_DL_ID, {
+                name: 'Hearth repair', kind: 'update', status: 'downloading',
+                pct: Math.round(ev.done / ev.total * 100),
+                done: ev.done, total: ev.total,
+                speed: (ev.done - _repairT0.b) / _s,
+                eta: (ev.total - ev.done) / Math.max(1, (ev.done - _repairT0.b) / _s),
+              });
             } else if (ev.type === 'done') {
-              if (ev.ok) { if (st) st.textContent = 'restored ' + (ev.restored || 0) + ' files'; toast('Repaired', 'Restart Hearth to load the restored files.', 'ok', 8000); }
-              else { if (st) st.textContent = ''; toast('Repair failed', ev.error || 'unknown', 'err', 9000); }
+              _repairT0 = null;
+              if (ev.ok) {
+                dlUpsert(REPAIR_DL_ID, { status: 'done', pct: 100 });
+                if (st) st.textContent = 'restored ' + (ev.restored || 0) + ' files';
+                toast('Repaired', 'Restart Hearth to load the restored files.', 'ok', 8000);
+              } else {
+                dlUpsert(REPAIR_DL_ID, { status: 'error' });
+                if (st) st.textContent = '';
+                toast('Repair failed', ev.error || 'unknown', 'err', 9000);
+              }
             }
           }
         }
@@ -14049,7 +14069,9 @@ function dlRender() {
   const _browse = (!list.length || _modelish)
     ? `<button data-act="discover" style="width:100%;padding:9px 0;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">Browse Hugging Face &rarr;</button>`
     : '';
-  const _title = (list.length && !_modelish) ? 'Updating Hearth' : 'Downloads';
+  const _repairing = list.some(([id]) => id === REPAIR_DL_ID);
+  const _title = (list.length && !_modelish)
+    ? (_repairing ? 'Repairing Hearth' : 'Updating Hearth') : 'Downloads';
   ov.innerHTML = `<div style="font-weight:700;font-size:15px;color:var(--fg);margin-bottom:12px">${_title}</div>${rows}${_browse}`;
 }
 
@@ -15062,6 +15084,10 @@ document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
 // and engines — real bar, speed, ETA, cancel — instead of handing the user off
 // to a browser download page. Resumable, so a dropped connection continues.
 const UPDATE_DL_ID = '__update__';
+// A repair re-downloads the same patch, so it reports through the SAME overlay
+// (and the same pause/cancel routing) rather than being invisible in Settings.
+const REPAIR_DL_ID = '__repair__';
+let _repairT0 = null;   // {t, b} start stamp for the repair's speed/ETA
 const _updDl = { t0: 0, b0: 0 };
 
 async function downloadUpdate() {
