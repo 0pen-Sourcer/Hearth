@@ -1131,7 +1131,21 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
     if hearth_rt.is_dir():
         candidates += sorted(hearth_rt.glob("*/llama-server.exe"),
                              key=lambda p: p.parent.name, reverse=True)
-    # 2) Reuse LM Studio's CUDA-12 backend if the user has it (zero download)
+    # 2) Engine shipped INSIDE the app (Full edition). A packaged build carries a
+    # current standalone llama-server so a fresh install has a working engine with
+    # no download, including on cards the llama-cpp-python wheel has no kernels
+    # for. Ranked after a downloaded runtime, so an update the user pulled still
+    # wins over the one baked into the installer.
+    try:
+        _app = Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "frozen", False) \
+            else Path(__file__).resolve().parent.parent
+        _bundled = _app / "llamacpp"
+        if _bundled.is_dir():
+            candidates += sorted(_bundled.glob("*/llama-server.exe"),
+                                 key=lambda p: p.parent.name, reverse=True)
+    except Exception:
+        pass
+    # 3) Reuse LM Studio's CUDA-12 backend if the user has it (zero download)
     lms = Path(os.path.expanduser("~/.lmstudio/extensions/backends"))
     if lms.is_dir():
         candidates += sorted(lms.glob("*nvidia-cuda12*/llama-server.exe"),

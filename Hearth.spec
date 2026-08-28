@@ -15,6 +15,7 @@
 
 import os
 import glob
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 
@@ -54,6 +55,8 @@ def _unfreeze_hearth(analysis):
 # Ollama / a cloud key (the recommended path anyway). Default build keeps the
 # self-contained server. Usage:  set HEARTH_LITE=1 && build.bat
 LITE = bool(os.environ.get("HEARTH_LITE"))
+# Set when a standalone llama.cpp server gets bundled (Full only).
+ENGINE_BUNDLED = False
 
 block_cipher = None
 
@@ -279,7 +282,43 @@ HIDDEN += ["clr", "pythonnet", "clr_loader", "clr_loader.netfx", "clr_loader.ffi
 # to fit the user's VRAM. NOTE: this can balloon the bundle by 50-400 MB
 # depending on whether the user installed a CPU or CUDA wheel. Verified by
 # running the rebuilt exe -> Models tab -> "Use this" path.
+# Ship a CURRENT standalone llama.cpp server in the Full bundle. The
+# llama-cpp-python wheel below has no Blackwell (RTX 50-series) kernels, so on
+# those cards it loads and then returns empty replies; Hearth refuses it there,
+# which would leave a Full install with no working engine at all. Bundling the
+# standalone server keeps Full genuinely self-contained on every supported card.
+# Source: the newest build in ~/.hearth/llamacpp, or HEARTH_BUNDLE_ENGINE=<dir>.
 if not LITE:
+    try:
+        _eng_src = os.environ.get("HEARTH_BUNDLE_ENGINE", "").strip()
+        if _eng_src:
+            _eng_dirs = [Path(_eng_src)]
+        else:
+            _mgd = Path(os.path.expanduser("~/.hearth/llamacpp"))
+            _eng_dirs = sorted(
+                (p.parent for p in _mgd.glob("*/llama-server.exe")),
+                key=lambda p: p.name, reverse=True) if _mgd.is_dir() else []
+        for _ed in _eng_dirs[:1]:          # newest usable build only
+            for _root, _d, _files in os.walk(_ed):
+                for _f in _files:
+                    _src = os.path.join(_root, _f)
+                    _rel = os.path.relpath(_root, _ed)
+                    _dst = os.path.join("llamacpp", _ed.name,
+                                        "" if _rel == "." else _rel)
+                    DATAS.append((_src, _dst))
+            print(f"[Hearth.spec] bundling llama.cpp engine: {_ed.name}")
+            ENGINE_BUNDLED = True
+    except Exception as _e:
+        print(f"[Hearth.spec] engine bundle skipped: {_e}")
+
+# With a current standalone engine inside the bundle, the llama-cpp-python wheel
+# and its CUDA wheels are dead weight: Hearth always finds the standalone first,
+# and the wheel is the one that cannot drive newer cards anyway. Skipping it also
+# takes ~1.7 GB out of the installer.
+if ENGINE_BUNDLED:
+    print("[Hearth.spec] standalone engine bundled, skipping the llama-cpp-python wheel")
+
+if not LITE and not ENGINE_BUNDLED:
     try:
         from PyInstaller.utils.hooks import collect_all as _collect_all
         _llc_datas, _llc_bins, _llc_hidden = _collect_all("llama_cpp")
@@ -301,7 +340,7 @@ if not LITE:
 # the frozen exe (the "could not find module" loader error that bit the
 # user before round 4). hearth/__init__.py adds the wheel bin dirs to the
 # DLL path on import.
-for _pkg in (() if LITE else ("nvidia.cuda_runtime", "nvidia.cublas", "nvidia.cuda_nvrtc")):
+for _pkg in (() if (LITE or ENGINE_BUNDLED) else ("nvidia.cuda_runtime", "nvidia.cublas", "nvidia.cuda_nvrtc")):
     try:
         from PyInstaller.utils.hooks import collect_all as _collect_all
         _d, _b, _h = _collect_all(_pkg)
