@@ -3967,6 +3967,24 @@
           starting automatically every launch. Everything below is optional.
         </p>
 
+        <!-- Email -->
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">Email <span style="color:var(--fg-faint);font-size:11px;font-weight:400">· read + send</span></div>
+            <div class="hint">Let JARVIS read your inbox and send replies when you ask. Use an <b>app password</b>, not your login one (Gmail: Account, Security, App passwords, needs 2-step on). Servers auto-detect for Gmail, Outlook, Yahoo, iCloud and Fastmail. Stays on this PC, and nothing is read until you ask.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
+            <input type="email" id="email-address" placeholder="you@gmail.com" spellcheck="false" autocomplete="off" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="password" id="email-password" placeholder="app password" autocomplete="new-password" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn-mini" id="email-save">Save</button>
+              <button class="btn-mini" id="email-test">Test</button>
+              <button class="btn-mini" id="email-clear">Disconnect</button>
+              <span id="email-status" style="font-size:11px;color:var(--fg-faint)"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- Telegram -->
         <div class="field" style="align-items:flex-start;">
           <div class="label">
@@ -4071,23 +4089,6 @@
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bc-publish">Publish</button>
               <span id="bc-status" style="font-size:11px;color:var(--fg-faint)"></span>
-            </div>
-          </div>
-        </div>
-        <!-- Email -->
-        <div class="field" style="align-items:flex-start;">
-          <div class="label">
-            <div class="name">Email <span style="color:var(--fg-faint);font-size:11px;font-weight:400">· read + send</span></div>
-            <div class="hint">Let JARVIS read your inbox and send replies when you ask. Use an <b>app password</b>, not your login one (Gmail: Account, Security, App passwords, needs 2-step on). Servers auto-detect for Gmail, Outlook, Yahoo, iCloud and Fastmail. Stays on this PC, and nothing is read until you ask.</div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
-            <input type="email" id="email-address" placeholder="you@gmail.com" spellcheck="false" autocomplete="off" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
-            <input type="password" id="email-password" placeholder="app password" autocomplete="new-password" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <button class="btn-mini" id="email-save">Save</button>
-              <button class="btn-mini" id="email-test">Test</button>
-              <button class="btn-mini" id="email-clear">Disconnect</button>
-              <span id="email-status" style="font-size:11px;color:var(--fg-faint)"></span>
             </div>
           </div>
         </div>
