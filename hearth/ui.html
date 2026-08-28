@@ -9161,6 +9161,31 @@ function _stickerProgress(phase, percent) {
   el.title = _PHASE_LABEL[phase] || phase || 'loading';
 }
 
+// Name the model that is CURRENTLY loading, immediately. The sticker used to keep
+// showing whatever was loaded before (or the first entry) until the load finished
+// and a refresh corrected it, so picking the second model in the list appeared to
+// load the first one.
+function stickerSetLoadingModel(pathOrId, name) {
+  const sel = document.getElementById('model-select');
+  const label = name || String(pathOrId || '').split(/[/\\]/).pop();
+  if (!label) return;
+  try {
+    STATE.brain.modelId = pathOrId || label;
+    STATE.brain.modelName = label;
+  } catch {}
+  if (!sel) return;
+  let opt = Array.from(sel.options).find(o => o.value === pathOrId
+    || o.textContent.replace(/\s+●.*$/, '').trim() === label);
+  if (!opt) {                    // not in the list yet (fresh download): add it
+    opt = document.createElement('option');
+    opt.value = pathOrId || label;
+    opt.textContent = label;
+    opt.dataset.transient = '1';
+    sel.appendChild(opt);
+  }
+  sel.value = opt.value;
+}
+
 function showLoadProgress(phase, percent, marker) {
   _stickerProgress(phase, percent);
   const box = $('st-loading');
@@ -13489,6 +13514,7 @@ function modelsWireRowClicks(pane) {
       if (_modelsState.starting) return;  // another start already in flight
       const fname = b.dataset.usePath.split(/[/\\]/).pop();
       modelsSetStartingLock(true, 'Loading ' + fname + '…');
+      stickerSetLoadingModel((typeof cfg !== 'undefined' && cfg && cfg.model_path) || (typeof path !== 'undefined' ? path : ''), fname);
       const savedCfg = (_modelsState.status && _modelsState.status.model_configs && _modelsState.status.model_configs[modelsCfgKey(b.dataset.usePath)]) || {};
       const body = Object.assign({ model_path: b.dataset.usePath }, savedCfg);
       try {
@@ -13567,6 +13593,7 @@ function modelsWireRowClicks(pane) {
       cfg.model_path = b.dataset.applyPath;
       const fname = cfg.model_path.split(/[/\\]/).pop();
       modelsSetStartingLock(true, 'Loading ' + fname + ' with custom config…');
+      stickerSetLoadingModel((typeof cfg !== 'undefined' && cfg && cfg.model_path) || (typeof path !== 'undefined' ? path : ''), fname);
       try {
         const r = await api('/api/llmserver/start', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -13659,6 +13686,7 @@ function modelsShowStartFailure(r, fname, origBody) {
       onClick: async () => {
         try {
           modelsSetStartingLock(true, 'Force-loading ' + fname + ' (slow, spilling to RAM)…');
+          stickerSetLoadingModel((typeof cfg !== 'undefined' && cfg && cfg.model_path) || (typeof path !== 'undefined' ? path : ''), fname);
           const forced = Object.assign({}, origBody, { force: true });
           const r2 = await api('/api/llmserver/start', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
