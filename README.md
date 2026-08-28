@@ -37,7 +37,7 @@ And it keeps growing: **skills are shareable.** A skill is a folder that teaches
 
 Reach it however you work: a terminal **CLI**, a desktop/web **app**, a headless **bridge**, or an **MCP server**.
 
-> **v0.7-preview**, the CLI and desktop app are the daily drivers. Voice and the bundled llama.cpp server work but are preview-quality (see notes below). Windows is the supported platform; macOS/Linux run from source with most tools working.
+> **v0.7.5-preview**, the CLI and desktop app are the daily drivers. Voice and the bundled llama.cpp server work but are preview-quality (see notes below). Windows is the supported platform; macOS/Linux run from source, with desktop control being Windows only for now.
 
 Where it's headed, grounded computer-use (it watches the screen, points, and acts), a guided "walk me through this" mode, and Mac/Linux, is in the **[Roadmap](ROADMAP.md)**.
 
@@ -48,7 +48,7 @@ Where it's headed, grounded computer-use (it watches the screen, points, and act
 <table>
 <tr>
 <td width="33%" align="center"><strong>Disposable facts get archived, what matters builds a wall of memory</strong><br><img src="docs/media/memory.gif" alt="Hearth's memory browser" width="280"></td>
-<td width="33%" align="center"><strong>Built-in model manager, no LM Studio needed</strong><br><img src="docs/media/discover.gif" alt="Downloading and running a model directly inside Hearth" width="280"></td>
+<td width="33%" align="center"><strong>Find, download and run a model without leaving the app</strong><br><img src="docs/media/discover.gif" alt="Downloading and running a model directly inside Hearth" width="280"></td>
 <td width="33%" align="center"><strong>Skills, reminders, your workspace</strong><br><img src="docs/media/skills.gif" alt="Skills, reminders, and workspace tour" width="280"></td>
 </tr>
 </table>
@@ -181,7 +181,9 @@ The same tool executor is exposed through `hearth/mcp_server.py`, so any MCP-awa
 
 ---
 
-## Workspace layout
+<details>
+<summary><strong>Workspace layout, where your chats, memory and models live on disk</strong></summary>
+
 
 ```
 ~/Jarvis/                  ← the agent's home (override with $env:JARVIS_WORKSPACE)
@@ -201,9 +203,13 @@ The same tool executor is exposed through `hearth/mcp_server.py`, so any MCP-awa
 
 Reads default to your whole disk (the assistant needs to know your machine). Writes, deletes, and moves are confined to the workspace unless you grant access to a folder. Set `JARVIS_LOCKDOWN=1` to confine reads to the workspace too.
 
+</details>
+
 ---
 
-## Configuration (env vars)
+<details>
+<summary><strong>Configuration, every environment variable</strong></summary>
+
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -228,9 +234,13 @@ Reads default to your whole disk (the assistant needs to know your machine). Wri
 
 `HEARTH_*` and `JARVIS_*` prefixes are interchangeable.
 
+</details>
+
 ---
 
-## CLI commands
+<details>
+<summary><strong>CLI commands, the full slash-command reference</strong></summary>
+
 
 ```
 /help                 full list
@@ -257,6 +267,8 @@ Reads default to your whole disk (the assistant needs to know your machine). Wri
 ```
 
 Plus `@<path>` to attach a file (text spliced inline, images sent to vision), arrow-key history, reverse search, and a multi-line input mode.
+
+</details>
 
 ---
 
