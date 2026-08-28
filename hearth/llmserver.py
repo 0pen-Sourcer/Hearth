@@ -412,6 +412,34 @@ def detect_gpu_vram_gb() -> Optional[float]:
     return None
 
 
+_blackwell_cache: List[Optional[bool]] = []
+
+
+def _gpu_is_blackwell() -> bool:
+    """True for an RTX 50-series (Blackwell, sm_120) card.
+
+    The bundled llama-cpp-python wheel has no kernels for these, so it loads and
+    then returns empty replies once the prompt grows. Detected by name, since
+    that works without CUDA installed. Cached; unknown means False so no other
+    GPU is ever blocked by a bad guess.
+    """
+    if _blackwell_cache:
+        return bool(_blackwell_cache[0])
+    ok = False
+    try:
+        no_window = 0x08000000 if os.name == "nt" else 0
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=6,
+            creationflags=no_window).stdout.lower()
+        # RTX 50-series consumer parts, plus the Blackwell workstation cards.
+        ok = bool(re.search(r"rtx\s*50\d0", out)) or "blackwell" in out
+    except Exception:
+        ok = False
+    _blackwell_cache.append(ok)
+    return ok
+
+
 def detect_gpu_vram_free_gb() -> Optional[float]:
     """Return FREE VRAM in GB right now. Different from detect_gpu_vram_gb()
     (which returns total). Used by start_builtin pre-flight to catch the
@@ -1770,6 +1798,22 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     _blackwell = (detect_gpu_compute_cap() or 0.0) >= 12.0
     _native = find_native_llama_server()
     _use_native = _native is not None
+
+    # The bundled llama-cpp-python wheel has no Blackwell (RTX 50-series, sm_120)
+    # kernels, so on those cards it loads and then returns empty replies once the
+    # context grows, which reads as "the model is broken". Refuse it there and
+    # point at the one-click engine install rather than starting something known
+    # not to work. Other GPUs keep the wheel as a working fallback.
+    if not _use_native and n_gpu_layers != 0 and _gpu_is_blackwell():
+        return {
+            "ok": False,
+            "error": ("This GPU (RTX 50-series) needs the standalone llama.cpp "
+                      "engine. The bundled runtime has no kernels for it and would "
+                      "return empty replies on longer prompts. Install the engine "
+                      "in Models, Engine (one click), or run on CPU with GPU "
+                      "layers set to 0."),
+            "needs_engine": True,
+        }
 
     # Resolve concurrent slots. Only the standalone llama-server has them; the
     # llama-cpp-python wheel wraps a single Llama instance and serialises no
