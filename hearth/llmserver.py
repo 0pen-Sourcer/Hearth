@@ -1110,8 +1110,17 @@ def set_engine_preference(pref: str) -> Dict[str, Any]:
 
 
 def _engine_source_of(exe: Path) -> str:
+    """Where an engine came from: the user's downloaded runtime, LM Studio's, or
+    the copy shipped inside the app (Full)."""
     s = str(exe)
-    return "hearth" if ".hearth" in s else ("lmstudio" if ".lmstudio" in s else "other")
+    if ".hearth" in s:
+        return "hearth"
+    if ".lmstudio" in s:
+        return "lmstudio"
+    # Shipped inside the packaged app: <app>/llamacpp/<build>/llama-server.exe
+    if os.sep + "llamacpp" + os.sep in s or "/llamacpp/" in s:
+        return "bundled"
+    return "other"
 
 
 def find_native_llama_server() -> Optional[Dict[str, Any]]:
@@ -1154,7 +1163,19 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
     # misbehaves on hardware we can't test.
     pref = get_engine_preference()
     if pref == "wheel":
-        _native_server_cache.append(None)   # fall through to llama-cpp-python
+        # "Built-in" means the engine that SHIPS WITH HEARTH. That used to be the
+        # llama-cpp-python wheel; a packaged build now carries a real llama.cpp
+        # server, so honour the preference with the bundled one when it is there.
+        # Without this, choosing Built-in on a packaged build pinned users to the
+        # wheel, which has no kernels for newer GPUs.
+        _bundled_only = [c for c in candidates if _engine_source_of(c) == "bundled"]
+        for exe in _bundled_only:
+            if _usable_server_exe(exe) and not engine_is_known_bad(str(exe)):
+                found = {"exe": str(exe), "label": exe.parent.name,
+                         "dll_dirs": [str(exe.parent)]}
+                _native_server_cache.append(found)
+                return found
+        _native_server_cache.append(None)   # nothing bundled -> the wheel
         return None
     if pref.startswith("hearth:"):          # pinned to one build
         want = pref.split(":", 1)[1]
@@ -1211,6 +1232,8 @@ def llama_runtime_info() -> Dict[str, Any]:
         source = "wheel"      # falling back to the bundled llama-cpp-python
     elif ".hearth" in exe:
         source = "hearth"     # Hearth's own downloaded runtime (self-sufficient)
+    elif _engine_source_of(Path(exe)) == "bundled":
+        source = "bundled"    # the real llama.cpp server shipped inside the app
     elif ".lmstudio" in exe:
         source = "lmstudio"   # reusing LM Studio's signed backend
     else:
@@ -1819,6 +1842,10 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     # point at the one-click engine install rather than starting something known
     # not to work. Other GPUs keep the wheel as a working fallback.
     if not _use_native and n_gpu_layers != 0 and _gpu_is_blackwell():
+        # Release the in-progress marker before bailing, or this path stays
+        # flagged as loading and every later attempt is refused as a duplicate.
+        with _start_lock:
+            _starting_paths.discard(normalized_path)
         return {
             "ok": False,
             "error": ("This GPU (RTX 50-series) needs the standalone llama.cpp "
