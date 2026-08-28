@@ -14628,7 +14628,18 @@ async function obLoadVoiceStatus() {
           try {
             const s = await fetch('/api/voice/install-status').then(x => x.json());
             if (s.running) { instBtn.textContent = s.pct != null ? `Installing… ${s.pct}%` : 'Installing…'; return; }
-            if (s.done) { clearInterval(poll); instBtn.textContent = s.ok ? 'Installed ✓' : 'Install failed'; if (s.ok) obLoadVoiceStatus(); }
+            if (s.done) {
+              clearInterval(poll);
+              if (s.ok) { instBtn.textContent = 'Installed ✓'; obLoadVoiceStatus(); }
+              else {
+                // A failed install must stay RETRYABLE. This used to leave the
+                // button disabled reading "Install failed", so a half-finished
+                // voice setup could never be attempted again from here.
+                instBtn.disabled = false;
+                instBtn.textContent = 'Retry install';
+                toast('Voice setup did not finish', (s.msg || s.error || 'You can retry it here.'), 'warn', 8000);
+              }
+            }
           } catch { clearInterval(poll); instBtn.disabled = false; instBtn.textContent = 'Install speakers'; }
         }, 2500);
       } catch (e) { instBtn.disabled = false; instBtn.textContent = 'Install failed'; toast('Speakers install failed', e.message, 'err', 7000); }
