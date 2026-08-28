@@ -579,6 +579,25 @@ def detect_running_server(default_api_base: str = "http://localhost:1234/v1") ->
     return None
 
 
+def _model_entry(p, source: str, size_gb: Optional[float] = None) -> Dict[str, Any]:
+    """One row describing a GGUF on disk.
+
+    The ONLY place this dict is built. It used to be assembled in both scan
+    functions, so a field added to one was silently missing from the other.
+    """
+    if size_gb is None:
+        size_gb = round(p.stat().st_size / (1024 ** 3), 2)
+    return {
+        "filename": p.name,
+        "path": str(p),
+        "size_gb": size_gb,
+        "source": source,
+        # Repo it was downloaded from, when Hearth fetched it, so the UI can link
+        # the real model page instead of guessing from the filename.
+        "hf_repo": model_source(p.name),
+    }
+
+
 def list_local_models() -> List[Dict[str, Any]]:
     """List GGUF files under ~/Jarvis/models. Surfaced in the GUI Models panel.
 
@@ -594,15 +613,7 @@ def list_local_models() -> List[Dict[str, Any]]:
         if "mmproj" in p.name.lower():
             continue
         try:
-            out.append({
-                "filename": p.name,
-                "path": str(p),
-                "size_gb": round(p.stat().st_size / (1024 ** 3), 2),
-                "source": "Hearth",
-                # Repo it was downloaded from, when Hearth fetched it, so the UI
-                # can link the real model page instead of guessing from a name.
-                "hf_repo": model_source(p.name),
-            })
+            out.append(_model_entry(p, "Hearth"))
         except OSError:
             continue
     return out
@@ -701,15 +712,7 @@ def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
                 if size_gb < 0.05:
                     continue
                 seen.add(sp)
-                out.append({
-                    "filename": p.name,
-                    "path": sp,
-                    "size_gb": size_gb,
-                    "source": _source_label(p),
-                    # Repo it was downloaded from, when Hearth fetched it. Lets the
-                    # UI link the real model page instead of guessing from a name.
-                    "hf_repo": model_source(p.name),
-                })
+                out.append(_model_entry(p, _source_label(p), size_gb))
                 count += 1
         except (OSError, PermissionError):
             continue
