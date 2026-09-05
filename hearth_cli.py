@@ -703,32 +703,24 @@ def _prune_old_images(messages: List[Dict], keep_last: int = 1) -> int:
     return n
 
 
-# Tools that touch the system / user files / the network in non-trivial
-# ways. Asks the user before running unless they pick "always".
-RISKY_TOOLS = {
-    "write_file", "edit_file", "delete_path", "move_path",
-    "create_directory", "run_command", "open_app", "open_url",
-    "open_in_browser",
-    "memory_forget",
-    # Reads private mail / sends mail - gate both.
-    "read_inbox", "send_email",
-    # Writes + registers executable Python as a new tool - gate it.
-    "create_plugin", "delete_plugin",
-    # Browser actions can submit forms / click "buy" - gate the action ones.
-    "browse_click", "browse_type",
-    # Computer-use: real mouse/keyboard on the live screen - gate the
-    # state-changing ones (move + screen-info are harmless, left ungated).
-    "computer_click", "computer_type", "computer_key", "computer_scroll",
-    "computer_drag",
-    # Spawns a team of autonomous agents + opens panes — gate it.
-    "launch_team",
-    # Desktop a11y: snapshot is read-only (ungated); click/type act, so gate them.
-    "desktop_click", "desktop_type",
-    # Slow / scanning tools - also gated so the user can deny full-drive scans.
-    "disk_usage",
-    # VRAM-eating heavy ops - generation can take minutes and shuts down LLM
-    "forge_generate", "forge_shutdown",
-}
+# Single source — see hearth/tools.py _RISKY_TOOLS. Import at runtime to avoid
+# circular import at module load (hearth.tools imports hearth_cli helpers).
+try:
+    from hearth.tools import _RISKY_TOOLS as RISKY_TOOLS
+except Exception:
+    # Fallback for source checkout without hearth installed
+    RISKY_TOOLS = {
+        "write_file", "edit_file", "delete_path", "move_path",
+        "create_directory", "run_command", "open_app", "open_url",
+        "open_in_browser", "memory_forget",
+        "read_inbox", "send_email",
+        "create_plugin", "delete_plugin",
+        "browse_click", "browse_type",
+        "computer_click", "computer_type", "computer_key", "computer_scroll",
+        "computer_drag", "launch_team",
+        "desktop_click", "desktop_type",
+        "disk_usage", "forge_generate", "forge_shutdown",
+    }
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
@@ -739,40 +731,6 @@ def _sanitize(text: str) -> str:
     if not text:
         return text
     return text.encode("utf-8", "replace").decode("utf-8", "replace")
-
-
-# Phrases that indicate the model is announcing an action without taking it.
-# Catches the most common Qwen/Gemma yield patterns. Case-insensitive,
-# substring match against the assistant's content. Used by the anti-yield
-# wrapper in JarvisCLI.respond() - see _yielded_this_turn handling.
-_YIELD_TRIGGERS = (
-    "i'll search", "i'll check", "i'll look", "i'll find",
-    "i'll open", "i'll run", "i'll fetch", "i'll grab",
-    "let me search", "let me check", "let me look", "let me find",
-    "let me open", "let me run", "let me fetch",
-    "i'm going to search", "i'm going to check", "i'm going to look",
-    "i'm going to run", "i'm going to open",
-    "going to run a", "going to check that", "going to look that up",
-    "i will search", "i will check", "i will run",
-    "one moment", "one sec while i", "one second",
-    "hold on while i", "give me a sec",
-)
-
-
-def _looks_like_yield(text: str) -> bool:
-    """True if the assistant message announces an action but didn't call
-    a tool to do it. Conservative - only fires on clear-cut patterns to
-    avoid nudging legitimate "I'll add that to memory" type responses.
-    """
-    if not text:
-        return False
-    t = text.lower().strip()
-    # Must end with something that suggests "...and I'm about to do it"
-    # rather than a completed statement. Trailing periods + short length
-    # are good signals.
-    if len(t) > 500:
-        return False
-    return any(trigger in t for trigger in _YIELD_TRIGGERS)
 
 
 def autodetect_model() -> str:
@@ -2974,7 +2932,12 @@ class JarvisCLI:
             parts = cmd.split()[1:]
             sub = parts[0].lower() if parts else ""
             from pathlib import Path as _P
-            mcp_path = _P.home() / "Jarvis" / "mcp.json"
+            # Respect relocated workspace (pointer file + env) — not just ~/Jarvis
+            try:
+                from hearth.tools import WORKSPACE as _WS
+                mcp_path = _P(_WS) / "mcp.json"
+            except Exception:
+                mcp_path = _P.home() / "Jarvis" / "mcp.json"
             if not sub:
                 # Status: count Hearth's exported tools + show client-config file location
                 try:
@@ -3033,14 +2996,15 @@ class JarvisCLI:
                     print(f"  {C_DIM}path: {mcp_path}{C_RESET}")
                 return True
             if sub == "config":
-                snippet = __import__("json").dumps({
-                    "mcpServers": {
-                        "hearth": {
-                            "command": "python",
-                            "args": ["-m", "hearth.mcp_server"],
-                        }
-                    }
-                }, indent=2)
+                import sys as _sys, os as _os
+                if getattr(_sys, "frozen", False):
+                    _launch = {"command": _sys.executable,
+                               "args": ["--hearth-run-python", "-m", "hearth.mcp_server"]}
+                else:
+                    _launch = {"command": _sys.executable,
+                               "args": [_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                                      "hearth", "mcp_server.py")]}
+                snippet = __import__("json").dumps({"mcpServers": {"hearth": _launch}}, indent=2)
                 print(f"  {C_DIM}Paste into the OTHER tool's mcp.json:{C_RESET}")
                 print()
                 for ln in snippet.split("\n"):
@@ -4676,18 +4640,13 @@ class JarvisCLI:
                     continue
                 raise
 
-    async def respond(self, depth: int = 0):  # noqa: C901  # see _looks_like_yield helper at module level
+    async def respond(self, depth: int = 0):  # noqa: C901
         if depth > MAX_TURNS:
             # Generous safety ceiling (the loop guard handles real spirals long
             # before this); reaching it means something genuinely runaway.
             print(f"{C_DIM}● reached the turn limit - wrapping up{C_RESET}")
             return
 
-        # Reset the anti-yield flag at the start of each new user turn so we
-        # can nudge at most ONCE per user message. (Not at every recursive
-        # tool-chain depth - that would loop.)
-        if depth == 0:
-            self._yielded_this_turn = False
             # Tool-loop guard: outcome-hash based, tiered (skip dup / warn /
             # stop). Fresh per user turn. See hearth/loop_guard.py for the full
             # rationale.
@@ -5130,29 +5089,6 @@ class JarvisCLI:
         # loop above - no end-of-turn speak needed.
 
         if not tool_calls_dict:
-            # Anti-yield wrapper: if the model emitted an "I'll do X" style
-            # announcement WITHOUT actually calling the tool, give it one
-            # nudge to follow through. Limited to once per user turn.
-            # Catches the most common Qwen/Gemma drift: "I'll search for
-            # that..." with no search.
-            if (
-                not self._yielded_this_turn
-                and content_captured
-                and len(content_captured) < 500
-                and depth < 6
-                and _looks_like_yield(content_captured)
-            ):
-                self._yielded_this_turn = True
-                print(f"{C_DIM}(model announced an action without taking it - nudging){C_RESET}")
-                self.messages.append({
-                    "role": "user",
-                    "content": (
-                        "You said you'd do that but you didn't actually call the tool. "
-                        "Don't narrate the intent - just call the tool. Right now, this turn."
-                    ),
-                })
-                await self.respond(depth + 1)
-                return
             self.save_history()
             return
 
@@ -5161,8 +5097,20 @@ class JarvisCLI:
             args_raw = tc["function"]["arguments"] or "{}"
             try:
                 args = json.loads(args_raw)
-            except json.JSONDecodeError:
-                args = {}
+            except json.JSONDecodeError as _je:
+                _snippet = (args_raw[:500] + "…") if len(args_raw) > 500 else args_raw
+                print(f"{C_RED}Tool JSON error for {name} at col {_je.colno}: {_je.msg}{C_RESET}")
+                print(f"{C_DIM}Raw: {_snippet}{C_RESET}")
+                # Feed the error back so the next turn can retry with fixed JSON.
+                err = (
+                    f"Error: your tool call JSON for '{name}' is malformed and was not executed. "
+                    f"json.loads failed at col {_je.colno}: {_je.msg}. Raw: {_snippet} "
+                    f"Fix: escape inner quotes and ensure valid JSON object."
+                )
+                self.messages.append({"role": "assistant", "content": "", "tool_calls": [tc]})
+                self.messages.append({"role": "tool", "tool_call_id": tc.get("id") or "call_err", "name": name, "content": err})
+                print(f"{C_YELLOW}→ {err[:300]}{C_RESET}")
+                continue
             # Args preview. We dump the FULL argument set only when we're
             # about to ASK you to approve - that's when a hidden ">D:\evil.bat"
             # tail matters and you need to read it. When the call runs

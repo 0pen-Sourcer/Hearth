@@ -346,32 +346,6 @@ def resolve_context_tokens(model_id: str) -> tuple:
     return CONTEXT_TOKENS, f"default {CONTEXT_TOKENS // 1024}K"
 
 
-# Phrases that signal "I'm going to do X" without an actual tool call.
-# Kept in sync with hearth_cli.py's _YIELD_TRIGGERS.
-_YIELD_TRIGGERS = (
-    "i'll search", "i'll check", "i'll look", "i'll find",
-    "i'll open", "i'll run", "i'll fetch", "i'll grab",
-    "let me search", "let me check", "let me look", "let me find",
-    "let me open", "let me run", "let me fetch",
-    "i'm going to search", "i'm going to check", "i'm going to look",
-    "i'm going to run", "i'm going to open",
-    "going to run a", "going to check that", "going to look that up",
-    "i will search", "i will check", "i will run",
-    "one moment", "one sec while i", "one second",
-    "hold on while i", "give me a sec",
-)
-
-
-def _looks_like_yield(text: str) -> bool:
-    """Conservative yield detector — only fires on clear-cut patterns."""
-    if not text:
-        return False
-    t = text.lower().strip()
-    if len(t) > 500:
-        return False
-    return any(trigger in t for trigger in _YIELD_TRIGGERS)
-
-
 # ---------------------------------------------------------------------------
 # Event emitters
 # ---------------------------------------------------------------------------
@@ -898,9 +872,6 @@ async def run_once(
     # old magic-number "stop after N calls of one tool" counter.
     guard = ToolLoopGuard()
     _force_answer = False
-    # Tracks if we already nudged the model in this run_once invocation
-    # (anti-yield wrapper).
-    _yielded_already = False
     # Set to a hint string when the last tool result contained a "NEXT STEP:"
     # directive. If the next assistant message doesn't act on it (just narrates
     # what happened), we fire a stronger nudge than the trigger-phrase one.
@@ -1515,9 +1486,6 @@ async def run_once(
             emit("thinking", content=reasoning)
 
         if msg.tool_calls:
-            # Reset the yield-nudge guard once we actually see tool calls
-            # in a turn — they're moving forward, not stuck.
-            _yielded_already = False
             tc_dicts = []
             for tc in msg.tool_calls:
                 tc_dicts.append({
@@ -1538,10 +1506,55 @@ async def run_once(
             for tc in msg.tool_calls:
                 name = tc.function.name
                 raw_args = tc.function.arguments or "{}"
+                # Repair pass: some local models emit bad JSON (unescaped inner
+                # quotes in PowerShell `if()` strings, trailing commas, numbered
+                # keys `{"0":{...}}` for batched calls). Try strict, then
+                # lenient repair before giving up — and when it still fails,
+                # feed the exact error back so the model can fix it.
                 try:
                     args = json.loads(raw_args)
-                except json.JSONDecodeError:
-                    args = {}
+                except json.JSONDecodeError as _je:
+                    # Lenient repair: allow literal tabs/newlines, trim trailing
+                    # commas/braces, escape stray quotes inside strings.
+                    try:
+                        # Repair 1: strict=False allows literal control chars
+                        args = json.loads(raw_args, strict=False)
+                    except Exception:
+                        args = None
+                    if args is None:
+                        # Common: model sent numbered keys {"0":{...},"1":{...}}
+                        # instead of array — unwrap the first if present.
+                        try:
+                            _tmp = json.loads(raw_args.strip().strip(","))
+                            if isinstance(_tmp, dict) and all(k.isdigit() for k in _tmp):
+                                _first = _tmp[sorted(_tmp, key=lambda k: int(k))[0]]
+                                if isinstance(_first, dict) and "name" in _first:
+                                    raw_args = json.dumps(_first.get("arguments", {}))
+                                    args = _first.get("arguments", {})
+                                else:
+                                    raise ValueError("numbered batch")
+                        except Exception:
+                            pass
+                    if args is None:
+                        _snippet = (raw_args[:600] + "…") if len(raw_args) > 600 else raw_args
+                        tool_result = (
+                            f"Error: your tool call JSON for '{name}' is malformed and was not executed. "
+                            f"json.loads failed at col {_je.colno}: {_je.msg}. "
+                            f"Raw arguments: {_snippet}\n"
+                            f"Fix: ensure all inner quotes are escaped (\\\"), no trailing commas, and arguments is a single JSON object like {{\"command\": \"...\"}}, not {{\"0\":...}}. Retry the SAME tool with corrected JSON."
+                        )
+                        emit("tool_call", name=name, args={})
+                        emit("tool_result", name=name, content=tool_result, ms=0)
+                        messages.append({"role": "tool", "tool_call_id": tc.id, "name": name, "content": tool_result})
+                        # Let loop guard track this failure so repeated mangles trip warn/stop.
+                        try:
+                            from .tools import _RISKY_TOOLS as _R
+                            _gd = guard.after(name, {}, tool_result)
+                            if _gd.action in ("warn", "stop"):
+                                messages[-1]["content"] += f"\n\n{_gd.note}"
+                        except Exception:
+                            pass
+                        continue
                 emit("tool_call", name=name, args=args)
 
                 # Permission policy.
@@ -1552,29 +1565,7 @@ async def run_once(
                 #    parallel implementation in hearth_cli.py.
                 # 2. Otherwise the legacy JARVIS_AUTO_APPROVE env var applies:
                 #    when set to "0", risky tools are auto-denied (no UI).
-                RISKY = {
-                    "write_file", "edit_file", "create_directory",
-                    "delete_path", "move_path", "run_command",
-                    "open_app", "open_url", "open_in_browser",
-                    "memory_forget", "extract_archive_file",
-                    "create_plugin", "delete_plugin",
-                    "read_inbox", "send_email",
-                    # Computer-use drives the REAL mouse/keyboard over the whole
-                    # desktop, so the state-changing actions are gated here too
-                    # (the GUI persists an "always allow" so it prompts once,
-                    # not on every click). computer_screen/move and
-                    # desktop_snapshot are read-only / harmless -> left ungated.
-                    "computer_click", "computer_type", "computer_key",
-                    "computer_scroll", "computer_drag",
-                    "desktop_click", "desktop_type",
-                    "launch_team",  # spawns a team of autonomous agents + panes
-                    # browse_click / browse_type / browse_scroll are NOT
-                    # listed — once the user has already approved the
-                    # initial `browse` call, every subsequent click/type/
-                    # scroll inside that same session shouldn't re-prompt.
-                    # Otherwise the agent stalls on page 1 waiting for
-                    # approval on every interaction.
-                }
+                from .tools import _RISKY_TOOLS as RISKY  # single source — see tools.py
                 if name in RISKY and permission_check is not None:
                     _deny_reason = ""
                     try:
@@ -1817,10 +1808,6 @@ async def run_once(
             continue
 
         # Final assistant text — no more tool calls.
-        # Emit the aggregate `assistant` event for clients that don't process
-        # `assistant_chunk` events (so existing CLI / bridge consumers still
-        # work). New clients render chunks live and use this as the canonical
-        # final text.
         if msg.content:
             emit("assistant", content=msg.content)
         elif not msg.tool_calls:
@@ -1869,83 +1856,6 @@ async def run_once(
             })
             continue
 
-        # NOTE: removed the old trigger-phrase anti-yield wrapper. It was
-        # producing false positives (model saying "let me check" as a polite
-        # opener while ACTUALLY calling the tool), adding latency, and rarely
-        # helping. The NEXT-STEP wrapper above covers the real failure mode.
-
-        # AGENT-LOOP SELF-CHECK: did the model stop too early?
-        # The user's #1 complaint: "feels like a chatbot, not an agent —
-        # does X and stops when I asked for the whole alphabet". The persona
-        # rule above tells the model to keep going; this is the safety net.
-        #
-        # Cheap, pattern-based — no extra LLM call. Triggers ONE nudge if
-        # the final response shape SCREAMS "I'm bailing early":
-        #   - Trailing chatbot-pitch question ("want me to also...?")
-        #   - Tiny answer to a clearly-large ask (long prompt, short reply)
-        #   - "Let me know" / "anything else" sign-off after a small action
-        #
-        # Fires at most ONCE per user turn (tracked via _early_stop_nudged).
-        try:
-            _final_msg = next(
-                (m for m in reversed(messages)
-                 if m.get("role") == "assistant" and isinstance(m.get("content"), str)),
-                None,
-            )
-            _final = (_final_msg or {}).get("content", "") or ""
-            _user_msg = next(
-                (m for m in messages
-                 if m.get("role") == "user" and isinstance(m.get("content"), str)),
-                None,
-            )
-            _user_text = (_user_msg or {}).get("content", "") or ""
-            if (
-                _final and _user_text
-                and not getattr(run_once, "_early_stop_nudged", False)
-                and iterations < max_depth - 1
-            ):
-                early_stop_patterns = [
-                    r"want me to (also|then|next)",
-                    r"shall i (also|continue|proceed|run)",
-                    r"should i (also|continue|proceed)",
-                    r"let me know (if|when)",
-                    r"anything else\?",
-                    r"would you like me to",
-                ]
-                import re as _re
-                tail = _final[-300:].lower()
-                hit = next((p for p in early_stop_patterns if _re.search(p, tail)), None)
-                # Sample-and-bail detector for long asks: user wrote >=300
-                # chars, but reply is <200 chars AND contains no real numbers
-                # (suggests "gave 3 things and stopped" on a "read the whole
-                # X" prompt). Heuristic, not exact.
-                long_ask_short_reply = (
-                    len(_user_text) >= 300
-                    and len(_final) < 200
-                    and not _re.search(r"\b\d{2,}\b", _final)
-                )
-                if hit or long_ask_short_reply:
-                    run_once._early_stop_nudged = True  # type: ignore[attr-defined]
-                    reason = ("trailing chatbot-pitch in reply"
-                              if hit else "short reply to a long ask")
-                    emit("nudge",
-                         reason=f"agent-loop self-check: {reason} — keep going")
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "[SYSTEM] You stopped early. Re-read the ORIGINAL "
-                            "user request and check: did you actually cover "
-                            "the whole ask, or sample and bail? If the ask "
-                            "was 'read it thoroughly' you should still be "
-                            "running the chunk loop. If it was 'find + launch X' "
-                            "you should be calling open_app, not asking 'want "
-                            "me to launch?'. Do the next concrete step. NOW. "
-                            "No 'want me to' questions. Just act."
-                        ),
-                    })
-                    continue  # loop back, run another turn
-        except Exception:
-            pass  # never block the chat reply on a self-check exception
 
         # Last-chance steer drain: the model produced a final answer with no
         # tool call, so the between-iterations drain never ran. If the user typed
@@ -1964,13 +1874,6 @@ async def run_once(
                     emit("steered", text=_s.strip())
                 continue
 
-        # Reset the per-turn nudge flag so a fresh user message can trigger
-        # the self-check again (we only block re-triggering within one user
-        # turn — across user turns it must be re-enabled).
-        try:
-            del run_once._early_stop_nudged  # type: ignore[attr-defined]
-        except AttributeError:
-            pass
 
         # Close out the desktop-activity overlay with a brief "Done" tick (only
         # if it was actually up this turn), so a computer-use task ends cleanly
