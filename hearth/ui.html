@@ -5303,6 +5303,10 @@ function renderConvoList() {
     list.innerHTML = `<div style="padding:18px 12px;color:var(--fg-faint);font-size:11px;text-align:center">No chats yet.</div>`;
     return;
   }
+  // Most recently touched first. The list was only ordered by the server on a
+  // full reload, so replying in an old chat left it sitting under Earlier while
+  // idle chats sat above it until you restarted.
+  STATE.conversations.sort((a, b) => (b.updated || 0) - (a.updated || 0));
   // Group by recency
   const now = Date.now();
   const groups = { Today: [], Yesterday: [], Earlier: [] };
@@ -7954,6 +7958,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'done') {
       _playSound('done');
+      // Touch the active chat so the sidebar floats it back to the top. The
+      // server already records this; without it the local copy kept its old
+      // timestamp until a reload and the chat stayed buried.
+      try {
+        const _ac = activeConvo();
+        if (_ac) { _ac.updated = Date.now(); renderConvoList(); }
+      } catch {}
       // Only surface "done" line when something noteworthy happened (an
       // abnormal stop reason, or an error). The default `X step(s) · Yms`
       // footer was visually noisy + read as a system print on top of the

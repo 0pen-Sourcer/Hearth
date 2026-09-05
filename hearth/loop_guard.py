@@ -135,11 +135,24 @@ class GuardDecision:
     note: str = ""
 
 
+def _outcome_hash(result: str) -> str:
+    """Stable digest of a tool result. Only the head is hashed: a long listing
+    that differs far down is still the same answer for loop purposes, and it
+    keeps the cost flat on big outputs."""
+    import hashlib
+    return hashlib.md5((result or "")[:2000].encode("utf-8", "replace")).hexdigest()
+
+
 @dataclass
 class _SigState:
     calls: int = 0
     failures: int = 0
     last_succeeded: bool = False
+    # Outcome tracking. Repeating a call whose RESULT keeps changing is polling
+    # (watching a build, a download, GPU load) and is legitimate progress. Only
+    # a repeat that returns the same thing means the model is stuck.
+    last_outcome: str = ""
+    same_outcome_calls: int = 0
 
 
 class ToolLoopGuard:
@@ -186,6 +199,12 @@ class ToolLoopGuard:
 
         st.calls += 1
         st.last_succeeded = not failed
+        outcome = _outcome_hash(result)
+        if outcome == st.last_outcome:
+            st.same_outcome_calls += 1
+        else:
+            st.same_outcome_calls = 1   # result moved, so this is progress
+        st.last_outcome = outcome
         if failed:
             st.failures += 1
             self._tool_fails[name] = self._tool_fails.get(name, 0) + 1
@@ -226,15 +245,16 @@ class ToolLoopGuard:
         # inputs => no new information, whatever the output wobble (e.g. fetching
         # the same URL repeatedly). (Identical MUTATING calls are skipped earlier
         # by before(); this catches read-only repeats.)
-        if st.calls >= NO_PROGRESS_STOP:
+        if st.same_outcome_calls >= NO_PROGRESS_STOP:
             return self._stop(
-                f"'{name}' has been called {st.calls} times with identical arguments — "
+                f"'{name}' has been called {st.same_outcome_calls} times with identical arguments "
+                f"and the same result each time — "
                 f"you already have that result. Use it and answer the user now; do not "
                 f"call it again."
             )
-        if st.calls >= NO_PROGRESS_WARN:
+        if st.same_outcome_calls >= NO_PROGRESS_WARN:
             return GuardDecision("warn",
-                f"[loop guard: you've called '{name}' {st.calls}x with the SAME arguments — "
+                f"[loop guard: '{name}' returned the SAME result {st.same_outcome_calls}x in a row — "
                 f"that gives no new info. Use the result you have, or change approach.]")
 
         # 3) PING-PONG: alternating A,B,A,B,... with no progress.

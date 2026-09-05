@@ -88,6 +88,27 @@ def recently_spoke_text(within_s: float = 6.0) -> str:
         return " ".join(t for (ts, t) in _spoken_log if ts >= cutoff)
 
 
+# How long after TTS stops the mic stays untrusted. Both capture paths (the
+# realtime recorder and the CLI push-to-talk loop) read this one value, so the
+# tail can be tuned once instead of drifting apart across three files.
+ECHO_TAIL_S: float = float(os.environ.get("HEARTH_VOICE_ECHO_TAIL_S", "1.8") or "1.8")
+
+
+def half_duplex_enabled() -> bool:
+    """Hold the mic closed while Hearth speaks. On speakers the mic hears the
+    reply and would answer itself, so this is the deterministic stop for that
+    loop. On a headset it should be off, so barge-in works. Env wins over the
+    saved setting; unreadable settings mean full duplex."""
+    v = os.environ.get("HEARTH_VOICE_HALF_DUPLEX")
+    if v is not None:
+        return v.strip().lower() not in ("0", "false", "no", "off")
+    try:
+        from .web import _load_settings
+        return bool(_load_settings().get("voice_half_duplex"))
+    except Exception:
+        return False
+
+
 def is_speaking() -> bool:
     """True while a speak() call is producing audio. listen.py gates STT on
     this so the mic doesn't transcribe the assistant's own voice through the speakers."""

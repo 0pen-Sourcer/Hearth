@@ -69,17 +69,23 @@ _barge_fired: bool = False  # a real barge fired this segment (vs an echo blip)
 # a speaker+mic user who still loops turns half-duplex on in Settings > Voice
 # (or HEARTH_VOICE_HALF_DUPLEX=1), which holds the mic closed while Hearth speaks.
 def _half_duplex() -> bool:
-    v = os.environ.get("HEARTH_VOICE_HALF_DUPLEX")
-    if v is not None:
-        return v.strip().lower() not in ("0", "false", "no", "off")
+    """Shared with the CLI capture loop; see voice.half_duplex_enabled."""
     try:
-        from .web import _load_settings
-        return bool(_load_settings().get("voice_half_duplex"))
+        from . import voice as _v
+        return _v.half_duplex_enabled()
     except Exception:
         return False
 # How long after TTS stops the mic stays deaf, to swallow the acoustic tail +
 # device/transcription buffering that arrives late on speakers.
-_ECHO_TAIL_S: float = float(os.environ.get("HEARTH_VOICE_ECHO_TAIL_S", "1.8") or "1.8")
+# Echo tail lives in voice.py so the realtime path and the CLI capture loop
+# cannot drift apart. Read through a helper, not copied at import, so an env
+# change is picked up without a restart.
+def _echo_tail() -> float:
+    try:
+        from . import voice as _v
+        return _v.ECHO_TAIL_S
+    except Exception:
+        return 1.8
 _BARGE_DEBUG: bool = os.environ.get("HEARTH_BARGE_DEBUG", "1") not in ("0", "", "false")
 
 
@@ -562,7 +568,7 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
                 # (Hearth's own voice, a video, music) — never a user turn. This is
                 # the hard stop against the self-reply loop on speakers. Flush the
                 # buffer too so accumulated echo can't ride into the next turn.
-                if _tts.is_speaking() or _tts.seconds_since_spoke() < _ECHO_TAIL_S:
+                if _tts.is_speaking() or _tts.seconds_since_spoke() < _echo_tail():
                     try: rec.clear_audio_queue()
                     except Exception: pass
                     continue
@@ -577,7 +583,7 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
                     try: rec.clear_audio_queue()
                     except Exception: pass
                     continue
-            elif _tts.is_speaking() or _tts.seconds_since_spoke() < 1.2:
+            elif _tts.is_speaking() or _tts.seconds_since_spoke() < _echo_tail():
                 try: rec.clear_audio_queue()
                 except Exception: pass
                 continue

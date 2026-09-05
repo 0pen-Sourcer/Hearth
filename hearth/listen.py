@@ -615,22 +615,34 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
                     time.sleep(0.05)
                     continue
 
-                # Hard-mute while the assistant is speaking AND for a brief cooldown
-                # after - kills the speaker-to-mic feedback loop deterministically.
+                # While the assistant speaks, the mic hears it too. Half duplex
+                # (speakers) drops that audio outright, which is the only
+                # deterministic stop for the self-reply loop. Full duplex
+                # (headset) keeps listening so you can talk over the reply, and
+                # raises the bar instead so only speech clearly louder than the
+                # bleed counts. This used to drop the audio either way, which
+                # made the barge path below unreachable.
                 tts_active = False
                 tts_recent = False
                 try:
                     tts_active = _voice.is_speaking()
-                    tts_recent = _voice.seconds_since_spoke() < POST_TTS_COOLDOWN_S
+                    tts_recent = _voice.seconds_since_spoke() < _voice.ECHO_TAIL_S
                 except Exception:
                     pass
-                if tts_active or tts_recent:
+                if (tts_active or tts_recent) and _voice.half_duplex_enabled():
                     speech_run = 0  # reset so a partial run doesn't carry over
+                    continue
+                if tts_recent and not tts_active:
+                    # Speaking has stopped but the speaker buffer is still
+                    # draining; that tail is never a user turn.
+                    speech_run = 0
                     continue
 
                 mono = data[:, 0] if data.ndim > 1 else data
                 rms = float((mono ** 2).mean() ** 0.5)
-                threshold = SPEECH_RMS  # tts is gated above; no need to raise here
+                # Full duplex over speakers: require speech well above the
+                # bleed so the reply cannot trigger itself.
+                threshold = SPEECH_RMS * TTS_MULT if tts_active else SPEECH_RMS
 
                 if rms > threshold:
                     speech_run += 1
