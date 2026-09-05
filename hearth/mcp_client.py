@@ -53,8 +53,28 @@ _LOOP: Optional[asyncio.AbstractEventLoop] = None
 _LOOP_THREAD: Optional[threading.Thread] = None
 _LOOP_READY = threading.Event()
 
-_WORKSPACE = Path(os.environ.get("JARVIS_WORKSPACE") or (Path.home() / "Jarvis"))
+def _workspace() -> Path:
+    env = os.environ.get("JARVIS_WORKSPACE")
+    if env and env.strip():
+        return Path(env.strip())
+    try:
+        ptr = Path.home() / ".hearth" / "workspace.txt"
+        if ptr.is_file():
+            p = ptr.read_text(encoding="utf-8").strip()
+            if p:
+                return Path(p)
+    except OSError:
+        pass
+    return Path.home() / "Jarvis"
+
+
+_WORKSPACE = _workspace()
 _MCP_JSON = _WORKSPACE / "mcp.json"
+
+
+def _mcp_json_path() -> Path:
+    # Re-resolve each time so a relocated workspace is picked up without restart
+    return _workspace() / "mcp.json"
 
 # Tool-call timeout when forwarding to an MCP server. The model's chat
 # request usually has its own ceiling; 60s is enough for filesystem /
@@ -63,10 +83,11 @@ _TOOL_TIMEOUT_S = 60.0
 
 
 def _read_config() -> Dict[str, Dict[str, Any]]:
-    if not _MCP_JSON.is_file():
+    p = _mcp_json_path()
+    if not p.is_file():
         return {}
     try:
-        data = json.loads(_MCP_JSON.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return {}
     servers = data.get("mcpServers") if isinstance(data, dict) else None

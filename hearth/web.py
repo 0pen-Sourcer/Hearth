@@ -1017,24 +1017,54 @@ def _gpu_snapshot() -> Dict:
             capture_output=True, text=True, timeout=3, creationflags=_NO_WINDOW,
         )
         if r.returncode != 0:
-            data = {"available": False, "error": "nvidia-smi failed"}
-        else:
-            gpus = []
-            for line in r.stdout.strip().splitlines():
-                bits = [p.strip() for p in line.split(",")]
-                if len(bits) >= 5:
+            raise FileNotFoundError("nvidia-smi failed")
+        gpus = []
+        for line in r.stdout.strip().splitlines():
+            bits = [p.strip() for p in line.split(",")]
+            if len(bits) >= 5:
+                gpus.append({
+                    "name": bits[0],
+                    "util_pct": int(bits[1]),
+                    "mem_used_mb": int(bits[2]),
+                    "mem_total_mb": int(bits[3]),
+                    "temp_c": int(bits[4]),
+                })
+        data = {"available": True, "gpus": gpus}
+    except Exception:
+        # No NVIDIA — try AMD/Intel via WMI (shared memory, no VRAM metrics)
+        try:
+            ps = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,"
+                 "Utilization,Temperature | ConvertTo-Json -Compress"],
+                capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW,
+            )
+            if ps.returncode == 0 and ps.stdout.strip():
+                import json as _j
+                raw = _j.loads(ps.stdout.strip())
+                items = raw if isinstance(raw, list) else [raw]
+                gpus = []
+                for g in items:
+                    name = g.get("Name") or "Unknown GPU"
+                    # AdapterRAM is in bytes for CIM; 0 means shared memory (iGPU)
+                    vram_bytes = int(g.get("AdapterRAM") or 0)
+                    vram_mb = vram_bytes // (1024 * 1024) if vram_bytes > 0 else 0
+                    util = g.get("Utilization")
+                    util_pct = int(util.get("Percentage", 0)) if isinstance(util, dict) else 0
+                    temp = g.get("Temperature")
+                    temp_c = int(temp.get("CurrentTemperature", 0)) if isinstance(temp, dict) else 0
                     gpus.append({
-                        "name": bits[0],
-                        "util_pct": int(bits[1]),
-                        "mem_used_mb": int(bits[2]),
-                        "mem_total_mb": int(bits[3]),
-                        "temp_c": int(bits[4]),
+                        "name": name,
+                        "util_pct": util_pct,
+                        "mem_used_mb": 0,   # iGPU shares system RAM
+                        "mem_total_mb": vram_mb,
+                        "temp_c": temp_c,
                     })
-            data = {"available": True, "gpus": gpus}
-    except FileNotFoundError:
-        data = {"available": False, "error": "nvidia-smi not on PATH"}
-    except Exception as e:
-        data = {"available": False, "error": f"{type(e).__name__}: {e}"}
+                data = {"available": bool(gpus), "gpus": gpus}
+            else:
+                data = {"available": False, "error": "no GPU detected"}
+        except Exception:
+            data = {"available": False, "error": "no GPU detected"}
     _gpu_cache["ts"] = now
     _gpu_cache["data"] = data
     return data
@@ -1658,7 +1688,15 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/gpu":
             return self._send_json(200, _gpu_snapshot())
         if path == "/api/tools":
-            return self._send_json(200, {"tools": TOOL_DEFINITIONS})
+            try:
+                from .tools import _RISKY_TOOLS as _RT, _NEVER_PERM as _NP
+                out = []
+                for _td in TOOL_DEFINITIONS:
+                    _r = "never" if _td["name"] in _NP else ("risky" if _td["name"] in _RT else "safe")
+                    out.append({**_td, "risk": _r})
+                return self._send_json(200, {"tools": out})
+            except Exception:
+                return self._send_json(200, {"tools": TOOL_DEFINITIONS})
         if path == "/api/persona":
             return self._send_json(200, {"system_prompt": system_prompt()})
         if path == "/api/llmserver/status":
@@ -2153,7 +2191,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             try:
                 from . import skills_install as _si
                 m = _si.inspect_source((body.get("source") or "").strip())
-                m.pop("_staged", None)  # internal temp path — don't leak to the UI
+                _staged = m.pop("_staged", None)
+                if _staged:
+                    try:
+                        import shutil as _sh, pathlib as _pl
+                        _sh.rmtree(_staged, ignore_errors=True)
+                    except Exception:
+                        pass
                 return self._send_json(200, m)
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
@@ -2204,8 +2248,12 @@ class HearthHandler(BaseHTTPRequestHandler):
 
                     def _stream_pip(args):
                         """Run pip, stream its progress into _VOICE_INSTALL, return rc."""
+                        _pip_cmd = [sys.executable, "-m", "pip", *args]
+                        if getattr(sys, "frozen", False):
+                            _pip_cmd = [sys.executable, "--hearth-run-python",
+                                        "-m", "pip", *args]
                         proc = _sp.Popen(
-                            [sys.executable, "-m", "pip", *args],
+                            _pip_cmd,
                             stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, bufsize=1,
                             env=env, creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
                         buf = ""
@@ -2250,8 +2298,13 @@ class HearthHandler(BaseHTTPRequestHandler):
                             if rc != 0:
                                 raise RuntimeError("download failed (runtime untouched)")
                             _VOICE_INSTALL.update(step="swapping runtime…", pct=None, speed="")
-                            _sp.run([sys.executable, "-m", "pip", "uninstall", "-y",
-                                     "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml"],
+                            _uninstall_cmd = [sys.executable, "-m", "pip", "uninstall", "-y",
+                                     "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml"]
+                            if getattr(sys, "frozen", False):
+                                _uninstall_cmd = [sys.executable, "--hearth-run-python",
+                                     "-m", "pip", "uninstall", "-y",
+                                     "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml"]
+                            _sp.run(_uninstall_cmd,
                                     capture_output=True, text=True,
                                     creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
                             rc = _stream_pip(["install", "--no-index",
@@ -2390,9 +2443,25 @@ class HearthHandler(BaseHTTPRequestHandler):
             txt = (body.get("json") or "").strip()
             if txt:
                 try:
-                    json.loads(txt)
+                    data = json.loads(txt)
                 except Exception as e:
                     return self._send_json(400, {"ok": False, "error": f"JSON: {e}"})
+                # Schema validation — catch typos like {"foo":123} before restart
+                if not isinstance(data, dict):
+                    return self._send_json(400, {"ok": False, "error": "config must be a JSON object with mcpServers"})
+                servers = data.get("mcpServers")
+                if servers is not None:
+                    if not isinstance(servers, dict):
+                        return self._send_json(400, {"ok": False, "error": "mcpServers must be an object"})
+                    for name, spec in servers.items():
+                        if not isinstance(spec, dict):
+                            return self._send_json(400, {"ok": False, "error": f"server '{name}' must be an object"})
+                        if "command" not in spec or not isinstance(spec["command"], str) or not spec["command"].strip():
+                            return self._send_json(400, {"ok": False, "error": f"server '{name}' missing 'command' string"})
+                        if "args" in spec and not isinstance(spec["args"], list):
+                            return self._send_json(400, {"ok": False, "error": f"server '{name}' args must be an array"})
+                        if "env" in spec and not isinstance(spec["env"], dict):
+                            return self._send_json(400, {"ok": False, "error": f"server '{name}' env must be an object"})
             mcp_path = os.path.join(WORKSPACE, "mcp.json")
             try:
                 os.makedirs(os.path.dirname(mcp_path) or WORKSPACE, exist_ok=True)
@@ -2549,14 +2618,20 @@ class HearthHandler(BaseHTTPRequestHandler):
                     _listen.set_device(stt_dev)
                     # Eagerly load so the download happens NOW, not on first /listen
                     _listen._try_load_model()
-                    details["stt"] = f"whisper {stt_mdl} on {stt_dev}"
+                    # Report the ACTUAL device, not the requested one — CUDA
+                    # may have silently fallen back to CPU on AMD/Radeon.
+                    actual = getattr(_listen, "DEVICE", stt_dev)
+                    load_err = getattr(_listen, "_last_load_error", None)
+                    details["stt"] = f"whisper {stt_mdl} on {actual}"
+                    if load_err:
+                        details["stt_warning"] = load_err
                 except Exception as e:
                     details["stt"] = f"{type(e).__name__}: {e}"
             # Realtime voice recorder: kill so it rebuilds with new model next time
             if _rt_voice:
                 try:
                     _rt_voice.stop_continuous()
-                    _rt_voice._recorder = None
+                    _rt_voice.reset_recorder()
                     details["realtime"] = "will rebuild on next start"
                 except Exception as e:
                     details["realtime"] = f"{type(e).__name__}: {e}"
@@ -3941,9 +4016,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         text = (body.get("text") or "").strip()
         if not text:
             return self._send_json(400, {"error": "empty text"})
-        if not _voice or not _voice.is_available():
-            reason = _voice.status() if _voice else {"reason": "voice module missing"}
-            return self._send_json(503, {"error": "TTS not available", "detail": reason})
+        if not _voice:
+            return self._send_json(503, {"error": "TTS not available", "detail": {"reason": "voice module missing"}})
         # The manual Speak button sends force=true: clear any stale abort flag so
         # it ALWAYS plays. Without this, a prior stop()/barge-in left _abort set
         # and every Speak click was silently dropped (the silent-Speak bug).
@@ -3952,9 +4026,16 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _voice.reset_abort()
             except Exception:
                 pass
-        # Speak through system speakers — non-blocking so the request returns fast
+        # Speak through system speakers — non-blocking so the request returns fast.
+        # _voice.speak(allow_download=True) will fetch Kokoro models on first use
+        # (~100MB), so the onboarding Test now triggers download instead of 503.
         try:
             r = _voice.speak(text, blocking=False)
+            if r == "no_voice":
+                reason = _voice.status() if _voice else {"reason": "voice module missing"}
+                return self._send_json(503, {"error": "TTS not available", "detail": reason})
+            if r == "empty":
+                return self._send_json(400, {"error": "empty text after filtering"})
             return self._send_json(200, {"ok": True, "result": r})
         except Exception as e:
             return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
@@ -4547,6 +4628,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n[hearth.web] stopping.")
+        try:
+            from . import mcp_client as _mc
+            _mc.shutdown()
+        except Exception:
+            pass
         server.shutdown()
     return 0
 

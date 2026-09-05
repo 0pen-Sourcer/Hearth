@@ -129,6 +129,22 @@ _TYPE_PY = {
 }
 
 
+def _sanitize_param(name: str) -> str:
+    """Turn an arbitrary JSON property name into a valid Python identifier."""
+    import keyword as _kw
+    import re as _re
+    s = _re.sub(r"[^0-9A-Za-z_]", "_", name)
+    if not s or s[0].isdigit():
+        s = "_" + s
+    if _kw.iskeyword(s):
+        s = s + "_"
+    # Ensure uniqueness is handled by caller if needed; for now the sanitized
+    # form is deterministic. Colliding originals (e.g. "a-b" and "a_b") will
+    # share the same sanitized name — last wins, which is acceptable for MCP
+    # tool schemas that should not have such collisions.
+    return s
+
+
 def _make_tool(name: str, description: str, schema: Dict[str, Any]):
     props: Dict[str, Any] = schema.get("properties", {}) or {}
     required = set(schema.get("required", []) or [])
@@ -138,21 +154,41 @@ def _make_tool(name: str, description: str, schema: Dict[str, Any]):
     # Python syntax requires required params BEFORE optional ones, so sort
     # accordingly before emitting the signature (the tool schemas list
     # properties in declaration order which sometimes puts optionals first).
+    # Property names like "foo-bar" or "123abc" are not valid Python identifiers,
+    # so sanitize them and map back to the original key when calling execute_tool.
+    param_map: List[tuple] = []  # (original, sanitized)
+    seen: set = set()
+    for pname in props:
+        san = _sanitize_param(pname)
+        # De-dupe sanitized collisions: "a-b" and "a_b" both -> "a_b"
+        base, n = san, 1
+        while san in seen:
+            n += 1
+            san = f"{base}_{n}"
+        seen.add(san)
+        param_map.append((pname, san))
+
     req_parts: List[str] = []
     opt_parts: List[str] = []
-    for pname, pschema in props.items():
+    for (pname, san), (_, pschema) in zip(param_map, props.items()):
         pytype = _TYPE_PY.get(pschema.get("type", "string"), "str")
         if pname in required:
-            req_parts.append(f"{pname}: {pytype}")
+            req_parts.append(f"{san}: {pytype}")
         else:
-            opt_parts.append(f"{pname}: Optional[{pytype}] = None")
+            opt_parts.append(f"{san}: Optional[{pytype}] = None")
 
     sig = ", ".join(req_parts + opt_parts)
+    # Build args dict mapping original names -> sanitized variable values
+    if param_map:
+        pairs = ", ".join(f"{orig!r}: {san}" for orig, san in param_map)
+        args_line = f"    _raw = {{{pairs}}}\n    args = {{k: v for k, v in _raw.items() if v is not None}}\n"
+    else:
+        args_line = "    args = {}\n"
 
     src = (
         f"def _tool({sig}):\n"
-        f"    args = {{k: v for k, v in locals().items() if v is not None}}\n"
-        f"    return execute_tool({name!r}, args)\n"
+        + args_line
+        + f"    return execute_tool({name!r}, args)\n"
     )
 
     ns: Dict[str, Any] = {

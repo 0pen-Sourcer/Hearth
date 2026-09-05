@@ -1289,7 +1289,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 },
                 "description": {"type": "string", "description": "One-line hook (~140 chars). This is what shows up in the always-loaded index, so make it specific."},
                 "body": {"type": "string", "description": "The actual memory content. Markdown OK. Include reasons / how-to-apply when relevant."},
-                "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags. Use cat:subcat like project:hearth for finer bucket."},
+                "volatility": {"type": "string", "enum": ["durable", "seasonal", "transient"], "description": "How long this stays true. durable=forever, seasonal=school term/project phase, transient=days. Default durable."},
+                "sub_category": {"type": "string", "description": "Finer bucket within type, e.g. school, hearth, health. Or use tags cat:subcat."},
+                "supersedes": {"type": "string", "description": "Slug of a seasonal memory this replaces, e.g. school. Archives the old one."},
                 "force": {"type": "boolean", "description": "Set true on retry after you've reviewed a [possible-dup] warning and confirmed this is genuinely a NEW fact, not an update to the flagged sibling."},
             },
             "required": ["title", "type", "description"],
@@ -5409,6 +5412,8 @@ def _memory_save(p: Dict) -> str:
         tags=p.get("tags") or [],
         sub_category=p.get("sub_category"),
         force=bool(p.get("force")),
+        volatility=p.get("volatility") or "durable",
+        supersedes=p.get("supersedes"),
     )
 
 
@@ -8075,7 +8080,7 @@ _LOAD_TOOLS_SCHEMA = {
             "'soul' (edit your persona), 'archive' (list/extract zips), "
             "'system' (network/disk/installed apps/battery), 'voice' (pick a "
             "voice), 'team' (launch_team — run several agents at once and watch "
-            "them), 'end_session'. Pass 'all' to load everything."),
+            "them), 'mcp' (any MCP server tools), 'end_session'. Pass 'all' to load everything."),
         "parameters": {
             "type": "object",
             "properties": {
@@ -8108,8 +8113,17 @@ def active_tool_count() -> int:
 
 
 def _any_tool_still_deferred() -> bool:
-    return any(n in _DEFERRED_TOOLS and n not in _unlocked_tools
-               for n in (t["name"] for t in TOOL_DEFINITIONS))
+    if any(n in _DEFERRED_TOOLS and n not in _unlocked_tools
+           for n in (t["name"] for t in TOOL_DEFINITIONS)):
+        return True
+    # MCP tools are also deferred when diet is on
+    if _TOOL_DIET:
+        try:
+            from . import mcp_client
+            return any(td["name"] not in _unlocked_tools for td in mcp_client.list_remote_tools())
+        except Exception:
+            pass
+    return False
 
 
 # Stopwords that match almost every tool description ("is", "it", "to", ...) and
@@ -8129,6 +8143,15 @@ def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
     Returns the matched tool-defs."""
     q = (query or "").strip().lower()
     deferred = [td for td in TOOL_DEFINITIONS if td["name"] in _DEFERRED_TOOLS]
+    # Also include MCP tools as deferred when diet is on
+    try:
+        from . import mcp_client
+        for td in mcp_client.list_remote_tools():
+            # MCP tools are deferred — add them to the pool so load_tools("mcp") can unlock
+            # Convert to TOOL_DEFINITIONS shape for scoring
+            deferred.append({"name": td["name"], "description": td["description"], "parameters": td["parameters"]})
+    except Exception:
+        pass
     if not q or q == "all":
         for td in deferred:
             _touch_unlocked(td["name"])
@@ -8164,8 +8187,8 @@ def _h_load_tools(p: "Dict[str, Any]") -> str:
     matched = unlock_tools(p.get("query", ""))
     if not matched:
         return ("No extra tools matched that. Groups you can ask for: image "
-                "generation, plugins, soul, archive, system, voice, end_session "
-                "(or 'all').")
+                "generation, plugins, soul, archive, system, voice, team, mcp, "
+                "end_session (or 'all').")
     lines = ["Loaded these tools — you can call them now:"]
     for td in matched:
         props = ", ".join((td["parameters"].get("properties") or {}).keys())
@@ -8217,6 +8240,21 @@ def _normalize_tool_workspace_paths() -> None:
 
 _normalize_tool_workspace_paths()
 
+# Single source of truth for permission tiers — see handoff section 6d.
+# RISKY: gated (Ask/Allow/Deny + YOLO). Safe: never gated. NEVER_PERM: not even listed.
+_RISKY_TOOLS: set = {
+    "write_file", "edit_file", "create_directory", "delete_path", "move_path",
+    "run_command", "open_app", "open_url", "open_in_browser",
+    "memory_forget", "extract_archive_file", "create_plugin", "delete_plugin",
+    "read_inbox", "send_email",
+    "computer_click", "computer_type", "computer_key", "computer_scroll", "computer_drag",
+    "desktop_click", "desktop_type",
+    "launch_team", "browse_click", "browse_type",
+    "disk_usage", "forge_generate", "forge_shutdown",
+    "generate_image", "generate_video",
+}
+_NEVER_PERM: set = {"ask_user", "ask", "spawn_subagent", "launch_team"}
+
 
 # ============================================================
 # PROVIDER FORMAT CONVERTERS
@@ -8258,6 +8296,12 @@ def to_openai_tools() -> List[Dict[str, Any]]:
     try:
         from . import mcp_client
         for td in mcp_client.list_remote_tools():
+            if td["name"] in denied:
+                continue
+            # MCP tools are deferred when diet is on — keeps prompt lean (see §6d).
+            # They ship via load_tools("mcp") or a server-name query, not every turn.
+            if _TOOL_DIET and td["name"] not in _unlocked_tools:
+                continue
             out.append({
                 "type": "function",
                 "function": {

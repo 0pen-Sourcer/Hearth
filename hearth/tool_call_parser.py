@@ -162,14 +162,50 @@ def _extract_chatml(match: "re.Match[str]", tool_names: List[str]) -> Optional[D
     pass that --chat_format flag. We catch it as a safety net."""
     body = (match.group(1) or "").strip()
     obj = _try_json(body)
-    if not obj:
-        return None
-    name = obj.get("name") or obj.get("function") or ""
-    args = obj.get("arguments") or obj.get("parameters") or {}
-    return {
-        "name": _resolve_tool_name(name, tool_names),
-        "arguments": _force_json_str(args),
-    }
+    if obj:
+        name = obj.get("name") or obj.get("function") or ""
+        args = obj.get("arguments") or obj.get("parameters") or {}
+        return {
+            "name": _resolve_tool_name(name, tool_names),
+            "arguments": _force_json_str(args),
+        }
+    # Fallback for hybrid XML emitted by small local models:
+    # ``<tool_call><name>view_image</name>{"path":"C:\\..."} </tool_call>``
+    # or ``<tool_call><name>run_command</name><arguments>...</arguments></tool_call>``
+    # or ``<tool_call><invoke name="run_command"><parameter name="command">...</parameter></invoke></tool_call>``
+    m_name = re.search(r"<name[^>]*>\s*([^<]+?)\s*</name>", body, re.IGNORECASE)
+    if not m_name:
+        m_name = re.search(r'<invoke[^>]*name\s*=\s*["\']([^"\']+)["\']', body, re.IGNORECASE)
+    if m_name:
+        raw_name = m_name.group(1).strip().strip('"').strip("'").strip(":")
+        after = body[m_name.end():].strip()
+        # Collect <parameter name="k">v</parameter> pairs if present (invoke style)
+        param_pairs = re.findall(r'<parameter[^>]*name\s*=\s*["\']([^"\']+)["\'][^>]*>([\s\S]*?)</parameter>', after, re.IGNORECASE)
+        if param_pairs:
+            kv: Dict[str, Any] = {}
+            for k, v in param_pairs:
+                kv[k.strip()] = v.strip()
+            return {"name": _resolve_tool_name(raw_name, tool_names), "arguments": _force_json_str(kv)}
+        # Strip optional <arguments> wrapper
+        m_args = re.search(r"<arguments[^>]*>([\s\S]*?)</arguments>", after, re.IGNORECASE)
+        if m_args:
+            after = m_args.group(1).strip()
+        obj2 = _try_json(after) if after else None
+        if isinstance(obj2, dict):
+            if "name" in obj2 or "function" in obj2:
+                nm = obj2.get("name") or obj2.get("function") or raw_name
+                ag = obj2.get("arguments") or obj2.get("parameters") or {}
+                return {"name": _resolve_tool_name(nm, tool_names), "arguments": _force_json_str(ag)}
+            return {"name": _resolve_tool_name(raw_name, tool_names), "arguments": _force_json_str(obj2)}
+        if after:
+            kv = _kv_pairs_to_dict(after)
+            if kv:
+                return {"name": _resolve_tool_name(raw_name, tool_names), "arguments": _force_json_str(kv)}
+            cleaned = after.strip().strip('"').strip("'").strip("{}").strip()
+            if cleaned and ("\\" in cleaned or "/" in cleaned):
+                return {"name": _resolve_tool_name(raw_name, tool_names), "arguments": _force_json_str({"path": cleaned})}
+        return {"name": _resolve_tool_name(raw_name, tool_names), "arguments": _force_json_str({})}
+    return None
 
 
 def _extract_llama3(match: "re.Match[str]", tool_names: List[str]) -> Optional[Dict[str, Any]]:

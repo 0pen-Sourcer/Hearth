@@ -2891,7 +2891,7 @@
     align-items: center; justify-content: center;
     pointer-events: none;
   }
-  .drop-overlay.show { display: flex; animation: modalBgIn 0.15s var(--ease); }
+  .drop-overlay.show { display: flex; animation: modalBgIn 0.15s var(--ease); pointer-events: auto; }
   .drop-overlay .card {
     background: var(--bg-2);
     border: 2px dashed var(--accent);
@@ -3576,6 +3576,7 @@
             <option value="small.en">small.en (244 MB · best for accents)</option>
             <option value="medium.en">medium.en (769 MB · slowest, most accurate)</option>
           </select>
+          <div id="stt-model-err" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.25);border-radius:6px;font-size:12px;color:var(--err);line-height:1.4"></div>
         </div>
         <div class="field">
           <div class="label">
@@ -3800,7 +3801,7 @@
         </div>
 
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
-        <div class="hint" style="margin-bottom:10px;">What each tool does when the AI calls it: <b>Ask</b> every time, <b>Allow</b> always, or <b>Deny</b> — a denied tool is hidden from the model entirely (saves the tokens its description would cost). Risky tools default to Ask.</div>
+        <div class="hint" style="margin-bottom:10px;">What each <b>risky</b> tool does when the AI calls it: <b>Ask</b> every time, <b>Allow</b> always, or <b>Deny</b> — a denied tool is hidden from the model entirely (saves the tokens its description would cost). Read-only tools (search, read, list) are always allowed and not shown.</div>
         <input type="text" id="perm-search" placeholder="Search tools…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;margin-bottom:10px;">
         <div id="perm-list" style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow:auto;"></div>
 
@@ -3840,12 +3841,16 @@
             <span class="v" id="runtime-status" style="text-align:right">checking…</span>
           </div>
           <div id="runtime-nudge" style="display:none;margin:8px 0 2px;padding:9px 11px;background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.25);border-radius:8px;font-size:12px;line-height:1.5;color:var(--fg-dim)"></div>
+          <div id="runtime-err" style="display:none;margin:6px 0 2px;padding:8px 10px;background:rgba(255,92,92,.07);border:1px solid rgba(255,92,92,.25);border-radius:6px;font-size:12px;color:var(--err);line-height:1.4"></div>
           <div class="progress-row" id="runtime-dl" style="display:none;align-items:center;gap:8px;margin:6px 0 2px;">
             <div style="flex:1;height:6px;background:var(--bg-1);border-radius:4px;overflow:hidden;"><div id="runtime-dl-fill" style="height:100%;width:0%;background:var(--accent);transition:width .2s;"></div></div>
             <span id="runtime-dl-pct" style="color:var(--fg-dim);min-width:70px;text-align:right;font-size:11px;"></span>
           </div>
-          <div class="server-card-actions">
-            <button class="btn-mini" id="btn-runtime-update">Download engine</button>
+          <div class="server-card-actions" style="flex-wrap:wrap">
+            <div style="width:100%;display:flex;align-items:center;gap:8px">
+              <button class="btn-mini" id="btn-runtime-update">Download engine</button>
+              <span id="runtime-hint" style="font-size:11px;color:var(--fg-faint);line-height:1.3"></span>
+            </div>
             <button class="btn-mini" id="btn-server-restart">Restart</button>
             <button class="btn-mini danger" id="btn-server-stop">Stop</button>
             <button class="btn-mini" id="btn-server-logs-tab">Open server logs</button>
@@ -4754,7 +4759,7 @@ function showModal(title, body, actions = []) {
     const b = document.createElement('button');
     b.textContent = a.label;
     if (a.kind) b.classList.add(a.kind);
-    b.onclick = () => { $('modal').classList.remove('open'); if (a.onclick) a.onclick(); };
+    b.onclick = async () => { if (a.onclick) { const _r = await a.onclick(); if (_r === false) return; } $('modal').classList.remove('open'); };
     $('modal-actions').appendChild(b);
   }
   $('modal').classList.add('open');
@@ -4970,6 +4975,7 @@ function showAskUser(reqId, question, options, allowOther) {
       ? `Press 1-${options.length}, or type a reply…`
       : `Press 1-${options.length} to choose…`;
   setTimeout(() => document.getElementById('input').focus(), 0);
+  // Proper voice-native ask is TODO — see handoff §6b. Previous band-aid (speakText + maybeAnswerAskByVoice) reverted per user request; keep basic for now.
 }
 
 function hideAskUser() {
@@ -7716,6 +7722,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
       pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0, pos: assistantMsg.content.length };
       assistantMsg.events.push(pendingToolEvent);
       appendPart(pendingTool.div, live);
+      if (pendingTool.div._toolName === 'run_command') {
+        fillCommandCard(pendingTool.div._toolArgs, '(waiting for approval — expand to see full command)', pendingTool.body);
+        pendingTool.div.classList.add('open');
+      }
       setState(`calling ${ev.name}…`);
       // Voice mode has no tool cards to look at, so mirror the tool name into
       // the HUD. Without this the overlay sits on "thinking…" through a 30s
@@ -8132,11 +8142,13 @@ async function handleSlash(raw) {
   switch (cmd.toLowerCase()) {
     case '/welcome':
       // Re-run the full multi-step onboarding (welcome card + brain + voice + try-it).
-      obStep = 1; obState = { brain: '', voice: '' };
+      obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+      _obMigrateProbed = false; _obSkipMigrate = false; _obImportWired = false;
       obShow();
       return true;
     case '/onboard':
-      obStep = 1; obState = { brain: '', voice: '' };
+      obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+      _obMigrateProbed = false; _obSkipMigrate = false; _obImportWired = false;
       obShow();
       return true;
     case '/help':
@@ -8385,22 +8397,35 @@ $('btn-new-chat').addEventListener('click', () => {
 // FILE DROP - only visible during drag
 // ============================================================
 let dragDepth = 0;
+function _hideDrop() { dragDepth = 0; const el = $('drop-overlay'); if (el) el.classList.remove('show'); }
 document.addEventListener('dragenter', e => {
   if (!e.dataTransfer?.types?.includes('Files')) return;
-  e.preventDefault(); dragDepth++;
-  $('drop-overlay').classList.add('show');
+  e.preventDefault();
+  dragDepth++;
+  const el = $('drop-overlay'); if (el) el.classList.add('show');
 });
 document.addEventListener('dragleave', e => {
+  // When leaving the window (relatedTarget null) hide immediately — fixes
+  // stuck overlay when user drags out or browser drops the drag state.
+  if (!e.relatedTarget && (e.clientX === 0 || e.clientY === 0)) { _hideDrop(); return; }
+  e.preventDefault();
   dragDepth = Math.max(0, dragDepth - 1);
-  if (dragDepth === 0) $('drop-overlay').classList.remove('show');
+  if (dragDepth === 0) {
+    setTimeout(() => { if (dragDepth === 0) { const el=$('drop-overlay'); if(el) el.classList.remove('show'); } }, 80);
+  }
 });
 document.addEventListener('dragover', e => { e.preventDefault(); });
 document.addEventListener('drop', async e => {
-  e.preventDefault(); dragDepth = 0;
-  $('drop-overlay').classList.remove('show');
+  e.preventDefault();
+  _hideDrop();
   const files = Array.from(e.dataTransfer?.files || []);
   for (const f of files) await uploadFile(f);
 });
+// Hard reset — pywebview/Edge sometimes never fires dragleave/drop if the
+// drag is cancelled with Esc or leaves the window frame.
+window.addEventListener('dragend', _hideDrop);
+window.addEventListener('blur', () => { if (dragDepth) setTimeout(_hideDrop, 200); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') _hideDrop(); });
 // Explicit attach button - guaranteed working path even if pywebview's
 // HTML5 drop doesn't fire on a given Windows build.
 const _attachBtn = document.getElementById('btn-attach');
@@ -9525,17 +9550,27 @@ async function refreshMcpStatus() {
       const stateColor = b.state === 'connected' ? 'var(--ok)'
                        : b.state === 'error' ? 'var(--err)'
                        : 'var(--fg-faint)';
-      const meta = b.state === 'connected'
-        ? `<span style="color:var(--fg-faint)">${Array.isArray(b.tools) ? b.tools.length : (b.tools || 0)} tools · ${esc(b.transport || 'stdio')}</span>`
-        : `<span style="color:${stateColor}">${esc(b.error || b.state)}</span>`;
-      return `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;">
-        <span style="color:${stateColor}">● ${esc(b.name)}</span>
+      let meta;
+      if (b.state === 'connected') {
+        const tools = Array.isArray(b.tools) ? b.tools : [];
+        const toolList = tools.length ? `<div style="font-size:11px;color:var(--fg-dim);margin-top:3px">${tools.map(t => `<span style="background:var(--bg-1);border:1px solid var(--border);border-radius:4px;padding:1px 5px;margin:1px 3px 1px 0;display:inline-block">${esc(t.name || t)}</span>`).join('')}</div>` : '';
+        meta = `<div style="text-align:right"><span style="color:var(--fg-faint)">${tools.length} tools · ${esc(b.transport || 'stdio')}</span>${toolList}</div>`;
+      } else {
+        // Provide actionable hint for common errors
+        let hint = '';
+        const err = (b.error || '').toLowerCase();
+        if (err.includes('npx') || err.includes('winerror 2') || err.includes('not found')) hint = '<br><span style="font-size:11px;color:var(--fg-dim)">Hint: needs Node.js — install from nodejs.org, then restart Hearth</span>';
+        else if (err.includes('command') && err.includes('missing')) hint = '<br><span style="font-size:11px;color:var(--fg-dim)">Hint: check "command" in mcp.json</span>';
+        meta = `<span style="color:${stateColor}">${esc(b.error || b.state)}${hint}</span>`;
+      }
+      return `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span style="color:${stateColor};flex-shrink:0">● ${esc(b.name)}</span>
         ${meta}
       </div>`;
     }).join('');
-    box.innerHTML = rows;
-  } catch {
-    box.innerHTML = '<span style="opacity:0.7">status unavailable</span>';
+    box.innerHTML = rows || '<span style="opacity:0.7">no bridges configured</span>';
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--err)">status unavailable: ${esc(e.message || 'unknown')}</span>`;
   }
 }
 
@@ -9840,10 +9875,18 @@ $('btn-log-clear').addEventListener('click', () => {
 async function refreshToolPerms() {
   const list = $('perm-list'), search = $('perm-search');
   if (!list) return;
-  let tools = [], perms = { always_allow: [], always_deny: [] };
-  try {
+   let tools = [], perms = { always_allow: [], always_deny: [] };
+    try {
     const [t, p] = await Promise.all([api('/api/tools'), api('/api/permissions')]);
-    tools = (t.tools || []).map(x => x.name).sort();
+    // Only risky tools are gated — safe reads (read_file, web_search…) are never permission-prompted, and neverPerm (ask_user etc.) would deadlock.
+    const all = t.tools || [];
+    const risky = all.filter(x => x.risk === 'risky');
+    if (risky.length) tools = risky.map(x => x.name).sort();
+    else {
+      // Fallback for old backend without risk field
+      const _neverPerm = new Set(['ask_user', 'ask', 'spawn_subagent', 'launch_team']);
+      tools = all.map(x => x.name).filter(n => !_neverPerm.has(n)).sort();
+    }
     perms = p;
   } catch { list.innerHTML = '<div class="hint">Couldn\'t load tools.</div>'; return; }
   const allow = new Set(perms.always_allow || []), deny = new Set(perms.always_deny || []);
@@ -9911,15 +9954,26 @@ async function refreshEmail() {
   });
   if (saveBtn) saveBtn.addEventListener('click', async () => {
     const b = gather();
-    if (!b.address || !b.password) { toast('Missing info', 'Enter your email and an app password.', 'warn'); return; }
+    if (!b.address || !b.password) { toast('Missing info', 'Enter your email and an app password.', 'warn'); status.innerHTML = '<span style="color:var(--err)">Enter email + app password — for Gmail use a 16-char App Password (myaccount.google.com/apppasswords), not your login password.</span>'; return; }
     busy(saveBtn, true, 'Saving…');
+    status.textContent = '';
     try {
       const r = await api('/api/email/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
-      if (!r.ok) { toast('Could not save', r.error || 'unknown', 'err', 7000); return; }
+      if (!r.ok) {
+        const msg = r.error || 'unknown';
+        status.innerHTML = `<span style="color:var(--err)">Could not save: ${esc(msg)} <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a></span>`;
+        status.querySelector('a').onclick = (e) => { e.preventDefault(); navigator.clipboard.writeText(msg); return false; };
+        toast('Could not save', msg, 'err', 7000); return;
+      }
       const t = await api('/api/email/test', { method: 'POST' });
-      if (t.ok) toast('Email connected', `Signed in as ${t.address}`, 'ok', 5000);
-      else toast('Saved, but sign-in failed', t.error || 'check the app password', 'err', 9000);
-      document.getElementById('email-password').value = '';
+      if (t.ok) { status.innerHTML = `<span style="color:var(--ok)">✓ Connected</span> as ${esc(t.address)}`; toast('Email connected', `Signed in as ${t.address}`, 'ok', 5000); document.getElementById('email-password').value = ''; }
+      else {
+        const msg = t.error || 'check the app password';
+        const hint = msg.toLowerCase().includes('auth') || msg.includes('535') ? ' — use Gmail App Password (16 chars, needs 2-step), not login password.' : '';
+        status.innerHTML = `<span style="color:var(--err)">Saved, but sign-in failed: ${esc(msg)}${esc(hint)} <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a></span>`;
+        status.querySelector('a').onclick = (e) => { e.preventDefault(); navigator.clipboard.writeText(msg); return false; };
+        toast('Saved, but sign-in failed', msg, 'err', 9000);
+      }
       refreshEmail();
     } finally { busy(saveBtn, false); }
   });
@@ -10195,7 +10249,21 @@ async function refreshSettings() {
       sttDev.value = s.stt_device || 'cpu';
       await wireGpuSelect(sttDev, () => _sttCuda, async (v) => {
         await saveSetting('stt_device', v);
-        try { await api('/api/voice/reload', { method: 'POST' }); toast('STT', 'switched to ' + v, 'ok'); }
+        try {
+          const r = await api('/api/voice/reload', { method: 'POST' });
+          const warn = r && r.details && r.details.stt_warning;
+          if (warn) {
+            toast('STT', warn, 'warn', 8000);
+            // Snap the dropdown back to the actual device so it doesn't lie.
+            const actual = (r.details.stt || '').match(/on (\w+)$/);
+            if (actual && actual[1] !== v) {
+              sttDev.value = actual[1];
+              await saveSetting('stt_device', actual[1]);
+            }
+          } else {
+            toast('STT', 'switched to ' + v, 'ok');
+          }
+        }
         catch (err) { toast('STT device', err.message, 'err'); }
       });
     }
@@ -10214,9 +10282,24 @@ async function refreshSettings() {
         try {
           await api('/api/voice/reload', { method: 'POST' });
           setDlDot($('stt-dl-dot'), 'done');
+          if ($('stt-model-err')) $('stt-model-err').style.display = 'none';
           markLoadedOption(sttMdl, mdl);
           toast('Whisper ready', mdl + ' loaded', 'ok');
-        } catch (err) { setDlDot($('stt-dl-dot'), 'idle'); toast('STT model', 'download/load failed: ' + err.message, 'err', 8000); }
+        } catch (err) {
+          setDlDot($('stt-dl-dot'), 'idle');
+          const msg = err.message || 'unknown';
+          const hint = msg.includes('Failed to fetch') ? ' — check internet / HuggingFace may be blocked, or try a smaller model' : '';
+          const eEl = $('stt-model-err');
+          if (eEl) {
+            const full = msg + hint;
+            eEl.style.display = 'block';
+            eEl.innerHTML = `Download failed: ${esc(msg)}${esc(hint)} <a href="#" style="color:var(--accent-2);margin-left:8px">Retry</a> <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
+            const links = eEl.querySelectorAll('a');
+            if (links[0]) links[0].onclick = (ev) => { ev.preventDefault(); eEl.style.display='none'; sttMdl.dispatchEvent(new Event('change')); return false; };
+            if (links[1]) links[1].onclick = (ev) => { ev.preventDefault(); navigator.clipboard.writeText(full); return false; };
+          }
+          toast('STT model', 'download/load failed: ' + msg, 'err', 8000);
+        }
         finally { sttMdl.disabled = false; }
       };
     }
@@ -10506,7 +10589,8 @@ async function refreshSettings() {
     };
     const replayBtn = $('btn-replay-onboard');
     if (replayBtn) replayBtn.onclick = () => {
-      obStep = 1; obState = { brain: '', voice: '' };
+      obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+      _obMigrateProbed = false; _obSkipMigrate = false; _obImportWired = false;
       obShow();
     };
     // Repair: re-fetch + re-apply this version's patch to restore deleted or
@@ -12825,22 +12909,33 @@ function markLoadedOption(sel, value) {
 // Inference engine (llama.cpp runtime) bar: show what's running + let the user
 // download Hearth's own copy or update it.
 async function refreshRuntimeBar() {
-  const statusEl = $('runtime-status'), btn = $('btn-runtime-update');
+  const statusEl = $('runtime-status'), btn = $('btn-runtime-update'),
+        hintEl = $('runtime-hint');
   if (!statusEl) return;
   try {
     const r = await api('/api/runtime/info');
     const adv = r.advice || {}, nudgeEl = $('runtime-nudge');
     if (r.engine === 'native') {
       const src = { hearth: "Hearth's own", lmstudio: "LM Studio's (signed)", other: 'detected copy' }[r.source] || r.source;
-      statusEl.innerHTML = `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} · ${esc(src)}</span>`;
+      statusEl.innerHTML = `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} \u00b7 ${esc(src)}</span>`;
       const upd = r.update || {};
       if (btn) {
-        // Say what the click will DO. "Update engine" on the newest build
-        // invites a pointless 640 MB re-download.
-        btn.textContent = (r.source === 'hearth')
-          ? (upd.available ? `Update to ${upd.latest}` : 'Engine up to date')
-          : "Install Hearth's own copy";
-        btn.disabled = (r.source === 'hearth' && !upd.available && upd.ok);
+        if (r.source === 'hearth' && !upd.available) {
+          // Up-to-date — hide button entirely, nothing to do.
+          btn.style.display = 'none';
+          if (hintEl) hintEl.textContent = '';
+        } else if (r.source === 'hearth' && upd.available) {
+          btn.style.display = '';
+          btn.textContent = `Update to ${upd.latest}`;
+          btn.disabled = false;
+          if (hintEl) hintEl.textContent = 'Downloads the latest llama.cpp build (~800 MB).';
+        } else {
+          // Using LM Studio's or bundled copy — offer to install our own.
+          btn.style.display = '';
+          btn.textContent = "Install Hearth's own copy";
+          btn.disabled = false;
+          if (hintEl) hintEl.textContent = "Downloads llama.cpp to ~/.hearth/llamacpp so you don't depend on LM Studio being installed.";
+        }
       }
       if (upd.available) statusEl.innerHTML += ' <span title="newer llama.cpp available"'
         + ' style="display:inline-block;width:7px;height:7px;border-radius:50%;'
@@ -12849,9 +12944,21 @@ async function refreshRuntimeBar() {
       // Only call the wheel a problem when it actually is one for this card.
       // On CPU-only / older GPUs it has real kernels and a CUDA build buys nothing.
       statusEl.innerHTML = adv.nudge
-        ? `bundled wheel <span style="color:#fbbf24">· no kernels for your GPU</span>`
-        : `bundled wheel <span style="color:var(--fg-faint)">· built in</span>`;
-      if (btn) btn.textContent = 'Install GPU engine';
+        ? `bundled wheel <span style="color:#fbbf24">\u00b7 no kernels for your GPU</span>`
+        : `bundled wheel <span style="color:var(--fg-faint)">\u00b7 built in</span>`;
+      if (btn) {
+        if (adv.nudge) {
+          // GPU too new for wheel — need a real engine.
+          btn.style.display = '';
+          btn.textContent = 'Install GPU engine';
+          btn.disabled = false;
+          if (hintEl) hintEl.textContent = 'Your GPU needs a standalone llama.cpp build (~800 MB). The bundled wheel is too old for this card.';
+        } else {
+          // Wheel works fine for this GPU — hide button.
+          btn.style.display = 'none';
+          if (hintEl) hintEl.textContent = '';
+        }
+      }
     }
     if (nudgeEl) {
       nudgeEl.style.display = adv.nudge ? 'block' : 'none';
@@ -12903,9 +13010,20 @@ async function runtimeInstall(tag) {
           setDlDot($('engine-dl-dot'), ev.ok ? 'done' : 'idle');
           _engDl.t0 = 0;
           dlUpsert(ENGINE_DL_ID, { status: ev.ok ? 'done' : (ev.cancelled ? 'paused' : 'error'), pct: ev.ok ? 100 : undefined });
-          if (ev.ok) toast('Engine ready', 'llama.cpp ' + (ev.tag || ''), 'ok');
-          else if (ev.cancelled) toast('Engine download cancelled', 'Progress kept, installing again resumes.', 'ok', 7000);
-          else toast('Engine download failed', ev.error || '', 'err', 8000);
+          const errEl = $('runtime-err');
+          if (ev.ok) { if (errEl) errEl.style.display = 'none'; toast('Engine ready', 'llama.cpp ' + (ev.tag || ''), 'ok'); }
+          else if (ev.cancelled) { if (errEl) errEl.style.display = 'none'; toast('Engine download cancelled', 'Progress kept, installing again resumes.', 'ok', 7000); }
+          else {
+            const msg = ev.error || 'unknown error';
+            if (errEl) {
+              errEl.style.display = 'block';
+              errEl.innerHTML = `Engine download failed: ${esc(msg)} <a href="#" style="color:var(--accent-2);margin-left:8px">Retry</a> <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
+              const links = errEl.querySelectorAll('a');
+              if (links[0]) links[0].onclick = (e) => { e.preventDefault(); errEl.style.display='none'; runtimeInstall(tag); return false; };
+              if (links[1]) links[1].onclick = (e) => { e.preventDefault(); navigator.clipboard.writeText(msg); return false; };
+            }
+            toast('Engine download failed', msg, 'err', 8000);
+          }
           refreshRuntimeBar();
         }
       }
@@ -12913,7 +13031,16 @@ async function runtimeInstall(tag) {
   } catch (e) {
     dl.style.display = 'none'; btn.disabled = false;
     setDlDot($('engine-dl-dot'), 'idle');
-    toast('Engine download failed', e.message, 'err', 8000);
+    const msg = e.message || 'unknown';
+    const errEl = $('runtime-err');
+    if (errEl) {
+      errEl.style.display = 'block';
+      errEl.innerHTML = `Engine download failed: ${esc(msg)} <a href="#" style="color:var(--accent-2);margin-left:8px">Retry</a> <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
+      const links = errEl.querySelectorAll('a');
+      if (links[0]) links[0].onclick = (ev) => { ev.preventDefault(); errEl.style.display='none'; runtimeInstall(tag); return false; };
+      if (links[1]) links[1].onclick = (ev) => { ev.preventDefault(); navigator.clipboard.writeText(msg); return false; };
+    }
+    toast('Engine download failed', msg, 'err', 8000);
   }
   refreshRuntimeBar();
 }
@@ -14296,15 +14423,11 @@ async function startWithModel(modelPath, label, detail, loadCfg) {
       }, 1500);
     } else {
       label.textContent = 'Start failed';
-      detail.textContent = (r && r.error) || '';
-      // Keep the row visible long enough to read the error, then hide so
-      // the next click can show a fresh attempt cleanly.
-      setTimeout(() => { if (dl) dl.hidden = true; }, 6000);
+      detail.innerHTML = `${esc((r && r.error) || '')} <a href="#" onclick="document.getElementById('models-dl').hidden=true;return false;" style="color:var(--fg-dim);margin-left:8px">Dismiss</a> <a href="#" onclick="navigator.clipboard.writeText(${(JSON.stringify((r && r.error) || ''))});return false;" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
     }
   } catch (e) {
     label.textContent = 'Start failed';
-    detail.textContent = e.message;
-    setTimeout(() => { if (dl) dl.hidden = true; }, 6000);
+    detail.innerHTML = `${esc(e.message)} <a href="#" onclick="document.getElementById('models-dl').hidden=true;return false;" style="color:var(--fg-dim);margin-left:8px">Dismiss</a> <a href="#" onclick="navigator.clipboard.writeText(${JSON.stringify(e.message || '')});return false;" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
   }
 }
 
@@ -14492,6 +14615,9 @@ async function _obProbeMigrate() {
 }
 let obStep = 1;
 let obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+function _saveOnboardingDraft() { try { localStorage.setItem('hearth_onboarding_draft', JSON.stringify({step: obStep, state: obState})); } catch {} }
+function _loadOnboardingDraft() { try { const d = JSON.parse(localStorage.getItem('hearth_onboarding_draft')||'null'); if(d && d.state && d.step) return d; } catch {} return null; }
+function _clearOnboardingDraft() { try { localStorage.removeItem('hearth_onboarding_draft'); } catch {} }
 
 async function maybeOnboard() {
   try {
@@ -14502,7 +14628,9 @@ async function maybeOnboard() {
     // the Models tab when the user was already picking a brain. /welcome
     // re-opens it manually any time.
     if (!s.onboarded) {
-      obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+      const draft = _loadOnboardingDraft();
+      if (draft && draft.step > 1 && draft.state) { obStep = draft.step; obState = draft.state; }
+      else { obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } }; }
       obShow();
     }
   } catch {}
@@ -14533,6 +14661,7 @@ function obRender() {
   if (obStep === 4) obLoadVoiceStatus();
   if (obStep === 5) setTimeout(() => $('ob-name').focus(), 80);
   if (obStep === 6) { _obProbeMigrate(); _obWireImport(); }
+  _saveOnboardingDraft();
 }
 
 // Wire the "paste your ChatGPT/Claude memory" box on the migrate step (step 6).
@@ -14601,6 +14730,7 @@ function obWireCloudStep() {
   const upd = () => {
     const v = sel.value;
     obState.cloud.provider = v;
+    _saveOnboardingDraft();
     keyRow.hidden = (v === 'local');
     if (urlRow) urlRow.hidden = (v !== 'custom');  // only a custom endpoint needs a URL
   };
@@ -14624,9 +14754,11 @@ async function obLoadBrains() {
   const builtin = s.builtin_running;
   const external = s.external_running;
 
-  // Status banner
+  // Status banner — Lite has no built-in engine, so local picks won't boot
   let banner = '';
-  if (builtin) {
+  if (s.is_lite) {
+    banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>You're on <b>Hearth Lite</b> — no built-in engine to run local models. Pick a cloud brain next, or download the Full edition / install the GPU engine in Settings → Built-in server.</span></div>`;
+  } else if (builtin) {
     banner = `<div class="ob-status-row is-good"><span class="ob-dot"></span><span>Hearth's built-in LLM is already running. You're set.</span></div>`;
   } else if (external) {
     banner = `<div class="ob-status-row is-good"><span class="ob-dot"></span><span>LM Studio / Ollama detected on this PC - you can use it as-is, or pick another model below.</span></div>`;
@@ -14982,6 +15114,7 @@ async function obFinish(skipped) {
       }
     } catch (err) { console.warn('cloud setup failed', err); }
   } catch {}
+  _clearOnboardingDraft();
   $('onboard').classList.remove('open');
   if (!skipped) toast('Welcome aboard', 'Type or hit the mic to start.', 'ok');
 }
@@ -14994,10 +15127,15 @@ $('ob-back').addEventListener('click', () => { if (obStep > 1) { obStep--; obRen
 $('ob-skip').addEventListener('click', () => obFinish(true));
 document.addEventListener('keydown', (e) => {
   if (!$('onboard').classList.contains('open')) return;
-  if (e.key === 'Escape') obFinish(true);
-  if (e.key === 'Enter' && obStep !== 4) { e.preventDefault(); $('ob-next').click(); }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    showModal('Skip setup?', 'You can finish this later in Settings → Behavior → Re-run onboarding.',
+      [{ label: 'Keep setting up' }, { label: 'Skip for now', onclick: () => obFinish(true) }]);
+    return;
+  }
+  if (e.key === 'Enter' && obStep !== 4 && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); $('ob-next').click(); }
 });
-$('ob-name').addEventListener('keydown', e => { if (e.key === 'Enter') saveOnboarding(false); });
+
 
 // Try to load the user-supplied icon; on success replace the inline H tile
 // with the image. Fails silently if no icon dropped in assets/.
