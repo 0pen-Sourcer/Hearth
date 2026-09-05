@@ -81,25 +81,41 @@ def list_input_devices() -> list:
         # API with different names (MME truncates to ~31 chars, WASAPI gives the
         # full name), so an exact-name check leaves duplicates. Group by the first
         # 18 chars and keep the fullest name; keep the default device's index.
+        #
+        # WDM-KS devices are raw kernel-streaming duplicates of what MME/WASAPI
+        # already expose, so we skip them — UNLESS a mic only exists on WDM-KS
+        # (some Realtek drivers only expose the mic there). Two-pass: first
+        # collect non-WDM-KS, then backfill WDM-KS-only entries.
         by_pfx = {}
+        wdmks_only = []
         for i, d in enumerate(sd.query_devices()):
             if int(d.get("max_input_channels", 0)) <= 0:
                 continue
-            if wdmks is not None and d.get("hostapi") == wdmks:
-                continue
             name = str(d.get("name", f"input {i}")).strip()
             if not name:
+                continue
+            # Raw WDM-KS driver paths like "@System32\drivers\bthhfenum.sys,#2;%1 … %0"
+            # are kernel-streaming plumbing, not user-facing mics. They show up when
+            # Bluetooth HFP exposes both a clean WASAPI name and a raw WDM-KS alias;
+            # the dedup below keeps the clean one. Drop the raw one outright.
+            low = name.lower()
+            if "@system32" in low or "bthhfenum.sys" in low or ("%1" in name and "%0" in name):
                 continue
             try:
                 if is_system_audio_device(name):
                     continue
             except Exception:
                 pass
+            is_wdmks = (wdmks is not None and d.get("hostapi") == wdmks)
             is_def = (i == default_in)
             pfx = name.lower()[:18]
             cur = by_pfx.get(pfx)
             if cur is None:
-                by_pfx[pfx] = {"index": i, "name": name, "default": is_def}
+                if is_wdmks:
+                    wdmks_only.append({"index": i, "name": name, "default": is_def,
+                                       "pfx": pfx})
+                else:
+                    by_pfx[pfx] = {"index": i, "name": name, "default": is_def}
             else:
                 # Prefer the fuller name; the default's index wins so selecting it
                 # still points at the OS default.
@@ -110,6 +126,12 @@ def list_input_devices() -> list:
                 if is_def:
                     cur["index"] = i
                     cur["default"] = True
+        # Backfill: WDM-KS devices whose prefix never appeared on another API
+        # are the ONLY representation of that mic — keep them.
+        for w in wdmks_only:
+            if w["pfx"] not in by_pfx:
+                by_pfx[w["pfx"]] = {"index": w["index"], "name": w["name"],
+                                     "default": w["default"]}
         return list(by_pfx.values())
     except Exception:
         return []

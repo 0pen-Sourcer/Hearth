@@ -873,6 +873,8 @@ def download_model(pick_id: str,
     try:
         done = _download_with_resume(url, dest, tmp, on_progress)
         record_model_source(str(dest), pick["hf_repo"])
+        _status_cache.pop("disk_models_cache", None)
+        _status_cache.pop("disk_scan_ts", None)
         return {"ok": True, "path": str(dest), "bytes": done}
     except Exception as e:
         # Keep the .part so the next attempt RESUMES instead of restarting.
@@ -913,6 +915,22 @@ def _phase_for_line(line: str) -> Optional[Tuple[str, int]]:
     Within a phase we stay flat so the bar never goes backwards.
     """
     l = line
+    # The STANDALONE llama-server (what Full now ships) prints different markers
+    # than the llama-cpp-python wheel below, and its lines carry a timestamp
+    # prefix. Without these the bar matched nothing and jumped straight from
+    # nothing to 100 when the port answered.
+    if "load_model: loading model" in l:
+        return ("loading_weights", 12)
+    if "load_tensors: loading model tensors" in l or "load_tensors: offloading" in l:
+        return ("loading_weights", 45)
+    if "llama threadpool init" in l:
+        return ("initializing_backend", 60)
+    if "load_model: initializing" in l or "n_ctx_slot" in l:
+        return ("reserving_kv", 78)
+    if "llama_server: model loaded" in l:
+        return ("starting_http", 93)
+    if "llama_server: listening on" in l or "main: server is listening" in l:
+        return ("ready", 100)
     # Roughly in the order llama.cpp prints these:
     if "llama_model_load:" in l or "llama_model_loader: loaded meta data" in l:
         return ("loading_weights", 15)
@@ -1168,14 +1186,18 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
         # server, so honour the preference with the bundled one when it is there.
         # Without this, choosing Built-in on a packaged build pinned users to the
         # wheel, which has no kernels for newer GPUs.
-        _bundled_only = [c for c in candidates if _engine_source_of(c) == "bundled"]
-        for exe in _bundled_only:
-            if _usable_server_exe(exe) and not engine_is_known_bad(str(exe)):
-                found = {"exe": str(exe), "label": exe.parent.name,
-                         "dll_dirs": [str(exe.parent)]}
-                _native_server_cache.append(found)
-                return found
-        _native_server_cache.append(None)   # nothing bundled -> the wheel
+        # Also check ~/.hearth/llamacpp/ (the user-downloaded runtimes) as a
+        # fallback — when running from source there is no bundled copy, but the
+        # user may have installed one via the Engine tab.
+        for source in ("bundled", "hearth"):
+            _filtered = [c for c in candidates if _engine_source_of(c) == source]
+            for exe in _filtered:
+                if _usable_server_exe(exe) and not engine_is_known_bad(str(exe)):
+                    found = {"exe": str(exe), "label": exe.parent.name,
+                             "dll_dirs": [str(exe.parent)]}
+                    _native_server_cache.append(found)
+                    return found
+        _native_server_cache.append(None)   # nothing bundled or hearth -> the wheel
         return None
     if pref.startswith("hearth:"):          # pinned to one build
         want = pref.split(":", 1)[1]
@@ -1387,7 +1409,16 @@ def remove_llama_build(tag: str) -> Dict[str, Any]:
     except Exception as e:
         return {"ok": False, "error": f"Couldn't delete it ({type(e).__name__}): {e}. "
                 "If a model is loaded on this engine, eject it first."}
+    reset_native_cache()
+    _status_cache.pop("disk_models_cache", None)
+    _status_cache.pop("disk_scan_ts", None)
     return {"ok": True, "removed": tag, "remaining": installed_llama_tags()}
+
+
+def invalidate_disk_cache() -> None:
+    """Force next status() to rescan disk. Call after download/delete."""
+    _status_cache.pop("disk_models_cache", None)
+    _status_cache.pop("disk_scan_ts", None)
 
 
 def check_llama_update(max_age: int = 21600) -> Dict[str, Any]:
@@ -1768,18 +1799,6 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             pass
         ctx = MIN_USABLE_CTX
 
-    if not llama_cpp_available():
-        return {"ok": False, "error":
-                "llama-cpp-python is not installed. Run: pip install llama-cpp-python "
-                "--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124"}
-
-    # Preflight: the prebuilt wheel doesn't include server deps.
-    missing = server_extras_missing()
-    if missing:
-        return {"ok": False, "error":
-                f"llama_cpp.server can't start — '{missing}' is missing. "
-                "Run: pip install fastapi 'uvicorn[standard]' sse-starlette pydantic-settings starlette-context"}
-
     # Path-level guard against concurrent double-spawn. The audit caught a
     # race where the auto-boot daemon and the GUI's "Use this" both reached
     # start_builtin() before _proc was assigned — both spawned llama_cpp.server,
@@ -1886,11 +1905,11 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         except Exception:
             pass
     if n_gpu_layers != 0:
-        # The native llama-server has working Blackwell kernels → keep the
-        # q8_0 + flash VRAM saver (fits a 9B on 8 GB). Only the
-        # old llama-cpp-python wheel needs the f16 + flash-off workaround on
-        # Blackwell, where its flash kernel returns empty on long context.
-        _needs_bw_workaround = _blackwell and not _use_native
+        # Blackwell (RTX 50-series): flash-attention kernels may not be stable
+        # on all builds — driver crash (TDR / black screen) or empty output on
+        # long context. Safe default: f16 KV + flash OFF for BOTH native and
+        # wheel. Costs a bit more VRAM but won't kill the display driver.
+        _needs_bw_workaround = _blackwell
         _kv_default = "f16" if _needs_bw_workaround else "q8_0"
         _was_default = cache_type_k is None
         if cache_type_k is None:
@@ -2070,6 +2089,21 @@ def start_builtin(model_path: str, port: Optional[int] = None,
     else:
         # PyInstaller: sys.executable is Hearth.exe (tray), so route via the
         # --hearth-run-llama-server sentinel; from source it's python → -m.
+        # Only reach this path when no native server was found, so validate
+        # the Python wheel is actually importable before trying to spawn it.
+        if not llama_cpp_available():
+            with _start_lock:
+                _starting_paths.discard(normalized_path)
+            return {"ok": False, "error":
+                    "llama-cpp-python is not installed. Run: pip install llama-cpp-python "
+                    "--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124"}
+        missing = server_extras_missing()
+        if missing:
+            with _start_lock:
+                _starting_paths.discard(normalized_path)
+            return {"ok": False, "error":
+                    f"llama_cpp.server can't start — '{missing}' is missing. "
+                    "Run: pip install fastapi 'uvicorn[standard]' sse-starlette pydantic-settings starlette-context"}
         _launcher = ([sys.executable, "--hearth-run-llama-server"]
                      if getattr(sys, "frozen", False)
                      else [sys.executable, "-m", "llama_cpp.server"])
@@ -2644,7 +2678,7 @@ def vram_fit_class(model_size_gb: Optional[float],
 
     Math:
       required = model_size + estimate_kv_cache_gb(model_size, ctx)
-      usable   = max(0, total_vram - 2.29 GB driver reserve)
+      usable   = max(0, free_vram - driver_reserve GB)
 
       good     — required <= usable                       (full GPU offload)
       partial  — required <= total_vram                   (some CPU spill)
@@ -2658,7 +2692,9 @@ def vram_fit_class(model_size_gb: Optional[float],
     if model_size_gb is None:
         return {"tier": "unknown", "label": ""}
     if free_vram_gb is None:
-        free_vram_gb = detect_gpu_vram_gb()
+        free_vram_gb = detect_gpu_vram_free_gb()
+        if free_vram_gb is None:
+            free_vram_gb = detect_gpu_vram_gb()
     if free_vram_gb is None:
         return {"tier": "unknown", "label": "no GPU detected"}
     required = model_size_gb + estimate_kv_cache_gb(model_size_gb, ctx)
@@ -2721,7 +2757,9 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
             info = json.loads(r.read().decode("utf-8"))
     except Exception as e:
         return [{"error": f"could not reach HuggingFace: {type(e).__name__}: {e}"}]
-    free_vram = detect_gpu_vram_gb()
+    free_vram = detect_gpu_vram_free_gb()
+    if free_vram is None:
+        free_vram = detect_gpu_vram_gb()
     out = []
     has_recommended = False
     for sib in info.get("siblings", []) or []:

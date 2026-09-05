@@ -199,9 +199,13 @@ def _ensure_kokoro_models(allow_download: bool = False) -> bool:
         _last_load_error = "kokoro models missing and auto-download disabled (JARVIS_NO_AUTODOWNLOAD=1)"
         return False
     if _is_lite_build():
-        _last_load_error = ("voice models not bundled in the Lite build — turn on "
-                            "voice in Settings → Voice to download them (~100MB).")
-        return False
+        # Lite build has the pip packages but not the ~100MB model files.
+        # Allow download when the user explicitly triggers voice (speak/test),
+        # but skip on silent status probes so boot doesn't pull 100MB.
+        if not allow_download:
+            _last_load_error = ("voice models not bundled in the Lite build — "
+                                "use voice or click Test to download them (~100MB).")
+            return False
     os.makedirs(VOICES_DIR, exist_ok=True)
     try:
         if not _find("kokoro"):
@@ -594,6 +598,11 @@ def stop() -> None:
         sd.stop()
     except Exception:
         pass
+    # Immediately mark idle so half-duplex tail starts counting from now
+    # instead of 0.4s later via the play-loop timeout. Without this the mic
+    # stays deaf for tail+0.4 after every barge.
+    if is_speaking():
+        _mark_speaking_end()
 
 
 def reset_abort() -> None:
@@ -718,6 +727,9 @@ def _play_loop() -> None:
                     try: stream.abort()
                     except Exception: pass
                     stream, cur_sr = None, None
+                    if playing:
+                        playing = False
+                        _mark_speaking_end()
                     break
                 stream.write(view[off:off + FRAME])
         except Exception:

@@ -287,12 +287,29 @@ class NoUsableMic(RuntimeError):
 def _probe_device(idx) -> bool:
     """True if the input device can actually be opened for capture. A Bluetooth
     HFP mic often enumerates but won't open, so we START a stream briefly instead
-    of trusting check_input_settings."""
+    of trusting check_input_settings. Tries callback mode first (what
+    RealtimeSTT actually uses), then blocking as a fallback — some WDM-KS
+    devices work in callback but not blocking, and vice versa."""
+    import queue as _q
     try:
         import sounddevice as sd
-        with sd.InputStream(device=idx, channels=1, samplerate=16000, blocksize=1024):
+        # Callback mode first — matches what RealtimeSTT uses internally.
+        _dummy = _q.Queue()
+        try:
+            with sd.InputStream(device=idx, channels=1, samplerate=16000,
+                                callback=lambda *a: _dummy.put_nowait(0)):
+                pass
+            return True
+        except Exception:
             pass
-        return True
+        # Blocking mode fallback — catches devices that only work one way.
+        try:
+            with sd.InputStream(device=idx, channels=1, samplerate=16000,
+                                blocksize=1024):
+                pass
+            return True
+        except Exception:
+            return False
     except Exception:
         return False
 
@@ -349,7 +366,9 @@ def _mic_index():
                           "speakers — reconnect the mic (or fix the Bluetooth headset) "
                           "and try again.")
 
-    # 2) No explicit pick — use the OS default only if it's a real mic.
+    # 2) No explicit pick — use the OS default only if it's a real mic that
+    # actually opens. Bluetooth HFP devices enumerate but may fail on sustained
+    # capture, so probe before trusting the default.
     try:
         import sounddevice as sd
         di = sd.query_devices(kind="input")
@@ -357,7 +376,13 @@ def _mic_index():
     except Exception:
         dname = ""
     if dname and not is_system_audio_device(dname):
-        return None   # PortAudio default is a real mic
+        try:
+            default_idx = sd.default.device[0]
+        except Exception:
+            default_idx = None
+        if default_idx is not None and _probe_device(default_idx):
+            return None   # PortAudio default is a real mic that opens
+        # Default device named real but won't open — fall through to find one that does.
     alt = _first_real_mic()
     if alt is not None:
         if dname:
