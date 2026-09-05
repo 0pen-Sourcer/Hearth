@@ -384,13 +384,38 @@ def _ensure_app_identity() -> Optional[str]:
     return icon
 
 
+# Win32 NOTIFYICONDATAW limits: szInfoTitle 64, szInfo 256, both including the
+# terminator. Kept a little under so a multi-byte character near the edge
+# cannot push it over.
+_TOAST_TITLE_MAX = 60
+_TOAST_BODY_MAX = 250
+
+
+def _fit_toast(title: str, body: str) -> tuple:
+    """Clamp a toast to what the OS notifier accepts."""
+    _ell = chr(0x2026)
+    t = (title or "").strip()
+    for _ch in (chr(13), chr(10), chr(9)):
+        t = t.replace(_ch, " ")
+    b = (body or "").strip()
+    if len(t) > _TOAST_TITLE_MAX:
+        t = t[:_TOAST_TITLE_MAX - 1].rstrip() + _ell
+    if len(b) > _TOAST_BODY_MAX:
+        b = b[:_TOAST_BODY_MAX - 1].rstrip() + _ell
+    return t, b
+
+
 def desktop_notify(title: str, body: str) -> bool:
     """Pop a desktop notification now. Tries plyer (cross-platform) then
     win10toast (Windows), falling back to stdout + TTS. Also pushes to the
     phone via ntfy if HEARTH_NTFY_TOPIC is set (so reminders reach you even when
     the PC is off). Returns True if a real DESKTOP toast fired. Shared by the
     reminder watcher AND the `notify` tool."""
-    _push_phone(title, body)  # best-effort phone push alongside the desktop toast
+    _push_phone(title, body)  # phone push gets the full text, it has no limit
+    # The Windows tray-balloon struct caps the body at 256 chars and the title
+    # at 64. Overshooting raises inside the notifier's own worker thread, which
+    # no try/except here can catch, so the toast just never appeared. Trim first.
+    title, body = _fit_toast(title, body)
     icon = _ensure_app_identity()
     # When we have the .ico, prefer win10toast FIRST — its `icon_path` actually
     # renders our icon on the toast. plyer's Windows backend usually shows a

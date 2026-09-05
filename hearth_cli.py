@@ -5107,7 +5107,7 @@ class JarvisCLI:
                 args = json.loads(args_raw)
             except json.JSONDecodeError as _je:
                 _snippet = (args_raw[:500] + "…") if len(args_raw) > 500 else args_raw
-                print(f"{C_RED}Tool JSON error for {name} at col {_je.colno}: {_je.msg}{C_RESET}")
+                print(f"{C_ERR}Tool JSON error for {name} at col {_je.colno}: {_je.msg}{C_RESET}")
                 print(f"{C_DIM}Raw: {_snippet}{C_RESET}")
                 # Feed the error back so the next turn can retry with fixed JSON.
                 err = (
@@ -5117,7 +5117,7 @@ class JarvisCLI:
                 )
                 self.messages.append({"role": "assistant", "content": "", "tool_calls": [tc]})
                 self.messages.append({"role": "tool", "tool_call_id": tc.get("id") or "call_err", "name": name, "content": err})
-                print(f"{C_YELLOW}→ {err[:300]}{C_RESET}")
+                print(f"{C_WARN}→ {err[:300]}{C_RESET}")
                 continue
             # Args preview. We dump the FULL argument set only when we're
             # about to ASK you to approve - that's when a hidden ">D:\evil.bat"

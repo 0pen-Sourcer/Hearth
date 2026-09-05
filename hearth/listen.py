@@ -595,14 +595,6 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
     # ~200-400ms (audio buffer). Wait that out before recording so we don't
     # transcribe the assistant's own tail.
     POST_STOP_DEBOUNCE_S = float(os.environ.get("JARVIS_STT_POST_STOP_DEBOUNCE", "0.4"))
-    # Hard-mute cooldown AFTER tts ends - the speaker buffer can keep playing
-    # for ~0.5-1s and we don't want that to feed back as a phantom utterance.
-    # The old guard tried to do this by raising the rms threshold, but the
-    # is_speaking() check was silently throwing (function didn't exist) so the
-    # threshold-raise never fired - hence the loop. With is_speaking() defined
-    # now, we ALSO hard-skip transcription for this cooldown to be belt-and-
-    # suspenders. Tunable via env.
-    POST_TTS_COOLDOWN_S = float(os.environ.get("JARVIS_STT_POST_TTS_COOLDOWN", "1.0"))
 
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1,

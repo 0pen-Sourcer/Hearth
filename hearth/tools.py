@@ -5507,7 +5507,7 @@ def _autodetect_forge_dir() -> str:
     # Saved setting wins
     try:
         from pathlib import Path as _Path
-        settings_path = _Path(SETTINGS_PATH)
+        settings_path = _Path(WORKSPACE) / "settings.json"
         if settings_path.is_file():
             saved = json.loads(settings_path.read_text(encoding="utf-8"))
             saved_dir = (saved.get("forge_dir") or "").strip()

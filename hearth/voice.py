@@ -36,7 +36,7 @@ import threading
 import time
 import wave
 from io import BytesIO
-from typing import Callable, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from .tools import WORKSPACE
 

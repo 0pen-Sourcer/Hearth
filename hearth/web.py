@@ -4256,6 +4256,14 @@ def _start_reminder_watcher() -> None:
         return
 
     def _notify(title: str, body: str) -> None:
+        # The Windows notifier raises on over-long text from inside its own
+        # worker thread, where the handlers below cannot catch it, so the toast
+        # silently never appears. Trim to what the OS struct holds first.
+        try:
+            from .reminders import _fit_toast
+            title, body = _fit_toast(title, body)
+        except Exception:
+            title, body = (title or "")[:60], (body or "")[:250]
         # 1. Try plyer (cross-platform desktop notifications)
         try:
             from plyer import notification  # type: ignore
