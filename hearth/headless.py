@@ -144,12 +144,9 @@ def _cloud_reasoning_effort(base: str, think: bool, model: str, level: str = "")
     return "minimal" if "openai.com" in (base or "").lower() else "none"
 
 
-DEFAULT_MAX_DEPTH = 40  # Bumped 20 → 40 after a live LM Studio PDF read hit
-                        # the ceiling mid-task: Qwen 3.5 Harmonic 9B was
-                        # doing legitimate map-reduce-by-hand on a 514-page
-                        # PDF (extract → chunked reads → summarize) and
-                        # ran out of turn budget at 20. Override with
-                        # `--max-depth N` or `HEARTH_MAX_TURNS=N`.
+# Single source, shared with the terminal. Override per run with --max-depth
+# or globally with HEARTH_MAX_TURNS. See loop_guard for why it is 40.
+DEFAULT_MAX_DEPTH = MAX_TURNS
 # Inject a wrap-up nudge to the model when we cross this fraction of the
 # cap so it has a chance to write a STATE_SNAPSHOT before we hard-stop.
 # Without it, the cap fires silently and the model has no idea on the next
@@ -867,6 +864,16 @@ async def run_once(
     # checks this so it never queues a second generation behind the user's.
     _TURN_ACTIVE.set()
     iterations = 0
+    # No history means a fresh conversation. Deferred tools unlocked by an
+    # earlier one are process-global, so a long-lived caller (the phone bridges
+    # run for days) would keep carrying them into every later chat and the
+    # prompt would only ever grow.
+    if not history:
+        try:
+            from .tools import reset_unlocked_tools
+            reset_unlocked_tools()
+        except Exception:
+            pass
     # Tool-loop guard (outcome-hash based, tiered skip/warn/stop). Shared with
     # the CLI — see hearth/loop_guard.py for the full rationale. Replaces the
     # old magic-number "stop after N calls of one tool" counter.

@@ -2416,6 +2416,14 @@ class JarvisCLI:
             return True
         if low == "/clear":
             self.messages = [self.messages[0]]
+            # Deferred tools unlocked earlier are process-global, so without this
+            # a cleared session keeps carrying whatever the last one opened and
+            # the prompt never shrinks back.
+            try:
+                from hearth.tools import reset_unlocked_tools
+                reset_unlocked_tools()
+            except Exception:
+                pass
             self.save_history()
             print(f"{C_OK}Context cleared.{C_RESET}")
             return True

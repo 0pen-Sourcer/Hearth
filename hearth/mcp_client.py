@@ -53,6 +53,20 @@ _LOOP: Optional[asyncio.AbstractEventLoop] = None
 _LOOP_THREAD: Optional[threading.Thread] = None
 _LOOP_READY = threading.Event()
 
+# Environment names that carry credentials. Withheld from MCP child processes
+# unless the server's own config asks for them by name. Opt out entirely with
+# HEARTH_MCP_ALLOW_SECRETS=1.
+_SECRET_ENV_RE = re.compile(
+    r"(API_?KEY|ACCESS_?KEY|SECRET|PASSWORD|PASSWD|TOKEN|CREDENTIAL|SESSION_?ID)",
+    re.IGNORECASE)
+
+
+def _is_secret_env(name: str) -> bool:
+    if os.environ.get("HEARTH_MCP_ALLOW_SECRETS", "").strip() in ("1", "true", "yes"):
+        return False
+    return bool(_SECRET_ENV_RE.search(name or ""))
+
+
 def _workspace() -> Path:
     env = os.environ.get("JARVIS_WORKSPACE")
     if env and env.strip():
@@ -123,7 +137,12 @@ async def _connect_one(name: str, spec: Dict[str, Any]) -> None:
 
     command = (spec.get("command") or "").strip()
     args = list(spec.get("args") or [])
-    env = dict(os.environ)
+    # An MCP server is third-party code, usually fetched at run time by npx.
+    # Handing it the whole environment hands it the cloud API key and the mail
+    # password too, so anything secret-shaped is withheld. A server that
+    # genuinely needs one can still be given it explicitly in its own "env"
+    # block, which is a deliberate choice rather than a silent default.
+    env = {k: v for k, v in os.environ.items() if not _is_secret_env(k)}
     env.update({str(k): str(v) for k, v in (spec.get("env") or {}).items()})
     if not command:
         with _BRIDGES_LOCK:

@@ -16,8 +16,9 @@ The principles:
      no-progress, and ping-pong (A->B->A->B with identical results).
   5. NUDGE first (inject a warning the model sees) — hard-stop is the rare
      backstop, so we don't fight the model into emitting malformed tool markup.
-  6. Mutating dup-calls are SKIPPED (no duplicate side effects like 4 identical
-     reminders); idempotent repeats are allowed but watched for no-progress.
+  6. Repeats are never blocked up front: skipping identical mutating calls also
+     killed legitimate iteration (editing one file repeatedly). Runaways are
+     caught after the fact instead, and the permission prompt gates side effects.
 
 Thresholds are tuned tighter than the typical 90-turn caps because 7-9B
 models stall faster, but every value is env-overridable.
@@ -64,9 +65,11 @@ def _env_int(name: str, default: int) -> int:
 
 
 # Generous hard ceiling on model turns per user message. Almost never hit in
-# normal use — it's the seatbelt, not the steering. 25 is a middle value
-# picked for small-model (7-9B) safety; larger frameworks default to 90.
-MAX_TURNS = _env_int("HEARTH_MAX_TURNS", 25)
+# normal use, it is the seatbelt rather than the steering. 40 came from a real
+# stall: a 9B model doing map-reduce over a 514-page PDF (extract, chunked
+# reads, summarise) ran out of budget at 20. Single source for every surface,
+# so the same task cannot succeed in the app and hard-stop in the terminal.
+MAX_TURNS = _env_int("HEARTH_MAX_TURNS", 40)
 
 # No-progress: the SAME call returning the SAME outcome this many times.
 NO_PROGRESS_WARN = _env_int("HEARTH_NOPROGRESS_WARN", 2)
