@@ -1197,8 +1197,9 @@ def _save_settings(d: Dict) -> Dict:
     _is_cloud_now = _new_provider in _CLOUD
     cur.update({k: v for k, v in d.items() if v is not None})
     os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
-    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-        json.dump(cur, f, indent=2)
+    # Atomic: a truncated settings.json (power cut, AV lock mid-write) would
+    # lose the brain, workspace pointer and voice prefs in one go.
+    _atomic_write_json(SETTINGS_PATH, cur, indent=2)
     # Brain switched cloud → local: ditch the cached disk_models and rescan
     # in the background so the Models tab reflects what's actually on disk
     # without making the user think the GUI froze.
@@ -3020,8 +3021,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                     if saved.get("preferred_model") != model_path:
                         saved["preferred_model"] = model_path
                         os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
-                        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-                            json.dump(saved, f, indent=2)
+                        _atomic_write_json(SETTINGS_PATH, saved, indent=2)
                 except Exception:
                     pass  # best-effort — preference is a nice-to-have
             return self._send_json(200, result)

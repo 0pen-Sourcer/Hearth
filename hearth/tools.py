@@ -165,6 +165,9 @@ for d in (WORKSPACE, SHOTS_DIR, LOGS_DIR, MEMORY_DIR):
     os.makedirs(d, exist_ok=True)
 
 # Per-tool result caps. Reads get more, write confirmations get less.
+# Ceiling for a caller-requested max_chars (see execute_tool).
+MAX_REQUESTED_CAP = 60000
+
 RESULT_CAPS: Dict[str, int] = {
     "read_file": 16000,
     "list_archive": 8000,
@@ -800,7 +803,13 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         ),
         "parameters": {
             "type": "object",
-            "properties": {"url": {"type": "string"}},
+            "properties": {
+                "url": {"type": "string"},
+                "max_chars": {"type": "integer", "description":
+                    "Characters of page text to return (default 8000). Raise it, up "
+                    "to 60000, when you need the WHOLE page, for example reading full "
+                    "docs or source rather than a summary."},
+            },
             "required": ["url"],
         },
     },
@@ -7957,7 +7966,16 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         return msg
     if not isinstance(result, str):
         result = json.dumps(result, ensure_ascii=False, default=str)
-    truncated = _trunc(result, RESULT_CAPS.get(name, DEFAULT_CAP))
+    # A caller can ask for more of its own result (web_fetch on a big page,
+    # read_file on long source). Bounded so one call cannot flood the context.
+    _cap = RESULT_CAPS.get(name, DEFAULT_CAP)
+    try:
+        _want = int((args or {}).get("max_chars") or 0)
+        if _want > 0:
+            _cap = max(_cap, min(_want, MAX_REQUESTED_CAP))
+    except (TypeError, ValueError):
+        pass
+    truncated = _trunc(result, _cap)
     dt_ms = int((datetime.now() - t0).total_seconds() * 1000)
     _log_activity("result", tool=name, chars=len(truncated), ms=dt_ms)
     return truncated
