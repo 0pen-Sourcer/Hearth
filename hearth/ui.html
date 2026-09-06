@@ -7999,6 +7999,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
         // it — this is what "end this session" by voice should do. In text chat
         // there's nothing to close, so it's a clean no-op (no error banner).
         if (voiceModeOn) exitVoiceMode();
+      } else if (ev.reason === 'stopped_early') {
+        // Hearth ended its own turn because a tool kept returning the same
+        // thing or kept failing. Say so plainly. Without this the turn simply
+        // stops mid-task and looks like it quit for no reason.
+        const _why = (ev.note || '').trim();
+        chatBody.appendChild(makeMeta(
+          'Stopped early, ' + (_why || 'a tool kept repeating itself.') +
+          ' Say continue if it should keep going.', 'warn'));
       } else if (ev.reason && ev.reason !== 'finished' && ev.reason !== 'stopped') {
         chatBody.appendChild(makeMeta(`stopped: ${ev.reason}`, 'warn'));
       }

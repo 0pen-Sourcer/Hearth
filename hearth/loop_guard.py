@@ -133,9 +133,14 @@ class GuardDecision:
       "skip" — do NOT execute (identical mutating dup); use `note` as the result
       "warn" — execute happened; append `note` to the result so the model sees it
       "stop" — pathological loop; the turn should wrap up. `note` is the directive.
+
+    `note` is written for the model. `reason` is the same event in plain words for
+    the person watching, since a turn that ends itself with no explanation reads
+    as quitting at random.
     """
     action: str = "ok"
     note: str = ""
+    reason: str = ""
 
 
 def _outcome_hash(result: str) -> str:
@@ -221,7 +226,8 @@ class ToolLoopGuard:
             return self._stop(
                 f"'{name}' has failed {st.failures} times with the same arguments. "
                 f"Stop retrying it. Tell the user plainly what failed and what "
-                f"you'd need to proceed."
+                f"you'd need to proceed.",
+                reason=f"{name} kept failing with the same arguments.",
             )
         if failed and st.failures >= FAILURE_WARN:
             return GuardDecision("warn",
@@ -236,7 +242,8 @@ class ToolLoopGuard:
             return self._stop(
                 f"'{name}' has failed {tf} times this turn (different arguments each time). "
                 f"You're guessing, not progressing. Stop — tell the user plainly what's wrong "
-                f"and what you'd need to fix it."
+                f"and what you'd need to fix it.",
+                reason=f"{name} failed repeatedly with different arguments.",
             )
         if failed and tf >= SAME_TOOL_FAIL_WARN:
             return GuardDecision("warn",
@@ -253,7 +260,8 @@ class ToolLoopGuard:
                 f"'{name}' has been called {st.same_outcome_calls} times with identical arguments "
                 f"and the same result each time — "
                 f"you already have that result. Use it and answer the user now; do not "
-                f"call it again."
+                f"call it again.",
+                reason=f"{name} kept returning the same result.",
             )
         if st.same_outcome_calls >= NO_PROGRESS_WARN:
             return GuardDecision("warn",
@@ -264,14 +272,15 @@ class ToolLoopGuard:
         if self._pingpong_cycles() >= PINGPONG_STOP:
             return self._stop(
                 "You're alternating between the same two tool calls without making "
-                "progress. Break the loop: answer the user with what you have."
+                "progress. Break the loop: answer the user with what you have.",
+                reason="it was alternating between the same two calls.",
             )
 
         return GuardDecision("ok")
 
-    def _stop(self, note: str) -> GuardDecision:
+    def _stop(self, note: str, reason: str = "") -> GuardDecision:
         self.stopped = True
-        return GuardDecision("stop", note)
+        return GuardDecision("stop", note, reason)
 
     def _pingpong_cycles(self) -> int:
         """Count how many times the tail looks like ...A B A B (two distinct

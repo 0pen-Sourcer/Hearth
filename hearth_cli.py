@@ -5259,6 +5259,11 @@ class JarvisCLI:
                 elif decision.action == "stop":
                     result = f"{result}\n\n{decision.note}"
                     self._force_answer = True
+                    # Say why out loud. A turn that ends itself in silence looks
+                    # like it quit for no reason.
+                    if decision.reason:
+                        print(f"{C_WARN}● stopped early, {decision.reason} "
+                              f"say continue if it should keep going.{C_RESET}")
 
             # Screen preview: clean dim label for synthetic results, else the
             # real result head (green ok / rose error) plus a bounded body peek.

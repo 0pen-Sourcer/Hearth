@@ -7945,6 +7945,29 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
             activity_hud.for_tool(name, args)
         except Exception:
             pass
+    # Check the call against the tool's own schema before running it. A missing
+    # required field used to surface as a bare KeyError, which reads as an
+    # internal fault rather than a rejected call, so the model would carry on and
+    # later claim the work was done when nothing had run. Naming the missing
+    # field and showing what did arrive lets it correct itself on the next turn.
+    try:
+        _schema = next((t for t in TOOL_DEFINITIONS if t.get("name") == name), None)
+        _req = ((_schema or {}).get("parameters") or {}).get("required") or []
+        _missing = [k for k in _req
+                    if k not in args or args.get(k) in (None, "")]
+        if _missing:
+            _got = ", ".join(sorted(args)) if args else "nothing"
+            msg = (f"Error ({name}): this call was NOT executed. Required "
+                   f"{'parameters' if len(_missing) > 1 else 'parameter'} "
+                   f"{', '.join(repr(m) for m in _missing)} missing. "
+                   f"Received: {_got}. Nothing was created, written or changed. "
+                   f"Call {name} again with the missing "
+                   f"{'fields' if len(_missing) > 1 else 'field'} included.")
+            _log_activity("error", tool=name, error=f"missing {_missing}")
+            return msg
+    except Exception:
+        pass  # never block a call because the schema lookup itself failed
+
     t0 = datetime.now()
     try:
         result = handler(args)

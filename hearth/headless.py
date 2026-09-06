@@ -879,6 +879,10 @@ async def run_once(
     # old magic-number "stop after N calls of one tool" counter.
     guard = ToolLoopGuard()
     _force_answer = False
+    # Why the loop guard ended the turn, if it did. Without this the turn just
+    # stops and hands control back with no explanation, which reads as Hearth
+    # quitting at random mid-task.
+    _stopped_note: Optional[str] = None
     # Set to a hint string when the last tool result contained a "NEXT STEP:"
     # directive. If the next assistant message doesn't act on it (just narrates
     # what happened), we fire a stronger nudge than the trigger-phrase one.
@@ -1726,6 +1730,7 @@ async def run_once(
                     # 'nudge' event is suppressed in the GUI for the same reason.
                 if decision.action == "stop":
                     _force_answer = True
+                    _stopped_note = decision.reason or decision.note
 
                 emit("tool_result", name=name, content=display_result, ms=ms)
                 # Turn an image marker into a real image the vision model sees.
@@ -1899,7 +1904,8 @@ async def run_once(
              duration_ms=int((time.time() - t_start) * 1000),
              iterations=iterations,
              stats=(_turn_stats or None),
-             reason="finished")
+             reason=("stopped_early" if _stopped_note else "finished"),
+             note=(_stopped_note or None))
 
         # PASSIVE FACT EXTRACTION — durable facts accumulate without the user
         # saying "remember that". Fire it on a daemon thread AFTER 'done' so the
