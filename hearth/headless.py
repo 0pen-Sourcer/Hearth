@@ -1522,6 +1522,7 @@ async def run_once(
                 # keys `{"0":{...}}` for batched calls). Try strict, then
                 # lenient repair before giving up — and when it still fails,
                 # feed the exact error back so the model can fix it.
+                _batch_note = ""
                 try:
                     args = json.loads(raw_args)
                 except json.JSONDecodeError as _je:
@@ -1533,15 +1534,34 @@ async def run_once(
                     except Exception:
                         args = None
                     if args is None:
+                        # Shared lenient read (string-aware repair, then a
+                        # Python-literal read). Single source with the CLI.
+                        try:
+                            from .tool_call_parser import loads_lenient as _lenient
+                            args = _lenient(raw_args)
+                        except Exception:
+                            args = None
+                    if args is None:
                         # Common: model sent numbered keys {"0":{...},"1":{...}}
-                        # instead of array — unwrap the first if present.
+                        # instead of array. Run the first and tell it the rest
+                        # were not executed, rather than dropping them silently.
                         try:
                             _tmp = json.loads(raw_args.strip().strip(","))
                             if isinstance(_tmp, dict) and all(k.isdigit() for k in _tmp):
-                                _first = _tmp[sorted(_tmp, key=lambda k: int(k))[0]]
+                                _keys = sorted(_tmp, key=lambda k: int(k))
+                                _first = _tmp[_keys[0]]
                                 if isinstance(_first, dict) and "name" in _first:
                                     raw_args = json.dumps(_first.get("arguments", {}))
                                     args = _first.get("arguments", {})
+                                    if len(_keys) > 1:
+                                        _dropped = [str(_tmp[k].get("name", "?"))
+                                                    for k in _keys[1:]
+                                                    if isinstance(_tmp[k], dict)]
+                                        _batch_note = (
+                                            f"Note: {len(_keys)} calls were packed into one "
+                                            f"arguments object. Only the first ran. NOT executed: "
+                                            f"{', '.join(_dropped)}. Send each as its own tool call."
+                                        )
                                 else:
                                     raise ValueError("numbered batch")
                         except Exception:
@@ -1766,6 +1786,8 @@ async def run_once(
                                 _pending_image_block = _block
                         except OSError:
                             pass
+                if _batch_note and isinstance(_tool_content, str):
+                    _tool_content = f"{_tool_content}{chr(10)}{chr(10)}{_batch_note}"
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,

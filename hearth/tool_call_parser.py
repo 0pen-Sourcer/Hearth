@@ -83,6 +83,74 @@ def _force_json_str(args: Any) -> str:
     return json.dumps({"value": args}, ensure_ascii=False)
 
 
+def _ident_neighbour(s: str, start: int, length: int) -> bool:
+    """True when the run at s[start:start+length] is part of a longer word, so
+    a bare None/True/False is not confused with Nonefoo or xTrue."""
+    before = s[start - 1] if start > 0 else ""
+    after = s[start + length] if start + length < len(s) else ""
+    return (before.isalnum() or before == "_"
+            or after.isalnum() or after == "_")
+
+
+def _repair_json_like(s: str) -> str:
+    """Rewrite almost-JSON into JSON without touching string CONTENT.
+
+    Handles single-quoted keys and values, bare None/True/False, trailing
+    commas before a closing brace or bracket, and the raw Windows path
+    backslashes models emit. Everything inside a string literal is copied
+    through as written, apart from the escaping JSON itself requires. A
+    blanket replace would rewrite the inside of values too, which dropped an
+    argument carrying an apostrophe and corrupted one carrying the word None."""
+    out: List[str] = []
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c in ('"', "'"):
+            quote = c
+            j = i + 1
+            body: List[str] = []
+            while j < n:
+                ch = s[j]
+                if ch == "\\":
+                    nxt = s[j + 1] if j + 1 < n else ""
+                    if nxt and nxt in '"\/bfnrtu':
+                        body.append(ch)
+                        body.append(nxt)
+                        j += 2
+                        continue
+                    # A lone backslash, which a raw Windows path carries.
+                    body.append("\\\\")
+                    j += 1
+                    continue
+                if ch == quote:
+                    break
+                if ch == '"':
+                    body.append('\\"')   # inner " inside a single-quoted literal
+                    j += 1
+                    continue
+                body.append(ch)
+                j += 1
+            out.append('"' + "".join(body) + '"')
+            i = j + 1
+            continue
+        for word, repl in (("None", "null"), ("True", "true"), ("False", "false")):
+            if s.startswith(word, i) and not _ident_neighbour(s, i, len(word)):
+                out.append(repl)
+                i += len(word)
+                break
+        else:
+            if c == ",":
+                k = i + 1
+                while k < n and s[k] in " \t\r\n":
+                    k += 1
+                if k < n and s[k] in "}]":
+                    i += 1          # trailing comma, drop it
+                    continue
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def _try_json(s: str) -> Optional[Dict[str, Any]]:
     """Best-effort JSON parse — many models emit *almost* JSON. Returns None
     on failure rather than raising so the caller can fall back to a regex
@@ -93,22 +161,32 @@ def _try_json(s: str) -> Optional[Dict[str, Any]]:
         return json.loads(s)
     except Exception:
         pass
-    # Try to repair common breakages: single quotes, trailing commas,
-    # Python None/True/False instead of JSON null/true/false.
+    # Repair common breakages. The rewrite is string-aware; see
+    # _repair_json_like for why a blanket replace was wrong.
     try:
-        repaired = (
-            s.replace("'", '"')
-             .replace("None", "null")
-             .replace("True", "true")
-             .replace("False", "false")
-        )
-        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
-        # Escape lone backslashes that aren't a valid JSON escape — models emit
-        # raw Windows paths like "C:\Users\..." which are invalid JSON as-is.
-        repaired = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', repaired)
-        return json.loads(repaired)
+        return json.loads(_repair_json_like(s))
     except Exception:
-        return None
+        pass
+    # Python-literal shaped input (single quotes, None/True/False) parses
+    # correctly here with no rewriting at all. literal_eval evaluates literals
+    # only, it does not execute code.
+    try:
+        import ast
+        val = ast.literal_eval(s)
+        if isinstance(val, dict):
+            return val
+    except Exception:
+        pass
+    return None
+
+
+def loads_lenient(s: str) -> Optional[Dict[str, Any]]:
+    """Public entry for parsing a tool call's `arguments` string. Strict JSON
+    first, then the string-aware repair, then a Python-literal read. Returns
+    None when the text cannot be read as an object, so the caller reports a
+    malformed call to the model rather than running a guess."""
+    out = _try_json(s)
+    return out if isinstance(out, dict) else None
 
 
 def _kv_pairs_to_dict(body: str) -> Dict[str, Any]:

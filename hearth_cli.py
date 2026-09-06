@@ -5104,7 +5104,14 @@ class JarvisCLI:
             name = tc["function"]["name"]
             args_raw = tc["function"]["arguments"] or "{}"
             try:
-                args = json.loads(args_raw)
+                # Same lenient read the bridge uses, so a call the bridge
+                # recovers is not rejected here. Strict JSON first, then a
+                # string-aware repair; never a blind string replace.
+                from hearth.tool_call_parser import loads_lenient as _lenient
+                _parsed = _lenient(args_raw)
+                if _parsed is None:
+                    raise json.JSONDecodeError("could not be read as a JSON object", args_raw, 0)
+                args = _parsed
             except json.JSONDecodeError as _je:
                 _snippet = (args_raw[:500] + "…") if len(args_raw) > 500 else args_raw
                 print(f"{C_ERR}Tool JSON error for {name} at col {_je.colno}: {_je.msg}{C_RESET}")
