@@ -8007,6 +8007,62 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
 # ============================================================
 # TOOL DIET — defer niche tool SCHEMAS off the default prompt
 # ============================================================
+# A required parameter with no description is easy for a smaller model to leave
+# out, and an omitted field means the call is rejected and the work silently does
+# not happen. These fill the gaps in one place so no required field ships
+# undescribed; a schema that already describes a field is left alone.
+_REQUIRED_PARAM_HELP = {
+    "path": "Full path to the file. Required, the call is rejected without it.",
+    "source": "Path to move or copy from.",
+    "destination": "Path to move or copy to.",
+    "content": "Full text to write. Required alongside path.",
+    "edits": "List of {old_text, new_text} replacements to apply.",
+    "command": "The command line to run.",
+    "query": "What to search for.",
+    "url": "Full address including https://.",
+    "text": "The text to use.",
+    "title": "Exact title, as shown in the memory list.",
+    "id": "Identifier from the matching list call.",
+    "job_id": "Identifier returned when the job was started.",
+    "name": "Name of the item to act on.",
+    "description": "One line describing what it is for.",
+    "body": "Main content.",
+    "prompt": "What to generate, described in plain words.",
+    "message": "The message text.",
+    "pattern": "Text or regular expression to look for.",
+}
+# Fields whose meaning is specific to one tool, so the shared table above cannot
+# cover them.
+_REQUIRED_PARAM_HELP_BY_TOOL = {
+    ("send_email", "subject"): "Subject line of the email.",
+    ("computer_move", "x"): "Horizontal screen pixel, 0 at the left edge.",
+    ("computer_move", "y"): "Vertical screen pixel, 0 at the top edge.",
+    ("computer_key", "key"): "Key name such as enter or f5, or a chord joined with +.",
+    ("computer_scroll", "amount"): "Wheel notches, positive scrolls up and negative scrolls down.",
+    ("computer_drag", "x1"): "Horizontal pixel where the drag starts.",
+    ("computer_drag", "y1"): "Vertical pixel where the drag starts.",
+    ("computer_drag", "x2"): "Horizontal pixel where the drag ends.",
+    ("computer_drag", "y2"): "Vertical pixel where the drag ends.",
+    ("launch_team", "members"): "One entry per sub-agent, each with its own task.",
+}
+
+
+def _fill_required_param_help() -> None:
+    for td in TOOL_DEFINITIONS:
+        params = td.get("parameters") or {}
+        props = params.get("properties") or {}
+        for req in params.get("required") or []:
+            spec = props.get(req)
+            if isinstance(spec, dict) and not spec.get("description"):
+                help_text = (_REQUIRED_PARAM_HELP_BY_TOOL.get((td.get("name"), req))
+                             or _REQUIRED_PARAM_HELP.get(req))
+                if help_text:
+                    spec["description"] = help_text
+
+
+_fill_required_param_help()
+
+
 # Every handler still EXISTS and still RUNS if called by name — deferring only
 # hides a tool's schema from the per-turn `tools` list to cut prompt overhead
 # (~130 tokens/tool). The model rediscovers deferred tools via the always-on
