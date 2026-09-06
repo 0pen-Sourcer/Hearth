@@ -41,6 +41,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
@@ -2856,7 +2857,6 @@ class HearthHandler(BaseHTTPRequestHandler):
             _m = (b.get("model") or "").strip()
             if not _u:
                 return self._send_json(400, {"ok": False, "error": "url required"})
-            import urllib.error
             import urllib.request as _ur
             _hdr = {"Authorization": f"Bearer {_k}"} if _k else {}
             _ids = []
