@@ -1579,7 +1579,6 @@ async def run_once(
                         messages.append({"role": "tool", "tool_call_id": tc.id, "name": name, "content": tool_result})
                         # Let loop guard track this failure so repeated mangles trip warn/stop.
                         try:
-                            from .tools import _RISKY_TOOLS as _R
                             _gd = guard.after(name, {}, tool_result)
                             if _gd.action in ("warn", "stop"):
                                 messages[-1]["content"] += f"\n\n{_gd.note}"
@@ -1596,8 +1595,8 @@ async def run_once(
                 #    parallel implementation in hearth_cli.py.
                 # 2. Otherwise the legacy JARVIS_AUTO_APPROVE env var applies:
                 #    when set to "0", risky tools are auto-denied (no UI).
-                from .tools import _RISKY_TOOLS as RISKY  # single source — see tools.py
-                if name in RISKY and permission_check is not None:
+                from .tools import is_risky  # single source — see tools.py
+                if is_risky(name) and permission_check is not None:
                     _deny_reason = ""
                     try:
                         decision = permission_check(name, args)
@@ -1663,7 +1662,7 @@ async def run_once(
                             "content": tool_result,
                         })
                         continue
-                elif name in RISKY:
+                elif is_risky(name):
                     if os.environ.get("JARVIS_AUTO_APPROVE", "1") == "0":
                         tool_result = (
                             f"The user declined this tool call. Strict permission "

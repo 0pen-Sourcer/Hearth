@@ -706,7 +706,7 @@ def _prune_old_images(messages: List[Dict], keep_last: int = 1) -> int:
 # Single source — see hearth/tools.py _RISKY_TOOLS. Import at runtime to avoid
 # circular import at module load (hearth.tools imports hearth_cli helpers).
 try:
-    from hearth.tools import _RISKY_TOOLS as RISKY_TOOLS
+    from hearth.tools import _RISKY_TOOLS as RISKY_TOOLS, is_risky as _is_risky
 except Exception:
     # Fallback for source checkout without hearth installed
     RISKY_TOOLS = {
@@ -721,6 +721,11 @@ except Exception:
         "desktop_click", "desktop_type",
         "disk_usage", "forge_generate", "forge_shutdown",
     }
+
+    def _is_risky(name: str) -> bool:
+        # Mirrors tools.is_risky. An mcp_ tool is third-party code reached
+        # over a bridge, so it is gated by prefix rather than by membership.
+        return bool(name) and (name in RISKY_TOOLS or name.startswith("mcp_"))
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
@@ -5133,7 +5138,7 @@ class JarvisCLI:
             # the workspace), we show a tidy one-line preview cut with "…" -
             # no 600-char code blob (e.g. create_plugin) dumped to the screen.
             preview_full = json.dumps(args, ensure_ascii=False)
-            is_risky = name in RISKY_TOOLS
+            is_risky = _is_risky(name)
 
             # Path-scoped auto-approval: for file-touching tools, a path arg
             # that resolves inside the workspace sandbox runs without a prompt
@@ -5191,7 +5196,7 @@ class JarvisCLI:
             denied = False
             decline_reason = ""
 
-            if (name in RISKY_TOOLS
+            if (_is_risky(name)
                     and not self.auto_approve
                     and not _path_safe
                     and self.tool_perms.get(name) != "always"):

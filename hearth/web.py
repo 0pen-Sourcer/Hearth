@@ -1690,11 +1690,26 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _gpu_snapshot())
         if path == "/api/tools":
             try:
-                from .tools import _RISKY_TOOLS as _RT, _NEVER_PERM as _NP
+                from .tools import _NEVER_PERM as _NP, is_risky as _isr
                 out = []
                 for _td in TOOL_DEFINITIONS:
-                    _r = "never" if _td["name"] in _NP else ("risky" if _td["name"] in _RT else "safe")
-                    out.append({**_td, "risk": _r})
+                    _r = "never" if _td["name"] in _NP else ("risky" if _isr(_td["name"]) else "safe")
+                    out.append({**_td, "risk": _r, "source": "builtin"})
+                # Bridged MCP tools are callable, so they belong in the panel
+                # too. Without them there was no way to deny one.
+                try:
+                    from . import mcp_client
+                    for _mt in mcp_client.list_remote_tools():
+                        out.append({
+                            "name": _mt.get("name", ""),
+                            "description": _mt.get("description", ""),
+                            "parameters": _mt.get("parameters") or {},
+                            "risk": "risky",
+                            "source": "mcp",
+                            "server": _mt.get("_mcp_server", ""),
+                        })
+                except Exception:
+                    pass
                 return self._send_json(200, {"tools": out})
             except Exception:
                 return self._send_json(200, {"tools": TOOL_DEFINITIONS})

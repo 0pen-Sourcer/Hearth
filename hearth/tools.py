@@ -8352,6 +8352,20 @@ _RISKY_TOOLS: set = {
 }
 _NEVER_PERM: set = {"ask_user", "ask", "spawn_subagent", "launch_team"}
 
+# MCP tools are third-party code reached over a bridge. Their names are not in
+# _RISKY_TOOLS and cannot be, since they are discovered at runtime, so a
+# membership test let every one of them run ungated. Gate them by prefix
+# instead: what a remote tool does is unknown, which is the definition of risky.
+MCP_TOOL_PREFIX = "mcp_"
+
+
+def is_risky(name: str) -> bool:
+    """Single source for whether a call needs permission. Import this rather
+    than testing membership of _RISKY_TOOLS, so a surface cannot drift."""
+    if not name or name in _NEVER_PERM:
+        return False
+    return name in _RISKY_TOOLS or name.startswith(MCP_TOOL_PREFIX)
+
 
 # ============================================================
 # PROVIDER FORMAT CONVERTERS

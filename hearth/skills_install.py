@@ -35,13 +35,22 @@ from typing import Any, Callable, Dict, List, Optional
 from . import skills_loader as _sl
 
 # Tools that let a skill change the machine / reach the network. Used only to
-# describe risk at install time — not to block anything at runtime.
-_RISKY_TOOLS = {
-    "run_command", "write_file", "edit_file", "delete_path", "move_path",
-    "create_directory", "open_url", "open_app", "browse", "browse_click",
-    "browse_type", "create_plugin", "install_skill", "set_reminder",
-    "forge_generate", "send_email",
+# describe risk at install time, not to block anything at runtime. The runtime
+# gate (tools.is_risky) is the base so this can never warn about less than what
+# will actually prompt; these are the extra install-time signals on top, which
+# reach out but are not gated per call.
+_EXTRA_INSTALL_SIGNALS = {
+    "browse", "browse_click", "browse_type", "install_skill", "set_reminder",
 }
+
+
+def _risky_declared(declared) -> list:
+    try:
+        from .tools import is_risky
+    except Exception:
+        return sorted(set(declared) & _EXTRA_INSTALL_SIGNALS)
+    return sorted({d for d in (declared or [])
+                   if is_risky(d) or d in _EXTRA_INSTALL_SIGNALS})
 
 _SLUG_RE = re.compile(r"[a-z0-9][a-z0-9_-]{1,40}$")
 # owner/repo, owner/repo@ref, owner/repo/sub/dir, optionally @ref on the end.
@@ -147,7 +156,7 @@ def inspect_source(source: str) -> Dict[str, Any]:
     if sdir.is_dir():
         scripts = sorted(p.name for p in sdir.iterdir()
                          if p.is_file() and not p.name.startswith("."))
-    risky = sorted(set(declared) & _RISKY_TOOLS)
+    risky = _risky_declared(declared)
     # Shipping executable scripts is itself a "runs code" signal even if no
     # risky tool is declared.
     ships_code = bool(scripts)

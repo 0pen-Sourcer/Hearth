@@ -9900,21 +9900,27 @@ async function refreshToolPerms() {
     // Only risky tools are gated — safe reads (read_file, web_search…) are never permission-prompted, and neverPerm (ask_user etc.) would deadlock.
     const all = t.tools || [];
     const risky = all.filter(x => x.risk === 'risky');
-    if (risky.length) tools = risky.map(x => x.name).sort();
+    const _pick = xs => xs.map(x => ({ name: x.name, source: x.source || 'builtin', server: x.server || '' }))
+                          .sort((a, b) => a.name.localeCompare(b.name));
+    if (risky.length) tools = _pick(risky);
     else {
       // Fallback for old backend without risk field
       const _neverPerm = new Set(['ask_user', 'ask', 'spawn_subagent', 'launch_team']);
-      tools = all.map(x => x.name).filter(n => !_neverPerm.has(n)).sort();
+      tools = _pick(all.filter(x => !_neverPerm.has(x.name)));
     }
     perms = p;
   } catch { list.innerHTML = '<div class="hint">Couldn\'t load tools.</div>'; return; }
   const allow = new Set(perms.always_allow || []), deny = new Set(perms.always_deny || []);
   function render() {
     const q = (search ? search.value : '').toLowerCase();
-    list.innerHTML = tools.filter(n => n.toLowerCase().includes(q)).map(n => {
+    list.innerHTML = tools.filter(t => t.name.toLowerCase().includes(q)).map(t => {
+      const n = t.name;
       const st = allow.has(n) ? 'allow' : deny.has(n) ? 'deny' : 'ask';
       const seg = (m, l) => `<button class="perm-seg${st === m ? ' on ' + m : ''}" data-tool="${n}" data-mode="${m}">${l}</button>`;
-      return `<div class="perm-row"><span class="perm-name">${esc(n)}</span><span class="perm-segs">${seg('ask', 'Ask')}${seg('allow', 'Allow')}${seg('deny', 'Deny')}</span></div>`;
+      // Bridged tools are third-party, so name the server they came from.
+      const tag = t.source === 'mcp'
+        ? ` <span style="color:var(--fg-faint);font-size:11px">via ${esc(t.server || 'MCP')}</span>` : '';
+      return `<div class="perm-row"><span class="perm-name">${esc(n)}${tag}</span><span class="perm-segs">${seg('ask', 'Ask')}${seg('allow', 'Allow')}${seg('deny', 'Deny')}</span></div>`;
     }).join('') || '<div class="hint">No tools match.</div>';
   }
   render();
