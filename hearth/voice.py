@@ -164,15 +164,39 @@ KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/latest/
 KOKORO_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/latest/download/voices-v1.0.bin"
 
 
-def _download(url: str, dest: str) -> None:
-    """Fetch url -> dest atomically via a .part temp, with a progress line."""
+class DownloadCancelled(Exception):
+    """Raised inside the fetch hook when a caller asks to stop."""
+
+
+def _download(url: str, dest: str,
+              progress: "Optional[Callable[[int, int], None]]" = None,
+              should_cancel: "Optional[Callable[[], bool]]" = None) -> None:
+    """Fetch url -> dest atomically via a .part temp, with a progress line.
+
+    `progress(done_bytes, total_bytes)` also receives each update so a caller can
+    show real size, speed and ETA rather than a bare percent. `should_cancel`
+    is polled during the transfer so a download can be stopped from the UI."""
     import urllib.request
     tmp = dest + ".part"
+    _last = [-1]
 
     def _hook(blocks, bs, total):
+        if should_cancel and should_cancel():
+            raise DownloadCancelled()
+        done = blocks * bs
         if total > 0:
-            pct = min(100, blocks * bs * 100 // total)
-            print(f"\r   {os.path.basename(dest)}: {pct}%", end="", flush=True)
+            done = min(done, total)
+            pct = min(100, done * 100 // total)
+            if pct != _last[0]:
+                _last[0] = pct
+                print(f"\r   {os.path.basename(dest)}: {pct}%", end="", flush=True)
+        if progress:
+            try:
+                progress(done, total)
+            except DownloadCancelled:
+                raise
+            except Exception:
+                pass
 
     try:
         urllib.request.urlretrieve(url, tmp, _hook)
@@ -184,6 +208,72 @@ def _download(url: str, dest: str) -> None:
                 os.remove(tmp)
             except OSError:
                 pass
+
+
+def models_present() -> bool:
+    """True when the Kokoro model and voice bank are both on disk."""
+    return bool(_find("kokoro") and _find("voices"))
+
+
+def can_install_models() -> bool:
+    """True when the model files are missing but fetchable. The Lite bundle
+    ships the packages without the ~100MB of weights, so this is the normal
+    state there and the GUI offers an install rather than reporting a fault."""
+    if models_present():
+        return False
+    if os.environ.get("JARVIS_NO_AUTODOWNLOAD") == "1":
+        return False
+    try:
+        import kokoro_onnx  # type: ignore  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def download_models(progress: "Optional[Callable[[str, int, int], None]]" = None,
+                    should_cancel: "Optional[Callable[[], bool]]" = None) -> bool:
+    """Fetch the Kokoro model and voice bank.
+
+    `progress(step, done_bytes, total_bytes)` reports across BOTH files as one
+    running total, so the downloads overlay shows a single coherent row with a
+    real size, speed and ETA. Speaking used to pull these inline, which blocked
+    the request for minutes with nothing on screen."""
+    global _last_load_error
+    if models_present():
+        return True
+    if os.environ.get("JARVIS_NO_AUTODOWNLOAD") == "1":
+        _last_load_error = "auto-download disabled (JARVIS_NO_AUTODOWNLOAD=1)"
+        return False
+    os.makedirs(VOICES_DIR, exist_ok=True)
+    jobs = []
+    if not _find("kokoro"):
+        jobs.append(("voice model", KOKORO_MODEL_URL, "kokoro-v1.0.onnx"))
+    if not _find("voices"):
+        jobs.append(("voice bank", KOKORO_VOICES_URL, "voices-v1.0.bin"))
+    # Sizes are unknown until each transfer starts, so carry the bytes already
+    # finished and add the running file on top. The total grows as each file
+    # reports in, which the overlay handles.
+    carried = {"done": 0, "total": 0}
+    try:
+        for label, url, fname in jobs:
+            def _p(done, total, _l=label):
+                if progress:
+                    progress(_l, carried["done"] + done, carried["total"] + total)
+            _download(url, os.path.join(VOICES_DIR, fname), _p, should_cancel)
+            path = os.path.join(VOICES_DIR, fname)
+            size = os.path.getsize(path) if os.path.exists(path) else 0
+            carried["done"] += size
+            carried["total"] += size
+    except DownloadCancelled:
+        _last_load_error = "voice file download cancelled"
+        return False
+    except Exception as e:
+        _last_load_error = f"voice model download failed: {type(e).__name__}: {e}"
+        return False
+    ok = models_present()
+    if not ok:
+        _last_load_error = "voice model download finished but the files are not on disk"
+    return ok
 
 
 def _is_lite_build() -> bool:
@@ -219,14 +309,6 @@ def _ensure_kokoro_models(allow_download: bool = False) -> bool:
     if os.environ.get("JARVIS_NO_AUTODOWNLOAD") == "1":
         _last_load_error = "kokoro models missing and auto-download disabled (JARVIS_NO_AUTODOWNLOAD=1)"
         return False
-    if _is_lite_build():
-        # Lite build has the pip packages but not the ~100MB model files.
-        # Allow download when the user explicitly triggers voice (speak/test),
-        # but skip on silent status probes so boot doesn't pull 100MB.
-        if not allow_download:
-            _last_load_error = ("voice models not bundled in the Lite build — "
-                                "use voice or click Test to download them (~100MB).")
-            return False
     os.makedirs(VOICES_DIR, exist_ok=True)
     try:
         if not _find("kokoro"):
@@ -887,6 +969,11 @@ def status() -> dict:
         "piper_installed": have_piper,
         "sounddevice_installed": have_sd,
         "ready": engine is not None and have_sd,
+        # Split "weights not fetched yet, offer a download" from "package
+        # missing, nothing to offer". Without this the GUI showed one dead end
+        # for both and the Lite build had no way to get voice at all.
+        "models_present": models_present(),
+        "can_install_models": can_install_models(),
         "default_voice": DEFAULT_KOKORO_VOICE,
         "default_speed": DEFAULT_SPEED,
         "last_load_error": _last_load_error,

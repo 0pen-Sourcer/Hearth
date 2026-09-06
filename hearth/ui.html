@@ -10161,6 +10161,7 @@ async function refreshSettings() {
               const t = setInterval(async () => {
                 try {
                   const x = await fetch('/api/voice/install-status').then(r => r.json());
+                  dlMirrorVoice('GPU voice runtime', x);
                   if (x.running) {
                     if (x.pct != null) {
                       inst.classList.add('det');
@@ -11077,12 +11078,30 @@ async function refreshSettings() {
       // Not-installed reads as reassuring, not broken: voice is OPTIONAL and
       // Hearth is fully usable by text. (A real load error still shows verbatim
       // so it's debuggable.) The voice packages ship with the Full edition.
-      $('tts-status').textContent = ttsOK ? `ready (${tts.engine})`
-        : (tts.last_load_error || 'Not set up — spoken replies are optional; Hearth works fully by text. Voice ships with the Full edition.');
-      $('tts-status').className = 'voice-status ' + (ttsOK ? 'ok' : 'bad');
+      // When the packages are present and only the weights are missing, this is
+      // a one-click fix, not a dead end. Saying it ships with the Full edition
+      // was wrong on Lite and left no way to get voice at all.
+      if (!ttsOK && tts.can_install_models) {
+        $('tts-status').innerHTML =
+          'Voice files not downloaded yet, about 100MB. '
+          + '<button type="button" id="btn-get-voice-files" class="ob-choice" '
+          + 'style="margin-left:6px;padding:4px 10px;font-size:11px;">Get voice files</button>';
+        $('tts-status').className = 'voice-status';
+        const gvf = document.getElementById('btn-get-voice-files');
+        if (gvf) gvf.onclick = async () => {
+          gvf.disabled = true;
+          const ok = await _obFetchVoiceModels(gvf);
+          if (ok) toast('Voice ready', 'Spoken replies are set up.', 'ok', 5000);
+          refreshSettings();
+        };
+      } else {
+        $('tts-status').textContent = ttsOK ? `ready (${tts.engine})`
+          : (tts.last_load_error || 'Not set up — spoken replies are optional; Hearth works fully by text.');
+        $('tts-status').className = 'voice-status ' + (ttsOK ? 'ok' : 'bad');
+      }
       const sttOK = stt.ready;
       $('stt-status').textContent = sttOK ? `ready (whisper ${stt.model_size}, ${stt.device})`
-        : (stt.last_load_error || 'Not set up — talking to Hearth is optional; you can always type. Voice ships with the Full edition.');
+        : (stt.last_load_error || 'Not set up — talking to Hearth is optional; you can always type. The speech model downloads by itself the first time you use the mic.');
       $('stt-status').className = 'voice-status ' + (sttOK ? 'ok' : 'bad');
     } catch {}
 
@@ -11779,6 +11798,7 @@ window.addEventListener('load', () => {
       poll = setInterval(async () => {
         try {
           const s = await fetch('/api/voice/install-status').then(x => x.json());
+          dlMirrorVoice('GPU voice runtime', s);
           if (s.running) { if (msg) msg.textContent = 'installing…'; return; }
           if (s.done) {
             clearInterval(poll);
@@ -14109,6 +14129,35 @@ function dlSyncBadge() {
   // app instead of only after opening the Models tab.
   const n = $('nav-dl-dot'); if (n) n.hidden = active;
 }
+// Every voice-related transfer (GPU runtime, voice files, speech model) mirrors
+// into the shared Downloads overlay, so one place shows every download Hearth is
+// doing rather than a progress line buried in whichever pane started it.
+const VOICE_DL_ID = '__voice__';
+const _voiceDl = { t0: 0, b0: 0 };
+function dlMirrorVoice(name, s) {
+  if (!s) return;
+  if (s.running) {
+    const done = s.bytes_done || 0, total = s.bytes_total || 0;
+    const now = Date.now();
+    if (!_voiceDl.t0) { _voiceDl.t0 = now; _voiceDl.b0 = done; }
+    const secs = (now - _voiceDl.t0) / 1000;
+    const speed = (total && secs > 1) ? (done - _voiceDl.b0) / secs : 0;
+    dlUpsert(VOICE_DL_ID, {
+      name: name + (s.step ? '  ·  ' + s.step : ''), kind: 'voice',
+      status: 'downloading', pct: s.pct != null ? s.pct : 0,
+      done: total ? done : undefined, total: total || undefined,
+      speed, eta: speed > 0 ? (total - done) / speed : 0,
+    });
+  } else if (s.done) {
+    _voiceDl.t0 = 0;
+    dlUpsert(VOICE_DL_ID, {
+      name, kind: 'voice',
+      status: s.cancelled ? 'paused' : (s.ok ? 'done' : 'error'),
+      pct: s.ok ? 100 : undefined,
+    });
+  }
+}
+
 function dlUpsert(id, patch) {
   const d = _dls[id] || (_dls[id] = { name: id, status: 'downloading', pct: 0 });
   Object.assign(d, patch);
@@ -14135,15 +14184,18 @@ function dlToggle(force) {
         if (ds.dlact === 'pause') {
           if (kind === 'engine') api('/api/runtime/cancel', { method: 'POST' }).catch(() => {});
           else if (kind === 'update') api('/api/update/cancel', { method: 'POST' }).catch(() => {});
+          else if (kind === 'voice') api('/api/voice/install-cancel', { method: 'POST' }).catch(() => {});
           else if (d.abort) { try { d.abort.abort(); } catch {} }   // model: client abort, .part stays
           dlUpsert(id, { status: 'paused' });
         } else if (ds.dlact === 'resume') {
           if (kind === 'engine') runtimeInstall();
           else if (kind === 'update') downloadUpdate();
+          else if (kind === 'voice') _obFetchVoiceModels(null);
           else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {});
         } else if (ds.dlact === 'cancel') {
           if (kind === 'engine') api('/api/runtime/discard', { method: 'POST' }).catch(() => {});
           else if (kind === 'update') api('/api/update/cancel', { method: 'POST' }).catch(() => {});
+          else if (kind === 'voice') api('/api/voice/install-cancel', { method: 'POST' }).catch(() => {});
           else {
             if (d.abort) { try { d.abort.abort(); } catch {} }
             if (d.filename) api('/api/llmserver/discard-partial', { method: 'POST',
@@ -14592,6 +14644,54 @@ let _obMigrateProbed = false;
 let _obSkipMigrate = false;
 let _obMigrateChoice = null;  // 'hermes' | 'openclaw' | 'skip'
 
+// One choice at a time. Adding 'selected' without clearing the siblings left
+// every option the user had clicked looking picked.
+// Pull the Kokoro weights with a visible percentage. Resolves either way; the
+// caller refreshes voice status afterwards.
+async function _obFetchVoiceModels(btn, onPct) {
+  const label = btn ? btn.textContent : '';
+  try {
+    const r = await api('/api/voice/install-models', { method: 'POST' });
+    if (r && r.already) { if (btn) btn.textContent = 'Installed'; return true; }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry install'; }
+    toast('Voice files not fetched', (e && e.message) || 'network', 'warn', 8000);
+    return false;
+  }
+  return await new Promise(resolve => {
+    const poll = setInterval(async () => {
+      try {
+        const s = await fetch('/api/voice/install-status').then(x => x.json());
+        dlMirrorVoice('Voice files', s);
+        if (s.running) {
+          if (btn) btn.textContent = s.pct != null ? `Getting voice files… ${s.pct}%` : 'Getting voice files…';
+          if (onPct) onPct(s.pct);
+          return;
+        }
+        if (s.done) {
+          clearInterval(poll);
+          if (btn) {
+            btn.textContent = s.ok ? 'Installed' : 'Retry install';
+            btn.disabled = !!s.ok;
+          }
+          if (!s.ok) toast('Voice files not fetched', s.msg || 'You can retry it here.', 'warn', 8000);
+          resolve(!!s.ok);
+        }
+      } catch {
+        clearInterval(poll);
+        if (btn) { btn.disabled = false; btn.textContent = label || 'Retry install'; }
+        resolve(false);
+      }
+    }, 700);
+  });
+}
+
+function _obPickChoice(box, btn) {
+  if (!box) return;
+  box.querySelectorAll('.ob-choice.selected').forEach(el => el.classList.remove('selected'));
+  if (btn) btn.classList.add('selected');
+}
+
 async function _obProbeMigrate() {
   if (_obMigrateProbed) return;
   _obMigrateProbed = true;
@@ -14619,7 +14719,7 @@ async function _obProbeMigrate() {
           <div class="ob-choice-title">Import from ${esc(c.src)}</div>
           <div class="ob-choice-sub">Reading ${esc(c.path)}. API keys stay where they are.</div>
         `;
-        btn.onclick = () => { _obMigrateChoice = c.src; btn.classList.add('selected'); };
+        btn.onclick = () => { _obMigrateChoice = c.src; _obPickChoice(box, btn); };
         box.appendChild(btn);
       }
       const skipBtn = document.createElement('button');
@@ -14628,7 +14728,7 @@ async function _obProbeMigrate() {
         <div class="ob-choice-title">Skip for now</div>
         <div class="ob-choice-sub">You can run this any time via Settings → Behavior → Migrate.</div>
       `;
-      skipBtn.onclick = () => { _obMigrateChoice = 'skip'; skipBtn.classList.add('selected'); };
+      skipBtn.onclick = () => { _obMigrateChoice = 'skip'; _obPickChoice(box, skipBtn); };
       box.appendChild(skipBtn);
     }
   } catch {
@@ -14881,10 +14981,17 @@ async function obLoadVoiceStatus() {
         const poll = setInterval(async () => {
           try {
             const s = await fetch('/api/voice/install-status').then(x => x.json());
+            dlMirrorVoice('Voice packages', s);
             if (s.running) { instBtn.textContent = s.pct != null ? `Installing… ${s.pct}%` : 'Installing…'; return; }
             if (s.done) {
               clearInterval(poll);
-              if (s.ok) { instBtn.textContent = 'Installed ✓'; obLoadVoiceStatus(); }
+              if (s.ok) {
+                // Packages alone are not voice. The weights are ~100MB and used
+                // to be pulled inline by the first speak, which blocked with
+                // nothing on screen, so fetch them here where there is a bar.
+                instBtn.textContent = 'Getting voice files…';
+                _obFetchVoiceModels(instBtn).finally(() => obLoadVoiceStatus());
+              }
               else {
                 // A failed install must stay RETRYABLE. This used to leave the
                 // button disabled reading "Install failed", so a half-finished
@@ -14941,9 +15048,29 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
   testBtn.onclick = async () => {
     const voice = voiceSel.value || 'am_michael';
     const speed = parseFloat(speedInput.value) || 1.5;
-    if (testMsg) testMsg.textContent = 'playing…';
     testBtn.disabled = true;
     try {
+      // On a fresh Lite install the weights are not on disk yet, and speaking
+      // fetches them inline. That blocked this request for minutes behind a
+      // static "playing" label and read as a silent failure. Fetch them first,
+      // with a percentage, so the wait is visible and explained.
+      let _needFiles = false;
+      try {
+        const vs = await fetch('/api/voice/status').then(x => x.json());
+        _needFiles = !!(vs && vs.tts && vs.tts.can_install_models);
+      } catch {}
+      if (_needFiles) {
+        if (testMsg) testMsg.textContent = 'first run, getting voice files (about 100MB)…';
+        const okFiles = await _obFetchVoiceModels(null, pct => {
+          if (testMsg) testMsg.textContent = pct != null
+            ? `getting voice files… ${pct}%` : 'getting voice files…';
+        });
+        if (!okFiles) {
+          if (testMsg) testMsg.textContent = 'could not get the voice files. Check your connection and retry.';
+          return;
+        }
+      }
+      if (testMsg) testMsg.textContent = 'playing…';
       // Save the pair first so /api/tts uses it (speak doesn't take per-call
       // voice/speed in the current shape - it reads DEFAULT_VOICE/SPEED).
       await api('/api/settings', {
@@ -15003,6 +15130,9 @@ async function obFinish(skipped) {
     if (vSel && vSel.value) pickedVoice = vSel.value;
     if (sIn && sIn.value)   pickedSpeed = parseFloat(sIn.value) || 1.5;
   }
+  // The settings save is the one call that has to land. If it fails the answers
+  // are gone and onboarding runs again on the next boot, so keep the draft and
+  // the overlay in place and say so, rather than closing on a success message.
   try {
     await api('/api/settings', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -15018,6 +15148,14 @@ async function obFinish(skipped) {
         voice_speed: pickedSpeed,
       }),
     });
+  } catch (e) {
+    toast('Could not save your setup',
+          ((e && e.message) ? e.message + '. ' : '') + 'Your answers are still here. Check free disk space, then hit Finish again.',
+          'err', 12000);
+    return;
+  }
+  // Everything below is best effort. A failure here costs a nicety, not the setup.
+  try {
     // If the user picked a non-default agent name during onboarding,
     // trigger the FULL rename (workspace folder + persona module +
     // env). Settings save already changed the in-memory persona name,

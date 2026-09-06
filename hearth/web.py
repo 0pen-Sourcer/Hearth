@@ -400,6 +400,63 @@ _PERMS_FILE = os.path.join(WORKSPACE, "permissions.json")
 _VOICE_INSTALL: Dict[str, Any] = {"running": False}
 
 
+_VOICE_INSTALL_CANCEL = threading.Event()
+
+
+def _install_voice_models_worker() -> None:
+    """Download the Kokoro weights and the speech model, publishing byte-level
+    progress on _VOICE_INSTALL so the downloads overlay can show size, speed and
+    ETA and offer Cancel, the same as every other download."""
+    global _VOICE_INSTALL
+    _VOICE_INSTALL_CANCEL.clear()
+    # `done` stays the completion flag the existing poller checks; byte counts
+    # get their own keys so the two never mean different things.
+    _VOICE_INSTALL = {"running": True, "device": "models", "pct": 0,
+                      "bytes_done": 0, "bytes_total": 0, "step": "starting"}
+
+    def _prog(step, done, total):
+        _VOICE_INSTALL["step"] = step
+        _VOICE_INSTALL["bytes_done"] = done
+        _VOICE_INSTALL["bytes_total"] = total
+        _VOICE_INSTALL["pct"] = (done * 100 // total) if total else None
+
+    def _cancelled():
+        return _VOICE_INSTALL_CANCEL.is_set()
+
+    try:
+        ok = bool(_voice and _voice.download_models(_prog, _cancelled))
+        err = ""
+        try:
+            err = (_voice.status().get("last_load_error") or "") if _voice else ""
+        except Exception:
+            pass
+        # The speech model downloads on the first mic use the same way, which
+        # blocks that first use with nothing on screen. Fetch it here too so one
+        # action sets up both halves of voice.
+        if ok and _listen is not None and not _cancelled():
+            try:
+                if not _listen.model_present():
+                    _prog("speech model", 0, 0)
+                    if not _listen.ensure_model():
+                        ok = False
+                        err = (_listen.status().get("last_load_error")
+                               or "speech model download failed")
+            except Exception as e:
+                ok = False
+                err = f"speech model: {type(e).__name__}: {e}"
+        cancelled = _cancelled()
+        _VOICE_INSTALL = {"running": False, "done": True,
+                          "ok": ok and not cancelled, "cancelled": cancelled,
+                          "device": "models", "pct": 100 if ok else None,
+                          "msg": ("Voice files ready." if (ok and not cancelled)
+                                  else ("Cancelled." if cancelled
+                                        else (err or "Download failed.")))[-400:]}
+    except Exception as e:
+        _VOICE_INSTALL = {"running": False, "done": True, "ok": False,
+                          "device": "models",
+                          "msg": f"{type(e).__name__}: {e}"[-400:]}
+
+
 def _load_perms_from_disk():
     allow, deny = set(), set()
     try:
@@ -2228,12 +2285,35 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, res)
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/voice/install-models":
+            # Fetch the Kokoro weights (~100MB). Speaking used to pull these
+            # inline, which blocked the request for minutes with nothing on
+            # screen, so the Test button read as a silent failure and the Lite
+            # build had no other way to get voice at all. Runs in the background
+            # and reports through the same channel the GPU install uses, so the
+            # UI polls /api/voice/install-status either way.
+            if not _voice:
+                return self._send_json(503, {"ok": False, "error": "voice module missing"})
+            try:
+                if _voice.models_present():
+                    return self._send_json(200, {"ok": True, "already": True})
+            except Exception:
+                pass
+            if _VOICE_INSTALL.get("running"):
+                return self._send_json(200, {"ok": True, "already": True})
+            threading.Thread(target=_install_voice_models_worker, daemon=True).start()
+            return self._send_json(200, {"ok": True, "started": True})
+
+        if path == "/api/voice/install-cancel":
+            # Stops a voice download from the downloads overlay, matching the
+            # Cancel every other download kind already has.
+            _VOICE_INSTALL_CANCEL.set()
+            return self._send_json(200, {"ok": True})
         if path == "/api/voice/install-gpu":
             # Install the GPU runtime for STT so whisper runs on the user's card
             # instead of slow CPU. CUDA whisper = ctranslate2 needs the cuBLAS +
             # cuDNN wheels; DirectML = onnxruntime-directml. Runs in the
             # background; the UI polls /api/voice/install-status.
-            global _VOICE_INSTALL
             body = self._read_json()
             dev = (body.get("device") or "cuda").strip().lower()
             # The GUI can pass the exact pip package(s) for the option it's

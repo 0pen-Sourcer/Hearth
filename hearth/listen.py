@@ -442,6 +442,34 @@ def _try_load_model():
     return _model
 
 
+def model_present() -> bool:
+    """True when the whisper weights for the selected size are already on disk.
+    Constructing WhisperModel downloads them, which blocks the first mic use
+    with nothing on screen, so setup fetches them ahead of time instead."""
+    root = os.path.join(VOICES_DIR, "whisper")
+    if not os.path.isdir(root):
+        return False
+    want = (MODEL_SIZE or "").lower().replace(".", "").replace("-", "")
+    if not want:
+        return False
+    # The size tag is in an ancestor directory (models--Systran--faster-whisper-
+    # base.en), while the leaf is a commit hash, so match the whole path.
+    for dirpath, _dirs, files in os.walk(root):
+        tag = dirpath.lower().replace(".", "").replace("-", "").replace("_", "")
+        if want in tag and any(f.endswith((".bin", ".safetensors")) for f in files):
+            return True
+    return False
+
+
+def ensure_model() -> bool:
+    """Load (and therefore download) the whisper weights now. Returns True when
+    the model is ready. Safe to call off the request thread."""
+    try:
+        return _try_load_model() is not None
+    except Exception:
+        return False
+
+
 def is_available() -> bool:
     try:
         import faster_whisper  # type: ignore  # noqa: F401
