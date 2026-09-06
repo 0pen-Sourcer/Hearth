@@ -6396,6 +6396,26 @@ async function refreshModels() {
       opt.textContent = _userPicked.split(/[\/\\]/).pop() + '   ● active';
       sel.insertBefore(opt, sel.firstChild);
     }
+    // Wiping innerHTML above resets the browser's selection to the first option.
+    // applyBrainState leaves the value alone while a load is in flight, so
+    // without this the dropdown showed whichever model happened to be first
+    // rather than the one being loaded. `prev` was captured for this and never
+    // used.
+    const _want = STATE.brain.modelId || prev || '';
+    if (_want) {
+      if (Array.from(sel.options).some(o => o.value === _want)) {
+        sel.value = _want;
+      } else if (STATE.brain.busy) {
+        // Loading something not in the rebuilt list yet (a fresh file). Keep it
+        // named rather than falling back to an unrelated entry.
+        const _o = document.createElement('option');
+        _o.value = _want;
+        _o.textContent = STATE.brain.modelName || _want.split(/[\/\\]/).pop();
+        _o.dataset.transient = '1';
+        sel.insertBefore(_o, sel.firstChild);
+        sel.value = _want;
+      }
+    }
     // Repaint dropdown selection + sticker + eject + ctx from the brain that
     // refreshState owns.
     applyBrainState();
@@ -6458,6 +6478,10 @@ $('model-select').addEventListener('change', async (e) => {
     return;
   }
   STATE.brain.busy = true;
+  // Name the model being loaded right away. Only the Models tab did this, so a
+  // pick made from this dropdown left the previous id in STATE.brain and the
+  // sticker fell back to the first entry in the list while loading.
+  stickerSetLoadingModel(id, displayId.split(/[\/\\]/).pop());
   applyBrainState();  // shows the loading pulse on the dot
   _refreshEmptyIfShown();  // flip the empty screen to the white-H "loading" state now
   // Cleaner labels - "starting server" was misleading when the server was
