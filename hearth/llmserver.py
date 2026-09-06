@@ -1905,11 +1905,16 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         except Exception:
             pass
     if n_gpu_layers != 0:
-        # Blackwell (RTX 50-series): flash-attention kernels may not be stable
-        # on all builds — driver crash (TDR / black screen) or empty output on
-        # long context. Safe default: f16 KV + flash OFF for BOTH native and
-        # wheel. Costs a bit more VRAM but won't kill the display driver.
-        _needs_bw_workaround = _blackwell
+        # Blackwell (RTX 50-series): the bundled llama-cpp-python wheel has no
+        # sm_120 kernels, so its flash path returns empty on long context. A
+        # current standalone llama-server does have them and runs this card with
+        # flash on and a quantised KV cache, which is what keeps a 9B inside 8GB.
+        # Forcing the workaround on the native engine too would double the KV
+        # cache and push a long context into system RAM for no gain, so it stays
+        # scoped to the wheel. HEARTH_FORCE_SAFE_KV=1 applies it either way, for
+        # a driver that still misbehaves.
+        _force_safe = os.environ.get("HEARTH_FORCE_SAFE_KV", "").strip() in ("1", "true", "yes")
+        _needs_bw_workaround = _blackwell and (not _use_native or _force_safe)
         _kv_default = "f16" if _needs_bw_workaround else "q8_0"
         _was_default = cache_type_k is None
         if cache_type_k is None:
@@ -1982,11 +1987,34 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                                                 reserve_gb=_reserve)
                 over = layers and n_gpu_layers > fits > 0
                 if fits == 0 or over:
+                    # Context is usually the bigger lever than layer count: the KV
+                    # cache grows with it, and a context that overflows VRAM makes
+                    # prompt processing an order of magnitude slower. Work out the
+                    # largest power-of-two context that would fit as-is and name it.
+                    _better_ctx = 0
+                    try:
+                        _c = ctx // 2
+                        while _c >= 8192:
+                            if estimate_safe_gpu_layers(sz, free_vram, _c,
+                                                        layer_count=layers,
+                                                        cache_type=cache_type_k,
+                                                        reserve_gb=_reserve) >= n_gpu_layers:
+                                _better_ctx = _c
+                                break
+                            _c //= 2
+                    except Exception:
+                        _better_ctx = 0
+                    _ctx_hint = (
+                        f" Lowering the context to {_better_ctx} would fit all "
+                        f"{n_gpu_layers} layers and is usually the bigger win, since "
+                        f"an oversized context is what pushes it into shared RAM."
+                        if _better_ctx else ""
+                    )
                     vram_warning = (
-                        f"Heads up: {n_gpu_layers} GPU layers likely won't fit "
-                        f"~{free_vram:.1f} GB free VRAM — the driver will spill to "
-                        f"shared RAM, which is slow and can return empty output on "
-                        f"some GPUs. Auto (or ~{max(fits,0)} layers) is the safe pick."
+                        f"Heads up: {n_gpu_layers} GPU layers at {ctx} context likely "
+                        f"won't fit ~{free_vram:.1f} GB free VRAM — the driver spills to "
+                        f"shared RAM, which is slow and can return empty output on some "
+                        f"GPUs.{_ctx_hint} Auto (or ~{max(fits,0)} layers) also works."
                     )
         except (OSError, AttributeError):
             pass  # if we can't stat or VRAM probe fails, just proceed silently

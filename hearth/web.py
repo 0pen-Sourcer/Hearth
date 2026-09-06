@@ -2746,6 +2746,79 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(400, {"error": "id and choice are required"})
             ok = _resolve_ask_user(rid, {"ok": True, "choice": choice, "other": other})
             return self._send_json(200 if ok else 404, {"ok": ok})
+        if path == "/api/llm-endpoint/test":
+            # Check a key BEFORE it is saved. Without this a typo is accepted
+            # silently and every later message fails with an auth error that
+            # points at nothing, which is a miserable first run.
+            #
+            # Listing models is not enough on its own: some providers serve their
+            # catalogue publicly, so a wrong key still returns a full list. The
+            # list only proves the address is right. Auth is proven by asking for
+            # a single token, which costs effectively nothing.
+            b = self._read_json()
+            _u = (b.get("url") or "").strip().rstrip("/")
+            _k = (b.get("key") or "").strip()
+            _m = (b.get("model") or "").strip()
+            if not _u:
+                return self._send_json(400, {"ok": False, "error": "url required"})
+            import urllib.error
+            import urllib.request as _ur
+            _hdr = {"Authorization": f"Bearer {_k}"} if _k else {}
+            _ids = []
+            try:
+                _rq = _ur.Request(_u + "/models", headers=_hdr)
+                with _ur.urlopen(_rq, timeout=12) as _r:
+                    _d = json.loads(_r.read().decode("utf-8", "replace"))
+                _ids = [m.get("id") for m in (_d.get("data") or []) if m.get("id")]
+            except urllib.error.HTTPError as _he:
+                if _he.code in (401, 403):
+                    return self._send_json(200, {"ok": False, "status": _he.code,
+                                                 "error": "the provider rejected this key"})
+                if _he.code == 404:
+                    return self._send_json(200, {"ok": False, "status": 404,
+                                                 "error": "reached the server but found no "
+                                                          "model list there, check the address"})
+            except Exception as _e:
+                return self._send_json(200, {
+                    "ok": False,
+                    "error": f"could not reach {_u} ({type(_e).__name__}), check the "
+                             f"address and your connection"})
+            # Address is good. Now prove the key by asking for one token.
+            _probe_model = _m or (_ids[0] if _ids else "")
+            if not _probe_model:
+                return self._send_json(200, {"ok": True, "count": len(_ids), "models": _ids[:200],
+                                             "note": "address reachable; no model to test auth with"})
+            try:
+                _body = json.dumps({"model": _probe_model, "max_tokens": 1,
+                                    "messages": [{"role": "user", "content": "hi"}]}).encode()
+                _rq2 = _ur.Request(_u + "/chat/completions", data=_body, method="POST",
+                                   headers={**_hdr, "Content-Type": "application/json"})
+                with _ur.urlopen(_rq2, timeout=25):
+                    pass
+                return self._send_json(200, {"ok": True, "count": len(_ids),
+                                             "models": _ids[:200], "verified": True})
+            except urllib.error.HTTPError as _he2:
+                if _he2.code in (401, 403):
+                    return self._send_json(200, {"ok": False, "status": _he2.code,
+                                                 "error": "the provider rejected this key"})
+                if _he2.code == 402:
+                    return self._send_json(200, {"ok": False, "status": 402,
+                                                 "error": "the key is valid but the account has "
+                                                          "no credit"})
+                if _he2.code == 404:
+                    return self._send_json(200, {"ok": False, "status": 404,
+                                                 "error": f"no model named {_probe_model} on this "
+                                                          f"provider"})
+                if _he2.code == 429:
+                    return self._send_json(200, {"ok": True, "count": len(_ids), "models": _ids[:200],
+                                                 "note": "rate limited while testing, the key "
+                                                         "itself was accepted"})
+                return self._send_json(200, {"ok": False, "status": _he2.code,
+                                             "error": f"the provider answered {_he2.code}"})
+            except Exception as _e2:
+                return self._send_json(200, {"ok": False,
+                                             "error": f"could not complete the check "
+                                                      f"({type(_e2).__name__})"})
         if path == "/api/llm-endpoint":
             # Switch the active LLM endpoint at runtime (e.g. local <-> Gemini).
             # Mutates the module-level constants in both web.py and headless.py

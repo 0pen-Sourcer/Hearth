@@ -15109,6 +15109,20 @@ async function obFinish(skipped) {
         if (obState.cloud.provider === 'custom' && !_customUrl) {
           toast('Custom brain', 'Add the endpoint URL (e.g. https://api.groq.com/openai/v1) — skipping for now.', 'warn', 5000);
         } else {
+          // Check the key before saving it. A typo used to save cleanly and
+          // then fail on every message with an auth error pointing nowhere.
+          try {
+            const _chk = await api('/api/llm-endpoint/test', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: body.url, key: body.key, model: body.model }),
+            });
+            if (_chk && _chk.ok === false) {
+              toast('Key not accepted', (_chk.error || 'could not verify') +
+                    '. Saved anyway, you can correct it in Settings.', 'warn', 9000);
+            } else if (_chk && _chk.count) {
+              toast('Key works', _chk.count + ' models available', 'ok', 3500);
+            }
+          } catch {}
           await api('/api/llm-endpoint', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
