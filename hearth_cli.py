@@ -5071,19 +5071,34 @@ class JarvisCLI:
 
         if first:
             spinner_task.cancel()
+        _unparsed_markup = False
 
-        # Strip malformed tool-call markup that small models emit when confused
-        # about the OpenAI tool format (or when we withhold tools and Hermes
-        # still "wants" to call something). Three known shapes:
-        #   - Gemma:  <|channel>call:NAME{...}<tool_call|>
-        #   - Hermes/Llama XML:  <tool_call><function=NAME>...<parameter=..>...
-        # The new hearth.tool_call_parser (used by run_once / headless) RECOVERS
-        # the call into proper OpenAI tool_calls, so we no longer need to scrub
-        # here. Leaving the old strip_tool_markup() + visible "(stripped
-        # malformed tool-call markup)" line was just confusing residue.
-        # If a pattern slips through the parser we'll see it as text and can
-        # add a new family to tool_call_parser._PATTERNS rather than blindly
-        # nuking it from history.
+        # Recover tool calls the server did not parse. Some models emit the call
+        # as text (a ChatML <tool_call> block and friends) instead of structured
+        # tool_calls. The bridge has always recovered these; the terminal did
+        # not, so the same model lost every call here while working in the GUI.
+        if not tool_calls_dict and content_captured:
+            try:
+                from hearth.tool_call_parser import has_tool_call, parse as _tcparse
+                if has_tool_call(content_captured):
+                    _names = [t["name"] for t in TOOL_DEFINITIONS]
+                    _cleaned, _recovered = _tcparse(content_captured, _names)
+                    if _recovered:
+                        content_captured = _cleaned
+                        for _i, _fc in enumerate(_recovered):
+                            tool_calls_dict[_i] = {
+                                "id": _fc["id"], "type": "function",
+                                "function": {"name": _fc["function"]["name"],
+                                             "arguments": _fc["function"]["arguments"]},
+                            }
+                        print(f"{C_DIM}(recovered {len(_recovered)} tool call"
+                              f"{'s' if len(_recovered) != 1 else ''} the model wrote as text){C_RESET}")
+                    else:
+                        # Markers present but nothing extracted. Saying nothing
+                        # here is what let the model believe the call ran.
+                        _unparsed_markup = True
+            except Exception:
+                pass
 
         if content_captured:
             entry: Dict = {"role": "assistant", "content": content_captured}
@@ -5102,6 +5117,19 @@ class JarvisCLI:
         # loop above - no end-of-turn speak needed.
 
         if not tool_calls_dict:
+            if _unparsed_markup and depth < MAX_TURNS:
+                # The reply carried tool-call markup that nothing could read, so
+                # no tool ran. Say so instead of ending the turn, otherwise the
+                # model treats its own unexecuted call as done and reports work
+                # that never happened.
+                note = ("Your last message contained tool-call markup that could "
+                        "not be parsed, so NOTHING was executed. No file was "
+                        "written and no command ran. Re-send it as a single "
+                        "well-formed tool call.")
+                print(f"{C_WARN}-> {note}{C_RESET}")
+                self.messages.append({"role": "user", "content": note})
+                self.save_history()
+                return await self.respond(depth + 1)
             self.save_history()
             return
 

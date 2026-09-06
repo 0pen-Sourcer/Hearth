@@ -180,6 +180,41 @@ def _try_json(s: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _first_json_object(s: str) -> str:
+    """Return the first balanced {...} in s, honouring string literals so a
+    brace inside a value does not end the scan. Empty string when there is none.
+
+    Models leave a tool-call tag unclosed often enough that matching on the tag
+    alone runs past the end of one call and into the next. Scanning the braces
+    finds where the object really ends, whatever the tags do."""
+    start = s.find("{")
+    if start < 0:
+        return ""
+    depth = 0
+    i = start
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if c == '"' or c == "'":
+            quote = c
+            i += 1
+            while i < n:
+                if s[i] == "\\":
+                    i += 2
+                    continue
+                if s[i] == quote:
+                    break
+                i += 1
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1]
+        i += 1
+    return ""
+
+
 def loads_lenient(s: str) -> Optional[Dict[str, Any]]:
     """Public entry for parsing a tool call's `arguments` string. Strict JSON
     first, then the string-aware repair, then a Python-literal read. Returns
@@ -240,12 +275,26 @@ def _extract_chatml(match: "re.Match[str]", tool_names: List[str]) -> Optional[D
     pass that --chat_format flag. We catch it as a safety net."""
     body = (match.group(1) or "").strip()
     obj = _try_json(body)
+    if not obj:
+        # An unclosed tag makes the captured body run past the end of this call,
+        # so json.loads reports trailing data and the whole call used to be
+        # dropped in silence. Take the first balanced object instead.
+        inner = _first_json_object(body)
+        if inner:
+            obj = _try_json(inner)
     if obj:
         name = obj.get("name") or obj.get("function") or ""
-        args = obj.get("arguments") or obj.get("parameters") or {}
+        args = obj.get("arguments") or obj.get("parameters")
+        if not args:
+            # Some models flatten the call to {"name": X, "path": ..., ...}
+            # rather than nesting an arguments object. Treat what is left as
+            # the arguments rather than running the tool with none.
+            args = {k: v for k, v in obj.items()
+                    if k not in ("name", "function", "arguments", "parameters",
+                                 "type", "id")}
         return {
             "name": _resolve_tool_name(name, tool_names),
-            "arguments": _force_json_str(args),
+            "arguments": _force_json_str(args or {}),
         }
     # Fallback for hybrid XML emitted by small local models:
     # ``<tool_call><name>view_image</name>{"path":"C:\\..."} </tool_call>``
@@ -398,7 +447,7 @@ _PATTERNS: List[_Pattern] = [
 
     # Hermes / Qwen / NousResearch ChatML tool-call block
     _Pattern("chatml",
-             r"<tool_call>(.+?)</tool_call>",
+             r"<tool_call>(.+?)(?:</tool_call>|(?=<tool_call>)|$)",
              _extract_chatml),
 
     # IBM Granite — different markers, same JSON shape

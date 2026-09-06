@@ -1471,6 +1471,7 @@ async def run_once(
         # them natively. Without this, the model's tool intent is lost and
         # the user just sees gibberish like `<|toolcall>call:viewimage{...}`
         # in the chat.
+        _unparsed_markup = False
         if not msg.tool_calls and msg.content:
             try:
                 from . import tool_call_parser as _tcp
@@ -1486,6 +1487,12 @@ async def run_once(
                             tc.function.name = fc["function"]["name"]
                             tc.function.arguments = fc["function"]["arguments"]
                             msg.tool_calls.append(tc)
+                    else:
+                        # Markup was there but nothing could be read from it, so
+                        # no tool ran. Left unsaid, the model treats its own
+                        # unexecuted call as done and reports work that never
+                        # happened, which is the whole failure this guards.
+                        _unparsed_markup = True
             except Exception as e:
                 # Parser is a best-effort fallback — if it throws, fall back
                 # to the original behavior of just showing the raw content.
@@ -1838,6 +1845,18 @@ async def run_once(
                 })
                 _pending_image_block = None
             # Loop back for next model turn after tool results
+            continue
+
+        # The reply carried tool-call markup nothing could read, so no tool ran.
+        # Ending the turn here is what let the model treat its own unexecuted
+        # call as done and report work that never happened. Tell it instead.
+        if _unparsed_markup and depth < max_depth - 1:
+            note = ("Your last message contained tool-call markup that could not "
+                    "be parsed, so NOTHING was executed. No file was written and "
+                    "no command ran. Re-send it as a single well-formed tool call.")
+            messages.append({"role": "assistant", "content": msg.content or ""})
+            messages.append({"role": "user", "content": note})
+            emit("nudge", reason="unparsed tool-call markup, nothing executed")
             continue
 
         # Final assistant text — no more tool calls.
