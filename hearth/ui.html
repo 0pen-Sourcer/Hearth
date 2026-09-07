@@ -4765,6 +4765,67 @@ function showModal(title, body, actions = []) {
   $('modal').classList.add('open');
 }
 
+// Repair plan panel. Repair used to be one button that downloaded and applied a
+// patch with no statement of what it would restore or what it cannot touch, so
+// a run that left voice broken still looked like a success. Same modal shell
+// and tokens as the permissions panel.
+function showRepairPlanModal(plan) {
+  const items = (plan && plan.items) || [];
+  const broken = items.filter(i => !i.ok);
+  const fixable = broken.filter(i => i.repairable);
+  const cannot = broken.filter(i => !i.repairable);
+
+  const chip = (bg, fg, txt) =>
+    `<span style="flex-shrink:0;font-family:var(--mono);font-size:11px;padding:2px 8px;`
+    + `border-radius:999px;background:${bg};color:${fg};white-space:nowrap">${txt}</span>`;
+
+  const row = (i) => {
+    const tag = i.ok
+      ? chip('rgba(74,222,128,.12)', '#4ade80', 'present')
+      : (i.repairable
+          ? chip('rgba(167,139,250,.14)', 'var(--accent-2)', 'will restore')
+          : chip('rgba(255,92,92,.14)', '#ff8080', 'needs reinstall'));
+    const detail = i.missing && i.missing.length
+      ? `<div style="font-family:var(--mono);font-size:11px;color:var(--fg-faint);margin-top:3px">missing ${esc(i.missing.join(', '))}</div>`
+      : '';
+    return `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid var(--border)">
+        <div style="min-width:0">
+          <div style="font-size:13px;color:var(--fg)">${esc(i.label)}</div>
+          <div style="font-size:12px;color:var(--fg-dim);margin-top:2px">${esc(i.note || '')}</div>
+          ${detail}
+        </div>${tag}
+      </div>`;
+  };
+
+  const summary = broken.length
+    ? `<div style="font-size:13px;color:var(--fg-dim);padding:2px 0 10px">`
+      + `${fixable.length} part${fixable.length === 1 ? '' : 's'} can be restored from this version's files.`
+      + (cannot.length ? ` ${cannot.length} need${cannot.length === 1 ? 's' : ''} a full reinstall.` : '')
+      + `</div>`
+    : `<div style="font-size:13px;color:var(--fg-dim);padding:2px 0 10px">`
+      + `Everything is present. Repairing anyway re-applies this version's code and voice files over the top.</div>`;
+
+  const html = summary + items.map(row).join('')
+    + `<div style="font-size:12px;color:var(--fg-faint);padding:10px 2px 0">`
+    + `Nothing is deleted. A failed repair rolls back and leaves the install as it was.</div>`;
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    showModal('Repair Hearth', html, [
+      { label: 'Cancel', onclick: () => { finish(false); } },
+      { label: broken.length ? 'Restore these' : 'Re-apply anyway',
+        kind: 'primary', onclick: () => { finish(true); } },
+    ]);
+    // Dismissing by clicking the backdrop counts as cancel.
+    const bg = document.getElementById('modal');
+    if (bg) {
+      const onBg = (e) => { if (e.target === bg) { finish(false); bg.removeEventListener('click', onBg); } };
+      bg.addEventListener('click', onBg);
+    }
+  });
+}
+
 // Interactive tool-permissions panel: per-tool remove (un-set an "always") +
 // a YOLO auto-approve toggle. Replaces the old text-only /perms dump.
 async function showPermsModal() {
@@ -10659,14 +10720,8 @@ async function refreshSettings() {
         return;
       }
       if (plan && Array.isArray(plan.items)) {
-        const broken = plan.items.filter(i => !i.ok);
-        const fixable = broken.filter(i => i.repairable).map(i => i.label);
-        const cannot = broken.filter(i => !i.repairable).map(i => i.label);
-        const lines = [];
-        if (fixable.length) lines.push('Will restore: ' + fixable.join(', '));
-        if (cannot.length) lines.push('Cannot restore (needs a reinstall): ' + cannot.join(', '));
-        if (!broken.length) lines.push('Nothing looks missing. Re-applying this version anyway will overwrite the code and voice files.');
-        if (!confirm(lines.join('\n\n') + '\n\nContinue?')) return;
+        if (!await showRepairPlanModal(plan)) return;
+        const cannot = plan.items.filter(i => !i.ok && !i.repairable).map(i => i.label);
         if (cannot.length) toast('Some parts need a reinstall', cannot.join(', '), 'warn', 9000);
       }
       repairBtn.disabled = true; const _rt = repairBtn.textContent; repairBtn.textContent = 'Repairing…';
