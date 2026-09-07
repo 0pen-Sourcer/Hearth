@@ -10648,6 +10648,27 @@ async function refreshSettings() {
     const repairBtn = $('btn-repair');
     if (repairBtn) repairBtn.onclick = async () => {
       const st = $('repair-status');
+      // Say what will be touched before touching it. This used to be one button
+      // that downloaded and applied a patch with no statement of what it would
+      // restore, or of the parts it cannot restore at all.
+      let plan = null;
+      try { plan = await api('/api/update/repair-plan'); } catch {}
+      if (plan && plan.can_patch === false) {
+        if (st) st.textContent = '';
+        toast('Cannot repair this build', plan.error || 'reinstall to restore', 'warn', 9000);
+        return;
+      }
+      if (plan && Array.isArray(plan.items)) {
+        const broken = plan.items.filter(i => !i.ok);
+        const fixable = broken.filter(i => i.repairable).map(i => i.label);
+        const cannot = broken.filter(i => !i.repairable).map(i => i.label);
+        const lines = [];
+        if (fixable.length) lines.push('Will restore: ' + fixable.join(', '));
+        if (cannot.length) lines.push('Cannot restore (needs a reinstall): ' + cannot.join(', '));
+        if (!broken.length) lines.push('Nothing looks missing. Re-applying this version anyway will overwrite the code and voice files.');
+        if (!confirm(lines.join('\n\n') + '\n\nContinue?')) return;
+        if (cannot.length) toast('Some parts need a reinstall', cannot.join(', '), 'warn', 9000);
+      }
       repairBtn.disabled = true; const _rt = repairBtn.textContent; repairBtn.textContent = 'Repairing…';
       if (st) st.textContent = 'downloading this version…';
       try {
@@ -15577,8 +15598,18 @@ function showBroadcast(items) {
             while ((nl = buf.indexOf('\n')) >= 0) {
               const ln = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); if (!ln) continue;
               let ev; try { ev = JSON.parse(ln); } catch { continue; }
-              if (ev.error) { ab.textContent = 'Repair failed'; ab.disabled = false; }
-              if (ev.done) { ab.textContent = 'Repaired ✓ — restart Hearth'; }
+              if (ev.type === 'progress' && ev.total) {
+                // Same overlay row the Settings repair uses, so a repair
+                // started from a broadcast card is visible in the one place
+                // every download is listed.
+                dlUpsert(REPAIR_DL_ID, {
+                  name: 'Hearth repair', kind: 'update', status: 'downloading',
+                  pct: Math.round(ev.done / ev.total * 100),
+                  done: ev.done, total: ev.total,
+                });
+              }
+              if (ev.error) { dlUpsert(REPAIR_DL_ID, { status: 'error' }); ab.textContent = 'Repair failed'; ab.disabled = false; }
+              if (ev.done) { dlUpsert(REPAIR_DL_ID, { status: 'done', pct: 100 }); ab.textContent = 'Repaired — restart Hearth'; }
             }
           }
         } catch (e) { ab.textContent = 'Repair failed'; ab.disabled = false; }

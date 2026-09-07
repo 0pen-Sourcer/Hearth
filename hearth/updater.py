@@ -114,6 +114,56 @@ def download_patch(on_progress=None, tag: str = "") -> dict:
             "size": asset["size"]}
 
 
+# Components a repair can and cannot restore. Kept beside repair() so the two
+# never disagree about what the patch actually carries.
+_REPAIRABLE = [
+    ("Hearth code", ["hearth"], "the app itself"),
+    ("Speech output", ["kokoro_onnx", "espeakng_loader"], "voice replies"),
+    ("Speech input", ["faster_whisper", "RealtimeSTT", "silero_vad"], "the mic"),
+    ("Audio devices", ["_sounddevice_data", "pyaudio"], "playback and capture"),
+    ("Numerics", ["torch", "scipy", "numpy.libs"], "shared by both"),
+]
+# Present in the installer but too large for a code patch, so a repair leaves
+# them alone and says so instead of reporting success over a broken install.
+_UNPATCHABLE = [
+    ("Speech runtime", ["onnxruntime"], "reinstall to restore"),
+    ("Transcribe runtime", ["ctranslate2"], "reinstall to restore"),
+]
+
+
+def repair_plan() -> dict:
+    """What a repair would touch, and what it cannot.
+
+    Reads the install rather than guessing, so the user is shown the parts that
+    are actually missing before anything downloads."""
+    base = code_dir()
+    if not base:
+        return {"ok": False, "can_patch": False,
+                "error": "this build keeps its code inside the executable, so it "
+                         "cannot self-repair; reinstall the release to restore it",
+                "items": []}
+
+    def _state(mods):
+        missing = [m for m in mods
+                   if not os.path.exists(os.path.join(base, m.replace(".", os.sep)))
+                   and not os.path.exists(os.path.join(base, m))]
+        return missing
+
+    items = []
+    for label, mods, note in _REPAIRABLE:
+        missing = _state(mods)
+        items.append({"label": label, "note": note, "repairable": True,
+                      "missing": missing, "ok": not missing})
+    for label, mods, note in _UNPATCHABLE:
+        missing = _state(mods)
+        items.append({"label": label, "note": note, "repairable": False,
+                      "missing": missing, "ok": not missing})
+    broken = [i["label"] for i in items if not i["ok"]]
+    unfixable = [i["label"] for i in items if not i["ok"] and not i["repairable"]]
+    return {"ok": True, "can_patch": True, "items": items,
+            "broken": broken, "needs_reinstall": unfixable}
+
+
 def repair(on_progress=None) -> dict:
     """Restore a fouled-up install by re-fetching THIS version's patch and
     re-applying it. The patch carries Hearth's code plus the loose voice stack

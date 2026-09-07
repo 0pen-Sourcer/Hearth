@@ -2113,6 +2113,18 @@ class HearthHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/update/repair-plan":
+            # What a repair would actually touch. Repair used to be one button
+            # with a progress bar and no statement of what it would do or what
+            # it cannot fix, so a run that left voice broken still looked like
+            # a success.
+            from . import updater
+            try:
+                return self._send_json(200, updater.repair_plan())
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "can_patch": False,
+                                             "error": f"{type(e).__name__}: {e}",
+                                             "items": []})
         if path == "/api/update/check":
             try:
                 from . import updater

@@ -32,7 +32,18 @@ from hearth.updater import HEARTH_VERSION  # noqa: E402
 # older install instead of forcing a full reinstall. torch is a big loose tree;
 # scipy/halo/spinners/_soundfile_data are dirs; soundfile is a single file.
 _BINARY_INCLUDES = ["torch", "scipy", "scipy.libs", "numpy.libs", "halo", "spinners",
-                    "_soundfile_data", "soundfile.py"]
+                    "_soundfile_data", "soundfile.py",
+                    # The voice engines themselves. Without these the patch could
+                    # deliver torch and soundfile but not the things that
+                    # actually speak and listen, so a repair reported success
+                    # and left voice broken. About 36MB against a payload that
+                    # already carries 365MB of torch.
+                    "kokoro_onnx", "faster_whisper", "RealtimeSTT", "silero_vad",
+                    "espeakng_loader", "_sounddevice_data", "pyaudio"]
+
+# Too large to sit in a code patch, so a repair cannot restore them and says so
+# rather than reporting success over a still-broken install.
+_UNPATCHABLE = ["onnxruntime", "ctranslate2"]
 # Pure-Python packages the voice recorder imports that PyInstaller freezes into
 # the exe rather than shipping loose, so they are absent from the dist tree and
 # from any base install that never had torch. Sourced straight from the venv and
