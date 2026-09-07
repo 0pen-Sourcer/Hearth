@@ -3157,12 +3157,21 @@ def _web_search(p: Dict) -> str:
 
 
 def _web_search_raw(p: Dict) -> str:
-    """DuckDuckGo HTML scrape. They blacklist scripted GETs without a proper
-    User-Agent and switched the /html/ endpoint to require POST. Both fixed
-    here. If DDG ever blocks again, we fall back to Wikipedia for definitional
-    queries so the model isn't left with '(no results)' forever."""
+    """Ask the search providers, then fall back to scraping.
+
+    The scrape below is DuckDuckGo's HTML endpoint, which they serve a bot-check
+    page for whenever they choose. It was the only backend, so a block meant no
+    search at all. Real providers are tried first now; the scrape and the
+    Wikipedia lookup are what is left when none of them answer."""
     query = p["query"]
     limit = int(p.get("limit") or 6)
+    try:
+        from . import websearch as _ws
+        _text, _prov = _ws.search(query, limit)
+        if _text:
+            return _text
+    except Exception:
+        pass
     ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
     try:
