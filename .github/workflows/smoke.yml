@@ -39,6 +39,14 @@ jobs:
         run: |
           python -c "from hearth.dev_tools import cmd_list; cmd_list()"
 
+      - name: Tool contract
+        # `import hearth` succeeds even when a tool is unusable, so check that
+        # every advertised tool resolves to a handler, that no method has been
+        # orphaned out of its class, and that a missing field is refused rather
+        # than raised.
+        run: |
+          python tests/test_tool_contract.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"
