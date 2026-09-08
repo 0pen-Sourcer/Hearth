@@ -215,6 +215,65 @@ def _first_json_object(s: str) -> str:
     return ""
 
 
+def _complete_truncated_json(s: str) -> str:
+    """Close an object the model stopped writing partway through.
+
+    A long generation is regularly cut a brace or a quote short, and the result
+    is a complete, correct call with its tail missing. Discarding it loses the
+    whole thing, so finish what is open: shut an unterminated string, drop a
+    dangling key or comma, and close each container still on the stack. Returns
+    "" when there is nothing recoverable.
+
+    Only reached after a strict parse has already failed."""
+    start = s.find("{")
+    if start < 0:
+        return ""
+    stack = []
+    in_str = False
+    esc = False
+    i = start
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c in "{[":
+                stack.append("}" if c == "{" else "]")
+            elif c in "}]":
+                if stack:
+                    stack.pop()
+                if not stack:
+                    return s[start:i + 1]      # balanced already
+        i += 1
+    if not stack:
+        return ""
+    out = s[start:]
+    if in_str:
+        if esc:                                # trailing lone backslash
+            out = out[:-1]
+        out += '"'
+    # A trailing comma, or a key with no value yet, is not valid JSON.
+    stripped = out.rstrip()
+    while stripped and stripped[-1] in ",:":
+        stripped = stripped[:-1].rstrip()
+        if stripped.endswith('"'):             # drop the orphaned key too
+            q = stripped.rfind('"', 0, len(stripped) - 1)
+            if q > 0 and stripped[:q].rstrip().endswith(("{", ",")):
+                stripped = stripped[:q].rstrip()
+                if stripped.endswith(","):
+                    stripped = stripped[:-1].rstrip()
+    out = stripped
+    return out + "".join(reversed(stack))
+
+
 def loads_lenient(s: str) -> Optional[Dict[str, Any]]:
     """Public entry for parsing a tool call's `arguments` string. Strict JSON
     first, then the string-aware repair, then a Python-literal read. Returns
@@ -282,6 +341,22 @@ def _extract_chatml(match: "re.Match[str]", tool_names: List[str]) -> Optional[D
         inner = _first_json_object(body)
         if inner:
             obj = _try_json(inner)
+    if not obj:
+        # The closing tag is not a reliable boundary: a file whose CONTENT
+        # contains </tool_call> (documentation of this very format, say) cuts
+        # the captured body early, and repairing that stub would write a
+        # truncated file with confidence. Rescan from the opening tag over the
+        # whole message and let the braces decide where the object really ends.
+        whole = match.string[match.start():]
+        wider = _first_json_object(whole)
+        if wider and len(wider) > len(body):
+            obj = _try_json(wider)
+    if not obj:
+        # A long generation is often cut a brace or a quote short. The call is
+        # otherwise complete, so finish it rather than losing the whole write.
+        patched = _complete_truncated_json(body)
+        if patched:
+            obj = _try_json(patched)
     if obj:
         name = obj.get("name") or obj.get("function") or ""
         args = obj.get("arguments") or obj.get("parameters")

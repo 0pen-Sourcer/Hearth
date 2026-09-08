@@ -1850,14 +1850,33 @@ async def run_once(
         # The reply carried tool-call markup nothing could read, so no tool ran.
         # Ending the turn here is what let the model treat its own unexecuted
         # call as done and report work that never happened. Tell it instead.
-        if _unparsed_markup and depth < max_depth - 1:
-            note = ("Your last message contained tool-call markup that could not "
-                    "be parsed, so NOTHING was executed. No file was written and "
-                    "no command ran. Re-send it as a single well-formed tool call.")
-            messages.append({"role": "assistant", "content": msg.content or ""})
-            messages.append({"role": "user", "content": note})
-            emit("nudge", reason="unparsed tool-call markup, nothing executed")
-            continue
+        if _unparsed_markup:
+            # A call that cannot be read comes back as an ordinary tool result,
+            # the same way a real tool failure does, so the model handles it
+            # with the machinery it already has. Every harness that parses tool
+            # calls out of text does it this way rather than injecting a user
+            # turn or lecturing about format. Repetition is the loop guard's
+            # job, not a counter of its own.
+            _iid = f"call_invalid_{depth}"
+            _err = ("This was not a readable tool call, so nothing ran. No file was "
+                    "written and no command executed. Send the call again.")
+            messages.append({
+                "role": "assistant", "content": msg.content or "",
+                "tool_calls": [{"id": _iid, "type": "function",
+                                "function": {"name": "invalid",
+                                             "arguments": "{}"}}],
+            })
+            messages.append({"role": "tool", "tool_call_id": _iid,
+                             "name": "invalid", "content": _err})
+            emit("tool_result", name="invalid", content=_err, ms=0)
+            _gd = guard.after("invalid", {}, _err)
+            if _gd.action in ("warn", "stop"):
+                messages[-1]["content"] += f"{chr(10)}{chr(10)}{_gd.note}"
+            if _gd.action == "stop":
+                _stopped_note = _gd.reason or _gd.note
+                _force_answer = True
+            else:
+                continue
 
         # Final assistant text — no more tool calls.
         if msg.content:

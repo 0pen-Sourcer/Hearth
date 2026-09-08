@@ -39,6 +39,13 @@ jobs:
         run: |
           python -c "from hearth.dev_tools import cmd_list; cmd_list()"
 
+      - name: Tool call parsing
+        # Every case here cost real work when it broke: a call cut one brace
+        # short, an unclosed tag swallowing the next call, file content that
+        # contains the closing tag.
+        run: |
+          python tests/test_tool_call_parsing.py
+
       - name: Tool contract
         # `import hearth` succeeds even when a tool is unusable, so check that
         # every advertised tool resolves to a handler, that no method has been
