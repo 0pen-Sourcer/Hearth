@@ -2671,6 +2671,32 @@
   /* ============================================================
      MODAL
      ============================================================ */
+  /* Composer add-menu. Skills, MCP and connectors used to live four clicks deep
+     in Settings, which is a strange place for the things that extend what
+     Hearth can do. The plus sits where people already reach to add something. */
+  .add-menu {
+    position: absolute; bottom: calc(100% + 8px); left: 0;
+    min-width: 252px; padding: 6px;
+    background: var(--bg-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 300; display: none;
+    animation: modalIn 0.14s var(--ease);
+  }
+  .add-menu.open { display: block; }
+  .add-menu-item {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 8px 10px;
+    background: none; border: 0; border-radius: var(--r);
+    color: var(--fg); font-size: 13px; text-align: left; cursor: pointer;
+  }
+  .add-menu-item:hover { background: var(--bg-2); }
+  .add-menu-item svg { flex-shrink: 0; color: var(--fg-dim); }
+  .add-menu-item .sub {
+    display: block; color: var(--fg-faint); font-size: 11px; margin-top: 1px;
+  }
+  .add-menu-sep { height: 1px; background: var(--border); margin: 5px 4px; }
   .modal-bg {
     display: none;
     position: fixed; inset: 0;
@@ -3183,9 +3209,30 @@
         <button class="mic-btn" id="btn-mic" title="Click to talk, click again to send (Whisper STT)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/><path d="M8 23h8"/></svg>
         </button>
-        <button class="mic-btn" id="btn-attach" title="Attach files (or drag-drop them in)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        <div style="position:relative">
+        <button class="mic-btn" id="btn-attach" title="Add a file, a skill or a tool server">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
         </button>
+        <div class="add-menu" id="add-menu">
+          <button class="add-menu-item" data-add="file">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            <span>Attach a file<span class="sub">or just drag it into the window</span></span>
+          </button>
+          <div class="add-menu-sep"></div>
+          <button class="add-menu-item" data-add="skills">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            <span>Skills<span class="sub">teach it a new way of working</span></span>
+          </button>
+          <button class="add-menu-item" data-add="mcp">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span>Tool servers<span class="sub">MCP, adds tools from elsewhere</span></span>
+          </button>
+          <button class="add-menu-item" data-add="connect">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span>Connectors<span class="sub">reach it from your phone or email</span></span>
+          </button>
+        </div>
+        </div>
         <input type="file" id="file-input" multiple hidden>
         <div class="grow">
           <div id="attach-tray" style="display:none;flex-wrap:wrap;gap:6px;padding:6px 0 4px 0;"></div>
@@ -3440,7 +3487,7 @@
             <div class="name">Your API key</div>
             <div class="hint">Stays on this PC in <code>~/Jarvis/settings.json</code>. Required for cloud.</div>
           </div>
-          <input type="password" id="setting-llm-key" placeholder="paste your key here" style="min-width:260px"/>
+          <input type="password" id="setting-llm-key" placeholder="paste your key here" style="min-width:260px" autocomplete="off" data-1p-ignore data-lpignore="true"/>
         </div>
         <!-- Model picker retired from Settings - was causing source-of-truth
              confusion (Settings said grok-4.3 while topbar showed grok-4.20-...).
@@ -3455,7 +3502,7 @@
             <div class="name">Custom URL</div>
             <div class="hint">The OpenAI-compatible base URL (no <code>/chat/completions</code>).</div>
           </div>
-          <input type="text" id="setting-llm-url" placeholder="https://your-server/v1" style="min-width:260px"/>
+          <input type="text" id="setting-llm-url" placeholder="https://your-server/v1" style="min-width:260px" autocomplete="off" data-1p-ignore data-lpignore="true"/>
         </div>
         <div class="field" id="brain-apply-row" hidden>
           <div class="label">
@@ -3490,6 +3537,21 @@
             <div class="voice-status" id="stt-status">checking…</div>
           </div>
           <div class="switch" data-key="voice_stt"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Wake word</div>
+            <div class="hint">Say this and Hearth opens already listening, even from the tray. It follows your agent's name, so renaming to Clara means "hey Clara". Leave it empty to use the defaults. Separate several with commas. <b>This holds the microphone open the whole time Hearth runs</b>, which on some headsets forces hands-free mode and quietens your music, so turn it off if you are not using it.</div>
+            <div class="voice-status" id="wake-status">checking…</div>
+          </div>
+          <div class="switch" data-key="tray_wake_on"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">What it listens for</div>
+            <div class="hint">The exact phrases. A word one letter off still counts, so a mishearing like "jarmis" still wakes it.</div>
+          </div>
+          <input type="text" id="setting-wake-phrases" placeholder="jarvis, hey jarvis, wake up jarvis" spellcheck="false" autocomplete="off" style="min-width:300px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;font-family:var(--mono)"/>
         </div>
         <div class="field">
           <div class="label">
@@ -3947,8 +4009,8 @@
             <div class="name">Outbound - Hearth as a CLIENT</div>
             <div class="hint">
               Paste a standard mcp.json config. Each server runs as a subprocess; its tools join the
-              Hearth tool list and are usable by every chat brain (local / cloud). Restart Hearth
-              after editing - bridge spin-up happens at launch.
+              Hearth tool list and are usable by every chat brain (local / cloud).
+              Saving reconnects the servers right away, no restart needed.
             </div>
           </div>
           <button class="btn-mini" id="btn-mcp-edit" style="min-width:140px;">Edit mcp.json</button>
@@ -3997,7 +4059,7 @@
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
             <input type="email" id="email-address" placeholder="you@gmail.com" spellcheck="false" autocomplete="off" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
-            <input type="password" id="email-password" placeholder="app password" autocomplete="new-password" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="password" id="email-password" placeholder="app password"  style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;" autocomplete="off" data-1p-ignore data-lpignore="true"/>
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="email-save">Save</button>
               <button class="btn-mini" id="email-test">Test</button>
@@ -4014,7 +4076,7 @@
             <div class="hint">@BotFather → /newbot → copy the token. Then message the bot once and find your chat id (or just run it - it logs incoming ids).</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
-            <input type="password" id="bridge-tg-token" placeholder="bot token (123456:ABC…)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="password" id="bridge-tg-token" placeholder="bot token (123456:ABC…)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;" autocomplete="off" data-1p-ignore data-lpignore="true"/>
             <input type="text" id="bridge-tg-ids" placeholder="allowed chat ids (comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bridge-tg-save">Save</button>
@@ -4032,7 +4094,7 @@
             <div class="hint">discord.com/developers, New Application, Bot, copy token and enable MESSAGE CONTENT INTENT. Your user id: Discord, Advanced, Developer Mode on, right-click your name, Copy User ID.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
-            <input type="password" id="bridge-dc-token" placeholder="bot token" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="password" id="bridge-dc-token" placeholder="bot token" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;" autocomplete="off" data-1p-ignore data-lpignore="true"/>
             <input type="text" id="bridge-dc-ids" placeholder="allowed user ids (comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bridge-dc-save">Save</button>
@@ -4290,7 +4352,7 @@
             <input type="text" id="ob-cloud-url" class="ob-input" placeholder="e.g. https://api.groq.com/openai/v1"/>
           </div>
           <div class="ob-label">Your API key</div>
-          <input type="password" id="ob-cloud-key" class="ob-input" placeholder="paste here · stays on this PC in ~/Jarvis/settings.json"/>
+          <input type="password" id="ob-cloud-key" class="ob-input" placeholder="paste here · stays on this PC in ~/Jarvis/settings.json" autocomplete="off" data-1p-ignore data-lpignore="true"/>
           <div class="ob-section" style="margin-top:12px">
             <div class="ob-label">Model id (optional)</div>
             <input type="text" id="ob-cloud-model" class="ob-input" placeholder="e.g. gemini-3-flash · leave blank for default"/>
@@ -8540,7 +8602,32 @@ const _attachTray = document.getElementById('attach-tray');
 let _pendingAttachments = [];
 
 if (_attachBtn && _fileInput) {
-  _attachBtn.addEventListener('click', () => _fileInput.click());
+  // The plus opens a small menu instead of going straight to the file picker.
+  // Attaching is still the first item, so the old habit costs one extra click,
+  // and the things that extend Hearth stop being buried in Settings.
+  const _addMenu = document.getElementById('add-menu');
+  const _closeAddMenu = () => { if (_addMenu) _addMenu.classList.remove('open'); };
+  _attachBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (_addMenu) _addMenu.classList.toggle('open');
+    else _fileInput.click();
+  });
+  document.addEventListener('click', (e) => {
+    if (_addMenu && !_addMenu.contains(e.target) && e.target !== _attachBtn) _closeAddMenu();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _closeAddMenu(); });
+  if (_addMenu) _addMenu.addEventListener('click', (e) => {
+    const it = e.target.closest('.add-menu-item');
+    if (!it) return;
+    _closeAddMenu();
+    const what = it.dataset.add;
+    if (what === 'file') { _fileInput.click(); return; }
+    if (what === 'skills') { showView('skills'); return; }
+    // The rest live under Settings; open it and select the right section.
+    showView('settings');
+    const tab = document.querySelector(`.settings-side-btn[data-st="${what}"]`);
+    if (tab) tab.click();
+  });
   _fileInput.addEventListener('change', async () => {
     const files = Array.from(_fileInput.files || []);
     for (const f of files) await uploadFile(f);
@@ -10161,6 +10248,12 @@ async function refreshSettings() {
     if (agentNameInput) {
       agentNameInput.value = s.agent_name || 'JARVIS';
     }
+    // Wake word: show what it actually listens for, and let it be changed.
+    const wakeInput = document.getElementById('setting-wake-phrases');
+    if (wakeInput) {
+      wakeInput.value = s.wake_phrases || '';
+      wakeInput.onchange = (e) => saveSetting('wake_phrases', e.target.value.trim());
+    }
     const forgeInput = document.getElementById('setting-forge-dir');
     if (forgeInput) {
       forgeInput.value = s.forge_dir || '';
@@ -10865,8 +10958,8 @@ async function refreshSettings() {
         }, null, 2);
         showModal('Edit mcp.json',
           `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
-          `Standard MCP server config. Each entry spawns at Hearth launch. ` +
-          `Restart Hearth after saving.</div>` +
+          `Standard MCP server config. Each entry runs as a subprocess. ` +
+          `Saving reconnects them right away, no restart.</div>` +
           `<textarea id="mcp-json-input" style="width:100%;min-height:340px;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:12px;resize:vertical;">${esc(current)}</textarea>` +
           `<div id="mcp-json-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>`,
           [
@@ -10885,7 +10978,21 @@ async function refreshSettings() {
                     body: JSON.stringify({ json: txt }),
                   });
                   if (sv.ok) {
-                    toast('mcp.json saved', 'Restart Hearth to apply.', 'ok', 6000);
+                    // Apply it now rather than telling the user to restart the
+                    // whole app to pick up an edited config.
+                    toast('mcp.json saved', 'Reconnecting servers…', 'ok', 4000);
+                    try {
+                      const rl = await api('/api/mcp/reload', { method: 'POST' });
+                      if (rl && rl.ok === false) {
+                        toast('Saved, but reconnect failed', rl.error || 'restart Hearth to apply', 'warn', 8000);
+                      } else {
+                        const n = (rl && rl.servers) || 0;
+                        toast('MCP reloaded', n ? `${n} server${n === 1 ? '' : 's'} reconnecting` : 'no servers configured', 'ok', 5000);
+                      }
+                    } catch (e) {
+                      toast('Saved, but reconnect failed', 'restart Hearth to apply', 'warn', 8000);
+                    }
+                    try { refreshMcpStatus(); } catch {}
                   } else {
                     toast('Save failed', sv.error || 'unknown', 'err');
                   }
@@ -11203,6 +11310,15 @@ async function refreshSettings() {
       $('stt-status').textContent = sttOK ? `ready (whisper ${stt.model_size}, ${stt.device})`
         : (stt.last_load_error || 'Not set up — talking to Hearth is optional; you can always type. The speech model downloads by itself the first time you use the mic.');
       $('stt-status').className = 'voice-status ' + (sttOK ? 'ok' : 'bad');
+      const wk = v.wake || {};
+      const wkEl = $('wake-status');
+      if (wkEl) {
+        const ph = (wk.phrases || []);
+        wkEl.textContent = !wk.on
+          ? 'off — the mic stays free'
+          : (ph.length ? 'listening for: ' + ph.join(', ') : 'on, but no phrases resolved');
+        wkEl.className = 'voice-status ' + (wk.on ? 'ok' : '');
+      }
     } catch {}
 
     // Reflect think setting into chat toggle

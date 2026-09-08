@@ -52,6 +52,16 @@ def _wake_phrases() -> List[str]:
     env = os.environ.get("JARVIS_WAKE_PHRASES", "").strip()
     if env:
         return [p.strip().lower() for p in env.split(",") if p.strip()]
+    # Whatever the user typed in Settings, Voice. Without this the phrases were
+    # reachable only through an environment variable, so nobody could see or
+    # change what the thing actually listens for.
+    try:
+        from .web import _load_settings
+        saved = str((_load_settings() or {}).get("wake_phrases") or "").strip()
+        if saved:
+            return [p.strip().lower() for p in saved.split(",") if p.strip()]
+    except Exception:
+        pass
     # Track the agent's actual name — a renamed agent (FRIDAY) should wake on
     # "hey friday", not still on "jarvis".
     name = os.environ.get("HEARTH_PERSONA_NAME", "").strip().lower()
@@ -70,6 +80,43 @@ def _normalize(t: str) -> str:
     return t
 
 
+# Speech recognition renders a short, unusual name inconsistently: a real log
+# line shows "okay jarvis wake up" coming back as "okay jarmis make up", which
+# an exact match never sees. So allow the name to be off by one letter, but
+# only when it is long enough that one letter is not most of the word, and only
+# when the first letter still agrees. That accepts jarmis, jervis and javis
+# while refusing travis, service, harvest, and it stops a name like "hearth"
+# waking on "earth". Set JARVIS_WAKE_EDITS=0 to require an exact match.
+def _wake_edit_budget(name: str) -> int:
+    env = os.environ.get("JARVIS_WAKE_EDITS", "").strip()
+    if env:
+        try:
+            return max(0, int(env))
+        except ValueError:
+            pass
+    return 1 if len(name) >= 6 else 0
+
+
+def _edit_distance(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _wake_name(phrases: List[str]) -> str:
+    """The bare name out of the phrase list, which is the shortest entry."""
+    solo = [p for p in phrases if p and " " not in p]
+    if solo:
+        return min(solo, key=len)
+    return min(phrases, key=len).split()[-1] if phrases else ""
+
+
 def _matches_wake(transcript: str, phrases: List[str]) -> Optional[str]:
     n = _normalize(transcript)
     if not n:
@@ -77,6 +124,15 @@ def _matches_wake(transcript: str, phrases: List[str]) -> Optional[str]:
     for p in phrases:
         if p in n:
             return p
+    name = _wake_name(phrases)
+    budget = _wake_edit_budget(name)
+    if len(name) < 4 or budget <= 0:
+        return None
+    for w in n.split():
+        if len(w) < 4 or w[0] != name[0]:
+            continue
+        if _edit_distance(w, name) <= budget:
+            return name
     return None
 
 
