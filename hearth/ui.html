@@ -3197,7 +3197,7 @@
         <div class="slash-menu" id="slash-menu" hidden></div>
         <button class="toggle-btn" id="btn-think" title="Show model reasoning">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z"/></svg>
-          think
+          <span class="think-label">think</span>
         </button>
         <!-- Context-usage ring. Inline next to controls instead of a detached
              pill above. Conic-gradient fills as ctx fills; percent in center;
@@ -5193,6 +5193,7 @@ document.getElementById('input').addEventListener('keydown', (e) => {
 const STATE = {
   view: 'chat',
   thinking: false,
+  thinkLevel: '',
   streaming: false,
   models: [],
   loadedModel: null,
@@ -7137,9 +7138,42 @@ function _flushSteerChip() {
   if (chip && chip.parentNode) chip.remove();
 }
 
+// Reasoning effort was a dropdown buried in Settings while the chat had a plain
+// on/off toggle, so the levels existed and nobody could reach them. The button
+// now cycles off, on, low, medium, high and shows which one is live. Codex and
+// Hermes both expose effort as a first-class setting rather than a hidden one;
+// this keeps it to a single control instead of adding a surface.
+const THINK_STEPS = [
+  { on: false, level: '',       label: 'think',      title: 'Reasoning off. Click to turn it on.' },
+  { on: true,  level: '',       label: 'think',      title: "Reasoning on, at the model's own default effort." },
+  { on: true,  level: 'low',    label: 'think · low',    title: 'Reasoning on, low effort. Fastest.' },
+  { on: true,  level: 'medium', label: 'think · med',    title: 'Reasoning on, medium effort.' },
+  { on: true,  level: 'high',   label: 'think · high',   title: 'Reasoning on, high effort. Slowest, most careful.' },
+];
+
+function _thinkStepIndex() {
+  if (!STATE.thinking) return 0;
+  const lv = (STATE.thinkLevel || '').toLowerCase();
+  const i = THINK_STEPS.findIndex(s => s.on && s.level === lv);
+  return i > 0 ? i : 1;
+}
+
+function applyThinkButton() {
+  const s = THINK_STEPS[_thinkStepIndex()];
+  thinkBtn.classList.toggle('on', s.on);
+  thinkBtn.title = s.title;
+  const lbl = thinkBtn.querySelector('.think-label');
+  if (lbl) lbl.textContent = s.label;
+}
+
 thinkBtn.addEventListener('click', () => {
-  STATE.thinking = !STATE.thinking;
-  thinkBtn.classList.toggle('on', STATE.thinking);
+  const next = THINK_STEPS[(_thinkStepIndex() + 1) % THINK_STEPS.length];
+  STATE.thinking = next.on;
+  STATE.thinkLevel = next.level;
+  applyThinkButton();
+  // Persist both, so the terminal and the bridge see the same choice.
+  saveSetting('think_default', next.on).catch(() => {});
+  saveSetting('think_level', next.level).catch(() => {});
 });
 
 // Regenerate: drop the assistant message the user is unhappy with (plus any
@@ -8397,12 +8431,12 @@ async function handleSlash(raw) {
     case '/think':
       if (arg === 'on' || arg === 'off') {
         STATE.thinking = (arg === 'on');
-        thinkBtn.classList.toggle('on', STATE.thinking);
+        applyThinkButton();
         await saveSetting('think_default', STATE.thinking);
         toast(`Think ${arg}`, '', 'ok', 1500);
       } else {
         STATE.thinking = !STATE.thinking;
-        thinkBtn.classList.toggle('on', STATE.thinking);
+        applyThinkButton();
       }
       return true;
     case '/allow':
@@ -11323,13 +11357,27 @@ async function refreshSettings() {
 
     // Reflect think setting into chat toggle
     STATE.thinking = !!s.think_default;
-    thinkBtn.classList.toggle('on', STATE.thinking);
+    STATE.thinkLevel = (s.think_level || '').toLowerCase();
+    applyThinkButton();
     document.body.classList.toggle('chat-bubbles', !!s.user_bubbles);
     // Reasoning-effort dropdown (persists think_level; web.py reads it per turn)
     const _tl = document.getElementById('setting-think-level');
     if (_tl) {
       _tl.value = s.think_level || '';
-      if (!_tl._wired) { _tl._wired = true; _tl.addEventListener('change', () => saveSetting('think_level', _tl.value)); }
+      if (!_tl._wired) {
+        _tl._wired = true;
+        _tl.addEventListener('change', () => {
+          // The chat button and this dropdown are the same setting; changing
+          // one has to move the other or they drift apart.
+          STATE.thinkLevel = (_tl.value || '').toLowerCase();
+          if (STATE.thinkLevel && !STATE.thinking) {
+            STATE.thinking = true;
+            saveSetting('think_default', true).catch(() => {});
+          }
+          applyThinkButton();
+          saveSetting('think_level', _tl.value);
+        });
+      }
     }
     // Read-lockdown toggle (its own endpoint, not settings.json — it flips a live
     // guard in tools.py + a persisted pointer).

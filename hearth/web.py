@@ -1280,7 +1280,20 @@ def _load_settings() -> Dict:
     return defaults
 
 
+# The GUI saves several keys at once in places (the reasoning control writes
+# two), and each save was a read, a merge and a write with nothing between
+# them. Two overlapping saves both read the same starting state and the second
+# write dropped the first one's change. Measured before this lock: six of six
+# concurrent pairs lost a write. Serialise the whole read-modify-write.
+_SETTINGS_WRITE_LOCK = threading.Lock()
+
+
 def _save_settings(d: Dict) -> Dict:
+    with _SETTINGS_WRITE_LOCK:
+        return _save_settings_locked(d)
+
+
+def _save_settings_locked(d: Dict) -> Dict:
     cur = _load_settings()
     # Detect a cloud→local or local→cloud brain switch BEFORE writing — the
     # disk-model cache populated under cloud is shorter (cached scan) and
