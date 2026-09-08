@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -131,6 +132,7 @@ def inspect_source(source: str) -> Dict[str, Any]:
     shows the user for consent: name, description, declared tools, the scripts
     it ships, and a risk flag. Leaves the fetched copy in a temp dir
     (`_staged`) so install_from_staged can move it without re-downloading."""
+    _sweep_old_staging()
     try:
         fetched = _resolve_source(source)
     except Exception as e:  # noqa: BLE001
@@ -178,6 +180,38 @@ def inspect_source(source: str) -> Dict[str, Any]:
     }
 
 
+def _staging_root(path: Path) -> Optional[Path]:
+    """The hearth-skill- temp directory that `path` sits inside, if any.
+
+    Deliberately narrow: only a directory this module created, directly under
+    the system temp dir, can be removed. Anything else returns None so a bad
+    manifest can never point the cleanup at real files."""
+    try:
+        tmp_root = Path(tempfile.gettempdir()).resolve()
+        p = Path(path).resolve()
+    except Exception:
+        return None
+    for cand in [p, *p.parents]:
+        if cand.name.startswith("hearth-skill-") and cand.parent == tmp_root:
+            return cand
+    return None
+
+
+def _sweep_old_staging(max_age_s: float = 86400.0) -> None:
+    """Drop staging directories left by an inspect that never got installed.
+    Without this every previewed skill kept a full copy of the repo in temp."""
+    try:
+        tmp_root = Path(tempfile.gettempdir())
+        now = time.time()
+        for d in tmp_root.glob("hearth-skill-*"):
+            try:
+                if d.is_dir() and (now - d.stat().st_mtime) > max_age_s:
+                    shutil.rmtree(d, ignore_errors=True)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
 def install_from_staged(manifest: Dict[str, Any], *, force: bool = False) -> Dict[str, Any]:
     """Move an already-inspected skill (manifest['_staged']) into the user
     skills dir. Call only after the user has consented to the manifest."""
@@ -196,6 +230,11 @@ def install_from_staged(manifest: Dict[str, Any], *, force: bool = False) -> Dic
         shutil.copytree(staged, dest)
     except OSError as e:
         return {"ok": False, "error": f"copy failed: {e}"}
+    # The staged copy has served its purpose. Left behind it was a full copy of
+    # the repo sitting in temp for good, once per install.
+    root = _staging_root(Path(staged))
+    if root is not None:
+        shutil.rmtree(root, ignore_errors=True)
     return {"ok": True, "name": slug, "folder": str(dest),
             "next": f"call load_skill('{slug}') to use it"}
 

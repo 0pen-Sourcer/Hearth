@@ -60,11 +60,47 @@ from . import system_prompt, execute_tool, to_openai_tools, TOOL_DEFINITIONS
 from .loop_guard import ToolLoopGuard, MAX_TURNS
 from .errors import classify_api_error
 
-LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
+def _brain_from_settings() -> dict:
+    """The brain the GUI is on, read straight from settings.json.
+
+    Only consulted for values the environment does not already pin, so a
+    launcher that exports LOCAL_API_BASE still wins. Without this, switching
+    brain in the window left `python -m hearth.headless` talking to
+    localhost:1234 and failing, because it read the environment and nothing
+    else."""
+    try:
+        base = os.environ.get("JARVIS_WORKSPACE") or os.path.expanduser("~/Jarvis")
+        with open(os.path.join(base, "settings.json"), encoding="utf-8") as f:
+            s = json.load(f) or {}
+    except Exception:
+        return {}
+    out = {}
+    if s.get("llm_url"):
+        out["base"] = str(s["llm_url"]).strip()
+    if s.get("llm_key"):
+        out["key"] = str(s["llm_key"]).strip()
+    if s.get("llm_model"):
+        out["model"] = str(s["llm_model"]).strip()
+    # The GUI keeps a per-provider key vault; fall back to it when the flat
+    # llm_key is empty, which is how it looks after switching providers.
+    if not out.get("key"):
+        prov = str(s.get("llm_provider") or "").strip().lower()
+        vault = s.get("provider_keys") or {}
+        if prov and isinstance(vault, dict) and vault.get(prov):
+            out["key"] = str(vault[prov]).strip()
+    return out
+
+
+_SETTINGS_BRAIN = _brain_from_settings()
+
+LOCAL_API_BASE = (os.getenv("LOCAL_API_BASE")
+                  or _SETTINGS_BRAIN.get("base")
+                  or "http://localhost:1234/v1")
 # Real API key for cloud endpoints (Gemini, OpenRouter, OpenAI, etc.).
 # Local LM Studio ignores it, so the harmless default is fine. To use a
 # cloud model: set LOCAL_API_BASE + LOCAL_API_KEY + LOCAL_MODEL.
-LOCAL_API_KEY = os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY") or "hearth-builtin"
+LOCAL_API_KEY = (os.getenv("LOCAL_API_KEY") or os.getenv("OPENAI_API_KEY")
+                 or _SETTINGS_BRAIN.get("key") or "hearth-builtin")
 
 
 def _is_local_endpoint(base: str) -> bool:

@@ -125,8 +125,19 @@ async def _connect_one(name: str, spec: Dict[str, Any]) -> None:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
+    # Sanitising is lossy: "my:mcp", "my mcp", "my.mcp" and "my_mcp" all reduce
+    # to the same key, so whichever connected first won and the rest were
+    # dropped without a word. Keep the first and suffix the others so every
+    # configured server still reaches the model under a name of its own.
     safe = _sanitize(name)
     with _BRIDGES_LOCK:
+        if safe in _BRIDGES and _BRIDGES[safe].get("raw_name") != name:
+            base, n = safe, 2
+            while f"{base}_{n}" in _BRIDGES:
+                n += 1
+            safe = f"{base}_{n}"
+            print(f"[hearth.mcp] '{name}' sanitises to '{base}', already taken by "
+                  f"'{_BRIDGES[base].get('raw_name')}'; using '{safe}'", flush=True)
         _BRIDGES[safe] = {
             "name": safe,
             "raw_name": name,
