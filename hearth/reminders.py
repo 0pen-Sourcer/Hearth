@@ -22,6 +22,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional
 
@@ -214,8 +215,16 @@ def set_reminder(when: str, what: str, recurring: str = "",
     if target is None:
         return {"ok": False, "error": f"Couldn't parse time: '{when}'. Try 'in 25 minutes', '2026-05-27 09:00', 'tomorrow at 7am'."}
     items = _load_all()
+    # The suffix used to be len(items), which repeats as soon as a delete brings
+    # the count back to a number already used in the same millisecond, and two
+    # reminders sharing an id means cancelling one cancels the other.
+    _existing = {r.get("id") for r in items}
+    _ms = int(time.time() * 1000)
+    _rid = f"r_{_ms}_{uuid.uuid4().hex[:6]}"
+    while _rid in _existing:
+        _rid = f"r_{_ms}_{uuid.uuid4().hex[:6]}"
     new = {
-        "id": f"r_{int(time.time()*1000)}_{len(items)}",
+        "id": _rid,
         "when_text": when,
         "due_iso": target.isoformat(timespec="seconds"),
         "what": what,

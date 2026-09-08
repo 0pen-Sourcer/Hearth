@@ -286,7 +286,17 @@ if __name__ == "__main__":
             pass
         _reg = os.path.join(_clients_dir, f"{os.getpid()}.json")
         with open(_reg, "w", encoding="utf-8") as _f:
+            # Record this process's start time as well. Windows recycles pids,
+            # so a pid alone let a finished session show as still connected once
+            # something unrelated inherited the number.
+            _started = None
+            try:
+                import psutil  # type: ignore
+                _started = psutil.Process(os.getpid()).create_time()
+            except Exception:
+                pass
             json.dump({"pid": os.getpid(), "client": _client,
+                       "started_at": _started,
                        "connected_at": datetime.now().isoformat(timespec="seconds")}, _f)
         import atexit as _ax
         _ax.register(lambda: os.path.exists(_reg) and os.remove(_reg))

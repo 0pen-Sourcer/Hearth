@@ -284,14 +284,31 @@ def bootstrap() -> Dict[str, Any]:
             "bridges": list_bridges()}
 
 
+async def _cancel_all_async() -> None:
+    """Cancel the connect tasks and let them unwind.
+
+    Each task holds the MCP server's stdio session in an `async with`, and that
+    context is what closes the child process. Stopping the loop outright never
+    ran those exits, so the npx subprocess was orphaned and the interpreter
+    printed a wall of destroyed-task and closed-pipe noise on the way out."""
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    for t in tasks:
+        t.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def shutdown() -> None:
-    """Cancel all sessions + stop the loop. Used by tray exit."""
+    """Close every session, then stop the loop. Used by tray exit and reload."""
     global _LOOP, _LOOP_THREAD
     if _LOOP is None:
         return
     try:
-        # Schedule loop.stop on the loop itself so pending tasks get a
-        # chance to clean up their async-with contexts (closes subprocesses).
+        fut = asyncio.run_coroutine_threadsafe(_cancel_all_async(), _LOOP)
+        fut.result(timeout=5.0)          # wait for the contexts to actually exit
+    except Exception:
+        pass
+    try:
         _LOOP.call_soon_threadsafe(_LOOP.stop)
     except Exception:
         pass

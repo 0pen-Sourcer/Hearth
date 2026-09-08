@@ -262,15 +262,54 @@ def _spawn_bridge(ch: str) -> Tuple[bool, Optional[str]]:
         if _s.get("llm_model"): env["LOCAL_MODEL"] = _s["llm_model"]
     except Exception:
         pass
+    # Capture the child's own output. Without it a bridge that died of a missing
+    # dependency and one that died of a bad token produced the same sentence, so
+    # the message sent people to check a token that was fine.
     p = subprocess.Popen(args, creationflags=_NO_WINDOW, env=env,
-                         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, encoding="utf-8", errors="replace")
     _BRIDGE_PROCS[ch] = p
     import time as _t
     _t.sleep(1.6)  # let it fail-fast on a bad token / missing dep
     running = p.poll() is None
-    return running, (None if running else
-                     "the bridge exited right away — check the token/config "
-                     "(and that the dep is installed for Discord/WhatsApp)")
+    if running:
+        return True, None
+    try:
+        out = (p.stdout.read() if p.stdout else "") or ""
+    except Exception:
+        out = ""
+    return False, _bridge_failure_reason(ch, out)
+
+
+def _bridge_failure_reason(ch: str, out: str) -> str:
+    """Turn the bridge's dying output into something worth acting on."""
+    low = (out or "").lower()
+    tail = " ".join((out or "").strip().splitlines()[-3:])[-300:]
+    if "modulenotfounderror" in low or "no module named" in low:
+        mod = ""
+        m = re.search(r"no module named ['\"]([\w.]+)['\"]", low)
+        if m:
+            mod = m.group(1)
+        pkg = {"discord": "discord.py", "telegram": "python-telegram-bot",
+               "whatsapp": "the WhatsApp dependency"}.get(ch, mod or "a dependency")
+        return (f"the {ch} bridge is missing a Python package"
+                + (f" ({mod})" if mod else "")
+                + f". Install {pkg} and start it again.")
+    if any(k in low for k in ("unauthorized", "401", "invalid token", "improperbadtoken",
+                              "logintfailure", "loginfailure", "invalid bot token")):
+        return (f"the {ch} bridge was rejected by the service, so the token is "
+                f"wrong or revoked. Paste a fresh one in Settings, Connectors.")
+    if "conflict" in low or "terminated by other getupdates" in low:
+        return (f"another copy of the {ch} bridge is already using this token. "
+                f"Stop that one, or use a separate bot token.")
+    if any(k in low for k in ("temporary failure in name resolution", "getaddrinfo",
+                              "connection refused", "network is unreachable", "ssl")):
+        return f"the {ch} bridge could not reach the network. Check the connection and retry."
+    if tail:
+        return f"the {ch} bridge exited right away: {tail}"
+    return (f"the {ch} bridge exited right away and said nothing. Check the token "
+            f"and that its dependency is installed.")
 
 
 def _autostart_bridges() -> None:
@@ -1430,6 +1469,18 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_ui()
         if path.startswith("/assets/"):
             return self._serve_asset(path[len("/assets/"):])
+        if path == "/api/update/repair-plan":
+            # What a repair would actually touch. Repair used to be one button
+            # with a progress bar and no statement of what it would do or what
+            # it cannot fix, so a run that left voice broken still looked like
+            # a success.
+            from . import updater
+            try:
+                return self._send_json(200, updater.repair_plan())
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "can_patch": False,
+                                             "error": f"{type(e).__name__}: {e}",
+                                             "items": []})
         if path == "/api/state":
             return self._send_state()
         if path == "/api/lockdown":
@@ -1733,7 +1784,19 @@ class HearthHandler(BaseHTTPRequestHandler):
                     rt_status = _rt_voice.status()
                 except Exception as e:
                     rt_status = {"available": False, "reason": f"{type(e).__name__}: {e}"}
-            return self._send_json(200, {"tts": tts_status, "stt": stt_status, "realtime": rt_status})
+            # What the wake listener is actually listening for. Until now this
+            # lived only in an env var, so nobody could see the phrases.
+            wake_status = {"on": False, "phrases": []}
+            try:
+                from .wake import _wake_phrases
+                wake_status = {
+                    "on": bool((_load_settings() or {}).get("tray_wake_on")),
+                    "phrases": _wake_phrases(),
+                }
+            except Exception:
+                pass
+            return self._send_json(200, {"tts": tts_status, "stt": stt_status,
+                                         "realtime": rt_status, "wake": wake_status})
         if path == "/api/voice/realtime/stream":
             return self._realtime_stream()
         if path == "/api/permissions":
@@ -1797,10 +1860,29 @@ class HearthHandler(BaseHTTPRequestHandler):
                 try:
                     with open(fp, encoding="utf-8") as f:
                         c = json.load(f)
+                    # A bare pid_exists is not enough: Windows recycles pids,
+                    # so a session that ended long ago keeps showing as
+                    # connected once an unrelated process inherits its number.
+                    # Match the recorded start time too.
                     alive = True
                     try:
                         import psutil
-                        alive = psutil.pid_exists(int(c.get("pid", -1)))
+                        _pid = int(c.get("pid", -1))
+                        if not psutil.pid_exists(_pid):
+                            alive = False
+                        else:
+                            _pr = psutil.Process(_pid)
+                            _started = c.get("started_at")
+                            if _started is not None:
+                                alive = abs(_pr.create_time() - float(_started)) < 2.0
+                            else:
+                                # Older records have no start time; fall back to
+                                # the process name, which still rules out a pid
+                                # reused by something unrelated.
+                                _want = (c.get("client") or "").lower()
+                                alive = (not _want) or _pr.name().lower() == _want
+                    except psutil.NoSuchProcess:
+                        alive = False
                     except Exception:
                         alive = True
                     if alive:
@@ -2113,18 +2195,6 @@ class HearthHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
-        if path == "/api/update/repair-plan":
-            # What a repair would actually touch. Repair used to be one button
-            # with a progress bar and no statement of what it would do or what
-            # it cannot fix, so a run that left voice broken still looked like
-            # a success.
-            from . import updater
-            try:
-                return self._send_json(200, updater.repair_plan())
-            except Exception as e:
-                return self._send_json(200, {"ok": False, "can_patch": False,
-                                             "error": f"{type(e).__name__}: {e}",
-                                             "items": []})
         if path == "/api/update/check":
             try:
                 from . import updater
@@ -2298,6 +2368,25 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, res)
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/mcp/reload":
+            # Apply an edited mcp.json without restarting Hearth. The client has
+            # always supported shutdown then bootstrap; it was simply never
+            # reachable, so saving the file told people to restart the app.
+            from . import mcp_client as _mc
+            try:
+                _mc.shutdown()
+            except Exception:
+                pass
+            try:
+                res = _mc.bootstrap()
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+            try:    # a reconnect changes which mcp_ tools exist
+                from .tools import reset_unlocked_tools
+                reset_unlocked_tools()
+            except Exception:
+                pass
+            return self._send_json(200, res if isinstance(res, dict) else {"ok": True})
         if path == "/api/voice/install-models":
             # Fetch the Kokoro weights (~100MB). Speaking used to pull these
             # inline, which blocked the request for minutes with nothing on

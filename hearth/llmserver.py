@@ -23,6 +23,7 @@ Workflow from a brand-new install:
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import signal
@@ -1956,7 +1957,8 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             if n_gpu_layers == -1 and free_vram is not None:
                 est = estimate_safe_gpu_layers(sz, free_vram, ctx,
                                                layer_count=layers, cache_type=cache_type_k,
-                                               reserve_gb=_reserve)
+                                               reserve_gb=_reserve,
+                                               kv_may_spill=bool(_use_native))
                 if est == 0:
                     n_gpu_layers = 0
                     vram_warning = (
@@ -2630,10 +2632,15 @@ def estimate_safe_gpu_layers(model_size_gb: Optional[float],
                              ctx: int = 24576,
                              layer_count: Optional[int] = None,
                              cache_type: Optional[str] = None,
-                             reserve_gb: float = 2.3) -> int:
-    """How many transformer layers to offload so the GPU allocation stays UNDER
-    free VRAM. Returns -1 (offload all — it fits comfortably), 0 (CPU-only —
-    no VRAM budget), or a positive count (partial offload; the rest run on CPU).
+                             reserve_gb: float = 2.3,
+                             kv_may_spill: bool = False) -> int:
+    """How many transformer layers to put on the GPU. Returns -1 (offload all),
+    0 (CPU-only, no VRAM budget), or a positive count (partial offload, the rest
+    run on CPU).
+
+    With `kv_may_spill` the weights are what must fit and the KV cache is
+    allowed to page into shared memory; otherwise both must fit inside free
+    VRAM.
 
     `reserve_gb` is headroom kept free for the CUDA context + n_batch compute
     buffer. The old llama-cpp-python wheel needed a big reserve (2.3) because a
@@ -2645,12 +2652,20 @@ def estimate_safe_gpu_layers(model_size_gb: Optional[float],
     kv_gb = estimate_kv_cache_gb(model_size_gb, ctx, cache_type)
     L = layer_count or 40  # real count when known, proxy otherwise
     budget = free_vram_gb - reserve_gb
-    footprint = model_size_gb + kv_gb
     if budget <= 0:
         return 0
+    # `kv_may_spill` is the standalone server, which pages the KV cache into
+    # shared memory rather than failing. Deciding on the weights alone there is
+    # what LM Studio does, and it matters: requiring the whole KV to fit held
+    # layers back on a card the weights fit on comfortably, paying a permanent
+    # per-token cost to avoid a spill that only slows the part that spilled.
+    # The old wheel returns garbage on a spill, so it still budgets for both.
+    footprint = model_size_gb if kv_may_spill else model_size_gb + kv_gb
     if footprint <= budget:
-        return -1  # everything fits — offload all
-    return max(1, int((budget / footprint) * L))
+        return -1  # offload all
+    # Round up rather than truncate: a layer on the GPU beats one on the CPU,
+    # and the reserve above already carries the safety margin.
+    return max(1, min(L, math.ceil((budget / footprint) * L)))
 
 
 def _kv_quant_factor(cache_type: Optional[str]) -> float:
