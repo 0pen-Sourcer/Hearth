@@ -2674,6 +2674,29 @@
   /* Composer add-menu. Skills, MCP and connectors used to live four clicks deep
      in Settings, which is a strange place for the things that extend what
      Hearth can do. The plus sits where people already reach to add something. */
+  /* Reasoning menu. Cycling a button through five states to reach "high" meant
+     four clicks and no way to see the options, so the levels open as a list. */
+  .think-menu {
+    position: absolute; bottom: calc(100% + 8px); left: 0;
+    min-width: 244px; padding: 6px;
+    background: var(--bg-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 300; display: none;
+    animation: modalIn 0.14s var(--ease);
+  }
+  .think-menu.open { display: block; }
+  .think-menu-item {
+    display: flex; align-items: baseline; gap: 8px;
+    width: 100%; padding: 7px 10px;
+    background: none; border: 0; border-radius: var(--r);
+    color: var(--fg); font-size: 13px; text-align: left; cursor: pointer;
+  }
+  .think-menu-item:hover { background: var(--bg-2); }
+  .think-menu-item.sel { color: var(--accent-2); }
+  .think-menu-item .sub { color: var(--fg-faint); font-size: 11px; }
+  .think-menu-item .tick { width: 12px; flex-shrink: 0; color: var(--accent-2); }
   .add-menu {
     position: absolute; bottom: calc(100% + 8px); left: 0;
     min-width: 252px; padding: 6px;
@@ -3195,10 +3218,13 @@
         <!-- Slash-command autocomplete. Floats above the input as soon as you
              type `/`. Arrow keys + Enter / Tab to select, Esc to dismiss. -->
         <div class="slash-menu" id="slash-menu" hidden></div>
+        <div style="position:relative">
         <button class="toggle-btn" id="btn-think" title="Show model reasoning">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z"/></svg>
           <span class="think-label">think</span>
         </button>
+        <div class="think-menu" id="think-menu"></div>
+        </div>
         <!-- Context-usage ring. Inline next to controls instead of a detached
              pill above. Conic-gradient fills as ctx fills; percent in center;
              tooltip shows raw used/budget. Hidden until first context_state event. -->
@@ -6497,6 +6523,26 @@ async function refreshModels() {
         }
       }
     }
+    // Rebuilding the list above wiped the selection, so the browser is sitting
+    // on the first entry. Restore it BEFORE the mid-swap return below: that
+    // return is exactly when this matters, and putting it after meant a load
+    // left the sticker naming whichever model happened to be first.
+    const _want = STATE.brain.modelId || prev || '';
+    if (_want) {
+      if (Array.from(sel.options).some(o => o.value === _want)) {
+        sel.value = _want;
+      } else {
+        // Loading something not in the rebuilt list yet (a fresh file). Keep it
+        // named rather than falling back to an unrelated entry.
+        const _o = document.createElement('option');
+        _o.value = _want;
+        _o.textContent = STATE.brain.modelName || _want.split(/[\/\\]/).pop();
+        _o.dataset.transient = '1';
+        sel.insertBefore(_o, sel.firstChild);
+        sel.value = _want;
+      }
+    }
+
     // Mid-swap/eject? The handler owns the truth; don't let a 9s poll repaint
     // a stale value (the "cloud grok-4.3 lingers" / flicker bug).
     if (STATE.brain.busy) return;
@@ -6519,26 +6565,6 @@ async function refreshModels() {
       opt.value = _userPicked;
       opt.textContent = _userPicked.split(/[\/\\]/).pop() + '   ● active';
       sel.insertBefore(opt, sel.firstChild);
-    }
-    // Wiping innerHTML above resets the browser's selection to the first option.
-    // applyBrainState leaves the value alone while a load is in flight, so
-    // without this the dropdown showed whichever model happened to be first
-    // rather than the one being loaded. `prev` was captured for this and never
-    // used.
-    const _want = STATE.brain.modelId || prev || '';
-    if (_want) {
-      if (Array.from(sel.options).some(o => o.value === _want)) {
-        sel.value = _want;
-      } else if (STATE.brain.busy) {
-        // Loading something not in the rebuilt list yet (a fresh file). Keep it
-        // named rather than falling back to an unrelated entry.
-        const _o = document.createElement('option');
-        _o.value = _want;
-        _o.textContent = STATE.brain.modelName || _want.split(/[\/\\]/).pop();
-        _o.dataset.transient = '1';
-        sel.insertBefore(_o, sel.firstChild);
-        sel.value = _want;
-      }
     }
     // Repaint dropdown selection + sticker + eject + ctx from the brain that
     // refreshState owns.
@@ -7143,38 +7169,70 @@ function _flushSteerChip() {
 // now cycles off, on, low, medium, high and shows which one is live. Codex and
 // Hermes both expose effort as a first-class setting rather than a hidden one;
 // this keeps it to a single control instead of adding a surface.
-const THINK_STEPS = [
-  { on: false, level: '',       label: 'think',      title: 'Reasoning off. Click to turn it on.' },
-  { on: true,  level: '',       label: 'think',      title: "Reasoning on, at the model's own default effort." },
-  { on: true,  level: 'low',    label: 'think · low',    title: 'Reasoning on, low effort. Fastest.' },
-  { on: true,  level: 'medium', label: 'think · med',    title: 'Reasoning on, medium effort.' },
-  { on: true,  level: 'high',   label: 'think · high',   title: 'Reasoning on, high effort. Slowest, most careful.' },
+// Reasoning effort, as a list rather than a cycle. The levels are the ones the
+// backend accepts; an empty level means the model picks for itself, which is
+// how Codex and Hermes both default.
+const THINK_OPTIONS = [
+  { on: false, level: '',       label: 'Off',           sub: 'no reasoning pass' },
+  { on: true,  level: '',       label: 'On',            sub: "model's own default" },
+  { on: true,  level: 'low',    label: 'Low effort',    sub: 'fastest' },
+  { on: true,  level: 'medium', label: 'Medium effort', sub: 'balanced' },
+  { on: true,  level: 'high',   label: 'High effort',   sub: 'slowest, most careful' },
 ];
 
-function _thinkStepIndex() {
+function _thinkIndex() {
   if (!STATE.thinking) return 0;
   const lv = (STATE.thinkLevel || '').toLowerCase();
-  const i = THINK_STEPS.findIndex(s => s.on && s.level === lv);
+  const i = THINK_OPTIONS.findIndex(o => o.on && o.level === lv);
   return i > 0 ? i : 1;
 }
 
 function applyThinkButton() {
-  const s = THINK_STEPS[_thinkStepIndex()];
-  thinkBtn.classList.toggle('on', s.on);
-  thinkBtn.title = s.title;
+  const o = THINK_OPTIONS[_thinkIndex()];
+  thinkBtn.classList.toggle('on', o.on);
+  thinkBtn.title = o.on
+    ? `Reasoning: ${o.label.toLowerCase()} (${o.sub}). Click to change.`
+    : 'Reasoning off. Click to change.';
   const lbl = thinkBtn.querySelector('.think-label');
-  if (lbl) lbl.textContent = s.label;
+  if (lbl) lbl.textContent = o.level ? 'think · ' + o.level : 'think';
+  const menu = document.getElementById('think-menu');
+  if (menu) {
+    const cur = _thinkIndex();
+    menu.querySelectorAll('.think-menu-item').forEach((el, i) => {
+      el.classList.toggle('sel', i === cur);
+      const t = el.querySelector('.tick');
+      if (t) t.textContent = i === cur ? '✓' : '';
+    });
+  }
 }
 
-thinkBtn.addEventListener('click', () => {
-  const next = THINK_STEPS[(_thinkStepIndex() + 1) % THINK_STEPS.length];
-  STATE.thinking = next.on;
-  STATE.thinkLevel = next.level;
-  applyThinkButton();
-  // Persist both, so the terminal and the bridge see the same choice.
-  saveSetting('think_default', next.on).catch(() => {});
-  saveSetting('think_level', next.level).catch(() => {});
-});
+(function wireThinkMenu() {
+  const menu = document.getElementById('think-menu');
+  if (!menu) return;
+  menu.innerHTML = THINK_OPTIONS.map((o, i) =>
+    `<button class="think-menu-item" data-think="${i}">`
+    + `<span class="tick"></span>`
+    + `<span>${o.label} <span class="sub">${o.sub}</span></span></button>`).join('');
+  const close = () => menu.classList.remove('open');
+  thinkBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); applyThinkButton(); });
+  document.addEventListener('click', (e) => {
+    if (!menu.contains(e.target) && e.target !== thinkBtn && !thinkBtn.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  menu.addEventListener('click', (e) => {
+    const it = e.target.closest('.think-menu-item');
+    if (!it) return;
+    const o = THINK_OPTIONS[Number(it.dataset.think) || 0];
+    STATE.thinking = o.on;
+    STATE.thinkLevel = o.level;
+    close();
+    applyThinkButton();
+    const sel = document.getElementById('setting-think-level');
+    if (sel) sel.value = o.level;
+    saveSetting('think_default', o.on).catch(() => {});
+    saveSetting('think_level', o.level).catch(() => {});
+  });
+})();
 
 // Regenerate: drop the assistant message the user is unhappy with (plus any
 // orphan tool messages after it) and re-send the LAST user message. Same
