@@ -54,6 +54,13 @@ jobs:
         run: |
           python tests/test_tool_contract.py
 
+      - name: Batched desktop steps
+        # A batch drives the real mouse and keyboard, so check that it refuses a
+        # tool outside the desktop set and stops at the first failing step
+        # instead of typing the rest of the sequence into whatever is in front.
+        run: |
+          python tests/test_desktop_batch.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"

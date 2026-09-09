@@ -176,6 +176,13 @@ no blind pixel-guessing:
   the target's CENTER pixel in that image. Hearth maps your pixel to the screen,
   snaps it to the nearest REAL control, clicks it, and re-screenshots to verify.
   Prefer this over raw computer_click, which only hits a blind pixel.
+Never sleep waiting for a window to draw. If the control you need is not there
+yet (a page loading, a dialog opening, an app starting), wait_for_element(name=…)
+returns the instant it appears and tells you what IS on screen if it never does.
+When the next few steps are already decided (click a field, type into it, press
+enter), send them as ONE execute_actions batch instead of a call each. Target by
+NAME inside a batch, not idx: the first click changes the window and an old idx
+then points at the wrong control.
 If the target window isn't focused, focus_window(title=…) ONCE, then snapshot —
 do not chain five focus attempts with different titles. To hit a control in a web
 app (a Gmail Compose, a Slack field), snapshot + desktop_click it BY NAME — that

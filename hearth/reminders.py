@@ -474,6 +474,7 @@ _CONFIRM_ON_FIRE = {
     "move_path", "open_app", "open_url", "open_in_browser", "send_email",
     "computer_click", "computer_type", "computer_key", "computer_scroll",
     "computer_drag", "computer_move", "desktop_click", "desktop_type",
+    "execute_actions",
     "browse", "browse_click", "browse_type", "browse_scroll",
     "generate_image", "generate_video", "create_plugin", "delete_plugin",
     "install_skill", "memory_forget",

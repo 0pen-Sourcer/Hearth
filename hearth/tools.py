@@ -7614,14 +7614,18 @@ def _desktop_snapshot(p: Dict) -> str:
     for e in els:
         lines.append(f"  [{e['idx']}] {e['type']}: {e['name'] or '(no name)'}  @({e['x']},{e['y']})")
     if snap.get("chrome_only"):
-        # Browser frame only: the page's own controls are NOT in this list, so
+        # Window frame only: the content's own controls are NOT in this list, so
         # clicking from it would hit the wrong thing. Say so and route to vision.
+        # This covers every Chromium-based app, not only browsers, so the note
+        # must not tell the model it is looking at a browser when it is in
+        # VS Code or Slack.
         lines.append("")
-        lines.append("NOTE: these are the BROWSER's own controls (tabs, toolbar) — the PAGE "
-                     "content is not exposed (Chromium keeps its renderer tree off). Do NOT "
-                     "look for page buttons or text boxes here. To act inside the page: "
-                     "capture_active_window -> view_image to SEE it -> smart_click(x, y, "
-                     "text=...) with a pixel from that image.")
+        lines.append("NOTE: these are only the WINDOW's own frame controls (minimize, close, "
+                     "tabs, toolbar) — what is INSIDE it is not exposed (a Chromium-based "
+                     "app, a browser or an Electron one like VS Code, Slack or Discord, "
+                     "keeps its renderer tree off). Do NOT look for the app's buttons or "
+                     "text boxes here. To act inside it: capture_active_window -> view_image "
+                     "to SEE it -> smart_click(x, y, text=...) with a pixel from that image.")
     else:
         lines.append("→ act with desktop_click(idx=N) or desktop_type(idx=N, text=...).")
     return "\n".join(lines)
@@ -7683,6 +7687,149 @@ for _cd in (
         "text": {"type": "string"}}, "required": ["text"]}},
 ):
     TOOL_DEFINITIONS.append(_cd)
+
+
+# ── Wait for a control, and run several desktop steps in one call ──
+# Two failure modes cost most desktop runs. A step fires before the window has
+# drawn the control it needs, and a chain of six clicks costs six round trips,
+# each one a chance for a small model to mangle a tool call.
+def _wait_for_element(p: Dict) -> str:
+    from . import desktop_a11y as _a
+    if not _a.available():
+        return f"Error: desktop UI inspection unavailable, {_a.unsupported_reason()}."
+    want = (p.get("name") or "").strip()
+    if not want:
+        return ("Error: 'name' is required, part of the label to wait for "
+                "(e.g. 'Sign in').")
+    win = (p.get("window") or "")
+    cap = max(10, min(int(p.get("max_elements", 60) or 60), 200))
+    timeout = max(1.0, min(float(p.get("timeout", 15) or 15), 120.0))
+    needle = want.lower()
+    started = _t.monotonic()
+    deadline = started + timeout
+    seen: list = []
+    while True:
+        snap = _a.snapshot(cap, window=win)
+        if snap.get("error"):
+            return f"Error: {snap['error']}"
+        els = snap.get("elements", []) or []
+        if els:
+            seen = els
+        for e in els:
+            if needle in (e.get("name") or "").lower():
+                # The successful snapshot is the one still cached, so this idx
+                # is the one desktop_click will resolve.
+                return (f"{e['name']!r} appeared after {_t.monotonic() - started:.1f}s "
+                        f"as [{e['idx']}] {e['type']} @({e['x']},{e['y']}). "
+                        f"Act on it with desktop_click(idx={e['idx']}).")
+        if _t.monotonic() >= deadline:
+            break
+        _t.sleep(0.6)
+    # A bare timeout makes a model retry the same wait. Name what IS on screen
+    # so it can pick a different control or decide the app is on another page.
+    if not seen:
+        return (f"Error: nothing named like {want!r} within {timeout:.0f}s, and the "
+                f"window exposes no interactive elements at all. Capture it with "
+                f"capture_active_window then view_image to see what is there.")
+    names = [e.get("name") or f"({e['type']})" for e in seen][:12]
+    more = f", and {len(seen) - 12} more" if len(seen) > 12 else ""
+    return (f"Error: nothing named like {want!r} within {timeout:.0f}s. Present "
+            f"right now: {', '.join(names)}{more}.")
+
+
+# Steps run through the ordinary handlers, so every guard those carry (the
+# foreground check, the destructive-command refusal) still applies. The
+# allowlist is what keeps a batch to the desktop.
+_BATCHABLE = {
+    "desktop_snapshot", "desktop_click", "desktop_type",
+    "computer_click", "computer_type", "computer_key", "computer_scroll",
+    "computer_move", "computer_drag", "focus_window", "wait_for_element",
+}
+_BATCH_MAX_STEPS = 12
+
+
+def _execute_actions(p: Dict) -> str:
+    steps = p.get("actions")
+    if not isinstance(steps, list) or not steps:
+        return ("Error: 'actions' must be a non-empty list, each entry a "
+                "{\"tool\": \"<name>\", ...its arguments} object. Allowed tools: "
+                + ", ".join(sorted(_BATCHABLE)) + ".")
+    if len(steps) > _BATCH_MAX_STEPS:
+        return (f"Error: {len(steps)} steps is more than the {_BATCH_MAX_STEPS} a "
+                f"batch runs. Split it, and check the result before the rest.")
+    for i, s in enumerate(steps, 1):
+        if not isinstance(s, dict) or not (s.get("tool") or "").strip():
+            return f"Error: step {i} has no 'tool'."
+        if s["tool"] not in _BATCHABLE:
+            return (f"Error: step {i} names {s['tool']!r}, which is not one a batch "
+                    f"runs. Allowed: {', '.join(sorted(_BATCHABLE))}.")
+
+    from . import desktop_a11y as _a
+    out, acted = [], False
+    for i, s in enumerate(steps, 1):
+        name = s["tool"]
+        args = {k: v for k, v in s.items() if k != "tool"}
+        if name in ("desktop_click", "desktop_type"):
+            if args.get("idx") is not None and acted:
+                out.append(f"{i}. {name}: skipped. An earlier step changed the "
+                           f"window, so idx {args['idx']} points at the old "
+                           f"snapshot. Target it by name inside a batch.")
+                break
+            if args.get("idx") is None and args.get("name"):
+                # Resolve the name against the window as it is now, not as it
+                # was when the model last looked at it.
+                _a.snapshot(60, window=(args.get("window") or ""))
+        try:
+            res = _HANDLERS[name](args)
+        except Exception as e:                     # a step must not kill the batch
+            out.append(f"{i}. {name}: Error: {e}")
+            break
+        res = (res or "").strip()
+        out.append(f"{i}. {name}: {res}")
+        if res.startswith("Error:"):
+            out.append(f"stopped at step {i}, {len(steps) - i} not run.")
+            break
+        if name != "desktop_snapshot" and name != "wait_for_element":
+            acted = True
+    return "\n".join(out)
+
+
+_HANDLERS["wait_for_element"] = _wait_for_element
+_HANDLERS["execute_actions"] = _execute_actions
+
+for _cd in (
+    {"name": "wait_for_element", "description":
+        "Block until a named control appears in a window, then report its idx. "
+        "Use this instead of sleeping after anything that takes time to draw (a "
+        "page load, a dialog, an app launch): it returns the moment the control "
+        "is there, and on a timeout it lists what IS on screen so you can adapt. "
+        "Pass window='<part of a title>' for a background window.",
+     "parameters": {"type": "object", "properties": {
+        "name": {"type": "string", "description":
+            "part of the label to wait for, case-insensitive"},
+        "window": {"type": "string", "description":
+            "target window by title substring; empty = foreground"},
+        "timeout": {"type": "number", "description": "seconds, default 15, max 120"},
+        "max_elements": {"type": "integer", "description": "cap per poll (default 60)"}},
+        "required": ["name"]}},
+    {"name": "execute_actions", "description":
+        "Run several desktop steps in one call, in order, stopping at the first "
+        "failure. Each entry is {\"tool\": \"<name>\", ...that tool's arguments}, "
+        "e.g. [{\"tool\":\"desktop_click\",\"name\":\"Search\"}, "
+        "{\"tool\":\"desktop_type\",\"name\":\"Search\",\"text\":\"invoices\"}, "
+        "{\"tool\":\"computer_key\",\"key\":\"enter\"}]. Allowed tools are "
+        "desktop_snapshot / desktop_click / desktop_type, computer_click / _type "
+        "/ _key / _scroll / _move / _drag, focus_window and wait_for_element. "
+        "Target elements by name, not idx: a click changes the window and an idx "
+        "from an older snapshot then points at the wrong control. Up to 12 steps.",
+     "parameters": {"type": "object", "properties": {
+        "actions": {"type": "array", "description":
+            "the steps, each an object with 'tool' plus that tool's arguments",
+            "items": {"type": "object"}}},
+        "required": ["actions"]}},
+):
+    TOOL_DEFINITIONS.append(_cd)
+
 
 
 # ── Watch-a-team: spawn several subagents + open a live pane per agent ──
@@ -8252,7 +8399,7 @@ _RISKY_TOOLS: set = {
     "memory_forget", "extract_archive_file", "create_plugin", "delete_plugin",
     "read_inbox", "send_email",
     "computer_click", "computer_type", "computer_key", "computer_scroll", "computer_drag",
-    "desktop_click", "desktop_type",
+    "desktop_click", "desktop_type", "execute_actions",
     "launch_team", "browse_click", "browse_type",
     "disk_usage", "forge_generate", "forge_shutdown",
     "generate_image", "generate_video",

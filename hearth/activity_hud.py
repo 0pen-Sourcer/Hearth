@@ -43,6 +43,7 @@ DESKTOP_TOOLS = {
     "computer_click", "computer_type", "computer_key", "computer_scroll",
     "computer_drag", "computer_move", "computer_screen",
     "desktop_click", "desktop_type", "desktop_snapshot",
+    "execute_actions", "wait_for_element",
     "smart_click", "focus_window", "screenshot", "view_image",
 }
 
