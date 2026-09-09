@@ -75,6 +75,14 @@ jobs:
         run: |
           python tests/test_voice_settings.py
 
+      - name: Destructive command guard
+        # PowerShell gives every cmdlet a short alias and a .NET equivalent, so
+        # a guard that matches only long names catches one spelling in nineteen.
+        # The second half matters as much: a guard that refuses ordinary work
+        # gets routed around, and then it guards nothing.
+        run: |
+          python tests/test_destructive_guard.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"

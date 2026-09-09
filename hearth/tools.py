@@ -3327,27 +3327,61 @@ def _rewrite_python_invocation(cmd: str) -> str:
 # everything in a folder. We block at the run_command layer because the
 # model has been known to run these as a "shortcut" instead of using
 # delete_path / move_path / list_processes which have their own gates.
+#
+# A blocklist cannot be complete and this one is not trying to be. It is a stop
+# on the shortcut, not a security boundary: an approved call runs regardless,
+# and the approval prompt is where the real decision is made. What it must do
+# is catch the ways the same destructive action is ORDINARILY written, because
+# a form that slips through is a prompt the user never sees. PowerShell gives
+# every cmdlet a short alias and a .NET equivalent, and matching only the long
+# name caught one spelling out of nineteen.
+# A bare alias is only a command where a command can start. Matching `move`
+# anywhere refused `git commit -m "move the parser"`, so the short forms are
+# anchored to the start of a statement and the unambiguous cmdlet names are not.
+_STMT = r"(?:^|[\n;&|(]\s*)"
 _DESTRUCTIVE_PATTERNS = [
-    re.compile(r"\bRemove-Item\b", re.I),
-    re.compile(r"\b(rm|del|erase)\b\s+(?!--help|-h\b)", re.I),
+    # Delete. `-Item` without \b at the end so Remove-ItemProperty is included.
+    re.compile(r"\bRemove-Item", re.I),
+    re.compile(_STMT + r"(rm|del|erase|ri)\b\s+(?!--help|-h\b)", re.I),
     re.compile(r"\brmdir\b", re.I),
-    re.compile(r"\brd\s+/s\b", re.I),
-    re.compile(r"\bMove-Item\b", re.I),
-    re.compile(r"\b(mv|move)\b\s+[^\s]", re.I),
-    re.compile(r"\bCopy-Item\b", re.I),
-    re.compile(r"^\s*(cp|copy)\b\s+[^\s]", re.I),
+    re.compile(_STMT + r"rd\b\s+(/\w+\s+)*(/s|/q)\b", re.I),   # flags in any order
+    # Move, copy, rename.
+    re.compile(r"\bMove-Item", re.I),
+    re.compile(_STMT + r"(mv|move|mi)\b\s+[^\s]", re.I),
+    re.compile(r"\bCopy-Item", re.I),
+    re.compile(_STMT + r"(cp|copy|cpi)\b\s+[^\s]", re.I),
+    re.compile(r"\bRename-Item", re.I),
+    re.compile(_STMT + r"(rni|ren)\b\s+[^\s]", re.I),
+    # Overwrite in place. New-Item -Force truncates an existing file, which is
+    # a delete wearing a create's name.
     re.compile(r"\bClear-Content\b", re.I),
+    re.compile(_STMT + r"clc\b", re.I),
     re.compile(r"\bSet-Content\b", re.I),
     re.compile(r"\bOut-File\b", re.I),
+    re.compile(r"\bNew-Item\b(?=.*\s-Force\b)", re.I),
+    # Processes.
     re.compile(r"\bStop-Process\b", re.I),
-    re.compile(r"\b(taskkill|kill|pkill)\b", re.I),
-    re.compile(r"\bShutdown\b|\bRestart-Computer\b", re.I),
+    re.compile(_STMT + r"spps\b", re.I),
+    re.compile(_STMT + r"(taskkill|kill|pkill)\b", re.I),
+    re.compile(r"\bwmic\b.*\bdelete\b", re.I),
+    # Power.
+    re.compile(r"\bShutdown\b|\b(Restart|Stop)-Computer\b", re.I),
+    # Disks.
     re.compile(r"\bformat\b\s+[A-Za-z]:", re.I),
+    re.compile(r"\b(Format-Volume|Clear-Disk|Initialize-Disk|Remove-Partition)\b", re.I),
     re.compile(r"\bdiskpart\b", re.I),
     re.compile(r"\bcipher\b\s+/w", re.I),
+    # Registry and accounts.
     re.compile(r"\bReg\b\s+(delete|add|import)", re.I),
+    re.compile(r"\b(Set|New|Remove)-ItemProperty\b", re.I),
     re.compile(r"\bnet\s+user\b", re.I),
-    re.compile(r">\s*[A-Za-z]:[\\/]"),       # output redirect to disk path
+    # .NET reached directly, which sidesteps every cmdlet name above.
+    re.compile(r"\[\s*(System\.)?IO\.(File|Directory|DirectoryInfo|FileInfo)\s*\]\s*::"
+               r"\s*(Delete|Move|Replace|WriteAll\w*|Create)", re.I),
+    re.compile(r"\[\s*(System\.)?Diagnostics\.Process\s*\]\s*::\s*\w*Kill", re.I),
+    # Redirects. An absolute path, or a relative one that climbs out of here.
+    re.compile(r">\s*[A-Za-z]:[\\/]"),
+    re.compile(r">\s*\.\.[\\/]"),
     re.compile(r"\|\s*Out-File"),
 ]
 
