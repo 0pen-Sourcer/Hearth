@@ -4848,7 +4848,33 @@ function showModal(title, body, actions = []) {
     const b = document.createElement('button');
     b.textContent = a.label;
     if (a.kind) b.classList.add(a.kind);
-    b.onclick = async () => { if (a.onclick) { const _r = await a.onclick(); if (_r === false) return; } $('modal').classList.remove('open'); };
+    // Two kinds of action. One VALIDATES and returns false to stay open on bad
+    // input; that one has to be awaited. One PERFORMS, and awaiting it holds
+    // the dialog open for the whole job with nothing on screen saying why, so
+    // an unload that stops a server and rebuilds two lists looked like a stuck
+    // modal. Those declare `closes: true` and dismiss before the work starts.
+    // Anything still awaited marks its button busy so the wait is legible.
+    b.onclick = async () => {
+      if (!a.onclick) { $('modal').classList.remove('open'); return; }
+      if (a.closes) {
+        $('modal').classList.remove('open');
+        await a.onclick();
+        return;
+      }
+      const _prev = b.textContent;
+      b.disabled = true;
+      b.textContent = a.busyLabel || _prev;
+      b.classList.add('working');
+      try {
+        const _r = await a.onclick();
+        if (_r === false) return;
+      } finally {
+        b.disabled = false;
+        b.textContent = _prev;
+        b.classList.remove('working');
+      }
+      $('modal').classList.remove('open');
+    };
     $('modal-actions').appendChild(b);
   }
   $('modal').classList.add('open');
@@ -6938,7 +6964,7 @@ $('btn-eject').addEventListener('click', async () => {
   showModal(`Unload ${STATE.brain.modelName}?`,
     'Frees VRAM. You can pick another model from the dropdown afterward.', [
     { label: 'Cancel' },
-    { label: 'Unload', kind: 'primary', onclick: async () => {
+    { label: 'Unload', kind: 'primary', closes: true, onclick: async () => {
       // Clear the single source of truth SYNCHRONOUSLY so the sticker stops
       // lying about "● loaded" before the backend even returns.
       const prevLoaded = STATE.loadedModel;
