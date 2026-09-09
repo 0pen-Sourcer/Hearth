@@ -5363,7 +5363,10 @@ class JarvisCLI:
                 _parsed = _lenient(args_raw)
                 if _parsed is None:
                     raise json.JSONDecodeError("could not be read as a JSON object", args_raw, 0)
-                args = _parsed
+                # These came from the model, so anything the tool layer reads
+                # as control rather than as an argument is dropped here.
+                from hearth.tools import strip_control_args as _strip_ctl
+                args = _strip_ctl(_parsed)
             except json.JSONDecodeError as _je:
                 _snippet = (args_raw[:500] + "…") if len(args_raw) > 500 else args_raw
                 print(f"{C_ERR}Tool JSON error for {name} at col {_je.colno}: {_je.msg}{C_RESET}")
@@ -5502,7 +5505,9 @@ class JarvisCLI:
                 # tool). Mark _approved so the inner destructive-pattern
                 # guard doesn't refuse it a SECOND time - the redundant
                 # gate would make echo>file fail after user already said y.
-                _approved_args = dict(args, _approved=True) if isinstance(args, dict) else args
+                from hearth.tools import APPROVAL_TOKEN as _APPROVAL_TOKEN
+                _approved_args = (dict(args, _approved=_APPROVAL_TOKEN)
+                                  if isinstance(args, dict) else args)
                 result = await asyncio.to_thread(execute_tool, name, _approved_args)
                 dt = (time.time() - t0) * 1000
 

@@ -17,6 +17,7 @@ import sys
 import json
 import glob as globmod
 import shlex
+import secrets
 import shutil
 import socket
 import time
@@ -3469,10 +3470,17 @@ def _run_command(p: Dict) -> str:
     # Destructive guardrail. Skipped when the user explicitly auto-approves
     # everything via env var, OR when this call has been threaded through
     # the per-call permission prompt and the user said yes (the bridges
-    # set p["_approved"]=True before dispatching in that case — the user
+    # mark the call approved before dispatching in that case — the user
     # has already SEEN the exact command and approved it, the second
     # refusal here was pure UX friction, not safety).
-    _approved = bool(p.get("_approved"))
+    #
+    # The marker has to be UNGUESSABLE, not merely truthy. Arguments arrive as
+    # a dict the model fills in, so a truthiness test let the model approve its
+    # own call by adding one key, and text it read from a page or a file could
+    # tell it to. It only has to be right on the surface where nobody can see a
+    # prompt to say no. Compared against a token minted at import, so a caller
+    # that does not hold it fails closed.
+    _approved = p.get("_approved") == APPROVAL_TOKEN
     # A sub-agent runs autonomously with nobody watching its tool calls, so it
     # gets NEITHER escape hatch: it can't be "already approved" (no prompt was
     # ever shown for it) and it can't ride the user's blanket auto-approve.
@@ -8439,6 +8447,20 @@ _RISKY_TOOLS: set = {
     "generate_image", "generate_video",
 }
 _NEVER_PERM: set = {"ask_user", "spawn_subagent", "launch_team"}
+
+# Minted per process and never written down, so only code inside this process
+# that imports it can mark a call approved. A model emitting the key name gets
+# a value that does not match, and fails closed.
+APPROVAL_TOKEN = f"hearth-approved-{secrets.token_urlsafe(24)}"
+
+# Keys the tool layer reads as control rather than as arguments. Model output
+# and anything derived from it goes through here first, so a page, a file or a
+# tool result cannot smuggle one in by telling the model to add it.
+def strip_control_args(args):
+    """Drop control keys from arguments that came from the model."""
+    if not isinstance(args, dict):
+        return args
+    return {k: v for k, v in args.items() if not str(k).startswith("_")}
 
 # MCP tools are third-party code reached over a bridge. Their names are not in
 # _RISKY_TOOLS and cannot be, since they are discovered at runtime, so a

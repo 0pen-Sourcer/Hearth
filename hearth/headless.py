@@ -1628,6 +1628,10 @@ async def run_once(
                         except Exception:
                             pass
                         continue
+                # Arguments came from the model, so anything the tool layer
+                # reads as control rather than as an argument is dropped here.
+                from .tools import strip_control_args as _strip_ctl
+                args = _strip_ctl(args)
                 emit("tool_call", name=name, args=args)
 
                 # Permission policy.
@@ -1737,14 +1741,18 @@ async def run_once(
                     continue
 
                 t0 = time.time()
-                # Pass _approved=True since this branch only runs AFTER the
+                # Mark the call approved, since this branch only runs AFTER the
                 # permission check said allow — without it run_command's
                 # destructive guard would refuse again even though it's approved.
+                # The marker is a token minted at import rather than a literal,
+                # so the model cannot approve its own call by writing the key
+                # into its arguments, and neither can text it read from a page.
                 # EXCEPTION: unsupervised callers (phone bridges, where the user
-                # can't see a prompt) do NOT get _approved, so run_command's
+                # can't see a prompt) are not marked, so run_command's
                 # destructive-pattern guard still blocks rm/format/taskkill etc.
                 # from a remote message while benign commands still run.
-                _approved_args = (dict(args, _approved=True)
+                from .tools import APPROVAL_TOKEN as _APPROVAL_TOKEN
+                _approved_args = (dict(args, _approved=_APPROVAL_TOKEN)
                                   if (isinstance(args, dict) and supervised) else args)
                 # Watchdog: fire slow_tool events at 30s + 90s so the GUI
                 # can pop "this is taking a while — send to background?" —

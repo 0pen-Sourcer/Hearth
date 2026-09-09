@@ -83,6 +83,13 @@ jobs:
         run: |
           python tests/test_destructive_guard.py
 
+      - name: The model cannot approve its own call
+        # Tool arguments are a dict the model fills in, and the tool layer reads
+        # one key out of that same dict as control. A truthiness test let the
+        # model clear the destructive guard by adding one key.
+        run: |
+          python tests/test_approval_boundary.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"
