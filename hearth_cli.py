@@ -226,6 +226,26 @@ def _apply_saved_voice_settings():
 
 
 _apply_saved_voice_settings()
+
+
+def _save_setting(key, value) -> bool:
+    """Persist one setting so a change made here survives a restart and reaches
+    the window. Read-modify-write against the current file, through the same
+    atomic writer the window uses, so a kill mid-write cannot leave a truncated
+    settings.json."""
+    try:
+        import json as _json
+        from hearth.web import _atomic_write_json
+        p = os.path.join(WORKSPACE, "settings.json")
+        cur = {}
+        if os.path.isfile(p):
+            with open(p, "r", encoding="utf-8") as f:
+                cur = _json.load(f) or {}
+        cur[key] = value
+        _atomic_write_json(p, cur, indent=2, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
 # True when the brain was pinned by an explicit launch env (e.g. grok.ps1).
 # Such a session ignores live settings.json brain-sync so the GUI can't yank a
 # deliberately env-pinned CLI off its endpoint mid-run.
@@ -1922,6 +1942,10 @@ class JarvisCLI:
             print(f"  {C_TOOL}/agent [<slug> \"<prompt>\"]{C_RESET}  list personas / spawn a sub-agent synchronously")
             print(f"  {C_TOOL}/voice [on|off]{C_RESET}        TTS toggle (alias: /voices)")
             print(f"  {C_TOOL}/voice speed <n>{C_RESET}       TTS playback rate (e.g. 1.2)")
+            print(f"  {C_TOOL}/voice devices{C_RESET}         list mics, and which one is in use")
+            print(f"  {C_TOOL}/voice device <n>{C_RESET}      pick a mic (or 'default')")
+            print(f"  {C_TOOL}/voice mic-test [s]{C_RESET}    record a moment and show the level")
+            print(f"  {C_TOOL}/voice duplex on|off{C_RESET}   hold the mic closed while Hearth speaks")
             print(f"  {C_TOOL}/stt [model]{C_RESET}           show/switch STT model (tiny.en/base.en/small.en/...)")
             print(f"  {C_TOOL}/listen{C_RESET}                one-shot voice input (record → transcribe)")
             print(f"  {C_TOOL}/listen on|off{C_RESET}         continuous voice-in with TTS interrupt")
@@ -3160,6 +3184,19 @@ class JarvisCLI:
         if low == "/stt" or low.startswith("/stt "):
             arg = cmd.split(None, 1)[1].strip() if len(cmd.split(None, 1)) > 1 else ""
             print(f"{C_OK}{stt.set_model(arg)}{C_RESET}")
+            if arg:
+                # The size is read from the environment by the push-to-talk path
+                # and by voice mode, and from settings.json on the next launch
+                # and by the window. Setting only the module left all three on
+                # the old size.
+                os.environ["JARVIS_STT_MODEL"] = stt.MODEL_SIZE
+                if _save_setting("stt_model", stt.MODEL_SIZE):
+                    print(f"{C_DIM}  saved, and the window uses it too{C_RESET}")
+                try:
+                    from hearth import realtime_voice as _rv
+                    _rv.reset_recorder()
+                except Exception:
+                    pass
             return True
         if low == "/sleep":
             self.sleep_mode = True
@@ -3200,6 +3237,9 @@ class JarvisCLI:
                 print(f"{C_OK}lockdown OFF{C_RESET} {C_DIM}— reads unrestricted (any file on disk). Writes stay workspace-confined regardless.{C_RESET}")
             return True
         if low in ("/voice", "/voices") or low.startswith("/voice ") or low.startswith("/voices "):
+            # Mic picking, a level check and the speaker guard existed only in
+            # the window, so a CLI user on the wrong input device had no way to
+            # see it, let alone change it.
             parts = cmd.split()
             if len(parts) == 1:
                 st = voice.status()
@@ -3229,17 +3269,31 @@ class JarvisCLI:
             elif parts[1].lower() == "speed":
                 if len(parts) >= 3:
                     new_speed = voice.set_speed(parts[2])
-                    print(f"{C_OK}TTS speed → {new_speed:g}x{C_RESET}")
+                    os.environ["JARVIS_VOICE_SPEED"] = str(new_speed)
+                    _saved = _save_setting("voice_speed", new_speed)
+                    print(f"{C_OK}TTS speed → {new_speed:g}x{C_RESET}"
+                          + (f"  {C_DIM}saved{C_RESET}" if _saved else ""))
                     if self.voice_on and voice.is_available():
                         voice.stop()
                         voice.speak("speed updated", blocking=False)
                 else:
                     print(f"{C_DIM}current TTS speed: {voice.status().get('default_speed')}x  "
                           f"(usage: /voice speed 1.2){C_RESET}")
+            elif parts[1].lower() in ("devices", "mics"):
+                self._voice_devices()
+            elif parts[1].lower() == "device":
+                self._voice_pick_device(parts[2] if len(parts) >= 3 else "")
+            elif parts[1].lower() in ("mic-test", "mictest", "test"):
+                self._voice_mic_test(parts[2] if len(parts) >= 3 else "")
+            elif parts[1].lower() == "duplex":
+                self._voice_duplex(parts[2].lower() if len(parts) >= 3 else "")
             elif parts[1].lower() in ("set", "voice", "name") and len(parts) >= 3:
                 vname = parts[2]
                 voice.set_default_voice(vname)
-                print(f"{C_OK}voice → {vname}{C_RESET}")
+                os.environ["JARVIS_VOICE"] = vname
+                _saved = _save_setting("voice_name", vname)
+                print(f"{C_OK}voice → {vname}{C_RESET}"
+                      + (f"  {C_DIM}saved{C_RESET}" if _saved else ""))
                 # Speak a sample so the user hears it immediately
                 if self.voice_on and voice.is_available():
                     voice.stop()
@@ -3249,7 +3303,10 @@ class JarvisCLI:
                 # bare /voice <name> shortcut
                 vname = parts[1]
                 voice.set_default_voice(vname)
-                print(f"{C_OK}voice → {vname}{C_RESET}")
+                os.environ["JARVIS_VOICE"] = vname
+                _saved = _save_setting("voice_name", vname)
+                print(f"{C_OK}voice → {vname}{C_RESET}"
+                      + (f"  {C_DIM}saved{C_RESET}" if _saved else ""))
                 if self.voice_on and voice.is_available():
                     voice.stop()
                     voice.speak(f"voice set to {vname}", blocking=False)
@@ -3300,6 +3357,125 @@ class JarvisCLI:
         except asyncio.CancelledError:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
+
+    # -- Voice input device, level check and the speaker guard ---------------
+    def _voice_devices(self):
+        try:
+            devs = stt.list_input_devices()
+        except Exception as e:
+            print(f"{C_ERR}could not read the input devices: {e}{C_RESET}")
+            return
+        if not devs:
+            print(f"{C_WARN}no input devices found. Plug a mic in, then "
+                  f"/voice devices again.{C_RESET}")
+            return
+        try:
+            picked = stt.input_device_index()
+        except Exception:
+            picked = None
+        # None means no device was picked and the OS default is used, which may
+        # not be any row below, so state it rather than leaving no marker and
+        # letting the list imply nothing is selected.
+        print(f"{C_DIM}in use: "
+              + (f"device {picked}" if picked is not None
+                 else "whichever mic Windows calls the default")
+              + f"{C_RESET}")
+        for d in devs:
+            mark = "*" if (picked is not None and d.get("index") == picked) else " "
+            tag = f" {C_DIM}(system default){C_RESET}" if d.get("default") else ""
+            print(f" {mark} [{d.get('index')}] {d.get('name')}{tag}")
+        # Device numbers are assigned by the OS and shift when hardware is
+        # unplugged or reordered, so a saved pick can point at nothing. That
+        # reads as "the mic stopped working" with no clue why.
+        if picked is not None and picked not in {d.get("index") for d in devs}:
+            print(f"{C_WARN}  device {picked} is saved but is not plugged in now, "
+                  f"so nothing is being recorded. Pick one above, or "
+                  f"/voice device default.{C_RESET}")
+        print(f"{C_DIM}  /voice device <n> to pick one, /voice device default to "
+              f"go back, /voice mic-test to check it.{C_RESET}")
+
+    def _voice_pick_device(self, arg: str):
+        arg = (arg or "").strip().lower()
+        if not arg:
+            print(f"{C_DIM}usage: /voice device <n|default>   "
+                  f"(/voice devices lists them){C_RESET}")
+            return
+        if arg in ("default", "auto", "-1"):
+            idx = -1
+        else:
+            try:
+                idx = int(arg)
+            except ValueError:
+                print(f"{C_ERR}'{arg}' is not a device number. "
+                      f"/voice devices lists them.{C_RESET}")
+                return
+            known = {d.get("index") for d in (stt.list_input_devices() or [])}
+            if known and idx not in known:
+                print(f"{C_ERR}no input device numbered {idx}. "
+                      f"/voice devices lists them.{C_RESET}")
+                return
+        os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(idx)
+        saved = _save_setting("voice_input_device", idx)
+        # Drop the cached recorder so the next voice session opens the new
+        # device rather than the one it was built on.
+        try:
+            from hearth import realtime_voice as _rv
+            _rv.reset_recorder()
+        except Exception:
+            pass
+        try:
+            stt.rescan_devices()
+        except Exception:
+            pass
+        where = "the system default" if idx < 0 else f"device {idx}"
+        print(f"{C_OK}mic → {where}{C_RESET}"
+              + (f"  {C_DIM}saved, and the window uses it too{C_RESET}" if saved else ""))
+
+    def _voice_mic_test(self, arg: str):
+        try:
+            secs = float(arg) if arg else 1.6
+        except ValueError:
+            secs = 1.6
+        secs = max(0.5, min(secs, 10.0))
+        print(f"{C_DIM}listening for {secs:g}s, say something...{C_RESET}")
+        try:
+            r = stt.mic_test(secs)
+        except Exception as e:
+            print(f"{C_ERR}mic test failed: {e}{C_RESET}")
+            return
+        if not r.get("ok"):
+            print(f"{C_ERR}mic test failed: {r.get('error', 'unknown')}{C_RESET}")
+            return
+        peak, rms = float(r.get("peak", 0.0)), float(r.get("rms", 0.0))
+        bar = "#" * max(0, min(int(peak * 40), 40))
+        print(f"  peak {peak:.3f}  rms {rms:.3f}  |{bar:<40}|")
+        if r.get("heard"):
+            print(f"{C_OK}heard you. This mic works.{C_RESET}")
+        else:
+            print(f"{C_WARN}nothing above the speech threshold. Either the wrong "
+                  f"device is picked (/voice devices) or the input level is "
+                  f"turned down in Windows sound settings.{C_RESET}")
+
+    def _voice_duplex(self, arg: str):
+        if arg in ("on", "1", "true", "yes"):
+            want = True
+        elif arg in ("off", "0", "false", "no"):
+            want = False
+        else:
+            cur = voice.half_duplex_enabled()
+            pinned = os.environ.get("HEARTH_VOICE_HALF_DUPLEX") is not None
+            print(f"{C_DIM}half-duplex is {'ON' if cur else 'off'}"
+                  f"{' (pinned by the environment)' if pinned else ''}.  "
+                  f"ON holds the mic closed while Hearth speaks, which stops a "
+                  f"speaker setup answering itself. Off lets you interrupt by "
+                  f"voice, which is what you want on a headset.  "
+                  f"usage: /voice duplex on|off{C_RESET}")
+            return
+        os.environ["HEARTH_VOICE_HALF_DUPLEX"] = "1" if want else "0"
+        saved = _save_setting("voice_half_duplex", want)
+        print(f"{C_OK}half-duplex: {'ON' if want else 'off'}{C_RESET}  "
+              + (f"{C_DIM}{'mic stays closed while Hearth speaks' if want else 'you can interrupt by voice'}"
+                 f"{', saved' if saved else ''}{C_RESET}"))
 
     # -- Status footer ------------------------------------------------------
     def _model_label(self) -> str:

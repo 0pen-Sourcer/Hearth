@@ -3646,6 +3646,7 @@
             <button class="btn-mini" id="btn-mic-refresh" title="Re-scan devices">Refresh</button>
             <button class="btn-mini" id="btn-mic-test">Test mic</button>
           </div>
+          <div id="mic-missing" style="display:none;font-size:12px;color:var(--warn,#e6a84b);line-height:1.4"></div>
           <div id="mic-test-result" style="display:none; align-items:center; gap:8px;">
             <div style="flex:1; height:8px; background:var(--bg-1); border-radius:4px; overflow:hidden;">
               <div id="mic-test-bar" style="height:100%; width:0%; background:var(--accent); transition:width .12s;"></div>
@@ -12183,6 +12184,24 @@ window.addEventListener('load', () => {
       const cur = (r && typeof r.selected === 'number') ? r.selected : parseInt(sel.value, 10) || -1;
       sel.innerHTML = '<option value="-1">System default</option>' +
         devs.map(d => `<option value="${d.index}">${String(d.name || ('input ' + d.index)).replace(/</g, '&lt;')}${d.default ? ' (default)' : ''}</option>`).join('');
+      // Device numbers are assigned by the OS and shift when hardware is
+      // unplugged or reordered, so a saved pick can name a device that is no
+      // longer there. Assigning it would leave the select blank while the
+      // backend still recorded silence from it, which reads as a dead mic with
+      // no explanation. Keep the pick, show it as missing, say what to do.
+      const gone = cur >= 0 && !devs.some(d => d.index === cur);
+      const note = document.getElementById('mic-missing');
+      if (gone) {
+        sel.insertAdjacentHTML('beforeend',
+          `<option value="${cur}">Saved mic (input ${cur}) is not connected</option>`);
+      }
+      if (note) {
+        note.style.display = gone ? 'block' : 'none';
+        note.textContent = gone
+          ? `The mic you picked (input ${cur}) is not plugged in, so nothing is being recorded. `
+            + `Plug it back in and hit Refresh, or choose another one above.`
+          : '';
+      }
       sel.value = String(cur);
     } catch (e) {}
   }
