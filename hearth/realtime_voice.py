@@ -17,7 +17,9 @@ fallback.
 
 Environment:
   HEARTH_REALTIME_VOICE=1   force-enable (default: auto if RealtimeSTT importable)
-  HEARTH_REALTIME_MODEL     faster-whisper size (default: tiny.en for speed)
+  HEARTH_REALTIME_MODEL     faster-whisper size override; without it the
+                            whisper-size setting (JARVIS_STT_MODEL) is used,
+                            falling back to tiny.en
   HEARTH_REALTIME_LANG      language hint (default: en)
 """
 
@@ -102,11 +104,27 @@ def is_available() -> bool:
     return _REALTIME_AVAILABLE
 
 
+def _model_size() -> str:
+    """Which faster-whisper size the recorder runs.
+
+    The whisper-size setting writes JARVIS_STT_MODEL, which the push-to-talk
+    path reads. Nothing sets HEARTH_REALTIME_MODEL, so reading only that left
+    voice mode pinned to tiny.en no matter what the setting said, and the
+    dropdown that appeared to control it changed the other path alone. An
+    explicitly exported override still wins.
+    """
+    for _v in (os.environ.get("HEARTH_REALTIME_MODEL"),
+               os.environ.get("JARVIS_STT_MODEL")):
+        if (_v or "").strip():                 # a blank export is not a choice
+            return _v.strip()
+    return "tiny.en"
+
+
 def status() -> dict:
     return {
         "available": is_available(),
         "listening": _listening,
-        "model": os.environ.get("HEARTH_REALTIME_MODEL", "tiny.en"),
+        "model": _model_size(),
         "engine": "RealtimeSTT (silero VAD + faster-whisper, streaming)",
     }
 
@@ -149,7 +167,7 @@ def _build_recorder():
 
     from RealtimeSTT import AudioToTextRecorder
 
-    model = os.environ.get("HEARTH_REALTIME_MODEL", "tiny.en")
+    model = _model_size()
     lang = os.environ.get("HEARTH_REALTIME_LANG", "en")
 
     def _on_realtime_update(text: str) -> None:

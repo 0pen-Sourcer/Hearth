@@ -68,6 +68,13 @@ jobs:
         run: |
           python tests/test_install_contract.py
 
+      - name: Voice settings reach every surface
+        # The voice panes save to settings.json and the voice modules read env
+        # vars, with nothing binding the two, so a setting can be written and
+        # displayed as selected while applying to one surface only.
+        run: |
+          python tests/test_voice_settings.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"

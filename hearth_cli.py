@@ -183,6 +183,49 @@ def _read_brain_key(provider: str) -> str:
 
 
 _S_URL, _S_KEY, _S_MODEL, _S_PROV = _read_settings_endpoint()
+
+
+def _apply_saved_voice_settings():
+    """Bring the CLI onto the same voice settings the window writes.
+
+    The voice panes save to settings.json and the modules read env vars, and
+    only the window ever exported them. So a whisper size, voice, speed or mic
+    picked there applied to the window alone and the CLI silently ran its own
+    defaults. Mirrors the window's export list. An env var already set wins,
+    so an explicit launch override is left alone.
+    """
+    defaults = {
+        "JARVIS_STT_MODEL": ("stt_model", "base.en"),
+        "JARVIS_STT_DEVICE": ("stt_device", "cpu"),
+        "JARVIS_TTS_DEVICE": ("tts_device", "cpu"),
+        "JARVIS_VOICE_SPEED": ("voice_speed", 1.5),
+        "JARVIS_VOICE": ("voice_name", "am_michael"),
+        "JARVIS_VOICE_INPUT_DEVICE": ("voice_input_device", -1),
+    }
+    try:
+        import json as _json
+        p = os.path.join(WORKSPACE, "settings.json")
+        s = {}
+        if os.path.isfile(p):
+            with open(p, "r", encoding="utf-8") as f:
+                s = _json.load(f) or {}
+        for env, (key, fallback) in defaults.items():
+            if os.environ.get(env):
+                continue
+            val = s.get(key, fallback)
+            if val is None or str(val).strip() == "":
+                continue
+            os.environ[env] = str(val)
+        # listen binds its size at import, which already happened above, so
+        # exporting alone would not move it.
+        want = os.environ.get("JARVIS_STT_MODEL", "")
+        if want and getattr(stt, "MODEL_SIZE", "") != want:
+            stt.set_model(want)
+    except Exception:
+        pass                                   # settings are a convenience here
+
+
+_apply_saved_voice_settings()
 # True when the brain was pinned by an explicit launch env (e.g. grok.ps1).
 # Such a session ignores live settings.json brain-sync so the GUI can't yank a
 # deliberately env-pinned CLI off its endpoint mid-run.
