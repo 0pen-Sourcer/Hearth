@@ -49,9 +49,16 @@ def check_no_orphaned_methods() -> list:
     Inserting a function into the middle of a class silently re-parents every
     method below it, which is how the browser worker lost run/call/stop while
     still importing fine. A def whose first parameter is self has no business
-    inside a plain function."""
+    inside a plain function.
+
+    The scan covers the top-level modules too. It did not, and hearth_cli.py is
+    both the longest file and the one most often spliced into, so the check was
+    blind to the place the break is most likely to recur."""
     out = []
-    for path in sorted(glob.glob(os.path.join(ROOT, "hearth", "*.py"))):
+    paths = sorted(glob.glob(os.path.join(ROOT, "hearth", "*.py")))
+    paths += [p for p in sorted(glob.glob(os.path.join(ROOT, "*.py")))
+              if os.path.basename(p) != "conftest.py"]
+    for path in paths:
         try:
             tree = ast.parse(io.open(path, encoding="utf-8").read())
         except SyntaxError:
@@ -76,13 +83,27 @@ def check_no_orphaned_methods() -> list:
 
 
 def check_name_lists() -> list:
-    """The risk/defer/never lists are separate literals; a rename leaves them
-    pointing at tools that no longer exist."""
+    """Tool names are repeated as bare literals across several modules, and a
+    rename or a typo leaves one pointing at a tool that does not exist. A stale
+    name in a risk list is the dangerous direction: the tool stops being gated
+    and nothing says so."""
     hearth, tools = _reg()
     known = {t["name"] for t in hearth.TOOL_DEFINITIONS}
     out = []
-    for label in ("_RISKY_TOOLS", "_DEFERRED_TOOLS", "_NEVER_PERM"):
-        for n in sorted(getattr(tools, label, set()) or set()):
+    lists = [("tools." + label, getattr(tools, label, set()) or set())
+             for label in ("_RISKY_TOOLS", "_DEFERRED_TOOLS", "_NEVER_PERM")]
+    # The same names are also listed in the modules that decide what to show,
+    # what to re-confirm, and what a sub-agent may not touch.
+    for mod, label in (("activity_hud", "DESKTOP_TOOLS"),
+                       ("reminders", "_CONFIRM_ON_FIRE"),
+                       ("subagents", "_DANGEROUS_FOR_SUBAGENTS")):
+        try:
+            m = __import__(f"hearth.{mod}", fromlist=[mod])
+            lists.append((f"{mod}.{label}", getattr(m, label, set()) or set()))
+        except Exception as e:
+            out.append(f"could not read {mod}.{label}: {type(e).__name__}: {e}")
+    for label, names in lists:
+        for n in sorted(names):
             if n not in known:
                 out.append(f"{label} names '{n}', which is not a registered tool")
     return out
