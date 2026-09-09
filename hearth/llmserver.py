@@ -1142,6 +1142,20 @@ def _engine_source_of(exe: Path) -> str:
     return "other"
 
 
+def build_rank(tag: str) -> tuple:
+    """Sort key for a llama.cpp build tag, newest last.
+
+    Tags are `b<number>` and the number crossed four digits into five, so a
+    plain string sort ranks b9999 above b10488. That picks a stale engine on
+    cards whose kernels only exist in recent builds, and the prune below keeps
+    the two highest, which under a string sort means deleting the current
+    engine and keeping the ancient one. Compare the number as a number, and
+    fall back to the name for anything not shaped like a tag.
+    """
+    m = re.match(r"^[bB](\d+)$", (tag or "").strip())
+    return (1, int(m.group(1)), "") if m else (0, 0, (tag or "").lower())
+
+
 def find_native_llama_server() -> Optional[Dict[str, Any]]:
     """Locate a standalone llama.cpp `llama-server.exe` — the official OpenAI-
     compatible server. It's newer than our pinned llama-cpp-python wheel and,
@@ -1158,7 +1172,7 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
     hearth_rt = Path(os.path.expanduser("~/.hearth/llamacpp"))
     if hearth_rt.is_dir():
         candidates += sorted(hearth_rt.glob("*/llama-server.exe"),
-                             key=lambda p: p.parent.name, reverse=True)
+                             key=lambda p: build_rank(p.parent.name), reverse=True)
     # 2) Engine shipped INSIDE the app (Full edition). A packaged build carries a
     # current standalone llama-server so a fresh install has a working engine with
     # no download, including on cards the llama-cpp-python wheel has no kernels
@@ -1170,14 +1184,14 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
         _bundled = _app / "llamacpp"
         if _bundled.is_dir():
             candidates += sorted(_bundled.glob("*/llama-server.exe"),
-                                 key=lambda p: p.parent.name, reverse=True)
+                                 key=lambda p: build_rank(p.parent.name), reverse=True)
     except Exception:
         pass
     # 3) Reuse LM Studio's CUDA-12 backend if the user has it (zero download)
     lms = Path(os.path.expanduser("~/.lmstudio/extensions/backends"))
     if lms.is_dir():
         candidates += sorted(lms.glob("*nvidia-cuda12*/llama-server.exe"),
-                             key=lambda p: p.parent.name, reverse=True)
+                             key=lambda p: build_rank(p.parent.name), reverse=True)
     # An explicit choice beats the ranking — the escape hatch when one engine
     # misbehaves on hardware we can't test.
     pref = get_engine_preference()
@@ -1374,7 +1388,7 @@ def installed_llama_tags() -> List[str]:
     if not root.is_dir():
         return []
     out = [p.parent.name for p in root.glob("*/llama-server.exe") if _usable_server_exe(p)]
-    return sorted(out, reverse=True)
+    return sorted(out, key=build_rank, reverse=True)
 
 
 def engine_build_dir(tag: str) -> Optional[str]:
@@ -1662,7 +1676,7 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         _root = Path(os.path.expanduser("~/.hearth/llamacpp"))
         _vers = sorted((d for d in _root.iterdir()
                         if d.is_dir() and not d.name.startswith(".")),
-                       key=lambda p: p.name, reverse=True)
+                       key=lambda p: build_rank(p.name), reverse=True)
         for _old in _vers[2:]:
             shutil.rmtree(_old, ignore_errors=True)
     except OSError:

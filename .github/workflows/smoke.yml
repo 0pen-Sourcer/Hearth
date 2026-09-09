@@ -61,6 +61,13 @@ jobs:
         run: |
           python tests/test_desktop_batch.py
 
+      - name: Engine picker and repair plan
+        # Build tags sort as numbers, not strings, or the picker runs a stale
+        # engine and the pruner deletes the current one. And the repair plan
+        # keeps a separate list from the patch builder, so check they agree.
+        run: |
+          python tests/test_install_contract.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"

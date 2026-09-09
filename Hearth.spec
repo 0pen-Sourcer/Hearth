@@ -14,6 +14,7 @@
 #  - PyWebView's Edge WebView2 runtime is assumed installed (Windows 10/11 ship it)
 
 import os
+import re
 import glob
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
@@ -295,9 +296,14 @@ if not LITE:
             _eng_dirs = [Path(_eng_src)]
         else:
             _mgd = Path(os.path.expanduser("~/.hearth/llamacpp"))
+            # Build tags crossed four digits into five, so a string sort
+            # would bundle b9999 over b10488. Rank the number as a number.
+            def _rank(_n):
+                _m = re.match(r"^[bB](\d+)$", _n or "")
+                return (1, int(_m.group(1)), "") if _m else (0, 0, (_n or "").lower())
             _eng_dirs = sorted(
                 (p.parent for p in _mgd.glob("*/llama-server.exe")),
-                key=lambda p: p.name, reverse=True) if _mgd.is_dir() else []
+                key=lambda p: _rank(p.name), reverse=True) if _mgd.is_dir() else []
         for _ed in _eng_dirs[:1]:          # newest usable build only
             for _root, _d, _files in os.walk(_ed):
                 for _f in _files:
