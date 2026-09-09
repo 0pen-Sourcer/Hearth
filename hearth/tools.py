@@ -5045,7 +5045,13 @@ def _screenshot(p: Dict) -> str:
     img = None
     try:
         from PIL import ImageGrab  # type: ignore
-        img = ImageGrab.grab()
+        # A shot taken while Hearth is in front contains Hearth, and the model
+        # then describes its own chat or clicks a control belonging to the
+        # assistant. Excluded only for the moment of the grab, so a screen
+        # recorder still sees the window.
+        from .win_capture import own_windows_hidden as _own_hidden
+        with _own_hidden():
+            img = ImageGrab.grab()
         img.save(out)
     except Exception as e:
         if sys.platform == "win32":
@@ -5176,7 +5182,11 @@ def _capture_active_window(p: Dict) -> str:
         # all_screens=True makes the bbox virtual-screen relative, matching
         # GetWindowRect — so a window on a left/secondary monitor (negative
         # coords) still grabs correctly.
-        img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+        # Hide our own windows unless one of them IS the target, which happens
+        # when the user asked about Hearth itself.
+        from .win_capture import own_window_handles as _own, own_windows_hidden as _own_hidden
+        with _own_hidden(enabled=hwnd not in set(_own())):
+            img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
         # Downscale to <=1280 long-edge; record the scale for smart_click.
         _le = max(img.size)
         if _le > 1280:
