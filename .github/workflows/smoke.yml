@@ -90,6 +90,13 @@ jobs:
         run: |
           python tests/test_approval_boundary.py
 
+      - name: A reply where some calls read and one does not
+        # The branch that ran when anything parsed did not check for LEFTOVER
+        # markup, so a reply with twenty calls and one bracket typo ran the
+        # nineteen and dropped the twentieth without a word.
+        run: |
+          python tests/test_partial_tool_parse.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"

@@ -5474,6 +5474,10 @@ function applyBrainState() {
   const b = STATE.brain;
   const $$id = (id) => document.getElementById(id);
 
+  // The reasoning control depends on which brain is loaded, so it is rebuilt
+  // here rather than once at startup.
+  try { renderThinkMenu(); applyThinkButton(); } catch (e) {}
+
   // Sticker: online dot + dropdown value.
   const dot = $$id('model-state');
   if (dot) {
@@ -7373,15 +7377,28 @@ const THINK_OPTIONS = [
   { on: true,  level: 'high',   label: 'High effort',   sub: 'slowest, most careful' },
 ];
 
+// Which of those a brain actually honours. reasoning_effort is an argument to
+// a cloud API; a local server takes a thinking flag that is on or off and has
+// no notion of an effort tier. Offering low/medium/high against a local model
+// put a level in the button that changed nothing about the reply, so the
+// control described a capability the model did not have. Same idea as any
+// harness that reads the tiers off the model rather than assuming them.
+function _thinkOptions() {
+  const cloud = !!(STATE.brain && STATE.brain.kind === 'cloud');
+  return cloud ? THINK_OPTIONS : THINK_OPTIONS.filter(o => !o.level);
+}
+
 function _thinkIndex() {
+  const opts = _thinkOptions();
   if (!STATE.thinking) return 0;
   const lv = (STATE.thinkLevel || '').toLowerCase();
-  const i = THINK_OPTIONS.findIndex(o => o.on && o.level === lv);
+  const i = opts.findIndex(o => o.on && o.level === lv);
   return i > 0 ? i : 1;
 }
 
 function applyThinkButton() {
-  const o = THINK_OPTIONS[_thinkIndex()];
+  const o = _thinkOptions()[_thinkIndex()];
+  if (!o) return;
   thinkBtn.classList.toggle('on', o.on);
   thinkBtn.title = o.on
     ? `Reasoning: ${o.label.toLowerCase()} (${o.sub}). Click to change.`
@@ -7399,13 +7416,27 @@ function applyThinkButton() {
   }
 }
 
-(function wireThinkMenu() {
+// Rebuilt whenever the brain changes, so switching from a cloud model to a
+// local one takes the effort tiers away instead of leaving a stale menu.
+function renderThinkMenu() {
   const menu = document.getElementById('think-menu');
   if (!menu) return;
-  menu.innerHTML = THINK_OPTIONS.map((o, i) =>
+  const opts = _thinkOptions();
+  menu.innerHTML = opts.map((o, i) =>
     `<button class="think-menu-item" data-think="${i}">`
     + `<span class="tick"></span>`
     + `<span>${o.label} <span class="sub">${o.sub}</span></span></button>`).join('');
+  // A level carried over from a cloud brain would keep showing in the button
+  // against a local one, which is the wrong label rather than a stale menu.
+  if (opts.length && !opts.some(o => o.level === (STATE.thinkLevel || ''))) {
+    STATE.thinkLevel = '';
+  }
+}
+
+(function wireThinkMenu() {
+  const menu = document.getElementById('think-menu');
+  if (!menu) return;
+  renderThinkMenu();
   const close = () => menu.classList.remove('open');
   thinkBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); applyThinkButton(); });
   document.addEventListener('click', (e) => {
@@ -7415,7 +7446,8 @@ function applyThinkButton() {
   menu.addEventListener('click', (e) => {
     const it = e.target.closest('.think-menu-item');
     if (!it) return;
-    const o = THINK_OPTIONS[Number(it.dataset.think) || 0];
+    const o = _thinkOptions()[Number(it.dataset.think) || 0];
+    if (!o) return;
     STATE.thinking = o.on;
     STATE.thinkLevel = o.level;
     close();

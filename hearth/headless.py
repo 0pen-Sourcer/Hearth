@@ -1523,6 +1523,14 @@ async def run_once(
                             tc.function.name = fc["function"]["name"]
                             tc.function.arguments = fc["function"]["arguments"]
                             msg.tool_calls.append(tc)
+                        # Some read and some did not. A reply carrying twenty
+                        # calls where one closed a bracket wrong used to take
+                        # this branch, run the nineteen, and drop the twentieth
+                        # without a word, so the turn ended on work the model
+                        # believed it had done. Anything the parse could not
+                        # excise is still a call that never ran.
+                        if _tcp.has_tool_call(cleaned):
+                            _unparsed_markup = True
                     else:
                         # Markup was there but nothing could be read from it, so
                         # no tool ran. Left unsaid, the model treats its own
