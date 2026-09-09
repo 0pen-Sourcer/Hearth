@@ -4914,6 +4914,198 @@ function showRepairPlanModal(plan) {
   });
 }
 
+async function showMcpJsonModal() {
+      try {
+        const r = await api('/api/mcp/config');
+        const current = (r && r.json) ? r.json : JSON.stringify({
+          mcpServers: {
+            "example-filesystem": {
+              command: "npx",
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "~/Documents"],
+              env: {}
+            }
+          }
+        }, null, 2);
+        showModal('Edit mcp.json',
+          `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
+          `Standard MCP server config. Each entry runs as a subprocess. ` +
+          `Saving reconnects them right away, no restart.</div>` +
+          `<textarea id="mcp-json-input" style="width:100%;min-height:340px;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:12px;resize:vertical;">${esc(current)}</textarea>` +
+          `<div id="mcp-json-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>`,
+          [
+            { label: 'Cancel' },
+            { label: 'Save', primary: true, onclick: async () => {
+                const ta = document.getElementById('mcp-json-input');
+                const errBox = document.getElementById('mcp-json-err');
+                const txt = (ta?.value || '').trim();
+                try { JSON.parse(txt); } catch (e) {
+                  if (errBox) errBox.textContent = 'JSON parse error: ' + e.message;
+                  return false;  // keep modal open
+                }
+                try {
+                  const sv = await api('/api/mcp/config', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ json: txt }),
+                  });
+                  if (sv.ok) {
+                    // Apply it now rather than telling the user to restart the
+                    // whole app to pick up an edited config.
+                    toast('mcp.json saved', 'Reconnecting servers…', 'ok', 4000);
+                    try {
+                      const rl = await api('/api/mcp/reload', { method: 'POST' });
+                      if (rl && rl.ok === false) {
+                        toast('Saved, but reconnect failed', rl.error || 'restart Hearth to apply', 'warn', 8000);
+                      } else {
+                        const n = (rl && rl.servers) || 0;
+                        toast('MCP reloaded', n ? `${n} server${n === 1 ? '' : 's'} reconnecting` : 'no servers configured', 'ok', 5000);
+                      }
+                    } catch (e) {
+                      toast('Saved, but reconnect failed', 'restart Hearth to apply', 'warn', 8000);
+                    }
+                    try { refreshMcpStatus(); } catch {}
+                  } else {
+                    toast('Save failed', sv.error || 'unknown', 'err');
+                  }
+                } catch (e) { toast('Save failed', e.message, 'err'); }
+              }
+            },
+          ]);
+      } catch (e) { toast('Open failed', e.message, 'err'); }
+}
+
+// Adding an MCP server meant hand-writing JSON with escaped Windows paths, so
+// in practice only someone who already knew the format could do it. Same
+// config, as fields, with the raw JSON still one click away.
+const MCP_PRESETS = [
+  { label: 'Files on this PC', name: 'filesystem', command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-filesystem', '<folder>'],
+    hint: 'Reads and writes inside one folder you choose. Replace the placeholder with a real path.' },
+  { label: 'Fetch a web page', name: 'fetch', command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-fetch'],
+    hint: 'Pulls a URL back as clean text.' },
+  { label: 'Git repository', name: 'git', command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-git', '--repository', '<path>'],
+    hint: 'History, diffs and blame for one repo.' },
+  { label: 'Blank', name: '', command: '', args: [], hint: '' },
+];
+
+function _mcpParseEnv(text) {
+  const out = {};
+  for (const line of (text || '').split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const eq = t.indexOf('=');
+    if (eq > 0) out[t.slice(0, eq).trim()] = t.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+async function _mcpSaveAndReload(cfg) {
+  try {
+    const sv = await api('/api/mcp/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ json: JSON.stringify(cfg, null, 2) }),
+    });
+    if (!sv || sv.ok === false) { toast('Save failed', (sv && sv.error) || 'unknown', 'err'); return; }
+    try {
+      const rl = await api('/api/mcp/reload', { method: 'POST' });
+      const n = (rl && rl.servers) || 0;
+      toast('Tool servers saved', n ? (n + (n === 1 ? ' server' : ' servers') + ' connecting') : 'none configured', 'ok', 5000);
+    } catch { toast('Saved, but reconnect failed', 'restart Hearth to apply', 'warn', 8000); }
+    try { refreshMcpStatus(); } catch {}
+  } catch (e) { toast('Save failed', e.message, 'err'); }
+}
+
+async function showMcpServersModal() {
+  let cfg = { mcpServers: {} };
+  try {
+    const r = await api('/api/mcp/config');
+    if (r && r.json) cfg = JSON.parse(r.json);
+  } catch {}
+  if (!cfg || typeof cfg !== 'object') cfg = {};
+  if (!cfg.mcpServers || typeof cfg.mcpServers !== 'object') cfg.mcpServers = {};
+  window._mcpCfg = cfg;
+
+  const FCSS = 'width:100%;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;font-family:var(--mono)';
+  const row = (name, spec) => {
+    const cmd = [spec.command || ''].concat(spec.args || []).join(' ');
+    return '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid var(--border)">'
+      + '<div style="min-width:0">'
+      + '<div style="font-size:13px;color:var(--fg)">' + esc(name) + '</div>'
+      + '<div style="font-family:var(--mono);font-size:11px;color:var(--fg-faint);word-break:break-all">' + esc(cmd) + '</div>'
+      + '</div>'
+      + '<button data-mcp-rm="' + esc(name) + '" style="flex-shrink:0;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);cursor:pointer;padding:3px 11px;font-size:12px">remove</button>'
+      + '</div>';
+  };
+  const names = Object.keys(cfg.mcpServers);
+  const list = names.length
+    ? names.map(n => row(n, cfg.mcpServers[n] || {})).join('')
+    : '<div style="color:var(--fg-dim);font-size:13px;padding:4px 2px">No servers yet.</div>';
+
+  const html = '<div style="font-size:12px;color:var(--fg-dim);padding-bottom:8px">Each server runs as a subprocess and its tools join the built-in ones. Saving reconnects right away.</div>'
+    + list
+    + '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">'
+    + '<div style="font-size:13px;color:var(--accent-2);margin-bottom:8px">Add a server</div>'
+    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Start from</label>'
+    + '<select id="mcp-preset" style="' + FCSS + ';font-family:inherit;margin-bottom:4px">'
+    + MCP_PRESETS.map((p, i) => '<option value="' + i + '">' + esc(p.label) + '</option>').join('')
+    + '</select>'
+    + '<div id="mcp-preset-hint" style="font-size:11px;color:var(--fg-faint);margin-bottom:10px"></div>'
+    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Name</label>'
+    + '<input id="mcp-name" placeholder="filesystem" spellcheck="false" autocomplete="off" style="' + FCSS + ';margin-bottom:10px"/>'
+    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Command</label>'
+    + '<input id="mcp-cmd" placeholder="npx" spellcheck="false" autocomplete="off" style="' + FCSS + ';margin-bottom:10px"/>'
+    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Arguments, one per line</label>'
+    + '<textarea id="mcp-args" rows="4" spellcheck="false" style="' + FCSS + ';resize:vertical;margin-bottom:10px"></textarea>'
+    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Environment, one KEY=value per line (optional)</label>'
+    + '<textarea id="mcp-env" rows="2" spellcheck="false" style="' + FCSS + ';resize:vertical"></textarea>'
+    + '<div id="mcp-form-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>'
+    + '</div>';
+
+  showModal('Tool servers', html, [
+    { label: 'Edit as JSON', onclick: () => { setTimeout(showMcpJsonModal, 60); } },
+    { label: 'Close' },
+    { label: 'Add server', kind: 'primary', onclick: async () => {
+        const name = (document.getElementById('mcp-name').value || '').trim();
+        const cmd = (document.getElementById('mcp-cmd').value || '').trim();
+        const err = document.getElementById('mcp-form-err');
+        if (!name || !cmd) { err.textContent = 'A name and a command are both required.'; return false; }
+        if (cfg.mcpServers[name]) { err.textContent = 'There is already a server called ' + name + '.'; return false; }
+        const args = (document.getElementById('mcp-args').value || '').split('\n').map(s => s.trim()).filter(Boolean);
+        if (args.some(a => a.indexOf('<') >= 0 && a.indexOf('>') >= 0)) {
+          err.textContent = 'Replace the placeholder in angle brackets with a real path first.';
+          return false;
+        }
+        cfg.mcpServers[name] = { command: cmd, args: args, env: _mcpParseEnv(document.getElementById('mcp-env').value) };
+        await _mcpSaveAndReload(cfg);
+      } },
+  ]);
+
+  const presetSel = document.getElementById('mcp-preset');
+  const fill = () => {
+    const p = MCP_PRESETS[Number(presetSel.value) || 0];
+    document.getElementById('mcp-name').value = p.name;
+    document.getElementById('mcp-cmd').value = p.command;
+    document.getElementById('mcp-args').value = (p.args || []).join('\n');
+    document.getElementById('mcp-preset-hint').textContent = p.hint || '';
+  };
+  if (presetSel) { presetSel.addEventListener('change', fill); fill(); }
+
+  const body = document.getElementById('modal-body');
+  if (body && !body._mcpRmWired) {
+    body._mcpRmWired = true;
+    body.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-mcp-rm]');
+      if (!b) return;
+      const cur = window._mcpCfg || {};
+      if (cur.mcpServers) delete cur.mcpServers[b.dataset.mcpRm];
+      await _mcpSaveAndReload(cur);
+      document.getElementById('modal').classList.remove('open');
+      setTimeout(showMcpServersModal, 150);
+    });
+  }
+}
+
 // Interactive tool-permissions panel: per-tool remove (un-set an "always") +
 // a YOLO auto-approve toggle. Replaces the old text-only /perms dump.
 async function showPermsModal() {
@@ -11036,64 +11228,7 @@ async function refreshSettings() {
     // MCP pane wiring - edit mcp.json + show client snippet. Live bridge
     // status comes from /api/mcp/status; rendered into #mcp-status-box.
     const mcpEditBtn = $('btn-mcp-edit');
-    if (mcpEditBtn) mcpEditBtn.onclick = async () => {
-      try {
-        const r = await api('/api/mcp/config');
-        const current = (r && r.json) ? r.json : JSON.stringify({
-          mcpServers: {
-            "example-filesystem": {
-              command: "npx",
-              args: ["-y", "@modelcontextprotocol/server-filesystem", "~/Documents"],
-              env: {}
-            }
-          }
-        }, null, 2);
-        showModal('Edit mcp.json',
-          `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
-          `Standard MCP server config. Each entry runs as a subprocess. ` +
-          `Saving reconnects them right away, no restart.</div>` +
-          `<textarea id="mcp-json-input" style="width:100%;min-height:340px;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:12px;resize:vertical;">${esc(current)}</textarea>` +
-          `<div id="mcp-json-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>`,
-          [
-            { label: 'Cancel' },
-            { label: 'Save', primary: true, onclick: async () => {
-                const ta = document.getElementById('mcp-json-input');
-                const errBox = document.getElementById('mcp-json-err');
-                const txt = (ta?.value || '').trim();
-                try { JSON.parse(txt); } catch (e) {
-                  if (errBox) errBox.textContent = 'JSON parse error: ' + e.message;
-                  return false;  // keep modal open
-                }
-                try {
-                  const sv = await api('/api/mcp/config', {
-                    method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({ json: txt }),
-                  });
-                  if (sv.ok) {
-                    // Apply it now rather than telling the user to restart the
-                    // whole app to pick up an edited config.
-                    toast('mcp.json saved', 'Reconnecting servers…', 'ok', 4000);
-                    try {
-                      const rl = await api('/api/mcp/reload', { method: 'POST' });
-                      if (rl && rl.ok === false) {
-                        toast('Saved, but reconnect failed', rl.error || 'restart Hearth to apply', 'warn', 8000);
-                      } else {
-                        const n = (rl && rl.servers) || 0;
-                        toast('MCP reloaded', n ? `${n} server${n === 1 ? '' : 's'} reconnecting` : 'no servers configured', 'ok', 5000);
-                      }
-                    } catch (e) {
-                      toast('Saved, but reconnect failed', 'restart Hearth to apply', 'warn', 8000);
-                    }
-                    try { refreshMcpStatus(); } catch {}
-                  } else {
-                    toast('Save failed', sv.error || 'unknown', 'err');
-                  }
-                } catch (e) { toast('Save failed', e.message, 'err'); }
-              }
-            },
-          ]);
-      } catch (e) { toast('Open failed', e.message, 'err'); }
-    };
+    if (mcpEditBtn) mcpEditBtn.onclick = () => showMcpServersModal();
     const mcpSnippetBtn = $('btn-mcp-snippet');
     if (mcpSnippetBtn) mcpSnippetBtn.onclick = () => {
       // The backend computes the correct launcher for how Hearth is actually
