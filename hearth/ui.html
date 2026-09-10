@@ -145,21 +145,26 @@
   }
   .model-picker:hover { border-color: var(--border-strong); }
   /* Load progress, shown ON the sticker so the thing being loaded is the thing
-     that fills. A violet wash sweeps left to right behind the name, with a hard
-     2px line at the bottom edge for a precise read when the name is long. Both
-     disappear when the load finishes. */
+     that fills. One line along the bottom edge and nothing else. A wash behind
+     the name tinted the whole control while it filled, which read as the
+     sticker being in some altered state rather than as a measure of progress.
+     A rail underneath, unfilled portion visible, is the same information
+     without touching anything else. */
   .model-picker { position: relative; overflow: hidden; }
   .model-picker > * { position: relative; z-index: 1; }
-  .model-picker::before,
-  .model-picker::after { content: ""; position: absolute; left: 0; opacity: 0;
-    transition: width .35s var(--ease), opacity .25s var(--ease); pointer-events: none; z-index: 0; }
-  .model-picker::before { top: 0; bottom: 0; width: 0;
-    background: linear-gradient(90deg, rgba(139,92,246,.22), rgba(167,139,250,.10)); }
-  .model-picker::after { bottom: 0; height: 2px; width: 0;
-    background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-  .model-picker.is-loading::before,
+  /* The rail: the full width, so the remaining distance is visible too. */
+  .model-picker::before { content: ""; position: absolute; left: 0; right: 0;
+    bottom: 0; height: 2px; opacity: 0; background: var(--border);
+    transition: opacity .25s var(--ease); pointer-events: none; z-index: 0; }
+  /* The fill. */
+  .model-picker::after { content: ""; position: absolute; left: 0; bottom: 0;
+    height: 2px; width: 0; opacity: 0; border-radius: 0 2px 2px 0;
+    background: var(--accent-2);
+    transition: width .35s var(--ease), opacity .25s var(--ease);
+    pointer-events: none; z-index: 0; }
+  .model-picker.is-loading::before { opacity: 1; }
   .model-picker.is-loading::after { opacity: 1; width: var(--load-pct, 0%); }
-  .model-pct { font-size: 10.5px; color: var(--accent-2); font-family: var(--mono);
+  .model-pct { font-size: 10.5px; color: var(--fg-dim); font-family: var(--mono);
     margin-left: 2px; white-space: nowrap; }
   .model-state {
     width: 7px; height: 7px; border-radius: 50%;
