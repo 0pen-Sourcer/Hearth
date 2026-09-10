@@ -859,7 +859,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "command":     {"type": "string"},
                 "cwd":         {"type": "string", "description": "Working dir. Default = workspace."},
                 "shell":       {"type": "string", "description": "'cmd' to force cmd.exe on Windows. Default = powershell."},
-                "description": {"type": "string", "description": "Short label for the job ('install torch', 'download Hermes-3 GGUF'). Shown in job_list."},
+                "description": {"type": "string", "description": "Short label for the job ('install torch', 'download Hermes-3 GGUF'). Shown in list_jobs."},
             },
             "required": ["command"],
         },
@@ -894,18 +894,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "required": ["job_id"],
         },
     },
-    {
-        "name": "job_list",
-        "description": "List recent background jobs (newest first). Pass active_only=true to see only running / starting jobs.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "active_only": {"type": "boolean", "description": "Default false — include completed/failed/killed."},
-            },
-        },
-    },
-
-    # ---- MEDIA GENERATION (image + video via xAI Grok Imagine / OpenAI) ----
     {
         "name": "generate_image",
         "description": (
@@ -6324,7 +6312,6 @@ _HANDLERS = {
     "job_wait":   lambda p: __import__("hearth.jobs", fromlist=["wait_job"]).wait_job(
         p.get("job_id", ""), timeout_s=min(float(p.get("timeout_s") or 30), 300.0)),
     "job_kill":   lambda p: __import__("hearth.jobs", fromlist=["kill_job"]).kill_job(p.get("job_id", "")),
-    "job_list":   lambda p: __import__("hearth.jobs", fromlist=["list_jobs"]).list_jobs(active_only=bool(p.get("active_only"))),
     "generate_image":    _generate_image,
     "generate_video":    _generate_video,
     "check_video_task":  _check_video_task,
@@ -8198,6 +8185,20 @@ _fill_required_param_help()
 # model that calls a deferred tool directly still works. So this is safe to
 # default on — worst case the model uses a niche tool slightly less often, never
 # a hard break. Opt out entirely with HEARTH_ALL_TOOLS=1 (loads every schema).
+for _cd in (
+    {"name": "summarize_file", "description":
+        "Summarise a long document instead of reading all of it. Use when "
+        "read_file says a file is too big, or when the question is about the "
+        "gist rather than a specific line. Handles PDF, DOCX, TXT, MD and code.",
+     "parameters": {"type": "object", "properties": {
+        "path": {"type": "string", "description": "file to summarise"},
+        "max_chars": {"type": "integer", "description":
+            "cap on the summary length (default 4000)"}},
+        "required": ["path"]}},
+):
+    TOOL_DEFINITIONS.append(_cd)
+
+
 _DEFERRED_TOOLS = {
     # image / video generation. All deferred, including forge_generate: local
     # Forge image-gen is niche (most turns aren't image gen), and its schema is
@@ -8210,6 +8211,22 @@ _DEFERRED_TOOLS = {
     "create_plugin", "list_plugins", "delete_plugin", "create_skill",
     # soul / persona editing
     "edit_soul", "append_soul", "read_soul", "draft_soul",
+    # summarising a long document, reached when read_file says a file is too big
+    "summarize_file",
+    # Raw pixel mouse control. The accessibility path (desktop_snapshot then
+    # desktop_click by name) is the one the persona teaches and the one that
+    # works; these are the fallback for a canvas or a game with no tree. In
+    # three months of real use they were called between zero and five times
+    # each while costing their schema on every single prompt. None is named in
+    # the persona or a skill, so deferring them cannot leave an instruction
+    # pointing at a tool the model cannot see.
+    "computer_scroll", "computer_drag", "computer_move", "computer_click",
+    "computer_screen",
+    # Interrupting to ask is rare and its own schema warns against it, and it
+    # errors outright on a bridge where nobody can answer.
+    "ask_user",
+    # Window layout is a bursty ask; the other window tools already defer.
+    "arrange_windows",
     # archive
     "list_archive", "extract_archive_file",
     # large-PDF map-reduce (niche; rediscovered via load_tools when the user
@@ -8225,7 +8242,7 @@ _DEFERRED_TOOLS = {
     # browser niche (browse/click/type/scroll stay core)
     "browse_key", "browse_close",
     # duplicate job controls (start_job/list_jobs/get_job_result stay core)
-    "job_kill", "job_list", "job_status", "job_wait",
+    "job_kill", "job_status", "job_wait",
     # email (opt-in, needs an app password) — surfaces via load_tools when the
     # user mentions email, so it never clutters the default tool list
     "read_inbox", "send_email",

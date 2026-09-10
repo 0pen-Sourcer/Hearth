@@ -13,6 +13,7 @@ import glob
 import io
 import json
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -178,9 +179,66 @@ def check_dryrun_covers_side_effects() -> list:
     return out
 
 
+def check_prompt_only_names_visible_tools() -> list:
+    """Everything that tells the model which tool to reach for has to name a
+    tool the model can actually see.
+
+    Two failure shapes, both real. A name with a handler and no schema is an
+    instruction pointing at nothing, which is what summarize_file was for
+    months while the persona, set_reminder's own description and a skill all
+    sent the model to it. A name that is DEFERRED is an instruction pointing
+    at something invisible until load_tools surfaces it, which is the shape
+    created by moving a tool out of the always-on set without checking who
+    teaches it.
+
+    Matched against the real tool names rather than by guessing identifiers
+    out of prose, since the persona writes some of them bare and some with
+    arguments, and a regex over identifiers finds str.append instead."""
+    hearth, tools = _reg()
+    known = {t["name"] for t in hearth.TOOL_DEFINITIONS}
+    deferred = set(getattr(tools, "_DEFERRED_TOOLS", set()) or set())
+    handlers = set(getattr(tools, "_HANDLERS", {}) or {})
+
+    sources = [os.path.join(ROOT, "hearth", "persona.py")]
+    for sub in ("skills", "subagents"):
+        for root, _d, files in os.walk(os.path.join(ROOT, "hearth", sub)):
+            sources += [os.path.join(root, f) for f in files
+                        if f.endswith((".md", ".py"))]
+    texts = []
+    for path in sources:
+        try:
+            texts.append((os.path.relpath(path, ROOT),
+                          io.open(path, encoding="utf-8", errors="ignore").read()))
+        except OSError:
+            pass
+    # A tool description that names another tool is the same instruction.
+    texts.append(("tool descriptions",
+                  " ".join(t.get("description", "") for t in hearth.TOOL_DEFINITIONS)))
+
+    # The meta-tool that surfaces the deferred ones carries its own schema
+    # (_LOAD_TOOLS_SCHEMA) and is injected into the active list separately, so
+    # it is absent from TOOL_DEFINITIONS on purpose.
+    exempt = {"load_tools"}
+    out = []
+    for name in sorted(handlers - exempt):
+        word = re.compile(r"\b" + re.escape(name) + r"\b")
+        for rel, text in texts:
+            if not word.search(text):
+                continue
+            # Deferred is fine and deliberate: the persona describes plenty
+            # of capabilities the model reaches through load_tools. Having no
+            # schema at all is the bug, because then nothing reaches it.
+            if name not in known:
+                out.append(f"{rel} names '{name}', which has a handler but no "
+                           f"schema, so nothing can call it")
+            break   # one report per tool is enough
+    return out
+
+
 CHECKS = [
     ("every advertised tool has a callable handler", check_handlers),
     ("acting tools are dry-run guarded", check_dryrun_covers_side_effects),
+    ("the prompt only names tools the model can see", check_prompt_only_names_visible_tools),
     ("no method orphaned outside its class", check_no_orphaned_methods),
     ("risk/defer lists only name real tools", check_name_lists),
     ("required parameters are described", check_required_described),
