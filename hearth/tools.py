@@ -1166,7 +1166,13 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "Ns'. Without the delay, the screenshot captures Hearth "
             "itself because the chat was in focus when they sent the "
             "prompt. Skip the delay only when they explicitly want THIS "
-            "Hearth window captured (e.g. 'screenshot what you just did')."
+            "Hearth window captured (e.g. 'screenshot what you just did'). "
+            "Hearth's own windows are left OUT of the image by default, "
+            "because a shot containing the chat makes you describe yourself "
+            "or click your own controls. When the question is ABOUT Hearth "
+            "(the user says something here looks wrong, or asks what you "
+            "just rendered), pass include_hearth: true so you can actually "
+            "look at it."
         ),
         "parameters": {
             "type": "object",
@@ -1175,6 +1181,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "Seconds to wait before capturing (0-10). Use 3-5 "
                     "when the user wants a different app captured so "
                     "they can switch to it. Default 0 (immediate)."},
+                "include_hearth": {"type": "boolean", "description":
+                    "Keep Hearth's own windows in the image. Default false. "
+                    "Set true to inspect Hearth itself, which is the only way "
+                    "to answer a question about its own interface."},
             },
         },
     },
@@ -5050,7 +5060,7 @@ def _screenshot(p: Dict) -> str:
         # assistant. Excluded only for the moment of the grab, so a screen
         # recorder still sees the window.
         from .win_capture import own_windows_hidden as _own_hidden
-        with _own_hidden():
+        with _own_hidden(enabled=not bool(p.get("include_hearth"))):
             img = ImageGrab.grab()
         img.save(out)
     except Exception as e:
