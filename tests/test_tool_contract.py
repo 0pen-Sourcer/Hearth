@@ -152,8 +152,29 @@ def check_serialisable() -> list:
         return [f"TOOL_DEFINITIONS is not JSON-serialisable: {e}"]
 
 
+def check_dryrun_covers_side_effects() -> list:
+    """A benchmark runs in dry-run so it can measure which tool a model picks
+    without moving the real mouse or writing real files. Any tool that acts on
+    the machine has to be in that set, or a benchmark drives the desktop for
+    real. A batch tool is the easy one to forget, since it looks like a wrapper
+    rather than an action."""
+    hearth, tools = _reg()
+    guarded = getattr(tools, "_DRYRUN_GUARDED", set()) or set()
+    known = {t["name"] for t in hearth.TOOL_DEFINITIONS}
+    out = [f"_DRYRUN_GUARDED names '{n}', which is not a registered tool"
+           for n in sorted(guarded) if n not in known]
+    # Everything gated for permission acts on the machine by definition. The
+    # exceptions read rather than write.
+    read_only = {"read_inbox", "disk_usage", "launch_team"}
+    for n in sorted(getattr(tools, "_RISKY_TOOLS", set()) or set()):
+        if n in known and n not in guarded and n not in read_only:
+            out.append(f"{n} is gated for permission but not dry-run guarded")
+    return out
+
+
 CHECKS = [
     ("every advertised tool has a callable handler", check_handlers),
+    ("acting tools are dry-run guarded", check_dryrun_covers_side_effects),
     ("no method orphaned outside its class", check_no_orphaned_methods),
     ("risk/defer lists only name real tools", check_name_lists),
     ("required parameters are described", check_required_described),

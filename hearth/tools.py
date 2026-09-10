@@ -7964,11 +7964,14 @@ _DRYRUN_GUARDED = {
     "run_command", "open_app", "open_url", "open_in_browser",
     "computer_move", "computer_click", "computer_type", "computer_key",
     "computer_scroll", "computer_drag", "desktop_click", "desktop_type",
+    "execute_actions",   # a batch of the above, so it needs the same guard
     "browse", "browse_click", "browse_type", "browse_scroll", "browse_key",
     "set_reminder", "cancel_reminder", "snooze_reminder",
     "send_email", "memory_save", "memory_forget", "edit_soul", "append_soul",
     "create_plugin", "delete_plugin", "create_skill", "install_skill",
     "generate_image", "generate_video", "launch_team",
+    "extract_archive_file",              # writes files out of an archive
+    "forge_generate", "forge_shutdown",  # drive an external image server
 }
 
 
