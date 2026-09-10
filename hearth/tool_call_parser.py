@@ -189,7 +189,7 @@ def _first_json_object(s: str) -> str:
     finds where the object really ends, whatever the tags do."""
     start = s.find("{")
     if start < 0:
-        return ""
+        return "", False
     depth = 0
     i = start
     n = len(s)
@@ -215,7 +215,7 @@ def _first_json_object(s: str) -> str:
     return ""
 
 
-def _complete_truncated_json(s: str) -> str:
+def _complete_truncated_json(s: str) -> "tuple[str, bool]":
     """Close an object the model stopped writing partway through.
 
     A long generation is regularly cut a brace or a quote short, and the result
@@ -223,6 +223,11 @@ def _complete_truncated_json(s: str) -> str:
     whole thing, so finish what is open: shut an unterminated string, drop a
     dangling key or comma, and close each container still on the stack. Returns
     "" when there is nothing recoverable.
+
+    Returns (json, severed). `severed` is True when a STRING was still open at
+    the end, which means a value was cut mid-way and whatever it holds is a
+    fragment. False means every value arrived whole and only closing braces
+    were missing, which is a different and harmless kind of incomplete.
 
     Only reached after a strict parse has already failed."""
     start = s.find("{")
@@ -251,10 +256,11 @@ def _complete_truncated_json(s: str) -> str:
                 if stack:
                     stack.pop()
                 if not stack:
-                    return s[start:i + 1]      # balanced already
+                    return s[start:i + 1], False   # balanced already
         i += 1
     if not stack:
-        return ""
+        return "", False
+    severed = in_str
     out = s[start:]
     if in_str:
         if esc:                                # trailing lone backslash
@@ -271,7 +277,7 @@ def _complete_truncated_json(s: str) -> str:
                 if stripped.endswith(","):
                     stripped = stripped[:-1].rstrip()
     out = stripped
-    return out + "".join(reversed(stack))
+    return out + "".join(reversed(stack)), severed
 
 
 def loads_lenient(s: str) -> Optional[Dict[str, Any]]:
@@ -325,6 +331,15 @@ def _extract_gemma(match: "re.Match[str]", tool_names: List[str]) -> Optional[Di
     }
 
 
+# Tools whose arguments carry content rather than a reference. A truncated
+# path fails loudly and harmlessly; truncated content is written, sent or run
+# as though it were whole.
+_TRUNCATION_UNSAFE = frozenset({
+    "write_file", "edit_file", "run_command", "send_email",
+    "create_skill", "create_plugin", "memory_save", "append_soul", "edit_soul",
+})
+
+
 def _extract_chatml(match: "re.Match[str]", tool_names: List[str]) -> Optional[Dict[str, Any]]:
     """Hermes / Qwen 2.5 / Qwen 3 / NousResearch family:
     ``<tool_call>{"name": "X", "arguments": {...}}</tool_call>``
@@ -351,12 +366,27 @@ def _extract_chatml(match: "re.Match[str]", tool_names: List[str]) -> Optional[D
         wider = _first_json_object(whole)
         if wider and len(wider) > len(body):
             obj = _try_json(wider)
+    truncated = False
     if not obj:
         # A long generation is often cut a brace or a quote short. The call is
         # otherwise complete, so finish it rather than losing the whole write.
-        patched = _complete_truncated_json(body)
+        patched, severed = _complete_truncated_json(body)
         if patched:
             obj = _try_json(patched)
+            truncated = bool(obj) and severed
+    if obj and truncated:
+        # Repairing the tail is right for a call whose arguments are a path or
+        # an index, and wrong for one carrying CONTENT. A write cut mid-string
+        # completes to a stub, and running it replaces the file with the part
+        # that arrived, which looks like a success and loses the rest. There is
+        # no way to tell a finished value from a severed one, so for the tools
+        # where that is destructive the call is dropped instead. Its markup
+        # stays in the text, which is what marks the call unreadable, and the
+        # model is told to send it again.
+        _name = _resolve_tool_name(obj.get("name") or obj.get("function") or "",
+                                   tool_names)
+        if _name in _TRUNCATION_UNSAFE:
+            return None
     if obj:
         name = obj.get("name") or obj.get("function") or ""
         args = obj.get("arguments") or obj.get("parameters")

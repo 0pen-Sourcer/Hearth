@@ -74,6 +74,37 @@ _ran_branch = _src.split("if fallback_calls:", 1)[-1].split("else:", 1)[0]
 check("and the flag is set inside the branch that ran the calls",
       _marker in _ran_branch)
 
+# ---------------------------------------------- a call cut off mid-generation
+# Completing a severed tail is right when the arguments are a reference and
+# wrong when they are content. A write cut mid-string completes to a stub, and
+# running it replaces the file with the part that arrived, which reports
+# success and loses the rest.
+CUT_WRITE = ('writing that now:\n<tool_call>\n'
+             '{"name": "write_file", "arguments": {"path": "a.txt", "content": "hel')
+CUT_CMD = ('ok:\n<tool_call>\n'
+           '{"name": "run_command", "arguments": {"command": "Remove-Item C:/a -Recur')
+CUT_READ = ('ok:\n<tool_call>\n{"name": "read_file", "arguments": {"path": "a.tx')
+
+_names = ["write_file", "read_file", "run_command"]
+cleaned, calls = tcp.parse(CUT_WRITE, _names)
+check("a truncated write is not run with the stub it arrived as", not calls)
+check("and it is flagged unreadable so the model resends", tcp.has_tool_call(cleaned))
+
+cleaned, calls = tcp.parse(CUT_CMD, _names)
+check("a truncated command is not run half-written", not calls)
+
+cleaned, calls = tcp.parse(CUT_READ, _names)
+check("a truncated path still recovers, since it fails harmlessly", len(calls) == 1)
+
+_, calls = tcp.parse('ok:\n<tool_call>\n{"name": "write_file", "arguments": '
+                     '{"path": "a.txt", "content": "hi"}}\n</tool_call>', _names)
+check("a complete write is untouched", len(calls) == 1)
+
+_, calls = tcp.parse('ok:\n<tool_call>\n{"name": "write_file", "arguments": '
+                     '{"path": "a.txt", "content": "hi"}\n</tool_call>', _names)
+check("a write one brace short still recovers, it is closed not severed",
+      len(calls) == 1)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
