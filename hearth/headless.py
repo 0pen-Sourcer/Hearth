@@ -1018,8 +1018,13 @@ async def run_once(
         # showing N% used + a 'Compacting...' badge when it kicks in. `measured`
         # tells the client the number is server-truth (post-calibration), not a
         # raw estimate.
+        # compact_at rides along so the interface can say how much room is
+        # left before compaction fires, rather than what fraction of a budget
+        # is consumed. It is the moment that matters, and hardcoding the
+        # fraction in the interface would leave two copies to drift apart.
         emit("context_state", used=_est, budget=_budget, pct=_pct,
-             messages=len(messages), measured=bool(_ctx_bias))
+             messages=len(messages), measured=bool(_ctx_bias),
+             compact_at=COMPACT_AT)
         if _est > _budget * COMPACT_AT and len(messages) > 12 and _compact_fails < 3:
             _last_msg = messages[-1] if messages else {}
             _last_role = _last_msg.get("role")

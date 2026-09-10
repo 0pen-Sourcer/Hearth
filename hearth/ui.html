@@ -7632,6 +7632,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // `opts.silent=true` - don't render a user bubble at all (used by the
   // subagent autofold: model just speaks, no fake "user" turn appears).
   const _silent = !!opts.silent;
+  // A fresh turn ends the quiet period a compaction started, so the ring can
+  // warn again if this turn refills the room.
+  STATE._ctxQuiet = false;
   // `opts.notify=true` — a notification-flush turn: a due reminder / finished
   // subagent should be surfaced while idle. We send a sentinel the backend
   // swaps for the actual <task-notification>, and crucially we add NO user
@@ -8574,22 +8577,29 @@ async function send(forced = null, displayAs = null, opts = {}) {
       return;
     }
     if (ev.type === 'context_state') {
-      // Warn-on-pressure mode: hide the ring entirely until ctx crosses 70%.
-      // Most users never care about percentage; show it ONLY when something
-      // is actually about to happen (compaction looming). Power users who
-      // want it always-visible can toggle via Settings (future v0.7).
+      // Counts DOWN to the thing that actually happens, not up from zero.
+      // A ring reading 83% full says something is wrong without saying what;
+      // "17% left" says how much room remains before the chat gets compacted,
+      // which is the only event the number predicts. Measured against the
+      // compaction point rather than the whole budget, since the budget is
+      // never reached: compaction fires first.
       const wrap = document.getElementById('ctx-ring-wrap');
       const ring = document.getElementById('ctx-ring');
       const pct  = document.getElementById('ctx-ring-pct');
       if (wrap && ring && pct) {
         const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
         const p = Math.max(0, Math.min(100, ev.pct || 0));
-        // Show ring only when ctx pressure is real. Compaction badge needs
-        // it visible regardless, so we don't hide while .compacting is set.
-        const shouldShow = p >= 70 || wrap.classList.contains('compacting');
+        const at = Math.max(0.05, Math.min(1, ev.compact_at || 0.75));
+        // How much of the room before compaction is still free.
+        const left = Math.max(0, Math.min(100, Math.round((1 - (p / 100) / at) * 100)));
+        // A compaction just ran, so leave it alone until the next turn rather
+        // than reappearing at a low number the moment room was made.
+        const shouldShow = (left <= 30 && !STATE._ctxQuiet)
+                           || wrap.classList.contains('compacting');
         wrap.hidden = !shouldShow;
-        ring.style.setProperty('--ctx-deg', (p * 3.6).toFixed(1) + 'deg');
-        pct.textContent = p + '%';
+        // The arc drains as the room runs out.
+        ring.style.setProperty('--ctx-deg', (left * 3.6).toFixed(1) + 'deg');
+        pct.textContent = left + '%';
         // Build a tooltip that explains the math: chat usage / effective
         // budget (which is total_ctx minus tool-schema overhead). Without
         // this, users wondered why a 1M-context Grok showed 200K - because
@@ -8599,10 +8609,11 @@ async function send(forced = null, displayAs = null, opts = {}) {
         const tools = b.tools ? fmt(b.tools) : '?';
         const src = b.source ? ` · source: ${b.source}` : '';
         const meas = ev.measured ? ' (server-measured)' : ' (estimated)';
-        wrap.title = `chat usage: ${fmt(ev.used||0)} / ${fmt(ev.budget||0)} effective (${p}%)${meas}\n` +
-                     `model context: ${total} total = ${fmt(ev.budget||0)} effective + ${tools} tool schemas${src}`;
-        wrap.classList.toggle('hot',  p >= 90);
-        wrap.classList.toggle('warn', p >= 70 && p < 90);
+        wrap.title = `${left}% of room left before this chat is compacted${meas}\n` +
+                     `using ${fmt(ev.used||0)} of ${fmt(Math.round((ev.budget||0)*at))} before that happens\n` +
+                     `model context: ${total} total = ${fmt(ev.budget||0)} usable + ${tools} tool schemas${src}`;
+        wrap.classList.toggle('hot',  left <= 10);
+        wrap.classList.toggle('warn', left > 10 && left <= 30);
         wrap.classList.remove('compacting');
       }
       return;
@@ -8639,6 +8650,11 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'compacted') {
       setState('thinking…');   // back to the real work
+      // Room was just made, so stop warning about running out of it. Without
+      // this the ring reappears the instant the next turn measures context,
+      // still low because compaction rarely gets far under the line, and it
+      // reads as though nothing happened. Cleared when the user sends again.
+      STATE._ctxQuiet = true;
       const wrap = document.getElementById('ctx-ring-wrap');
       const ring = document.getElementById('ctx-ring');
       const pct  = document.getElementById('ctx-ring-pct');
