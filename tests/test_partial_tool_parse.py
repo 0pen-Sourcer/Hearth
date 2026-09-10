@@ -94,7 +94,7 @@ cleaned, calls = tcp.parse(CUT_CMD, _names)
 check("a truncated command is not run half-written", not calls)
 
 cleaned, calls = tcp.parse(CUT_READ, _names)
-check("a truncated path still recovers, since it fails harmlessly", len(calls) == 1)
+check("a severed value never runs, whichever tool it names", not calls)
 
 _, calls = tcp.parse('ok:\n<tool_call>\n{"name": "write_file", "arguments": '
                      '{"path": "a.txt", "content": "hi"}}\n</tool_call>', _names)

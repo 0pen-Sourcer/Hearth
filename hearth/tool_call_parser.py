@@ -331,15 +331,6 @@ def _extract_gemma(match: "re.Match[str]", tool_names: List[str]) -> Optional[Di
     }
 
 
-# Tools whose arguments carry content rather than a reference. A truncated
-# path fails loudly and harmlessly; truncated content is written, sent or run
-# as though it were whole.
-_TRUNCATION_UNSAFE = frozenset({
-    "write_file", "edit_file", "run_command", "send_email",
-    "create_skill", "create_plugin", "memory_save", "append_soul", "edit_soul",
-})
-
-
 def _extract_chatml(match: "re.Match[str]", tool_names: List[str]) -> Optional[Dict[str, Any]]:
     """Hermes / Qwen 2.5 / Qwen 3 / NousResearch family:
     ``<tool_call>{"name": "X", "arguments": {...}}</tool_call>``
@@ -375,18 +366,17 @@ def _extract_chatml(match: "re.Match[str]", tool_names: List[str]) -> Optional[D
             obj = _try_json(patched)
             truncated = bool(obj) and severed
     if obj and truncated:
-        # Repairing the tail is right for a call whose arguments are a path or
-        # an index, and wrong for one carrying CONTENT. A write cut mid-string
-        # completes to a stub, and running it replaces the file with the part
-        # that arrived, which looks like a success and loses the rest. There is
-        # no way to tell a finished value from a severed one, so for the tools
-        # where that is destructive the call is dropped instead. Its markup
-        # stays in the text, which is what marks the call unreadable, and the
-        # model is told to send it again.
-        _name = _resolve_tool_name(obj.get("name") or obj.get("function") or "",
-                                   tool_names)
-        if _name in _TRUNCATION_UNSAFE:
-            return None
+        # A value cut mid-string is a fragment, and running a call built from
+        # one is how a write ends up replacing a file with the part that
+        # arrived. Nothing distinguishes a fragment from a finished value, so
+        # a severed call never runs, whichever tool it names. Its markup stays
+        # in the text, which is what marks it unreadable, and the model is
+        # asked to send it again.
+        #
+        # Closing braces are a different matter. Every value arrived whole and
+        # only the structure is missing, which a local model emitting calls as
+        # text does constantly, so that still recovers.
+        return None
     if obj:
         name = obj.get("name") or obj.get("function") or ""
         args = obj.get("arguments") or obj.get("parameters")
