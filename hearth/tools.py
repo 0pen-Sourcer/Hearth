@@ -7947,7 +7947,16 @@ except Exception:
 ACTIVITY_LOG = os.path.join(LOGS_DIR, "activity.jsonl")
 
 
+# The activity log is the record of what the agent actually did, and it is read
+# back to answer questions like which tools get used and which ones fail. A test
+# suite that probes every tool writes a call and an error for each one, so a few
+# runs bury the real signal under entries nobody made. Tests set this.
+_ACTIVITY_MUTED = os.environ.get("HEARTH_NO_ACTIVITY_LOG") == "1"
+
+
 def _log_activity(event: str, **fields: Any) -> None:
+    if _ACTIVITY_MUTED:
+        return
     rec = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event, **fields}
     try:
         with open(ACTIVITY_LOG, "a", encoding="utf-8") as f:

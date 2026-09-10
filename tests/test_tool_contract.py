@@ -19,6 +19,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+# check_rejection_path calls every tool with empty arguments, which would write
+# a call and an error into the real activity log for each one. That log is read
+# back to work out which tools actually get used, and a handful of runs is
+# enough to drown the real numbers. Set before hearth is imported.
+os.environ["HEARTH_NO_ACTIVITY_LOG"] = "1"
+
 
 def _reg():
     import hearth
