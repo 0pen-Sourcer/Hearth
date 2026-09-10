@@ -1232,6 +1232,9 @@ def _load_settings() -> Dict:
         "voice_name": "am_michael",  # Kokoro voice id (am_/af_/bm_/bf_ + name). am_michael = calm neutral baseline.
         "agent_name": "JARVIS",      # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
         "stt_model": "base.en",  # base.en / small.en / medium.en
+        # Memory bookkeeping runs on most turns, so its cards can outnumber
+        # the reply. Display only; the events are still recorded either way.
+        "show_memory_tools": True,
         "theme": "warm-flame",
         "preferred_model": "",
         "llm_provider": "local",

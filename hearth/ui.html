@@ -3738,6 +3738,15 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">Show memory tool cards</div>
+            <div class="hint">JARVIS saves and recalls facts on most turns, so those cards can outnumber the reply itself. Turn this off to keep them out of the chat. It changes nothing about what gets remembered, and the cards come back if you turn it on again, in old chats too.</div>
+          </div>
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="setting-show-memory-tools" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;"/>
+          </label>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">House rules</div>
             <div class="hint">Always-do / never-do rules live in <code>~/Jarvis/rules.md</code> and are re-read every turn. Edit freely, no restart.</div>
           </div>
@@ -5501,6 +5510,14 @@ function deriveBrainKind() {
 
 // THE one function that paints brain-derived UI. Idempotent: safe to call from
 // any refresh path. Reads STATE.brain + STATE.memCount, writes every display.
+// Memory bookkeeping runs on most turns, so its cards can outnumber the
+// reply itself. Hiding them is display only: the events stay on the message,
+// so turning this back on shows them again in old chats too.
+const _MEMORY_TOOLS = new Set(['memory_save', 'memory_recall', 'memory_list']);
+function _hideToolCard(name) {
+  return _MEMORY_TOOLS.has(name) && STATE.showMemoryTools === false;
+}
+
 function applyBrainState() {
   const b = STATE.brain;
   const $$id = (id) => document.getElementById(id);
@@ -5923,6 +5940,7 @@ function renderChat() {
         flushThink();
         putText(p);
         if (ev.kind === 'tool') {
+          if (_hideToolCard(ev.name)) continue;
           const t = makeToolCard(ev.name, ev.args || {});
           // Keep the green/red diff for file writes; the terse text result would
           // clobber it. Other tools show their result as before.
@@ -8217,6 +8235,15 @@ async function send(forced = null, displayAs = null, opts = {}) {
         _partialTool = null;
       }
       _sealLiveText();   // freeze text-so-far; the card drops BELOW it
+      if (_hideToolCard(ev.name)) {
+        // Still recorded on the message, just not drawn.
+        assistantMsg.events.push({ kind: 'tool', name: ev.name, args: ev.args || {},
+                                   result: '', ms: 0, pos: assistantMsg.content.length });
+        pendingTool = null;
+        pendingToolEvent = assistantMsg.events[assistantMsg.events.length - 1];
+        setState(`calling ${ev.name}…`);
+        return;
+      }
       pendingTool = makeToolCard(ev.name, ev.args || {});
       pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0, pos: assistantMsg.content.length };
       assistantMsg.events.push(pendingToolEvent);
@@ -8368,6 +8395,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
           pendingToolEvent.ms = ev.ms || 0;
         }
         pendingTool = null;
+        pendingToolEvent = null;
+      } else if (pendingToolEvent) {
+        // No card was drawn (memory tools hidden), but the event still carries
+        // the result, so turning the setting back on shows a complete card in
+        // the stored chat rather than an empty one.
+        pendingToolEvent.result = ev.content || '';
+        pendingToolEvent.ms = ev.ms || 0;
         pendingToolEvent = null;
       }
       // Checkpoint to disk after each tool result, so stopping a long agent run
@@ -11636,6 +11670,24 @@ async function refreshSettings() {
         });
       }
     }
+    // Memory tool cards. Display only, so it re-renders the open chat rather
+    // than touching anything the model does.
+    const _mt = document.getElementById('setting-show-memory-tools');
+    if (_mt) {
+      const _on = (STATE.settings || {}).show_memory_tools;
+      STATE.showMemoryTools = _on !== false;
+      _mt.checked = STATE.showMemoryTools;
+      if (!_mt._wired) {
+        _mt._wired = true;
+        _mt.addEventListener('change', async () => {
+          STATE.showMemoryTools = _mt.checked;
+          saveSetting('show_memory_tools', _mt.checked).catch(() => {});
+          try { renderChat(); } catch (e) {}
+          toast('Memory cards', _mt.checked ? 'Shown in chat.' : 'Hidden. Nothing changes about what is remembered.', 'ok', 3000);
+        });
+      }
+    }
+
     // Read-lockdown toggle (its own endpoint, not settings.json — it flips a live
     // guard in tools.py + a persisted pointer).
     const _ld = document.getElementById('setting-lockdown');
