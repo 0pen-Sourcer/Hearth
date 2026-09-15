@@ -104,6 +104,10 @@ jobs:
         run: |
           python tests/test_api_origin.py
 
+      - name: Workspace containment is by folder, not by prefix
+        run: |
+          python tests/test_containment.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"

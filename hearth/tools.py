@@ -293,6 +293,21 @@ def _trunc(s: str, cap: int) -> str:
 # PATH SAFETY
 # ============================================================
 
+def path_within(path: str, root: str) -> bool:
+    """True when `path` is `root` or inside it, judged by folder, not by text.
+
+    A string prefix test passes a sibling folder named Jarvis-something for a
+    root named Jarvis, because one name starts with the other. Compared
+    component by component instead, case-folded the way Windows compares,
+    and a path on another drive is outside rather than an error."""
+    try:
+        a = os.path.normcase(os.path.abspath(path))
+        b = os.path.normcase(os.path.abspath(root))
+        return os.path.commonpath([a, b]) == b
+    except ValueError:
+        return False
+
+
 def _resolve_read(p: str) -> str:
     """Return absolute path for a read-style op.
 
@@ -319,7 +334,7 @@ def _resolve_read(p: str) -> str:
             p = cwd_candidate
     else:
         p = os.path.abspath(p)
-    if _read_locked() and not p.startswith(WORKSPACE):
+    if _read_locked() and not path_within(p, WORKSPACE):
         raise PermissionError(f"Read locked to workspace: {WORKSPACE}")
     return p
 
@@ -2921,7 +2936,7 @@ def _find_file(p: Dict) -> str:
         ap = os.path.abspath(path)
         if ap in seen_loc or not os.path.isdir(ap):
             return
-        if _read_locked() and not ap.startswith(WORKSPACE):
+        if _read_locked() and not path_within(ap, WORKSPACE):
             return
         seen_loc.add(ap)
         locations.append(ap)

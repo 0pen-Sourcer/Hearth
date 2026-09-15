@@ -1377,7 +1377,8 @@ def _list_files(rel_path: str = "") -> Dict:
     """List files in workspace/<rel_path>. Safe — never escapes workspace."""
     rel = (rel_path or "").strip().strip("/").strip("\\")
     base = os.path.normpath(os.path.join(WORKSPACE, rel))
-    if not base.startswith(WORKSPACE):
+    from .tools import path_within
+    if not path_within(base, WORKSPACE):
         return {"error": "path escapes workspace"}
     if not os.path.isdir(base):
         return {"error": f"not a directory: {rel}"}
