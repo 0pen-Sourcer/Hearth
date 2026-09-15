@@ -22,6 +22,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+os.environ["HEARTH_NO_ACTIVITY_LOG"] = "1"   # the probes below are not real activity
+
 from hearth.tools import _is_destructive                            # noqa: E402
 
 FAILS: list = []
@@ -92,6 +94,26 @@ for _cmd in MUST_PASS:
           + (f"   [{_hit}]" if _hit else ""))
     if _hit:
         FAILS.append(_cmd)
+
+# ----------------------------------------------- the same guard, every shell
+# start_job hands a string to a shell exactly like run_command, but it had no
+# guard and no permission gate, so Remove-Item -Recurse ran as a background job
+# while run_command beside it refused. Checked on a path that does not exist,
+# and refused before anything is spawned.
+from hearth.tools import execute_tool, is_risky                     # noqa: E402
+
+_bad = "Remove-Item C:/hearth-bench-nonexistent -Recurse -Force"
+for _tool, _args in (("run_command", {"command": _bad}),
+                     ("start_job", {"command": _bad, "label": "probe"})):
+    _r = execute_tool(_tool, _args)
+    print(("ok    " if "refused" in _r else "FAIL  ") + f"{_tool} refuses a destructive command")
+    if "refused" not in _r:
+        FAILS.append(f"{_tool} guard")
+
+for _tool in ("run_command", "start_job", "send_to_phone", "install_skill"):
+    print(("ok    " if is_risky(_tool) else "FAIL  ") + f"{_tool} asks permission first")
+    if not is_risky(_tool):
+        FAILS.append(f"{_tool} gated")
 
 print()
 if FAILS:

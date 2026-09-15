@@ -531,7 +531,16 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
         body = r.get("what", "(empty)")
         action_tool = r.get("action_tool", "")
         action_args = r.get("action_args") or {}
-        needs_confirm = bool(action_tool) and action_tool in _CONFIRM_ON_FIRE
+        # Anything gated for permission in an ordinary turn is gated here too.
+        # Reading only this module's own list let a scheduled start_job fire
+        # an arbitrary shell command at the due time with no prompt, because
+        # the list had never been told start_job existed.
+        try:
+            from .tools import is_risky as _is_risky
+        except Exception:
+            _is_risky = lambda _n: True   # fail closed
+        needs_confirm = bool(action_tool) and (
+            action_tool in _CONFIRM_ON_FIRE or _is_risky(action_tool))
         full_result = ""
         if action_tool and not needs_confirm:
             full_result = _run_action(action_tool, action_args)

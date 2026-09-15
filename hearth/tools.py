@@ -3462,9 +3462,13 @@ def _ask_user(p: Dict) -> Dict[str, Any]:
         return {"ok": False, "error": f"ask_user surface error: {type(e).__name__}: {e}"}
 
 
-def _run_command(p: Dict) -> str:
-    cmd = _rewrite_python_invocation(p["command"])
-    cwd = p.get("cwd")
+def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
+    """Why a shell command must not run yet, or None when it may.
+
+    Shared by every tool that hands a string to a shell. A second copy is
+    how start_job ended up launching Remove-Item -Recurse as a background
+    job with no guard at all, while run_command beside it refused.
+    """
     # Destructive guardrail. Skipped when the user explicitly auto-approves
     # everything via env var, OR when this call has been threaded through
     # the per-call permission prompt and the user said yes (the bridges
@@ -3506,7 +3510,7 @@ def _run_command(p: Dict) -> str:
         bad = _is_destructive(cmd)
         if bad:
             return (
-                f"Error (run_command): refused to run a destructive command "
+                f"Error ({tool}): refused to run a destructive command "
                 f"WITHOUT explicit user approval.\n"
                 f"  Detected pattern: '{bad}'\n"
                 f"  Full command:     {cmd}\n\n"
@@ -3518,6 +3522,15 @@ def _run_command(p: Dict) -> str:
                 f"If the user truly wants this command auto-run, they can set "
                 f"JARVIS_AUTO_APPROVE=1."
             )
+    return None
+
+
+def _run_command(p: Dict) -> str:
+    cmd = _rewrite_python_invocation(p["command"])
+    cwd = p.get("cwd")
+    _why = _destructive_refusal(p, cmd, "run_command")
+    if _why:
+        return _why
     if cwd:
         cwd = _resolve_read(cwd)
     else:
@@ -6304,10 +6317,11 @@ _HANDLERS = {
     "run_command": _run_command,
     # Background-job tracking — see hearth/jobs.py. Lazy-import so a missing
     # ~/Jarvis/jobs/ dir or a stale module doesn't break tool registration.
-    "start_job":  lambda p: __import__("hearth.jobs", fromlist=["start_job"]).start_job(
+    "start_job":  lambda p: (_destructive_refusal(p, p.get("command", ""), "start_job")
+        or __import__("hearth.jobs", fromlist=["start_job"]).start_job(
         p.get("command", ""), cwd=p.get("cwd"),
         shell=(p.get("shell") or "powershell"),
-        description=p.get("description", "")),
+        description=p.get("description", ""))),
     "job_status": lambda p: __import__("hearth.jobs", fromlist=["get_job"]).get_job(p.get("job_id", "")),
     "job_wait":   lambda p: __import__("hearth.jobs", fromlist=["wait_job"]).wait_job(
         p.get("job_id", ""), timeout_s=min(float(p.get("timeout_s") or 30), 300.0)),
@@ -7967,6 +7981,8 @@ _DRYRUN_GUARDED = {
     "create_plugin", "delete_plugin", "create_skill", "install_skill",
     "generate_image", "generate_video", "launch_team",
     "extract_archive_file",              # writes files out of an archive
+    "start_job",                         # a shell command, in the background
+    "send_to_phone",                     # a real message to a real phone
     "forge_generate", "forge_shutdown",  # drive an external image server
 }
 
@@ -8486,7 +8502,10 @@ _normalize_tool_workspace_paths()
 # RISKY: gated (Ask/Allow/Deny + YOLO). Safe: never gated. NEVER_PERM: not even listed.
 _RISKY_TOOLS: set = {
     "write_file", "edit_file", "create_directory", "delete_path", "move_path",
-    "run_command", "open_app", "open_url", "open_in_browser",
+    "run_command", "start_job", "open_app", "open_url", "open_in_browser",
+    # These act outside the machine: one sends a message to a phone, the other
+    # downloads and installs code.
+    "send_to_phone", "install_skill",
     "memory_forget", "extract_archive_file", "create_plugin", "delete_plugin",
     "read_inbox", "send_email",
     "computer_click", "computer_type", "computer_key", "computer_scroll", "computer_drag",
