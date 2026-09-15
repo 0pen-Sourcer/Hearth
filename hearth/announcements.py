@@ -166,6 +166,21 @@ def publish(title: str, body: str, kind: str = "info") -> dict:
         "kind": kind,
         "created": int(time.time()),
     }
+    # Every client drops an entry that fails signature verification, so an
+    # unsigned one is written, pushed, and then shown to nobody, with nothing
+    # anywhere saying so. Sign it here when the key is on this machine, and
+    # refuse to write it when it is not.
+    key = os.environ.get("HEARTH_ANNOUNCE_KEY") or os.path.join(
+        os.path.expanduser("~"), ".hearth", "announce_private.key")
+    if not os.path.isfile(key):
+        return {"ok": False,
+                "error": "no signing key at " + key + ", and every Hearth build "
+                         "ignores an unsigned announcement, so nothing was written"}
+    entry = sign_entry(entry, key)
+    if not _verify(entry):
+        return {"ok": False,
+                "error": "signed with a key that does not match the public key "
+                         "builds verify against, so nothing was written"}
     feed = _read_local_feed()
     feed.append(entry)
     with open(_LOCAL_FEED, "w", encoding="utf-8") as f:
