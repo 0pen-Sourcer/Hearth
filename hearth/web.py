@@ -1434,7 +1434,6 @@ class HearthHandler(BaseHTTPRequestHandler):
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(payload)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
@@ -1472,14 +1471,41 @@ class HearthHandler(BaseHTTPRequestHandler):
         host = (raw.split("]")[0] + "]") if raw.startswith("[") else raw.split(":")[0]
         return host in ("127.0.0.1", "localhost", "[::1]", "::1")
 
+    def _origin_allowed(self) -> bool:
+        """Refuse a browser request made from any page other than Hearth's own.
+
+        The host check stops DNS rebinding, where a page's own domain resolves
+        to 127.0.0.1 and the Host header still names that domain. It does not
+        stop the simpler case: a page on any site that fetches
+        http://127.0.0.1:8765/ sends Host 127.0.0.1, because Host names the
+        target, so it passed, and with a wildcard CORS header the page could
+        read settings back and call tools.
+
+        A browser always sends Origin on a cross-origin request, so an Origin
+        naming a different host and port than the one being asked is someone
+        else's page. No Origin at all is a non-browser client (the CLI, a
+        bridge, a script) and is left alone. "null" is a sandboxed frame or a
+        file page, and neither has any business with this API."""
+        origin = (self.headers.get("Origin") or "").strip().lower()
+        if not origin:
+            return True
+        if origin == "null":
+            return False
+        want = (self.headers.get("Host") or "").strip().lower()
+        return urllib.parse.urlparse(origin).netloc == want
+
+    def _request_allowed(self) -> bool:
+        return self._host_allowed() and self._origin_allowed()
+
     def do_OPTIONS(self) -> None:
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "content-type")
+        # Hearth's own page is same-origin and never preflights. A preflight is
+        # only ever another site asking permission, so it gets none.
+        self.send_response(403)
         self.end_headers()
 
     def do_GET(self) -> None:
+        if not self._request_allowed():
+            return self._send_json(403, {"error": "forbidden origin"})
         path = urllib.parse.urlparse(self.path).path
         if path in ("/", "/index.html", "/ui"):
             return self._serve_ui()
@@ -1990,8 +2016,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.send_error(404, "not found")
 
     def do_DELETE(self) -> None:
-        if not self._host_allowed():
-            return self._send_json(403, {"error": "forbidden host"})
+        if not self._request_allowed():
+            return self._send_json(403, {"error": "forbidden origin"})
         path = urllib.parse.urlparse(self.path).path
         if path.startswith("/api/memory/"):
             name = urllib.parse.unquote(path[len("/api/memory/"):])
@@ -2003,8 +2029,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.send_error(404, "not found")
 
     def do_POST(self) -> None:
-        if not self._host_allowed():
-            return self._send_json(403, {"error": "forbidden host"})
+        if not self._request_allowed():
+            return self._send_json(403, {"error": "forbidden origin"})
         # Hoisted: the brain-switch branch reassigns LOCAL_API_BASE, and other
         # branches (e.g. /api/memory/import) read it — so the global must be
         # declared before any use in this function, not mid-body.
@@ -3919,7 +3945,6 @@ class HearthHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(size))
                 self.send_header("Cache-Control", "public, max-age=3600")
-                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 # Stream in chunks so a big video doesn't hold the whole
                 # bytes object in memory.
@@ -4056,7 +4081,6 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
@@ -4141,7 +4165,6 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 

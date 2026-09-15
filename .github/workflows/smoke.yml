@@ -97,6 +97,13 @@ jobs:
         run: |
           python tests/test_partial_tool_parse.py
 
+      - name: Another website cannot use the local API
+        # A page on any site that fetches 127.0.0.1 sends Host 127.0.0.1, so a
+        # loopback host check alone let it through, and wildcard CORS let it
+        # read stored keys back and call tools.
+        run: |
+          python tests/test_api_origin.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"
