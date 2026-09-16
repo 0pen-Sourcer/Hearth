@@ -9819,10 +9819,17 @@ async function tickLoadProgress() {
   try {
     const r = await api('/api/llmserver/progress');
     if (!r || !r.phase || r.phase === 'idle') {
+      // The server reports idle for the first moment after the request, before
+      // it has spawned anything. Polling starts in that window, so treating the
+      // first idle as "nothing is loading" stopped the poll for good and the
+      // bar never appeared again for the rest of the load. Wait for a real
+      // phase before giving up.
+      if (!_loadSeenPhase && Date.now() - _loadPollStart < 20000) return;
       hideLoadProgress();
       stopLoadProgress();
       return;
     }
+    _loadSeenPhase = true;
     if (r.phase === 'ready') {
       showLoadProgress(r.phase, 100, r.marker);
       // Model just landed — refresh state now so STATE.loadedModel updates and the
@@ -9838,7 +9845,15 @@ async function tickLoadProgress() {
       stopLoadProgress();
       return;
     }
-    showLoadProgress(r.phase, r.percent || 5, r.marker);
+    // Between markers the engine says nothing, and on a large model that
+    // silence is most of the load. The reported number sat on one value for
+    // half a minute and read as a freeze, so it drifts toward the next
+    // marker while waiting, slowly and never past it.
+    const reported = r.percent || 5;
+    const now = Date.now();
+    if (reported > _loadShown) { _loadShown = reported; _loadShownAt = now; }
+    const drift = Math.min(8, (now - _loadShownAt) / 4000);
+    showLoadProgress(r.phase, Math.min(99, _loadShown + drift), r.marker);
   } catch (e) {
     // Network blip - keep ticking, the next poll usually recovers.
   }
@@ -9865,8 +9880,13 @@ function _refreshEmptyIfShown() {
   }
   if (typeof renderChat === 'function') renderChat();
 }
+let _loadPollStart = 0, _loadSeenPhase = false, _loadShown = 0, _loadShownAt = 0;
 function startLoadProgress() {
   if (LOAD_PROGRESS_TIMER) return;
+  _loadPollStart = Date.now();
+  _loadSeenPhase = false;
+  _loadShown = 0;
+  _loadShownAt = 0;
   tickLoadProgress();
   LOAD_PROGRESS_TIMER = setInterval(tickLoadProgress, 500);
   _refreshEmptyIfShown();
