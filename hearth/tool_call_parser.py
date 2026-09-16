@@ -232,7 +232,7 @@ def _complete_truncated_json(s: str) -> "tuple[str, bool]":
     Only reached after a strict parse has already failed."""
     start = s.find("{")
     if start < 0:
-        return ""
+        return "", False
     stack = []
     in_str = False
     esc = False
@@ -427,6 +427,27 @@ def _extract_chatml(match: "re.Match[str]", tool_names: List[str]) -> Optional[D
             if cleaned and ("\\" in cleaned or "/" in cleaned):
                 return {"name": _resolve_tool_name(raw_name, tool_names), "arguments": _force_json_str({"path": cleaned})}
         return {"name": _resolve_tool_name(raw_name, tool_names), "arguments": _force_json_str({})}
+    # Last shape, and a real one: the tool NAME arrives as a parameter rather
+    # than as a tag. A model that has seen several tool dialects mixes them,
+    # and one writes the whole call as parameters, taking the name from the
+    # placeholder in the format example it was shown:
+    #   <function_calls>
+    #   <parameter name="func_name">grep_search</parameter>
+    #   <parameter name="path">C:\some\dir</parameter>
+    #   </function_calls>
+    # The intent is not ambiguous, so it runs rather than being thrown away and
+    # leaving the model to guess at a format for the rest of the conversation.
+    pairs = re.findall(
+        r'<parameter[^>]*name\s*=\s*["\']([^"\']+)["\'][^>]*>([\s\S]*?)</parameter>',
+        body, re.IGNORECASE)
+    if pairs:
+        kv = {k.strip(): v.strip() for k, v in pairs}
+        for key in ("func_name", "function_name", "tool_name", "name",
+                    "function", "tool"):
+            if key in kv:
+                nm = kv.pop(key)
+                return {"name": _resolve_tool_name(nm, tool_names),
+                        "arguments": _force_json_str(kv)}
     return None
 
 

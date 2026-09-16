@@ -105,6 +105,36 @@ _, calls = tcp.parse('ok:\n<tool_call>\n{"name": "write_file", "arguments": '
 check("a write one brace short still recovers, it is closed not severed",
       len(calls) == 1)
 
+# ------------------------------------- a model mixing tool-call dialects
+# A model that has seen several formats writes a hybrid: the opening tag from
+# one, the body from another, and the tool NAME as a parameter rather than a
+# tag, taken from the placeholder in the example it was shown. The intent is
+# not ambiguous, so it runs rather than being discarded and leaving the model
+# to guess at formats for the rest of the conversation.
+HYBRID = ('<tool_call>\n<function_calls>\n'
+          '<parameter name="func_name">read_file</parameter>\n'
+          '<parameter name="path">notes.txt</parameter>\n'
+          '</function_calls>')
+_n2 = ["read_file", "write_file", "run_command", "grep_search"]
+_c, _calls = tcp.parse(HYBRID, _n2)
+check("the name arriving as a parameter still resolves",
+      len(_calls) == 1 and _calls[0]["function"]["name"] == "read_file")
+check("its other parameters become the arguments",
+      _calls and '"path": "notes.txt"' in _calls[0]["function"]["arguments"])
+check("and no markup is left to flag", not tcp.has_tool_call(_c))
+
+# A block holding no JSON at all must not raise. The completer returned a bare
+# string on that path after it began returning a pair, so every XML-shaped call
+# raised inside the parser, was swallowed, and vanished with no explanation.
+for _txt in ("<tool_call>\nnot json at all\n</tool_call>",
+             "<tool_call></tool_call>",
+             "<tool_call>\n<function_calls></function_calls>"):
+    try:
+        tcp.parse(_txt, _n2)
+        check(f"a block with no JSON does not raise: {_txt[:28]!r}", True)
+    except Exception as e:
+        check(f"a block with no JSON does not raise: {_txt[:28]!r} ({type(e).__name__})", False)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

@@ -455,7 +455,10 @@ def _manual_tools_block(tools: List[Dict[str, Any]]) -> str:
         lines.append(json.dumps(fn, ensure_ascii=False))
     lines.append("</tools>")
     lines.append('To call one, emit a JSON object inside <tool_call></tool_call>:')
-    lines.append('<tool_call>\n{"name": "func_name", "arguments": {...}}\n</tool_call>')
+    # A real tool with real arguments, not placeholders. A model shown
+    # "func_name" was seen sending a parameter literally named func_name.
+    lines.append('<tool_call>\n{"name": "read_file", '
+                 '"arguments": {"path": "notes.txt"}}\n</tool_call>')
     lines.append("Emit several <tool_call> blocks to call several functions. "
                  "Results return inside <tool_response> tags — use them to answer.")
     return "\n".join(lines)
@@ -1915,8 +1918,23 @@ async def run_once(
             # turn or lecturing about format. Repetition is the loop guard's
             # job, not a counter of its own.
             _iid = f"call_invalid_{depth}"
-            _err = ("This was not a readable tool call, so nothing ran. No file was "
-                    "written and no command executed. Send the call again.")
+            # Two things this has to get right. It must not claim nothing ran
+            # when other calls in the same message DID run, because the model
+            # then distrusts results it actually received and starts over. And
+            # it has to show the shape that works, or the model spends the rest
+            # of the conversation guessing at formats it has seen elsewhere.
+            _ran = len(getattr(msg, "tool_calls", None) or [])
+            _lead = ("Part of that message was not a readable tool call. "
+                     f"The {_ran} call(s) above it did run, their results stand. "
+                     "The unreadable part did not run."
+                     if _ran else
+                     "That was not a readable tool call, so nothing ran. No file "
+                     "was written and no command executed.")
+            _err = (_lead + " Send the unread call again in this exact shape, "
+                    "one JSON object per block, nothing else inside the tags.\n"
+                    '<tool_call>\n'
+                    '{"name": "read_file", "arguments": {"path": "notes.txt"}}\n'
+                    "</tool_call>")
             messages.append({
                 "role": "assistant", "content": msg.content or "",
                 "tool_calls": [{"id": _iid, "type": "function",
