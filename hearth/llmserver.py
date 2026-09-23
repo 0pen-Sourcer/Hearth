@@ -30,6 +30,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -783,7 +784,24 @@ def _download_with_resume(url, dest, tmp,
     if resume_from:
         headers["Range"] = f"bytes={resume_from}-"
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as r:
+    try:
+        conn = urllib.request.urlopen(req, timeout=30)
+    except urllib.error.HTTPError as e:
+        # 416 means the part on disk is at or past the end of the file: a part
+        # left by an earlier attempt at a different build, or one that finished
+        # and failed to rename. Every retry asks for the same impossible range,
+        # so without clearing it the download is wedged for good with no way out
+        # from the interface. Drop it and start clean.
+        if e.code != 416 or not resume_from:
+            raise
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        resume_from = 0
+        conn = urllib.request.urlopen(
+            urllib.request.Request(url, headers={"User-Agent": ua}), timeout=30)
+    with conn as r:
         status = getattr(r, "status", 200) or 200
         clen = int(r.headers.get("Content-Length") or 0)
         if resume_from and status == 206:          # server honored the range
@@ -906,54 +924,110 @@ _load_progress: Dict[str, Any] = {
 }
 
 
-def _phase_for_line(line: str) -> Optional[Tuple[str, int]]:
-    """Map a llama_cpp.server stdout line to (phase, percent). Returns None
-    when the line isn't a known phase marker.
+# The stretch of the bar the measured weight read owns. Below it the process
+# has barely started; above it the engine is doing work that is not file reading
+# and has its own log markers.
+_WEIGHT_BAND_BOTTOM = 8
+_WEIGHT_BAND_TOP = 88
 
-    Percent values are calibrated to a typical 8-25s load on this build:
-    spawn → ~5%, weights → 10-50% (file read is the long bit), backend init →
-    50-70%, KV reserve → 70-85%, HTTP startup → 85-99%, ready → 100%.
-    Within a phase we stay flat so the bar never goes backwards.
+
+def _phase_for_line(line: str) -> Optional[Tuple[str, int]]:
+    """Map an engine log line to (phase, percent), or None if it says nothing.
+
+    These are boundaries, not a spread. Almost everything the engine prints
+    about the model, the metadata dump, the architecture summary, the CUDA
+    device list, is printed from the header before a single tensor is read, so
+    a percentage assigned by where a line sits in the log lands far ahead of
+    the truth and then the bar stops for the whole real wait. Those lines are
+    pinned to the bottom and the measured read fills the middle.
+
+    Only the lines that genuinely come after the weights are resident carry a
+    high number: the threadpool, the context and KV allocation, the HTTP start.
     """
     l = line
-    # The STANDALONE llama-server (what Full now ships) prints different markers
-    # than the llama-cpp-python wheel below, and its lines carry a timestamp
-    # prefix. Without these the bar matched nothing and jumped straight from
-    # nothing to 100 when the port answered.
-    if "load_model: loading model" in l:
-        return ("loading_weights", 12)
-    if "load_tensors: loading model tensors" in l or "load_tensors: offloading" in l:
-        return ("loading_weights", 45)
-    if "llama threadpool init" in l:
-        return ("initializing_backend", 60)
-    if "load_model: initializing" in l or "n_ctx_slot" in l:
-        return ("reserving_kv", 78)
-    if "llama_server: model loaded" in l:
-        return ("starting_http", 93)
-    if "llama_server: listening on" in l or "main: server is listening" in l:
-        return ("ready", 100)
-    # Roughly in the order llama.cpp prints these:
-    if "llama_model_load:" in l or "llama_model_loader: loaded meta data" in l:
-        return ("loading_weights", 15)
-    if "llama_model_loader: - kv" in l or "Model metadata:" in l:
-        return ("loading_weights", 25)
+    # --- before or during the read: the bottom of the bar -------------------
+    if ("load_model: loading model" in l
+            or "llama_model_load:" in l
+            or "llama_model_loader:" in l
+            or "Model metadata:" in l
+            or "print_info:" in l
+            or "llm_load_print_meta:" in l
+            or "ggml_cuda_init:" in l
+            or "CUDA : " in l):
+        return ("loading_weights", 8)
     if "load_tensors:" in l:
-        return ("loading_weights", 45)
-    if "llm_load_print_meta:" in l or "print_info:" in l:
-        return ("initializing_backend", 55)
-    if "CUDA : " in l or "ggml_cuda_init:" in l:
-        return ("initializing_backend", 65)
-    if "llama_kv_cache" in l or "kv self size" in l:
-        return ("reserving_kv", 75)
-    if "sched_reserve:" in l or "graph_reserve:" in l:
-        return ("reserving_kv", 82)
-    if "Started server process" in l or "Waiting for application startup" in l:
-        return ("starting_http", 92)
-    if "Application startup complete" in l:
+        # Printed as the read BEGINS, so it is a floor, not a milestone.
+        return ("loading_weights", 10)
+    # --- after the weights are resident ------------------------------------
+    if "llama threadpool init" in l:
+        return ("initializing_backend", 90)
+    if ("load_model: initializing" in l or "n_ctx_slot" in l
+            or "llama_kv_cache" in l or "kv self size" in l
+            or "sched_reserve:" in l or "graph_reserve:" in l):
+        return ("reserving_kv", 93)
+    if ("llama_server: model loaded" in l
+            or "Started server process" in l
+            or "Waiting for application startup" in l
+            or "Application startup complete" in l):
         return ("starting_http", 97)
-    if "Uvicorn running on" in l:
+    if ("llama_server: listening on" in l
+            or "main: server is listening" in l
+            or "Uvicorn running on" in l):
         return ("ready", 100)
     return None
+
+
+def _model_total_bytes(model_path: str) -> int:
+    """Size of the weights the engine is about to read, shards included.
+
+    A split GGUF names itself `...-00001-of-00003.gguf` and the engine opens
+    every part, so sizing off the first file alone reports three times the real
+    progress and the bar finishes two thirds of the way through the load.
+    """
+    try:
+        total = os.path.getsize(model_path)
+    except OSError:
+        return 0
+    m = re.search(r"-(\d{5})-of-(\d{5})\.gguf$", model_path, re.IGNORECASE)
+    if not m:
+        return total
+    try:
+        count = int(m.group(2))
+        stem = model_path[:m.start()]
+        total = 0
+        for i in range(1, count + 1):
+            part = f"{stem}-{i:05d}-of-{m.group(2)}.gguf"
+            total += os.path.getsize(part)
+        return total
+    except OSError:
+        return total
+
+
+def _weight_load_fraction(pid: int, total_bytes: int) -> Optional[float]:
+    """How far through reading the weights the engine is, 0..1, or None.
+
+    Measured off the process rather than its log. Between "loading model" and
+    "model loaded" the engine prints nothing for what is most of the wait on a
+    multi-gigabyte file, so a bar driven by log lines sits on one number for
+    half a minute and reads as a hang.
+
+    Resident memory is the signal that survives the differences. The weights
+    are mapped, not read, so IO counters stay near zero on Windows, but the
+    pages fault in as the engine walks the file and resident size tracks the
+    file size closely enough to drive a bar. It holds for a GPU offload too,
+    since every tensor passes through host memory on its way to the card.
+
+    Resident size also covers buffers that are not weights, so this is capped
+    by its caller rather than trusted to land exactly on 100.
+    """
+    if total_bytes <= 0:
+        return None
+    try:
+        import psutil
+        rss = psutil.Process(pid).memory_info().rss
+    except Exception:
+        return None
+    return max(0.0, min(1.0, rss / float(total_bytes)))
 
 
 def _set_progress(**kwargs) -> None:
@@ -2252,8 +2326,13 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                   model=os.path.basename(model_path))
     # Phase-tracking state for the parser: don't ever regress percent.
     last_phase_percent = 5
+    last_phase_name = "starting"
     last_marker = "spawned"
+    shown_percent = 5
     log_pos = 0  # byte offset we've already scanned for phase markers
+    # Denominator for the measured part of the bar. Zero disables it and the
+    # log markers drive alone, which is what happens when the path is unreadable.
+    _weight_bytes = _model_total_bytes(model_path)
     while time.time() < deadline:
         # If a concurrent call replaced the global _proc with a different
         # subprocess, our work is moot — abandon ship cleanly.
@@ -2309,10 +2388,28 @@ def start_builtin(model_path: str, port: Optional[int] = None,
                     ph, pct = phase_pct
                     if pct > last_phase_percent:
                         last_phase_percent = pct
+                        last_phase_name = ph
                         last_marker = ln.strip()[:120]
-                        _set_progress(phase=ph, percent=pct, marker=last_marker)
         except OSError:
             pass
+        # The log gives the floor, the process gives the movement between
+        # markers. Capped below the point where the engine announces the model
+        # is loaded, so a measurement that overshoots cannot claim the load is
+        # finished; only the log says that.
+        _cand = last_phase_percent
+        if last_phase_percent < _WEIGHT_BAND_TOP:
+            _frac = _weight_load_fraction(spawned.pid, _weight_bytes)
+            if _frac is not None:
+                _measured = _WEIGHT_BAND_BOTTOM + int(
+                    _frac * (_WEIGHT_BAND_TOP - _WEIGHT_BAND_BOTTOM))
+                if _measured > _cand:
+                    _cand = _measured
+                    if last_phase_percent < 50:
+                        last_phase_name = "loading_weights"
+        if _cand > shown_percent:
+            shown_percent = _cand
+            _set_progress(phase=last_phase_name, percent=shown_percent,
+                          marker=last_marker)
         # Probe with the API key — builtin 401s unauthenticated requests, which
         # would make external_server_running return False even though the server
         # is fully up. external_server_running handles 401 as "alive" too.

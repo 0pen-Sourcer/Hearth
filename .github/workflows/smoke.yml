@@ -104,6 +104,14 @@ jobs:
         run: |
           python tests/test_api_origin.py
 
+      - name: Resuming a download, and reporting a load
+        # A part file at or past the end of the file makes every resume answer
+        # 416, so the download fails the same way forever with no way to clear
+        # it. And the engine prints its metadata before it reads a tensor, so a
+        # bar driven by log position jumps up and then holds still for the wait.
+        run: |
+          python tests/test_download_progress.py
+
       - name: Workspace containment is by folder, not by prefix
         run: |
           python tests/test_containment.py
