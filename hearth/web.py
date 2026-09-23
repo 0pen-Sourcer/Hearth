@@ -1226,6 +1226,7 @@ def _load_settings() -> Dict:
         "voice_tts": False,
         "voice_stt": False,
         "voice_mic_hint_dismissed": False,  # first-voice mic tip, "don't show again"
+        "voice_half_duplex": False,  # hold the mic closed while speaking, for speakers
         "stt_device": "cpu",   # cpu / cuda
         "tts_device": "cpu",   # cpu / cuda / dml
         "voice_speed": 1.5,    # Kokoro playback rate (0.5x-2.5x). 1.5 is the snappier default that doesn't sound like a turtle.

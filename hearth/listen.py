@@ -515,6 +515,8 @@ def status() -> dict:
         "listening": _listening,
         "ready": have_fw and have_sd and have_np,
         "last_load_error": _last_load_error,
+        "last_transcribe_error": _last_transcribe_error,
+        "last_transcribe_error_at": _last_transcribe_error_at,
     }
 
 
@@ -558,6 +560,25 @@ def _record_until_silence(max_seconds: float = MAX_UTTERANCE_S):
     return audio
 
 
+_last_transcribe_error: Optional[str] = None
+_last_transcribe_error_at: float = 0.0
+
+
+def note_transcribe_error(exc: BaseException) -> None:
+    global _last_transcribe_error, _last_transcribe_error_at
+    _last_transcribe_error = f"{type(exc).__name__}: {exc}"
+    _last_transcribe_error_at = time.time()
+    try:
+        print(f"[listen] transcription failed: {_last_transcribe_error}",
+              file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def last_transcribe_error() -> dict:
+    return {"error": _last_transcribe_error, "at": _last_transcribe_error_at}
+
+
 def _transcribe_language() -> Optional[str]:
     """The language code to transcribe in, or None to detect it per utterance.
 
@@ -597,7 +618,11 @@ def transcribe(audio) -> str:
             condition_on_previous_text=False,
         )
         return " ".join(s.text.strip() for s in segments).strip()
-    except Exception:
+    except Exception as e:
+        # An empty string is what "you said nothing" looks like too, so a
+        # transcription that fails outright was indistinguishable from silence
+        # and left nothing behind to explain the difference.
+        note_transcribe_error(e)
         return ""
 
 
