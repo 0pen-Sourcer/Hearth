@@ -1231,7 +1231,8 @@ def _load_settings() -> Dict:
         "voice_speed": 1.5,    # Kokoro playback rate (0.5x-2.5x). 1.5 is the snappier default that doesn't sound like a turtle.
         "voice_name": "am_michael",  # Kokoro voice id (am_/af_/bm_/bf_ + name). am_michael = calm neutral baseline.
         "agent_name": "JARVIS",      # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
-        "stt_model": "base.en",  # base.en / small.en / medium.en
+        "stt_model": "base.en",  # a name ending .en holds English only
+        "stt_language": "",      # blank = detect per utterance
         # Memory bookkeeping runs on most turns, so its cards can outnumber
         # the reply. Display only; the events are still recorded either way.
         "show_memory_tools": True,
@@ -1269,6 +1270,7 @@ def _load_settings() -> Dict:
     # Apply device prefs as env vars BEFORE models load
     os.environ["JARVIS_STT_DEVICE"] = defaults.get("stt_device", "cpu")
     os.environ["JARVIS_STT_MODEL"]  = defaults.get("stt_model",  "base.en")
+    os.environ["JARVIS_STT_LANGUAGE"] = defaults.get("stt_language", "")
     os.environ["JARVIS_TTS_DEVICE"] = defaults.get("tts_device", "cpu")
     os.environ["JARVIS_VOICE_SPEED"] = str(defaults.get("voice_speed", 1.5))
     os.environ["JARVIS_VOICE"]      = defaults.get("voice_name", "am_michael")
@@ -1325,6 +1327,7 @@ def _save_settings_locked(d: Dict) -> Dict:
     # Re-apply env vars + reload voice/listen so new device picks effect
     os.environ["JARVIS_STT_DEVICE"] = cur.get("stt_device", "cpu")
     os.environ["JARVIS_STT_MODEL"]  = cur.get("stt_model",  "base.en")
+    os.environ["JARVIS_STT_LANGUAGE"] = cur.get("stt_language", "")
     os.environ["JARVIS_TTS_DEVICE"] = cur.get("tts_device", "cpu")
     os.environ["JARVIS_VOICE_SPEED"] = str(cur.get("voice_speed", 1.5))
     os.environ["JARVIS_VOICE"]      = cur.get("voice_name", "am_michael")
@@ -2842,6 +2845,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             os.environ["JARVIS_TTS_DEVICE"] = tts_dev
             os.environ["JARVIS_STT_DEVICE"] = stt_dev
             os.environ["JARVIS_STT_MODEL"]  = stt_mdl
+            os.environ["JARVIS_STT_LANGUAGE"] = settings.get("stt_language", "")
             details = {}
             if _voice:
                 try:

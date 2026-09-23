@@ -197,6 +197,9 @@ def _apply_saved_voice_settings():
     defaults = {
         "JARVIS_STT_MODEL": ("stt_model", "base.en"),
         "JARVIS_STT_DEVICE": ("stt_device", "cpu"),
+        # Blank means detect per utterance, and an unset variable reads the
+        # same way, so there is nothing to export in that case.
+        "JARVIS_STT_LANGUAGE": ("stt_language", ""),
         "JARVIS_TTS_DEVICE": ("tts_device", "cpu"),
         "JARVIS_VOICE_SPEED": ("voice_speed", 1.5),
         "JARVIS_VOICE": ("voice_name", "am_michael"),

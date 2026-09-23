@@ -49,6 +49,10 @@ VOICES_DIR = os.path.join(WORKSPACE, "voices")
 # on CPU. Override via env if user has a beefier setup.
 MODEL_SIZE = os.environ.get("JARVIS_STT_MODEL", "base.en")
 COMPUTE_TYPE = os.environ.get("JARVIS_STT_COMPUTE", "int8")  # CPU-friendly
+# Empty means let the model decide from the audio. A fixed code here was
+# forcing English on every utterance, so a multilingual model handed back a
+# rough English rendering of whatever was said rather than the words.
+LANGUAGE = os.environ.get("JARVIS_STT_LANGUAGE", "").strip()
 
 
 def list_input_devices() -> list:
@@ -554,6 +558,19 @@ def _record_until_silence(max_seconds: float = MAX_UTTERANCE_S):
     return audio
 
 
+def _transcribe_language() -> Optional[str]:
+    """The language code to transcribe in, or None to detect it per utterance.
+
+    Read on every call rather than captured at import, because the setting is
+    applied by writing the environment and reloading the model in place.
+    """
+    lang = (os.environ.get("JARVIS_STT_LANGUAGE", "") or "").strip().lower()
+    size = (os.environ.get("JARVIS_STT_MODEL", MODEL_SIZE) or "").strip().lower()
+    if size.endswith(".en"):
+        return "en"
+    return lang or None
+
+
 def transcribe(audio) -> str:
     """Run the model on a float32 numpy audio array at SAMPLE_RATE.
     Returns the transcribed text (best segment). Empty string on failure."""
@@ -563,7 +580,9 @@ def transcribe(audio) -> str:
     try:
         segments, _info = model.transcribe(
             audio,
-            language="en",
+            # A model whose name ends in .en holds no other language, and
+            # asking it to detect one wastes a pass to reach the same answer.
+            language=_transcribe_language(),
             beam_size=1,            # fast - boost to 5 for accuracy
             # Silero VAD (ships with faster-whisper, no extra dep) drops
             # speech-free chunks AND tightens utterance edges - much smarter

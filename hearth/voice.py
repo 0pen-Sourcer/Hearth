@@ -472,8 +472,9 @@ def set_speed(speed: float) -> float:
     return DEFAULT_SPEED
 
 
-# Built-in Kokoro voice catalog. Lets the model offer real options when the
-# user wants to try something else.
+# Built-in Kokoro voice catalog. The voice bank that ships alongside the model
+# carries all of these, and only the English ones were listed, so the other
+# eight languages were downloaded on every install and reachable by nobody.
 KOKORO_VOICES = [
     # American male
     "am_michael", "am_adam", "am_eric", "am_echo", "am_fenrir",
@@ -485,7 +486,43 @@ KOKORO_VOICES = [
     "bm_george", "bm_lewis", "bm_daniel", "bm_fable",
     # British female
     "bf_emma", "bf_isabella", "bf_alice", "bf_lily",
+    # Spanish
+    "ef_dora", "em_alex", "em_santa",
+    # French
+    "ff_siwis",
+    # Hindi
+    "hf_alpha", "hf_beta", "hm_omega", "hm_psi",
+    # Italian
+    "if_sara", "im_nicola",
+    # Japanese
+    "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo",
+    # Portuguese
+    "pf_dora", "pm_alex", "pm_santa",
+    # Mandarin
+    "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
+    "zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang",
 ]
+
+# A voice id begins with a letter naming its language, and the phonemizer needs
+# that language to turn text into the sounds the voice was trained on. The code
+# was fixed at English, so a Hindi voice was handed English phonemes and read
+# the text as though it were English. The codes are the ones espeak answers to:
+# Mandarin is "cmn" there, not "zh", which it rejects outright.
+_VOICE_LANG = {
+    "a": "en-us", "b": "en-gb", "e": "es", "f": "fr-fr", "h": "hi",
+    "i": "it", "j": "ja", "p": "pt-br", "z": "cmn",
+}
+# What to call each one where a person reads it.
+VOICE_LANG_NAMES = {
+    "en-us": "English (US)", "en-gb": "English (UK)", "es": "Spanish",
+    "fr-fr": "French", "hi": "Hindi", "it": "Italian", "ja": "Japanese",
+    "pt-br": "Portuguese", "cmn": "Mandarin",
+}
+
+
+def voice_language(voice: str) -> str:
+    """The phonemizer language a voice id belongs to."""
+    return _VOICE_LANG.get((voice or "")[:1].lower(), "en-us")
 
 
 def list_voices() -> List[str]:
@@ -588,7 +625,17 @@ def _play(audio_bytes_or_array, sample_rate: int) -> None:
     sd.wait()
 
 
-_SENTENCE_END = ("."  , "!", "?", "\n")
+# Where a chunk may end. The Latin marks alone meant a reply in a script that
+# ends its sentences differently never found a boundary, so the whole reply went
+# to the synthesizer as one piece and playback only began once all of it was
+# rendered. Devanagari danda, the ideographic full stop and its comma, the
+# fullwidth marks, the Arabic question mark, and an ellipsis.
+_SENTENCE_END = (".", "!", "?", "\n",
+                 "।", "॥",          # । ॥
+                 "。", "、",          # 。 、
+                 "！", "？",          # ！ ？
+                 "؟",                    # ؟
+                 "…")                    # …
 
 
 def _clean_for_tts(text: str) -> str:
@@ -758,7 +805,8 @@ def _synth_loop() -> None:
                 if kind == "kokoro":
                     samples, sr = obj.create(  # type: ignore[attr-defined]
                         chunk, voice=voice or DEFAULT_KOKORO_VOICE,
-                        speed=speed, lang="en-us")
+                        speed=speed,
+                        lang=voice_language(voice or DEFAULT_KOKORO_VOICE))
                     arr = _to_int16(samples)
                 elif kind == "piper":
                     buf = BytesIO()
@@ -917,7 +965,8 @@ def _speak_legacy(text, blocking, voice, speed) -> str:
                         if kind == "kokoro":
                             samples, sr = obj.create(  # type: ignore[attr-defined]
                                 chunk, voice=voice or DEFAULT_KOKORO_VOICE,
-                                speed=speed, lang="en-us")
+                                speed=speed,
+                                lang=voice_language(voice or DEFAULT_KOKORO_VOICE))
                             _play(samples, sr)
                         elif kind == "piper":
                             buf = BytesIO()

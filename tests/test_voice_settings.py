@@ -72,6 +72,52 @@ missing = sorted(gui - cli)
 check("the CLI applies every voice setting the window does"
       + (", missing " + ", ".join(missing) if missing else ""), not missing)
 
+# ---------------------------------------------- speaking anything but English
+# The voice bank that ships with the model holds nine languages. Listing only
+# the English ones meant the rest were downloaded on every install and
+# reachable by nobody, and the phonemizer was fixed at English, so a voice from
+# another language would have been handed English sounds for its text.
+from hearth import voice as _voice                                 # noqa: E402
+
+_bank = set(_voice.KOKORO_VOICES)
+for _v in ("hf_alpha", "hm_omega", "ef_dora", "ff_siwis", "if_sara",
+           "jm_kumo", "pf_dora", "zf_xiaobei"):
+    check(f"the catalog lists {_v}", _v in _bank)
+
+for _v, _lang in (("am_michael", "en-us"), ("bm_george", "en-gb"),
+                  ("ef_dora", "es"), ("ff_siwis", "fr-fr"), ("hf_alpha", "hi"),
+                  ("if_sara", "it"), ("jm_kumo", "ja"), ("pf_dora", "pt-br"),
+                  # espeak names Mandarin cmn and rejects zh outright.
+                  ("zf_xiaobei", "cmn")):
+    check(f"{_v} is phonemized as {_lang}", _voice.voice_language(_v) == _lang)
+
+check("an empty voice id still resolves to something",
+      _voice.voice_language("") == "en-us")
+_src = open(os.path.join(ROOT, "hearth", "voice.py"), encoding="utf-8").read()
+check("no call fixes the phonemizer at one language",
+      'lang="en-us"' not in _src)
+
+# A reply in a script with its own sentence mark found no boundary, so none of
+# it played until all of it had been rendered.
+for _mark, _label in (("।", "danda"), ("。", "ideographic stop"),
+                      ("？", "fullwidth question"), ("؟", "arabic question")):
+    check(f"a chunk may end on the {_label}", _mark in _voice._SENTENCE_END)
+
+# ------------------------------------------------------ the language to hear
+from hearth import listen as _listen                               # noqa: E402
+from hearth import realtime_voice as _rt                           # noqa: E402
+
+for _mdl, _lang, _want in (("base.en", "", "en"), ("base.en", "hi", "en"),
+                           ("large-v3", "", None), ("large-v3", "hi", "hi")):
+    os.environ["JARVIS_STT_MODEL"] = _mdl
+    os.environ["JARVIS_STT_LANGUAGE"] = _lang
+    check(f"push-to-talk on {_mdl} asked for {_lang!r} transcribes as {_want!r}",
+          _listen._transcribe_language() == _want)
+    check(f"voice mode agrees for {_mdl} asked for {_lang!r}",
+          _rt._language() == (_want or ""))
+os.environ.pop("JARVIS_STT_LANGUAGE", None)
+os.environ.pop("JARVIS_STT_MODEL", None)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

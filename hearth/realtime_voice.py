@@ -20,7 +20,9 @@ Environment:
   HEARTH_REALTIME_MODEL     faster-whisper size override; without it the
                             whisper-size setting (JARVIS_STT_MODEL) is used,
                             falling back to tiny.en
-  HEARTH_REALTIME_LANG      language hint (default: en)
+  HEARTH_REALTIME_LANG      language override; without it the spoken-language
+                            setting (JARVIS_STT_LANGUAGE) is used, and a blank
+                            one means detect it per utterance
 """
 
 from __future__ import annotations
@@ -120,6 +122,23 @@ def _model_size() -> str:
     return "tiny.en"
 
 
+def _language() -> str:
+    """The language code the recorder transcribes in, blank to detect it.
+
+    The same split as the size above: the setting writes JARVIS_STT_LANGUAGE
+    and only the push-to-talk path was reading it, so voice mode stayed pinned
+    to English however the setting was left. A model whose name ends in .en
+    holds nothing else, so there is nothing to detect.
+    """
+    if _model_size().lower().endswith(".en"):
+        return "en"
+    for _v in (os.environ.get("HEARTH_REALTIME_LANG"),
+               os.environ.get("JARVIS_STT_LANGUAGE")):
+        if (_v or "").strip():
+            return _v.strip().lower()
+    return ""
+
+
 def status() -> dict:
     return {
         "available": is_available(),
@@ -168,7 +187,7 @@ def _build_recorder():
     from RealtimeSTT import AudioToTextRecorder
 
     model = _model_size()
-    lang = os.environ.get("HEARTH_REALTIME_LANG", "en")
+    lang = _language()
 
     def _on_realtime_update(text: str) -> None:
         # Live partial transcript while user speaks. Drop captions arriving

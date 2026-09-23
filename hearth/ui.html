@@ -3625,6 +3625,46 @@
                 <option value="bf_emma">Emma — British, poised, clear</option>
                 <option value="bf_isabella">Isabella — British, warm, refined</option>
               </optgroup>
+              <optgroup label="Hindi">
+                <option value="hf_alpha">Alpha — female</option>
+                <option value="hf_beta">Beta — female</option>
+                <option value="hm_omega">Omega — male</option>
+                <option value="hm_psi">Psi — male</option>
+              </optgroup>
+              <optgroup label="Spanish">
+                <option value="ef_dora">Dora — female</option>
+                <option value="em_alex">Alex — male</option>
+                <option value="em_santa">Santa — male</option>
+              </optgroup>
+              <optgroup label="French">
+                <option value="ff_siwis">Siwis — female</option>
+              </optgroup>
+              <optgroup label="Italian">
+                <option value="if_sara">Sara — female</option>
+                <option value="im_nicola">Nicola — male</option>
+              </optgroup>
+              <optgroup label="Portuguese">
+                <option value="pf_dora">Dora — female</option>
+                <option value="pm_alex">Alex — male</option>
+                <option value="pm_santa">Santa — male</option>
+              </optgroup>
+              <optgroup label="Japanese">
+                <option value="jf_alpha">Alpha — female</option>
+                <option value="jf_gongitsune">Gongitsune — female</option>
+                <option value="jf_nezumi">Nezumi — female</option>
+                <option value="jf_tebukuro">Tebukuro — female</option>
+                <option value="jm_kumo">Kumo — male</option>
+              </optgroup>
+              <optgroup label="Mandarin">
+                <option value="zf_xiaobei">Xiaobei — female</option>
+                <option value="zf_xiaoni">Xiaoni — female</option>
+                <option value="zf_xiaoxiao">Xiaoxiao — female</option>
+                <option value="zf_xiaoyi">Xiaoyi — female</option>
+                <option value="zm_yunjian">Yunjian — male</option>
+                <option value="zm_yunxi">Yunxi — male</option>
+                <option value="zm_yunxia">Yunxia — male</option>
+                <option value="zm_yunyang">Yunyang — male</option>
+              </optgroup>
             </select>
             <button class="btn-mini" id="setting-voice-test" title="Hear the selected voice">▶ Test</button>
           </div>
@@ -3662,15 +3702,53 @@
         <div class="field">
           <div class="label">
             <div class="name">Whisper model size<span class="dl-dot" id="stt-dl-dot"></span></div>
-            <div class="hint"><code>tiny.en</code> = fastest, fine for clear short prompts. <code>small.en</code> for harder accents or noisy rooms.</div>
+            <div class="hint"><code>tiny.en</code> = fastest, fine for clear short prompts. <code>small.en</code> for harder accents or noisy rooms. A name ending <code>.en</code> understands English only; pick one from the second group to speak anything else.</div>
           </div>
           <select id="setting-stt-model">
-            <option value="tiny.en">tiny.en (39 MB · snappiest)</option>
-            <option value="base.en">base.en (74 MB · balanced)</option>
-            <option value="small.en">small.en (244 MB · best for accents)</option>
-            <option value="medium.en">medium.en (769 MB · slowest, most accurate)</option>
+            <optgroup label="English only">
+              <option value="tiny.en">tiny.en (39 MB · snappiest)</option>
+              <option value="base.en">base.en (74 MB · balanced)</option>
+              <option value="small.en">small.en (244 MB · best for accents)</option>
+              <option value="medium.en">medium.en (769 MB · slowest, most accurate)</option>
+            </optgroup>
+            <optgroup label="Every language">
+              <option value="tiny">tiny (39 MB · snappiest)</option>
+              <option value="base">base (74 MB · balanced)</option>
+              <option value="small">small (244 MB · good for accents)</option>
+              <option value="medium">medium (769 MB · slower, more accurate)</option>
+              <option value="large-v3">large-v3 (1.5 GB · slowest, most accurate)</option>
+            </optgroup>
           </select>
           <div id="stt-model-err" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.25);border-radius:6px;font-size:12px;color:var(--err);line-height:1.4"></div>
+        </div>
+        <div class="field" id="field-stt-language">
+          <div class="label">
+            <div class="name">Spoken language</div>
+            <div class="hint">Leave it on detect and Hearth works out each utterance on its own. Naming the language is a little faster and a little more accurate when you always speak the same one.</div>
+          </div>
+          <select id="setting-stt-language">
+            <option value="">Detect it</option>
+            <option value="en">English</option>
+            <option value="hi">Hindi</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="pt">Portuguese</option>
+            <option value="ru">Russian</option>
+            <option value="ar">Arabic</option>
+            <option value="zh">Chinese</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="it">Italian</option>
+            <option value="tr">Turkish</option>
+            <option value="id">Indonesian</option>
+            <option value="vi">Vietnamese</option>
+            <option value="bn">Bengali</option>
+            <option value="ta">Tamil</option>
+            <option value="te">Telugu</option>
+            <option value="mr">Marathi</option>
+            <option value="ur">Urdu</option>
+          </select>
         </div>
         <div class="field">
           <div class="label">
@@ -9845,15 +9923,13 @@ async function tickLoadProgress() {
       stopLoadProgress();
       return;
     }
-    // Between markers the engine says nothing, and on a large model that
-    // silence is most of the load. The reported number sat on one value for
-    // half a minute and read as a freeze, so it drifts toward the next
-    // marker while waiting, slowly and never past it.
+    // The server measures the weight read now rather than inferring it from log
+    // lines, so this number moves on its own about once a second and needs no
+    // help. Only guard against it going backwards, which a phase change used to
+    // cause when a marker reported lower than where the reading already was.
     const reported = r.percent || 5;
-    const now = Date.now();
-    if (reported > _loadShown) { _loadShown = reported; _loadShownAt = now; }
-    const drift = Math.min(8, (now - _loadShownAt) / 4000);
-    showLoadProgress(r.phase, Math.min(99, _loadShown + drift), r.marker);
+    if (reported > _loadShown) _loadShown = reported;
+    showLoadProgress(r.phase, Math.min(99, _loadShown), r.marker);
   } catch (e) {
     // Network blip - keep ticking, the next poll usually recovers.
   }
@@ -9880,13 +9956,12 @@ function _refreshEmptyIfShown() {
   }
   if (typeof renderChat === 'function') renderChat();
 }
-let _loadPollStart = 0, _loadSeenPhase = false, _loadShown = 0, _loadShownAt = 0;
+let _loadPollStart = 0, _loadSeenPhase = false, _loadShown = 0;
 function startLoadProgress() {
   if (LOAD_PROGRESS_TIMER) return;
   _loadPollStart = Date.now();
   _loadSeenPhase = false;
   _loadShown = 0;
-  _loadShownAt = 0;
   tickLoadProgress();
   LOAD_PROGRESS_TIMER = setInterval(tickLoadProgress, 500);
   _refreshEmptyIfShown();
@@ -10715,6 +10790,7 @@ async function refreshSettings() {
     const ttsDev = $('setting-tts-device');
     const sttDev = $('setting-stt-device');
     const sttMdl = $('setting-stt-model');
+    const sttLang = $('setting-stt-language');
 
     async function wireGpuSelect(sel, isInstalled, onApply) {
       if (!sel) return;
@@ -10851,6 +10927,26 @@ async function refreshSettings() {
         toast('Voice', 'set to ' + e.target.value, 'ok', 2000);
       };
     }
+    // The first letter of a voice id names its language, and the sample has to
+    // be in that language: English words spoken through another language's
+    // sounds come out as nonsense, which reads as a broken voice rather than a
+    // mismatched one.
+    const _SAMPLE = {
+      e: 'Hola, asi es como sueno.',
+      f: 'Bonjour, voici ma voix.',
+      h: 'नमस्ते, मेरी आवाज़ ऐसी लगती है।',
+      i: 'Ciao, ecco come suono.',
+      j: 'こんにちは、これが私の声です。',
+      p: 'Ola, e assim que eu soo.',
+      z: '你好，这就是我的声音。',
+    };
+    function sampleLine(voice) {
+      const key = String(voice || '')[0];
+      if (_SAMPLE[key]) return _SAMPLE[key];
+      const name = String(voice || '').replace(/^[a-z]{2}_/, '')
+        .replace(/^./, c => c.toUpperCase());
+      return 'This is ' + (name || 'the voice') + '. This is how I sound.';
+    }
     if (voiceTest) {
       voiceTest.onclick = async () => {
         voiceTest.disabled = true;
@@ -10859,7 +10955,7 @@ async function refreshSettings() {
           if (voiceSel) await saveSetting('voice_name', voiceSel.value);  // so /api/tts uses it
           const r = await fetch('/api/tts', {
             method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ text: 'This is ' + (voiceSel ? voiceSel.value.replace(/^[a-z]{2}_/, '').replace(/^./, c => c.toUpperCase()) : 'the voice') + '. This is how I sound.' }),
+            body: JSON.stringify({ text: sampleLine(voiceSel ? voiceSel.value : '') }),
           });
           if (!r.ok) toast('Voice test', 'playback failed — make sure TTS is enabled above', 'warn', 5000);
         } catch (err) { toast('Voice test', err.message, 'err'); }
@@ -10889,12 +10985,34 @@ async function refreshSettings() {
         catch (err) { toast('STT device', err.message, 'err'); }
       });
     }
+    // An .en model holds no other language, so offering a choice of language
+    // beside it would be a control that does nothing. It is hidden rather than
+    // disabled, and the size dropdown right above says which group to pick from.
+    function syncLangField() {
+      const f = $('field-stt-language');
+      if (!f || !sttMdl) return;
+      f.hidden = String(sttMdl.value || '').endsWith('.en');
+    }
+    if (sttLang) {
+      sttLang.value = s.stt_language || '';
+      sttLang.onchange = async (e) => {
+        const v = e.target.value;
+        await saveSetting('stt_language', v);
+        try {
+          await api('/api/voice/reload', { method: 'POST' });
+          toast('Speech', v ? 'listening for ' + (e.target.selectedOptions[0] || {}).text
+                            : 'detecting the language per utterance', 'ok');
+        } catch (err) { toast('Speech', err.message, 'err'); }
+      };
+    }
     if (sttMdl) {
       sttMdl.value = s.stt_model || 'base.en';
       markLoadedOption(sttMdl, s.stt_model || 'base.en');  // show which one is live
+      syncLangField();
       sttMdl.onchange = async (e) => {
         const mdl = e.target.value;
         await saveSetting('stt_model', mdl);
+        syncLangField();
         // Disable the dropdown for the duration so it's OBVIOUS work is happening —
         // /api/voice/reload blocks while faster-whisper pulls the model (can be a
         // minute for small.en), and a vanished toast made it look frozen.
