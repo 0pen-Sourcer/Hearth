@@ -32,6 +32,7 @@ and the rest of Hearth keeps working silently.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 import wave
@@ -148,6 +149,28 @@ _last_load_error: Optional[str] = None
 # isn't installed → fell back to CPU). GUI can render this as a yellow toast
 # with an "install" hint, without making it look like TTS is broken.
 _last_load_warning: Optional[str] = None
+# Last failure from inside the speaking threads. Synthesis and playback run
+# behind a queue, so speak() has already answered "ok" by the time either can
+# fail, and both loops caught everything and carried on. The result was the
+# oldest complaint about voice: pressing speak does nothing, says nothing, and
+# leaves nothing anywhere to read. Recorded with the moment it happened so a
+# caller can tell a fresh failure from one left over from an earlier turn.
+_last_speak_error: Optional[str] = None
+_last_speak_error_at: float = 0.0
+
+
+def note_speak_error(where: str, exc: BaseException) -> None:
+    global _last_speak_error, _last_speak_error_at
+    _last_speak_error = f"{where}: {type(exc).__name__}: {exc}"
+    _last_speak_error_at = time.time()
+    try:
+        print(f"[voice] {_last_speak_error}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def last_speak_error() -> dict:
+    return {"error": _last_speak_error, "at": _last_speak_error_at}
 
 
 def _find(*candidates: str) -> Optional[str]:
@@ -828,14 +851,16 @@ def _synth_loop() -> None:
                         break
                     except _queue.Full:
                         continue
-        except Exception:
+        except Exception as e:
+            note_speak_error("synthesis", e)
             continue
 
 
 def _play_loop() -> None:
     try:
         import sounddevice as sd  # type: ignore
-    except ImportError:
+    except ImportError as e:
+        note_speak_error("playback device", e)
         return
     stream = None
     cur_sr = None
@@ -977,7 +1002,8 @@ def _speak_legacy(text, blocking, voice, speed) -> str:
                                 sr = wav.getframerate()
                                 frames = wav.readframes(wav.getnframes())
                             _play(frames, sr)
-                except Exception:
+                except Exception as e:
+                    note_speak_error("synthesis", e)
                     return
         finally:
             _mark_speaking_end()
@@ -1031,6 +1057,9 @@ def status() -> dict:
         # so the user doesn't think TTS is silently broken when speak() works
         # but their picked device wasn't honored.
         "last_load_warning": _last_load_warning,
+        # What went wrong behind the queue, if anything, and when.
+        "last_speak_error": _last_speak_error,
+        "last_speak_error_at": _last_speak_error_at,
         # ONNX providers actually available on this machine — so the GUI can
         # disable picks that need a wheel the user hasn't installed yet, and
         # render a download icon next to them.

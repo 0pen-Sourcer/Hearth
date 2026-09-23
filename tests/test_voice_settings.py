@@ -118,6 +118,30 @@ for _mdl, _lang, _want in (("base.en", "", "en"), ("base.en", "hi", "en"),
 os.environ.pop("JARVIS_STT_LANGUAGE", None)
 os.environ.pop("JARVIS_STT_MODEL", None)
 
+# ------------------------------------------- a failure behind the queue is seen
+# Synthesis and playback run behind a queue, so speak() answers "ok" before
+# either can fail, and both loops caught everything and carried on. Pressing
+# speak did nothing, said nothing, and left nothing anywhere to read.
+_vsrc = open(os.path.join(ROOT, "hearth", "voice.py"), encoding="utf-8").read()
+check("the synthesis loop no longer swallows its failures whole",
+      ("except Exception:" + chr(10) + " " * 12 + "continue") not in _vsrc)
+check("a failure is recorded where a caller can find it",
+      "note_speak_error" in _vsrc and _vsrc.count("note_speak_error(") >= 3)
+
+_before = _voice.last_speak_error().get("at", 0)
+_voice.note_speak_error("synthesis", ValueError("no such voice"))
+_after = _voice.last_speak_error()
+check("the recorded failure names what went wrong",
+      "no such voice" in (_after.get("error") or ""))
+check("and carries a time, so a stale one is not mistaken for a fresh one",
+      _after.get("at", 0) > _before)
+_st = _voice.status()
+check("status reports it", _st.get("last_speak_error") == _after.get("error"))
+
+_ui = open(os.path.join(ROOT, "hearth", "ui.html"), encoding="utf-8").read()
+check("the window asks whether a failure landed after the button was pressed",
+      "speakErrorSince" in _ui and "last_speak_error_at" in _ui)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

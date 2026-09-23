@@ -10972,10 +10972,25 @@ async function refreshSettings() {
         .replace(/^./, c => c.toUpperCase());
       return 'This is ' + (name || 'the voice') + '. This is how I sound.';
     }
+    // Wait a short while for a failure from inside the speaking threads, and
+    // return its text if one arrives. Silence here means it played.
+    async function speakErrorSince(since) {
+      for (let i = 0; i < 8; i++) {
+        await new Promise(r => setTimeout(r, 250));
+        try {
+          const t = ((await api('/api/voice/status')) || {}).tts || {};
+          if (t.last_speak_error && (t.last_speak_error_at || 0) >= since) {
+            return t.last_speak_error;
+          }
+        } catch { return null; }
+      }
+      return null;
+    }
     if (voiceTest) {
       voiceTest.onclick = async () => {
         voiceTest.disabled = true;
         const prev = voiceTest.textContent; voiceTest.textContent = 'playing…';
+        const since = Date.now() / 1000;
         try {
           if (voiceSel) await saveSetting('voice_name', voiceSel.value);  // so /api/tts uses it
           const r = await fetch('/api/tts', {
@@ -10983,6 +10998,14 @@ async function refreshSettings() {
             body: JSON.stringify({ text: sampleLine(voiceSel ? voiceSel.value : '') }),
           });
           if (!r.ok) toast('Voice test', 'playback failed — make sure TTS is enabled above', 'warn', 5000);
+          else {
+            // Speaking happens behind a queue, so the request answers before
+            // anything has been synthesized and a failure after that point used
+            // to be silent in every direction. The server records it; this asks
+            // whether one landed after the button was pressed.
+            const err = await speakErrorSince(since);
+            if (err) toast('Voice test', err, 'err', 9000);
+          }
         } catch (err) { toast('Voice test', err.message, 'err'); }
         finally { voiceTest.disabled = false; voiceTest.textContent = prev; }
       };
