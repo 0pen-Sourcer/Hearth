@@ -116,6 +116,14 @@ jobs:
         run: |
           python tests/test_containment.py
 
+      - name: The window's script
+        # One file, no import to fail: a stray bracket takes the whole
+        # interface down to a blank page and nothing would have caught it.
+        # Also flags a control wired to an id no markup defines, which does
+        # not break, it just silently never works.
+        run: |
+          python tests/test_ui_script.py
+
       - name: Verify all tool dispatchers exist
         run: |
           python -c "from hearth.tools import TOOL_DEFINITIONS, _HANDLERS; missing = [td['name'] for td in TOOL_DEFINITIONS if td['name'] not in _HANDLERS]; assert not missing, f'tools missing a dispatcher in _HANDLERS: {missing}'; print('ok,', len(TOOL_DEFINITIONS), 'tools dispatch')"

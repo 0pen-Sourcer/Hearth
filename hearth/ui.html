@@ -9897,12 +9897,19 @@ async function tickLoadProgress() {
   try {
     const r = await api('/api/llmserver/progress');
     if (!r || !r.phase || r.phase === 'idle') {
-      // The server reports idle for the first moment after the request, before
-      // it has spawned anything. Polling starts in that window, so treating the
-      // first idle as "nothing is loading" stopped the poll for good and the
-      // bar never appeared again for the rest of the load. Wait for a real
-      // phase before giving up.
-      if (!_loadSeenPhase && Date.now() - _loadPollStart < 20000) return;
+      // Idle means one of two different things and the poller has to tell them
+      // apart. Started from a click, it is idle only for the moment between the
+      // request and the spawn, so a short wait is right and anything longer is
+      // a load that never began. Started at startup, it is watching for a load
+      // the window did not ask for and cannot time, so it waits for as long as
+      // there is no model, which is the only thing that would end the wait.
+      if (!_loadSeenPhase) {
+        if (_loadWatch) {
+          if (!STATE.loadedModel && Date.now() - _loadPollStart < 600000) return;
+        } else if (Date.now() - _loadPollStart < 20000) {
+          return;
+        }
+      }
       hideLoadProgress();
       stopLoadProgress();
       return;
@@ -9956,18 +9963,36 @@ function _refreshEmptyIfShown() {
   }
   if (typeof renderChat === 'function') renderChat();
 }
-let _loadPollStart = 0, _loadSeenPhase = false, _loadShown = 0;
-function startLoadProgress() {
-  if (LOAD_PROGRESS_TIMER) return;
+let _loadPollStart = 0, _loadSeenPhase = false, _loadShown = 0, _loadWatch = false;
+// `watch` is the startup case: a load may be starting on its own and may not
+// be, so the poller runs slowly and patiently. A click passes nothing and gets
+// the tight cadence, since the load is already on its way.
+function startLoadProgress(watch) {
+  if (LOAD_PROGRESS_TIMER) {
+    if (!watch) _loadWatch = false;          // a click upgrades an idle watcher
+    return;
+  }
   _loadPollStart = Date.now();
   _loadSeenPhase = false;
   _loadShown = 0;
+  _loadWatch = !!watch;
   tickLoadProgress();
-  LOAD_PROGRESS_TIMER = setInterval(tickLoadProgress, 500);
+  _scheduleLoadTick();
   _refreshEmptyIfShown();
 }
+function _scheduleLoadTick() {
+  LOAD_PROGRESS_TIMER = setTimeout(async () => {
+    await tickLoadProgress();
+    if (LOAD_PROGRESS_TIMER) _scheduleLoadTick();
+  }, _loadSeenPhase ? 500 : (_loadWatch ? 2000 : 500));
+}
 function stopLoadProgress() {
-  if (LOAD_PROGRESS_TIMER) { clearInterval(LOAD_PROGRESS_TIMER); LOAD_PROGRESS_TIMER = null; _refreshEmptyIfShown(); }
+  if (LOAD_PROGRESS_TIMER) {
+    clearTimeout(LOAD_PROGRESS_TIMER);
+    LOAD_PROGRESS_TIMER = null;
+    _loadWatch = false;
+    _refreshEmptyIfShown();
+  }
 }
 
 // ============================================================
@@ -11047,7 +11072,6 @@ async function refreshSettings() {
     // Chat brain - friendlier rebuild of the old LLM-endpoint block.
     const brainMode = $('setting-brain-mode');
     const cloudFields = $('brain-cloud-fields');
-    const modelField = $('brain-model-field');
     const customUrl = $('brain-custom-url');
     const applyRow = $('brain-apply-row');
     const llmUrl = $('setting-llm-url');
@@ -11055,7 +11079,6 @@ async function refreshSettings() {
     const llmMdl = $('setting-llm-model');
     const llmApply = $('btn-llm-apply');
     const brainHint = $('brain-where-hint');
-    const modelHint = $('brain-model-hint');
     if (brainMode && llmUrl && llmKey && llmMdl && llmApply) {
       const PRESETS = {
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },
@@ -11087,13 +11110,14 @@ async function refreshSettings() {
       function applyMode(v) {
         const isLocal = (v === 'local');
         cloudFields.hidden = isLocal;
-        if (modelField) modelField.hidden = true; // hidden placeholder; topbar owns model pick now
         customUrl.hidden   = (v !== 'custom');
         // applyRow stays hidden until the user actually changes something
         // (provider/key/url) — see _dirtyBrain(). No permanent eyesore.
         const p = PRESETS[v] || PRESETS.local;
-        brainHint.innerHTML = p.hint;
-        if (modelHint && p.modelHint) modelHint.innerHTML = p.modelHint;
+        // The model examples used to render into their own line, which was
+        // removed, so they went nowhere. They belong with the rest of what
+        // this provider needs to be told anyway.
+        brainHint.innerHTML = p.hint + (p.modelHint ? ' ' + p.modelHint : '');
         if (!isLocal && v !== 'custom') llmUrl.value = p.url;
         if (!llmMdl.value && p.sample) llmMdl.placeholder = 'e.g. ' + p.sample;
       }
@@ -12527,35 +12551,6 @@ window.addEventListener('load', () => {
   });
 });
 
-// GPU voice install button (Settings → Voice): pip-installs the CUDA STT runtime
-// (cuBLAS + cuDNN) in the background + polls progress — no terminal needed. This
-// is the "download button instead of just 'not installed'" the user asked for.
-window.addEventListener('load', () => {
-  const btn = document.getElementById('btn-install-gpu-voice');
-  if (!btn) return;
-  const msg = document.getElementById('gpu-voice-install-msg');
-  let poll = null;
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    if (msg) msg.textContent = 'installing… (a few minutes, ~500MB)';
-    try {
-      await api('/api/voice/install-gpu', { method: 'POST', body: JSON.stringify({ device: 'cuda' }) });
-      poll = setInterval(async () => {
-        try {
-          const s = await fetch('/api/voice/install-status').then(x => x.json());
-          dlMirrorVoice('GPU voice runtime', s);
-          if (s.running) { if (msg) msg.textContent = 'installing…'; return; }
-          if (s.done) {
-            clearInterval(poll);
-            if (msg) msg.textContent = s.msg || (s.ok ? 'installed ✓ — toggle voice off/on' : 'failed');
-            btn.disabled = false;
-          }
-        } catch (e) {}
-      }, 2500);
-    } catch (e) { if (msg) msg.textContent = 'failed to start'; btn.disabled = false; }
-  });
-});
-
 function setVoiceStatus(s) {
   $('voice-status-text').textContent = s;
   // Infer the HUD state from the status text so the grid picks the right effect
@@ -13096,217 +13091,6 @@ function showWelcomeCard(force = false) {
   // this as a safe no-op so legacy callers (e.g. showView, render hooks)
   // don't crash. /welcome slash command re-opens the new overlay.
   return;
-}
-
-async function renderServerSetup() {
-  // No-op now: welcome card just shows a link to the Models tab so it stays
-  // clean. All picking / downloading / scanning lives in the Models view.
-  return;
-  // (Legacy code below is dead - kept around briefly while we verify the new
-  // flow, will get cleaned in a follow-up.)
-  // eslint-disable-next-line no-unreachable
-  let s;
-  try { s = await api('/api/llmserver/status'); }
-  catch { s = { llama_cpp_installed: false, picks: [] }; }
-
-  const intro = $('welcome-server-intro');
-  const opts = $('welcome-server-options');
-
-  if (s.external_running || s.builtin_running) {
-    // Server actually came up between page load and this call - hide the section.
-    $('welcome-no-server').hidden = true;
-    return;
-  }
-
-  if (s.llama_cpp_installed) {
-    // BEST case: built-in is available. Offer to download + boot a curated pick.
-    const recId = s.recommended_pick_id || '';
-    const recWhy = s.recommendation_reason || '';
-    intro.textContent = 'Hearth runs its own built-in LLM server - no other apps required. We picked the best fit for your PC:';
-    opts.innerHTML = '<div class="picks">' + (s.picks || []).map(p => {
-      const isRec = p.id === recId;
-      const tagHtml = isRec
-        ? '<span class="pick-tag pick-tag-pc">Recommended for your PC</span>'
-        : (p.tags && p.tags.includes('recommended') ? '<span class="pick-tag">good default</span>' : '');
-      return `
-      <div class="pick${isRec ? ' pick-rec' : ''}" data-pick-id="${esc(p.id)}">
-        <div class="pick-info">
-          <div class="pick-name">${esc(p.name)}${tagHtml}</div>
-          <div class="pick-meta">${p.size_gb} GB download &middot; needs ${p.vram_min_gb}+ GB VRAM &middot; ${p.context.toLocaleString()} token context</div>
-          <div class="pick-desc">${esc(p.description)}</div>
-          ${isRec && recWhy ? `<div class="pick-why">${esc(recWhy)}</div>` : ''}
-        </div>
-        <button class="pick-btn">Download &amp; use</button>
-      </div>`;
-    }).join('') + '</div>' +
-      '<div class="welcome-tip">Or <a href="#" id="hf-browse-link">browse Hugging Face</a> for any GGUF. Already have one? Drop it into <code>~/Jarvis/models/</code> and pick it from the dropdown above.</div>';
-    opts.querySelectorAll('.pick').forEach(el => {
-      el.querySelector('.pick-btn').addEventListener('click', () => downloadAndStart(el.dataset.pickId));
-    });
-    const hfLink = $('hf-browse-link');
-    if (hfLink) hfLink.addEventListener('click', (e) => { e.preventDefault(); openHFSearch(); });
-  } else {
-    // Fallback: external app links + a nudge toward the built-in path.
-    intro.textContent = 'Hearth needs a local LLM. Three options - all free:';
-    opts.innerHTML = `
-      <div class="welcome-links">
-        <a href="https://lmstudio.ai/" target="_blank" rel="noopener" class="welcome-link">
-          <b>LM Studio</b><span>Beginner-friendly desktop app. GUI + GPU.</span></a>
-        <a href="https://ollama.com/" target="_blank" rel="noopener" class="welcome-link">
-          <b>Ollama</b><span>Lightweight CLI.</span></a>
-      </div>
-      <div class="welcome-tip">Already running a server? Hearth auto-detects it. Want to pick a model right here? Open the <b>Models</b> tab → <b>Discover</b> to browse Hugging Face and download one that fits your VRAM.</div>
-    `;
-  }
-}
-
-// Modal: search Hugging Face for any GGUF, pick a quant level, download +
-// auto-start the built-in server. Lets users go beyond the 3 curated picks.
-function openHFSearch() {
-  showModal('Browse Hugging Face for a model', `
-    <input type="text" id="hf-q" class="hf-search-input" placeholder="search GGUF models (e.g. mistral 7b, phi 3, gemma)" autofocus />
-    <div id="hf-results" class="hf-results">
-      <div style="padding:14px;color:var(--fg-faint);font-size:12px">Type a query above to search GGUF repos on Hugging Face.</div>
-    </div>
-  `, [{ label: 'Close' }]);
-  const q = document.getElementById('hf-q');
-  const res = document.getElementById('hf-results');
-  let _debounce = null;
-  if (!q) return;
-  q.addEventListener('input', () => {
-    clearTimeout(_debounce);
-    _debounce = setTimeout(async () => {
-      const term = q.value.trim();
-      if (!term) { res.innerHTML = '<div style="padding:14px;color:var(--fg-faint);font-size:12px">Type a query above.</div>'; return; }
-      res.innerHTML = '<div style="padding:14px;color:var(--fg-faint);font-size:12px">Searching Hugging Face...</div>';
-      try {
-        const r = await api('/api/llmserver/hf-search?q=' + encodeURIComponent(term));
-        const list = r.results || [];
-        if (!list.length) { res.innerHTML = '<div style="padding:14px;color:var(--fg-faint);font-size:12px">No GGUF repos matched.</div>'; return; }
-        res.innerHTML = list.map((it, i) => `
-          <div class="hf-result" data-repo="${esc(it.hf_repo)}">
-            <div>
-              <div class="hf-result-name">${esc(it.hf_repo)}</div>
-              <div style="font-size:10px;color:var(--fg-faint)">${(it.tags || []).slice(0,4).join(' &middot; ')}</div>
-            </div>
-            <div class="hf-result-meta">${it.downloads ? it.downloads.toLocaleString() + ' dl' : ''}</div>
-          </div>
-          <div class="hf-files" id="hf-files-${i}" hidden></div>
-        `).join('');
-        res.querySelectorAll('.hf-result').forEach((el, i) => {
-          el.addEventListener('click', () => loadHFRepoFiles(el.dataset.repo, i));
-        });
-      } catch (e) {
-        res.innerHTML = '<div style="padding:14px;color:#e74c3c;font-size:12px">Search failed: ' + esc(e.message) + '</div>';
-      }
-    }, 350);
-  });
-}
-
-async function loadHFRepoFiles(repo, idx) {
-  const box = document.getElementById('hf-files-' + idx);
-  if (!box) return;
-  if (!box.hidden) { box.hidden = true; return; }  // toggle
-  box.hidden = false;
-  box.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--fg-faint)">Loading file list...</div>';
-  try {
-    const r = await api('/api/llmserver/hf-files?repo=' + encodeURIComponent(repo));
-    const files = r.files || [];
-    if (!files.length || files[0].error) {
-      box.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--fg-faint)">No .gguf files in this repo.</div>';
-      return;
-    }
-    box.innerHTML = files.map(f => `
-      <div class="hf-file" data-filename="${esc(f.filename)}">
-        <span>${esc(f.filename)}</span>
-        <span style="color:var(--fg-faint)">${f.size_gb ? f.size_gb + ' GB' : ''}</span>
-      </div>
-    `).join('');
-    box.querySelectorAll('.hf-file').forEach(el => {
-      el.addEventListener('click', async () => {
-        $('modal').classList.remove('open');
-        await downloadCustomHF(repo, el.dataset.filename);
-      });
-    });
-  } catch (e) {
-    box.innerHTML = '<div style="padding:8px;font-size:12px;color:#e74c3c">Failed: ' + esc(e.message) + '</div>';
-  }
-}
-
-async function downloadCustomHF(repo, filename) {
-  // Re-use the welcome-card download UI for progress display.
-  showWelcomeCard(true);
-  $('welcome-no-server').hidden = false;
-  const dl = $('welcome-download');
-  const bar = $('welcome-dl-bar-inner');
-  const label = $('welcome-dl-label');
-  const detail = $('welcome-dl-detail');
-  const opts = $('welcome-server-options');
-  dl.hidden = false;
-  bar.style.width = '0%';
-  label.textContent = 'Downloading ' + filename + '...';
-  detail.textContent = repo;
-  opts.style.opacity = '0.4';
-  opts.style.pointerEvents = 'none';
-  let modelPath = null;
-  try {
-    const res = await fetch('/api/llmserver/download-hf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repo, filename }),
-    });
-    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
-    const reader = res.body.getReader();
-    const dec = new TextDecoder('utf-8');
-    let buf = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let ev; try { ev = JSON.parse(line); } catch { continue; }
-        if (ev.type === 'progress') {
-          const pct = ev.total ? Math.min(100, Math.floor(100 * ev.done / ev.total)) : 0;
-          bar.style.width = pct + '%';
-          label.textContent = filename + ' - ' + pct + '%';
-          detail.textContent = (ev.done / 1e9).toFixed(2) + ' GB of ' + (ev.total / 1e9).toFixed(2) + ' GB';
-        } else if (ev.type === 'done') {
-          if (!ev.ok) {
-            label.textContent = 'Download failed';
-            detail.textContent = ev.error || '';
-            opts.style.opacity = '1'; opts.style.pointerEvents = '';
-            return;
-          }
-          modelPath = ev.path;
-          bar.style.width = '100%';
-        }
-      }
-    }
-    if (modelPath) {
-      label.textContent = 'Starting server...';
-      const startRes = await api('/api/llmserver/start', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_path: modelPath }),
-      });
-      if (startRes && startRes.ok) {
-        label.textContent = 'Ready - server live';
-        toast('Server started', filename, 'ok', 5000);
-        hideWelcomeCard(true);
-        setTimeout(() => { refreshModels(); refreshState(); }, 500);
-      } else {
-        label.textContent = 'Server start failed';
-        detail.textContent = (startRes && startRes.error) || '';
-      }
-    }
-  } catch (e) {
-    label.textContent = 'Error';
-    detail.textContent = e.message;
-  } finally {
-    opts.style.opacity = '1'; opts.style.pointerEvents = '';
-  }
 }
 
 // ============================================================
@@ -14119,61 +13903,6 @@ function modelsRenderMine() {
          } }]);
     });
   });
-}
-
-function modelsRenderPicks() {
-  // Quick Picks tab was removed. Function kept as a no-op so any cached
-  // callsite doesn't blow up. Use the Discover tab to browse models.
-  return;
-  // unreachable but preserved so the legacy renderer below doesn't error
-  // out on the missing pane container.
-  const s = _modelsState.status || {};
-  const pane = $('models-pane-picks');
-  const picks = s.picks || [];
-  const recId = s.recommended_pick_id || '';
-  if (!picks.length) {
-    pane.innerHTML = '<div class="models-empty">No picks available.</div>';
-    return;
-  }
-  let html = `
-    <div class="models-section">
-      <div class="sec-head">
-        <h3>Quick picks</h3>
-        <span class="sub">Hand-curated GGUFs - one click downloads + boots them.</span>
-      </div>
-      <div class="sec-body">`;
-  for (const p of picks) {
-    const isRec = p.id === recId;
-    const caps = modelsCapTags(p.name, p.tags || []);
-    const rowId = 'pick-' + p.id;
-    html += `
-      <div class="model-row${isRec ? ' is-recommended' : ''}" data-row="${rowId}">
-        <div class="model-info">
-          <div class="model-name">${esc(p.name)}
-            ${isRec ? '<span class="model-badge badge-rec">Fits your VRAM</span>' : ''}
-          </div>
-          <div class="model-meta">${p.size_gb} GB &middot; needs ${p.vram_min_gb}+ GB VRAM &middot; ${p.context.toLocaleString()} ctx &middot; ${esc(p.hf_repo)}</div>
-          <div class="model-meta" style="color:var(--fg-dim);font-family:inherit">${esc(p.description)}</div>
-          ${modelsCapTagsHTML(caps)}
-        </div>
-        <div class="cell-size">${p.size_gb} GB</div>
-        <button class="model-action" data-pick="${esc(p.id)}">Download &amp; use</button>
-        <div class="model-expand" data-expand="${rowId}">
-          <div class="ex-desc">Downloads the file, then loads it with sensible defaults. Tune context / GPU layers anytime in <b>My Models</b> — set once, right where you load it.</div>
-          ${p.hf_repo ? `<div class="ex-desc" style="margin-top:8px">
-            <a href="https://huggingface.co/${esc(p.hf_repo)}" target="_blank" rel="noopener" style="color:var(--accent-2)">View ${esc(p.hf_repo)} on Hugging Face &#8599;</a>
-            <span style="color:var(--fg-faint)"> &middot; licence, benchmarks and what it was trained for</span>
-          </div>` : ''}
-          <div class="ex-actions">
-            <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
-            <button class="model-action" data-apply-pick="${esc(p.id)}" data-apply-id="${rowId}">Download</button>
-          </div>
-        </div>
-      </div>`;
-  }
-  html += '</div></div>';
-  pane.innerHTML = html;
-  modelsWireRowClicks(pane);
 }
 
 // Engine pane: what's running inference, and every llama.cpp build you can
@@ -15024,32 +14753,6 @@ function dlRender() {
   ov.innerHTML = `<div style="font-weight:700;font-size:15px;color:var(--fg);margin-bottom:12px">${_title}</div>${rows}${_browse}`;
 }
 
-async function modelsHFSearch(query) {
-  const out = $('models-hf-results');
-  if (!query) { out.innerHTML = ''; return; }
-  out.innerHTML = '<div class="sec-sub" style="padding:10px">Searching...</div>';
-  try {
-    const r = await api('/api/llmserver/hf-search?q=' + encodeURIComponent(query));
-    const list = r.results || [];
-    if (!list.length) { out.innerHTML = '<div class="sec-sub" style="padding:10px">No GGUF repos matched.</div>'; return; }
-    out.innerHTML = list.map((it, i) => `
-      <div class="model-row" data-repo="${esc(it.hf_repo)}" data-idx="${i}">
-        <div class="model-info">
-          <div class="model-name">${esc(it.hf_repo)}</div>
-          <div class="model-meta">${(it.downloads || 0).toLocaleString()} downloads &middot; ${(it.tags || []).slice(0, 4).map(esc).join(' &middot; ')}</div>
-          <div class="hf-files" id="mhf-files-${i}" hidden style="margin-top:8px"></div>
-        </div>
-        <button class="model-action is-secondary" data-toggle="${i}">Show files</button>
-      </div>
-    `).join('');
-    out.querySelectorAll('.model-action[data-toggle]').forEach(b => {
-      b.addEventListener('click', () => modelsLoadHFFiles(b.closest('.model-row').dataset.repo, b.dataset.toggle));
-    });
-  } catch (e) {
-    out.innerHTML = '<div style="padding:10px;color:#e74c3c">' + esc(e.message) + '</div>';
-  }
-}
-
 async function modelsLoadHFFiles(repo, idx) {
   const box = $('mhf-files-' + idx);
   if (!box) return;
@@ -15250,106 +14953,6 @@ async function startWithModel(modelPath, label, detail, loadCfg) {
   } catch (e) {
     label.textContent = 'Start failed';
     detail.innerHTML = `${esc(e.message)} <a href="#" onclick="document.getElementById('models-dl').hidden=true;return false;" style="color:var(--fg-dim);margin-left:8px">Dismiss</a> <a href="#" onclick="navigator.clipboard.writeText(${JSON.stringify(e.message || '')});return false;" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
-  }
-}
-
-async function downloadAndStart(pickId) {
-  const dl = $('welcome-download');
-  const bar = $('welcome-dl-bar-inner');
-  const label = $('welcome-dl-label');
-  const detail = $('welcome-dl-detail');
-  const opts = $('welcome-server-options');
-  dl.hidden = false;
-  bar.style.width = '0%';
-  label.textContent = 'Connecting to Hugging Face...';
-  detail.textContent = '';
-  opts.style.opacity = '0.4';
-  opts.style.pointerEvents = 'none';
-
-  let modelPath = null;
-  try {
-    const res = await fetch('/api/llmserver/download', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pick_id: pickId }),
-    });
-    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-    const reader = res.body.getReader();
-    const dec = new TextDecoder('utf-8');
-    let buf = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let ev; try { ev = JSON.parse(line); } catch { continue; }
-        if (ev.type === 'progress') {
-          const pct = ev.total ? Math.min(100, Math.floor(100 * ev.done / ev.total)) : 0;
-          bar.style.width = pct + '%';
-          label.textContent = `Downloading: ${pct}%`;
-          detail.textContent = `${(ev.done / 1e9).toFixed(2)} GB of ${(ev.total / 1e9).toFixed(2)} GB`;
-        } else if (ev.type === 'done') {
-          if (!ev.ok) {
-            label.textContent = 'Download failed';
-            detail.textContent = ev.error || 'unknown error';
-            opts.style.opacity = '1'; opts.style.pointerEvents = '';
-            return;
-          }
-          modelPath = ev.path;
-          bar.style.width = '100%';
-          label.textContent = ev.already ? 'Already downloaded' : 'Download complete';
-        }
-      }
-    }
-  } catch (e) {
-    label.textContent = 'Error';
-    detail.textContent = e.message || String(e);
-    opts.style.opacity = '1'; opts.style.pointerEvents = '';
-    return;
-  }
-
-  if (!modelPath) {
-    label.textContent = 'No model returned';
-    opts.style.opacity = '1'; opts.style.pointerEvents = '';
-    return;
-  }
-
-  // Don't evict a model you're actively using. Only auto-start the just-
-  // downloaded model when nothing is loaded; otherwise say it's ready and let
-  // the user switch to it from the dropdown when THEY want to (this is why a
-  // background download used to surprise-swap the active model out).
-  if (STATE.brain && STATE.brain.loaded) {
-    label.textContent = 'Download complete';
-    detail.textContent = 'Pick it from the model dropdown above whenever you want to switch to it.';
-    opts.style.opacity = '1'; opts.style.pointerEvents = '';
-    setTimeout(() => { refreshModels(); }, 300);
-    return;
-  }
-  label.textContent = 'Starting server...';
-  detail.textContent = 'Loading model into memory (10-30s)';
-  try {
-    const startRes = await api('/api/llmserver/start', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model_path: modelPath }),
-    });
-    if (startRes && startRes.ok) {
-      label.textContent = 'Ready - server is live';
-      detail.textContent = 'Pick the model from the dropdown above and chat.';
-      toast('Built-in server started', 'No LM Studio needed. Talk to me.', 'ok', 6000);
-      hideWelcomeCard(true);
-      setTimeout(() => { refreshModels(); refreshState(); }, 500);
-    } else {
-      label.textContent = 'Server start failed';
-      detail.textContent = (startRes && startRes.error) || 'unknown error';
-    }
-  } catch (e) {
-    label.textContent = 'Server start failed';
-    detail.textContent = e.message || String(e);
-  } finally {
-    opts.style.opacity = '1'; opts.style.pointerEvents = '';
   }
 }
 
@@ -16120,7 +15723,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key.toLowerCase() === 'k') {
     e.preventDefault();
-    try { const d = $('model-dropdown'); if (d) d.focus(); } catch {}
+    try { const d = $('model-select'); if (d) d.focus(); } catch {}
     return;
   }
 });
@@ -16396,14 +15999,12 @@ window.addEventListener('load', function initSidebarDrawer() {
   // are correct on first paint (don't wait for the first chat turn).
   refreshCtxBudget().catch(() => {});
 
-  // If a builtin autoboot is already in flight when the GUI opens, kick the
-  // sticker progress bar so the user sees it instead of an empty pill.
-  try {
-    const p = await api('/api/llmserver/progress');
-    if (p && p.phase && p.phase !== 'idle' && p.phase !== 'ready' && p.phase !== 'error') {
-      startLoadProgress();
-    }
-  } catch {}
+  // A model loading on its own at startup gets the same bar as one picked by
+  // hand. A single check here used to miss it: the window is ready before the
+  // spawn is, so the one look found idle and nothing watched after that, and
+  // the whole load passed with an empty pill. This watches until a model is
+  // loaded or the load appears.
+  startLoadProgress(true);
 
   setInterval(refreshState, 12000);
   setInterval(refreshModels, 9000);
