@@ -666,6 +666,7 @@ async def run_once(
     # "hearth-builtin") gets a 401 on the auto-detect probe + every chat request.
     # Detect by probing: does this base answer with our builtin's signature?
     _effective_key = LOCAL_API_KEY
+    _builtin_engine = ""
     try:
         from . import llmserver as _ls
         st = _ls.status(LOCAL_API_BASE)
@@ -674,11 +675,26 @@ async def run_once(
             from urllib.parse import urlparse
             if urlparse(LOCAL_API_BASE).port == urlparse(st["builtin_url"]).port:
                 _effective_key = "hearth-builtin"
+                _builtin_engine = (st.get("builtin_engine") or "").lower()
     except Exception:
         pass
-    # Only our builtin server uses the hearth-builtin key. That's the exclusive
-    # signal to hand-inject tools as text instead of via the API `tools` param.
-    _use_manual_tools = (_effective_key == "hearth-builtin")
+    # Hand-injecting the tool spec as text means reading the call back out of
+    # prose, and every model family writes that differently, so the reader is a
+    # pile of format-specific patterns that breaks whenever a new finetune
+    # words it another way. The standalone engine applies the model's OWN chat
+    # template and returns parsed tool_calls, so the format is handled by the
+    # people who ship the template rather than guessed at here. That path is
+    # used whenever it is available.
+    #
+    # The wheel build predates it and still needs the text route, and
+    # HEARTH_MANUAL_TOOLS=1 forces the old behaviour if a model ever does worse
+    # on the native one. The text reader stays either way: it runs when a reply
+    # carries no structured calls, so a model that ignores the tools parameter
+    # and writes prose is still understood.
+    _native_tools = (_effective_key == "hearth-builtin"
+                     and _builtin_engine == "native"
+                     and os.environ.get("HEARTH_MANUAL_TOOLS", "") not in ("1", "true", "yes"))
+    _use_manual_tools = (_effective_key == "hearth-builtin") and not _native_tools
     # No overall request deadline + a per-read (per-chunk) stall timeout: a slow
     # local model can stream a large generation for many minutes, and a flat total
     # timeout aborts it mid-stream. Per-read only trips if the server truly stalls;
