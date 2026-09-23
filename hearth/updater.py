@@ -189,13 +189,70 @@ def repair(on_progress=None) -> dict:
     return r
 
 
+# Written before a patch starts replacing files and removed once it has
+# finished. Its presence at startup means the last attempt did not get to the
+# end, which is what a power cut or a kill in the middle of an update leaves.
+_INFLIGHT = "_patch_inflight.json"
+
+
+def _backup_dir(base: str) -> str:
+    return os.path.join(base, "_patch_backup")
+
+
+def recover_interrupted_patch() -> dict:
+    """Undo a patch that was cut off partway through, if one was.
+
+    A rollback inside apply_patch only covers a failure it lives to see. Losing
+    the process during the extract left files from two versions mixed together
+    with nothing to notice or reverse it, and the install would not start. This
+    runs at startup, restores everything the interrupted attempt had backed up,
+    removes the files it had added, and clears the marker.
+    """
+    base = code_dir()
+    if not base:
+        return {"ok": True, "recovered": False}
+    marker = os.path.join(base, _INFLIGHT)
+    if not os.path.isfile(marker):
+        return {"ok": True, "recovered": False}
+    import shutil
+    backup = _backup_dir(base)
+    try:
+        with open(marker, "r", encoding="utf-8") as f:
+            rec = json.load(f) or {}
+        restored, dropped = 0, 0
+        for n in rec.get("replaced") or []:
+            src = os.path.join(backup, n)
+            if os.path.isfile(src):
+                dst = os.path.join(base, n)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
+                restored += 1
+        # Files the patch was adding have no earlier version to go back to, so
+        # the only way back is to take them away again.
+        for n in rec.get("added") or []:
+            try:
+                os.remove(os.path.join(base, n))
+                dropped += 1
+            except OSError:
+                pass
+        os.remove(marker)
+        print(f"[hearth.updater] recovered an interrupted update: "
+              f"{restored} file(s) restored, {dropped} removed", flush=True)
+        return {"ok": True, "recovered": True, "restored": restored, "removed": dropped}
+    except Exception as e:
+        return {"ok": False, "recovered": False, "error": f"{type(e).__name__}: {e}"}
+
+
 def apply_patch(path: str) -> dict:
     """Replace the on-disk .py layer with the patch contents.
 
     Backs the current files up first and restores them if anything fails, so a
     bad or truncated patch leaves a working install rather than a half-updated
     one. Only paths inside the code directory are written, so a crafted archive
-    can't escape and drop files elsewhere."""
+    can't escape and drop files elsewhere. A marker written alongside the backup
+    covers the case this function cannot: losing the process mid-extract, which
+    recover_interrupted_patch undoes at the next start.
+    """
     import zipfile
     import shutil
     base = code_dir()
@@ -203,7 +260,8 @@ def apply_patch(path: str) -> dict:
         return {"ok": False, "error": "this build isn't patchable"}
     if not path or not os.path.isfile(path):
         return {"ok": False, "error": "patch file not found"}
-    backup = os.path.join(base, "_patch_backup")
+    backup = _backup_dir(base)
+    marker = os.path.join(base, _INFLIGHT)
     try:
         with zipfile.ZipFile(path) as z:
             names = [n for n in z.namelist() if not n.endswith("/")]
@@ -214,25 +272,45 @@ def apply_patch(path: str) -> dict:
                     return {"ok": False, "error": f"patch tried to write outside the app: {n}"}
             shutil.rmtree(backup, ignore_errors=True)
             os.makedirs(backup, exist_ok=True)
+            replaced, added = [], []
             for n in names:                       # snapshot what we're replacing
                 cur = os.path.join(base, n)
                 if os.path.isfile(cur):
                     dst = os.path.join(backup, n)
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     shutil.copy2(cur, dst)
+                    replaced.append(n)
+                else:
+                    added.append(n)
+            with open(marker, "w", encoding="utf-8") as f:
+                json.dump({"replaced": replaced, "added": added,
+                           "version": HEARTH_VERSION}, f)
             try:
                 for n in names:
                     z.extract(n, base)
             except Exception as e:                # roll back to the snapshot
-                for n in names:
+                for n in replaced:
                     b = os.path.join(backup, n)
                     if os.path.isfile(b):
                         shutil.copy2(b, os.path.join(base, n))
+                for n in added:
+                    try:
+                        os.remove(os.path.join(base, n))
+                    except OSError:
+                        pass
+                try:
+                    os.remove(marker)
+                except OSError:
+                    pass
                 return {"ok": False, "error": f"patch failed, rolled back: {e}"}
     except zipfile.BadZipFile:
         return {"ok": False, "error": "patch archive is corrupt; download it again"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    try:
+        os.remove(marker)
+    except OSError:
+        pass
     _sync_registry_version()
     return {"ok": True, "files": len(names)}
 

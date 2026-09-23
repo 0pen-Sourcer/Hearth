@@ -21,6 +21,20 @@ _warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub
 _warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub.*")
 
 # ---------------------------------------------------------------------------
+# Undo an update that was cut off partway through, before anything else loads.
+# A patch replaces these files one at a time; losing the process in the middle
+# of that leaves two versions mixed together and the app does not come back up.
+# The rollback inside apply_patch only covers a failure it lives to see, so the
+# marker it leaves behind is checked here instead. Ordinary starts find nothing
+# and pay one missing-file check for it.
+# ---------------------------------------------------------------------------
+try:
+    from . import updater as _updater
+    _updater.recover_interrupted_patch()
+except Exception:
+    pass
+
+# ---------------------------------------------------------------------------
 # Use the OS certificate store for TLS (Windows/macOS) so cloud endpoints
 # (Gemini, xAI/Grok, OpenAI, OpenRouter) work even behind a corporate or
 # antivirus TLS-inspecting proxy whose root CA lives in the OS store but NOT

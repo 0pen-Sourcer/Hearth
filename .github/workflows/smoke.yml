@@ -116,6 +116,13 @@ jobs:
         run: |
           python tests/test_containment.py
 
+      - name: An update cut off partway through
+        # The rollback inside the applier only runs for a failure it lives to
+        # see. A power cut or a kill during the extract left two versions mixed
+        # together, with nothing to notice it and no way back.
+        run: |
+          python tests/test_patch_recovery.py
+
       - name: The window's script
         # One file, no import to fail: a stray bracket takes the whole
         # interface down to a blank page and nothing would have caught it.
