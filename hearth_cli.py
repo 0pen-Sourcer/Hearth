@@ -27,7 +27,49 @@ import threading
 import urllib.request
 from typing import Dict, List, Optional
 
-from openai import AsyncOpenAI
+
+# Answered before anything heavy loads. There was no argument handling at all,
+# so --help and --version started the whole session, spawned the MCP bridges
+# and sat at a prompt, which is not what either flag is asking for.
+_HELP = """usage: hearth-cli [--help] [--version]
+
+Hearth in the terminal. Runs against the server Hearth manages, or any
+OpenAI-compatible one (LM Studio, Ollama, llama.cpp, vLLM, a cloud provider).
+
+Everything else is set from inside the session. Type /help once it starts.
+
+Environment (optional, each overrides the saved setting):
+  LOCAL_API_BASE     server address         default http://localhost:1234/v1
+  LOCAL_MODEL        model id               default: whatever is loaded
+  LOCAL_API_KEY      key for that server
+  JARVIS_CONTEXT     context window in tokens
+  JARVIS_WORKSPACE   where writes are allowed           default ~/Jarvis
+  JARVIS_LOCKDOWN    1 confines reads to the workspace as well
+  HEARTH_MANUAL_TOOLS  1 sends the tool list as text instead of natively
+"""
+
+
+def _answer_flags(argv: List[str]) -> None:
+    args = [a for a in argv[1:] if a.strip()]
+    if not args:
+        return
+    if any(a in ("-h", "--help", "/?") for a in args):
+        print(_HELP)
+        sys.exit(0)
+    if any(a in ("-V", "--version") for a in args):
+        try:
+            from hearth.updater import HEARTH_VERSION as _v
+        except Exception:
+            _v = "unknown"
+        print(f"hearth {_v}")
+        sys.exit(0)
+    # Frozen builds re-launch this exe with private sentinels of their own, and
+    # the migrator reads sys.argv; anything unrecognised is left for them.
+
+
+_answer_flags(sys.argv)
+
+from openai import AsyncOpenAI  # noqa: E402
 
 
 def _stream_client_timeout():
@@ -3679,6 +3721,8 @@ class JarvisCLI:
         if prompt_task in done:
             try:
                 return prompt_task.result()
+            except EOFError:
+                raise
             except Exception:
                 pass
         if listen_task in done:
@@ -3749,6 +3793,8 @@ class JarvisCLI:
             await _drain(stt_task, evt_task)
             try:
                 return await prompt_task
+            except EOFError:
+                raise
             except Exception:
                 return ""
 
@@ -3756,8 +3802,16 @@ class JarvisCLI:
         _cancel(prompt_task, stt_task, evt_task)
         await _drain(*(t for t in (prompt_task, stt_task, evt_task) if t not in done))
         if prompt_task in done:
+            # End of input is how Ctrl+Z / Ctrl+D ask to leave, and it is also
+            # what a closed console or a finished pipe looks like. EOFError is
+            # an Exception, so the catch-all below turned it into an empty line:
+            # the loop re-prompted, hit the same end of input at once, and spun,
+            # measured at twenty thousand prompts in twenty-five seconds, never
+            # reaching the exit that was written for it. It goes up untouched.
             try:
                 return prompt_task.result()
+            except EOFError:
+                raise
             except Exception:
                 return ""
         if stt_task is not None and stt_task in done:
@@ -5315,12 +5369,29 @@ class JarvisCLI:
                             }
                         print(f"{C_DIM}(recovered {len(_recovered)} tool call"
                               f"{'s' if len(_recovered) != 1 else ''} the model wrote as text){C_RESET}")
+                        # Calls that read run, but a reply of twenty calls with
+                        # one bracket wrong ran the nineteen and dropped the
+                        # twentieth without a word, and the model went on as if
+                        # all twenty had run. Markup the parse could not excise
+                        # is a call that never ran. The bridge has had this
+                        # check; the terminal did not.
+                        if has_tool_call(_cleaned):
+                            _unparsed_markup = True
                     else:
                         # Markers present but nothing extracted. Saying nothing
                         # here is what let the model believe the call ran.
                         _unparsed_markup = True
-            except Exception:
-                pass
+            except Exception as _pe:
+                # A parser that throws on real markup is the same outcome as one
+                # that reads nothing from it: no tool ran. Swallowing it meant the
+                # turn ended on work the model believed it had done. Only when the
+                # markup is really there, or a plain answer would be sent back
+                # round as though it were a broken call.
+                print(f"{C_DIM}(tool-call parser error: {type(_pe).__name__}: {_pe}){C_RESET}")
+                try:
+                    _unparsed_markup = bool(has_tool_call(content_captured))
+                except Exception:
+                    pass
 
         if content_captured:
             entry: Dict = {"role": "assistant", "content": content_captured}
@@ -5665,6 +5736,21 @@ class JarvisCLI:
                 ],
             })
             self._pending_image_block = None
+
+        # Some of the reply was a call that could not be read. The ones that
+        # could have run and their results are in place above, so this goes
+        # after them, where the ordering is valid, and says which part ran.
+        if _unparsed_markup:
+            _ran = len(entry.get("tool_calls") or [])
+            note = (f"Part of your last message was not a readable tool call. The "
+                    f"{_ran} call(s) that could be read did run, and their results "
+                    f"are above. The unreadable part did NOT run. Send it again as "
+                    f"one well-formed call, one JSON object per block:\n"
+                    f'<tool_call>\n{{"name": "read_file", "arguments": '
+                    f'{{"path": "notes.txt"}}}}\n</tool_call>')
+            print(f"{C_WARN}-> part of that reply was not a readable tool call; "
+                  f"{_ran} ran, the rest did not{C_RESET}")
+            self.messages.append({"role": "user", "content": note})
 
         # Spiral guard tripped: append a hard "answer now" directive AFTER all
         # tool results (valid ordering). The next respond() call withholds

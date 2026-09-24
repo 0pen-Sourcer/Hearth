@@ -74,6 +74,22 @@ _ran_branch = _src.split("if fallback_calls:", 1)[-1].split("else:", 1)[0]
 check("and the flag is set inside the branch that ran the calls",
       _marker in _ran_branch)
 
+# ------------------------------------------------- the terminal wires it too
+# The terminal runs its own agent loop rather than the bridge's, so a fix made
+# in one does not reach the other. It had the check for a reply where nothing
+# parsed and not the one for a reply where some did, which is the case above.
+_cli = open(os.path.join(ROOT, "hearth_cli.py"), encoding="utf-8").read()
+_cli_ran = _cli.split("if _recovered:", 1)[-1].split("else:", 1)[0]
+check("the terminal flags leftover markup when some calls parsed",
+      "has_tool_call(_cleaned)" in _cli_ran)
+# And it has to tell the model after the calls that did run, not only in the
+# branch where none ran, or the flag is set and nothing reads it.
+_cli_tail = _cli.split('for tc in entry["tool_calls"]:', 1)[-1]
+check("and says so after the calls that did run",
+      "if _unparsed_markup:" in _cli_tail)
+check("without letting a parser crash pass as a clean reply",
+      "except Exception:\n                pass\n\n        if content_captured:" not in _cli)
+
 # ---------------------------------------------- a call cut off mid-generation
 # Completing a severed tail is right when the arguments are a reference and
 # wrong when they are content. A write cut mid-string completes to a stub, and

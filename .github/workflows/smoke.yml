@@ -116,6 +116,15 @@ jobs:
         run: |
           python tests/test_containment.py
 
+      - name: The terminal, run as a real process
+        # It has its own agent loop, so fixes to the shared one do not reach
+        # it. End of input came back as an empty line and the loop spun on it
+        # instead of exiting. The terminal is the Windows product, so it is run
+        # where it ships.
+        if: runner.os == 'Windows'
+        run: |
+          python tests/test_cli.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through
