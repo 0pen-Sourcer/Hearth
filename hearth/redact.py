@@ -31,14 +31,30 @@ from typing import Dict, List, Tuple
 _KEY_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     ("xAI key",        re.compile(r"\bxai-[A-Za-z0-9]{16,}")),
     ("Anthropic key",  re.compile(r"\bsk-ant-[A-Za-z0-9_-]{16,}")),
+    # Before the generic sk- rule, or an OpenRouter key is masked correctly but
+    # reported as an OpenAI one, and the report is what tells you which key to
+    # go and rotate.
+    ("OpenRouter key", re.compile(r"\bsk-or-[A-Za-z0-9_-]{16,}")),
     ("OpenAI key",     re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}")),
     ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}")),
-    ("OpenRouter key", re.compile(r"\bsk-or-[A-Za-z0-9_-]{16,}")),
     ("GitHub token",   re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}")),
     ("GitHub PAT",     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}")),
     ("HF token",       re.compile(r"\bhf_[A-Za-z0-9]{20,}")),
     ("Slack token",    re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
     ("AWS key",        re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    # Shapes this missed while the key sat in a settings file it would be asked
+    # to clean. Groq is a provider the brain picker offers, and the Discord and
+    # Telegram bot tokens belong to bridges that ship in the product, so all
+    # three are on disk on a machine using them.
+    ("Groq key",       re.compile(r"\bgsk_[A-Za-z0-9]{20,}")),
+    ("Telegram bot token",
+     re.compile(r"\b\d{8,12}:[A-Za-z0-9_-]{30,}")),
+    ("Discord bot token",
+     re.compile(r"\b[A-Za-z0-9_-]{23,28}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}")),
+    ("Google OAuth secret", re.compile(r"\bGOCSPX-[A-Za-z0-9_-]{20,}")),
+    ("Replicate token", re.compile(r"\br8_[A-Za-z0-9]{30,}")),
+    ("Stripe key",     re.compile(r"\b[rs]k_(?:live|test)_[A-Za-z0-9]{20,}")),
+    ("npm token",      re.compile(r"\bnpm_[A-Za-z0-9]{30,}")),
     ("bearer token",   re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._-]{20,}")),
     # UUID (Hackatime/WakaTime API keys, session ids). Generic but a real leak
     # shape; masked last so prefixed keys above match first.

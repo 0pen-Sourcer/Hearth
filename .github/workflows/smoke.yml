@@ -116,6 +116,13 @@ jobs:
         run: |
           python tests/test_containment.py
 
+      - name: Masking secrets out of public output
+        # It only knows the shapes it was taught, and several that sit on disk
+        # on a machine running Hearth were not among them, so they went through
+        # in full. The label matters too: it is what says which key to rotate.
+        run: |
+          python tests/test_redaction.py
+
       - name: Working out when a reminder is for
         # Most ordinary phrasings parsed as nothing, so the reminder was
         # refused. And "tonight at 11" was accepted and set for eleven in the
