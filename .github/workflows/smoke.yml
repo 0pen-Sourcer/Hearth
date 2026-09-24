@@ -116,6 +116,13 @@ jobs:
         run: |
           python tests/test_containment.py
 
+      - name: Working out when a reminder is for
+        # Most ordinary phrasings parsed as nothing, so the reminder was
+        # refused. And "tonight at 11" was accepted and set for eleven in the
+        # morning without saying anything.
+        run: |
+          python tests/test_reminder_parsing.py
+
       - name: Finding a tool that isn't loaded by default
         # The matcher scored a query token against a description with a plain
         # substring test, so a short word landed inside a longer one and a

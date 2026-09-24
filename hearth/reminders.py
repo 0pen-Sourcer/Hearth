@@ -62,11 +62,42 @@ _REL_PATTERN = re.compile(
     r"^in\s+(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w)$",
     re.I,
 )
-_TIME_PATTERN = re.compile(r"^(\d{1,2}):?(\d{2})?\s*(am|pm)?$", re.I)
+_TIME_PATTERN = re.compile(r"^(\d{1,2}):?(\d{2})?\s*(a\.?m\.?|p\.?m\.?)?$", re.I)
+# "at" between the day and the time is how people write it about half the time.
+# Requiring it meant "friday 6pm" parsed as nothing at all and the reminder was
+# refused for a phrasing that reads perfectly well.
 _DAYNAME_PATTERN = re.compile(
-    r"^(?:next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+(.+))?$",
+    r"^(?:next\s+|this\s+|on\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+    r"(?:\s+(?:at\s+)?(.+))?$",
     re.I,
 )
+# Times said as words rather than digits.
+_NAMED_TIMES = {
+    "noon": (12, 0), "midday": (12, 0), "midnight": (0, 0),
+    "morning": (9, 0), "afternoon": (14, 0), "evening": (19, 0), "night": (21, 0),
+}
+# "in an hour" and "in a couple of hours" are as common as "in 1 hour" and
+# carried no digit for the relative pattern to match on, so they parsed as
+# nothing at all. Ordered: the longer phrasings have to be tried first, or the
+# leading article swallows them.
+_SPOKEN_COUNTS = [
+    (re.compile(r"^in\s+half\s+an?\s+", re.I), "in 0.5 "),
+    (re.compile(r"^in\s+(?:an?\s+)?couple\s+(?:of\s+)?", re.I), "in 2 "),
+    (re.compile(r"^in\s+(?:an?\s+)?few\s+", re.I), "in 3 "),
+    (re.compile(r"^in\s+one\s+", re.I), "in 1 "),
+    (re.compile(r"^in\s+two\s+", re.I), "in 2 "),
+    (re.compile(r"^in\s+three\s+", re.I), "in 3 "),
+    (re.compile(r"^in\s+ten\s+", re.I), "in 10 "),
+    (re.compile(r"^in\s+an?\s+", re.I), "in 1 "),
+]
+
+
+def _spell_out_count(s: str) -> str:
+    for pat, repl in _SPOKEN_COUNTS:
+        new = pat.sub(repl, s, count=1)
+        if new != s:
+            return new
+    return s
 
 _REL_UNITS = {
     "s": 1, "second": 1, "seconds": 1, "sec": 1, "secs": 1,
@@ -78,16 +109,34 @@ _REL_UNITS = {
 _DAYS = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
 
 
-def _parse_time(s: str, base: datetime) -> Optional[datetime]:
-    """Parse "9pm", "21:00", "7:30am" → datetime on the same day as base."""
-    m = _TIME_PATTERN.match(s.strip().lower())
+def _parse_time(s: str, base: datetime,
+                assume_pm: bool = False) -> Optional[datetime]:
+    """Parse "9pm", "21:00", "7:30am", "noon" to a time on base's day.
+
+    `assume_pm` is for a phrase that has already said which half of the day it
+    means. "tonight at 11" gave 11 in the morning, twelve hours from what was
+    asked for, and said nothing about it.
+    """
+    txt = re.sub(r"^at\s+", "", (s or "").strip().lower()).strip()
+    if not txt:
+        return None
+    if txt in _NAMED_TIMES:
+        hh, mm = _NAMED_TIMES[txt]
+        return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    m = _TIME_PATTERN.match(txt)
     if not m:
         return None
     hh = int(m.group(1))
     mm = int(m.group(2) or 0)
-    ampm = m.group(3)
-    if ampm == "pm" and hh < 12: hh += 12
-    elif ampm == "am" and hh == 12: hh = 0
+    ampm = (m.group(3) or "").replace(".", "")
+    if ampm == "pm" and hh < 12:
+        hh += 12
+    elif ampm == "am" and hh == 12:
+        hh = 0
+    elif not ampm and assume_pm and hh < 12:
+        hh += 12
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return None
     try:
         return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
     except ValueError:
@@ -107,8 +156,10 @@ def parse_when(s: str, now: Optional[datetime] = None) -> Optional[datetime]:
         except ValueError:
             pass
 
-    # Relative: "in 25 minutes"
-    m = _REL_PATTERN.match(s)
+    # Relative: "in 25 minutes", and the spoken forms of the same thing. "in an
+    # hour" and "in half an hour" carried no digit, so they matched nothing and
+    # the reminder was refused.
+    m = _REL_PATTERN.match(_spell_out_count(s))
     if m:
         n = float(m.group(1))
         unit = m.group(2).lower()
@@ -123,12 +174,19 @@ def parse_when(s: str, now: Optional[datetime] = None) -> Optional[datetime]:
         return _parse_time(rest, base) or base.replace(hour=9, minute=0, second=0, microsecond=0)
     if s.startswith("tonight"):
         rest = s[len("tonight"):].strip()
-        rest = re.sub(r"^at\s+", "", rest)
-        return _parse_time(rest, now) or now.replace(hour=20, minute=0, second=0, microsecond=0)
-    if s.startswith("today"):
-        rest = s[len("today"):].strip()
-        rest = re.sub(r"^at\s+", "", rest)
-        return _parse_time(rest, now)
+        # Already told which half of the day, so a bare 11 is the evening one.
+        return (_parse_time(rest, now, assume_pm=True)
+                or now.replace(hour=20, minute=0, second=0, microsecond=0))
+    if s.startswith("this evening") or s.startswith("this afternoon"):
+        rest = s.split(None, 2)[2] if len(s.split()) > 2 else ""
+        _dflt = 19 if "evening" in s else 14
+        return (_parse_time(rest, now, assume_pm=True)
+                or now.replace(hour=_dflt, minute=0, second=0, microsecond=0))
+    if s.startswith("today") or s.startswith("this morning"):
+        rest = s.split(None, 2)[2] if s.startswith("this morning") and len(s.split()) > 2             else s[len("today"):].strip()
+        return (_parse_time(rest, now)
+                or (now.replace(hour=9, minute=0, second=0, microsecond=0)
+                    if s.startswith("this morning") else None))
 
     # "next monday at 10am" / "monday"
     m = _DAYNAME_PATTERN.match(s)
@@ -142,7 +200,8 @@ def parse_when(s: str, now: Optional[datetime] = None) -> Optional[datetime]:
         rest = m.group(2) or ""
         return _parse_time(rest, base) or base.replace(hour=9, minute=0, second=0, microsecond=0)
 
-    # Bare time = today
+    # Bare time = today. "at 3pm" is how people say this and the leading word
+    # meant the whole phrase matched nothing; _parse_time drops it now.
     t = _parse_time(s, now)
     if t:
         # If it's already past, roll to tomorrow
