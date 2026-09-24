@@ -73,6 +73,27 @@ missing = sorted(looked_up - DEFINED - created)
 check("every id the script reaches for exists"
       + (": " + ", ".join(missing) if missing else ""), not missing)
 
+# ------------------------------------------------- the calls reach something
+# A button wired to an endpoint that was renamed does nothing and says nothing,
+# the same shape as the missing ids above. Only literal paths are checked;
+# anything assembled from a variable is out of reach here.
+WEB = open(os.path.join(ROOT, "hearth", "web.py"), encoding="utf-8").read()
+called = {m.group(1).rstrip("/")
+          for m in re.finditer(r"""['"`](/api/[A-Za-z0-9_\-/]*)""", SRC)}
+served = set()
+for m in re.finditer(r"""path\s*==\s*["'](/api/[^"']*)["']""", WEB):
+    served.add(m.group(1).rstrip("/"))
+for m in re.finditer(r"""path\.startswith\(\s*\(?\s*["'](/api/[^"']*)["']""", WEB):
+    served.add(m.group(1).rstrip("/"))
+for m in re.finditer(r"""path\s+in\s*\(([^)]*)\)""", WEB):
+    for q in re.findall(r"""["'](/api/[^"']*)["']""", m.group(1)):
+        served.add(q.rstrip("/"))
+check("the server answers something", len(served) > 50)
+unserved = sorted(c for c in called
+                  if not any(c == s or c.startswith(s + "/") for s in served))
+check("every endpoint the window calls is answered"
+      + (": " + ", ".join(unserved) if unserved else ""), not unserved)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

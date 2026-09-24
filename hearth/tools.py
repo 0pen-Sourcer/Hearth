@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from collections import OrderedDict
 import re
+from functools import lru_cache
 import sys
 import json
 import glob as globmod
@@ -912,7 +913,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "generate_image",
         "description": (
-            "Generate an image from a text prompt. Saves to ~/Jarvis/generated/ "
+            "Generate an image, picture, photo, artwork or illustration from a text prompt. Saves to ~/Jarvis/generated/ "
             "and returns the file path. The GUI renders it inline; CLI opens "
             "it in the default image viewer. Supported providers: xAI Grok "
             "(grok-imagine-image-quality), OpenAI (gpt-image-2 by default — "
@@ -1030,7 +1031,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "network_info",
-        "description": "Local IP, hostname, network adapters. No external probes.",
+        "description": "Local IP address, hostname, network adapters, wifi. No external probes.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
@@ -3833,6 +3834,19 @@ def _system_info(p: Dict) -> str:
             boot = datetime.fromtimestamp(psu.boot_time())
             info["boot_time"] = boot.strftime("%Y-%m-%d %H:%M:%S")
             info["uptime_hours"] = round((datetime.now() - boot).total_seconds() / 3600, 1)
+        except Exception:
+            pass
+        # The tool catalogue has advertised a battery reading for a while and
+        # nothing anywhere produced one, so asking for it returned unrelated
+        # tools. Absent on a desktop, which is the answer to "am I on battery".
+        try:
+            bat = psu.sensors_battery()
+            if bat is not None:
+                info["battery_percent"] = round(bat.percent)
+                info["on_ac_power"] = bool(bat.power_plugged)
+                secs = getattr(bat, "secsleft", None)
+                if isinstance(secs, int) and secs >= 0:
+                    info["battery_hours_left"] = round(secs / 3600, 1)
         except Exception:
             pass
         disks = []
@@ -8345,6 +8359,9 @@ _LOAD_TOOLS_SCHEMA = {
     "type": "function",
     "function": {
         "name": "load_tools",
+        # Replaced at the bottom of this module by a menu built from the real
+        # deferred set. This text only ships if that rebuild fails, so it has to
+        # stay true on its own.
         "description": (
             "Reveal extra built-in tools that aren't loaded by default (kept off "
             "to save context). Call this with a short query naming what you need, "
@@ -8406,7 +8423,23 @@ _LOAD_STOPWORDS = {
     "and", "or", "with", "what", "how", "do", "does", "i", "can", "could",
     "you", "please", "tool", "tools", "that", "this", "need", "want", "use",
     "about", "any", "some", "give", "show", "find", "from", "into", "at",
+    "all", "everything", "something", "anything", "nothing", "here", "there",
+    "when", "where", "which", "why", "just", "really", "very", "much", "more",
+    "own", "level", "thing", "stuff", "please", "then", "than", "also", "only",
+    "still", "okay", "yes", "not", "but", "was", "were", "are", "have", "has",
 }
+
+
+@lru_cache(maxsize=2048)
+def _words_of(text: str) -> frozenset:
+    """The words in a piece of text, with plurals folded in, for matching a
+    query token against it without matching inside an unrelated longer word."""
+    out = set()
+    for w in re.split(r"[^a-z0-9]+", (text or "").lower()):
+        if w:
+            out.add(w)
+            out.add(w.rstrip("s"))
+    return frozenset(out)
 
 
 def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
@@ -8430,22 +8463,39 @@ def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
             _touch_unlocked(td["name"])
         return deferred
     toks = [w for w in q.replace("-", " ").replace("/", " ").split() if w]
-    meaningful = [w for w in toks if w not in _LOAD_STOPWORDS and len(w) > 1]
-    toks = meaningful or toks  # if the whole query was stopwords, fall back
+    # A one or two letter token means nothing on its own and was matching a
+    # fragment of an identifier, so "am i on battery" landed on a voice called
+    # am_michael. They are kept only when the query is nothing but short words,
+    # which is how "whats my ip" still reaches the network tool. The plural fold
+    # runs against the stopword list too, or "whats" slipped through as "what".
+    def _carries_meaning(w):
+        return w not in _LOAD_STOPWORDS and w.rstrip("s") not in _LOAD_STOPWORDS
+    meaningful = [w for w in toks if _carries_meaning(w) and len(w) > 2]
+    toks = meaningful or [w for w in toks if _carries_meaning(w)]
     scored: "List[tuple]" = []
     for td in deferred:
         n = td["name"]
         nl = n.lower()
         cat = _TOOL_CATEGORY.get(n, "").lower()
-        desc = td["description"].lower()
+        # Descriptions and categories are matched whole-word. A bare substring
+        # test let a short token land inside a longer word, so "all" hit
+        # "install", "finally" and "usually", and a query that matched nothing
+        # came back with a handful of unrelated tools and "you can call them
+        # now" — which then had to be paid for in schema tokens for the rest of
+        # the session. The name keeps a substring test, since "image" genuinely
+        # belongs to generate_image, but only for a token long enough to mean
+        # something on its own.
+        words = _words_of(td["description"]) | _words_of(cat)
         score = 0
         for w in toks:
             ws = w.rstrip("s")
-            if w in nl or (len(ws) > 2 and ws in nl):
+            if (len(w) >= 4 and w in nl) or (len(ws) >= 4 and ws in nl):
                 score += 5          # name hit — strongest signal
-            elif w in cat or (len(ws) > 2 and ws in cat):
+            elif w in _words_of(nl) or ws in _words_of(nl):
+                score += 5
+            elif w in _words_of(cat) or ws in _words_of(cat):
                 score += 3
-            elif w in desc or (len(ws) > 2 and ws in desc):
+            elif w in words or ws in words:
                 score += 1
         if score > 0:
             scored.append((score, td))

@@ -116,6 +116,14 @@ jobs:
         run: |
           python tests/test_containment.py
 
+      - name: Finding a tool that isn't loaded by default
+        # The matcher scored a query token against a description with a plain
+        # substring test, so a short word landed inside a longer one and a
+        # query that matched nothing came back with unrelated tools under
+        # "you can call them now".
+        run: |
+          python tests/test_tool_discovery.py
+
       - name: Saving a conversation
         # A kill between the write and the rename leaves the temporary behind,
         # and it ends in .json, so the lister read it as a second copy of the
