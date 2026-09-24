@@ -35,7 +35,19 @@ def check(label, cond):
         FAILS.append(label)
 
 
-srv = ThreadingHTTPServer(("127.0.0.1", 0), web.HearthHandler)
+class _Quiet(web.HearthHandler):
+    """The handler logs every request to stderr. Run from a terminal that is
+    nothing but a pipe, which is how this runs under CI and under a loop that
+    redirects, that write blocks whenever the reader is behind, and it blocks
+    inside the request, so the client on the other end sees a reset partway
+    through a response that the server has already logged as answered. Silence
+    it: this test is about which requests are allowed, not about the log."""
+
+    def log_message(self, *_a, **_kw):
+        pass
+
+
+srv = ThreadingHTTPServer(("127.0.0.1", 0), _Quiet)
 PORT = srv.server_address[1]
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 PROBE = "/api/__origin_probe__"
@@ -72,7 +84,28 @@ src = open(os.path.join(ROOT, "hearth", "web.py"), encoding="utf-8").read()
 check("no wildcard CORS header is sent anywhere",
       'Access-Control-Allow-Origin", "*"' not in src)
 
+# An unknown path answers JSON, not an HTML error page. Every caller here is
+# the window, which reads JSON, so the page reached it as a parse failure with
+# no status in it and the real problem was invisible.
+import json as _json                                                # noqa: E402
+
+_c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
+_c.request("GET", "/api/definitely-not-a-real-endpoint",
+           headers={"Host": f"127.0.0.1:{PORT}", "Origin": own})
+_r = _c.getresponse()
+_ct = _r.getheader("Content-Type") or ""
+_body = _r.read().decode("utf-8", "replace")
+_c.close()
+check("an unknown endpoint answers 404", _r.status == 404)
+check("and answers it as JSON", "application/json" in _ct)
+try:
+    check("with the path in it",
+          "definitely-not-a-real-endpoint" in (_json.loads(_body).get("error") or ""))
+except Exception as e:
+    check(f"with the path in it ({type(e).__name__})", False)
+
 srv.shutdown()
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

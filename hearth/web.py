@@ -2043,7 +2043,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import llmserver
             repo = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("repo", [""])[0]
             return self._send_json(200, {"files": llmserver.list_hf_files(repo)})
-        self.send_error(404, "not found")
+        return self._not_found()
 
     def do_DELETE(self) -> None:
         if not self._request_allowed():
@@ -2056,7 +2056,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             cid = urllib.parse.unquote(path[len("/api/conversations/"):])
             ok = _delete_convo(cid)
             return self._send_json(200 if ok else 404, {"ok": ok})
-        self.send_error(404, "not found")
+        return self._not_found()
 
     def do_POST(self) -> None:
         if not self._request_allowed():
@@ -3523,7 +3523,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
             return
-        self.send_error(404, "not found")
+        return self._not_found()
+
+    def _not_found(self):
+        """Answer an unknown path. Every caller of these is the window, which
+        reads JSON, so an HTML error page reached it as a parse failure with no
+        status in it and the real problem was invisible."""
+        return self._send_json(404, {"error": f"no endpoint at {self.path}"})
 
     # -------- handlers --------
 
