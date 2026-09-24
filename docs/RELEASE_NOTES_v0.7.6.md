@@ -1,4 +1,4 @@
-v0.7.6 is a fix release across desktop control, memory, cloud models, and the interface.
+v0.7.6 is a fix release across desktop control, voice, memory, models, cloud providers, and the interface.
 
 If you are on v0.7.2 or newer, Hearth patches itself, no reinstall. On v0.7.0 or v0.7.1 you need the installer one more time, then you are on the small updates for good. Updating never touches your chats, memory, or models.
 
@@ -30,6 +30,10 @@ Reasoning is visible on OpenRouter and other providers that stream their thinkin
 
 ## Voice
 
+Hearth speaks and listens in nine languages, not one. The voice bank has always installed 54 voices covering English, Hindi, Spanish, French, Italian, Portuguese, Japanese and Mandarin, and only the English ones were reachable. They are all in the picker now, each one reading its own language properly rather than being handed English sounds. Transcription has the multilingual Whisper sizes alongside the English-only ones, with a spoken-language setting that detects each utterance on its own unless you name one. Speech in a script that ends its sentences differently starts playing as soon as the first sentence is ready, the same as English always did.
+
+When speech fails, Hearth says so. Synthesis and playback run behind a queue, which meant a failure after the request had been accepted was silent in every direction, with nothing written anywhere to explain it. Now it names what went wrong, and the preview button tells you rather than just going quiet. A transcription that fails is no longer indistinguishable from not having said anything.
+
 Voice starts on an updated install. The update now carries the maths library the speech stack loads at startup, along with the rest of its dependencies, so a patched install behaves the same as a fresh one. The microphone test runs in its own process, so a headset you plug in after opening Hearth is picked up without a restart.
 
 ## Reading a run
@@ -40,11 +44,19 @@ The window is responsive, so a narrow or half snapped window moves the sidebar i
 
 ## Models
 
-Loading a model shows real progress on the sticker instead of a blinking dot, and it names the model that is actually loading rather than the one that was there before. Every model links to its page on Hugging Face, so you can check the licence and what it was trained for without leaving the app, and a model Hearth downloaded remembers exactly which repo it came from. With no server running, the model list shows what is on your disk rather than saying there is nothing.
+Loading a model shows real progress on the sticker instead of a blinking dot, and it names the model that is actually loading rather than the one that was there before. That progress is now measured rather than guessed at from the engine's log. The engine prints everything it knows about a model before it reads a single byte of it, so the bar used to jump most of the way up in the first second or two and then sit still for the whole real wait. It moves steadily for the length of the load instead, all the way through, and a model loading on its own when you open Hearth gets the same bar as one you picked by hand.
+
+A download that was interrupted in an awkward place used to stay broken forever, failing the same way on every retry with nothing you could do about it from inside the app. It starts over cleanly now. Every model links to its page on Hugging Face, so you can check the licence and what it was trained for without leaving the app, and a model Hearth downloaded remembers exactly which repo it came from. With no server running, the model list shows what is on your disk rather than saying there is nothing.
 
 On an RTX 50-series card Hearth no longer starts its bundled runtime, which has no kernels for those GPUs and would return empty replies on longer prompts. It asks you to install the standalone engine instead, which is one click in Models.
 
 ## Elsewhere
+
+Updating is safe to interrupt. If the power goes or you kill Hearth while it is replacing files, the next start puts it back the way it was rather than leaving you with an install that will not open. Your chats survive being killed mid-save too, and a save that got cut off no longer leaves a ghost copy of the chat sitting in the sidebar.
+
+Reminders understand how people actually say times. "at 3pm", "friday 6pm", "at noon", "in an hour", "in a couple of hours" all work, where before they were turned down. "tonight at 11" means eleven at night, which it did not before.
+
+Asking Hearth for a capability it does not have gets a straight answer instead of a handful of unrelated tools. And it can tell you your charge level, whether you are plugged in and roughly how long you have left.
 
 A command card shows the command that ran above its output, and the approval prompt can show the whole command before you allow it rather than cutting it off. Repairing an install reports in the same place as other downloads, with progress and a cancel. Email setup moved to Connectors where it belongs, and a voice install that fails part way can be retried instead of dead-ending. Settings now links to the project, so the source, releases and issue tracker are one click away.
 
