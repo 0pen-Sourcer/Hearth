@@ -7793,7 +7793,8 @@ for _cd in (
     {"name": "desktop_snapshot", "description":
         "Read a window's interactive UI elements (buttons, fields, menu items, "
         "list items, checkboxes) as a numbered list with exact positions — an "
-        "accessibility snapshot of the app. PREFER this over screenshot+"
+        "accessibility snapshot of the app, including inside Chrome, Slack, "
+        "Discord, VS Code and other web or Electron apps. PREFER this over screenshot+"
         "computer_click: it's precise and costs no vision tokens. Pass "
         "window='<part of a title>' to target a SPECIFIC window even in the "
         "background (e.g. 'Visual Studio Code'); omit for the foreground window. "

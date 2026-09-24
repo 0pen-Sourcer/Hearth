@@ -1458,8 +1458,35 @@ class HearthHandler(BaseHTTPRequestHandler):
 
     # -------- helpers --------
 
+    def _drain_body(self) -> None:
+        """Read whatever of the request body has not been read yet.
+
+        A reply sent without reading the body leaves those bytes unread, and on
+        Windows closing a socket with unread data sends a reset rather than a
+        normal close. The reset can reach the client before it has read the
+        reply and wipe it, so an early answer (a refusal, an unknown path) was
+        sometimes lost as "connection reset" instead of arriving.
+        """
+        if getattr(self, "_body_read", False):
+            return
+        self._body_read = True
+        try:
+            length = int(self.headers.get("content-length", "0") or "0")
+        except (TypeError, ValueError):
+            length = 0
+        if length <= 0:
+            return
+        if length > 8 * 1024 * 1024:
+            self.close_connection = True       # too large to be worth reading
+            return
+        try:
+            self.rfile.read(length)
+        except OSError:
+            pass
+
     def _send_json(self, code: int, body: Any) -> None:
         payload = json.dumps(body, ensure_ascii=False, default=str).encode("utf-8")
+        self._drain_body()
         try:
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1472,13 +1499,18 @@ class HearthHandler(BaseHTTPRequestHandler):
             pass
 
     def _read_json(self) -> Dict:
+        if getattr(self, "_body_read", False):
+            return getattr(self, "_body_json", {})
+        self._body_read = True
         length = int(self.headers.get("content-length", "0") or "0")
         if length <= 0:
+            self._body_json = {}
             return {}
         try:
-            return json.loads(self.rfile.read(length).decode("utf-8"))
+            self._body_json = json.loads(self.rfile.read(length).decode("utf-8"))
         except json.JSONDecodeError:
-            return {}
+            self._body_json = {}
+        return self._body_json
 
     def _query(self) -> Dict[str, str]:
         parsed = urllib.parse.urlparse(self.path)

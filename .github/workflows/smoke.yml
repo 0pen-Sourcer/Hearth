@@ -133,6 +133,13 @@ jobs:
         run: |
           python tests/test_cli.py
 
+      - name: The persona the model reads every turn
+        # Held to a size and to the facts. It had grown to about twelve thousand
+        # tokens of accreted rules, repeated tool manuals and claims that had
+        # gone false, and with the schemas used 64% of a 32K window.
+        run: |
+          python tests/test_persona.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through
@@ -192,4 +199,4 @@ jobs:
       - run: pip install openai psutil
       - name: Render persona
         run: |
-          python -c "from hearth.persona import system_prompt; p = system_prompt(); assert 4000 < len(p) < 60000, f'persona suspicious size: {len(p)}'; print('persona ok,', len(p), 'chars')"
+          python -c "from hearth.persona import system_prompt; p = system_prompt(); assert 4000 < len(p) < 20000, f'persona suspicious size: {len(p)}'; print('persona ok,', len(p), 'chars')"
