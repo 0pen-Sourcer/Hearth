@@ -48,7 +48,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from . import system_prompt, TOOL_DEFINITIONS, memory, execute_tool
 from .headless import run_once
-from .tools import WORKSPACE, LOGS_DIR
+from .tools import (WORKSPACE, LOGS_DIR,
+                    WRITE_TEMP_PREFIX as _WRITE_TEMP_PREFIX,
+                    is_write_temp as _is_write_temp,
+                    sweep_write_temps as _sweep_write_temps)
 
 # Voice modules are optional — guard imports so a missing dep doesn't kill the server.
 try:
@@ -342,10 +345,10 @@ def _list_convos() -> List[Dict]:
     if not os.path.isdir(CONVOS_DIR):
         return out
     for fn in os.listdir(CONVOS_DIR):
-        # A write temporary ends in .json too, and one left behind by a killed
-        # save holds a complete conversation, so it listed as a second copy of
-        # the chat it was about to become.
-        if not fn.endswith(".json") or fn.startswith((_TMP_PREFIX, ".tmp-")):
+        # A staged write ends in .json too, and one left behind by a killed save
+        # holds a complete conversation, so it listed as a second copy of the
+        # chat it was about to become.
+        if not fn.endswith(".json") or _is_write_temp(fn):
             continue
         try:
             with open(os.path.join(CONVOS_DIR, fn), "r", encoding="utf-8") as f:
@@ -408,40 +411,13 @@ def _atomic_write_json(path: str, data, **dump_kw) -> None:
         raise
 
 
-# Temp files are written beside their target so the rename onto it is atomic.
-# Killing the process between the write and the rename leaves one behind, and
-# the cleanup on the way out cannot run for a kill. They are named so that
-# anything reading the directory can tell them from real files.
-_TMP_PREFIX = ".hearth-tmp-"
+# Named and swept in tools, so the chat search index and anything else reading
+# these folders applies the same rule.
+_TMP_PREFIX = _WRITE_TEMP_PREFIX
 
 
 def _sweep_stale_temp_files(directory: str, older_than_s: float = 300.0) -> int:
-    """Delete leftover write temporaries in a directory. Returns how many.
-
-    One of these had been sitting in the conversations folder for a month,
-    holding a complete copy of a chat that was also saved properly, and the
-    lister picked it up because it ends in .json, so it showed as a second copy
-    of that conversation in the sidebar. Only files older than a few minutes
-    are touched, so a write happening right now is never pulled out from under
-    itself.
-    """
-    removed = 0
-    try:
-        now = time.time()
-        for fn in os.listdir(directory):
-            if not fn.startswith((_TMP_PREFIX, ".tmp-")):
-                continue
-            full = os.path.join(directory, fn)
-            try:
-                if now - os.path.getmtime(full) < older_than_s:
-                    continue
-                os.remove(full)
-                removed += 1
-            except OSError:
-                pass
-    except OSError:
-        pass
-    return removed
+    return _sweep_write_temps(directory, older_than_s)
 
 
 def _save_convo(data: Dict) -> bool:

@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional
 
-from .tools import WORKSPACE
+from .tools import WORKSPACE, is_write_temp
 
 INDEX_PATH = os.path.join(WORKSPACE, "session_index.db")
 CONVOS_DIR = os.path.join(WORKSPACE, "conversations")
@@ -90,7 +90,11 @@ def _needs_reindex() -> bool:
     except sqlite3.Error:
         return True
     for fn in os.listdir(CONVOS_DIR):
-        if not fn.endswith(".json"):
+        # A staged write carries the .json extension and no chat id that was
+        # ever indexed, so it read as an unindexed conversation and this said
+        # the index was stale on every call. One left behind by a killed save
+        # meant the whole index was rebuilt for every search.
+        if not fn.endswith(".json") or is_write_temp(fn):
             continue
         cid = fn[:-5]
         path = os.path.join(CONVOS_DIR, fn)
@@ -132,7 +136,7 @@ def rebuild_index() -> int:
 
     # 1) GUI conversations — one file per chat thread.
     for fn in sorted(os.listdir(CONVOS_DIR)):
-        if not fn.endswith(".json"):
+        if not fn.endswith(".json") or is_write_temp(fn):
             continue
         path = os.path.join(CONVOS_DIR, fn)
         try:
@@ -373,7 +377,8 @@ def format_matches(matches: List[Match]) -> str:
         try:
             n_files = 0
             if os.path.isdir(CONVOS_DIR):
-                n_files = sum(1 for f in os.listdir(CONVOS_DIR) if f.endswith(".json"))
+                n_files = sum(1 for f in os.listdir(CONVOS_DIR)
+                              if f.endswith(".json") and not is_write_temp(f))
             n_indexed = 0
             if os.path.isfile(INDEX_PATH):
                 conn = _connect()

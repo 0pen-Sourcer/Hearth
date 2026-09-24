@@ -114,6 +114,31 @@ finally:
 check("a rename held off by a file lock is retried rather than lost", ok)
 check("and it took more than one attempt to get there", _calls["n"] >= 3)
 
+# ------------------------------------------- the chat search index agrees
+# The index keeps a timestamp per conversation id and asks whether any file on
+# disk is newer. A staged write carries the .json extension and an id that was
+# never indexed, so it read as an unindexed conversation and the index reported
+# itself stale on every single query, rebuilding from scratch each time.
+from hearth import session_search as S                              # noqa: E402
+
+_sd = tempfile.mkdtemp()
+S.CONVOS_DIR, S.INDEX_PATH = _sd, os.path.join(_sd, "idx.db")
+with open(os.path.join(_sd, "c_one.json"), "w", encoding="utf-8") as f:
+    json.dump({"id": "c_one", "title": "t", "updated": 1, "created": 1,
+               "messages": [{"role": "user", "content": "hello world"}]}, f)
+S.rebuild_index()
+check("a freshly built index is not stale", S._needs_reindex() is False)
+
+with open(os.path.join(_sd, ".tmp-leftover.json"), "w", encoding="utf-8") as f:
+    json.dump({"id": "c_one", "messages": []}, f)
+check("a staged write does not make the index look stale forever",
+      S._needs_reindex() is False)
+
+S.rebuild_index()
+_hits = S.search("hello world")
+check("and the staged write is not indexed as a second conversation",
+      len({getattr(h, "conversation_id", None) for h in _hits}) <= 1)
+
 _src = open(os.path.join(ROOT, "hearth", "web.py"), encoding="utf-8").read()
 check("the server clears stale temporaries when it starts",
       "_sweep_stale_temp_files(_d)" in _src)

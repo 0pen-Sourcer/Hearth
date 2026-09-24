@@ -66,7 +66,11 @@ def validate_plugin_source(code: str) -> Tuple[Optional[dict], Optional[Callable
         return None, None, "missing a module-level run(args) function"
     name = tool.get("name")
     if not isinstance(name, str) or not _NAME_RE.match(name):
-        return None, None, "TOOL['name'] must be lower_snake_case (a-z, 0-9, _)"
+        # The length rule was left out, so a one-character name was refused with
+        # a message saying it had to be lower_snake_case, which it already was,
+        # and the model corrected nothing and tried again.
+        return None, None, ("TOOL['name'] must be lower_snake_case, start with a "
+                            "letter, and be 2 to 41 characters (a-z, 0-9, _)")
     if not isinstance(tool.get("description"), str) or not tool["description"].strip():
         return None, None, "TOOL needs a non-empty 'description'"
     params = tool.get("parameters")

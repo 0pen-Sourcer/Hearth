@@ -81,6 +81,46 @@ WORKSPACE = os.path.abspath(_resolve_workspace())
 # the pointer file, not just the env var. tools.py is imported first, so this
 # runs before those modules resolve their own WORKSPACE.
 os.environ["JARVIS_WORKSPACE"] = WORKSPACE
+# A file being written is staged beside its target and renamed onto it, so the
+# rename is atomic and a crash leaves the previous version. Killing the process
+# between the two steps leaves the staged file behind, and the cleanup on the
+# way out cannot run for a kill. It carries the target's extension, so anything
+# reading the directory has to be able to tell it apart: one was read as a
+# second copy of a conversation for a month, and the chat search index treated
+# its presence as proof of staleness and rebuilt itself on every single query.
+WRITE_TEMP_PREFIX = ".hearth-tmp-"
+_LEGACY_WRITE_TEMP_PREFIX = ".tmp-"
+
+
+def is_write_temp(filename: str) -> bool:
+    """True for a staged write left beside its target, not a real file."""
+    return os.path.basename(filename or "").startswith(
+        (WRITE_TEMP_PREFIX, _LEGACY_WRITE_TEMP_PREFIX))
+
+
+def sweep_write_temps(directory: str, older_than_s: float = 300.0) -> int:
+    """Delete staged writes a killed process left in `directory`. Returns how
+    many. Only files older than a few minutes, so a write happening right now is
+    never pulled out from under itself."""
+    removed = 0
+    try:
+        now = time.time()
+        for fn in os.listdir(directory):
+            if not is_write_temp(fn):
+                continue
+            full = os.path.join(directory, fn)
+            try:
+                if now - os.path.getmtime(full) < older_than_s:
+                    continue
+                os.remove(full)
+                removed += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return removed
+
+
 SAFE_READ_ONLY = os.environ.get("JARVIS_LOCKDOWN", "").strip() in ("1", "true", "yes")
 
 # Lockdown pointer so a GUI/CLI toggle can confine reads without a restart or an
