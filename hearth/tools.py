@@ -467,16 +467,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "read_file",
         "description": (
-            "Smart file reader. Auto-detects format and extracts text from "
-            "PDF (pypdf), DOCX (python-docx), XLSX/XLSM (openpyxl), PPTX "
-            "(python-pptx), EPUB, IPYNB, CSV/TSV, JSON/JSONL, HTML/XML, RTF, "
-            "and single-stream .gz/.bz2/.xz. For plain text/code/logs, "
-            "returns line-numbered output. For archives (.zip/.tar/...) "
-            "returns a hint to use list_archive. For images, hints to use "
-            "view_image. Path can be absolute (anywhere readable) or "
-            "relative to workspace. start_line/end_line slice text files; "
-            "for PDFs they become start_page/end_page; for XLSX/CSV they "
-            "cap rows-per-sheet / row count."
+            "Read a file. Extracts text from PDF, DOCX, XLSX, PPTX, EPUB, IPYNB, CSV, "
+            "JSON, HTML, RTF and .gz/.bz2/.xz; plain text comes back line-numbered. "
+            "start_line/end_line slice it (pages for a PDF, rows for a sheet). For an "
+            "archive use list_archive, for an image view_image."
         ),
         "parameters": {
             "type": "object",
@@ -491,11 +485,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "write_file",
         "description": (
-            "Create a NEW file inside the workspace. For MODIFYING an existing "
-            "file, ALWAYS use edit_file instead — this tool will REFUSE to "
-            "overwrite an existing file with >30 lines (forces use of "
-            "edit_file). Set overwrite=true only when the user explicitly "
-            "asked for a full rewrite."
+            "Create a new file in the workspace. To change an existing file use "
+            "edit_file; overwriting a file of more than 30 lines is refused unless "
+            "overwrite=true, which is only for a rewrite the user asked for."
         ),
         "parameters": {
             "type": "object",
@@ -510,13 +502,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "edit_file",
         "description": (
-            "Targeted string-replace edits — never rewrites the whole file. "
-            "Each edit replaces `old_text` with `new_text`. old_text must be "
-            "UNIQUE in the file (include surrounding context to make it so), "
-            "OR set `replace_all: true` on the edit for variable/symbol renames. "
-            "Falls back to whitespace-tolerant matching if exact fails. "
-            "ALWAYS call read_file first to see the exact text including "
-            "indentation. Multiple edits are applied in order."
+            "Edit a file by replacing exact text: each edit swaps old_text for "
+            "new_text. old_text must be unique in the file (include surrounding lines) "
+            "unless replace_all is set. Read the section first to get the exact text "
+            "and indentation. Edits apply in order."
         ),
         "parameters": {
             "type": "object",
@@ -602,12 +591,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "search_chats",
         "description": (
-            "Search across ALL past chat conversations (full-text via SQLite "
-            "FTS5). Use this whenever the user says 'what did we talk about', "
-            "'remember when we discussed X', 'find that thing from last week', "
-            "or asks something that requires recall beyond the current chat. "
-            "Returns top matches with snippets — read them, then answer the "
-            "user's question without quoting the convo_ids."
+            "Full-text search over every past conversation. Use it for anything that "
+            "happened in an earlier chat. Returns matches with snippets."
         ),
         "parameters": {
             "type": "object",
@@ -621,19 +606,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "set_reminder",
         "description": (
-            "Schedule a future desktop notification, optionally with a TOOL CALL "
-            "that runs at the same moment (an 'action reminder'). `when` is a local "
-            "ISO timestamp ('2026-05-27T19:00') or a duration from now ('25m', "
-            "'2h', '3d'): convert what the user said yourself from the current "
-            "local time you are given each turn, so 'tonight at 11' is today's "
-            "date at 23:00. Saved to "
-            "~/Jarvis/reminders.json; a background watcher fires when due. Catches "
-            "up on missed reminders the next time Hearth launches (the user sees "
-            "'while you were away'). Use whenever the user says 'remind me to X at "
-            "Y'. For repeating reminders ('every 30 minutes', 'daily'), pass the "
-            "cadence as `recurring`. For 'at 5pm summarize my emails', pass "
-            "`action_tool='summarize_emails'` + `action_args={}` so the tool "
-            "actually runs alongside the notification."
+            "Schedule a desktop notification, optionally running a tool at the same "
+            "moment (action_tool with action_args). `when` is a local ISO timestamp "
+            "('2026-05-27T19:00') or a duration from now ('25m', '2h', '3d'): convert "
+            "what the user said yourself from the current local time you are given. "
+            "Repeat with `recurring` ('every 30 minutes', 'daily'). Missed reminders "
+            "fire at the next launch."
         ),
         "parameters": {
             "type": "object",
@@ -641,9 +619,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "when": {"type": "string", "description": "When to fire the first time: a local ISO timestamp like '2026-05-27T19:00', or a duration from now like '25m', '2h', '3d'."},
                 "what": {"type": "string", "description": "The message to show the user."},
                 "recurring": {"type": "string", "description": "Optional: 'every 30 minutes', 'hourly', 'daily', 'weekly', 'every 2 hours', etc. Omit for one-shot reminders."},
-                "action_tool": {"type": "string", "description": "Optional: name of a Hearth tool to RUN when the reminder fires (e.g. 'summarize_file', 'web_search', 'run_command', 'open_app'). Read-only tools run automatically and their result is appended to the toast. State-changing ones (run_command, open_app/url, write_file, send_email, computer_/desktop_, browse) are NOT run silently — when due, Hearth surfaces the reminder and ASKS you to confirm first, so you CAN schedule things like 'at 6pm run my backup script' safely."},
-                "action_args": {"type": "object", "description": "Optional: arguments for action_tool. Object matching the tool's parameter schema. Ignored if action_tool is empty."},
-                "tag": {"type": "string", "description": "Optional: free-form label like 'work' / 'side' / 'medication' for grouping in the GUI."},
+                "action_tool": {"type": "string", "description": "A tool to run when it fires. Read-only tools run and their result joins the notification; tools that change something wait for the user to confirm."},
+                "action_args": {"type": "object", "description": "Arguments for action_tool, matching its parameters."},
+                "tag": {"type": "string", "description": "A label for grouping, like 'work' or 'medication'."},
             },
             "required": ["when", "what"],
         },
@@ -687,46 +665,30 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "spawn_subagent",
         "description": (
-            "Fork a focused, scoped sub-agent. Personas live under "
-            "hearth/subagents/*.md - call list_subagent_personas first if "
-            "unsure which slug to use.\n"
-            "PARALLEL = THE DEFAULT FOR MULTIPLE AGENTS. If the user wants "
-            "more than one agent (\"spawn 3 researchers\", \"in parallel\", "
-            "\"send a team\") emit ALL the spawn_subagent calls in ONE turn "
-            "with mode='background'. They run CONCURRENTLY and each result "
-            "auto-arrives as a <task-notification>. NEVER spawn sync, wait, "
-            "then spawn the next — that runs them one-at-a-time (the slow "
-            "ladder the user does NOT want).\n"
-            "  mode='background': returns immediately with agent_id + "
-            "    transcript_path; result notification arrives on a later "
-            "    turn (no polling). Use for ANY multi-agent or long task.\n"
-            "  mode='sync' (default): blocks until the child returns. Use "
-            "    ONLY for a single, short, must-have-it-now subtask.\n"
-            "Depth-limited to 3 nested forks."
+            "Start a scoped sub-agent (see list_subagent_personas for personas). "
+            "mode='background' returns an agent_id at once and the result arrives later"
+            " as a task notification: use it for anything long, and for several agents "
+            "spawn them all in one turn. mode='sync' waits for the result: use it only "
+            "for one short subtask. Nests up to 3 deep."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "persona": {"type": "string", "description":
-                    "Slug of a persona under hearth/subagents/ — call "
-                    "list_subagent_personas() first if unsure. Current set: "
-                    "researcher, coder, archivist, librarian, summarizer, "
-                    "pdf_coordinator."},
+                    "researcher, coder, archivist, librarian, summarizer or "
+                    "pdf_coordinator (list_subagent_personas describes them)."},
                 "prompt": {"type": "string", "description":
-                    "Focused work for the child. Tight scope - one PDF "
-                    "chunk, one question, one file."},
+                    "The work, tightly scoped: one question, one file, one "
+                    "chunk."},
                 "max_turns": {"type": "integer", "description":
-                    "Override the persona's default turn cap. Capped at 20 "
-                    "even if higher passed."},
+                    "Override the persona's turn limit, up to the same "
+                    "ceiling as the main loop."},
                 "mode": {"type": "string", "enum": ["sync", "background"],
-                    "description": "sync = block; background = fire-and-"
-                    "forget with a task-notification on completion."},
+                    "description": "sync waits for the result; background "
+                    "returns at once and notifies on completion."},
                 "name": {"type": "string", "description":
-                    "Optional human label for this instance. Use when "
-                    "spawning multiple subagents of the SAME persona to "
-                    "tell them apart (e.g. researcher 'Alex' on topic A "
-                    "and researcher 'Beth' on topic B). Appears in the "
-                    "completion notification + transcript."},
+                    "A label to tell apart several agents of the same "
+                    "persona; shown in the notification."},
             },
             "required": ["persona", "prompt"],
         },
@@ -815,15 +777,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "find_file",
         "description": (
-            "Find files (or folders) by name across common locations — workspace, Desktop, "
-            "Documents, Downloads, Pictures, Videos, Music, ~/Code, ~/Projects, "
-            "the current working dir, AND every non-system drive (D:, E:, F:, G:...). "
-            "Use this whenever the user says 'find X' / 'where's Y' / 'do I have any Z' "
-            "instead of asking them for a path. Pass a name substring or a glob "
-            "(e.g. 'budget', '*.pdf', 'vacation_*'). For media/binary results, just "
-            "report the paths (don't read_file them). For text files, read top results. "
-            "If user says 'search C drive' / 'check G:\\\\SteamLibrary', pass that as "
-            "`path` to scope the scan AND get a 4x bigger budget."),
+            "Find files or folders by name (a substring or a glob) across the "
+            "workspace, Desktop, Documents, Downloads, Pictures, Videos, Music, ~/Code,"
+            " ~/Projects, the working directory and every non-system drive. Use it "
+            "instead of asking for a path. `path` scopes the search and allows a deeper"
+            " scan, `deep` goes further, `kind` filters by type."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -853,12 +812,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "web_fetch",
         "description": (
-            "Fetch a URL and return its readable text (HTML stripped) to YOU. "
-            "INVISIBLE to the user — they do NOT see a browser, just whatever you "
-            "tell them. Use this to READ a page yourself. If the user wants to "
-            "OPEN / WATCH / PLAY something (a video, a site), do NOT web_fetch it — "
-            "use open_url / open_in_browser (their own browser) or browse instead. "
-            "Never say 'I opened it' after a web_fetch — you didn't."
+            "Fetch a page's readable text for you to read; the user sees nothing. To "
+            "open something for them to watch or use, use open_url, open_in_browser or "
+            "browse."
         ),
         "parameters": {
             "type": "object",
@@ -877,14 +833,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "run_command",
         "description": (
-            "Execute a shell command. On Windows defaults to PowerShell — both "
-            "classic commands (dir, where, tasklist, ipconfig) AND PowerShell "
-            "cmdlets (Get-ChildItem, Get-Process, Sort-Object) work. Default "
-            "120s timeout, max 300s. Use timeout=180+ for pip installs. "
-            "Set detached=true for things that DON'T exit on their own — "
-            "daemons, dev servers, UI launchers, game launchers, Forge's "
-            "run_neo.bat. Without detached they will hang the call until "
-            "timeout fires."
+            "Run a single-line shell command (PowerShell on Windows). python and pip "
+            "run in Hearth's own environment. Times out after 120s by default, up to "
+            "300 (use 180 or more for pip installs). Set detached=true for anything "
+            "that does not exit on its own, like a server or a launcher. Destructive "
+            "commands are refused until the user says yes; do not reword one to get "
+            "past the refusal."
         ),
         "parameters": {
             "type": "object",
@@ -903,13 +857,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "start_job",
         "description": (
-            "Run a shell command in the BACKGROUND and return a job_id "
-            "immediately so you can keep working while it runs. Use this for "
-            "anything that takes >30s (pip install of heavy deps, HF model "
-            "download, dataset preprocessing, build). The job's output streams "
-            "to disk; check it with job_status or wait for it with job_wait. "
-            "DO NOT use for fast commands (use run_command) or daemons / UIs "
-            "(use run_command with detached=true)."
+            "Run a shell command in the background and get a job_id at once; check it "
+            "with job_status or job_wait. For anything over about 30 seconds (heavy pip"
+            " installs, model downloads, builds). Fast commands belong in run_command, "
+            "and servers or launchers in run_command with detached=true."
         ),
         "parameters": {
             "type": "object",
@@ -1053,11 +1004,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     # ---- KNOW MY PC ----
     {
         "name": "system_info",
-        "description": "Full machine snapshot in ONE call: OS, CPU, GPU(s) with "
-                       "VRAM/temp/load/driver (nvidia-smi), RAM total/used/available, "
-                       "disks, hostname, user, uptime. Use this alone for any "
-                       "hardware/spec question — do NOT also run nvidia-smi or other "
-                       "shell commands, it already includes them.",
+        "description": (
+            "Machine snapshot in one call: OS, CPU, GPUs with VRAM, temperature and "
+            "load, RAM, disks, hostname, user, uptime, battery. It already includes "
+            "what nvidia-smi reports."
+        ),
         "parameters": {"type": "object", "properties": {}},
     },
     {
@@ -1162,7 +1113,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     # ---- APP CONTROL ----
     {
         "name": "open_app",
-        "description": "Launch / open with default association. Accepts: app names ('notepad', 'spotify', 'chrome'), full file paths (e.g. 'G:\\\\movie.mkv' opens in default player, '.rar' in archive tool), folder paths (opens in Explorer), or URLs. Resolution order: existing path → URL → PATH lookup → UWP URI → Start Menu shortcut. Use this whenever the user says 'open this', 'launch X', or references something they want to interact with.",
+        "description": (
+            "Open an app by name, a file with its default program, a folder in "
+            "Explorer, or a URL."
+        ),
         "parameters": {
             "type": "object",
             "properties": {"name": {"type": "string"}},
@@ -1171,7 +1125,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "open_url",
-        "description": "Open a URL in the user's DEFAULT browser (their login, fullscreen). The user sees it, but YOU lose control of it afterward — you can't change the page, search again, or click. Use for a one-off handoff, AND when the user wants SEVERAL links opened as TABS to browse themselves — call open_url once per link (their browser handles multiple tabs; the browse tool can't — it's a single controlled tab). If you'll need to keep driving one page (change the video, navigate), use browse instead. Never web_fetch a thing you're meant to OPEN — fetch is invisible.",
+        "description": (
+            "Open a URL in the user's default browser for them to use. You cannot drive"
+            " it afterwards. To open several links as tabs, call it once per link. To "
+            "keep control of a page, use browse."
+        ),
         "parameters": {
             "type": "object",
             "properties": {"url": {"type": "string"}},
@@ -1205,20 +1163,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "screenshot",
         "description": (
-            "Capture the screen, save to workspace/screenshots/, return "
-            "the path. When the user asks for a screenshot of a SPECIFIC "
-            "app/window, ALWAYS pass `delay_s: 3` (or up to 10) and tell "
-            "them in your reply 'switch to the window now, capturing in "
-            "Ns'. Without the delay, the screenshot captures Hearth "
-            "itself because the chat was in focus when they sent the "
-            "prompt. Skip the delay only when they explicitly want THIS "
-            "Hearth window captured (e.g. 'screenshot what you just did'). "
-            "Hearth's own windows are left OUT of the image by default, "
-            "because a shot containing the chat makes you describe yourself "
-            "or click your own controls. When the question is ABOUT Hearth "
-            "(the user says something here looks wrong, or asks what you "
-            "just rendered), pass include_hearth: true so you can actually "
-            "look at it."
+            "Capture the whole screen and return the saved path; follow with view_image"
+            " to see it. Hearth's own windows are left out, so you see what is behind "
+            "them. For one app, capture_active_window is tighter. When the question is "
+            "about Hearth itself, pass include_hearth: true."
         ),
         "parameters": {
             "type": "object",
@@ -1237,15 +1185,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "capture_active_window",
         "description": (
-            "Screenshot ONLY the window in focus (the game/app the user is "
-            "actually looking at), not the whole desktop. Use this over "
-            "`screenshot` when answering 'what's happening in the game / on "
-            "this screen right now' — it's tighter and cleaner for vision. "
-            "Pass window_title to grab a named window that isn't in front. "
-            "Chain view_image on the returned path to actually see it. "
-            "Pass mark=true to draw a NUMBER on every control the accessibility "
-            "tree can see, then click one with smart_click(mark=N) instead of "
-            "estimating a pixel — far more reliable when the tree has the window."
+            "Screenshot only the focused window, or a named one with window_title; "
+            "tighter than screenshot for vision. Follow with view_image. mark=true "
+            "numbers every control the accessibility tree sees, so you can click one "
+            "with smart_click(mark=N)."
         ),
         "parameters": {
             "type": "object",
@@ -1264,35 +1207,35 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "smart_click",
         "description": (
-            "The RELIABLE way to click something on screen (computer-use). "
-            "Workflow: capture_active_window -> view_image to SEE it -> smart_click "
-            "with the pixel (x,y) at the target's CENTER in that image, in the "
-            "image's own coordinate space (top-left = 0,0). Hearth maps your pixel "
-            "to real screen coords, snaps it to the nearest real UI control from "
-            "the accessibility tree (so the click lands on the actual button, not "
-            "a guessed pixel), clicks it, and takes a fresh screenshot to verify. "
-            "Pass label = what you think it is (helps logging). Pass text to type "
-            "into the control right after clicking, in the SAME call — atomic, so "
-            "focus can't drift between the click and the type. Prefer this over "
-            "computer_click for anything you located visually."
+            "Click something you located in a captured image: pass the pixel (x, y) at "
+            "the target's centre, in that image's own coordinates. Hearth maps it to "
+            "the screen, snaps it to the nearest real control, clicks, and re-captures "
+            "to verify. After a marked capture, pass mark=N instead. Pass text to type "
+            "into the control in the same call. Prefer this to computer_click."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "x": {"type": "integer", "description": "Pixel X of the target's center IN THE LAST capture image. Not needed when using mark."},
-                "y": {"type": "integer", "description": "Pixel Y of the target's center IN THE LAST capture image."},
-                "label": {"type": "string", "description": "What the target is (e.g. 'Send button'). Optional."},
-                "mark": {"type": "integer", "description": "Click the control NUMBERED N on the last capture_active_window(mark=true) image. Uses that control's real centre, so no pixel estimation. Preferred when numbers are on the image."},
-                "text": {"type": "string", "description": "Optional: type this into the control immediately after clicking, in one atomic op (no focus-drift gap)."},
+                "x": {"type": "integer", "description": "Pixel x of the target's centre in the last capture image."},
+                "y": {"type": "integer", "description": "Pixel y of the target's centre in the last capture image."},
+                "label": {"type": "string", "description": "What the target is, e.g. 'Send button'."},
+                "mark": {"type": "integer", "description": "Click the control numbered N on the last marked capture, instead of x and y."},
+                "text": {"type": "string", "description": "Type this into the control right after clicking, in the same step."},
                 "button": {"type": "string", "enum": ["left", "right", "middle"]},
-                "double": {"type": "boolean", "description": "true = double-click."},
+                "double": {"type": "boolean", "description": "Double-click."},
             },
-            "required": ["x", "y"],
+            # Either mark or x and y, so neither is required on its own. With
+            # x and y marked required, a mark-only call was refused before it
+            # reached the handler, so clicking by number never worked. The
+            # handler refuses a call that gives neither.
+            "required": [],
         },
     },
     {
         "name": "view_image",
-        "description": "Load an image file from disk so you can SEE it. Use this when the user gives you a path to an image (e.g. 'see this image C:\\\\path.png') or asks about a screenshot you just took. Returns the image content for vision processing. Works with .png, .jpg, .jpeg, .gif, .webp, .bmp.",
+        "description": (
+            "Load an image file so you can see it (png, jpg, gif, webp, bmp)."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -1323,26 +1266,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "memory_save",
         "description": (
-            "Save a long-term memory. Use this when you learn a fact about "
-            "the user, their setup, their preferences, or projects worth "
-            "remembering across conversations. The index updates "
-            "automatically.\n\n"
-            "**HARD RULE — if the response contains a `[possible-dup]` "
-            "line, STOP and act on it before moving on.** That warning "
-            "means an existing memory shares topic words with this new "
-            "one. You MUST do exactly ONE of:\n"
-            "  (a) memory_forget(<flagged-slug>) THEN tell the user "
-            "      what you consolidated and why.\n"
-            "  (b) edit_file the existing memory in place to absorb the "
-            "      new fact (use the slug+path from the warning).\n"
-            "  (c) memory_save again with the SAME args plus "
-            "      `force=true` if the new fact is genuinely independent "
-            "      of the flagged one.\n"
-            "Do NOT just call memory_save a second time with the same "
-            "title (that produces an 'updated memory' which suppresses "
-            "the warning but leaves the sibling untouched — exactly the "
-            "proliferation the warning is preventing). Do NOT tell the "
-            "user 'Saved.' and leave the duplicate to rot."
+            "Save a lasting fact about the user or their world (preferences, hardware, "
+            "projects, people, setups). One topic per memory under a stable title; to "
+            "change a fact, save over the same title. A [possible-dup] line in the "
+            "result means a similar memory exists: act on it before moving on."
         ),
         "parameters": {
             "type": "object",
@@ -1359,7 +1286,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "volatility": {"type": "string", "enum": ["durable", "seasonal", "transient"], "description": "How long this stays true. durable=forever, seasonal=school term/project phase, transient=days. Default durable."},
                 "sub_category": {"type": "string", "description": "Finer bucket within type, e.g. school, hearth, health. Or use tags cat:subcat."},
                 "supersedes": {"type": "string", "description": "Slug of a seasonal memory this replaces, e.g. school. Archives the old one."},
-                "force": {"type": "boolean", "description": "Set true on retry after you've reviewed a [possible-dup] warning and confirmed this is genuinely a NEW fact, not an update to the flagged sibling."},
+                "force": {"type": "boolean", "description": "After a [possible-dup] warning, true if this really is a separate fact."},
             },
             "required": ["title", "type", "description"],
         },
@@ -1383,13 +1310,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "worklog",
         "description": (
-            "Your private scratch pad for a LONG or multi-step task. Jot findings, "
-            "extracted facts, progress, and where you are as you go, then read them "
-            "back — so you don't re-read the same files/sources over and over and "
-            "rot your context. Append a note: worklog(note='...'). Read it all: "
-            "worklog(action='read'). Start fresh for a new task: worklog(action='clear'). "
-            "Reach for this when grinding a big document or many files into an output "
-            "across many turns."
+            "Your scratch pad for a long task: note findings as you go and read them "
+            "back instead of re-reading the sources. worklog(note='...') appends, "
+            "action='read' returns everything, action='clear' starts fresh."
         ),
         "parameters": {
             "type": "object",
@@ -6523,18 +6446,12 @@ for _bt in (
     {
         "name": "browse",
         "description": (
-            "Drive a REAL web browser (controlled Chromium) — the user SEES the window. "
-            "Navigate, get the rendered text + a numbered list of clickable links/buttons, "
-            "then browse_click / browse_type. The session stays open across calls. "
-            "PREFER browse whenever you might need to KEEP control of what's on screen — "
-            "e.g. playing a video the user may then want changed ('next one', 'search "
-            "something else'), browsing a site, filling a form. With browse YOU can do "
-            "all that next; with open_url you can't (it hands off to their browser and you "
-            "lose control). Only use open_url/open_in_browser for a pure one-off handoff. "
-            "Leave the browse session OPEN while the user is still using it. It's a SINGLE "
-            "tab — each browse() navigation REPLACES the current page, so for 'open these "
-            "in separate tabs for me' use open_url (once per link), not browse. For a quick "
-            "text grab (you read it), use web_fetch; to search, web_search."
+            "Drive a real, visible Chromium window: navigate, get the page text and a "
+            "numbered list of links and buttons, then act with browse_click and "
+            "browse_type. The session stays open, so you can keep driving it (the next "
+            "video, another search). It is one tab: each navigation replaces the page. "
+            "To hand the user links to browse themselves use open_url; to read a page "
+            "yourself use web_fetch."
         ),
         "parameters": {
             "type": "object",
@@ -6681,12 +6598,8 @@ _HANDLERS["create_skill"] = _create_skill
 TOOL_DEFINITIONS.append({
     "name": "list_skills",
     "description": (
-        "List available skills (bundled + user-installed). Each entry is "
-        "{name, description, version, folder, source}. Skills are prose + asset "
-        "bundles (e.g. make-pdf, make-pptx, make-xlsx) the user invokes via "
-        "existing tools after you load_skill(<name>) for the full instructions. "
-        "Catalog also appears in your system prompt — use this tool when you "
-        "want the structured response."
+        "List available skills, bundled and installed. The catalog is already in "
+        "your prompt; this returns it structured."
     ),
     "parameters": {"type": "object", "properties": {}},
 })
@@ -6694,11 +6607,8 @@ TOOL_DEFINITIONS.append({
 TOOL_DEFINITIONS.append({
     "name": "load_skill",
     "description": (
-        "Load the full SKILL.md body + asset manifest for one skill. Call this "
-        "BEFORE following its workflow so you have the exact steps + the "
-        "bundled script paths (scripts/, references/, assets/). Returns "
-        "{ok, name, description, body, scripts, references, assets, folder, ...}. "
-        "Use the `folder` field to construct script paths."
+        "Load a skill's full instructions and its bundled files before following "
+        "it. Build script paths from the returned `folder`."
     ),
     "parameters": {
         "type": "object",
@@ -7791,14 +7701,13 @@ _HANDLERS["desktop_type"] = _desktop_type
 
 for _cd in (
     {"name": "desktop_snapshot", "description":
-        "Read a window's interactive UI elements (buttons, fields, menu items, "
-        "list items, checkboxes) as a numbered list with exact positions — an "
-        "accessibility snapshot of the app, including inside Chrome, Slack, "
-        "Discord, VS Code and other web or Electron apps. PREFER this over screenshot+"
-        "computer_click: it's precise and costs no vision tokens. Pass "
-        "window='<part of a title>' to target a SPECIFIC window even in the "
-        "background (e.g. 'Visual Studio Code'); omit for the foreground window. "
-        "Then act with desktop_click / desktop_type.",
+        (
+            "List a window's controls (buttons, fields, menu and list items, "
+            "checkboxes) with numbers and positions, read from the accessibility tree, "
+            "including inside Chrome, Slack, Discord, VS Code and other web or Electron"
+            " apps. Precise and needs no vision. window='<part of a title>' targets a "
+            "background window. Then act with desktop_click or desktop_type."
+        ),
      "parameters": {"type": "object", "properties": {
         "max_elements": {"type": "integer", "description": "cap (default 50)"},
         "window": {"type": "string", "description":
@@ -7948,15 +7857,16 @@ for _cd in (
         "max_elements": {"type": "integer", "description": "cap per poll (default 60)"}},
         "required": ["name"]}},
     {"name": "execute_actions", "description":
-        "Run several desktop steps in one call, in order, stopping at the first "
-        "failure. Each entry is {\"tool\": \"<name>\", ...that tool's arguments}, "
-        "e.g. [{\"tool\":\"desktop_click\",\"name\":\"Search\"}, "
-        "{\"tool\":\"desktop_type\",\"name\":\"Search\",\"text\":\"invoices\"}, "
-        "{\"tool\":\"computer_key\",\"key\":\"enter\"}]. Allowed tools are "
-        "desktop_snapshot / desktop_click / desktop_type, computer_click / _type "
-        "/ _key / _scroll / _move / _drag, focus_window and wait_for_element. "
-        "Target elements by name, not idx: a click changes the window and an idx "
-        "from an older snapshot then points at the wrong control. Up to 12 steps.",
+        (
+            "Run several desktop steps in one call, in order, stopping at the first "
+            "failure. Each entry is {\"tool\": \"<name>\", ...its arguments}, e.g. "
+            "[{\"tool\":\"desktop_click\",\"name\":\"Search\"}, "
+            "{\"tool\":\"desktop_type\",\"name\":\"Search\",\"text\":\"invoices\"}, "
+            "{\"tool\":\"computer_key\",\"key\":\"enter\"}]. Allowed: desktop_snapshot, "
+            "desktop_click, desktop_type, the computer_* tools, focus_window and "
+            "wait_for_element. Target by name, not idx: a click changes the window and "
+            "an old idx then points at the wrong control. Up to 12 steps."
+        ),
      "parameters": {"type": "object", "properties": {
         "actions": {"type": "array", "description":
             "the steps, each an object with 'tool' plus that tool's arguments",

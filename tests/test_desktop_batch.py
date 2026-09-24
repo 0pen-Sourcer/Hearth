@@ -134,6 +134,34 @@ try:
 finally:
     A.available, A.snapshot = _saved
 
+# ------------------------------------------------ clicking a numbered control
+# A marked capture numbers every control, and smart_click(mark=N) clicks one by
+# its real centre. The schema listed x and y as required, and required fields
+# are checked before a tool runs, so every mark-only call was refused and never
+# reached the click. The click itself is stubbed: nothing touches the screen.
+_seen = []
+_real_smart = T._HANDLERS["smart_click"]
+T._HANDLERS["smart_click"] = lambda p: (_seen.append(dict(p)), "clicked (stub)")[1]
+try:
+    r = T.execute_tool("smart_click", {"mark": 5})
+    check("smart_click by mark alone reaches the click", bool(_seen)
+          and "NOT executed" not in str(r))
+    _seen.clear()
+    T.execute_tool("smart_click", {"x": 10, "y": 20})
+    check("and by pixel still does", bool(_seen))
+finally:
+    T._HANDLERS["smart_click"] = _real_smart
+r = T.execute_tool("smart_click", {})
+check("a call with neither mark nor a pixel is refused, not crashed",
+      str(r).startswith("Error"))
+
+# ------------------------------------------------ a sub-agent's turn limit
+# The tool said an override was capped; nothing capped it.
+import inspect                                                      # noqa: E402
+from hearth import subagents as _SA                                 # noqa: E402
+check("a sub-agent's turn override is held to the shared ceiling",
+      "min(turns_cap, _CEILING)" in inspect.getsource(_SA))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

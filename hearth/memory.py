@@ -295,7 +295,8 @@ def save(title: str, mtype: str, description: str, body: str = "",
                 f"memory '{top['title']}' ({top['slug']}){others}. If this is "
                 f"an UPDATE to that fact, call memory_forget('{top['slug']}') "
                 f"or edit_file the existing one. If it's genuinely separate, "
-                f"call memory_save again with force=True to dismiss this."
+                f"call memory_save again with force=True to dismiss this. Saving "
+                f"again under the same title does not resolve it."
             )
     tags = tags or []
     if isinstance(tags, str):

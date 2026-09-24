@@ -870,7 +870,15 @@ def spawn_subagent(persona: str, prompt: str,
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-    turns_cap = int(max_turns or p.get("max_turns") or _DEFAULT_MAX_TURNS)
+    # Held to the same ceiling as every other surface. The tool told the model
+    # an override was capped, and nothing capped it, so any number it passed
+    # ran as given.
+    from .loop_guard import MAX_TURNS as _CEILING
+    try:
+        turns_cap = int(max_turns or p.get("max_turns") or _DEFAULT_MAX_TURNS)
+    except (TypeError, ValueError):
+        turns_cap = _DEFAULT_MAX_TURNS
+    turns_cap = max(1, min(turns_cap, _CEILING))
     agent_id = f"sub_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
     # Carry the human label through both paths so the toast / notification /
     # transcript can read it. Empty string is fine — surfaces fall back to
