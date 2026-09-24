@@ -8465,10 +8465,6 @@ _LOAD_STOPWORDS = {
     "and", "or", "with", "what", "how", "do", "does", "i", "can", "could",
     "you", "please", "tool", "tools", "that", "this", "need", "want", "use",
     "about", "any", "some", "give", "show", "find", "from", "into", "at",
-    "all", "everything", "something", "anything", "nothing", "here", "there",
-    "when", "where", "which", "why", "just", "really", "very", "much", "more",
-    "own", "level", "thing", "stuff", "please", "then", "than", "also", "only",
-    "still", "okay", "yes", "not", "but", "was", "were", "are", "have", "has",
 }
 
 
@@ -8504,40 +8500,39 @@ def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
         for td in deferred:
             _touch_unlocked(td["name"])
         return deferred
-    toks = [w for w in q.replace("-", " ").replace("/", " ").split() if w]
-    # A one or two letter token means nothing on its own and was matching a
-    # fragment of an identifier, so "am i on battery" landed on a voice called
-    # am_michael. They are kept only when the query is nothing but short words,
-    # which is how "whats my ip" still reaches the network tool. The plural fold
-    # runs against the stopword list too, or "whats" slipped through as "what".
-    def _carries_meaning(w):
-        return w not in _LOAD_STOPWORDS and w.rstrip("s") not in _LOAD_STOPWORDS
-    meaningful = [w for w in toks if _carries_meaning(w) and len(w) > 2]
-    toks = meaningful or [w for w in toks if _carries_meaning(w)]
+    # Picking by name is the main path: every deferred tool is named in this
+    # tool's description, so the model chooses rather than hoping a keyword
+    # lands. "select:a,b" and a bare exact name both resolve directly, with
+    # nothing scored, so a name can never lose to a description that mentions
+    # the same words.
+    by_name = {td["name"].lower(): td for td in deferred}
+    if q.startswith("select:"):
+        picked = [by_name[n.strip()] for n in q[len("select:"):].split(",")
+                  if n.strip() in by_name]
+        for td in picked:
+            _touch_unlocked(td["name"])
+        return picked
+    if q in by_name:
+        _touch_unlocked(by_name[q]["name"])
+        return [by_name[q]]
+    # Keyword fallback, for when the model is unsure of the name. Whole words
+    # only, so a short word cannot land inside a longer one.
+    toks = [w for w in q.replace("-", " ").replace("/", " ").split()
+            if w and w not in _LOAD_STOPWORDS]
     scored: "List[tuple]" = []
     for td in deferred:
         n = td["name"]
-        nl = n.lower()
-        cat = _TOOL_CATEGORY.get(n, "").lower()
-        # Descriptions and categories are matched whole-word. A bare substring
-        # test let a short token land inside a longer word, so "all" hit
-        # "install", "finally" and "usually", and a query that matched nothing
-        # came back with a handful of unrelated tools and "you can call them
-        # now" — which then had to be paid for in schema tokens for the rest of
-        # the session. The name keeps a substring test, since "image" genuinely
-        # belongs to generate_image, but only for a token long enough to mean
-        # something on its own.
-        words = _words_of(td["description"]) | _words_of(cat)
+        name_words = _words_of(n)
+        cat_words = _words_of(_TOOL_CATEGORY.get(n, ""))
+        desc_words = _words_of(td["description"])
         score = 0
         for w in toks:
-            ws = w.rstrip("s")
-            if (len(w) >= 4 and w in nl) or (len(ws) >= 4 and ws in nl):
+            forms = {w, w.rstrip("s")}
+            if forms & name_words:
                 score += 5          # name hit — strongest signal
-            elif w in _words_of(nl) or ws in _words_of(nl):
-                score += 5
-            elif w in _words_of(cat) or ws in _words_of(cat):
+            elif forms & cat_words:
                 score += 3
-            elif w in words or ws in words:
+            elif forms & desc_words:
                 score += 1
         if score > 0:
             scored.append((score, td))
@@ -8711,14 +8706,15 @@ def to_openai_tools() -> List[Dict[str, Any]]:
     return out
 
 
-# Tool → category, so listings group sensibly instead of dumping a flat wall
-# (e.g. the 4 browser tools read as ONE "Web & browser" capability, not 4
-# count-padding entries). Order here = display order. Unknown names (user
-# plugins) fall into "Custom / plugins".
+# Tool -> category. This is what the model reads to find a tool that is not
+# loaded, so a tool with no entry falls into "Custom / plugins" and is filed
+# where nobody would look for it: the desktop controls sat there beside the
+# image generator. Every built-in tool has an entry; a test holds it to that.
+# Order here = display order. Unknown names are user plugins.
 _CATEGORY_ORDER = [
-    "Files & docs", "Web & browser", "System & apps", "Memory",
-    "Reminders & alerts", "Email", "Voice", "Self-extending (plugins)",
-    "Image generation", "Session",
+    "Files & docs", "Web & browser", "Desktop control", "System & apps",
+    "Background jobs", "Sub-agents", "Memory", "Reminders & alerts", "Email",
+    "Voice", "Self-extending (plugins)", "Image generation", "Session",
 ]
 _TOOL_CATEGORY = {
     # Files & docs
@@ -8727,44 +8723,59 @@ _TOOL_CATEGORY = {
     "create_directory": "Files & docs", "delete_path": "Files & docs", "move_path": "Files & docs",
     "find_file": "Files & docs", "grep_search": "Files & docs", "glob_files": "Files & docs",
     "locate_path": "Files & docs", "list_archive": "Files & docs", "extract_archive_file": "Files & docs",
-    "read_pdf_large": "Files & docs",
+    "read_pdf_large": "Files & docs", "summarize_file": "Files & docs",
     # Web & browser
     "web_search": "Web & browser", "web_fetch": "Web & browser",
     "open_url": "Web & browser", "open_in_browser": "Web & browser", "list_browsers": "Web & browser",
-    "browse": "Web & browser", "browse_click": "Web & browser", "browse_type": "Web & browser", "browse_scroll": "Web & browser", "browse_key": "Web & browser",
-    "browse_close": "Web & browser",
+    "browse": "Web & browser", "browse_click": "Web & browser", "browse_type": "Web & browser",
+    "browse_scroll": "Web & browser", "browse_key": "Web & browser", "browse_close": "Web & browser",
+    # Desktop control
+    "desktop_snapshot": "Desktop control", "desktop_click": "Desktop control",
+    "desktop_type": "Desktop control", "wait_for_element": "Desktop control",
+    "execute_actions": "Desktop control", "smart_click": "Desktop control",
+    "computer_screen": "Desktop control", "computer_move": "Desktop control",
+    "computer_click": "Desktop control", "computer_type": "Desktop control",
+    "computer_key": "Desktop control", "computer_scroll": "Desktop control",
+    "computer_drag": "Desktop control", "focus_window": "Desktop control",
+    "list_windows": "Desktop control", "manage_window": "Desktop control",
+    "arrange_windows": "Desktop control", "capture_active_window": "Desktop control",
     # System & apps
     "run_command": "System & apps", "system_info": "System & apps", "list_processes": "System & apps",
-    "network_info": "System & apps", "get_battery": "System & apps", "list_installed_apps": "System & apps",
+    "network_info": "System & apps", "list_installed_apps": "System & apps",
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
-    "capture_active_window": "System & apps", "smart_click": "System & apps",
-    "focus_window": "System & apps", "list_windows": "System & apps", "manage_window": "System & apps",
-    "list_jobs": "Background jobs", "get_job_result": "Background jobs",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
     "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps",
-    "learn_environment": "System & apps",
+    "learn_environment": "System & apps", "system_vibe": "System & apps",
+    # Background jobs
+    "start_job": "Background jobs", "job_status": "Background jobs", "job_wait": "Background jobs",
+    "job_kill": "Background jobs", "list_jobs": "Background jobs", "get_job_result": "Background jobs",
+    # Sub-agents
+    "spawn_subagent": "Sub-agents", "list_subagent_personas": "Sub-agents",
+    "get_subagent_result": "Sub-agents", "launch_team": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",
-    "edit_soul": "Memory", "append_soul": "Memory", "read_soul": "Memory",
+    "edit_soul": "Memory", "append_soul": "Memory", "read_soul": "Memory", "draft_soul": "Memory",
     # Reminders & alerts
     "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
     "cancel_reminder": "Reminders & alerts", "snooze_reminder": "Reminders & alerts",
-    "spawn_subagent": "Sub-agents", "list_subagent_personas": "Sub-agents",
-    "get_subagent_result": "Sub-agents",
-    "notify": "Reminders & alerts",
+    "notify": "Reminders & alerts", "send_to_phone": "Reminders & alerts",
+    # Email
+    "read_inbox": "Email", "send_email": "Email",
     # Voice
     "set_voice": "Voice", "list_voices": "Voice",
     # Self-extending
     "create_plugin": "Self-extending (plugins)", "list_plugins": "Self-extending (plugins)",
-    "delete_plugin": "Self-extending (plugins)",
-    "install_skill": "Self-extending (plugins)",
-    "read_inbox": "Email", "send_email": "Email",
+    "delete_plugin": "Self-extending (plugins)", "install_skill": "Self-extending (plugins)",
+    "list_skills": "Self-extending (plugins)", "load_skill": "Self-extending (plugins)",
+    "create_skill": "Self-extending (plugins)",
     # Image generation
     "generate_image": "Image generation", "generate_video": "Image generation",
     "check_video_task": "Image generation", "list_generations": "Image generation",
+    "forge_generate": "Image generation", "forge_status": "Image generation",
+    "forge_shutdown": "Image generation",
     # Session
-    "end_session": "Session",
+    "end_session": "Session", "ask_user": "Session", "worklog": "Session",
 }
 
 
@@ -9251,15 +9262,19 @@ try:
     for _cat, _tds in tools_by_category():
         _dn = [td["name"] for td in _tds if td["name"] in _DEFERRED_TOOLS]
         if _dn:
-            _shown = ", ".join(_dn[:5]) + ("..." if len(_dn) > 5 else "")
-            _menu_parts.append(f"{_cat.lower()} ({_shown})")
+            # Every name, never a sample. Five per group with "..." left 23 of
+            # 64 tools reachable only by guessing a keyword that happened to hit
+            # them, among them the window, click and team tools. Listing all of
+            # them costs about seventy-five tokens.
+            _menu_parts.append(f"{_cat.lower()} ({', '.join(_dn)})")
     if _menu_parts:
         _LOAD_TOOLS_SCHEMA["function"]["description"] = (
             "Reveal extra built-in tools kept off the default prompt to save "
             "context. BEFORE assuming you can't do something, or reaching for "
             "run_command, check here first, the tool you need is very likely one "
-            "call away. Pass a keyword naming what you need, then call the tool it "
-            "returns. Available on demand, by group: " + "; ".join(_menu_parts) +
-            ". Pass 'all' to load everything.")
+            "call away. Every one of them is named below: pick by name with "
+            "'select:name' or 'select:name1,name2', then call it. A keyword also "
+            "works when you are not sure of the name. Available on demand, by "
+            "group: " + "; ".join(_menu_parts) + ". Pass 'all' to load everything.")
 except Exception:
     pass
