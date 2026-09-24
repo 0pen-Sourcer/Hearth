@@ -116,6 +116,13 @@ jobs:
         run: |
           python tests/test_containment.py
 
+      - name: Saving a conversation
+        # A kill between the write and the rename leaves the temporary behind,
+        # and it ends in .json, so the lister read it as a second copy of the
+        # chat it was about to become.
+        run: |
+          python tests/test_convo_store.py
+
       - name: An update cut off partway through
         # The rollback inside the applier only runs for a failure it lives to
         # see. A power cut or a kill during the extract left two versions mixed

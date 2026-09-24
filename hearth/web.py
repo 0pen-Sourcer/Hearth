@@ -342,7 +342,10 @@ def _list_convos() -> List[Dict]:
     if not os.path.isdir(CONVOS_DIR):
         return out
     for fn in os.listdir(CONVOS_DIR):
-        if not fn.endswith(".json"):
+        # A write temporary ends in .json too, and one left behind by a killed
+        # save holds a complete conversation, so it listed as a second copy of
+        # the chat it was about to become.
+        if not fn.endswith(".json") or fn.startswith((_TMP_PREFIX, ".tmp-")):
             continue
         try:
             with open(os.path.join(CONVOS_DIR, fn), "r", encoding="utf-8") as f:
@@ -380,19 +383,65 @@ def _atomic_write_json(path: str, data, **dump_kw) -> None:
     to 1 MB of valid JSON + zero-fill."""
     import tempfile
     d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-", suffix=".json")
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=_TMP_PREFIX, suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, **dump_kw)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        # A just-closed file is briefly held open by antivirus and the search
+        # indexer on Windows, which surfaces as "used by another process" on the
+        # rename. Retrying is the difference between a saved turn and a lost one.
+        for _attempt in range(6):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if _attempt == 5:
+                    raise
+                time.sleep(0.05)
     except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
+
+
+# Temp files are written beside their target so the rename onto it is atomic.
+# Killing the process between the write and the rename leaves one behind, and
+# the cleanup on the way out cannot run for a kill. They are named so that
+# anything reading the directory can tell them from real files.
+_TMP_PREFIX = ".hearth-tmp-"
+
+
+def _sweep_stale_temp_files(directory: str, older_than_s: float = 300.0) -> int:
+    """Delete leftover write temporaries in a directory. Returns how many.
+
+    One of these had been sitting in the conversations folder for a month,
+    holding a complete copy of a chat that was also saved properly, and the
+    lister picked it up because it ends in .json, so it showed as a second copy
+    of that conversation in the sidebar. Only files older than a few minutes
+    are touched, so a write happening right now is never pulled out from under
+    itself.
+    """
+    removed = 0
+    try:
+        now = time.time()
+        for fn in os.listdir(directory):
+            if not fn.startswith((_TMP_PREFIX, ".tmp-")):
+                continue
+            full = os.path.join(directory, fn)
+            try:
+                if now - os.path.getmtime(full) < older_than_s:
+                    continue
+                os.remove(full)
+                removed += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return removed
 
 
 def _save_convo(data: Dict) -> bool:
@@ -4888,6 +4937,10 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     Used by hearth.desktop to embed the same backend in a PyWebView window."""
     server = _QuietHTTPServer((host, port), HearthHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    # Clear write temporaries a killed save left behind, before anything lists
+    # the folder and reports one as a conversation.
+    for _d in (CONVOS_DIR, os.path.dirname(SETTINGS_PATH) or "."):
+        _sweep_stale_temp_files(_d)
     _preload_whisper_async()
     _start_reminder_watcher()
     _maybe_learn_environment_async()
