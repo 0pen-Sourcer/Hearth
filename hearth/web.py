@@ -3406,13 +3406,22 @@ class HearthHandler(BaseHTTPRequestHandler):
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             _last_emit = [0.0]
+            # The window pauses or cancels a model download by dropping this
+            # connection. The broken pipe that followed was swallowed here and
+            # nothing told the download loop, so the transfer ran on to the end
+            # after the interface said paused, and Resume then started a second
+            # writer on the same part file. A dropped connection is the stop
+            # signal now.
+            _gone = [False]
 
             def emit(obj: Dict[str, Any]) -> None:
+                if _gone[0]:
+                    return
                 try:
                     self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
                     self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    _gone[0] = True
 
             def on_progress(done: int, total: int) -> None:
                 now = time.time()
@@ -3423,7 +3432,8 @@ class HearthHandler(BaseHTTPRequestHandler):
 
             llmserver.save_pending_download(repo, filename)  # so Resume knows the repo
             try:
-                result = llmserver.download_from_hf_repo(repo, filename, on_progress=on_progress)
+                result = llmserver.download_from_hf_repo(repo, filename, on_progress=on_progress,
+                                                         cancel=lambda: _gone[0])
                 if result.get("ok"):
                     llmserver.clear_pending_download()
                 emit({"type": "done", **result})
@@ -3501,13 +3511,17 @@ class HearthHandler(BaseHTTPRequestHandler):
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             _last_emit = [0.0]
+            # A dropped connection is the stop signal: see download-hf above.
+            _gone = [False]
 
             def emit(obj: Dict[str, Any]) -> None:
+                if _gone[0]:
+                    return
                 try:
                     self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
                     self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    _gone[0] = True
 
             def on_progress(done: int, total: int) -> None:
                 now = time.time()
@@ -3518,7 +3532,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 emit({"type": "progress", "done": done, "total": total})
 
             try:
-                result = llmserver.download_model(pick_id, on_progress=on_progress)
+                result = llmserver.download_model(pick_id, on_progress=on_progress,
+                                                  cancel=lambda: _gone[0])
                 emit({"type": "done", **result})
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})

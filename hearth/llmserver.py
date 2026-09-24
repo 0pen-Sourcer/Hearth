@@ -765,9 +765,47 @@ def scan_disk_for_models(max_per_dir: int = 50) -> List[Dict[str, Any]]:
     return out
 
 
+def _hf_resolve_url(repo: str, filename: str) -> str:
+    """Where a file in a Hugging Face repo is fetched from."""
+    return f"https://huggingface.co/{repo}/resolve/main/{filename}"
+
+
 class DownloadCancelled(Exception):
     """Raised out of a download loop when the caller asks to stop. The .part
     file is deliberately left behind so a later attempt resumes."""
+
+
+# One writer per part file. Two downloads of the same file appending to one part
+# at once interleave their bytes, and a model file built that way is corrupt in
+# a way no size check catches, because each writer only counts its own. That is
+# exactly what Pause then Resume produced: the paused transfer never stopped,
+# the resumed one started beside it, and the result was 262 KB longer than the
+# file on the server. A new download for a file already being written asks the
+# old one to stop and waits for it to let go before it reads where to resume.
+_part_locks: Dict[str, "_threading.Lock"] = {}
+_part_writers: Dict[str, "_threading.Event"] = {}
+_part_registry = _threading.Lock()
+
+
+def _claim_part(tmp) -> Tuple[str, "_threading.Lock", "_threading.Event"]:
+    key = os.path.normcase(os.path.abspath(str(tmp)))
+    with _part_registry:
+        lock = _part_locks.setdefault(key, _threading.Lock())
+        previous = _part_writers.get(key)
+    if previous is not None:
+        previous.set()
+    lock.acquire()
+    mine = _threading.Event()
+    with _part_registry:
+        _part_writers[key] = mine
+    return key, lock, mine
+
+
+def _release_part(key: str, lock: "_threading.Lock", mine: "_threading.Event") -> None:
+    with _part_registry:
+        if _part_writers.get(key) is mine:
+            del _part_writers[key]
+    lock.release()
 
 
 def _download_with_resume(url, dest, tmp,
@@ -779,6 +817,16 @@ def _download_with_resume(url, dest, tmp,
     from zero (matters a lot on slow/metered links). Atomic rename to `dest` on
     completion. The caller LEAVES the .part on failure so the next attempt
     resumes. Returns total bytes written."""
+    key, lock, superseded = _claim_part(tmp)
+    try:
+        return _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded)
+    finally:
+        _release_part(key, lock, superseded)
+
+
+def _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded) -> int:
+    # Read after the claim, so a writer that was still appending has stopped
+    # and the offset is where the file really ends.
     resume_from = tmp.stat().st_size if tmp.exists() else 0
     headers = {"User-Agent": ua}
     if resume_from:
@@ -811,7 +859,7 @@ def _download_with_resume(url, dest, tmp,
         with open(tmp, mode) as f:
             while True:
                 # Checked per chunk so a cancel lands in well under a second.
-                if cancel and cancel():
+                if (cancel and cancel()) or superseded.is_set():
                     raise DownloadCancelled()
                 chunk = r.read(256 * 1024)
                 if not chunk:
@@ -831,6 +879,11 @@ def _download_with_resume(url, dest, tmp,
     if total and done < total:
         raise IOError(f"incomplete download: {done}/{total} bytes — connection "
                       f"closed early; kept .part for resume")
+    # Longer than the server said is never a good file. Only a short read was
+    # checked, and a part that two writers had appended to came out long.
+    if total and done > total:
+        raise IOError(f"download is {done - total} bytes longer than the server "
+                      f"sent; the partial file is not trustworthy")
     # os.replace overwrites an existing dest atomically (Path.rename raises on
     # Windows when dest already exists), and we retry because antivirus / the
     # search indexer briefly locks the just-closed .part — that surfaces as
@@ -847,7 +900,8 @@ def _download_with_resume(url, dest, tmp,
 
 
 def download_model(pick_id: str,
-                   on_progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
+                   on_progress: Optional[Callable[[int, int], None]] = None,
+                   cancel: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
     """Download a curated pick from Hugging Face into ~/Jarvis/models/.
     `on_progress(done_bytes, total_bytes)` is called every ~256KB. Returns
     {ok, path} on success or {ok: False, error: ...}. Uses a .part file so
@@ -882,7 +936,7 @@ def download_model(pick_id: str,
         # through to the normal HF path.
         pass
 
-    url = f"https://huggingface.co/{pick['hf_repo']}/resolve/main/{pick['hf_file']}"
+    url = _hf_resolve_url(pick["hf_repo"], pick["hf_file"])
     dest = MODELS_DIR / pick["hf_file"]
     if dest.exists():
         record_model_source(str(dest), pick["hf_repo"])
@@ -890,11 +944,14 @@ def download_model(pick_id: str,
 
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        done = _download_with_resume(url, dest, tmp, on_progress)
+        done = _download_with_resume(url, dest, tmp, on_progress, cancel=cancel)
         record_model_source(str(dest), pick["hf_repo"])
         _status_cache.pop("disk_models_cache", None)
         _status_cache.pop("disk_scan_ts", None)
         return {"ok": True, "path": str(dest), "bytes": done}
+    except DownloadCancelled:
+        return {"ok": False, "cancelled": True,
+                "error": "download paused (progress kept, it will resume)"}
     except Exception as e:
         # Keep the .part so the next attempt RESUMES instead of restarting.
         return {"ok": False, "error": f"download failed: {type(e).__name__}: {e}"}
@@ -3000,7 +3057,8 @@ def model_source(filename: str) -> str:
 
 
 def download_from_hf_repo(repo: str, filename: str,
-                          on_progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
+                          on_progress: Optional[Callable[[int, int], None]] = None,
+                          cancel: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
     """Download an arbitrary GGUF picked from search_huggingface() results.
     Same .part-file handling as the curated picks so interrupted downloads
     never look complete."""
@@ -3013,12 +3071,15 @@ def download_from_hf_repo(repo: str, filename: str,
     if dest.exists():
         record_model_source(str(dest), repo)   # backfill if it predates the map
         return {"ok": True, "path": str(dest), "already": True}
-    url = f"https://huggingface.co/{repo}/resolve/main/{filename}"
+    url = _hf_resolve_url(repo, filename)
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        done = _download_with_resume(url, dest, tmp, on_progress)
+        done = _download_with_resume(url, dest, tmp, on_progress, cancel=cancel)
         record_model_source(str(dest), repo)
         return {"ok": True, "path": str(dest), "bytes": done}
+    except DownloadCancelled:
+        return {"ok": False, "cancelled": True,
+                "error": "download paused (progress kept, it will resume)"}
     except Exception as e:
         # Keep the .part so the next attempt RESUMES instead of restarting.
         return {"ok": False, "error": f"download failed: {type(e).__name__}: {e}"}
