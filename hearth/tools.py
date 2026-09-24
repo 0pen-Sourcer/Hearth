@@ -622,9 +622,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "set_reminder",
         "description": (
             "Schedule a future desktop notification, optionally with a TOOL CALL "
-            "that runs at the same moment (an 'action reminder'). Accepts natural "
-            "time strings: 'in 25 minutes', 'tomorrow at 7am', '2026-05-27 09:00', "
-            "'9pm', 'next monday at 10am', 'in 2 hours'. Saved to "
+            "that runs at the same moment (an 'action reminder'). `when` is a local "
+            "ISO timestamp ('2026-05-27T19:00') or a duration from now ('25m', "
+            "'2h', '3d'): convert what the user said yourself from the current "
+            "local time you are given each turn, so 'tonight at 11' is today's "
+            "date at 23:00. Saved to "
             "~/Jarvis/reminders.json; a background watcher fires when due. Catches "
             "up on missed reminders the next time Hearth launches (the user sees "
             "'while you were away'). Use whenever the user says 'remind me to X at "
@@ -636,7 +638,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "when": {"type": "string", "description": "When to fire the FIRST time. Natural-language OK."},
+                "when": {"type": "string", "description": "When to fire the first time: a local ISO timestamp like '2026-05-27T19:00', or a duration from now like '25m', '2h', '3d'."},
                 "what": {"type": "string", "description": "The message to show the user."},
                 "recurring": {"type": "string", "description": "Optional: 'every 30 minutes', 'hourly', 'daily', 'weekly', 'every 2 hours', etc. Omit for one-shot reminders."},
                 "action_tool": {"type": "string", "description": "Optional: name of a Hearth tool to RUN when the reminder fires (e.g. 'summarize_file', 'web_search', 'run_command', 'open_app'). Read-only tools run automatically and their result is appended to the toast. State-changing ones (run_command, open_app/url, write_file, send_email, computer_/desktop_, browse) are NOT run silently — when due, Hearth surfaces the reminder and ASKS you to confirm first, so you CAN schedule things like 'at 6pm run my backup script' safely."},

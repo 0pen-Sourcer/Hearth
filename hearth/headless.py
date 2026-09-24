@@ -782,9 +782,9 @@ async def run_once(
                 messages.append({"role": h["role"], "content": _hc})
     # A "notification flush" turn carries no real user message — the GUI fires
     # it (idle) only to let the model surface a due reminder / finished subagent.
-    # The notification itself becomes the trailing user-role message (Claude
-    # Code's isMeta pattern: the model reads + reports it, but no user bubble was
-    # ever rendered for it). Sentinel must match ui.html's flush call.
+    # The notification itself becomes the trailing user-role message: the model
+    # reads and reports it, but no user bubble is ever rendered for it, since the
+    # user never typed it. Sentinel must match ui.html's flush call.
     NOTIFY_FLUSH = "__HEARTH_NOTIFY_FLUSH__"
     _is_flush = prompt.strip() == NOTIFY_FLUSH
 

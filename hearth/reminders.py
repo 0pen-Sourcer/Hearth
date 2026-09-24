@@ -4,15 +4,11 @@ Stored at ~/Jarvis/reminders.json. A background watcher (started by web.py)
 fires desktop notifications when reminders come due.
 
 Usage from a tool call:
-    set_reminder(when="2026-05-27 09:00", what="standup")
-    set_reminder(when="in 25 minutes", what="check the oven")
-    set_reminder(when="tomorrow at 7am", what="workout")
+    set_reminder(when="2026-05-27T09:00", what="standup")
+    set_reminder(when="25m", what="check the oven")
 
-The `when` parser handles:
-  - ISO timestamps: "2026-05-27T09:00:00", "2026-05-27 09:00"
-  - Relative: "in 25 minutes", "in 2 hours", "in 3 days"
-  - Natural: "tomorrow at 7am", "tonight at 9pm", "next monday at 10am"
-  - Time-only (today): "9pm", "21:00", "7:30am"
+`when` is a local ISO timestamp or a duration from now. The model converts what
+the user said, using the local time it is given every turn.
 """
 
 from __future__ import annotations
@@ -55,160 +51,44 @@ def _save_all(items: List[Dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# When-parser — covers the 80% of user inputs
+# When a reminder is for
 # ---------------------------------------------------------------------------
+# The model turns what was said into a time. It is given the exact local time
+# every turn and understands language; a pattern list does neither, and a guess
+# that reads "tonight at 11" as eleven in the morning is worse than a refusal.
+# So this reads only forms that mean one thing: a timestamp, or a duration from
+# now. Anything else is refused with instructions, and the model converts it.
 
-_REL_PATTERN = re.compile(
-    r"^in\s+(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w)$",
+_DURATION = re.compile(
+    r"^(?:in\s+)?(\d+(?:\.\d+)?)\s*"
+    r"(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|weeks?)$",
     re.I,
 )
-_TIME_PATTERN = re.compile(r"^(\d{1,2}):?(\d{2})?\s*(a\.?m\.?|p\.?m\.?)?$", re.I)
-# "at" between the day and the time is how people write it about half the time.
-# Requiring it meant "friday 6pm" parsed as nothing at all and the reminder was
-# refused for a phrasing that reads perfectly well.
-_DAYNAME_PATTERN = re.compile(
-    r"^(?:next\s+|this\s+|on\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
-    r"(?:\s+(?:at\s+)?(.+))?$",
-    re.I,
-)
-# Times said as words rather than digits.
-_NAMED_TIMES = {
-    "noon": (12, 0), "midday": (12, 0), "midnight": (0, 0),
-    "morning": (9, 0), "afternoon": (14, 0), "evening": (19, 0), "night": (21, 0),
-}
-# "in an hour" and "in a couple of hours" are as common as "in 1 hour" and
-# carried no digit for the relative pattern to match on, so they parsed as
-# nothing at all. Ordered: the longer phrasings have to be tried first, or the
-# leading article swallows them.
-_SPOKEN_COUNTS = [
-    (re.compile(r"^in\s+half\s+an?\s+", re.I), "in 0.5 "),
-    (re.compile(r"^in\s+(?:an?\s+)?couple\s+(?:of\s+)?", re.I), "in 2 "),
-    (re.compile(r"^in\s+(?:an?\s+)?few\s+", re.I), "in 3 "),
-    (re.compile(r"^in\s+one\s+", re.I), "in 1 "),
-    (re.compile(r"^in\s+two\s+", re.I), "in 2 "),
-    (re.compile(r"^in\s+three\s+", re.I), "in 3 "),
-    (re.compile(r"^in\s+ten\s+", re.I), "in 10 "),
-    (re.compile(r"^in\s+an?\s+", re.I), "in 1 "),
-]
-
-
-def _spell_out_count(s: str) -> str:
-    for pat, repl in _SPOKEN_COUNTS:
-        new = pat.sub(repl, s, count=1)
-        if new != s:
-            return new
-    return s
-
-_REL_UNITS = {
-    "s": 1, "second": 1, "seconds": 1, "sec": 1, "secs": 1,
-    "m": 60, "minute": 60, "minutes": 60, "min": 60, "mins": 60,
-    "h": 3600, "hour": 3600, "hours": 3600, "hr": 3600, "hrs": 3600,
-    "d": 86400, "day": 86400, "days": 86400,
-    "w": 604800, "week": 604800, "weeks": 604800,
-}
-_DAYS = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
-
-
-def _parse_time(s: str, base: datetime,
-                assume_pm: bool = False) -> Optional[datetime]:
-    """Parse "9pm", "21:00", "7:30am", "noon" to a time on base's day.
-
-    `assume_pm` is for a phrase that has already said which half of the day it
-    means. "tonight at 11" gave 11 in the morning, twelve hours from what was
-    asked for, and said nothing about it.
-    """
-    txt = re.sub(r"^at\s+", "", (s or "").strip().lower()).strip()
-    if not txt:
-        return None
-    if txt in _NAMED_TIMES:
-        hh, mm = _NAMED_TIMES[txt]
-        return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    m = _TIME_PATTERN.match(txt)
-    if not m:
-        return None
-    hh = int(m.group(1))
-    mm = int(m.group(2) or 0)
-    ampm = (m.group(3) or "").replace(".", "")
-    if ampm == "pm" and hh < 12:
-        hh += 12
-    elif ampm == "am" and hh == 12:
-        hh = 0
-    elif not ampm and assume_pm and hh < 12:
-        hh += 12
-    if not (0 <= hh <= 23 and 0 <= mm <= 59):
-        return None
-    try:
-        return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    except ValueError:
-        return None
+_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 
 
 def parse_when(s: str, now: Optional[datetime] = None) -> Optional[datetime]:
-    s = (s or "").strip().lower()
-    now = now or datetime.now()
+    """A timestamp, or a duration from now. None for anything else.
+
+    Timestamps are ISO 8601 in local time ("2026-09-24T23:00"); a trailing
+    offset is honoured and converted to local. Durations are a number and a
+    unit ("25m", "2h", "in 25 minutes", "1.5 hours").
+    """
+    s = (s or "").strip()
     if not s:
         return None
-
-    # ISO-ish: 2026-05-27, 2026-05-27 09:00, 2026-05-27T09:00:00
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(s.replace("Z", ""), fmt)
-        except ValueError:
-            pass
-
-    # Relative: "in 25 minutes", and the spoken forms of the same thing. "in an
-    # hour" and "in half an hour" carried no digit, so they matched nothing and
-    # the reminder was refused.
-    m = _REL_PATTERN.match(_spell_out_count(s))
-    if m:
-        n = float(m.group(1))
-        unit = m.group(2).lower()
-        seconds = n * _REL_UNITS.get(unit, 60)
-        return now + timedelta(seconds=seconds)
-
-    # tomorrow / tonight / today + optional time
-    if s.startswith("tomorrow"):
-        rest = s[len("tomorrow"):].strip()
-        rest = re.sub(r"^at\s+", "", rest)
-        base = (now + timedelta(days=1))
-        return _parse_time(rest, base) or base.replace(hour=9, minute=0, second=0, microsecond=0)
-    if s.startswith("tonight"):
-        rest = s[len("tonight"):].strip()
-        # Already told which half of the day, so a bare 11 is the evening one.
-        return (_parse_time(rest, now, assume_pm=True)
-                or now.replace(hour=20, minute=0, second=0, microsecond=0))
-    if s.startswith("this evening") or s.startswith("this afternoon"):
-        rest = s.split(None, 2)[2] if len(s.split()) > 2 else ""
-        _dflt = 19 if "evening" in s else 14
-        return (_parse_time(rest, now, assume_pm=True)
-                or now.replace(hour=_dflt, minute=0, second=0, microsecond=0))
-    if s.startswith("today") or s.startswith("this morning"):
-        rest = s.split(None, 2)[2] if s.startswith("this morning") and len(s.split()) > 2             else s[len("today"):].strip()
-        return (_parse_time(rest, now)
-                or (now.replace(hour=9, minute=0, second=0, microsecond=0)
-                    if s.startswith("this morning") else None))
-
-    # "next monday at 10am" / "monday"
-    m = _DAYNAME_PATTERN.match(s)
-    if m:
-        target_day = _DAYS.index(m.group(1).lower())
-        today_day = now.weekday()
-        diff = (target_day - today_day) % 7
-        if diff == 0:
-            diff = 7
-        base = now + timedelta(days=diff)
-        rest = m.group(2) or ""
-        return _parse_time(rest, base) or base.replace(hour=9, minute=0, second=0, microsecond=0)
-
-    # Bare time = today. "at 3pm" is how people say this and the leading word
-    # meant the whole phrase matched nothing; _parse_time drops it now.
-    t = _parse_time(s, now)
-    if t:
-        # If it's already past, roll to tomorrow
-        if t < now:
-            t = t + timedelta(days=1)
+    now = now or datetime.now()
+    try:
+        t = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if t.tzinfo is not None:
+            t = t.astimezone().replace(tzinfo=None)
         return t
-
+    except ValueError:
+        pass
+    m = _DURATION.match(s)
+    if m:
+        unit = m.group(2).lower()[0]
+        return now + timedelta(seconds=float(m.group(1)) * _UNIT_SECONDS[unit])
     return None
 
 
@@ -270,9 +150,19 @@ def set_reminder(when: str, what: str, recurring: str = "",
 
     `tag` (optional) is a free-form label for grouping/filtering in the GUI.
     """
-    target = parse_when(when)
+    now = datetime.now()
+    target = parse_when(when, now)
     if target is None:
-        return {"ok": False, "error": f"Couldn't parse time: '{when}'. Try 'in 25 minutes', '2026-05-27 09:00', 'tomorrow at 7am'."}
+        return {"ok": False, "error": (
+            f"Not set: '{when}' is not a time I read. Work it out from the current "
+            f"local time ({now:%Y-%m-%d %H:%M}, {now:%A}) and send `when` as an ISO "
+            f"local timestamp like '{now:%Y-%m-%d}T23:00', or a duration like '25m', "
+            f"'2h', '3d'.")}
+    # A time already gone is a conversion slip, not a request to fire at once.
+    if target < now - timedelta(seconds=60):
+        return {"ok": False, "error": (
+            f"Not set: {target:%Y-%m-%d %H:%M} has already passed. It is now "
+            f"{now:%Y-%m-%d %H:%M} ({now:%A}). Send the next occurrence instead.")}
     items = _load_all()
     # The suffix used to be len(items), which repeats as soon as a delete brings
     # the count back to a number already used in the same millisecond, and two
