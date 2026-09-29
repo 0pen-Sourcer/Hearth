@@ -139,6 +139,26 @@ _hits = S.search("hello world")
 check("and the staged write is not indexed as a second conversation",
       len({getattr(h, "conversation_id", None) for h in _hits}) <= 1)
 
+# "OR" inside "for" read as an operator, so the query went to FTS5 raw, the
+# question mark failed to parse, and the real match was reported as none.
+with open(os.path.join(_sd, "c_two.json"), "w", encoding="utf-8") as f:
+    json.dump({"id": "c_two", "title": "launch", "updated": 2, "created": 2,
+               "messages": [{"role": "user",
+                             "content": "the plan for the launch is Tuesday, notes attached"}]}, f)
+S.rebuild_index()
+
+
+def _found(q):
+    return any(h.conversation_id == "c_two" and h.score != S.RECENCY_SCORE
+               for h in S.search(q))
+
+
+check("a question containing 'for' finds its match", _found("plan for the launch?"))
+check("and one containing 'notes', which holds NOT", _found("launch notes?"))
+check("a query written with real operators still works", _found("launch OR nothing"))
+check("and one with an operator FTS5 cannot parse is searched as keywords",
+      _found("launch AND"))
+
 _src = open(os.path.join(ROOT, "hearth", "web.py"), encoding="utf-8").read()
 check("the server clears stale temporaries when it starts",
       "_sweep_stale_temp_files(_d)" in _src)

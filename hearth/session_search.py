@@ -272,8 +272,6 @@ def search(query: str, limit: int = 8) -> List[Match]:
         rebuild_index()
     if not os.path.isfile(INDEX_PATH):
         return []
-    # Quote the query for FTS5 to handle phrases naturally — escape any
-    # special chars. If the user passed an already-valid FTS query, no-op.
     fts_q = _safe_fts_query(query)
     # Temporal/recency questions rank by RECENCY first (newest match wins, bm25
     # only breaks ties); everything else ranks by relevance with recency breaking
@@ -281,10 +279,7 @@ def search(query: str, limit: int = 8) -> List[Match]:
     # the SQL, so the f-string is injection-safe.
     _order = ("updated DESC, bm25(messages)" if _is_temporal_query(query)
               else "bm25(messages), updated DESC")
-    conn = _connect()
-    try:
-        cur = conn.execute(
-            f"""
+    sql = f"""
             SELECT conversation_id, title, message_index, role, content,
                    snippet(messages, 4, '', '', '…', 28),
                    bm25(messages), updated
@@ -292,12 +287,17 @@ def search(query: str, limit: int = 8) -> List[Match]:
              WHERE messages MATCH ?
           ORDER BY {_order}
              LIMIT ?
-            """,
-            (fts_q, limit),
-        )
-        rows = cur.fetchall()
-    except sqlite3.OperationalError:
-        rows = []
+            """
+    conn = _connect()
+    rows = []
+    # A query written with operators that FTS5 still cannot parse is searched
+    # again as plain keywords rather than dropped.
+    for attempt in dict.fromkeys((fts_q, _quoted_fts_query(query))):
+        try:
+            rows = conn.execute(sql, (attempt, limit)).fetchall()
+            break
+        except sqlite3.OperationalError:
+            continue
     conn.close()
     matches = [
         Match(
@@ -349,21 +349,26 @@ def _recent(limit: int = 8) -> List[Match]:
     ]
 
 
+# FTS5 reads AND, OR and NOT only as whole uppercase words, and NEAR only as
+# NEAR(...). Anything else is text: "for", "notes" and "candy" hold no operator.
+_FTS_OPERATOR = re.compile(r"(?:^|\s)(?:AND|OR|NOT)(?=\s|$)|\bNEAR\s*\(")
+
+
 def _safe_fts_query(q: str) -> str:
-    """Wrap user input for FTS5 so simple queries Just Work.
-    If the query already contains FTS operators (AND/OR/NEAR), pass through.
-    Otherwise quote each token; treat the whole thing as an AND of tokens."""
-    q = q.strip()
-    if not q:
+    """A query that uses FTS5 operators passes through; any other is searched
+    as the AND of its words, each quoted so punctuation is plain text."""
+    q = (q or "").strip()
+    if _FTS_OPERATOR.search(q):
         return q
-    upper_ops = ("AND", "OR", "NOT", "NEAR", "MATCH")
-    if any(op in q.upper() for op in upper_ops):
-        return q
-    tokens = [t.strip('"').strip() for t in q.split() if t.strip()]
+    return _quoted_fts_query(q)
+
+
+def _quoted_fts_query(q: str) -> str:
+    tokens = [t.strip('"').strip() for t in (q or "").split()]
+    tokens = [t for t in tokens if t and t not in ("AND", "OR", "NOT")]
     if not tokens:
-        return q
-    quoted = [f'"{t.replace(chr(34), chr(34)*2)}"' for t in tokens]
-    return " ".join(quoted)
+        return (q or "").strip()
+    return " ".join(f'"{t.replace(chr(34), chr(34) * 2)}"' for t in tokens)
 
 
 def format_matches(matches: List[Match]) -> str:
