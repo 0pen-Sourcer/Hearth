@@ -190,6 +190,22 @@ def _parse_recurring(spec: str) -> Optional[int]:
     return None
 
 
+def describe_due(target: datetime, now: Optional[datetime] = None) -> str:
+    """'tomorrow, Wed 30 Sep at 00:00, 1 h 34 min from now'."""
+    now = now or datetime.now()
+    days = (target.date() - now.date()).days
+    day = {0: "today", 1: "tomorrow"}.get(days, "")
+    stamp = f"{target:%a %d %b} at {target:%H:%M}"
+    mins = max(0, round((target - now).total_seconds() / 60))
+    if mins < 60:
+        gap = f"{mins} min"
+    elif mins < 48 * 60:
+        gap = f"{mins // 60} h {mins % 60} min" if mins % 60 else f"{mins // 60} h"
+    else:
+        gap = f"{round(mins / 1440)} days"
+    return f"{day + ', ' if day else ''}{stamp}, {gap} from now"
+
+
 def set_reminder(when: str, what: str, recurring: str = "",
                  action_tool: str = "", action_args: Optional[Dict] = None,
                  tag: str = "") -> Dict:
@@ -254,7 +270,9 @@ def set_reminder(when: str, what: str, recurring: str = "",
         new = {"id": _rid, **new}
         items.append(new)
         _save_all(items)
-    return {"ok": True, "reminder": new}
+    # Stated in words with the gap from now, so a conversion slip (midnight
+    # stored for "tonight at 11") is visible next to what the reply claims.
+    return {"ok": True, "set_for": describe_due(target, now), "reminder": new}
 
 
 def snooze_reminder(rid: str, minutes: int = 10) -> Dict:

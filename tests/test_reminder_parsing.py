@@ -116,6 +116,21 @@ for spec, secs in (("every 30 minutes", 1800), ("daily", 86400),
     check(f"{spec!r} repeats every {secs}s", R._parse_recurring(spec) == secs)
 check("a one-shot has no repeat", R._parse_recurring("") is None)
 
+# A live model stored midnight for "tonight at 11" and told the user 11 PM;
+# the result showed only an ISO string, which neither side checked. It now
+# says the time in words with the gap from now.
+_n = datetime(2026, 9, 29, 22, 26)
+check("a slip into tomorrow is spelled out",
+      R.describe_due(datetime(2026, 9, 30, 0, 0), _n)
+      == "tomorrow, Wed 30 Sep at 00:00, 1 h 34 min from now")
+check("tonight reads as today", R.describe_due(datetime(2026, 9, 29, 23, 0), _n)
+      == "today, Tue 29 Sep at 23:00, 34 min from now")
+check("further out reads in days", R.describe_due(datetime(2026, 10, 2, 18, 0), _n)
+      == "Fri 02 Oct at 18:00, 3 days from now")
+_r = R.set_reminder("25m", "oven")
+check(f"set_reminder reports it in words: {_r.get('set_for')!r}",
+      _r.get("ok") and "min from now" in (_r.get("set_for") or ""))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
