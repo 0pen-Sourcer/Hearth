@@ -474,41 +474,27 @@ def _extract_llama3(match: "re.Match[str]", tool_names: List[str]) -> Optional[D
     return None
 
 
-def _extract_mistral(match: "re.Match[str]", tool_names: List[str]) -> Optional[Dict[str, Any]]:
+def _extract_mistral(match: "re.Match[str]", tool_names: List[str]) -> List[Dict[str, Any]]:
     """Mistral / Mixtral / Magistral: ``[TOOL_CALLS][{"name": "X", "arguments": {...}}]``
 
-    The arguments token always wraps a JSON array of one or more calls. The
-    caller's outer loop iterates pattern matches, so we just return the first
-    one here and let the outer loop pick up the rest from subsequent matches."""
+    One block holds every call of the turn as a JSON array."""
     body = (match.group(1) or "").strip()
     if not body.startswith("["):
         body = "[" + body + "]"
     arr = _try_json(body)
-    if not isinstance(arr, list) or not arr:
-        return None
-    first = arr[0] if isinstance(arr[0], dict) else None
-    if not first:
-        return None
-    return {
-        "name": _resolve_tool_name(first.get("name", ""), tool_names),
-        "arguments": _force_json_str(first.get("arguments") or {}),
-    }
+    return [{"name": _resolve_tool_name(it.get("name", ""), tool_names),
+             "arguments": _force_json_str(it.get("arguments") or {})}
+            for it in (arr if isinstance(arr, list) else []) if isinstance(it, dict)]
 
 
-def _extract_command_r(match: "re.Match[str]", tool_names: List[str]) -> Optional[Dict[str, Any]]:
+def _extract_command_r(match: "re.Match[str]", tool_names: List[str]) -> List[Dict[str, Any]]:
     """Cohere Command-R / R+: ``Action: ```json\\n[{"tool_name": "X", "parameters": {...}}]```
 
-    Command-R uses an English "Action: " preamble + a JSON code fence. We grab
-    the JSON body and treat the first item like Mistral."""
-    body = (match.group(1) or "").strip()
-    arr = _try_json(body)
-    if isinstance(arr, list) and arr and isinstance(arr[0], dict):
-        item = arr[0]
-        return {
-            "name": _resolve_tool_name(item.get("tool_name") or item.get("name") or "", tool_names),
-            "arguments": _force_json_str(item.get("parameters") or item.get("arguments") or {}),
-        }
-    return None
+    An English "Action: " preamble and a JSON fenced array of every call."""
+    arr = _try_json((match.group(1) or "").strip())
+    return [{"name": _resolve_tool_name(it.get("tool_name") or it.get("name") or "", tool_names),
+             "arguments": _force_json_str(it.get("parameters") or it.get("arguments") or {})}
+            for it in (arr if isinstance(arr, list) else []) if isinstance(it, dict)]
 
 
 def _extract_granite(match: "re.Match[str]", tool_names: List[str]) -> Optional[Dict[str, Any]]:
@@ -632,22 +618,26 @@ def parse(text: str, tool_names: Optional[List[str]] = None
             new_cleaned.append(cleaned[last:m.start()])
             last = m.end()
             try:
-                call = pat.extract(m, tool_names)
+                got = pat.extract(m, tool_names)
             except Exception:
-                call = None
-            if not call or not call.get("name"):
+                got = None
+            # A block holds one call, or for the array formats every call.
+            found = [c for c in (got if isinstance(got, list) else [got])
+                     if c and c.get("name")]
+            if not found:
                 # Couldn't extract — keep the original text rather than
                 # silently dropping it (it might be a real <tool_call> we
                 # don't yet support; better visible than vanished).
                 new_cleaned.append(m.group(0))
                 continue
-            counter += 1
-            calls.append({
-                "id": f"call_{counter}",
-                "type": "function",
-                "function": call,
-                "_family": pat.family,
-            })
+            for call in found:
+                counter += 1
+                calls.append({
+                    "id": f"call_{counter}",
+                    "type": "function",
+                    "function": call,
+                    "_family": pat.family,
+                })
         new_cleaned.append(cleaned[last:])
         cleaned = "".join(new_cleaned)
 

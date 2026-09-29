@@ -107,7 +107,30 @@ def case_garbage_is_not_invented_into_a_call():
     return [] if not calls else [f"invented {calls}"]
 
 
+def _paths(text):
+    _, calls = parse(text, NAMES)
+    return [(c["function"]["name"], json.loads(c["function"]["arguments"]).get("path"))
+            for c in calls]
+
+
+def case_mistral_array_keeps_every_call():
+    got = _paths('Reading both. [TOOL_CALLS][{"name": "read_file", "arguments": {"path": "a"}}, '
+                 '{"name": "read_file", "arguments": {"path": "b"}}, '
+                 '{"name": "list_directory", "arguments": {"path": "c"}}]')
+    want = [("read_file", "a"), ("read_file", "b"), ("list_directory", "c")]
+    return [] if got == want else [f"expected {want}, got {got}"]
+
+
+def case_command_r_array_keeps_every_call():
+    got = _paths('Action: ```json\n[{"tool_name": "read_file", "parameters": {"path": "a"}}, '
+                 '{"tool_name": "read_file", "parameters": {"path": "b"}}]\n```')
+    want = [("read_file", "a"), ("read_file", "b")]
+    return [] if got == want else [f"expected {want}, got {got}"]
+
+
 CHECKS = [
+    ("a Mistral block keeps every call in it", case_mistral_array_keeps_every_call),
+    ("a Command-R block keeps every call in it", case_command_r_array_keeps_every_call),
     ("a plain call parses", case_plain),
     ("two calls stay two", case_two_calls_stay_two),
     ("an unclosed tag does not swallow the next call", case_unclosed_tag),
