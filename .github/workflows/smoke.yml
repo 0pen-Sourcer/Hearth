@@ -166,6 +166,12 @@ jobs:
         run: |
           python tests/test_whatsapp_gate.py
 
+      - name: A bridge started from the window keeps running
+        # Its output went to a pipe nothing read; once full, the bridge's next
+        # print blocked and it stopped answering while still shown as running.
+        run: |
+          python tests/test_bridge_spawn.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through

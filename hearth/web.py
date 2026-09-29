@@ -265,24 +265,49 @@ def _spawn_bridge(ch: str) -> Tuple[bool, Optional[str]]:
         if _s.get("llm_model"): env["LOCAL_MODEL"] = _s["llm_model"]
     except Exception:
         pass
-    # Capture the child's own output. Without it a bridge that died of a missing
-    # dependency and one that died of a bad token produced the same sentence, so
-    # the message sent people to check a token that was fine.
-    p = subprocess.Popen(args, creationflags=_NO_WINDOW, env=env,
-                         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         text=True, encoding="utf-8", errors="replace")
+    # The child writes to its log file, never to a pipe: nothing drains a pipe
+    # once the bridge is up, and a full one blocks the bridge's next print for
+    # good. The same file is what the log view shows, and its fresh tail is
+    # what explains a bridge that died on start.
+    log_path = _bridge_log_path(ch)
+    env["PYTHONUNBUFFERED"] = "1"
+    with open(log_path, "a", encoding="utf-8", errors="replace") as log:
+        log.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} starting {ch} bridge ---\n")
+        log.flush()
+        start = log.tell()
+        p = subprocess.Popen(args, creationflags=_NO_WINDOW, env=env,
+                             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
     _BRIDGE_PROCS[ch] = p
-    import time as _t
-    _t.sleep(1.6)  # let it fail-fast on a bad token / missing dep
-    running = p.poll() is None
-    if running:
+    time.sleep(1.6)  # let it fail-fast on a bad token / missing dep
+    if p.poll() is None:
         return True, None
     try:
-        out = (p.stdout.read() if p.stdout else "") or ""
-    except Exception:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            f.seek(start)
+            out = f.read()
+    except OSError:
         out = ""
     return False, _bridge_failure_reason(ch, out)
+
+
+_BRIDGE_LOG_KEEP = 512 * 1024
+
+
+def _bridge_log_path(ch: str) -> str:
+    """<workspace>/logs/<channel>_bridge.log, trimmed to its newest part."""
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    path = os.path.join(LOGS_DIR, f"{ch}_bridge.log")
+    try:
+        if os.path.getsize(path) > 2 * _BRIDGE_LOG_KEEP:
+            with open(path, "rb") as f:
+                f.seek(-_BRIDGE_LOG_KEEP, os.SEEK_END)
+                tail = f.read()
+            with open(path, "wb") as f:
+                f.write(tail[tail.find(b"\n") + 1:])
+    except OSError:
+        pass
+    return path
 
 
 def _bridge_failure_reason(ch: str, out: str) -> str:

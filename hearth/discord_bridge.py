@@ -31,22 +31,14 @@ os.environ.setdefault("JARVIS_NO_GUI", "1")
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "discord_bridge.json")
 _DISCORD_MAX = 2000  # Discord's hard per-message character cap
-_LOG_PATH = os.path.join(os.path.expanduser("~"), "Jarvis", "logs", "discord_bridge.log")
 
 
 def _log(msg: str) -> None:
-    """Print AND append to a log file. The bridge is usually spawned windowless
-    by the GUI, so a file is the only way to see why it did or didn't respond."""
-    line = "[discord] " + msg
+    """One timestamped line. Started from the window, output goes to
+    <workspace>/logs/discord_bridge.log, which the log view shows."""
+    import time as _t
     try:
-        print(line, flush=True)
-    except Exception:
-        pass
-    try:
-        import time as _t
-        os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
-        with open(_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(_t.strftime("%H:%M:%S ") + line + "\n")
+        print(_t.strftime("%H:%M:%S ") + "[discord] " + msg, flush=True)
     except Exception:
         pass
 
