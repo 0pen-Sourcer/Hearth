@@ -466,7 +466,7 @@ _DANGEROUS_FOR_SUBAGENTS = {
     "browse", "browse_click", "browse_type", "browse_scroll", "browse_key", "browse_close",
     "computer_move", "computer_click", "computer_type", "computer_key",
     "computer_scroll", "computer_drag",
-    "desktop_click", "desktop_type", "manage_window", "execute_actions",
+    "desktop_click", "desktop_type", "smart_click", "manage_window", "execute_actions",
 }
 
 

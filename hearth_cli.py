@@ -811,29 +811,7 @@ def _prune_old_images(messages: List[Dict], keep_last: int = 1) -> int:
     return n
 
 
-# Single source — see hearth/tools.py _RISKY_TOOLS. Import at runtime to avoid
-# circular import at module load (hearth.tools imports hearth_cli helpers).
-try:
-    from hearth.tools import _RISKY_TOOLS as RISKY_TOOLS, is_risky as _is_risky
-except Exception:
-    # Fallback for source checkout without hearth installed
-    RISKY_TOOLS = {
-        "write_file", "edit_file", "delete_path", "move_path",
-        "create_directory", "run_command", "open_app", "open_url",
-        "open_in_browser", "memory_forget",
-        "read_inbox", "send_email",
-        "create_plugin", "delete_plugin",
-        "browse_click", "browse_type",
-        "computer_click", "computer_type", "computer_key", "computer_scroll",
-        "computer_drag", "launch_team",
-        "desktop_click", "desktop_type",
-        "disk_usage", "forge_generate", "forge_shutdown",
-    }
-
-    def _is_risky(name: str) -> bool:
-        # Mirrors tools.is_risky. An mcp_ tool is third-party code reached
-        # over a bridge, so it is gated by prefix rather than by membership.
-        return bool(name) and (name in RISKY_TOOLS or name.startswith("mcp_"))
+from hearth.tools import is_risky as _is_risky  # noqa: E402
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 

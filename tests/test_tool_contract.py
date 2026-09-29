@@ -235,9 +235,32 @@ def check_prompt_only_names_visible_tools() -> list:
     return out
 
 
+def check_input_tools_gated_alike() -> list:
+    """A tool that clicks, types or presses keys for the model acts the same
+    whichever one it is. Each has to ask permission, stay out of a benchmark's
+    real desktop, and stay out of a sub-agent's default toolset. smart_click
+    was none of the three while computer_click was all of them, and its
+    description told the model to prefer it."""
+    hearth, tools = _reg()
+    from hearth import subagents
+    out = []
+    for td in hearth.TOOL_DEFINITIONS:
+        n = td["name"]
+        if not n.endswith(("_click", "_type", "_key", "_drag")):
+            continue
+        if not tools.is_risky(n):
+            out.append(f"{n} sends input but never asks permission")
+        if n not in tools._DRYRUN_GUARDED:
+            out.append(f"{n} sends input but a dry-run benchmark runs it for real")
+        if n not in subagents._DANGEROUS_FOR_SUBAGENTS:
+            out.append(f"{n} sends input and a default sub-agent may call it")
+    return out
+
+
 CHECKS = [
     ("every advertised tool has a callable handler", check_handlers),
     ("acting tools are dry-run guarded", check_dryrun_covers_side_effects),
+    ("input tools are gated alike", check_input_tools_gated_alike),
     ("the prompt only names tools the model can see", check_prompt_only_names_visible_tools),
     ("no method orphaned outside its class", check_no_orphaned_methods),
     ("risk/defer lists only name real tools", check_name_lists),

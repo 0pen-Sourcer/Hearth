@@ -7955,7 +7955,7 @@ _DRYRUN_GUARDED = {
     "write_file", "edit_file", "create_directory", "delete_path", "move_path",
     "run_command", "open_app", "open_url", "open_in_browser",
     "computer_move", "computer_click", "computer_type", "computer_key",
-    "computer_scroll", "computer_drag", "desktop_click", "desktop_type",
+    "computer_scroll", "computer_drag", "desktop_click", "desktop_type", "smart_click",
     "execute_actions",   # a batch of the above, so it needs the same guard
     "browse", "browse_click", "browse_type", "browse_scroll", "browse_key",
     "set_reminder", "cancel_reminder", "snooze_reminder",
@@ -8522,8 +8522,8 @@ _RISKY_TOOLS: set = {
     "memory_forget", "extract_archive_file", "create_plugin", "delete_plugin",
     "read_inbox", "send_email",
     "computer_click", "computer_type", "computer_key", "computer_scroll", "computer_drag",
-    "desktop_click", "desktop_type", "execute_actions",
-    "launch_team", "browse_click", "browse_type",
+    "desktop_click", "desktop_type", "execute_actions", "smart_click",
+    "launch_team", "browse_click", "browse_type", "browse_key",
     "disk_usage", "forge_generate", "forge_shutdown",
     "generate_image", "generate_video",
 }
