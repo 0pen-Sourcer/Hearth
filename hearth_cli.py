@@ -4936,6 +4936,12 @@ class JarvisCLI:
             print(f"{C_DIM}● reached the turn limit - wrapping up{C_RESET}")
             return
 
+        # Once per user turn, not per tool round. This block once sat under the
+        # return above with its own condition deleted, so none of it ran: the
+        # loop guard was never created and the first tool call of every session
+        # crashed, and one interrupt was never cleared, so every later reply
+        # stopped at its first word.
+        if depth == 0:
             # Tool-loop guard: outcome-hash based, tiered (skip dup / warn /
             # stop). Fresh per user turn. See hearth/loop_guard.py for the full
             # rationale.

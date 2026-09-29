@@ -140,6 +140,14 @@ jobs:
         run: |
           python tests/test_persona.py
 
+      - name: A real turn through the terminal's agent loop
+        # Runs the terminal against a stand-in model that answers with one tool
+        # call. Nothing else exercised this loop, which let a change strand the
+        # per-turn setup after a return and crash the first tool call.
+        if: runner.os == 'Windows'
+        run: |
+          python tests/test_cli_turn.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through
