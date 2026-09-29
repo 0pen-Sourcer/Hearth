@@ -158,6 +158,43 @@ _extract_src = open(os.path.join(ROOT, "hearth", "memory_extract.py"), encoding=
 check("the extractor leaves merging to the gated pass, not after every save",
       "curate(apply=True)" not in _extract_src)
 
+# ------------------------------------------------- the extractor updates facts
+# A fact the extractor proposed under a title already saved was skipped, so
+# "moved to Linux" under the same title never replaced "Windows 10". It
+# also never saw what was saved, so it could not name an old fact exactly.
+import json                                                          # noqa: E402
+from hearth import memory_extract as E                               # noqa: E402
+
+M.save("laptop-os", "user", "Runs Windows 10", "Windows 10", force=True)
+_seen = {}
+
+
+def _model(reply):
+    def call(_system, prompt):
+        _seen["prompt"] = prompt
+        return json.dumps(reply)
+    return call
+
+
+_convo = [{"role": "user", "content": "I wiped the laptop and moved to Linux Mint"},
+          {"role": "assistant", "content": "Nice, Mint it is."}]
+E.extract_and_save(_convo, _model([
+    {"title": "laptop-os", "category": "user", "description": "Runs Linux Mint",
+     "body": "Switched from Windows.", "confidence": 5, "updates": True}]))
+_now = open(os.path.join(M.MEM_DIR, M._slug("laptop-os") + ".md"), encoding="utf-8").read()
+check("a change to a saved fact replaces it", "Linux Mint" in _now)
+_old = os.path.join(M.MEM_DIR, "_archive", M._slug("laptop-os") + ".md")
+check("and the version it replaced is kept in the archive",
+      os.path.isfile(_old) and "Windows 10" in open(_old, encoding="utf-8").read())
+check("the extractor is shown the titles already saved",
+      "- laptop-os" in _seen.get("prompt", ""))
+E.extract_and_save(_convo, _model([
+    {"title": "laptop-os", "category": "user", "description": "Uses Mint as the OS",
+     "body": "", "confidence": 5}]))
+check("a saved fact repeated without a change is left as it is",
+      "Runs Linux Mint" in open(os.path.join(M.MEM_DIR, M._slug("laptop-os") + ".md"),
+                                encoding="utf-8").read())
+
 # ---------------------------------------------------------------- forgetting
 M.forget("home town")
 check("forgetting removes the file and its index line",

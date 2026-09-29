@@ -13,7 +13,8 @@ Safety guards on the extraction pass:
   - 1-5 confidence score per fact; only >=4 persists.
   - Strict category whitelist matching memory.VALID_TYPES
     (user / feedback / project / reference).
-  - Dedup against existing slugs; skip_known defaults True.
+  - The extractor sees the saved titles. A saved title is rewritten only
+    when marked as an update, and the old version is archived first.
 
 Cost: one cheap LLM call per compaction or session end, not per turn.
 """
@@ -79,7 +80,8 @@ for these; reserve 5 for things they EXPLICITLY asked to be remembered.
   preferences a real user wants remembered. Even if literal, skip.
 - One-off questions ("what's the capital of France").
 - Things the assistant said, only things the USER said or revealed.
-- Anything that's already obviously in memory (avoid duplicates).
+- A fact already saved (see "Already saved" below) that the conversation does
+  not change. Repeating it is noise.
 
 # Output format — STRICT JSON ONLY, no preamble, no markdown fences
 Return a JSON array. Each fact is an object with these exact keys:
@@ -99,10 +101,14 @@ Return a JSON array. Each fact is an object with these exact keys:
         flaky", "picking up the game Friday"). Useful ~2 weeks.
     When unsure between durable and seasonal, pick SEASONAL — a durable fact that
     goes stale (still thinking they're "in class 12" two years later) is far worse.
-  - "supersedes" (optional): if this fact REPLACES an earlier one because the
-    user moved on ("now in college" replaces "in class 12"; "switched to Linux"
-    replaces "on Windows"), put the OLD fact's topic in 3-5 words ("school
-    grade", "primary OS"). Omit if it replaces nothing.
+  - "updates" (optional): true when the title is one already saved and the
+    conversation CHANGES that fact ("switched to Linux" for a saved
+    "primary-os"). The saved version is kept in the archive. Without it, a
+    title that is already saved is skipped.
+  - "supersedes" (optional): if this fact, under a NEW title, REPLACES an
+    earlier one because the user moved on ("now in college" replaces "in class
+    12"), put the OLD fact's exact title from "Already saved". Omit if it
+    replaces nothing.
   - "layer": WHERE this belongs (default "fact"):
       "fact"       = something about them or their world → searchable memory.
       "preference" = how they want REPLIES / recurring needs ("prefers terse
@@ -125,7 +131,9 @@ GOOD (will save):
 
   {"title": "broken-earbud", "category": "user", "description": "One side of the user's wireless earbuds stopped working.", "body": "Minor annoyance — they may repair or replace. Worth bringing up next time audio comes up.", "confidence": 4, "volatility": "transient"}
 
-  {"title": "current-os", "category": "user", "description": "User switched their main machine to Linux Mint.", "body": "Tailor shell/commands to Linux now.", "confidence": 5, "volatility": "seasonal", "supersedes": "primary OS"}
+  {"title": "primary-os", "category": "user", "description": "User switched their main machine to Linux Mint.", "body": "Tailor shell/commands to Linux now.", "confidence": 5, "volatility": "seasonal", "updates": true}
+
+  {"title": "college-year", "category": "user", "description": "User started first year of college.", "body": "Moved on from school; tailor study help to college level.", "confidence": 5, "volatility": "seasonal", "supersedes": "current-grade"}
 
   {"title": "side-project-deadline", "category": "project", "description": "Side project has a hard ship date this month.", "body": "Avoid blocking on related work; shipping is the win condition.", "confidence": 5, "volatility": "seasonal"}
 
@@ -134,8 +142,16 @@ BAD (will NOT save — extractor must filter these):
   {"title": "wants-to-destroy-world", "category": "user", "description": "User wants to take over the world.", ...}  # joke / hyperbole — DROP
   {"title": "asked-about-france", "category": "user", "description": "User asked what the capital of France is.", ...}  # one-off question — DROP
 
-# Recent conversation
 """
+
+
+def _already_saved_block() -> str:
+    try:
+        titles = _memory.fact_titles()
+    except Exception:
+        titles = []
+    listing = "\n".join(f"- {t}" for t in titles) if titles else "(nothing yet)"
+    return f"# Already saved (titles, newest first)\n{listing}\n\n# Recent conversation\n"
 
 
 def _safe_strip_json(s: str) -> str:
@@ -205,8 +221,8 @@ def extract_and_save(
       recent_turns: how many user+assistant pairs to scan.
       confidence_floor: drop facts below this confidence. 4 is the safe
                        default; raise to 5 for "only save if model is sure".
-      skip_known: don't overwrite an existing memory of the same slug.
-                  Set False to allow refresh.
+      skip_known: skip a fact whose title is already saved unless the
+                  extractor marks it as an update. False rewrites it anyway.
 
     Returns:
       (saved_facts, warnings): list of facts that were actually persisted,
@@ -219,7 +235,8 @@ def extract_and_save(
     if not transcript.strip():
         return saved, ["no user/assistant content to scan"]
 
-    user_prompt = EXTRACTION_PROMPT + "\n" + transcript + "\n\nJSON:"
+    user_prompt = (EXTRACTION_PROMPT + _already_saved_block() + "\n"
+                   + transcript + "\n\nJSON:")
     try:
         raw = llm_call(
             "You are a precise JSON-emitting fact extractor. Output ONLY a JSON array.",
@@ -291,8 +308,11 @@ def extract_and_save(
         if category not in ALLOWED_CATEGORIES:
             warnings.append(f"dropped '{title}': bad category {category!r}")
             continue
-        if skip_known and _fact_already_known(title):
-            continue
+        updates = f.get("updates") is True
+        if _fact_already_known(title):
+            if skip_known and not updates:
+                continue
+            _memory.archive_before_update(title)
 
         try:
             _memory.save(

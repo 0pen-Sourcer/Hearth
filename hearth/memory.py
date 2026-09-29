@@ -674,6 +674,27 @@ def run_maintenance() -> Dict[str, Any]:
     return out
 
 
+def fact_titles(limit: int = 80) -> List[str]:
+    """Titles of the saved facts, newest first."""
+    _ensure_index_fresh()
+    out: List[str] = []
+    for ln in reversed(_read_index_lines()):
+        m = re.match(r"- \[(.+?)\]\(", ln)
+        if m:
+            out.append(m.group(1))
+            if len(out) >= limit:
+                break
+    return out
+
+
+def archive_before_update(title: str) -> Optional[str]:
+    """Keep the current version of a fact recoverable before it is rewritten."""
+    fn = _slug(title) + ".md"
+    if not os.path.isfile(os.path.join(MEM_DIR, fn)):
+        return None
+    return _archive_file(fn, {"archived_reason": "updated"})
+
+
 def list_index() -> str:
     _ensure_index_fresh()
     lines = _read_index_lines()
