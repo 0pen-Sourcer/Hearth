@@ -3219,9 +3219,16 @@ def _web_search_raw(p: Dict) -> str:
 
 def _web_fetch(p: Dict) -> str:
     url = p["url"].strip()
-    # Auto-prepend https:// for bare domains. Models often emit a hostname
-    # (e.g. "example.com" or "docs.python.org") without a scheme.
-    if not url.startswith(("http://", "https://", "file://")):
+    # Local files go through read_file, which honours the read lockdown; a
+    # file:// URL here read anything on disk.
+    if url.lower().startswith("file:") or re.match(r"[A-Za-z]:[\\/]|\\\\", url):
+        return (f"Error: {url} is a local file. web_fetch is for web pages; "
+                f"use read_file for files on this machine.")
+    scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+    if scheme and scheme not in ("http", "https"):
+        return f"Error: web_fetch takes http or https URLs, not {scheme}://."
+    # Models often emit a bare hostname ("docs.python.org") without a scheme.
+    if not scheme:
         url = "https://" + url
     try:
         status, ctype, body = _http_get(url, 20)
