@@ -21,7 +21,8 @@ Setup:
         "allow_self_chat": true,
         "ntfy_topic": ""}
      allowed_numbers = who may talk to it (you). allow_self_chat lets you message
-     the linked number's own "you" chat.
+     the linked number's own "you" chat; what that number sends to anyone else
+     is left alone.
   3. Point it at a brain via the same env vars the CLI uses (LOCAL_API_BASE /
      LOCAL_API_KEY / LOCAL_MODEL), then run:
        python -m hearth.whatsapp_bridge
@@ -35,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections import deque
 from pathlib import Path
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "whatsapp_bridge.json")
@@ -81,6 +83,31 @@ def _sender_number(message) -> str:
         return str(message.Info.MessageSource.Sender.User)
     except Exception:
         return ""
+
+
+def _own_ids(client, src) -> set:
+    """Every id the linked account goes by: its phone number and its LID."""
+    ids = set()
+    for jid in (getattr(src, "Sender", None), getattr(src, "SenderAlt", None)):
+        if getattr(jid, "User", ""):
+            ids.add(str(jid.User))
+    try:
+        me = client.get_me()
+        for jid in (me.JID, me.LID):
+            if getattr(jid, "User", ""):
+                ids.add(str(jid.User))
+    except Exception:
+        pass
+    return ids
+
+
+def _is_own_chat(src, own: set) -> bool:
+    """The account's own "you" chat. A message the account itself sent anywhere
+    else is a conversation with someone else and never an instruction."""
+    return str(getattr(getattr(src, "Chat", None), "User", "") or "") in own
+
+
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg")
 
 
 # System message injected every bridge turn (not persisted): teaches the model
@@ -160,6 +187,12 @@ def run() -> None:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     histories: dict = {}
+    sent_ids: deque = deque(maxlen=256)
+
+    def _remember(resp):
+        mid = getattr(resp, "ID", "")
+        if mid:
+            sent_ids.append(str(mid))
 
     client = NewClient(_SESSION_DB)
 
@@ -194,11 +227,14 @@ def run() -> None:
             src = message.Info.MessageSource
             if getattr(src, "IsGroup", False):
                 return  # single-owner relay; ignore groups
+            if str(getattr(message.Info, "ID", "")) in sent_ids:
+                return  # a reply this bridge sent
             from_me = bool(getattr(src, "IsFromMe", False))
             number = _sender_number(message)
-            if from_me and not allow_self:
-                return
-            if not from_me and number not in allowed:
+            if from_me:
+                if not (allow_self and _is_own_chat(src, _own_ids(client, src))):
+                    return
+            elif number not in allowed:
                 print(f"[whatsapp] ignored message from {number} "
                       f"(add it to allowed_numbers to enable).")
                 return
@@ -216,7 +252,18 @@ def run() -> None:
             from .redact import redact_secrets_only
             _safe = redact_secrets_only(reply or "(no output)")[0]
             for chunk in _split(_safe):
-                client.send_message(chat, chunk)
+                _remember(client.send_message(chat, chunk))
+            from . import bridge_status
+            for f in bridge_status.files_in(reply, 60_000_000):
+                try:
+                    if f.lower().endswith(_IMAGE_EXTS):
+                        _remember(client.send_image(chat, f))
+                    else:
+                        _remember(client.send_document(
+                            chat, f, filename=os.path.basename(f)))
+                except Exception as e:
+                    print(f"[whatsapp] could not send {os.path.basename(f)}: "
+                          f"{type(e).__name__}: {e}")
         except Exception as e:
             print(f"[whatsapp] handler error: {type(e).__name__}: {e}")
 

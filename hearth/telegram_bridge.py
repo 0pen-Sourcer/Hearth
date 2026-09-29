@@ -27,7 +27,6 @@ import asyncio
 import json
 import mimetypes
 import os
-import re
 import time
 import urllib.request
 
@@ -142,20 +141,6 @@ def _send_document(token: str, chat_id: int, path: str) -> None:
         urllib.request.urlopen(req, timeout=120)
     except Exception:
         pass
-
-
-# Detect absolute paths in the reply text so we can send produced files back.
-_PATH_RE = re.compile(r"[A-Za-z]:[\\/][^\s'\"<>|]+\.[A-Za-z0-9]{1,5}")
-
-
-def _files_in(text: str):
-    seen, out = set(), []
-    for m in _PATH_RE.findall(text or ""):
-        p = m.rstrip(".,);")
-        if p not in seen and os.path.isfile(p) and os.path.getsize(p) < 45_000_000:
-            seen.add(p)
-            out.append(p)
-    return out[:4]
 
 
 # System message injected every bridge turn (not persisted, so the history cap
@@ -296,7 +281,7 @@ def run() -> None:
                 _edit_message(token, chat_id, status["msg_id"],
                               bridge_status.format_done(status["events"]))
             _send_message(token, chat_id, final, reply_to=msg.get("message_id"))
-            for f in _files_in(reply):
+            for f in bridge_status.files_in(reply, 45_000_000):
                 _send_document(token, chat_id, f)
 
 

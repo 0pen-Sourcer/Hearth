@@ -9,8 +9,14 @@ reliably edit, so it gets a one-line "used: ..." footer instead.
 Text only — NO emojis (the user explicitly didn't want emoji in chat). On
 Discord (`rich=True`) tool names are wrapped in `code` and the header bolded so
 they stay visually distinct; Telegram gets the same content in plain text.
+
+`files_in` finds the local files a reply names, which every bridge sends back
+as attachments.
 """
 from __future__ import annotations
+
+import os
+import re
 
 # Argument keys most likely to say WHAT a call is acting on, best-first.
 _ARG_KEYS = ("path", "file", "filename", "query", "url", "command", "name",
@@ -81,3 +87,29 @@ def footer(events, max_tools: int = 8) -> str:
     shown = names[:max_tools]
     tail = f" +{len(names) - len(shown)} more" if len(names) > len(shown) else ""
     return "_used: " + ", ".join(shown) + tail + "_"
+
+
+# A path is either quoted or backticked, where it may contain spaces, or bare,
+# where it ends at the first space. Only names of real files survive, so a
+# span that merely looks like a path is dropped.
+_PATH_IN_TEXT = re.compile(
+    r"[`\"'“‘]([A-Za-z]:[\\/][^`\"'”’<>|\r\n]+)"
+    r"|([A-Za-z]:[\\/][^\s`\"'<>|]+\.[A-Za-z0-9]{1,5})")
+
+
+def files_in(text: str, max_bytes: int, limit: int = 4) -> list:
+    """Existing local files named in `text`, in order, under `max_bytes` each."""
+    seen, out = set(), []
+    for m in _PATH_IN_TEXT.finditer(text or ""):
+        p = (m.group(1) or m.group(2)).strip().rstrip(".,;:)")
+        key = os.path.normcase(os.path.abspath(p)) if p else ""
+        if not p or key in seen:
+            continue
+        try:
+            ok = os.path.isfile(p) and os.path.getsize(p) < max_bytes
+        except OSError:
+            ok = False
+        if ok:
+            seen.add(key)
+            out.append(p)
+    return out[:limit]

@@ -73,19 +73,6 @@ def _split(s: str, n: int = _DISCORD_MAX):
     return out
 
 
-import re as _re
-_PATH_RE = _re.compile(r"[A-Za-z]:[\\/][^\s'\"<>|]+\.[A-Za-z0-9]{1,5}")
-
-
-def _files_in(text: str):
-    seen, out = set(), []
-    for m in _PATH_RE.findall(text or ""):
-        p = m.rstrip(".,);")
-        if p not in seen and os.path.isfile(p) and os.path.getsize(p) < 24_000_000:
-            seen.add(p); out.append(p)
-    return out[:4]
-
-
 # Injected as a system message every bridge turn (not persisted to history, so
 # the rolling-history cap can't drop it). Teaches the model the channel's one
 # non-obvious affordance: it CAN send files here by naming their path.
@@ -274,7 +261,7 @@ def run() -> None:
                 await message.channel.send(chunk)
             except Exception:
                 pass
-        for f in _files_in(reply):
+        for f in bridge_status.files_in(reply, 24_000_000):
             try:
                 await message.channel.send(file=discord.File(f))
             except Exception:
