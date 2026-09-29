@@ -51,7 +51,8 @@ from .headless import run_once
 from .tools import (WORKSPACE, LOGS_DIR,
                     WRITE_TEMP_PREFIX as _WRITE_TEMP_PREFIX,
                     is_write_temp as _is_write_temp,
-                    sweep_write_temps as _sweep_write_temps)
+                    sweep_write_temps as _sweep_write_temps,
+                    atomic_write_json as _atomic_write_json)
 
 # Voice modules are optional — guard imports so a missing dep doesn't kill the server.
 try:
@@ -400,40 +401,6 @@ def _load_convo(cid: str) -> Optional[Dict]:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
-
-
-def _atomic_write_json(path: str, data, **dump_kw) -> None:
-    """Write JSON atomically: dump to a temp file in the same dir, flush + fsync,
-    then os.replace onto the target (atomic on Windows and POSIX). A crash or kill
-    mid-write (e.g. tray Quit killing the process tree) then leaves the OLD file
-    intact instead of a half-written, NULL-padded, unparseable one — a plain
-    open('w') truncates first, so dying mid-dump is what corrupted a conversation
-    to 1 MB of valid JSON + zero-fill."""
-    import tempfile
-    d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=_TMP_PREFIX, suffix=".json")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, **dump_kw)
-            f.flush()
-            os.fsync(f.fileno())
-        # A just-closed file is briefly held open by antivirus and the search
-        # indexer on Windows, which surfaces as "used by another process" on the
-        # rename. Retrying is the difference between a saved turn and a lost one.
-        for _attempt in range(6):
-            try:
-                os.replace(tmp, path)
-                break
-            except PermissionError:
-                if _attempt == 5:
-                    raise
-                time.sleep(0.05)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 # Named and swept in tools, so the chat search index and anything else reading

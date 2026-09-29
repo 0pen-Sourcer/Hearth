@@ -121,6 +121,37 @@ def sweep_write_temps(directory: str, older_than_s: float = 300.0) -> int:
     return removed
 
 
+def atomic_write_json(path: str, data, **dump_kw) -> None:
+    """Replace `path` with `data` as JSON, all at once. Staged beside the target,
+    flushed to disk, then renamed over it, so a reader never sees half a file and
+    a crash leaves the previous version."""
+    import tempfile
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=WRITE_TEMP_PREFIX, suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, **dump_kw)
+            f.flush()
+            os.fsync(f.fileno())
+        # A just-closed file is briefly held open by antivirus and the search
+        # indexer on Windows, which surfaces as "used by another process" on the
+        # rename. Retrying is the difference between a saved write and a lost one.
+        for _attempt in range(6):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if _attempt == 5:
+                    raise
+                time.sleep(0.05)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 # Lockdown pointer so a GUI/CLI toggle can confine reads without a restart or an
 # env var (there was no way to turn lockdown on from the app). Env still wins.
 _LOCKDOWN_POINTER = os.path.join(os.path.expanduser("~"), ".hearth", "lockdown")

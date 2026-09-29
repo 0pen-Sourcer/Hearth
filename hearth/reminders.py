@@ -19,12 +19,14 @@ import re
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional
 
-from .tools import WORKSPACE
+from .tools import WORKSPACE, atomic_write_json
 
 REMINDERS_PATH = os.path.join(WORKSPACE, "reminders.json")
+_LOCK_PATH = os.path.join(WORKSPACE, ".reminders.lock")
 
 
 # ---------------------------------------------------------------------------
@@ -38,16 +40,74 @@ def _load_all() -> List[Dict]:
         with open(REMINDERS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
-    except (OSError, json.JSONDecodeError):
+    except OSError:
+        return []
+    except json.JSONDecodeError:
+        # Saving over it would erase every reminder in it, so it is set aside
+        # where it can still be recovered.
+        try:
+            os.replace(REMINDERS_PATH, REMINDERS_PATH + f".corrupt-{int(time.time())}")
+        except OSError:
+            pass
         return []
 
 
 def _save_all(items: List[Dict]) -> None:
     try:
-        with open(REMINDERS_PATH, "w", encoding="utf-8") as f:
-            json.dump(items, f, indent=2)
+        atomic_write_json(REMINDERS_PATH, items, indent=2)
     except OSError:
         pass
+
+
+# The window and the terminal each run a watcher over the same file, and either
+# can set or cancel a reminder at any moment. Every load-change-save holds this
+# lock, across processes, so one never writes back a copy that predates the
+# other's change and each due reminder is claimed by exactly one of them.
+_THREAD_LOCK = threading.Lock()
+_LOCK_WAIT_S = 10.0
+
+
+@contextmanager
+def _store_lock():
+    with _THREAD_LOCK:
+        os.makedirs(os.path.dirname(_LOCK_PATH) or ".", exist_ok=True)
+        fd = os.open(_LOCK_PATH, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            _lock_file(fd)
+            try:
+                yield
+            finally:
+                _unlock_file(fd)
+        finally:
+            os.close(fd)
+
+
+if os.name == "nt":
+    import msvcrt
+
+    def _lock_file(fd: int) -> None:
+        deadline = time.monotonic() + _LOCK_WAIT_S
+        while True:
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise TimeoutError("the reminders file is locked by another Hearth process")
+                time.sleep(0.05)
+
+    def _unlock_file(fd: int) -> None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _lock_file(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def _unlock_file(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +206,7 @@ def set_reminder(when: str, what: str, recurring: str = "",
 
     `action_tool` (optional) names any Hearth tool. `action_args` carries
     its arguments. The tool's return value is appended to the toast body so
-    the user sees the result. Action reminders are the killer differentiator
+    the user sees the result.
 
     `tag` (optional) is a free-form label for grouping/filtering in the GUI.
     """
@@ -163,17 +223,7 @@ def set_reminder(when: str, what: str, recurring: str = "",
         return {"ok": False, "error": (
             f"Not set: {target:%Y-%m-%d %H:%M} has already passed. It is now "
             f"{now:%Y-%m-%d %H:%M} ({now:%A}). Send the next occurrence instead.")}
-    items = _load_all()
-    # The suffix used to be len(items), which repeats as soon as a delete brings
-    # the count back to a number already used in the same millisecond, and two
-    # reminders sharing an id means cancelling one cancels the other.
-    _existing = {r.get("id") for r in items}
-    _ms = int(time.time() * 1000)
-    _rid = f"r_{_ms}_{uuid.uuid4().hex[:6]}"
-    while _rid in _existing:
-        _rid = f"r_{_ms}_{uuid.uuid4().hex[:6]}"
     new = {
-        "id": _rid,
         "when_text": when,
         "due_iso": target.isoformat(timespec="seconds"),
         "what": what,
@@ -191,8 +241,19 @@ def set_reminder(when: str, what: str, recurring: str = "",
         new["action_args"] = action_args or {}
     if tag:
         new["tag"] = tag.strip()
-    items.append(new)
-    _save_all(items)
+    with _store_lock():
+        items = _load_all()
+        # Unique even when a delete brings the count back to one already used
+        # in the same millisecond; two reminders sharing an id means cancelling
+        # one cancels the other.
+        _existing = {r.get("id") for r in items}
+        _ms = int(time.time() * 1000)
+        _rid = f"r_{_ms}_{uuid.uuid4().hex[:6]}"
+        while _rid in _existing:
+            _rid = f"r_{_ms}_{uuid.uuid4().hex[:6]}"
+        new = {"id": _rid, **new}
+        items.append(new)
+        _save_all(items)
     return {"ok": True, "reminder": new}
 
 
@@ -205,19 +266,19 @@ def snooze_reminder(rid: str, minutes: int = 10) -> Dict:
     """
     if minutes <= 0:
         return {"ok": False, "error": "minutes must be > 0"}
-    items = _load_all()
-    for r in items:
-        if r.get("id") == rid:
-            base = datetime.now()
-            new_due = base + timedelta(minutes=int(minutes))
-            r["due_iso"] = new_due.isoformat(timespec="seconds")
-            r["fired"] = False  # resurrect if it had already fired
-            r.pop("fired_at", None)
-            r["snoozed_at"] = datetime.now().isoformat(timespec="seconds")
-            r["snooze_count"] = int(r.get("snooze_count", 0)) + 1
-            _save_all(items)
-            return {"ok": True, "id": rid, "new_due_iso": r["due_iso"],
-                    "snooze_count": r["snooze_count"]}
+    with _store_lock():
+        items = _load_all()
+        for r in items:
+            if r.get("id") == rid:
+                new_due = datetime.now() + timedelta(minutes=int(minutes))
+                r["due_iso"] = new_due.isoformat(timespec="seconds")
+                r["fired"] = False  # resurrect if it had already fired
+                r.pop("fired_at", None)
+                r["snoozed_at"] = datetime.now().isoformat(timespec="seconds")
+                r["snooze_count"] = int(r.get("snooze_count", 0)) + 1
+                _save_all(items)
+                return {"ok": True, "id": rid, "new_due_iso": r["due_iso"],
+                        "snooze_count": r["snooze_count"]}
     return {"ok": False, "error": f"no reminder with id {rid}"}
 
 
@@ -230,12 +291,13 @@ def list_reminders(include_fired: bool = False) -> List[Dict]:
 
 
 def cancel_reminder(rid: str) -> bool:
-    items = _load_all()
-    n = len(items)
-    items = [r for r in items if r.get("id") != rid]
-    if len(items) == n:
-        return False
-    _save_all(items)
+    with _store_lock():
+        items = _load_all()
+        n = len(items)
+        items = [r for r in items if r.get("id") != rid]
+        if len(items) == n:
+            return False
+        _save_all(items)
     return True
 
 
@@ -460,6 +522,49 @@ def _prune_old_fired(items: List[Dict], days: int = 30) -> List[Dict]:
     return out
 
 
+def _advance_after_fire(r: Dict, now: datetime, now_iso: str) -> None:
+    rec_s = r.get("recurring_seconds")
+    if rec_s and isinstance(rec_s, (int, float)) and rec_s > 0:
+        # Advance on the original phase, stepping the due time by the interval
+        # until it is in the future, so "daily at 9am" stays at 9am instead of
+        # drifting to launch time plus a day, which piled reminders set for
+        # different times onto one instant.
+        try:
+            next_due = datetime.fromisoformat(r.get("due_iso", ""))
+        except Exception:
+            next_due = now
+        step = timedelta(seconds=max(1.0, float(rec_s)))
+        while next_due <= now:
+            next_due += step
+        r["due_iso"] = next_due.isoformat(timespec="seconds")
+        r["last_fired_at"] = now_iso
+    else:
+        r["fired"] = True
+        r["fired_at"] = now_iso
+
+
+def _claim_due(missed: bool = False) -> List[Dict]:
+    """Take the reminders that are due, marking them fired or advanced in the
+    same locked write, and return them to fire. Whichever process claims one
+    fires it; the other finds it already taken. Firing happens after the lock
+    is released, since an action can run a tool for seconds."""
+    with _store_lock():
+        now = datetime.now()
+        now_iso = now.isoformat(timespec="seconds")
+        items = _load_all()
+        pruned = _prune_old_fired(items) if missed else items
+        due = []
+        for r in pruned:
+            if r.get("fired"):
+                continue
+            if r.get("due_iso", "") <= now_iso:
+                due.append(dict(r))
+                _advance_after_fire(r, now, now_iso)
+        if due or len(pruned) != len(items):
+            _save_all(pruned)
+    return due
+
+
 def start_watcher(notify: Callable[[str, str], None]) -> None:
     """Begin firing reminders. `notify(title, body)` is called per fire.
 
@@ -545,69 +650,19 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
         except Exception:
             pass
 
-    def _advance_after_fire(r: Dict, now: datetime, now_iso: str) -> None:
-        rec_s = r.get("recurring_seconds")
-        if rec_s and isinstance(rec_s, (int, float)) and rec_s > 0:
-            # Advance on the ORIGINAL phase: step the existing due time by the
-            # interval until the next slot is in the future. This keeps a
-            # "daily at 9am" reminder anchored at 9am instead of drifting to
-            # "launch time + 24h" -- which is what made multiple daily
-            # reminders set for different times (9am/2pm/4pm) all collapse onto
-            # the same instant and fire as duplicate toasts together.
-            try:
-                next_due = datetime.fromisoformat(r.get("due_iso", ""))
-            except Exception:
-                next_due = now
-            step = timedelta(seconds=max(1.0, float(rec_s)))
-            while next_due <= now:
-                next_due += step
-            r["due_iso"] = next_due.isoformat(timespec="seconds")
-            r["last_fired_at"] = now_iso
-        else:
-            r["fired"] = True
-            r["fired_at"] = now_iso
-
     def _loop():
-        # Catch-up pass: any reminder due in the past that never fired gets
-        # fired NOW and marked missed. Recurring reminders advance to the
-        # next slot relative to NOW (so a weekly that missed 3 cycles
-        # doesn't fire 3 toasts in a row - fires once, next slot is one
-        # interval from now). Also prunes one-shots older than 30 days.
-        try:
-            now = datetime.now()
-            now_iso = now.isoformat(timespec="seconds")
-            items = _prune_old_fired(_load_all())
-            dirty = False
-            for r in items:
-                if r.get("fired"):
-                    continue
-                if r.get("due_iso", "") < now_iso:
-                    _fire(r, missed=True)
-                    _advance_after_fire(r, now, now_iso)
-                    dirty = True
-            _save_all(items)  # save even if not dirty - pruning may have changed shape
-            del dirty
-        except Exception:
-            pass
-
+        # The first pass catches up on what came due while Hearth was off and
+        # fires it once as missed; a recurring one that missed several slots
+        # moves to its next future slot rather than firing once per slot.
+        missed = True
         while not _watcher_stop.is_set():
             try:
-                now = datetime.now()
-                now_iso = now.isoformat(timespec="seconds")
-                items = _load_all()
-                dirty = False
-                for r in items:
-                    if r.get("fired"):
-                        continue
-                    if r.get("due_iso", "") <= now_iso:
-                        _fire(r)
-                        _advance_after_fire(r, now, now_iso)
-                        dirty = True
-                if dirty:
-                    _save_all(items)
+                for r in _claim_due(missed):
+                    _fire(r, missed=missed)
             except Exception:
                 pass
-            _watcher_stop.wait(20.0)  # check every 20s
+            missed = False
+            _watcher_stop.wait(20.0)
 
     _watcher_thread = threading.Thread(target=_loop, daemon=True, name="hearth-reminders")
     _watcher_thread.start()

@@ -172,6 +172,12 @@ jobs:
         run: |
           python tests/test_bridge_spawn.py
 
+      - name: The reminders file the window and the terminal share
+        # Both watchers fired every reminder, and one writing back a stale copy
+        # erased a reminder set meanwhile.
+        run: |
+          python tests/test_reminder_store.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through
