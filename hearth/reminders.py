@@ -26,7 +26,6 @@ from typing import Callable, Dict, List, Optional
 from .tools import WORKSPACE, atomic_write_json
 
 REMINDERS_PATH = os.path.join(WORKSPACE, "reminders.json")
-_LOCK_PATH = os.path.join(WORKSPACE, ".reminders.lock")
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +69,10 @@ _LOCK_WAIT_S = 10.0
 @contextmanager
 def _store_lock():
     with _THREAD_LOCK:
-        os.makedirs(os.path.dirname(_LOCK_PATH) or ".", exist_ok=True)
-        fd = os.open(_LOCK_PATH, os.O_RDWR | os.O_CREAT, 0o600)
+        # Beside the file it guards, wherever that has been pointed.
+        lock_path = os.path.join(os.path.dirname(REMINDERS_PATH) or ".", ".reminders.lock")
+        os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
             _lock_file(fd)
             try:
