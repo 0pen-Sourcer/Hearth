@@ -114,38 +114,54 @@ def _read_local_feed() -> list:
     return []
 
 
+_SINCE_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "announcements_since.txt")
+
+
+def _polling_since() -> float:
+    """When this machine first tried to read the feed, recorded on that first
+    attempt whether or not it succeeded.
+
+    A brand-new install should not be shown announcements written for people
+    already running an older build. The earlier rule was "swallow whatever is in
+    the feed on the first successful fetch", and a fetch that failed returned
+    before recording anything. The feed answered 404 on every machine for its
+    whole life, so no install ever recorded a first fetch, and the first
+    announcement ever published would have been swallowed everywhere as
+    backlog. A machine that already has a seen list from an older build is an
+    existing user: everything unseen is shown to it.
+    """
+    try:
+        with open(_SINCE_PATH, encoding="utf-8") as f:
+            return float(f.read().strip())
+    except (OSError, ValueError):
+        pass
+    since = 0.0 if os.path.isfile(_SEEN_PATH) else time.time()
+    try:
+        os.makedirs(os.path.dirname(_SINCE_PATH), exist_ok=True)
+        with open(_SINCE_PATH, "w", encoding="utf-8") as f:
+            f.write(str(since))
+    except OSError:
+        pass
+    return since
+
+
 def fetch_new(url: str = FEED_URL, mark: bool = True) -> list:
     """Announcements not yet seen on this machine. Best-effort: any network or
     parse failure returns []. Marks the returned ones as seen so they fire once."""
+    since = _polling_since()          # before the fetch, so a failure still counts
     try:
         data = _fetch(url)
     except Exception:
         return []
-    # First run on this machine: swallow the whole backlog instead of showing
-    # it. Announcements are written for whoever was already running an older
-    # build, so a brand-new install reading "you're on an old version, grab the
-    # installer" is both wrong and alarming. mark_all_seen() existed for this
-    # and was never wired to anything.
-    if not os.path.isfile(_SEEN_PATH):
-        _save_seen({str(e["id"]) for e in _entries(data)})
-        return []
     seen = _load_seen()
-    new = [e for e in _entries(data) if str(e["id"]) not in seen]
+    # `created` is inside the signed content, so it cannot be moved forward to
+    # get an old entry past this check.
+    new = [e for e in _entries(data)
+           if str(e["id"]) not in seen and float(e.get("created") or 0) >= since]
     if mark and new:
         seen |= {str(e["id"]) for e in new}
         _save_seen(seen)
     return new
-
-
-def mark_all_seen(url: str = FEED_URL) -> None:
-    """Suppress the current backlog without showing it (used on a fresh install
-    so a new user isn't hit with months of old announcements at once)."""
-    try:
-        data = _fetch(url)
-    except Exception:
-        return
-    seen = _load_seen() | {str(e["id"]) for e in _entries(data)}
-    _save_seen(seen)
 
 
 def publish(title: str, body: str, kind: str = "info") -> dict:

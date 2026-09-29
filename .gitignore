@@ -40,7 +40,6 @@ logs/
 *.jsonl
 *.onnx
 *.bin
-announcements.json
 
 # ---- Build / distribution ----
 build/

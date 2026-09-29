@@ -148,6 +148,12 @@ jobs:
         run: |
           python tests/test_cli_turn.py
 
+      - name: Broadcasts reaching the people they are written for
+        # The feed file was gitignored and never served, and the first-run rule
+        # would have swallowed the first announcement on every machine.
+        run: |
+          python tests/test_announcements.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through
