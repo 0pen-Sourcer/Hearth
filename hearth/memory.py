@@ -124,11 +124,51 @@ def _normalize_type(raw: str) -> str:
     return _TYPE_ALIASES.get(key, "user")
 
 _SLUG = re.compile(r"[^a-z0-9]+")
+# The index is MEMORY.md and Windows filenames ignore case, so no fact may be
+# named "memory". Nor any name Windows reserves for a device.
+_INDEX_STEM = "memory"
+_WIN_RESERVED = ({"con", "prn", "aux", "nul"}
+                 | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)})
+
+
+def _legacy_slug(title: str) -> str:
+    """The name earlier builds gave a title: ASCII letters and digits only."""
+    return _SLUG.sub("_", (title or "").lower()).strip("_")
+
+
+def _script_slug(title: str) -> str:
+    """A filename for a title in any script.
+
+    The earlier rule kept only a-z and 0-9, so a title with nothing else, any
+    Hindi or Chinese or Japanese title, became empty and fell back to "memory".
+    That file is MEMORY.md, the index, on Windows: a fact written there replaced
+    every line of it, and every such title shared that one name and overwrote
+    the last. Letters, marks and numbers from every script are kept; a Hindi
+    vowel sign is a mark, not a letter, and dropping it breaks the word apart.
+    """
+    import unicodedata
+    out = []
+    for ch in (title or "").lower():
+        out.append(ch if unicodedata.category(ch)[0] in "LMN" else "_")
+    s = re.sub(r"_+", "_", "".join(out)).strip("_")[:80].rstrip("_. ")
+    if not s:
+        import hashlib
+        s = "fact_" + hashlib.sha1((title or "").encode("utf-8")).hexdigest()[:8]
+    if s == _INDEX_STEM or s in _WIN_RESERVED:
+        s += "_fact"
+    return s
 
 
 def _slug(title: str) -> str:
-    s = _SLUG.sub("_", title.lower()).strip("_")
-    return s or "memory"
+    """The file a title lives in. A fact saved by an earlier build under its old
+    name keeps that name, so updating it finds it instead of starting a copy."""
+    new = _script_slug(title)
+    old = _legacy_slug(title)
+    if (old and old != new and old != _INDEX_STEM and old not in _WIN_RESERVED
+            and os.path.isfile(os.path.join(MEM_DIR, old + ".md"))
+            and not os.path.isfile(os.path.join(MEM_DIR, new + ".md"))):
+        return old
+    return new
 
 
 def _path_for(title: str) -> str:
@@ -142,25 +182,6 @@ def _read_index_lines() -> List[str]:
         return [ln.rstrip("\n") for ln in f.readlines()]
 
 
-def _write_index_lines(lines: List[str]) -> str:
-    """Write lines back, enforcing caps. Returns warning string or ''."""
-    text = "\n".join(lines).rstrip() + "\n"
-    warnings: List[str] = []
-    if len(lines) > INDEX_LINE_CAP:
-        lines = lines[:INDEX_LINE_CAP]
-        text = "\n".join(lines).rstrip() + "\n"
-        warnings.append(f"index truncated to {INDEX_LINE_CAP} lines")
-    if len(text.encode("utf-8")) > INDEX_BYTE_CAP:
-        # truncate to last newline before cap
-        encoded = text.encode("utf-8")[:INDEX_BYTE_CAP]
-        cut = encoded.rfind(b"\n")
-        text = encoded[:cut].decode("utf-8", errors="ignore") + "\n"
-        warnings.append(f"index truncated to {INDEX_BYTE_CAP} bytes")
-    with open(INDEX_PATH, "w", encoding="utf-8") as f:
-        f.write(text)
-    return "; ".join(warnings)
-
-
 def _index_entry(slug: str, title: str, mtype: str, hook: str) -> str:
     hook = hook.strip().replace("\n", " ")[:140]
     return f"- [{title}]({slug}.md) — `{mtype}` {hook}"
@@ -172,6 +193,91 @@ def _index_entry_for_slug(lines: List[str], slug: str) -> Optional[int]:
         if pat.search(ln):
             return i
     return None
+
+
+# The index is derived from the fact files and never edited in place. Six
+# places used to change a file and then patch the index to match, with nothing
+# checking the patch landed, and two saves at once (the extractor thread and
+# the model's own save) each read the old index and wrote back their own
+# version. One real store had 62 facts and an index listing 24 of them, the
+# user's name and hardware among the missing, which the model then believed it
+# did not know. Rebuilding from the files each time means it cannot drift.
+_INDEX_LOCK = threading.Lock()
+
+
+def _fact_files() -> List[str]:
+    try:
+        return [f for f in os.listdir(MEM_DIR)
+                if f.endswith(".md") and not f.startswith(".")
+                and f.lower() != "memory.md"]
+    except OSError:
+        return []
+
+
+def _rebuild_index() -> str:
+    """Regenerate MEMORY.md from the fact files, oldest first so the newest sit
+    at the end where the prompt view reads them. Returns a warning or ''."""
+    with _INDEX_LOCK:
+        rows = []
+        for fn in _fact_files():
+            path = os.path.join(MEM_DIR, fn)
+            try:
+                fm, _body = _read_body(path)
+            except (OSError, UnicodeDecodeError):
+                continue
+            slug = fn[:-3]
+            when = fm.get("updated") or ""
+            if not when:
+                try:
+                    when = datetime.fromtimestamp(os.path.getmtime(path)).isoformat(
+                        timespec="seconds")
+                except OSError:
+                    when = ""
+            rows.append((when, slug, _index_entry(
+                slug, fm.get("name") or slug, fm.get("type") or "user",
+                fm.get("description") or "")))
+        rows.sort(key=lambda r: (r[0], r[1]))
+        lines = [r[2] for r in rows]
+        warnings: List[str] = []
+        if len(lines) > INDEX_LINE_CAP:          # keep the newest, not the oldest
+            warnings.append(f"index holds the newest {INDEX_LINE_CAP} of {len(lines)}")
+            lines = lines[-INDEX_LINE_CAP:]
+        text = "\n".join(lines).rstrip() + "\n" if lines else ""
+        while lines and len(text.encode("utf-8")) > INDEX_BYTE_CAP:
+            lines = lines[1:]
+            text = "\n".join(lines).rstrip() + "\n"
+        os.makedirs(MEM_DIR, exist_ok=True)
+        tmp = os.path.join(MEM_DIR, f".index-{os.getpid()}-{threading.get_ident()}.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        for attempt in range(6):
+            try:
+                os.replace(tmp, INDEX_PATH)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                    raise
+                time.sleep(0.05)
+        return "; ".join(warnings)
+
+
+def _ensure_index_fresh() -> None:
+    """Rebuild when the index and the files disagree, which heals a store left
+    inconsistent by an earlier build without touching any fact."""
+    try:
+        listed = set(re.findall(r"\]\(([^)]+)\.md\)", "\n".join(_read_index_lines())))
+    except OSError:
+        listed = set()
+    on_disk = {f[:-3] for f in _fact_files()}
+    if listed != on_disk:
+        try:
+            _rebuild_index()
+        except OSError:
+            pass
 
 
 # Title-similarity stopwords. Kept small + obvious; the goal is to catch
@@ -343,20 +449,11 @@ def save(title: str, mtype: str, description: str, body: str = "",
     front.append("---")
     content = "\n".join(front) + "\n\n" + body.strip() + "\n"
 
+    verb = "updated" if os.path.isfile(path) else "saved"
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    lines = _read_index_lines()
-    new_entry = _index_entry(slug, title, mtype, description)
-    existing = _index_entry_for_slug(lines, slug)
-    if existing is not None:
-        lines[existing] = new_entry
-        verb = "updated"
-    else:
-        lines.append(new_entry)
-        verb = "saved"
-
-    warn = _write_index_lines(lines)
+    warn = _rebuild_index()
     msg = f"{verb} memory: {slug} ({mtype})"
     if warn:
         msg += f"  [{warn}]"
@@ -392,11 +489,9 @@ def forget(title: str) -> str:
     if os.path.exists(path):
         os.remove(path)
         removed = True
-    lines = _read_index_lines()
-    idx = _index_entry_for_slug(lines, slug)
-    if idx is not None:
-        lines.pop(idx)
-        _write_index_lines(lines)
+    idx = _index_entry_for_slug(_read_index_lines(), slug)
+    if removed or idx is not None:
+        _rebuild_index()
         removed = True
     if not removed:
         return f"no memory found matching '{title}'"
@@ -461,16 +556,7 @@ def curate(apply: bool = False) -> Dict[str, Any]:
             else:
                 archived.append(r["slug"])
     if apply and archived:
-        lines = _read_index_lines()
-        aset = set(archived)
-        keep_lines = []
-        for ln in lines:
-            m = re.match(r"^- \[[^\]]+\]\(([^)]+)\.md\)", ln)
-            slug = m.group(1) if m else None
-            if slug and slug in aset:
-                continue
-            keep_lines.append(ln)
-        _write_index_lines(keep_lines)
+        _rebuild_index()
     return {"applied": apply, "clusters": out_clusters,
             "archived" if apply else "would_archive": archived}
 
@@ -582,6 +668,7 @@ def run_maintenance() -> Dict[str, Any]:
 
 
 def list_index() -> str:
+    _ensure_index_fresh()
     lines = _read_index_lines()
     if not lines:
         return "(no memories yet)"
@@ -599,6 +686,7 @@ def index_for_prompt(max_lines: int = 20, max_line_chars: int = 120) -> str:
     over the cap, show recent items + 'and N more — call memory_recall to
     find others'. memory_recall keyword-scores against ALL facts regardless
     of what's shown here, so capping the prompt-injection is safe."""
+    _ensure_index_fresh()
     lines = _read_index_lines()
     if not lines:
         return ""
@@ -681,18 +769,7 @@ def _promote_from_archive(archive_path: str) -> None:
             return
     except OSError:
         return
-    try:
-        fm, _body = _read_body(new_path)
-    except OSError:
-        return
-    slug = fn[:-3] if fn.endswith(".md") else fn
-    title = fm.get("name", slug)
-    mtype = fm.get("type", "user")
-    desc = fm.get("description", "")
-    lines = _read_index_lines()
-    if _index_entry_for_slug(lines, slug) is None:
-        lines.append(_index_entry(slug, title, mtype, desc))
-        _write_index_lines(lines)
+    _rebuild_index()
 
 
 def _bucket_files(mtype: str, sub_category: str,
@@ -802,16 +879,7 @@ def _evict_if_over_cap(mtype: str, sub_category: str,
     # Drop the index entries for archived files so the public list view
     # stays clean; readers can still walk _archive/ manually.
     if archived:
-        lines = _read_index_lines()
-        keep = []
-        archive_set = set(archived)
-        for ln in lines:
-            m = re.match(r"^- \[[^\]]+\]\(([^)]+)\.md\)", ln)
-            slug = m.group(1) if m else None
-            if slug and slug in archive_set:
-                continue
-            keep.append(ln)
-        _write_index_lines(keep)
+        _rebuild_index()
     return archived
 
 
@@ -839,11 +907,7 @@ def _archive_file(fn: str, extra_fm: Optional[Dict[str, str]] = None) -> Optiona
     except OSError:
         return None
     slug = fn[:-3] if fn.endswith(".md") else fn
-    lines = _read_index_lines()
-    keep = [ln for ln in lines
-            if not re.match(rf"^- \[[^\]]+\]\({re.escape(slug)}\.md\)", ln)]
-    if len(keep) != len(lines):
-        _write_index_lines(keep)
+    _rebuild_index()
     return slug
 
 

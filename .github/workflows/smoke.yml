@@ -154,6 +154,12 @@ jobs:
         run: |
           python tests/test_announcements.py
 
+      - name: The memory store and its index
+        # A title in a non-Latin script replaced the whole index, and the
+        # index drifted from the files until the model forgot most of them.
+        run: |
+          python tests/test_memory_store.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through
