@@ -178,6 +178,12 @@ jobs:
         run: |
           python tests/test_reminder_store.py
 
+      - name: A team of agents, as the panes show it
+        # Tool results rendered as empty arrows, failures as done, and members
+        # that never started were not mentioned to the model.
+        run: |
+          python tests/test_team.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through

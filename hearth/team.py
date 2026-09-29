@@ -55,15 +55,18 @@ def _render_entry(e: Dict[str, Any]) -> Optional[str]:
             lines.append(f"{C['tool']}  🔧 {c.get('name')}{C['reset']} {C['dim']}{(args_s or '')[:160]}{C['reset']}")
         return "\n".join(lines) if lines else None
     if k in ("tool_result", "result"):
-        r = str(e.get("result") or e.get("content") or "").replace("\n", " ")
-        return f"{C['dim']}    ↳ {r[:160]}{C['reset']}"
+        r = str(e.get("preview") or e.get("result") or e.get("content") or "").replace("\n", " ")
+        name = f"{e['name']}: " if e.get("name") else ""
+        return f"{C['dim']}    ↳ {name}{r[:160]}{C['reset']}"
     if k in ("assistant_final", "assistant", "assistant_text", "final"):
         t = (e.get("text") or e.get("content") or "").strip()
         return f"\n{C['reset']}{t}\n" if t else None
     if k == "end":
-        st = str(e.get("status", "done"))
-        col = C["ok"] if st in ("completed", "ok", "done", "success") else C["warn"]
-        return f"{col}{C['bold']}■ {st}{C['reset']}"
+        # The subagent loop ends with its result: ok, plus error when it failed.
+        if e.get("ok") is False or e.get("error"):
+            why = str(e.get("error") or "failed").replace("\n", " ")[:160]
+            return f"{C['warn']}{C['bold']}■ failed{C['reset']} {C['dim']}{why}{C['reset']}"
+        return f"{C['ok']}{C['bold']}■ done{C['reset']}"
     return None
 
 
@@ -225,36 +228,48 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
     _local = any(h in _base for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1",
                                       "192.168.", "10.", "host.docker.internal"))
     _MAX_TEAM = 4 if _local else 8
-    if len(members) > _MAX_TEAM:
-        members = members[:_MAX_TEAM]
+    # Every member that does not start is reported with the reason, so the
+    # model knows which part of the task has nobody working on it.
+    dropped: List[Dict[str, str]] = []
     spawned: List[Dict[str, Any]] = []
     for m in members:
+        persona = (m.get("persona") or "coder").strip()
+        name = str(m.get("name") or persona).strip()
         prompt = (m.get("prompt") or "").strip()
         if not prompt:
+            dropped.append({"name": name, "reason": "no prompt"})
             continue
-        persona = (m.get("persona") or "coder").strip()
-        name = (m.get("name") or persona).strip()
+        if len(spawned) >= _MAX_TEAM:
+            dropped.append({"name": name, "reason": f"over the team limit of {_MAX_TEAM} here"})
+            continue
         r = subagents.spawn_subagent(persona=persona, prompt=prompt,
                                      mode="background", name=name)
         if r.get("ok"):
             spawned.append({"name": name, "persona": persona,
                             "agent_id": r.get("agent_id"),
                             "transcript": r.get("transcript_path")})
+        else:
+            dropped.append({"name": name, "reason": str(r.get("error") or "did not start")})
     if not spawned:
-        return {"ok": False, "error": "no agents spawned — each member needs a prompt"}
+        return {"ok": False, "error": "no agents started", "dropped": dropped}
     if sys.platform == "win32":
         opened = _open_wt(spawned) or _open_consoles(spawned)
     else:
         opened = _open_tmux(spawned)
+    note = (f"Spawned {len(spawned)} agents and opened a live pane for each — "
+            f"watch them work side by side." if opened else
+            f"Spawned {len(spawned)} agents. Couldn't open watch panes "
+            f"(no Windows Terminal / tmux found) — they're running in the "
+            f"background; their results will arrive as notifications.")
+    if dropped:
+        note += (" Not started: " + "; ".join(f"{d['name']} ({d['reason']})" for d in dropped)
+                 + ". Their part of the task is not being worked on.")
     return {
         "ok": True,
         "spawned": [{"name": s["name"], "persona": s["persona"], "agent_id": s["agent_id"]} for s in spawned],
+        "dropped": dropped,
         "watching": opened,
-        "note": (f"Spawned {len(spawned)} agents and opened a live pane for each — "
-                 f"watch them work side by side." if opened else
-                 f"Spawned {len(spawned)} agents. Couldn't open watch panes "
-                 f"(no Windows Terminal / tmux found) — they're running in the "
-                 f"background; their results will arrive as notifications."),
+        "note": note,
     }
 
 

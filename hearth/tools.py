@@ -7921,13 +7921,14 @@ def _launch_team(p: Dict) -> str:
     members = p.get("members") or []
     if not isinstance(members, list) or not members:
         return ("Error: launch_team needs a 'members' list, each with a 'prompt' "
-                "(and optional 'name' + 'persona': coder/researcher/locator/"
-                "archivist/summarizer). E.g. one architect, one frontend coder, "
+                "(and optional 'name' + 'persona': coder/researcher/archivist/"
+                "summarizer). E.g. one architect, one frontend coder, "
                 "one backend coder.")
     from . import team as _team
     r = _team.launch_team(members)
     if not r.get("ok"):
-        return f"Error: {r.get('error', 'team launch failed')}"
+        why = "; ".join(f"{d['name']}: {d['reason']}" for d in r.get("dropped") or [])
+        return f"Error: {r.get('error', 'team launch failed')}" + (f" ({why})" if why else "")
     who = ", ".join(f"{m['name']} ({m['persona']})" for m in r.get("spawned", []))
     return f"{r.get('note', 'Team launched.')}\nTeam: {who}"
 
@@ -7947,7 +7948,7 @@ TOOL_DEFINITIONS.append({
     "parameters": {"type": "object", "properties": {
         "members": {"type": "array", "items": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Short label, e.g. 'Architect', 'Frontend'."},
-            "persona": {"type": "string", "enum": ["coder", "researcher", "locator", "archivist", "summarizer"],
+            "persona": {"type": "string", "enum": ["coder", "researcher", "archivist", "summarizer"],
                         "description": "Sub-agent role. Default 'coder'."},
             "prompt": {"type": "string", "description": "The scoped task for this member."},
         }, "required": ["prompt"]}},
