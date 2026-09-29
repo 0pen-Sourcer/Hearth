@@ -36,10 +36,13 @@ def check(label, cond):
         FAILS.append(label)
 
 
-def run(args, stdin=subprocess.DEVNULL, timeout=120):
+def run(args, stdin=subprocess.DEVNULL, timeout=120, home=None):
     # A scratch workspace and no server, so this touches nothing real and does
     # not depend on a model being loaded.
     env = dict(os.environ)
+    if home:
+        env["USERPROFILE"] = env["HOME"] = home
+    env.pop("JARVIS_LOCKDOWN", None)
     env["JARVIS_WORKSPACE"] = tempfile.mkdtemp(prefix="hearth-cli-test-")
     env["LOCAL_API_BASE"] = "http://127.0.0.1:9/v1"
     env["JARVIS_NO_ONBOARDING"] = "1"
@@ -47,8 +50,10 @@ def run(args, stdin=subprocess.DEVNULL, timeout=120):
     env["PYTHONIOENCODING"] = "utf-8"
     t0 = time.time()
     try:
+        feed = stdin if isinstance(stdin, bytes) else None
         p = subprocess.run([sys.executable, "-X", "utf8", CLI] + args,
-                           stdin=stdin, capture_output=True, timeout=timeout,
+                           input=feed, stdin=None if feed is not None else stdin,
+                           capture_output=True, timeout=timeout,
                            env=env, cwd=ROOT)
         return p.returncode, (p.stdout + p.stderr).decode("utf-8", "replace"), time.time() - t0
     except subprocess.TimeoutExpired as e:
@@ -78,6 +83,28 @@ check(f"end of input ends the session instead of spinning ({secs:.0f}s)",
       code == 0)
 check(f"it asked once, not over and over ({prompts} prompt(s))", prompts <= 3)
 check("and says goodbye on the way out", "bye" in out)
+
+# ---------------------------------------------------------------- lockdown
+# /lockdown flipped a flag the read check never looked at: it printed
+# "reads confined" and every read still reached the whole disk.
+home = tempfile.mkdtemp(prefix="hearth-cli-home-")
+code, out, _ = run([], stdin=b"/lockdown on\n", timeout=150, home=home)
+check("/lockdown on reports it is on", "lockdown ON" in out)
+probe = subprocess.run(
+    [sys.executable, "-X", "utf8", "-c",
+     "from hearth import tools as t; print(t.read_locked()); "
+     "import os; t._resolve_read(os.path.expanduser('~'))"],
+    capture_output=True, cwd=ROOT,
+    env={**{k: v for k, v in os.environ.items() if k != "JARVIS_LOCKDOWN"},
+         "USERPROFILE": home, "HOME": home,
+         "JARVIS_WORKSPACE": tempfile.mkdtemp(prefix="hearth-cli-ws-")})
+said = (probe.stdout + probe.stderr).decode("utf-8", "replace")
+check(f"and reads outside the workspace are refused afterwards ({said.splitlines()[:1]})",
+      said.startswith("True") and "PermissionError" in said)
+code, out, _ = run([], stdin=b"/lockdown status\n", timeout=150, home=home)
+check("a new session still has it on", "lockdown ON" in out)
+code, out, _ = run([], stdin=b"/lockdown off\n", timeout=150, home=home)
+check("/lockdown off turns it off", "lockdown OFF" in out)
 
 print()
 if FAILS:

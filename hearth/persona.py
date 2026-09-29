@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from .tools import WORKSPACE, SAFE_READ_ONLY
+from .tools import WORKSPACE, read_locked
 from .skills_loader import skills_for_prompt
 from .memory import index_for_prompt, read_rules, read_soul, read_profile
 
@@ -35,7 +35,7 @@ def system_prompt(voice: bool = False) -> str:
     workspace = WORKSPACE
     reads_line = (
         "Reads are confined to the workspace (lockdown is on)."
-        if SAFE_READ_ONLY else
+        if read_locked() else
         "Reads roam the whole disk freely — C:\\, D:\\, ~/Downloads, Program Files, registry. Anywhere."
     )
 

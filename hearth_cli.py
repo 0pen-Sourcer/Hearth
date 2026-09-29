@@ -142,7 +142,7 @@ try:
         to_openai_tools,
         tools_by_category,
         WORKSPACE,
-        SAFE_READ_ONLY,
+        read_locked,
         ACTIVITY_LOG,
         system_prompt,
         trim_to_budget,
@@ -1288,7 +1288,7 @@ class JarvisCLI:
             ("endpoint",  f"{LOCAL_API_BASE}"),
             ("context",   f"{self.context_tokens} tokens, compact @ {int(COMPACT_AT*100)}%"),
             ("workspace", f"{WORKSPACE}"),
-            ("reads",     "unrestricted" if not SAFE_READ_ONLY else "sandbox only"),
+            ("reads",     "sandbox only" if read_locked() else "unrestricted"),
             ("tools",     _tools_banner_label()),
             ("memories",  f"{mem_lines}"),
             ("voice",     v_label),
@@ -3246,16 +3246,16 @@ class JarvisCLI:
             parts = cmd.split()
             arg = parts[1].lower() if len(parts) > 1 else ""
             if arg in ("on", "1", "true"):
-                _t.SAFE_READ_ONLY = True
+                _t.set_lockdown(True)
             elif arg in ("off", "0", "false"):
-                _t.SAFE_READ_ONLY = False
-            elif arg in ("", "status"):
-                _t.SAFE_READ_ONLY = _t.SAFE_READ_ONLY if arg == "status" else (not _t.SAFE_READ_ONLY)
-            else:
+                _t.set_lockdown(False)
+            elif arg == "":
+                _t.set_lockdown(not _t.read_locked())
+            elif arg != "status":
                 print(f"{C_DIM}usage: /lockdown [on|off|status]{C_RESET}")
                 return True
-            if _t.SAFE_READ_ONLY:
-                print(f"{C_OK}lockdown ON{C_RESET} {C_DIM}— reads confined to the workspace ({_t.WORKSPACE}). Set JARVIS_LOCKDOWN=1 to make it the default.{C_RESET}")
+            if _t.read_locked():
+                print(f"{C_OK}lockdown ON{C_RESET} {C_DIM}— reads confined to the workspace ({_t.WORKSPACE}). Kept across restarts, shared with the window.{C_RESET}")
             else:
                 print(f"{C_OK}lockdown OFF{C_RESET} {C_DIM}— reads unrestricted (any file on disk). Writes stay workspace-confined regardless.{C_RESET}")
             return True

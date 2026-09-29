@@ -121,14 +121,12 @@ def sweep_write_temps(directory: str, older_than_s: float = 300.0) -> int:
     return removed
 
 
-SAFE_READ_ONLY = os.environ.get("JARVIS_LOCKDOWN", "").strip() in ("1", "true", "yes")
-
 # Lockdown pointer so a GUI/CLI toggle can confine reads without a restart or an
 # env var (there was no way to turn lockdown on from the app). Env still wins.
 _LOCKDOWN_POINTER = os.path.join(os.path.expanduser("~"), ".hearth", "lockdown")
 
 
-def _read_locked() -> bool:
+def read_locked() -> bool:
     """Confine reads to the workspace? Checked live per read. Env JARVIS_LOCKDOWN
     wins (1/0); otherwise the persisted pointer set by the in-app toggle."""
     v = (os.environ.get("JARVIS_LOCKDOWN", "") or "").strip().lower()
@@ -375,7 +373,7 @@ def _resolve_read(p: str) -> str:
             p = cwd_candidate
     else:
         p = os.path.abspath(p)
-    if _read_locked() and not path_within(p, WORKSPACE):
+    if read_locked() and not path_within(p, WORKSPACE):
         raise PermissionError(f"Read locked to workspace: {WORKSPACE}")
     return p
 
@@ -2902,7 +2900,7 @@ def _find_file(p: Dict) -> str:
         ap = os.path.abspath(path)
         if ap in seen_loc or not os.path.isdir(ap):
             return
-        if _read_locked() and not path_within(ap, WORKSPACE):
+        if read_locked() and not path_within(ap, WORKSPACE):
             return
         seen_loc.add(ap)
         locations.append(ap)

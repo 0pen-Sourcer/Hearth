@@ -1589,7 +1589,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_state()
         if path == "/api/lockdown":
             from . import tools as _t
-            return self._send_json(200, {"on": _t._read_locked()})
+            return self._send_json(200, {"on": _t.read_locked()})
         if path == "/api/email":
             try:
                 from . import email_tools
@@ -3711,7 +3711,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         JARVIS_LOCKDOWN (which also confines reads) restricts it to the workspace.
         Cross-site POSTs are already blocked by the Host guard, and reveal just
         opens Explorer at an existing path (no data access). Non-blocking spawn."""
-        from .tools import list_extra_workspaces, SAFE_READ_ONLY
+        from .tools import list_extra_workspaces, read_locked, path_within
         body = self._read_json()
         path = (body.get("path") or "").strip()
         if not path:
@@ -3722,11 +3722,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(400, {"error": "bad path"})
         if not os.path.exists(real):
             return self._send_json(404, {"error": "not found"})
-        if SAFE_READ_ONLY:
-            ws_real = os.path.realpath(WORKSPACE)
-            allowed_roots = [ws_real] + [os.path.realpath(p) for p in list_extra_workspaces()]
-            if not any(real.lower().startswith(root.lower() + os.sep) or
-                       real.lower() == root.lower() for root in allowed_roots):
+        if read_locked():
+            if not any(path_within(real, root)
+                       for root in [WORKSPACE] + list(list_extra_workspaces())):
                 return self._send_json(403, {"error": "path outside allowed roots (lockdown)"})
         try:
             if sys.platform == "win32":
