@@ -127,6 +127,37 @@ check(f"and every one of the 80 is either in the store or archived, none lost "
       f"({len(burst_names & facts())} kept, {len(burst_names & archived)} archived)",
       burst_names <= (facts() | archived))
 
+# ------------------------------------------- archiving only what is meant
+# Superseding named a fact by title and used to archive the closest title on a
+# single shared word: "primary OS" archived "primary GPU" and kept the old OS.
+M.save("primary GPU", "user", "RTX 5060", "RTX 5060", force=True)
+M.save("primary OS", "user", "Windows 10", "Windows 10", force=True)
+M.save("current OS", "user", "Windows 11", "Windows 11", supersedes="primary OS", force=True)
+_arch = os.path.join(M.MEM_DIR, "_archive")
+_arched = {f[:-3] for f in os.listdir(_arch)} if os.path.isdir(_arch) else set()
+check("superseding archives the fact it names", "primary_os" in _arched)
+check("and leaves a fact that merely shares a word alone", "primary_gpu" in facts())
+M.save("new thing", "user", "x", "x", supersedes="a fact that does not exist", force=True)
+check("superseding something that is not there archives nothing",
+      "primary_gpu" in facts())
+
+# The merge dropped numbers and short words, so distinct facts collapsed.
+for t in ("class 10 marks", "class 12 marks", "drive C free space", "drive D free space"):
+    M.save(t, "user", t, t, force=True)
+_merges = M.curate(apply=False)["clusters"]
+check(f"facts told apart by a number or a letter are not merged: {_merges}",
+      not any(set(c["dups"]) & {"class_10_marks", "class_12_marks",
+                                  "drive_c_free_space", "drive_d_free_space"}
+              for c in _merges))
+M.save("favourite colour", "user", "violet", "violet", force=True)
+M.save("colour favourite", "user", "violet", "violet", force=True)
+check("the same title written two ways still merges",
+      any({"favourite_colour", "colour_favourite"} == {c["kept"], *c["dups"]}
+          for c in M.curate(apply=False)["clusters"]))
+_extract_src = open(os.path.join(ROOT, "hearth", "memory_extract.py"), encoding="utf-8").read()
+check("the extractor leaves merging to the gated pass, not after every save",
+      "curate(apply=True)" not in _extract_src)
+
 # ---------------------------------------------------------------- forgetting
 M.forget("home town")
 check("forgetting removes the file and its index line",

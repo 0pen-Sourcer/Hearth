@@ -499,12 +499,19 @@ def forget(title: str) -> str:
 
 
 def _curate_base(title: str) -> str:
-    """A topic key for a title with volatile value-tokens stripped, so
-    'workout_schedule_7am' and 'workout_schedule_7pm' collapse to the same
-    base ('schedule workout') and read as one topic."""
-    words = _significant_words(title)
-    base = [w for w in words if not re.fullmatch(r"\d+|\d{1,2}(am|pm)|am|pm", w)]
-    return " ".join(sorted(set(base)))
+    """A key that two titles share only when they are the same title written
+    differently: the same words, whatever the case, punctuation or order.
+
+    It used to drop numbers, times and short words so "workout 7am" and
+    "workout 7pm" read as one topic. Those are often exactly what tells two
+    facts apart, and the merge kept one and archived the other: "class 10
+    marks" went under "class 12 marks", "drive C free space" under "drive D".
+    Whether two near titles are one topic is a judgement, and the save already
+    puts it to the model with a [possible-dup] warning; merging here is only
+    for true duplicates.
+    """
+    words = re.findall(r"\w+", (title or "").lower())
+    return " ".join(sorted(set(words)))
 
 
 def curate(apply: bool = False) -> Dict[str, Any]:
@@ -918,10 +925,24 @@ def _supersede(topic: str, new_slug: str) -> Optional[str]:
     topic = (topic or "").strip()
     if not topic:
         return None
-    cands = find_similar_titles(topic, exclude_slug=new_slug)
-    if not cands:
-        return None
-    return _archive_file(cands[0]["slug"] + ".md", {"superseded_by": new_slug})
+    # Only the fact actually named. The closest-title guess this used to make
+    # needed a single shared word of four letters, so superseding "primary
+    # OS" archived "primary GPU" and left the old OS fact in place. Archiving
+    # the wrong memory is worse than archiving none.
+    slug = _slug(topic)
+    if slug != new_slug and os.path.isfile(os.path.join(MEM_DIR, slug + ".md")):
+        return _archive_file(slug + ".md", {"superseded_by": new_slug})
+    want = topic.lower()
+    for fn in _fact_files():
+        if fn[:-3] == new_slug:
+            continue
+        try:
+            fm, _ = _read_body(os.path.join(MEM_DIR, fn))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if (fm.get("name") or "").strip().lower() == want:
+            return _archive_file(fn, {"superseded_by": new_slug})
+    return None
 
 
 _EXPIRY_STAMP = os.path.join(MEM_DIR, ".last_expiry")

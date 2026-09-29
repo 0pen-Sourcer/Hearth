@@ -311,16 +311,6 @@ def extract_and_save(
         except Exception as e:
             warnings.append(f"save failed for '{title}': {type(e).__name__}: {e}")
 
-    # Auto-curate: whenever new facts landed (the only time fresh dups can
-    # appear), silently merge same-topic duplicates so memory self-maintains —
-    # no manual /curate needed. Conservative + non-destructive (archives the
-    # older copies, recoverable). Best-effort; never breaks the extraction.
-    if saved:
-        try:
-            _memory.curate(apply=True)
-        except Exception:
-            pass
-
     # Periodic full maintenance sweep — gated to ~daily so it's free on the
     # common turn (the gate returns instantly) and actually runs at most once a
     # day or when memory crosses its size cap. Bundles: expire stale facts +
