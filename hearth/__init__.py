@@ -61,7 +61,7 @@ if _os.name == "nt":
         import sysconfig as _sysconfig
         _spkg = _sysconfig.get_paths().get("purelib") or _sysconfig.get_paths().get("platlib")
         if _spkg:
-            for _sub in ("cuda_runtime", "cublas", "cuda_nvrtc"):
+            for _sub in ("cuda_runtime", "cublas", "cuda_nvrtc", "cudnn"):
                 _bin = _os.path.join(_spkg, "nvidia", _sub, "bin")
                 if _os.path.isdir(_bin):
                     try:

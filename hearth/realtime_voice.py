@@ -164,6 +164,41 @@ def status() -> dict:
     }
 
 
+def _stt_device() -> tuple:
+    """(device, compute_type) for the speech model, from the "Listening runs
+    on" setting. The graphics card when chosen and usable; otherwise the
+    processor with 8-bit weights, which is several times faster there than the
+    float32 the model falls back to on its own."""
+    want = (_env.get("STT_DEVICE") or "cpu").lower()
+    if want == "cuda":
+        try:
+            import ctranslate2  # type: ignore
+            if ctranslate2.get_cuda_device_count() > 0:
+                # "auto": the worker process refuses float16 on some cards
+                # where the main process accepts it; auto picks what it can run.
+                return "cuda", "auto"
+        except Exception:
+            pass
+    return "cpu", "int8"
+
+
+def model_downloaded(size: str = "") -> bool:
+    """Whether the speech model is already on disk, so starting voice can say
+    it is downloading instead of looking stuck on the first run."""
+    size = size or _model_size()
+    try:
+        from faster_whisper.utils import _MODELS  # type: ignore
+        repo = _MODELS.get(size, size)
+    except Exception:
+        repo = f"Systran/faster-whisper-{size}"
+    try:
+        from huggingface_hub import try_to_load_from_cache  # type: ignore
+        hit = try_to_load_from_cache(repo, "model.bin")
+        return isinstance(hit, str)
+    except Exception:
+        return True
+
+
 def _build_recorder(sess: Optional[_Session] = None):
     """Lazily build the AudioToTextRecorder with ChatGPT-voice-mode tuning.
 
@@ -292,9 +327,12 @@ def _build_recorder(sess: Optional[_Session] = None):
             try: _tts.set_voice_state("listening")
             except Exception: pass
 
-    rec = AudioToTextRecorder(
+    device, compute = _stt_device()
+    kwargs = dict(
         model=model,
         language=lang,
+        device=device,
+        compute_type=compute,
         # silero VAD (neural). 0.35 is the sensitivity sweet spot - low enough
         # to catch a soft user, high enough to ignore desk-fan rumble.
         silero_sensitivity=0.35,
@@ -332,7 +370,28 @@ def _build_recorder(sess: Optional[_Session] = None):
         # RealtimeSTT/PortAudio use the OS default.
         input_device_index=_mic_index(),
     )
-    return rec
+    if device != "cuda":
+        return AudioToTextRecorder(**kwargs)
+    # On the graphics card a failure inside the recorder's worker process never
+    # reaches here; the constructor just waits. Give it a bounded time (the
+    # model is already downloaded) and fall back to the processor.
+    box: dict = {}
+
+    def _build():
+        try:
+            box["rec"] = AudioToTextRecorder(**kwargs)
+        except Exception as e:
+            box["err"] = e
+
+    t = threading.Thread(target=_build, daemon=True, name="hearth-stt-gpu")
+    t.start()
+    t.join(None if not model_downloaded() else 45.0)
+    if "rec" in box:
+        return box["rec"]
+    why = box.get("err") or "it did not start in time"
+    print(f"[hearth.realtime_voice] GPU speech model failed ({why}); using the processor", flush=True)
+    kwargs.update(device="cpu", compute_type="int8")
+    return AudioToTextRecorder(**kwargs)
 
 
 _mic_warning = ""  # surfaced to the UI when a picked mic couldn't be opened
@@ -596,6 +655,7 @@ def _run_session(sess: _Session) -> None:
                 # the hard stop against the self-reply loop on speakers. Flush the
                 # buffer too so accumulated echo can't ride into the next turn.
                 if _tts.is_speaking() or _tts.seconds_since_spoke() < _echo_tail():
+                    print(f"[hearth.realtime_voice] dropped (speakers mode, Hearth was talking): {text!r}", flush=True)
                     try: rec.clear_audio_queue()
                     except Exception: pass
                     continue
@@ -607,13 +667,14 @@ def _run_session(sess: _Session) -> None:
                 # pass straight through. Either way, consume the grace.
                 _barge_grace_until = 0.0
                 if _looks_like_echo(text):
+                    print(f"[hearth.realtime_voice] dropped (repeat of Hearth's own words): {text!r}", flush=True)
                     try: rec.clear_audio_queue()
                     except Exception: pass
                     continue
-            elif _tts.is_speaking() or _tts.seconds_since_spoke() < _echo_tail():
-                try: rec.clear_audio_queue()
-                except Exception: pass
-                continue
+            # Headphones (speakers mode off): nothing is dropped for timing. The
+            # mic cannot hear the earpieces, so words said while or just after
+            # Hearth talks are the person's; only a repeat of Hearth's own words,
+            # below, is treated as echo.
             # Final net for split speaker/headphone setups: echo cancellation can't
             # cancel when playback and mic are on different devices, and the bleed
             # often arrives late enough (transcription lag + device buffering) to
@@ -621,6 +682,7 @@ def _run_session(sess: _Session) -> None:
             # assistant just said, it's that echo, not a real turn — drop it. A
             # headset user's words don't overlap, so they pass straight through.
             if _tts.seconds_since_spoke() < 6.0 and _looks_like_echo(text):
+                print(f"[hearth.realtime_voice] dropped (repeat of Hearth's own words): {text!r}", flush=True)
                 try: rec.clear_audio_queue()
                 except Exception: pass
                 continue

@@ -114,6 +114,48 @@ def _query(i=None, kind=None):
 sys.modules["sounddevice"] = types.SimpleNamespace(
     InputStream=lambda device=None, **k: _Stream(STATE["default"] if device is None else device),
     query_devices=_query, query_hostapis=lambda: [{"name": "Windows WASAPI"}])
+
+
+class _PaStream:
+    """PyAudio's stream, which is what wake opens: a fresh device table each time."""
+    def __init__(self, device):
+        self.device = device
+        STATE["open"] += 1
+        STATE["opened"].append(device)
+
+    def read(self, n, exception_on_overflow=True):
+        time.sleep(0.02)
+        return bytes(2 * n)
+
+    def stop_stream(self):
+        pass
+
+    def close(self):
+        STATE["open"] -= 1
+
+
+class _PyAudio:
+    def get_device_count(self):
+        return len(DEVICES)
+
+    def get_device_info_by_index(self, i):
+        d = DEVICES[i]
+        return {"name": d["name"], "maxInputChannels": d["max_input_channels"], "hostApi": 0}
+
+    def get_host_api_info_by_index(self, i):
+        return {"name": "Windows WASAPI"}
+
+    def get_default_input_device_info(self):
+        return {"index": STATE["default"]}
+
+    def open(self, input_device_index=None, **k):
+        return _PaStream(input_device_index)
+
+    def terminate(self):
+        pass
+
+
+sys.modules["pyaudio"] = types.SimpleNamespace(PyAudio=_PyAudio, paInt16=8)
 import hearth.web as _web                                          # noqa: E402
 
 SETTINGS = {}
@@ -125,13 +167,21 @@ check(f"with Stereo Mix as default and no pick, wake does not listen or guess: {
       s is None and "not a microphone" in why)
 SETTINGS["voice_input_name"] = "Headset (boAt Rockerz)"
 s, why = wl._open_mic()
-check("a mic picked by name is the one opened", s is not None and s.device == 2)
+check("a mic picked by name is the one opened", s is not None and s._st.device == 2)
 if s is not None:
-    s.stop()
+    s.stop(); s.close()
 SETTINGS["voice_input_name"] = "Headset (Not Here)"
 s, why = wl._open_mic()
 check(f"a picked mic that is gone pauses wake rather than opening another: {why!r}",
       s is None and "not connected" in why)
+
+DEVICES.append({"name": "Headset (Plugged In Later)", "max_input_channels": 1, "hostapi": 0})
+SETTINGS["voice_input_name"] = "Headset (Plugged In Later)"
+s, why = wl._open_mic()
+check("a mic plugged in after launch is found without a restart", s is not None and s._st.device == 3)
+if s is not None:
+    s.stop(); s.close()
+DEVICES.pop()
 
 # ------------------------------------------------ handing the mic to voice mode
 SETTINGS["voice_input_name"] = "Headset (boAt Rockerz)"

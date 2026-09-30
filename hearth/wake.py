@@ -223,46 +223,37 @@ class WakeListener:
         self._thread = None
 
     def _open_mic(self):
-        """(stream, '') or (None, why). The picked mic, looked up by name in this
-        process's device table; with none picked, the Windows default input when
-        it is a real mic. Never a guess among other devices: that is how wake
-        ended up on a virtual mic that records nothing, or on a loopback of the
-        speakers that woke on a video saying the name."""
-        import sounddevice as sd
+        """(stream, '') or (None, why). The picked mic, looked up by name in a
+        freshly enumerated device table, so a headset plugged in after launch
+        is found; with none picked, the Windows default input when it is a real
+        mic. Never a guess among other devices: that is how wake ended up on a
+        virtual mic that records nothing, or on a loopback of the speakers."""
         from . import listen as _ll
         try:
             from .web import _load_settings
             cfg = _load_settings() or {}
         except Exception:
             cfg = {}
+        rows, default = _ll.device_rows()
         name = str(cfg.get("voice_input_name", "") or "").strip()
-        dev = None
+        if not name:
+            legacy, why = _ll.name_for_numbered_pick(cfg.get("voice_input_device", -1))
+            if why:
+                return None, why + ("; wake is paused until it is" if "not connected" in why else "")
+            name = legacy
         if name:
-            dev = _ll.index_for_name(name, _ll.sounddevice_inputs())
+            dev = _ll.index_for_name(name, rows)
             if dev is None:
                 return None, f"your mic '{name}' is not connected; wake is paused until it is"
         else:
-            try:
-                legacy = int(cfg.get("voice_input_device", -1))
-            except (TypeError, ValueError):
-                legacy = -1
-            if legacy >= 0:
-                name, why = _ll.name_for_numbered_pick(legacy)
-                if not name:
-                    return None, why + "; wake is paused until it is" if "not connected" in why else why
-                dev = _ll.index_for_name(name, _ll.sounddevice_inputs())
-            else:
-                try:
-                    name = str(sd.query_devices(kind="input").get("name", ""))
-                except Exception:
-                    return None, "no microphone is connected"
+            dev = default
+            name = next((r[1] for r in rows if r[0] == dev), "") if dev is not None else ""
+            if not name:
+                return None, "no microphone is connected"
         if _ll.is_system_audio_device(name):
             return None, f"'{name}' is not a microphone; pick yours in Settings > Voice"
         try:
-            st = sd.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32",
-                                blocksize=int(self.sample_rate * BLOCK_S), device=dev)
-            st.start()
-            return st, ""
+            return _ll.MicInput(dev, self.sample_rate, int(self.sample_rate * BLOCK_S)), ""
         except Exception as e:
             return None, f"'{name}' would not open ({type(e).__name__})"
 

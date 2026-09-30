@@ -12979,23 +12979,29 @@ window.addEventListener('load', () => {
       // longer there. Assigning it would leave the select blank while the
       // backend still recorded silence from it, which reads as a dead mic with
       // no explanation. Keep the pick, show it as missing, say what to do.
-      const gone = savedName ? !byName : (cur >= 0 && !devs.some(d => d.index === cur));
+      const gone = !!savedName && !byName;
       const note = document.getElementById('mic-missing');
       if (gone) {
         sel.insertAdjacentHTML('beforeend',
-          `<option value="${cur}" data-name="${esc(savedName)}">${esc(savedName || ('Saved mic (input ' + cur + ')'))} is not connected</option>`);
+          `<option value="${cur}" data-name="${esc(savedName)}">${esc(savedName)} (not connected)</option>`);
       }
       if (note) {
         note.style.display = gone ? 'block' : 'none';
         note.textContent = gone
-          ? `The mic you picked (${savedName || 'input ' + cur}) is not plugged in, so nothing is being recorded. `
-            + `Plug it back in and hit Refresh, or choose another one above.`
+          ? `${savedName} isn't connected. Plug it in and it shows up here by itself, or pick another.`
           : '';
       }
-      sel.value = String(cur);
+      sel.value = gone ? String(cur) : (byName ? String(byName.index) : '-1');
     } catch (e) {}
   }
   populate();
+  // A headset plugged in or out shows up without pressing Refresh while the
+  // Voice settings are open.
+  setInterval(() => {
+    const pane = document.querySelector('.settings-pane[data-st="voice"]');
+    if (STATE.view === 'settings' && pane && !pane.hidden && document.activeElement !== sel) populate();
+  }, 4000);
+  window._refreshMicPicker = populate;
   sel.addEventListener('change', async () => {
     const idx = parseInt(sel.value, 10);
     const opt = sel.options[sel.selectedIndex];
@@ -13003,7 +13009,8 @@ window.addEventListener('load', () => {
     try {
       await api('/api/settings', { method: 'POST', body: JSON.stringify({
         voice_input_device: isNaN(idx) ? -1 : idx, voice_input_name: name }) });
-      if (typeof toast === 'function') toast('Mic set', 'restart voice mode to use it', 'ok', 2500);
+      if (typeof toast === 'function') toast('Mic set', name || 'System default', 'ok', 2000);
+      if (rtVoiceActive) { await stopRealtimeVoice(); setTimeout(() => startRealtimeVoice().catch(() => {}), 500); }
     } catch (e) {}
   });
   const refreshBtn = document.getElementById('btn-mic-refresh');
@@ -13190,13 +13197,13 @@ function setMicUI() {
   const btn = document.getElementById('voice-mic-toggle'); if (!btn) return;
   if (rtVoiceActive && _voiceMuted) {
     btn.innerHTML = _MIC_OFF_SVG; btn.style.color = ''; btn.style.opacity = '0.45';
-    btn.title = 'Muted — click to listen'; setVoiceStatus('🔇 muted — click the mic to talk');
+    btn.title = 'Muted: click to listen again'; setVoiceStatus('muted');
   } else if (rtVoiceActive) {
     btn.innerHTML = _MIC_ON_SVG; btn.style.color = 'var(--accent)'; btn.style.opacity = '1';
     btn.title = 'Listening — click to mute'; setVoiceStatus('listening');
   } else {
     btn.innerHTML = _MIC_ON_SVG; btn.style.color = ''; btn.style.opacity = '1';
-    btn.title = 'Start / stop talking';
+    btn.title = 'Voice is off: click to start listening';
   }
 }
 $('voice-mic-toggle').addEventListener('click', () => {
@@ -13208,7 +13215,9 @@ $('voice-mic-toggle').addEventListener('click', () => {
     setMicUI();
     return;
   }
-  voiceCycle();
+  // Not listening (voice stopped or failed): start it again. Press-to-talk is
+  // only for installs without continuous voice.
+  probeRealtimeVoice().then(ok => { if (ok) startRealtimeVoice().catch(() => {}); else voiceCycle(); });
 });
 
 // Keyboard still works in voice mode (focus the hidden input)
@@ -13292,8 +13301,10 @@ async function warmUpBrainForVoice() {
   return _brainWarmupPromise;
 }
 
+let _rtUserStop = false, _rtFailed = false;
 async function startRealtimeVoice() {
   if (rtVoiceActive) return;
+  _rtUserStop = false; _rtFailed = false;
   const ok = await probeRealtimeVoice();
   if (!ok) return false;
   // Don't present "listening" against a brain that can't answer yet.
@@ -13337,6 +13348,13 @@ async function startRealtimeVoice() {
     rtVoiceActive = false;
     rtVoiceReader = null;
     rtVoiceAbort = null;
+    setMicUI();
+    // A voice setting changed (mic, model, speakers mode) and the session was
+    // rebuilt under us: pick it up again rather than sit on a stale status.
+    if (voiceModeOn && !_rtUserStop && !_rtFailed) {
+      setVoiceStatus('restarting voice…');
+      setTimeout(() => { if (voiceModeOn && !rtVoiceActive && !_rtUserStop) startRealtimeVoice().catch(() => {}); }, 700);
+    }
   }
   return true;
 }
@@ -13422,9 +13440,9 @@ function handleRealtimeEvent(ev) {
     };
     _utterTimer = setTimeout(fire, _UTTER_GAP);
   } else if (ev.type === 'warming') {
-    // STT model still loading — don't imply it can hear yet.
+    // The speech model is still loading; the first run downloads it.
     _voiceReady = false;
-    setVoiceStatus('warming up the mic…');
+    setVoiceStatus(ev.detail || 'getting the microphone ready…');
   } else if (ev.type === 'ready') {
     _voiceReady = true;
     setVoiceStatus('listening');
@@ -13442,13 +13460,19 @@ function handleRealtimeEvent(ev) {
     // so it shows even with toasts muted — this is one you must not miss.
     if (!_voiceReady) toast('Voice is taking a while', ev.message || '', 'warn', 12000, true);
   } else if (ev.type === 'error') {
-    // A real voice failure is mute-proof too, otherwise it fails silently.
-    toast('Voice error', ev.message || '', 'err', 9000, true);
+    // Say it where the person is looking, not only in a toast, and never leave
+    // "getting ready" up after voice has failed.
+    _rtFailed = true;
     rtVoiceActive = false;
+    _voiceReady = false;
+    setVoiceStatus(ev.message || 'voice stopped');
+    setMicUI();
+    toast("Voice didn't start", ev.message || '', 'err', 5000, true);
   }
 }
 
 async function stopRealtimeVoice() {
+  _rtUserStop = true;
   rtVoiceActive = false;
   if (rtVoiceAbort) {
     try { rtVoiceAbort.abort(); } catch {}

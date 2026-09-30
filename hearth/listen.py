@@ -56,118 +56,124 @@ COMPUTE_TYPE = _env.get("STT_COMPUTE", "int8")  # CPU-friendly
 LANGUAGE = _env.get("STT_LANGUAGE", "").strip()
 
 
-def list_input_devices() -> list:
-    """[{index, name, default}] of real INPUT devices (mics), for the mic picker.
-    Re-initializes PortAudio first so a headset plugged in AFTER launch appears
-    (the device list is otherwise a stale startup snapshot). Skips the raw
-    kernel-streaming duplicates (the odd '...sys' names) and loopback/system-audio
-    capture, and dedupes by name."""
+def device_rows() -> tuple:
+    """([(index, name, input_channels, hostapi)], default_input_index) from a
+    fresh PyAudio instance. PyAudio enumerates devices each time it is created,
+    so a headset plugged in after launch is there; the sounddevice table is a
+    snapshot from startup that cannot be refreshed while a stream is open.
+    Falls back to sounddevice when PyAudio is not installed."""
+    try:
+        import pyaudio  # type: ignore
+        pa = pyaudio.PyAudio()
+        try:
+            rows = []
+            for i in range(pa.get_device_count()):
+                try:
+                    d = pa.get_device_info_by_index(i)
+                    api = pa.get_host_api_info_by_index(d["hostApi"]).get("name", "")
+                    rows.append((i, str(d.get("name", "")), int(d.get("maxInputChannels", 0)), api))
+                except Exception:
+                    continue
+            try:
+                default = int(pa.get_default_input_device_info()["index"])
+            except Exception:
+                default = None
+            return rows, default
+        finally:
+            pa.terminate()
+    except Exception:
+        pass
     try:
         import sounddevice as sd  # type: ignore
-        # NOTE: do NOT call sd._terminate()/_initialize() here — it tears down
-        # PortAudio while the running app may have a stream open and crashes the
-        # backend. Hot-plug rescan is handled out-of-process by _rescan_devices().
-        # Identify the WDM-KS host API — its device names are the raw driver
-        # entries (e.g. a '.sys'); MME/WASAPI give the friendly name.
-        wdmks = None
+        apis = [a.get("name", "") for a in sd.query_hostapis()]
+        rows = [(i, str(d.get("name", "")), int(d.get("max_input_channels", 0)),
+                 apis[d["hostapi"]] if d.get("hostapi") is not None else "")
+                for i, d in enumerate(sd.query_devices())]
         try:
-            for hi, ha in enumerate(sd.query_hostapis()):
-                _n = (ha.get("name") or "").lower()
-                if "wdm-ks" in _n or "kernel streaming" in _n:
-                    wdmks = hi
-                    break
+            default = sd.default.device[0]
         except Exception:
-            wdmks = None
-        try:
-            default_in = sd.default.device[0]
-        except Exception:
-            default_in = None
-        # Dedupe by a name PREFIX: the same physical mic shows up once per host
-        # API with different names (MME truncates to ~31 chars, WASAPI gives the
-        # full name), so an exact-name check leaves duplicates. Group by the first
-        # 18 chars and keep the fullest name; keep the default device's index.
-        #
-        # WDM-KS devices are raw kernel-streaming duplicates of what MME/WASAPI
-        # already expose, so we skip them — UNLESS a mic only exists on WDM-KS
-        # (some Realtek drivers only expose the mic there). Two-pass: first
-        # collect non-WDM-KS, then backfill WDM-KS-only entries.
-        by_pfx = {}
-        wdmks_only = []
-        for i, d in enumerate(sd.query_devices()):
-            if int(d.get("max_input_channels", 0)) <= 0:
-                continue
-            name = str(d.get("name", f"input {i}")).strip()
-            if not name:
-                continue
-            # Raw WDM-KS driver paths like "@System32\drivers\bthhfenum.sys,#2;%1 … %0"
-            # are kernel-streaming plumbing, not user-facing mics. They show up when
-            # Bluetooth HFP exposes both a clean WASAPI name and a raw WDM-KS alias;
-            # the dedup below keeps the clean one. Drop the raw one outright.
-            low = name.lower()
-            if "@system32" in low or "bthhfenum.sys" in low or ("%1" in name and "%0" in name):
-                continue
-            try:
-                if is_system_audio_device(name):
-                    continue
-            except Exception:
-                pass
-            is_wdmks = (wdmks is not None and d.get("hostapi") == wdmks)
-            is_def = (i == default_in)
-            pfx = name.lower()[:18]
-            cur = by_pfx.get(pfx)
-            if cur is None:
-                if is_wdmks:
-                    wdmks_only.append({"index": i, "name": name, "default": is_def,
-                                       "pfx": pfx})
-                else:
-                    by_pfx[pfx] = {"index": i, "name": name, "default": is_def}
-            else:
-                # Prefer the fuller name; the default's index wins so selecting it
-                # still points at the OS default.
-                if len(name) > len(cur["name"]):
-                    cur["name"] = name
-                    if not cur["default"]:
-                        cur["index"] = i
-                if is_def:
-                    cur["index"] = i
-                    cur["default"] = True
-        # Backfill: WDM-KS devices whose prefix never appeared on another API
-        # are the ONLY representation of that mic — keep them.
-        for w in wdmks_only:
-            if w["pfx"] not in by_pfx:
-                by_pfx[w["pfx"]] = {"index": w["index"], "name": w["name"],
-                                     "default": w["default"]}
-        return list(by_pfx.values())
+            default = None
+        return rows, default
     except Exception:
-        return []
+        return [], None
+
+
+def list_input_devices() -> list:
+    """[{index, name, default}] of real microphones for the mic picker, from the
+    current device table. Skips raw kernel-streaming duplicates and loopback
+    capture of the speakers, and lists each mic once under its fullest name."""
+    rows, default_in = device_rows()
+    by_pfx: dict = {}
+    wdmks_only = []
+    for i, name, ch, api in rows:
+        name = name.strip()
+        if ch <= 0 or not name:
+            continue
+        low = name.lower()
+        if "@system32" in low or "bthhfenum.sys" in low or ("%1" in name and "%0" in name):
+            continue
+        try:
+            if is_system_audio_device(name):
+                continue
+        except Exception:
+            pass
+        is_wdmks = "wdm-ks" in (api or "").lower() or "kernel streaming" in (api or "").lower()
+        is_def = (i == default_in)
+        pfx = low[:18]
+        cur = by_pfx.get(pfx)
+        if cur is None:
+            if is_wdmks:
+                wdmks_only.append({"index": i, "name": name, "default": is_def, "pfx": pfx})
+            else:
+                by_pfx[pfx] = {"index": i, "name": name, "default": is_def}
+        else:
+            if len(name) > len(cur["name"]):
+                cur["name"] = name
+                if not cur["default"]:
+                    cur["index"] = i
+            if is_def:
+                cur["index"] = i
+                cur["default"] = True
+    for w in wdmks_only:
+        if w["pfx"] not in by_pfx:
+            by_pfx[w["pfx"]] = {"index": w["index"], "name": w["name"], "default": w["default"]}
+    return list(by_pfx.values())
+
+
+class MicInput:
+    """A mic opened through PyAudio, read like a sounddevice stream:
+    read(n) -> (float32 array of shape (n, 1), overflowed)."""
+
+    def __init__(self, index, rate: int, block: int):
+        import pyaudio  # type: ignore
+        self._pa = pyaudio.PyAudio()
+        try:
+            self._st = self._pa.open(format=pyaudio.paInt16, channels=1, rate=rate, input=True,
+                                     input_device_index=index, frames_per_buffer=block)
+        except Exception:
+            self._pa.terminate()
+            raise
+
+    def read(self, n: int):
+        import numpy as np  # type: ignore
+        raw = self._st.read(n, exception_on_overflow=False)
+        return (np.frombuffer(raw, dtype=np.int16).astype("float32") / 32768.0).reshape(-1, 1), False
+
+    def stop(self) -> None:
+        try:
+            self._st.stop_stream()
+        except Exception:
+            pass
+
+    def close(self) -> None:
+        try:
+            self._st.close()
+        finally:
+            self._pa.terminate()
 
 
 def rescan_devices() -> list:
-    """Re-enumerate mics to catch a just-plugged headset. Re-initializing
-    PortAudio in-process crashes the running app, so do it in an ISOLATED
-    subprocess (its own PortAudio) and read the clean list back. Falls back to
-    the in-process list on any error."""
-    import subprocess
-    import json as _json
-    code = ("import sounddevice as sd\n"
-            "try:\n sd._terminate(); sd._initialize()\n"
-            "except Exception: pass\n"
-            "import hearth.listen as L, json\n"
-            "print(json.dumps(L.list_input_devices()))")
-    try:
-        args = ([sys.executable, "--hearth-run-python", "-c", code]
-                if getattr(sys, "frozen", False)
-                else [sys.executable, "-c", code])
-        flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
-        r = subprocess.run(args, capture_output=True, text=True, timeout=12,
-                           creationflags=flags)
-        lines = [ln for ln in (r.stdout or "").strip().splitlines() if ln.strip()]
-        if lines:
-            data = _json.loads(lines[-1])
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
+    """The mic list, freshly enumerated (see device_rows)."""
     return list_input_devices()
 
 

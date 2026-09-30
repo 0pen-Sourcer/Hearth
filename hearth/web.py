@@ -1879,9 +1879,18 @@ class HearthHandler(BaseHTTPRequestHandler):
                 cur = int(_env.get("VOICE_INPUT_DEVICE", "-1"))
             except ValueError:
                 cur = -1
+            sel_name = _env.get("VOICE_INPUT_NAME", "")
+            if not sel_name and cur >= 0 and _listen:
+                # An older pick saved as a number: name it now if it still means
+                # a real mic, and keep it that way.
+                try:
+                    sel_name, _why = _listen.name_for_numbered_pick(cur)
+                    if sel_name:
+                        _save_settings({"voice_input_name": sel_name})
+                except Exception:
+                    sel_name = ""
             return self._send_json(200, {
-                "devices": devs, "selected": cur,
-                "selected_name": _env.get("VOICE_INPUT_NAME", "")})
+                "devices": devs, "selected": cur, "selected_name": sel_name})
         if path == "/api/voice/install-status":
             return self._send_json(200, _VOICE_INSTALL or {"running": False})
         if path == "/api/voice/status":
@@ -4329,7 +4338,13 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _voice.set_level_sink(lambda v: put({"type": "level", "v": v}))
             # "warming" until the STT model finishes loading; the ready callback
             # flips it to listening once the recorder can actually hear.
-            emit({"type": "warming"})
+            _detail = ""
+            try:
+                if not _rt_voice.model_downloaded():
+                    _detail = "downloading the speech model, first time only (a minute or two)…"
+            except Exception:
+                pass
+            emit({"type": "warming", "detail": _detail} if _detail else {"type": "warming"})
             lease = _rt_voice.start_continuous(
                 lambda t: put({"type": "final", "text": t}),
                 on_caption=lambda t: put({"type": "partial", "text": t}),
