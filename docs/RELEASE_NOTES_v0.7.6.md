@@ -8,7 +8,7 @@ A web page open in any browser tab could reach Hearth's local server, read the A
 
 A model could approve its own destructive command by adding one field to the call, which a web page or a file could talk it into. Approval now comes from you and nothing else. The guard that stops commands like deleting a folder only knew one spelling of most of them, and PowerShell has many, so it now catches the ways those commands are ordinarily written. Background jobs had no guard and no prompt at all while the same command run directly was refused, and now they have both.
 
-Tools from MCP servers ask before they run, like every other tool that acts on your machine, and they no longer receive your cloud key or mail password along with the rest of the environment. Clicking by picture and pressing keys in the browser now ask as well, the same as the clicks and typing that always did.
+Tools from MCP servers ask before they run, like every other tool that acts on your machine, and they no longer receive your cloud key or mail password along with the rest of the environment. Clicking by picture and pressing keys in the browser now ask as well, the same as the clicks and typing that always did. Agents in a team follow your permissions too. They used to run risky tools without asking; now they run one only if you have already said to always allow it.
 
 Writes stay inside your workspace, judged by where they actually land. A shortcut folder inside the workspace that pointed somewhere else used to let a write go straight through it without a question. A search pattern could hand options to the search engine underneath, including one that runs a program on every file it reads, and a web fetch of a local file could read past the read lockdown. Both are closed. In the terminal, /lockdown on now really confines reads, where before it only said it did.
 
@@ -98,7 +98,7 @@ The terminal no longer crashes on the first tool call of a session, and Ctrl+Z e
 
 ## Elsewhere
 
-Searching past chats finds what you asked about. Most questions used to report no match even when there was one.
+Searching past chats finds what you asked about. Most questions used to report no match even when there was one. The window opens fast with a long chat history, because it reads a chat only when you open it instead of loading every one in full to draw the sidebar.
 
 Updating is safe to interrupt. If the power goes or you kill Hearth while it is replacing files, the next start puts it back the way it was rather than leaving you with an install that will not open. Your chats survive being killed mid-save too, and a save that got cut off no longer leaves a ghost copy of the chat sitting in the sidebar.
 
@@ -106,8 +106,8 @@ Asking Hearth for a capability it does not have gets a straight answer instead o
 
 A command card shows the command that ran above its output, and the approval prompt can show the whole command before you allow it rather than cutting it off. Repairing an install reports in the same place as other downloads, with progress and a cancel. Email setup moved to Connectors where it belongs, and a voice install that fails part way can be retried instead of dead-ending. Settings now links to the project, so the source, releases and issue tracker are one click away.
 
-Reads can be confined to your workspace from Settings without setting an environment variable. Windows shows the version you actually have after an update. People running from a git clone are told when there is something worth pulling. When no model is loaded, the app and the terminal both say so in red instead of showing a placeholder that looked like a model.
+Reads can be confined to your workspace from Settings without setting an environment variable. Hearth's environment variables are named HEARTH_ now, since the agent can have any name, and the old JARVIS_ ones keep working. Windows shows the version you actually have after an update. People running from a git clone are told when there is something worth pulling. When no model is loaded, the app and the terminal both say so in red instead of showing a placeholder that looked like a model.
 
 ---
 
-Windows installer only. Full includes the GPU engine, Lite is for people already running Ollama or LM Studio. Linux runs from source, though desktop control is Windows only for now. Not code signed yet, so Windows shows the blue unknown-publisher box, click More info then Run anyway.
+Windows installer only. Full includes the GPU engine, Lite is for people already running Ollama or LM Studio. Linux runs from source, though desktop control is Windows only for now. Not code signed yet, so Windows shows the blue unknown-publisher box, click More info then Run anyway. Every installer is checked before release: it starts, its voice and model engine load, and Windows Defender scans it clean.
