@@ -3765,7 +3765,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Where Hearth's AI lives</div>
-            <div class="hint" id="brain-where-hint">Local-first (LM Studio / Ollama / built-in). For full control, open the Models tab.</div>
+            <div class="hint" id="brain-where-hint">On this PC by default, or a cloud service with your own key. Load and manage local models in the Models tab.</div>
           </div>
           <select id="setting-brain-mode">
             <option value="local">Local-first - on this PC (recommended)</option>
@@ -3821,7 +3821,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Speak responses out loud</div>
-            <div class="hint">Uses the Kokoro voice. Toggle on for hands-free.</div>
+            <div class="hint">Reads every reply aloud.</div>
             <div class="voice-status" id="tts-status">checking…</div>
           </div>
           <div class="switch" data-key="voice_tts"></div>
@@ -3829,7 +3829,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Listen for my voice (auto)</div>
-            <div class="hint">Real-time mode uses silero VAD - just talk, no buttons. Falls back to press-to-talk if not installed.</div>
+            <div class="hint">Just talk, no buttons: Hearth notices when you start and stop speaking. Off means press-to-talk.</div>
             <div class="voice-status" id="stt-status">checking…</div>
           </div>
           <div class="switch" data-key="voice_stt"></div>
@@ -3837,7 +3837,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Wake word</div>
-            <div class="hint">Say this and Hearth opens already listening, even from the tray. It follows your agent's name, so renaming to Clara means "hey Clara". Leave it empty to use the defaults. Separate several with commas. <b>This holds the microphone open the whole time Hearth runs</b>, which on some headsets forces hands-free mode and quietens your music, so turn it off if you are not using it.</div>
+            <div class="hint">Say this to start talking to Hearth, even while it sits in the tray. It follows the assistant's name. Separate phrases with commas. It keeps the microphone open, which switches some headsets into call mode, so leave it off if you don't use it.</div>
             <div class="voice-status" id="wake-status">checking…</div>
           </div>
           <div class="switch" data-key="tray_wake_on"></div>
@@ -3851,15 +3851,15 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Half-duplex (speaker mode)</div>
-            <div class="hint">On a headset, leave this OFF so you can interrupt by voice. Turn it ON only if you run on speakers and Hearth ever hears itself and loops - it then holds the mic closed while it speaks, so you can't barge in mid-sentence.</div>
+            <div class="name">Speakers mode</div>
+            <div class="hint">Turn this on if you use speakers and Hearth hears itself talking. It stops listening while it speaks, so you can't interrupt it. Leave it off with headphones.</div>
           </div>
           <div class="switch" data-key="voice_half_duplex"></div>
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Speaking (text-to-speech)</div>
-            <div class="hint">Where the spoken-aloud voice (Kokoro) runs. CPU is plenty fast for speaking — you rarely need GPU here. (Listening / transcription is the "Where to transcribe" setting below — that's the one that benefits from GPU.)</div>
+            <div class="name">Voice runs on</div>
+            <div class="hint">The processor is fast enough for speaking. The graphics card matters for listening, further down.</div>
           </div>
           <select id="setting-tts-device">
             <option value="cpu">CPU (recommended)</option>
@@ -3870,7 +3870,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Voice</div>
-            <div class="hint">Which Kokoro voice speaks. Change it anytime — no need to redo onboarding.</div>
+            <div class="hint">Which voice speaks. Change it anytime.</div>
           </div>
           <div style="display:flex; align-items:center; gap:10px; min-width:300px;">
             <select id="setting-voice-name" style="flex:1; min-width:210px;">
@@ -3937,7 +3937,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Voice speed</div>
-            <div class="hint">1.5 is the new default - faster, less monotone. Slide higher if you want it snappier; lower if it's too quick to follow.</div>
+            <div class="hint">How fast the voice talks. 1.5 is the default.</div>
           </div>
           <div style="display:flex; align-items:center; gap:12px; min-width:240px;">
             <input id="setting-voice-speed" type="range" min="0.5" max="2.5" step="0.1" value="1.5" style="flex:1;">
@@ -3947,7 +3947,7 @@
         <div class="field" style="flex-direction:column; align-items:stretch; gap:6px;">
           <div class="label">
             <div class="name">Microphone</div>
-            <div class="hint">Which mic Hearth listens through. Pick your headset or virtual mic if the system default isn't capturing your voice. Plugged one in just now? Hit Refresh.</div>
+            <div class="hint">Which microphone Hearth listens through. Plugged one in just now? Press Refresh.</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <select id="setting-mic-device" style="flex:1; min-width:200px;">
@@ -3966,8 +3966,8 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Whisper model size<span class="dl-dot" id="stt-dl-dot"></span></div>
-            <div class="hint"><code>tiny.en</code> = fastest, fine for clear short prompts. <code>small.en</code> for harder accents or noisy rooms. A name ending <code>.en</code> understands English only; pick one from the second group to speak anything else.</div>
+            <div class="name">Speech recognition<span class="dl-dot" id="stt-dl-dot"></span></div>
+            <div class="hint">Larger is more accurate and slower. Names ending in .en understand English only; pick one from the second group for other languages.</div>
           </div>
           <select id="setting-stt-model">
             <optgroup label="English only">
@@ -4017,8 +4017,8 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Where to transcribe (STT)</div>
-            <div class="hint"><b>GPU (CUDA) recommended</b> — Whisper transcription is far faster on GPU than CPU. If it says "(not installed)", just pick it — Hearth downloads the CUDA runtime for you (~500&nbsp;MB, one-time) right here.</div>
+            <div class="name">Listening runs on</div>
+            <div class="hint">The graphics card is much faster. If it says not installed, pick it anyway and Hearth downloads what it needs (about 500 MB, once).</div>
           </div>
           <select id="setting-stt-device" data-gpu="1">
             <option value="cpu">CPU</option>
@@ -4039,7 +4039,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Agent name</div>
-            <div class="hint">What do you want to call me? Shows up everywhere - chat avatar, persona signature, workspace folder. Letters/digits/spaces only, 1-20 chars. Default: JARVIS.</div>
+            <div class="hint">What the assistant is called: in chat, in its voice and in the wake word. It also names the workspace folder. Letters, digits and spaces, up to 20.</div>
           </div>
           <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
             <input type="text" id="setting-agent-name" maxlength="20" pattern="[A-Za-z0-9 ]+" style="flex:1; min-width:160px;"/>
@@ -4052,7 +4052,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Show reasoning by default</div>
-            <div class="hint">For thinking models - exposes the internal scratchpad. Triples response time on some.</div>
+            <div class="hint">Show the model's thinking before its answer, for models that think. Replies can take much longer.</div>
           </div>
           <div class="switch" data-key="think_default"></div>
         </div>
@@ -4060,7 +4060,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Reasoning effort</div>
-            <div class="hint">When reasoning is on, how hard a supporting model thinks (cloud models that accept it). Model default lets the model decide.</div>
+            <div class="hint">How hard a cloud model thinks when reasoning is on. Model default lets it decide.</div>
           </div>
           <select id="setting-think-level" style="min-width:150px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:7px 10px;font-size:12px;outline:none;">
             <option value="">Model default</option>
@@ -4073,7 +4073,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Lock reads to workspace</div>
-            <div class="hint">By default JARVIS can READ anywhere on your disk (writes are always confined to the workspace). Turn this on to confine reads too. Takes effect immediately, no restart.</div>
+            <div class="hint">Hearth can read files anywhere on this PC and only ever writes inside its workspace. Turn this on to keep reading inside the workspace too.</div>
           </div>
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" class="switch-box" id="setting-lockdown"/>
@@ -4082,7 +4082,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Show memory tool cards</div>
-            <div class="hint">JARVIS saves and recalls facts on most turns, so those cards can outnumber the reply itself. Turn this off to keep them out of the chat. It changes nothing about what gets remembered, and the cards come back if you turn it on again, in old chats too.</div>
+            <div class="hint">Hearth saves and looks up facts on most turns. Turn this off to hide those steps in the chat; what it remembers doesn't change.</div>
           </div>
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" class="switch-box" id="setting-show-memory-tools"/>
@@ -4091,19 +4091,14 @@
         <div class="field">
           <div class="label">
             <div class="name">House rules</div>
-            <div class="hint">Always-do / never-do rules live in <code>~/Jarvis/rules.md</code> and are re-read every turn. Edit freely, no restart.</div>
+            <div class="hint">Things it should always or never do, kept in a file it rereads every turn.</div>
           </div>
           <button class="btn-mini" id="btn-edit-rules">Open rules.md</button>
         </div>
         <div class="field">
           <div class="label">
             <div class="name">Forge / SD-WebUI folder</div>
-            <div class="hint">
-              For LOCAL image gen via Stable Diffusion. Point at your sd-webui-forge install
-              (the folder with <code>webui.bat</code> + <code>modules/</code>). Auto-detected if
-              installed in a common location; otherwise paste the full path.
-              <span id="forge-detect-hint" style="color:var(--fg-faint)">scanning…</span>
-            </div>
+            <div class="hint">For making images on this PC with Stable Diffusion: the Forge folder that has webui.bat in it. Found by itself in the usual places. <span id="forge-detect-hint" style="color:var(--fg-faint)">scanning…</span></div>
           </div>
           <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
             <input type="text" id="setting-forge-dir" placeholder="e.g. D:\AI\sd-webui-forge" style="flex:1; min-width:220px;"/>
@@ -4114,14 +4109,7 @@
         <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">Migrate from another agent</div>
-            <div class="hint">
-              Import memory, skills, and (optionally) the model/provider
-              config from <b>Hermes</b> or <b>OpenClaw</b>. API keys are
-              never copied. Memory files become Hearth memories under
-              <code>~/Jarvis/memory/</code>; skills get parked under
-              <code>~/Jarvis/imported_skills/</code> for later review.
-              Dry-run shows what would happen before any write.
-            </div>
+            <div class="hint">Bring memory and skills over from Hermes or OpenClaw. API keys are never copied. Dry-run shows what would change before anything does.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:260px;">
             <div style="display:flex;gap:6px;align-items:center;">
@@ -4167,21 +4155,21 @@
         <div class="field">
           <div class="label">
             <div class="name">Generation stats</div>
-            <div class="hint">The tok/s counter while a reply streams and the speed + total-time footer under each message (hover to see it). Off hides both.</div>
+            <div class="hint">Speed while a reply comes in, and time and speed under each message when you hover it.</div>
           </div>
           <div class="switch" data-key="gen_stats"></div>
         </div>
         <div class="field">
           <div class="label">
             <div class="name">File-change diffs</div>
-            <div class="hint">Show a green/red diff of what changed when Hearth writes or edits a file, inside the tool card. Off shows the plain result text instead.</div>
+            <div class="hint">Show what changed, in green and red, when Hearth edits a file.</div>
           </div>
           <div class="switch" data-key="show_diffs"></div>
         </div>
         <div class="field">
           <div class="label">
             <div class="name">Chat bubbles</div>
-            <div class="hint">Right-align your messages into a tinted bubble, like a messaging app. Off (default) keeps Hearth's own look — your turns left-aligned like everything else.</div>
+            <div class="hint">Put your messages in bubbles on the right, like a messaging app.</div>
           </div>
           <div class="switch" data-key="user_bubbles"></div>
         </div>
@@ -4195,7 +4183,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Activity overlay</div>
-            <div class="hint">While JARVIS controls the desktop (clicking, typing, reading the screen) a small pill floats at the top of the screen showing what it's doing, so you can follow along even when another window is focused. It never takes focus or blocks clicks.</div>
+            <div class="hint">While Hearth works the desktop, a small label at the top of the screen says what it is doing. It never takes focus or blocks a click.</div>
           </div>
           <div class="switch" data-key="activity_hud"></div>
         </div>
@@ -4204,22 +4192,22 @@
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Toasts</h4>
         <div class="field">
           <div class="label">
-            <div class="name">Mute all notification toasts</div>
-            <div class="hint">Silences every corner pop-up (API errors, status, confirmations). Master switch - overrides the toggles below. Errors still show in Logs.</div>
+            <div class="name">Mute all pop-ups</div>
+            <div class="hint">Hide every pop-up notice. Errors still go to Logs.</div>
           </div>
           <div class="switch" data-key="mute_toasts"></div>
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">"Remembered N facts" toast</div>
-            <div class="hint">Pops up when Hearth auto-extracts durable facts at end of a turn. Off = silent saves; check the Memory tab to see what landed.</div>
+            <div class="name">"Remembered" pop-up</div>
+            <div class="hint">A notice when Hearth saves something new about you.</div>
           </div>
           <div class="switch" data-key="toast_facts_saved"></div>
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">"Context compacted" toast</div>
-            <div class="hint">Brief pop when compaction shrinks your context. The ring next to the input already changes color - toast is extra.</div>
+            <div class="name">"Summarised" pop-up</div>
+            <div class="hint">A notice when an older part of the chat is summarised to make room.</div>
           </div>
           <div class="switch" data-key="toast_compacted"></div>
         </div>
@@ -4229,7 +4217,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Keep local model loaded when switching to cloud</div>
-            <div class="hint">Off (default) = free the 5+ GB VRAM when you go to Grok/Gemini. On = leave it warm so swapping back is instant (~10s reload tax saved). Recommended off on 8 GB VRAM cards.</div>
+            <div class="hint">Off frees graphics memory when you switch to a cloud model. On keeps the local one ready, so switching back is instant.</div>
           </div>
           <div class="switch" data-key="keep_local_warm"></div>
         </div>
@@ -4340,8 +4328,8 @@
 
         <div class="field">
           <div class="label">
-            <div class="name">Auto-boot last model on launch</div>
-            <div class="hint">When you start Hearth, automatically load the last <strong>local GGUF</strong> you used into the built-in server. Saves the 15-30s "wait for me to click Use this" beat. Does NOT affect cloud brains (Grok / Gemini / OpenAI) - those just need the API key.</div>
+            <div class="name">Load my last model at start</div>
+            <div class="hint">When Hearth starts, it loads the last local model you used.</div>
           </div>
           <div class="switch" data-key="server_autoboot"></div>
         </div>
@@ -4377,7 +4365,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Idle auto-unload</div>
-            <div class="hint">How long the server can sit idle before unloading the model to free VRAM. <code>0</code> = never unload. Same as <code>HEARTH_KEEP_ALIVE_MIN</code>.</div>
+            <div class="hint">Unload the model after this many idle minutes to free graphics memory. 0 keeps it loaded.</div>
           </div>
           <select id="setting-server-idle">
             <option value="0">never</option>
