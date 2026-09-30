@@ -187,6 +187,34 @@ def _read_settings_endpoint():
         return None, None, None, None
 
 
+
+def _type_out(text: str, delay: float = 0.012) -> None:
+    """Print a line a character at a time, the way a person would type it.
+    Escape codes go out whole, and anything not a terminal gets the line at
+    once."""
+    if not sys.stdout.isatty() or _env.get("NO_ANIMATION") in ("1", "true", "yes"):
+        print(text)
+        return
+    parts = re.split(r"(\x1b\[[0-9;]*m)", text)
+    for part in parts:
+        if part.startswith("\x1b"):
+            sys.stdout.write(part)
+            continue
+        for ch in part:
+            sys.stdout.write(ch)
+            sys.stdout.flush()
+            time.sleep(delay)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
+def _setup_rule(step: int, total: int, title: str) -> None:
+    """A thin progress rule between parts of first-run setup."""
+    width = 24
+    filled = round(width * step / total)
+    print(f"  {C_BRAND}{'━' * filled}{C_DIM}{'─' * (width - filled)}{C_RESET}  "
+          f"{C_DIM}{step}/{total}{C_RESET}  {C_TOOL}{title}{C_RESET}")
+
 def _probe_live_model(url: str, key: str = "") -> Optional[str]:
     """Ask an endpoint what it is ACTUALLY serving right now.
 
@@ -4044,10 +4072,11 @@ class JarvisCLI:
         if not self._is_first_run():
             return
 
+        from hearth.persona import NAME as _me
         print()
-        print(f"{C_BRAND}─ first-run setup ─{C_RESET}  "
-              f"{C_DIM}~60 seconds. Helps me be useful to you specifically.{C_RESET}")
-        print(f"{C_DIM}  press Enter to skip a question; Ctrl-C any time to skip the rest{C_RESET}")
+        _type_out(f"  {C_BRAND}Hey, I'm {_me}.{C_RESET}")
+        _type_out(f"  {C_DIM}A minute of setup so I fit how you work. Enter skips a question, "
+                  f"Ctrl-C skips the rest.{C_RESET}", delay=0.004)
         print()
 
         # WHERE to keep files - ask BEFORE anything writes to disk, so a user
@@ -4079,6 +4108,7 @@ class JarvisCLI:
         # Learn the machine FIRST - hardware, installed models, drive map - so the
         # model walks in with real context (and never wastes 2 minutes disk-scanning
         # for things it could have just known). Same call backs the /learn command.
+        _setup_rule(1, 4, "your machine")
         print(f"  {C_DIM}getting to know your machine (hardware, models, drives)...{C_RESET}")
         try:
             from hearth.environment import learn_environment
@@ -4098,6 +4128,7 @@ class JarvisCLI:
             # a phantom name in the FIRST thing a new user reads makes every
             # later failure look like Hearth lying. Ask the endpoint instead.
             _live = _probe_live_model(LOCAL_API_BASE, LOCAL_API_KEY)
+            _setup_rule(2, 4, "a brain")
             print(f"  {C_TOOL}Which model should I think with?{C_RESET}")
             print(f"  {C_DIM}    Local means it runs on your own GPU. Free, private, "
                   f"nothing leaves this machine.{C_RESET}")
@@ -4135,6 +4166,7 @@ class JarvisCLI:
             print()
 
         answers: Dict[str, str] = {}
+        _setup_rule(3, 4, "about you")
         try:
             answers = self._ask_personal(ask)
         except (KeyboardInterrupt, EOFError):
@@ -4147,6 +4179,7 @@ class JarvisCLI:
         print(f"  {C_OK}saved.{C_RESET}  "
               f"{C_DIM}/me changes any of it later.{C_RESET}")
         print()
+        _setup_rule(4, 4, "bring your history")
         # Offer importing memory from another AI - most people already have
         # years of context in ChatGPT/Claude. /import-memory walks them through it.
         print(f"  {C_TOOL}Already use ChatGPT or Claude?{C_RESET}  "

@@ -3048,17 +3048,27 @@
   .ob-seg button small { display: block; margin-top: 3px; font-weight: 400; font-size: 11.5px; color: var(--fg-dim); line-height: 1.35; }
   .ob-seg button:hover { border-color: var(--border-2); }
   .ob-seg button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-2)); }
+  /* With motion on, one highlight slides between the options instead of each
+     option lighting up on its own. */
+  .ob-seg.ob-slide { position: relative; }
+  .ob-seg.ob-slide button, .ob-seg.ob-slide button.on { background: var(--bg-2); border-color: var(--border); position: relative; z-index: 1; }
+  .ob-seg.ob-slide button.on { background: transparent; border-color: transparent; }
+  .ob-seg .ob-seg-hl { position: absolute; z-index: 0; border-radius: var(--r); pointer-events: none;
+    border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg-2)); }
+  .ob-hero .ob-arch { stroke-dasharray: 150; }
+  /* The whole window repaints from the point that was clicked. */
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
   .ob-hero svg { color: var(--accent); }
+  /* The app stays visible, softened, behind setup, so picking a look shows it
+     on the real window rather than on a swatch. */
   .ob-overlay {
     display: none;
     position: fixed; inset: 0;
-    background: radial-gradient(1100px 700px at 50% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%),
-                linear-gradient(180deg, var(--bg-0) 0%, var(--bg-0) 100%);
-    backdrop-filter: blur(8px);
+    background: color-mix(in srgb, var(--bg-0) 58%, transparent);
+    backdrop-filter: blur(10px) saturate(0.9);
     z-index: 1400;
     align-items: center; justify-content: center;
     padding: 40px;
-    animation: modalBgIn 0.25s var(--ease);
   }
   .ob-overlay.open { display: flex; }
   .ob-card {
@@ -3067,10 +3077,10 @@
     background: var(--bg-1);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-xl);
-    box-shadow: 0 25px 80px rgba(0,0,0,0.55), 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.5);
     display: flex; flex-direction: column;
     overflow: hidden;
-    animation: modalIn 0.32s var(--ease);
+    transform-origin: 50% 50%;
   }
   .ob-progress {
     display: flex; gap: 8px;
@@ -3082,14 +3092,21 @@
     transition: background 0.25s var(--ease);
   }
   .ob-progress .dot.done { background: var(--accent); }
-  .ob-progress .dot.cur  { background: var(--accent-2); box-shadow: 0 0 12px color-mix(in srgb, var(--accent-2) 45%, transparent); }
+  .ob-progress .dot.cur  { background: var(--accent-2); }
+  /* One track with a capsule for the current step. Its two edges ride
+     different springs, so it stretches toward the next step and settles. */
+  .ob-progress.ob-liquid .dot { display: none; }
+  .ob-track { position: relative; flex: 1; height: 4px; border-radius: 99px; background: var(--bg-3); overflow: hidden; }
+  .ob-track i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 99px; }
+  .ob-track .ob-done { background: color-mix(in srgb, var(--accent) 45%, var(--bg-3)); }
+  .ob-track .ob-cur { background: var(--accent); }
   /* … so the body scrolls between the fixed progress bar + footer, keeping
      Continue always reachable even with many models / a short screen. */
   .ob-body { padding: 36px 44px 32px 44px; flex: 1 1 auto; overflow-y: auto; min-height: 0; }
   .ob-hero {
     width: 64px; height: 64px;
     border-radius: 16px;
-    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent-2) 6%, transparent));
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-2));
     border: 1px solid var(--accent-line);
     display: flex; align-items: center; justify-content: center;
     color: var(--accent-2);
@@ -3169,8 +3186,8 @@
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--fg-faint);
   }
-  .ob-status-row.is-good .ob-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-  .ob-status-row.is-warn .ob-dot { background: var(--accent-2); box-shadow: 0 0 8px color-mix(in srgb, var(--accent-2) 45%, transparent); }
+  .ob-status-row.is-good .ob-dot { background: var(--ok); }
+  .ob-status-row.is-warn .ob-dot { background: var(--accent-2); }
   .ob-status-row.is-bad  .ob-dot { background: var(--err); }
   .ob-disk-list {
     max-height: 160px; overflow-y: auto;
@@ -4725,7 +4742,7 @@
     <div class="ob-body" id="ob-body">
       <!-- ---- step 1: welcome ---- -->
       <div class="ob-step" data-step="1">
-        <div class="ob-hero"><svg width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M15 53V31a17 17 0 0 1 34 0v22M9 53h46" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z" fill="currentColor"/></svg></div>
+        <div class="ob-hero"><svg width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path class="ob-arch" d="M15 53V31a17 17 0 0 1 34 0v22M9 53h46" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><path class="ob-flame" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z" fill="currentColor"/></svg></div>
         <h1 class="ob-title">Hey, I'm <span class="ob-agent-name">JARVIS</span>.</h1>
         <p class="ob-sub">I run on your PC and do real things on it: open apps, find and read your
           files, browse the web, and talk out loud if you want. Nothing leaves this machine unless you
@@ -15766,6 +15783,267 @@ async function _obProbeMigrate() {
     }, 400);
   }
 }
+
+// ============================================================
+// MOTION - springs for setup. A spring is a closed-form step response, and a
+// value retargeted many times is the sum of one step per change, so position
+// and speed stay continuous however often it is pushed. One-shot animations
+// use the same curve through a linear() easing.
+// ============================================================
+const _reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function _springStep(t, period, zeta) {
+  if (t <= 0) return 0;
+  const w = 2 * Math.PI / period;
+  if (zeta >= 1) return 1 - Math.exp(-w * t) * (1 + w * t);
+  const wd = w * Math.sqrt(1 - zeta * zeta);
+  return 1 - Math.exp(-zeta * w * t) * (Math.cos(wd * t) + (zeta * w / wd) * Math.sin(wd * t));
+}
+// A spring as a CSS easing, for element.animate(). Duration is when it has
+// settled within half a percent.
+function springEasing(period = 0.42, zeta = 0.82) {
+  let dur = period;
+  for (let t = period * 0.5; t < period * 6; t += 0.01) {
+    let settled = true;
+    for (let u = t; u < t + period; u += 0.02) if (Math.abs(1 - _springStep(u, period, zeta)) > 0.005) { settled = false; break; }
+    if (settled) { dur = t; break; }
+  }
+  const pts = [];
+  for (let i = 0; i <= 40; i++) pts.push(+_springStep(dur * i / 40, period, zeta).toFixed(4));
+  pts[pts.length - 1] = 1;
+  return { easing: `linear(${pts.join(', ')})`, duration: Math.round(dur * 1000) };
+}
+class Spring {
+  constructor(value, period = 0.42, zeta = 0.82) {
+    this.base = value; this.target = value; this.steps = []; this.period = period; this.zeta = zeta;
+  }
+  to(target, now = performance.now() / 1000) {
+    if (target === this.target) return;
+    this.steps.push({ t0: now, d: target - this.target });
+    this.target = target;
+    _springTick();
+  }
+  jump(v) { this.base = this.target = v; this.steps = []; }
+  value(now = performance.now() / 1000) {
+    let v = this.base;
+    for (const s of this.steps) v += s.d * _springStep(now - s.t0, this.period, this.zeta);
+    return v;
+  }
+  settled(now = performance.now() / 1000) {
+    const done = this.steps.every(s => now - s.t0 > this.period * 3);
+    if (done && this.steps.length) { this.base = this.target; this.steps = []; }
+    return done;
+  }
+}
+const _springUsers = new Set();   // functions that draw from springs each frame
+let _springRaf = 0;
+function _springTick() {
+  if (_springRaf) return;
+  const frame = () => {
+    let busy = false;
+    for (const f of _springUsers) if (f() !== false) busy = true;
+    _springRaf = busy ? requestAnimationFrame(frame) : 0;
+  };
+  _springRaf = requestAnimationFrame(frame);
+}
+
+// Repaint the whole window from a point, for a change of look.
+function revealLook(x, y, apply) {
+  if (_reduceMotion() || !document.startViewTransition) { apply(); return; }
+  const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  const vt = document.startViewTransition(apply);
+  vt.ready.then(() => {
+    const sp = springEasing(0.7, 1);
+    document.documentElement.animate(
+      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
+      { duration: sp.duration, easing: sp.easing, pseudoElement: '::view-transition-new(root)' });
+  }).catch(() => {});
+}
+
+// ---- setup: the card, its progress capsule and the sliding highlights
+const _obMotion = {
+  h: new Spring(0, 0.46, 0.86),
+  capL: new Spring(0, 0.5, 0.9), capR: new Spring(0, 0.34, 0.8),
+  done: new Spring(0, 0.5, 0.9),
+  segs: new Map(),
+  shownStep: 0,
+};
+function _obEnsureTrack() {
+  const prog = document.getElementById('ob-progress');
+  if (!prog || prog.querySelector('.ob-track')) return prog;
+  prog.classList.add('ob-liquid');
+  prog.insertAdjacentHTML('beforeend', '<div class="ob-track"><i class="ob-done"></i><i class="ob-cur"></i></div>');
+  return prog;
+}
+function _obPaintTrack() {
+  const tr = document.querySelector('#ob-progress .ob-track');
+  if (!tr) return false;
+  const W = tr.clientWidth || 1;
+  const l = _obMotion.capL.value(), r = _obMotion.capR.value(), d = _obMotion.done.value();
+  const cur = tr.querySelector('.ob-cur'), done = tr.querySelector('.ob-done');
+  cur.style.left = (Math.min(l, r) * W) + 'px';
+  cur.style.width = (Math.max(0.004, Math.abs(r - l)) * W) + 'px';
+  done.style.width = (Math.max(0, d) * W) + 'px';
+  return !(_obMotion.capL.settled() && _obMotion.capR.settled() && _obMotion.done.settled());
+}
+_springUsers.add(_obPaintTrack);
+function _obMoveTrack(step, total, instant) {
+  _obEnsureTrack();
+  const seg = 1 / total, gap = 0.012;
+  const L = (step - 1) * seg + gap / 2, R = step * seg - gap / 2;
+  if (instant) { _obMotion.capL.jump(L); _obMotion.capR.jump(R); _obMotion.done.jump(L); _obPaintTrack(); return; }
+  _obMotion.capL.to(L); _obMotion.capR.to(R); _obMotion.done.to(L);
+}
+
+// A highlight slides between the options of a choice group. Edges on two
+// springs: the one heading toward the new option moves first.
+function _obSlideSeg(box, instant) {
+  if (!box) return;
+  const on = box.querySelector('button.on');
+  let st = _obMotion.segs.get(box);
+  if (!st) {
+    const hl = document.createElement('div');
+    hl.className = 'ob-seg-hl';
+    box.prepend(hl);
+    box.classList.add('ob-slide');
+    st = { hl, L: new Spring(0, 0.42, 0.84), R: new Spring(0, 0.42, 0.84), T: 0, H: 0, seen: false };
+    _obMotion.segs.set(box, st);
+    _springUsers.add(() => {
+      if (!st.hl.isConnected) return false;
+      const l = st.L.value(), r = st.R.value();
+      st.hl.style.left = l + 'px'; st.hl.style.width = Math.max(0, r - l) + 'px';
+      st.hl.style.top = st.T + 'px'; st.hl.style.height = st.H + 'px';
+      return !(st.L.settled() && st.R.settled());
+    });
+  }
+  st.hl.style.opacity = on ? '1' : '0';
+  if (!on || !box.offsetParent) return;
+  const L = on.offsetLeft, R = L + on.offsetWidth;
+  st.T = on.offsetTop; st.H = on.offsetHeight;
+  if (instant || !st.seen || _reduceMotion()) { st.L.jump(L); st.R.jump(R); st.seen = true; _springTick(); return; }
+  const right = L > st.L.target;
+  // The leading edge is stiffer, the trailing one follows.
+  st.L.period = right ? 0.5 : 0.32; st.R.period = right ? 0.32 : 0.5;
+  st.L.to(L); st.R.to(R);
+}
+
+// Swap step content: the old one leaves with a short blur, the new one
+// arrives on a spring, and the card's height springs between the two.
+function _obSwap(prevEl, nextEl, dir) {
+  const card = document.querySelector('#onboard .ob-card');
+  if (!card || _reduceMotion() || !prevEl || prevEl === nextEl) {
+    if (prevEl && prevEl !== nextEl) prevEl.hidden = true;
+    nextEl.hidden = false;
+    return;
+  }
+  const h0 = card.getBoundingClientRect().height;
+  prevEl.hidden = true; nextEl.hidden = false;
+  card.style.height = '';
+  const h1 = card.getBoundingClientRect().height;
+  prevEl.hidden = false; nextEl.hidden = true;
+  const out = prevEl.animate(
+    [{ opacity: 1, filter: 'blur(0px)', transform: 'translateX(0)' },
+     { opacity: 0, filter: 'blur(5px)', transform: `translateX(${-14 * dir}px)` }],
+    { duration: 130, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+  _obMotion.h.jump(h0);
+  card.style.height = h0 + 'px';
+  const drawH = () => {
+    if (!card.isConnected) return false;
+    card.style.height = _obMotion.h.value() + 'px';
+    if (_obMotion.h.settled()) { card.style.height = ''; return false; }
+    return true;
+  };
+  _springUsers.add(drawH);
+  _obMotion.h.to(h1);
+  out.onfinish = () => {
+    out.cancel();
+    prevEl.hidden = true; nextEl.hidden = false;
+    const sp = springEasing(0.46, 0.86);
+    nextEl.animate(
+      [{ opacity: 0, filter: 'blur(5px)', transform: `translateX(${16 * dir}px)` },
+       { opacity: 1, filter: 'blur(0px)', transform: 'translateX(0)' }],
+      { duration: sp.duration, easing: sp.easing });
+    _obEnterExtras(nextEl);
+  };
+}
+
+// First look at a step: its title settles word by word, and on the welcome
+// the mark draws itself.
+function _obEnterExtras(stepEl) {
+  if (_reduceMotion()) return;
+  const sp = springEasing(0.5, 0.86);
+  const arch = stepEl.querySelector('.ob-arch'), flame = stepEl.querySelector('.ob-flame');
+  if (arch) arch.animate([{ strokeDashoffset: 150 }, { strokeDashoffset: 0 }], { duration: 900, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'backwards' });
+  if (flame) flame.animate(
+    [{ transform: 'scale(0)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }],
+    { duration: sp.duration, easing: sp.easing, delay: 420, fill: 'backwards', transformOrigin: '32px 50px' });
+  if (flame) flame.style.transformOrigin = '32px 50px';
+  const title = stepEl.querySelector('.ob-title');
+  if (title && !title.dataset.split) {
+    title.dataset.split = '1';
+    const walk = (node) => {
+      [...node.childNodes].forEach(n => {
+        if (n.nodeType === 3) {
+          const frag = document.createDocumentFragment();
+          n.textContent.split(/(\s+)/).forEach(w => {
+            if (!w) return;
+            if (/^\s+$/.test(w)) { frag.appendChild(document.createTextNode(w)); return; }
+            const sEl = document.createElement('span'); sEl.className = 'ob-w'; sEl.textContent = w;
+            sEl.style.display = 'inline-block';
+            frag.appendChild(sEl);
+          });
+          n.replaceWith(frag);
+        } else if (n.nodeType === 1) walk(n);
+      });
+    };
+    walk(title);
+  }
+  if (title) title.querySelectorAll('.ob-w').forEach((w, i) => w.animate(
+    [{ opacity: 0, filter: 'blur(4px)', transform: 'translateY(6px)' }, { opacity: 1, filter: 'blur(0)', transform: 'none' }],
+    { duration: sp.duration, easing: sp.easing, delay: 40 + i * 32, fill: 'backwards' }));
+}
+
+// The card arrives, and on finish folds into the message box: setup becomes
+// the window instead of vanishing off it.
+function _obCardIn() {
+  const card = document.querySelector('#onboard .ob-card');
+  const ov = $('onboard');
+  if (!card || _reduceMotion()) return;
+  const sp = springEasing(0.55, 0.86);
+  ov.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' });
+  card.animate([{ opacity: 0, transform: 'translateY(14px) scale(.97)', filter: 'blur(6px)' },
+                { opacity: 1, transform: 'none', filter: 'blur(0)' }],
+               { duration: sp.duration, easing: sp.easing });
+}
+function _obFoldAway() {
+  const ov = $('onboard');
+  const card = ov && ov.querySelector('.ob-card');
+  const box = document.getElementById('input');
+  if (!card || !box || _reduceMotion()) { ov.classList.remove('open'); return Promise.resolve(); }
+  const a = card.getBoundingClientRect(), b = (box.closest('.grow') || box).getBoundingClientRect();
+  const sx = b.width / a.width, sy = b.height / a.height;
+  const dx = (b.left + b.width / 2) - (a.left + a.width / 2), dy = (b.top + b.height / 2) - (a.top + a.height / 2);
+  const sp = springEasing(0.72, 0.9);
+  [...card.children].forEach(c => c.animate([{ opacity: 1, filter: 'blur(0)' }, { opacity: 0, filter: 'blur(6px)' }],
+    { duration: 160, easing: 'ease-in', fill: 'forwards' }));
+  const fold = card.animate(
+    // Solid while it travels, so the shape is seen landing on the box.
+    [{ transform: 'none', borderRadius: getComputedStyle(card).borderRadius, opacity: 1, offset: 0 },
+     { opacity: 1, offset: 0.8 },
+     { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: '14px', opacity: 0, offset: 1 }],
+    { duration: sp.duration, easing: sp.easing, fill: 'forwards' });
+  ov.animate([{ backgroundColor: getComputedStyle(ov).backgroundColor, backdropFilter: 'blur(10px)' },
+              { backgroundColor: 'transparent', backdropFilter: 'blur(0px)' }],
+             { duration: sp.duration, easing: 'ease-out', fill: 'forwards' });
+  return new Promise(res => {
+    fold.onfinish = () => {
+      ov.classList.remove('open');
+      ov.getAnimations({ subtree: true }).forEach(x => x.cancel());
+      box.focus();
+      res();
+    };
+  });
+}
+
 let obStep = 1;
 let obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
 
@@ -15779,11 +16057,13 @@ function _obSegValue(key) {
   if (key === 'uimode') return document.documentElement.dataset.ui === 'advanced' ? 'advanced' : 'simple';
   return '';
 }
-function _obPaintSegs() {
+function _obPaintSegs(instant = true) {
   for (const [key, id] of Object.entries(_OB_SEGS)) {
     const box = document.getElementById(id);
     if (!box) continue;
     box.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset[key] === _obSegValue(key)));
+    // Laid out only once its step is on screen, so measure a frame later.
+    requestAnimationFrame(() => _obSlideSeg(box, instant));
   }
 }
 for (const [key, id] of Object.entries(_OB_SEGS)) {
@@ -15793,9 +16073,9 @@ for (const [key, id] of Object.entries(_OB_SEGS)) {
     const b = e.target.closest('button');
     if (!b) return;
     obState[key] = b.dataset[key];
-    if (key === 'look') hearthSetAppearance(obState.look);
+    if (key === 'look') revealLook(e.clientX, e.clientY, () => hearthSetAppearance(obState.look));
     if (key === 'uimode') hearthSetInterface(obState.uimode);
-    _obPaintSegs();
+    _obPaintSegs(false);
     _saveOnboardingDraft();
   });
 }
@@ -15822,13 +16102,23 @@ async function maybeOnboard() {
 
 function obShow() {
   $('onboard').classList.add('open');
+  _obMotion.shownStep = 0;
   obRender();
+  _obCardIn();
 }
 
 function obRender() {
+  const prevEl = document.querySelector(`#ob-body .ob-step[data-step="${_obMotion.shownStep}"]`);
+  const nextEl = document.querySelector(`#ob-body .ob-step[data-step="${obStep}"]`);
+  const dir = obStep >= _obMotion.shownStep ? 1 : -1;
+  const first = !_obMotion.shownStep;
   document.querySelectorAll('#ob-body .ob-step').forEach(el => {
-    el.hidden = (Number(el.dataset.step) !== obStep);
+    if (el !== prevEl && el !== nextEl) el.hidden = true;
   });
+  if (first || !prevEl) { nextEl.hidden = false; if (prevEl && prevEl !== nextEl) prevEl.hidden = true; _obEnterExtras(nextEl); }
+  else _obSwap(prevEl, nextEl, dir);
+  _obMotion.shownStep = obStep;
+  requestAnimationFrame(() => _obMoveTrack(obStep, OB_TOTAL_STEPS, first));
   // Progress dots
   const dots = document.querySelectorAll('#ob-progress .dot');
   dots.forEach((d, i) => {
@@ -16341,8 +16631,7 @@ async function obFinish(skipped) {
     } catch (err) { console.warn('cloud setup failed', err); }
   } catch {}
   _clearOnboardingDraft();
-  $('onboard').classList.remove('open');
-  if (!skipped) toast('Welcome aboard', 'Type or hit the mic to start.', 'ok');
+  await _obFoldAway();
 }
 
 $('ob-next').addEventListener('click', async () => {
