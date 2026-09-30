@@ -406,6 +406,7 @@ def _list_convos() -> List[Dict]:
             "updated": data.get("updated", 0),
             "created": data.get("created", 0),
             "msg_count": len(data.get("messages", [])),
+            "pinned": bool(data.get("pinned")),
         }
         with _CONVO_META_LOCK:
             _CONVO_META[fn] = (key, meta)
@@ -2834,8 +2835,26 @@ class HearthHandler(BaseHTTPRequestHandler):
             data = self._read_json()
             if not data.get("id"):
                 return self._send_json(400, {"error": "missing id"})
+            if "pinned" not in data:
+                # A window that loaded the chat before it was pinned elsewhere
+                # must not unpin it by saving.
+                prev = _load_convo(data["id"]) or {}
+                if prev.get("pinned"):
+                    data["pinned"] = True
             ok = _save_convo(data)
             return self._send_json(200 if ok else 500, {"ok": ok})
+        if path == "/api/conversations/pin":
+            body = self._read_json()
+            cid = (body.get("id") or "").strip()
+            data = _load_convo(cid)
+            if not data:
+                return self._send_json(404, {"ok": False, "error": "conversation not found"})
+            if body.get("pinned"):
+                data["pinned"] = True
+            else:
+                data.pop("pinned", None)
+            ok = _save_convo(data)
+            return self._send_json(200 if ok else 500, {"ok": ok, "pinned": bool(data.get("pinned"))})
         if path == "/api/conversations/compact":
             # Real, invisible compaction (the "subagent way"): summarize the older
             # turns server-side and REPLACE them with one compact marker — no fake
