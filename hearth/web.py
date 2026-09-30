@@ -2970,6 +2970,14 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(500, {"error": str(e)})
         if path == "/api/upload":
             return self._upload()
+        if path == "/api/onboarding":
+            # The same apply the terminal's first-run setup uses.
+            from . import onboarding
+            try:
+                saved = onboarding.apply(self._read_json() or {})
+            except Exception as e:
+                return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+            return self._send_json(200, {"ok": True, "settings": saved})
         if path == "/api/run_tool":
             # Direct tool invocation from the UI — for "summarize this file" buttons etc.
             body = self._read_json()

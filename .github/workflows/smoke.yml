@@ -253,6 +253,10 @@ jobs:
         run: |
           python tests/test_team_state.py
 
+      - name: First-run answers reach the model, from the window and the terminal
+        run: |
+          python tests/test_onboarding.py
+
       - name: Pinned chats stay pinned
         run: |
           python tests/test_convo_pins.py

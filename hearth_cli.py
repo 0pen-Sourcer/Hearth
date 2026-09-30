@@ -1037,7 +1037,7 @@ class JarvisCLI:
                 from prompt_toolkit.completion import WordCompleter
                 _slash = ["/help", "/brain", "/endpoint", "/provider", "/models", "/model", "/load",
                           "/tools", "/clear", "/compact", "/context", "/tokens", "/chats", "/chat",
-                          "/history", "/workspace", "/log", "/mem", "/curate", "/rules", "/name",
+                          "/history", "/workspace", "/log", "/mem", "/curate", "/rules", "/name", "/me",
                           "/learn", "/migrate", "/import-memory", "/import", "/jobs", "/mcp", "/agent", "/skill",
                           "/skills", "/voice", "/voices", "/stt", "/listen", "/sleep", "/wake", "/think",
                           "/multi", "/mode", "/perms", "/allow", "/disallow", "/allowed", "/lockdown",
@@ -2024,6 +2024,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/disallow <path>{C_RESET}       revoke an /allow")
             print(f"  {C_TOOL}/allowed{C_RESET}               list paths the assistant can write to")
             print(f"  {C_TOOL}/lockdown [on|off]{C_RESET}     keep reads inside the workspace too")
+            print(f"  {C_TOOL}/me{C_RESET}                    what I call you, how I sound, headphones or speakers, what I may do")
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
             print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
             print(f"  {C_TOOL}/repair{C_RESET}                restore deleted/corrupted files by re-applying this version")
@@ -2062,6 +2063,18 @@ class JarvisCLI:
                     print(f"{C_DIM}skipped. run /update anytime.{C_RESET}")
             except Exception as e:
                 print(f"{C_ERR}update unavailable: {type(e).__name__}: {e}{C_RESET}")
+            return True
+        if low == "/me":
+            # The personal part of first-run setup, any time. Enter keeps an answer.
+            print(f"{C_DIM}Enter skips a question and keeps what's set. Ctrl-C stops.{C_RESET}\n")
+            try:
+                answers = self._ask_personal(
+                    lambda q: input(f"  {C_TOOL}{q}{C_RESET}\n  > ").strip())
+            except (KeyboardInterrupt, EOFError):
+                print()
+                return True
+            self._persist_onboarding(answers)
+            print(f"\n  {C_OK}saved.{C_RESET} {C_DIM}It applies from your next message.{C_RESET}")
             return True
         if low == "/repair":
             # Restore a fouled-up install by re-applying this version's patch
@@ -3014,6 +3027,7 @@ class JarvisCLI:
                 old = _persona.NAME
                 _persona.NAME = new_name
                 os.environ["HEARTH_PERSONA_NAME"] = new_name
+                self._agent_name = new_name
                 # Persist so next CLI launch picks it up. Use the settings
                 # API path the GUI shares.
                 from pathlib import Path as _P
@@ -3930,80 +3944,70 @@ class JarvisCLI:
         return True
 
     def _persist_onboarding(self, answers: Dict[str, str]) -> None:
-        """Write wizard answers to memory + rules.md additively."""
-        from hearth import memory
-        from hearth.tools import WORKSPACE
-
-        if answers.get("name"):
-            memory.save(
-                title="User name",
-                mtype="user",
-                description=f"Call me {answers['name']}",
-                body=f"My name (or what I prefer to be called): {answers['name']}",
-            )
-        if answers.get("role"):
-            memory.save(
-                title="User role",
-                mtype="user",
-                description=f"User is a {answers['role']}",
-                body=(
-                    f"What I do: {answers['role']}\n\n"
-                    f"Use this to tune explanations and references appropriately."
-                ),
-            )
-        if answers.get("browser"):
-            body = f"Preferred browser: {answers['browser']}"
-            if answers.get("profile"):
-                body += f"\nDefault profile name: {answers['profile']}"
-            desc = f"Default browser is {answers['browser']}" + (
-                f" / profile '{answers['profile']}'" if answers.get("profile") else ""
-            )
-            memory.save(
-                title="Preferred browser",
-                mtype="reference",
-                description=desc,
-                body=body,
-            )
-
-        extra_rules = []
-        if answers.get("tone"):
-            extra_rules.append(f"- Tone preference: {answers['tone']}.")
-        if answers.get("avoid"):
-            if answers["avoid"].strip().lower() not in ("none", "n/a", "nothing", "no"):
-                extra_rules.append(f"- Topics/language to avoid: {answers['avoid']}.")
-        if extra_rules:
-            rules_path = os.path.join(WORKSPACE, "rules.md")
-            existed = os.path.isfile(rules_path)
-            with open(rules_path, "a", encoding="utf-8") as f:
-                if existed:
-                    f.write("\n")
-                f.write("# Onboarding preferences (set by first-run wizard)\n")
-                f.write("\n".join(extra_rules) + "\n")
-
-        # Set the shared `onboarded` flag in settings.json so the GUI
-        # doesn't re-onboard if the user launches the desktop app later.
+        """Apply the answers the same way the window's setup does: who they are
+        and how they want replies go to profile.md, choices to settings."""
+        from hearth import onboarding
         try:
-            settings_path = os.path.join(WORKSPACE, "settings.json")
-            cur: Dict = {}
-            if os.path.isfile(settings_path):
-                with open(settings_path, "r", encoding="utf-8") as _sf:
-                    cur = json.load(_sf) or {}
-            cur["onboarded"] = True
-            # Agent rename from the wizard - persist + apply to this session so
-            # the persona signature / banner use the new name from message #1.
-            _agent = (answers.get("agent_name") or "").strip()
-            if _agent and _agent.lower() != "jarvis":
-                cur["agent_name"] = _agent
-                os.environ["HEARTH_PERSONA_NAME"] = _agent
-                try:
-                    from hearth import persona as _p
-                    _p.NAME = _agent
-                except Exception:
-                    pass
-            with open(settings_path, "w", encoding="utf-8") as _sf:
-                json.dump(cur, _sf, indent=2)
-        except Exception:
-            pass
+            onboarding.apply(answers)
+        except Exception as e:
+            print(f"  {C_ERR}could not save setup: {e}{C_RESET}")
+            return
+        # A new name applies to this session from the next message on.
+        _agent = (answers.get("agent_name") or "").strip()
+        if _agent:
+            os.environ["HEARTH_PERSONA_NAME"] = _agent
+            self._agent_name = _agent          # the prompt bar caches it
+            try:
+                from hearth import persona as _p
+                _p.NAME = _agent
+            except Exception:
+                pass
+
+    def _ask_personal(self, ask) -> Dict[str, str]:
+        """The questions about the person and how Hearth should behave. Used by
+        first-run setup and by /me. Enter skips a question and leaves it as is."""
+        from hearth import onboarding
+        answers: Dict[str, str] = {}
+
+        def keep(key: str, value: str) -> None:
+            if value:
+                answers[key] = value
+
+        keep("name", ask("What should I call you?"))
+        keep("role", ask("What do you do? (e.g. student, web developer, video editor)"))
+        agent = ask("What would you like to call me? (Enter to keep the current name)")
+        if agent:
+            if re.fullmatch(r"[A-Za-z0-9 ]{1,20}", agent):
+                answers["agent_name"] = agent
+            else:
+                print(f"  {C_DIM}names are letters, digits and spaces, up to 20. Keeping the current one.{C_RESET}")
+        print()
+        tones = list(onboarding.TONE_LABELS.items())
+        print(f"  {C_TOOL}How should I sound?{C_RESET}")
+        for n, (_k, label) in enumerate(tones, 1):
+            print(f"  {C_DIM}    {n}  {label}{C_RESET}")
+        t = ask("Pick a number, or describe it in your own words")
+        if t.isdigit() and 1 <= int(t) <= len(tones):
+            answers["tone"] = tones[int(t) - 1][0]
+        elif t:
+            answers["tone"] = t
+        keep("avoid", ask("Anything I should avoid, topics or language? (Enter for nothing)"))
+        b = ask("Which browser should I open links in? (chrome / brave / edge / firefox, Enter for the system default)")
+        if b:
+            answers["browser"] = b
+            keep("profile", ask(f"Which {b} profile? (its name in the profile picker, Enter for the default)"))
+        print()
+        a = ask("Will you hear me on headphones or speakers? (h / s, Enter to skip)").lower()
+        if a[:1] in ("h", "s"):
+            answers["audio"] = "headphones" if a[:1] == "h" else "speakers"
+        print()
+        print(f"  {C_TOOL}Before I change things on your PC:{C_RESET}")
+        print(f"  {C_DIM}    1  ask me every time{C_RESET}")
+        print(f"  {C_DIM}    2  just edit files in my folder, ask before commands{C_RESET}")
+        print(f"  {C_DIM}    3  go ahead, ask only before deleting or risky commands{C_RESET}")
+        m = ask("Pick 1-3 (Enter for 1)")
+        answers["approval_mode"] = {"2": "edits", "3": "auto"}.get(m, "ask")
+        return answers
 
     async def _maybe_extract_facts(self) -> None:
         """Passive memory extraction at the end of a turn - auto-saves durable
@@ -4132,43 +4136,16 @@ class JarvisCLI:
 
         answers: Dict[str, str] = {}
         try:
-            answers["name"] = ask("What should I call you?")
-            answers["agent_name"] = ask(
-                "And what would you like to call ME? (Enter to stay JARVIS)"
-            )
-            answers["role"] = ask(
-                "Briefly, what do you do? (e.g. 'student', 'web dev', 'streamer', 'designer')"
-            )
-            print()
-            print(f"  {C_TOOL}How blunt should I be?{C_RESET}")
-            print(f"  {C_DIM}    1 = polite & formal, 3 = friendly default, "
-                  f"5 = brutally honest no filler{C_RESET}")
-            answers["tone"] = ask("Pick 1-5 or describe in your own words")
-            answers["avoid"] = ask(
-                "Topics or language I should avoid? (or press Enter for none)"
-            )
-            answers["browser"] = ask(
-                "Preferred browser for opening links? "
-                "(chrome / brave / firefox / Enter for system default)"
-            )
-            if answers["browser"]:
-                answers["profile"] = ask(
-                    f"Which {answers['browser']} profile? "
-                    f"(the display name in the profile picker, e.g. 'personal')"
-                )
-            else:
-                answers["profile"] = ""
+            answers = self._ask_personal(ask)
         except (KeyboardInterrupt, EOFError):
-            print(f"\n{C_DIM}  ok, skipping rest. "
-                  f"Edit ~/Jarvis/rules.md or use memory_save anytime.{C_RESET}\n")
+            print(f"\n{C_DIM}  ok, skipping the rest. /me asks these again any time.{C_RESET}\n")
             self._persist_onboarding(answers)
             return
 
         self._persist_onboarding(answers)
         print()
         print(f"  {C_OK}saved.{C_RESET}  "
-              f"{C_DIM}/rules to view; memory_save to add more; "
-              f"~/Jarvis/rules.md to edit by hand.{C_RESET}")
+              f"{C_DIM}/me changes any of it later.{C_RESET}")
         print()
         # Offer importing memory from another AI - most people already have
         # years of context in ChatGPT/Claude. /import-memory walks them through it.

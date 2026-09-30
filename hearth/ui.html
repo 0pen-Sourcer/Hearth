@@ -3037,6 +3037,18 @@
      Way friendlier than a single dropdown-stuffed modal - each step has
      a hero icon, headline, body, and a single primary action.
      ============================================================ */
+  .ob-tries { grid-template-columns: 1fr !important; gap: 8px !important; }
+  .ob-tries .ob-choice { padding: 11px 14px; }
+  .ob-tries .ob-choice-title { font-weight: 500; font-size: 13px; }
+  .ob-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ob-seg.ob-seg-3 { grid-template-columns: repeat(3, 1fr); }
+  .ob-seg.ob-seg-4 { grid-template-columns: repeat(4, 1fr); }
+  .ob-seg button { text-align: left; padding: 10px 12px; border-radius: var(--r); cursor: pointer;
+    background: var(--bg-2); border: 1px solid var(--border); color: var(--fg); font: 600 13px var(--sans); }
+  .ob-seg button small { display: block; margin-top: 3px; font-weight: 400; font-size: 11.5px; color: var(--fg-dim); line-height: 1.35; }
+  .ob-seg button:hover { border-color: var(--border-2); }
+  .ob-seg button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-2)); }
+  .ob-hero svg { color: var(--accent); }
   .ob-overlay {
     display: none;
     position: fixed; inset: 0;
@@ -4707,22 +4719,18 @@
       <div class="dot"></div>
       <div class="dot"></div>
       <div class="dot"></div>
+      <div class="dot"></div>
     </div>
 
     <div class="ob-body" id="ob-body">
       <!-- ---- step 1: welcome ---- -->
       <div class="ob-step" data-step="1">
-        <div class="ob-hero">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2 L4 7 v6 c0 5 3.5 8.5 8 9 4.5 -0.5 8 -4 8 -9 V7 z"/>
-            <path d="M9 12 l2 2 4 -4"/>
-          </svg>
-        </div>
-        <h1 class="ob-title">Hey, I'm Jarvis.</h1>
-        <p class="ob-sub">A local-first AI that actually does things on your PC. I open apps, find files,
-          read documents, browse the web, and never send a byte to the cloud unless you tell me to.
-          A few quick steps and we're rolling.</p>
-        <div class="ob-tipline">Local stays the default. You can wire a cloud key on the next screen too. Not into the name <b>Jarvis</b>? Pick anything you like later in Settings → Behavior → Agent name (Cortana, Friday, Athena, anything) - the avatar, voice and folder all rename with it.</div>
+        <div class="ob-hero"><svg width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M15 53V31a17 17 0 0 1 34 0v22M9 53h46" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z" fill="currentColor"/></svg></div>
+        <h1 class="ob-title">Hey, I'm <span class="ob-agent-name">JARVIS</span>.</h1>
+        <p class="ob-sub">I run on your PC and do real things on it: open apps, find and read your
+          files, browse the web, and talk out loud if you want. Nothing leaves this machine unless you
+          pick a cloud model. A few quick choices and we're going.</p>
+        <div class="ob-tipline">Every choice here can be changed later in Settings, including my name.</div>
       </div>
 
       <!-- ---- step 2: pick a brain ---- -->
@@ -4798,20 +4806,19 @@
             <path d="M8 23h8"/>
           </svg>
         </div>
-        <h1 class="ob-title">Want me to listen + speak?</h1>
-        <p class="ob-sub">Voice mode lets you just <em>talk</em>. I detect when you start speaking,
-          transcribe live, and answer out loud. You can cut me off mid-sentence by just talking back.
-          You can also skip this and only type.</p>
+        <h1 class="ob-title">Want me to talk?</h1>
+        <p class="ob-sub">Talk to me like a person: I hear when you start and stop, and answer out
+          loud. Or just type, and turn voice on whenever you like.</p>
 
         <div class="ob-choices">
           <button class="ob-choice" data-voice="full">
-            <div class="ob-choice-title">Yes - talk + listen</div>
-            <div class="ob-choice-sub">Mic + speakers. Press the voice icon, then just talk.</div>
+            <div class="ob-choice-title">Talk and listen</div>
+            <div class="ob-choice-sub">Press the mic once, then just talk.</div>
             <span class="ob-choice-badge">Recommended</span>
           </button>
           <button class="ob-choice" data-voice="text">
             <div class="ob-choice-title">Text only</div>
-            <div class="ob-choice-sub">I stay silent. You can flip voice on later in Settings.</div>
+            <div class="ob-choice-sub">I stay quiet. Voice can go on later.</div>
           </button>
         </div>
         <div class="ob-status-row" id="ob-voice-status"><span class="ob-dot"></span><span>checking voice…</span></div>
@@ -4826,7 +4833,7 @@
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:end;">
             <div>
               <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Voice</label>
-              <select id="ob-voice-name" style="width:100%;">
+              <select id="ob-voice-name" class="ob-select" style="width:100%;">
                 <optgroup label="Male">
                   <option value="am_michael">Michael — American, calm neutral baseline</option>
                   <option value="bm_george">George — British, deep, formal butler</option>
@@ -4850,6 +4857,13 @@
               <input id="ob-voice-speed" type="range" min="0.8" max="2.2" step="0.1" value="1.5" style="width:100%;">
             </div>
           </div>
+          <div style="margin-top:14px;">
+            <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">What will you hear me on?</label>
+            <div class="ob-seg" id="ob-audio">
+              <button type="button" data-audio="headphones">Headphones<small>You can talk over me to cut in</small></button>
+              <button type="button" data-audio="speakers">Speakers<small>I stop listening while I talk, so I don't hear myself</small></button>
+            </div>
+          </div>
           <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
             <button type="button" id="ob-voice-test" class="ob-choice" style="padding:8px 14px; font-size:12px;">▶ Test voice</button>
             <span id="ob-voice-test-msg" style="font-size:11px; color:var(--fg-faint);">Hear it before you commit.</span>
@@ -4865,29 +4879,32 @@
             <circle cx="12" cy="7" r="4"/>
           </svg>
         </div>
-        <h1 class="ob-title">Quick personal touch.</h1>
-        <p class="ob-sub">I'll use this to address you and match your style. Skip any field -
-          you can always change these in Settings.</p>
+        <h1 class="ob-title">A bit about you.</h1>
+        <p class="ob-sub">So I know who I'm talking to. Skip anything you like.</p>
 
         <div class="ob-section">
           <div class="ob-label">What should I call you?</div>
-          <input type="text" id="ob-name" class="ob-input" placeholder="e.g. Sam, Athena, Friday, whatever you like">
+          <input type="text" id="ob-name" class="ob-input" placeholder="Your name, or a nickname">
+        </div>
+        <div class="ob-section">
+          <div class="ob-label">What do you do?</div>
+          <input type="text" id="ob-role" class="ob-input" placeholder="e.g. student, web developer, video editor">
         </div>
         <div class="ob-section">
           <div class="ob-label">What should you call me?</div>
           <input type="text" id="ob-agent-name" class="ob-input" maxlength="20" pattern="[A-Za-z0-9 ]+"
-                 placeholder="JARVIS (default) - try Cortana, Friday, Athena, anything">
+                 placeholder="JARVIS, or Friday, Athena, anything">
           <div style="font-size:11px;color:var(--fg-faint);margin-top:4px">
-            Sets the chat avatar letter, persona signature, and workspace folder name (~/&lt;NewName&gt;/). Letters/digits/spaces, 1-20 chars.
+            Letters, digits and spaces, up to 20.
           </div>
         </div>
         <div class="ob-section">
           <div class="ob-label">How should I sound?</div>
           <select id="ob-tone" class="ob-select">
-            <option value="">Default - concise, a little dry</option>
-            <option value="casual">Casual - talk to me like a friend</option>
-            <option value="formal">Formal - efficient + butler-like</option>
-            <option value="brief">Brief - minimum words, maximum signal</option>
+            <option value="">Default: clear, a little dry</option>
+            <option value="casual">Casual: talk like a friend</option>
+            <option value="formal">Formal: efficient, butler-like</option>
+            <option value="brief">Brief: minimum words</option>
           </select>
         </div>
         <div class="ob-section">
@@ -4902,8 +4919,43 @@
         </div>
       </div>
 
-      <!-- ---- step 6: migrate (auto-skipped if no source detected) ---- -->
+      <!-- ---- step 6: how I work and how I look ---- -->
       <div class="ob-step" data-step="6" hidden>
+        <div class="ob-hero">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>
+          </svg>
+        </div>
+        <h1 class="ob-title">How should I work?</h1>
+        <p class="ob-sub">You can change all of this later, from the chat bar and Settings.</p>
+        <div class="ob-section">
+          <div class="ob-label">Before I change things on your PC</div>
+          <div class="ob-seg ob-seg-3" id="ob-approval">
+            <button type="button" data-approval="ask">Ask me<small>Every edit and command waits for your OK</small></button>
+            <button type="button" data-approval="edits">Just edit files<small>Edits in my folder go ahead, commands still ask</small></button>
+            <button type="button" data-approval="auto">Go ahead<small>Only deleting and risky commands still ask</small></button>
+          </div>
+        </div>
+        <div class="ob-section">
+          <div class="ob-label">Look</div>
+          <div class="ob-seg ob-seg-4" id="ob-look">
+            <button type="button" data-look="classic">Classic<small>Violet</small></button>
+            <button type="button" data-look="dark">Dark<small>Warm greys</small></button>
+            <button type="button" data-look="light">Light<small>For daytime</small></button>
+            <button type="button" data-look="system">System<small>Follows Windows</small></button>
+          </div>
+        </div>
+        <div class="ob-section">
+          <div class="ob-label">How much to show</div>
+          <div class="ob-seg" id="ob-uimode">
+            <button type="button" data-uimode="simple">Simple<small>Tidy. My steps fold into one line.</small></button>
+            <button type="button" data-uimode="advanced">Advanced<small>Every step, logs and engine settings</small></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---- step 7: migrate ---- -->
+      <div class="ob-step" data-step="7" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -4941,12 +4993,12 @@
         <div class="ob-tipline">
           API keys are <b>never</b> copied. Memory files import as Hearth memories;
           skills get parked under <code>~/Jarvis/imported_skills/</code> for later.
-          You can re-run this any time via Settings → Behavior → Migrate.
+          You can do this any time from Settings → Behavior.
         </div>
       </div>
 
-      <!-- ---- step 7: all set ---- -->
-      <div class="ob-step" data-step="7" hidden>
+      <!-- ---- step 8: all set ---- -->
+      <div class="ob-step" data-step="8" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/>
@@ -4954,15 +5006,18 @@
           </svg>
         </div>
         <h1 class="ob-title">You're all set.</h1>
-        <p class="ob-sub">Type whatever you'd ask a friend. I do real things - open apps, read
-          files, browse the web, control your PC. The more specific you are, the better.</p>
-        <div class="ob-tipline">Type <code>/help</code> any time for slash commands, <code>/tools</code> for the full tool list, or just talk.</div>
-        <div class="ob-tipline" style="margin-top:8px">Want me on your phone or reading your email? <b>Settings → Connectors</b>. Add community skills in the <b>Skills</b> tab.</div>
+        <p class="ob-sub">Ask the way you'd ask a friend. I act on this PC, so try one of these:</p>
+        <div class="ob-choices ob-tries">
+          <button class="ob-choice ob-try" data-try="What's taking up the most space on my C drive?"><div class="ob-choice-title">What's taking up the most space on my C drive?</div></button>
+          <button class="ob-choice ob-try" data-try="Find the biggest files in my Downloads folder"><div class="ob-choice-title">Find the biggest files in my Downloads folder</div></button>
+          <button class="ob-choice ob-try" data-try="Open Notepad and write me a short to-do list for today"><div class="ob-choice-title">Open Notepad and write me a short to-do list for today</div></button>
+        </div>
+        <div class="ob-tipline">Type <code>/help</code> for commands. Your phone and email connect from <b>Settings → Connectors</b>.</div>
       </div>
     </div>
 
     <div class="ob-footer">
-      <div class="ob-meta" id="ob-step-meta">Step 1 of 7</div>
+      <div class="ob-meta" id="ob-step-meta">Step 1 of 8</div>
       <div class="ob-buttons">
         <button class="ob-btn ghost" id="ob-skip">Skip setup</button>
         <button class="ob-btn" id="ob-back" hidden>Back</button>
@@ -15609,8 +15664,8 @@ send = async function(forced = null) {
 // ============================================================
 // ONBOARDING - multi-step card overlay on first launch.
 // ============================================================
-const OB_TOTAL_STEPS = 7;
-// Migrate step (6) self-detects whether any source agent is installed.
+const OB_TOTAL_STEPS = 8;
+// Migrate step (7) self-detects whether any source agent is installed.
 // When the probe comes back empty, _obSkipMigrate is set and obNext/Back
 // jump over step 6 so the user doesn't see an empty 'nothing here' card.
 let _obMigrateProbed = false;
@@ -15707,12 +15762,43 @@ async function _obProbeMigrate() {
   } catch {
     _obSkipMigrate = true;
     setTimeout(() => {
-      if (obStep === 6 && _obSkipMigrate) { obStep = 7; obRender(); }
+      if (obStep === 7 && _obSkipMigrate) { obStep = 8; obRender(); }
     }, 400);
   }
 }
 let obStep = 1;
 let obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+
+// Segmented choices. Look and how-much-to-show apply the moment they're
+// picked, so the setup itself changes in front of you.
+const _OB_SEGS = { audio: 'ob-audio', approval: 'ob-approval', look: 'ob-look', uimode: 'ob-uimode' };
+function _obSegValue(key) {
+  if (obState[key]) return obState[key];
+  if (key === 'approval') return 'ask';
+  if (key === 'look') { try { return localStorage.getItem('hearth_theme') || 'classic'; } catch { return 'classic'; } }
+  if (key === 'uimode') return document.documentElement.dataset.ui === 'advanced' ? 'advanced' : 'simple';
+  return '';
+}
+function _obPaintSegs() {
+  for (const [key, id] of Object.entries(_OB_SEGS)) {
+    const box = document.getElementById(id);
+    if (!box) continue;
+    box.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset[key] === _obSegValue(key)));
+  }
+}
+for (const [key, id] of Object.entries(_OB_SEGS)) {
+  const box = document.getElementById(id);
+  if (!box) continue;
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    obState[key] = b.dataset[key];
+    if (key === 'look') hearthSetAppearance(obState.look);
+    if (key === 'uimode') hearthSetInterface(obState.uimode);
+    _obPaintSegs();
+    _saveOnboardingDraft();
+  });
+}
 function _saveOnboardingDraft() { try { localStorage.setItem('hearth_onboarding_draft', JSON.stringify({step: obStep, state: obState})); } catch {} }
 function _loadOnboardingDraft() { try { const d = JSON.parse(localStorage.getItem('hearth_onboarding_draft')||'null'); if(d && d.state && d.step) return d; } catch {} return null; }
 function _clearOnboardingDraft() { try { localStorage.removeItem('hearth_onboarding_draft'); } catch {} }
@@ -15752,13 +15838,16 @@ function obRender() {
   });
   $('ob-step-meta').textContent = `Step ${obStep} of ${OB_TOTAL_STEPS}`;
   $('ob-back').hidden = (obStep === 1);
+  $('ob-skip').hidden = (obStep === OB_TOTAL_STEPS);
   $('ob-next').textContent = (obStep === OB_TOTAL_STEPS) ? 'Finish' : 'Continue';
   // Lazy-load each step's content when it becomes visible
   if (obStep === 2) obLoadBrains();
   if (obStep === 3) obWireCloudStep();
   if (obStep === 4) obLoadVoiceStatus();
   if (obStep === 5) setTimeout(() => $('ob-name').focus(), 80);
-  if (obStep === 6) { _obProbeMigrate(); _obWireImport(); }
+  if (obStep === 7) { _obProbeMigrate(); _obWireImport(); }
+  if (obStep === 1) document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _agentName(); });
+  _obPaintSegs();
   _saveOnboardingDraft();
 }
 
@@ -16106,21 +16195,25 @@ async function obFinish(skipped) {
   // The settings save is the one call that has to land. If it fails the answers
   // are gone and onboarding runs again on the next boot, so keep the draft and
   // the overlay in place and say so, rather than closing on a success message.
+  const role = ($('ob-role')?.value || '').trim();
   try {
-    await api('/api/settings', {
+    // Name, work, tone and browser go to the profile the model reads every
+    // turn; voice, approval and look go to settings. Same path as the terminal.
+    const answers = {
+      agent_name: agentName || undefined,
+      voice_name: pickedVoice,
+      voice_speed: pickedSpeed,
+      approval_mode: _obSegValue('approval'),
+      audio: voiceOn ? (obState.audio || undefined) : undefined,
+    };
+    if (obState.voice) answers.voice = obState.voice;
+    if (!skipped) Object.assign(answers, { name, role, tone, browser });
+    const r = await api('/api/onboarding', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        onboarded: true,
-        user_name: name || undefined,
-        tone_preference: tone || undefined,
-        preferred_browser: browser || undefined,
-        agent_name: agentName || undefined,
-        voice_tts: voiceOn || undefined,
-        voice_stt: voiceOn || undefined,
-        voice_name: pickedVoice,
-        voice_speed: pickedSpeed,
-      }),
+      body: JSON.stringify(answers),
     });
+    STATE.settings = Object.assign({}, STATE.settings || {}, (r && r.settings) || {});
+    if (typeof paintModeButton === 'function') paintModeButton();
   } catch (e) {
     toast('Could not save your setup',
           ((e && e.message) ? e.message + '. ' : '') + 'Your answers are still here. Check free disk space, then hit Finish again.',
@@ -16167,23 +16260,6 @@ async function obFinish(skipped) {
         }
       } catch (e) {
         toast('Migrate failed', e.message, 'warn', 5000);
-      }
-    }
-    if (!skipped) {
-      const descParts = [];
-      if (name) descParts.push(`name: ${name}`);
-      if (tone) descParts.push(`tone: ${tone}`);
-      if (browser) descParts.push(`browser: ${browser}`);
-      if (descParts.length) {
-        try {
-          await api('/api/run_tool', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({
-              tool: 'memory_save',
-              args: { title: 'user_profile', type: 'user', description: descParts.join(' · ') },
-            }),
-          });
-        } catch {}
       }
     }
     // Fire the brain pick if user selected one
@@ -16279,7 +16355,7 @@ document.addEventListener('keydown', (e) => {
   if (!$('onboard').classList.contains('open')) return;
   if (e.key === 'Escape') {
     e.preventDefault();
-    showModal('Skip setup?', 'You can finish this later in Settings → Behavior → Re-run onboarding.',
+    showModal('Skip setup?', 'You can finish it later from Settings → About → Replay setup.',
       [{ label: 'Keep setting up' }, { label: 'Skip for now', onclick: () => obFinish(true) }]);
     return;
   }
@@ -16287,11 +16363,12 @@ document.addEventListener('keydown', (e) => {
 });
 
 
-// Global keyboard shortcuts - documented in Settings → Behavior →
+// Global keyboard shortcuts - documented in Settings → About →
 // Keyboard shortcuts. Modifier is Ctrl on Win/Linux, Cmd on Mac.
 // Tab-switch uses Ctrl+<n> matching the actual sidebar order (computed from the
 // DOM, so inserting/reordering tabs can't desync the shortcuts).
-const navOrder = () => [...document.querySelectorAll('.nav-btn[data-view]')].map(b => b.dataset.view);
+const navOrder = () => [...document.querySelectorAll('.nav-btn[data-view]')]
+  .filter(b => b.offsetParent !== null).map(b => b.dataset.view);
 window.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
