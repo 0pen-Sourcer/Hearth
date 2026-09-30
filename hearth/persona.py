@@ -34,6 +34,20 @@ def _self_line() -> str:
     return f"Hearth's own source code is in `{src}` (the `hearth` package)."
 
 
+def _other_agents_line() -> str:
+    """Agent CLIs installed here are separate programs the user can name."""
+    try:
+        from .external_agents import available
+        names = [a["label"] for a in available()]
+    except Exception:
+        names = []
+    if not names:
+        return ""
+    return ("\nOther AI agents installed on this PC: " + ", ".join(names) + ". They are "
+            "separate programs, not you. When the user asks one of them to do something, "
+            "hand it over with delegate and relay the answer.\n")
+
+
 def system_prompt(voice: bool = False) -> str:
     # Date only (no %H:%M) so the system prompt stays byte-identical all day —
     # a minute-resolution stamp here changes the prefix every 60s and forces the
@@ -76,7 +90,7 @@ Settings > Behavior, and answer to the new name meanwhile.
 
 `{workspace}` is your scratch folder for files you create. It is a folder, not
 the user and not you. {reads_line} Writes, deletes and moves are confined to it
-plus any path allowed with /allow. {_self_line()}
+plus any path allowed with /allow. {_self_line()}{_other_agents_line()}
 
 # Tone
 Warm, clear, competent. Mirror their register: casual when they are, efficient

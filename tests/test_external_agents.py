@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -86,6 +87,48 @@ team._open_wt = team._open_consoles = team._open_tmux = lambda spawned: False
 res = team.launch_team([{"name": "Ext", "agent": "stand-in", "prompt": "do it", "folder": work}])
 check("launch_team hands an agent member to that agent", res.get("ok") and calls and calls[0][0][:2] == ("stand-in", "do it"))
 xa.spawn = xa_spawn
+
+# delegate: one task, the agent's answer relayed in the same turn
+from hearth import tools                                            # noqa: E402
+out = tools._delegate({"agent": "stand-in", "task": "read a.txt", "folder": work})
+check("delegate waits and relays the agent's answer", "Stand-in answered" in out and "The file says hello." in out)
+check("delegate without an agent says what is installed", tools._delegate({"task": "x"}).startswith("Error"))
+check("the model is told about the agents it can hand work to",
+      "delegate" in [t["name"] for t in tools.TOOL_DEFINITIONS])
+
+# A slow agent: the turn moves on, and the answer still arrives later.
+xa.AGENTS["stand-in-slow"] = {"label": "Slow agent", "exe": ["stand-in"], "args": lambda allow: ["-c",
+                              "import time, sys; sys.stdin.read(); time.sleep(1.5); print('late answer')"],
+                              "stream": "text"}
+late = []
+subagents._BG_COMPLETION_CB = lambda i, res: late.append(res)
+tools._DELEGATE_WAIT_S = 0.3
+out = tools._delegate({"agent": "stand-in-slow", "task": "x", "folder": work})
+check("a slow agent does not hold the turn", "still working" in out)
+t0 = time.time()
+while not late and time.time() - t0 < 20:
+    time.sleep(0.1)
+check("its answer arrives afterwards like a background helper's", late and "late answer" in late[0].get("text", ""))
+
+# npm installs CLIs as .cmd shims; the prompt must never go through cmd.exe.
+shim_dir = tempfile.mkdtemp(prefix="hearth-shim-")
+os.makedirs(os.path.join(shim_dir, "node_modules", "g", "dist"))
+open(os.path.join(shim_dir, "node_modules", "g", "dist", "index.js"), "w").close()
+shim = os.path.join(shim_dir, "g.cmd")
+with open(shim, "w") as f:
+    f.write('@IF EXIST "%~dp0\\node.exe" (\n  "%~dp0\\node.exe"  "%~dp0\\node_modules\\g\\dist\\index.js" %*\n)'
+            ' ELSE (\n  node  "%~dp0\\node_modules\\g\\dist\\index.js" %*\n)\n')
+argv = xa._direct_argv(shim)
+if sys.platform == "win32":
+    check("an npm shim runs its script directly, not through cmd.exe",
+          argv[-1].endswith("index.js") and not argv[0].lower().endswith(".cmd"))
+    xa.AGENTS["stand-in-shim"] = {"label": "Shim", "exe": ["stand-in-shim"], "args": lambda allow: ["-p"],
+                                  "stream": "text", "prompt_arg": True}
+    bad = os.path.join(shim_dir, "opaque.cmd")
+    open(bad, "w").write("@echo off\r\nsomething %*\r\n")
+    xa._which = lambda names: bad if names == ["stand-in-shim"] else (sys.executable if names == ["stand-in"] else real_which(names))
+    r = xa.spawn("stand-in-shim", "hi & del x", cwd=work)
+    check("a shim it can't see through is refused rather than given a prompt", not r.get("ok"))
 
 print()
 if FAILS:

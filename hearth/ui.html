@@ -853,7 +853,23 @@
   .tool-run .tr-fail { color: var(--err); }
   .tool.t-failed .t-name { color: var(--err); }
   .tool-run .tr-fail:not(:empty)::before { content: '· '; color: var(--fg-faint); }
-  .tool-run .tr-live { color: var(--fg-faint); font-family: var(--mono); font-size: 11.5px; }
+  .tool-run .tr-live { color: var(--fg-faint); font-family: var(--mono); font-size: 11.5px; display: inline-flex; align-items: center; gap: 6px; }
+  /* Which outside things a run touched: another agent, a skill, the sites it read. */
+  .tr-chips { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; }
+  .hx-chip { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px 0 3px;
+    border-radius: 99px; background: color-mix(in srgb, var(--hx, var(--accent)) 12%, var(--bg-2));
+    border: 1px solid color-mix(in srgb, var(--hx, var(--accent)) 30%, var(--border));
+    color: var(--fg); font: 500 11.5px var(--sans); white-space: nowrap; }
+  .hx-chip b { width: 14px; height: 14px; border-radius: 4px; display: grid; place-items: center;
+    background: var(--hx, var(--accent)); color: #fff; font: 700 9px var(--sans); }
+  .hx-chip.skill b { background: var(--fg-dim); }
+  .fav-stack { display: inline-flex; align-items: center; }
+  .fav-stack img, .fav-stack .fav-more { width: 16px; height: 16px; border-radius: 50%; background: #fff;
+    border: 1.5px solid var(--bg-1); margin-left: -5px; object-fit: contain; padding: 1px; box-sizing: border-box; }
+  .fav-stack img:first-child { margin-left: 0; }
+  .fav-stack .fav-more { display: inline-grid; place-items: center; font: 600 8.5px var(--sans); color: var(--fg-dim); background: var(--bg-3); width: auto; min-width: 16px; padding: 0 3px; border-radius: 99px; }
+  .fav-cycle { width: 14px; height: 14px; border-radius: 50%; object-fit: contain; background: #fff; padding: 1px; box-sizing: border-box; }
+  .t-head .hx-chip { margin-right: 2px; }
   .tool-run .tr-cards { display: none; padding-left: 12px; border-left: 1px solid var(--border); margin-left: 5px; }
   .tool-run.open .tr-cards { display: block; }
   .tool {
@@ -6852,6 +6868,99 @@ function _foldsIntoRun(el) {
     && !el.classList.contains('subagent') && !el.classList.contains('has-diff')
     && !el.classList.contains('open'));
 }
+// The agent CLIs Hearth can hand work to. Each gets a monogram in its maker's
+// colour rather than a logo.
+const HARNESS = {
+  'claude-code':  { label: 'Claude Code',  maker: 'Anthropic',   c: '#d97757' },
+  'codex':        { label: 'Codex',        maker: 'OpenAI',      c: '#10a37f' },
+  'antigravity':  { label: 'Antigravity',  maker: 'Google',      c: '#4285f4' },
+  'gemini-cli':   { label: 'Gemini CLI',   maker: 'Google',      c: '#8e75ff' },
+  'grok':         { label: 'Grok',         maker: 'xAI',         c: '#6b7280' },
+  'kimi':         { label: 'Kimi Code',    maker: 'Moonshot AI', c: '#2563eb' },
+  'opencode':     { label: 'OpenCode',     maker: 'SST',         c: '#d4a017' },
+  'qwen-code':    { label: 'Qwen Code',    maker: 'Alibaba',     c: '#615ced' },
+  'crush':        { label: 'Crush',        maker: 'Charm',       c: '#e0569c' },
+  'cursor-agent': { label: 'Cursor Agent', maker: 'Cursor',      c: '#555b66' },
+  'copilot':      { label: 'Copilot CLI',  maker: 'GitHub',      c: '#6e40c9' },
+  'goose':        { label: 'Goose',        maker: 'Block',       c: '#b08900' },
+  'aider':        { label: 'Aider',        maker: 'Aider',       c: '#1f9d55' },
+  'droid':        { label: 'Droid',        maker: 'Factory',     c: '#e8590c' },
+  'amp':          { label: 'Amp',          maker: 'Sourcegraph', c: '#e5484d' },
+  'pi':           { label: 'Pi',           maker: 'pi.dev',      c: '#71717a' },
+};
+function harnessChip(id, extraTitle = '') {
+  const h = HARNESS[id] || { label: id || 'agent', maker: '', c: 'var(--accent)' };
+  return `<span class="hx-chip" style="--hx:${h.c}" title="${esc(h.label + (h.maker ? ' by ' + h.maker : '') + extraTitle)}"><b>${esc(h.label[0])}</b>${esc(h.label)}</span>`;
+}
+function _favImg(domain) {
+  return `<img src="/api/favicon?d=${encodeURIComponent(domain)}" alt="" title="${esc(domain)}" loading="lazy" onerror="this.remove()">`;
+}
+function _domainsIn(text) {
+  const seen = [];
+  for (const m of String(text || '').matchAll(/https?:\/\/(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})/gi)) {
+    const d = m[1].toLowerCase();
+    if (!seen.includes(d)) seen.push(d);
+  }
+  return seen;
+}
+function _cardDomain(card) {
+  const a = card._toolArgs || {};
+  const u = a.url || a.href || '';
+  const d = _domainsIn(u)[0];
+  return d || '';
+}
+// What a set of tool cards reached outside Hearth, as chips for a summary line.
+function _integrationChips(cards) {
+  const out = [], agents = new Set(), skills = new Set(), sites = [];
+  for (const c of cards) {
+    if (c.classList.contains('t-running')) continue;      // the live label shows that one
+    const n = c._toolName || '', a = c._toolArgs || {};
+    if (n === 'delegate' && a.agent) agents.add(String(a.agent).toLowerCase());
+    if (n === 'launch_team' && Array.isArray(a.members)) a.members.forEach(m => m && m.agent && agents.add(String(m.agent).toLowerCase()));
+    if ((n === 'load_skill' || n === 'create_skill') && (a.name || a.skill)) skills.add(a.name || a.skill);
+    if (n === 'web_search') _domainsIn(c.querySelector('.t-body')?.textContent).forEach(d => sites.includes(d) || sites.push(d));
+    if (n === 'web_fetch' || n === 'browse' || n === 'open_url') { const d = _cardDomain(c); if (d && !sites.includes(d)) sites.push(d); }
+  }
+  agents.forEach(id => out.push(harnessChip(id)));
+  skills.forEach(k => out.push(`<span class="hx-chip skill" title="skill"><b>S</b>${esc(k)}</span>`));
+  if (sites.length) {
+    const shown = sites.slice(0, 4).map(_favImg).join('');
+    const more = sites.length > 4 ? `<span class="fav-more">+${sites.length - 4}</span>` : '';
+    out.push(`<span class="fav-stack" title="${esc(sites.join(', '))}">${shown}${more}</span>`);
+  }
+  return out.join('');
+}
+// While a search is in flight nothing is known about the results yet, so a few
+// familiar sites cycle next to it; reading a page shows that page's own icon.
+const _SEARCH_CYCLE = ['wikipedia.org', 'reddit.com', 'github.com', 'youtube.com', 'steampowered.com'];
+function _liveLabel(run, card) {
+  if (!card) { clearInterval(run._cycle); run._cycle = null; return ''; }
+  const n = card._toolName || '', a = card._toolArgs || {};
+  if (n !== 'web_search') { clearInterval(run._cycle); run._cycle = null; }
+  if (n === 'delegate') return `${harnessChip(String(a.agent || '').toLowerCase())} working…`;
+  if (n === 'web_fetch' || n === 'browse') {
+    const d = _cardDomain(card);
+    if (d) return `<img class="fav-cycle" src="/api/favicon?d=${encodeURIComponent(d)}" alt="" onerror="this.remove()">Reading ${esc(d)}…`;
+  }
+  if (n === 'web_search') {
+    if (!run._cycle) {
+      let i = 0;
+      run._cycle = setInterval(() => {
+        const img = run._live.querySelector('.fav-cycle');
+        if (!img || !run.isConnected) { clearInterval(run._cycle); run._cycle = null; return; }
+        i = (i + 1) % _SEARCH_CYCLE.length;
+        img.animate([{ opacity: 1, filter: 'blur(0)' }, { opacity: 0, filter: 'blur(3px)' }], { duration: 140, easing: 'ease-in' })
+          .onfinish = () => {
+            img.src = '/api/favicon?d=' + _SEARCH_CYCLE[i];
+            img.animate([{ opacity: 0, filter: 'blur(3px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 200, easing: 'ease-out' });
+          };
+      }, 700);
+    }
+    return `<img class="fav-cycle" src="/api/favicon?d=${_SEARCH_CYCLE[0]}" alt="">Searching the web…`;
+  }
+  return esc(n) + '…';
+}
+
 const _RUN_VERBS = {
   folder: ['looked in a folder', 'looked in {n} folders'],
   search: ['searched once', 'searched {n} times'],
@@ -6866,9 +6975,13 @@ const _RUN_VERBS = {
   rocket: ['opened an app', 'opened {n} apps'],
   monitor:['used the desktop', 'used the desktop {n} times'],
   users:  ['asked a helper', 'asked {n} helpers'],
+  handoff:['handed off a task', 'handed off {n} tasks'],
+  web:    ['searched the web', 'searched the web {n} times'],
   plugin: ['used a plugin', 'used plugins {n} times'],
 };
 function _toolKind(name) {
+  if (name === 'delegate') return 'handoff';
+  if (name === 'web_search') return 'web';
   const icon = _toolIcon(name);
   for (const [k, v] of Object.entries(_TOOL_ICONS)) if (v === icon) return k;
   return 'file';
@@ -6885,8 +6998,7 @@ function _summarizeRun(run) {
     const bad = /^\s*(error|traceback|failed)\b/i.test(txt);
     c.classList.toggle('t-failed', bad);
     if (bad) failed++;
-    const ms = c.querySelector('.t-ms');
-    if (ms && !ms.textContent) running = c;
+    if (c.classList.contains('t-running')) running = c;
   }
   const parts = [...counts].map(([k, n]) => {
     const v = _RUN_VERBS[k] || _RUN_VERBS.file;
@@ -6896,7 +7008,10 @@ function _summarizeRun(run) {
   line = line.charAt(0).toUpperCase() + line.slice(1);
   run._sum.textContent = line;
   run._fail.textContent = failed ? (failed === 1 ? '1 failed' : failed + ' failed') : '';
-  run._live.textContent = running ? (running._toolName || '') + '…' : '';
+  const live = _liveLabel(run, running);
+  if (run._liveKey !== live) { run._live.innerHTML = live; run._liveKey = live; }
+  const chips = _integrationChips(cards);
+  if (run._chipKey !== chips) { run._chips.innerHTML = chips; run._chipKey = chips; }
   run.classList.toggle('has-fail', failed > 0);
   if (failed && !run._openedForFail) { run._openedForFail = true; run.classList.add('open'); }
 }
@@ -6905,12 +7020,13 @@ function makeToolRun() {
   run.className = 'tool-run';
   run.innerHTML = `<div class="tr-head">
       <svg class="t-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
-      <span class="tr-sum"></span><span class="tr-fail"></span><span class="tr-live"></span>
+      <span class="tr-sum"></span><span class="tr-chips"></span><span class="tr-fail"></span><span class="tr-live"></span>
     </div><div class="tr-cards"></div>`;
   run._cards = run.querySelector('.tr-cards');
   run._sum = run.querySelector('.tr-sum');
   run._fail = run.querySelector('.tr-fail');
   run._live = run.querySelector('.tr-live');
+  run._chips = run.querySelector('.tr-chips');
   run.querySelector('.tr-head').addEventListener('click', () => run.classList.toggle('open'));
   let queued = false;
   new MutationObserver(() => {
@@ -6944,7 +7060,7 @@ function _toolIcon(name) {
   const has = (...ks) => ks.some(k => n.includes(k));
   let key = 'file';
   if (has('plugin')) key = 'plugin';
-  else if (has('subagent', 'launch_team', 'agent')) key = 'users';
+  else if (has('subagent', 'launch_team', 'agent', 'delegate')) key = 'users';
   else if (has('list_dir', 'list_file', 'list_archive', 'extract_archive')) key = 'folder';
   else if (has('glob', 'find_file', 'grep', 'search')) key = 'search';
   else if (has('write_file', 'edit_file', 'create_file', 'append')) key = 'edit';
@@ -7071,6 +7187,7 @@ function _argPreview(args) {
 function _startToolClock(t) {
   if (!t || !t.ms) return;
   const t0 = Date.now();
+  t.div.classList.add('t-running');
   t._clock = setInterval(() => {
     if (!t.div.isConnected) return _stopToolClock(t);
     if (pendingPermId) { t.ms.textContent = 'waiting for you'; return; }
@@ -7080,7 +7197,7 @@ function _startToolClock(t) {
 }
 function _stopToolClock(t) {
   if (t && t._clock) { clearInterval(t._clock); t._clock = null; }
-  if (t && t.div) t.div.classList.remove('t-slow');
+  if (t && t.div) { t.div.classList.remove('t-slow', 't-running'); t.div.dispatchEvent(new Event('toolsettled', { bubbles: true })); }
 }
 
 function makeToolCard(name, args) {
@@ -7103,8 +7220,8 @@ function makeToolCard(name, args) {
     <div class="t-head">
       <svg class="t-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       <svg class="t-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${_toolIcon(name)}</svg>
-      <span class="t-name">${esc(name)}</span>
-      <span class="t-args" title="${esc(fullArgs)}">${esc(headerArgs)}</span>
+      <span class="t-name">${name === 'delegate' && args && args.agent ? harnessChip(String(args.agent).toLowerCase()) : esc(name)}</span>
+      <span class="t-args" title="${esc(fullArgs)}">${esc(name === 'delegate' && args ? (args.task || '') : headerArgs)}</span>
       <span class="t-ms"></span>
     </div>
     <div class="t-body"></div>

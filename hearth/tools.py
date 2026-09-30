@@ -7952,6 +7952,71 @@ TOOL_DEFINITIONS.append({
 })
 
 
+# ── Hand one task to another agent CLI and wait for its answer ──
+_DELEGATE_WAIT_S = 280
+
+
+def _delegate(p: Dict) -> str:
+    from . import external_agents as _xa, subagents as _sa
+    agent = (p.get("agent") or "").strip().lower()
+    task = (p.get("task") or "").strip()
+    if not agent or not task:
+        return "Error: delegate needs 'agent' and 'task'. " + _xa.describe()
+    folder = (p.get("folder") or "").strip()
+    if folder:
+        folder = os.path.abspath(os.path.expanduser(folder))
+    import threading
+    done = threading.Event()
+    box: Dict[str, Any] = {}
+    gave_up = threading.Event()
+
+    def _finished(agent_id: str, result: Dict[str, Any]) -> None:
+        box.update(result)
+        done.set()
+        # Past the wait, the answer arrives like any background helper's.
+        if gave_up.is_set() and _sa._BG_COMPLETION_CB:
+            try:
+                _sa._BG_COMPLETION_CB(agent_id, result)
+            except Exception:
+                pass
+
+    r = _xa.spawn(agent, task, cwd=folder, on_done=_finished)
+    if not r.get("ok"):
+        return f"Error: {r.get('error')}. " + _xa.describe()
+    label = r.get("label") or agent
+    if not done.wait(_DELEGATE_WAIT_S):
+        gave_up.set()
+        if done.is_set():            # finished in the gap between the two checks
+            gave_up.clear()
+        else:
+            return (f"{label} is still working on it in the background. Its answer will "
+                    f"arrive in this chat when it finishes; tell the user that.")
+    if not box.get("ok"):
+        return f"Error: {label} stopped: {box.get('error') or 'no reason given'}"
+    note = "" if r.get("tested") else f" ({label} support is new in Hearth; check the result.)"
+    text = (box.get("text") or "").strip() or "(it finished without a written answer)"
+    return f"{label} answered{note}:\n\n{text[:12000]}"
+
+
+_HANDLERS["delegate"] = _delegate
+TOOL_DEFINITIONS.append({
+    "name": "delegate",
+    "description":
+        "Hand one task to another AI agent CLI installed on this PC (Claude Code, "
+        "Codex, Antigravity, Gemini CLI and others) and get its answer back. Use it "
+        "whenever the user names one: 'have Claude Code...', 'ask Codex to...'. It "
+        "runs on the user's own account in the given folder, can read and edit files "
+        "there, and waits up to a few minutes for the answer. Relay what it says. "
+        + _external_agents_line(),
+    "parameters": {"type": "object", "properties": {
+        "agent": {"type": "string", "description": "Which one, by id: " + ", ".join(
+            __import__("hearth.external_agents", fromlist=["AGENTS"]).AGENTS)},
+        "task": {"type": "string", "description": "The full task, self-contained: it does not see this chat."},
+        "folder": {"type": "string", "description": "Folder it works in. Default: the workspace."},
+    }, "required": ["agent", "task"]},
+})
+
+
 # Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
 # can NEVER take down the core tools.
 try:
@@ -7994,7 +8059,7 @@ _DRYRUN_GUARDED = {
     "set_reminder", "cancel_reminder", "snooze_reminder",
     "send_email", "memory_save", "memory_forget", "edit_soul", "append_soul",
     "create_plugin", "delete_plugin", "create_skill", "install_skill",
-    "generate_image", "generate_video", "launch_team",
+    "generate_image", "generate_video", "launch_team", "delegate",
     "extract_archive_file",              # writes files out of an archive
     "start_job",                         # a shell command, in the background
     "send_to_phone",                     # a real message to a real phone
@@ -8551,7 +8616,7 @@ _RISKY_TOOLS: set = {
     "run_command", "start_job", "open_app", "open_url", "open_in_browser",
     # A team can include other agent CLIs, which act under their own permission
     # rules rather than Hearth's, so starting one is asked about.
-    "launch_team",
+    "launch_team", "delegate",
     # These act outside the machine: one sends a message to a phone, the other
     # downloads and installs code.
     "send_to_phone", "install_skill",
@@ -8600,7 +8665,8 @@ def is_risky(name: str) -> bool:
 
 APPROVAL_MODES = ("ask", "edits", "auto")
 _EDIT_TOOLS = {"write_file", "edit_file", "create_directory"}
-_SHELL_TOOLS = {"run_command", "start_job"}
+# Another agent CLI acts like a command: Auto-edit still asks, Auto doesn't.
+_SHELL_TOOLS = {"run_command", "start_job", "delegate"}
 # Undoable only with effort, so Auto still asks about them.
 _ALWAYS_ASK_IN_AUTO = {"delete_path", "move_path"}
 
@@ -8756,7 +8822,7 @@ _TOOL_CATEGORY = {
     "job_kill": "Background jobs", "list_jobs": "Background jobs", "get_job_result": "Background jobs",
     # Sub-agents
     "spawn_subagent": "Sub-agents", "list_subagent_personas": "Sub-agents",
-    "get_subagent_result": "Sub-agents", "launch_team": "Sub-agents",
+    "get_subagent_result": "Sub-agents", "launch_team": "Sub-agents", "delegate": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",

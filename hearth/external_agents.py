@@ -33,22 +33,52 @@ def _claude_cmd(allow: str) -> List[str]:
 
 
 # id -> how to run it. `args` builds the arguments (the prompt goes on stdin
-# unless `prompt_arg` is set). `stream` names the output parser.
+# unless `prompt_arg` is set). `stream` names the output parser. `allow` is
+# how much the user lets agents do on their own: "auto" or "edits". `maker`
+# is the company behind it, shown next to its agents in the Team view.
 AGENTS: Dict[str, Dict[str, Any]] = {
-    "claude-code": {"label": "Claude Code", "exe": ["claude"], "args": _claude_cmd, "stream": "claude",
-                    "billing": "Agent SDK credit on your Claude plan"},
-    "codex": {"label": "Codex", "exe": ["codex"], "args": lambda allow: ["exec", "--skip-git-repo-check"]
+    "claude-code": {"label": "Claude Code", "maker": "Anthropic", "exe": ["claude"], "args": _claude_cmd,
+                    "stream": "claude", "billing": "Agent SDK credit on your Claude plan"},
+    "codex": {"label": "Codex", "maker": "OpenAI", "exe": ["codex"],
+              "args": lambda allow: ["exec", "--skip-git-repo-check"]
               + (["--full-auto"] if allow in ("auto", "edits") else []) + ["-"], "stream": "text"},
-    "gemini-cli": {"label": "Gemini CLI", "exe": ["gemini"], "args": lambda allow: ["-p", "-"]
-                   + (["--yolo"] if allow == "auto" else []), "stream": "text"},
-    "opencode": {"label": "OpenCode", "exe": ["opencode"], "args": lambda allow: ["run"], "stream": "text",
-                 "prompt_arg": True},
-    "qwen-code": {"label": "Qwen Code", "exe": ["qwen"], "args": lambda allow: ["-p", "-"], "stream": "text"},
-    "crush": {"label": "Crush", "exe": ["crush"], "args": lambda allow: ["run"], "stream": "text", "prompt_arg": True},
-    "cursor-agent": {"label": "Cursor Agent", "exe": ["cursor-agent"], "args": lambda allow: ["-p"]
-                     + (["--force"] if allow == "auto" else []), "stream": "text", "prompt_arg": True},
-    "copilot": {"label": "GitHub Copilot CLI", "exe": ["copilot"], "args": lambda allow: ["-p"]
-                + (["--allow-all-tools"] if allow == "auto" else []), "stream": "text", "prompt_arg": True},
+    "antigravity": {"label": "Antigravity", "maker": "Google", "exe": ["agy"],
+                    "args": lambda allow: (["--dangerously-skip-permissions"] if allow == "auto" else []) + ["-p"],
+                    "stream": "text", "prompt_arg": True},
+    "gemini-cli": {"label": "Gemini CLI", "maker": "Google", "exe": ["gemini"],
+                   "args": lambda allow: (["--yolo"] if allow == "auto" else []) + ["-p"],
+                   "stream": "text", "prompt_arg": True},
+    "grok": {"label": "Grok", "maker": "xAI", "exe": ["grok"],
+             "args": lambda allow: ["--no-auto-update"] + (["--always-approve"] if allow == "auto" else []) + ["-p"],
+             "stream": "text", "prompt_arg": True},
+    "kimi": {"label": "Kimi Code", "maker": "Moonshot AI", "exe": ["kimi"],
+             "args": lambda allow: ["--print", "-p"], "stream": "text", "prompt_arg": True},
+    "opencode": {"label": "OpenCode", "maker": "SST", "exe": ["opencode"], "args": lambda allow: ["run"],
+                 "stream": "text", "prompt_arg": True},
+    "qwen-code": {"label": "Qwen Code", "maker": "Alibaba", "exe": ["qwen"],
+                  "args": lambda allow: (["--yolo"] if allow == "auto" else []) + ["-p"],
+                  "stream": "text", "prompt_arg": True},
+    "crush": {"label": "Crush", "maker": "Charm", "exe": ["crush"], "args": lambda allow: ["run"],
+              "stream": "text", "prompt_arg": True},
+    "cursor-agent": {"label": "Cursor Agent", "maker": "Cursor", "exe": ["cursor-agent"],
+                     "args": lambda allow: ["-p"] + (["--force"] if allow == "auto" else []),
+                     "stream": "text", "prompt_arg": True},
+    "copilot": {"label": "Copilot CLI", "maker": "GitHub", "exe": ["copilot"],
+                "args": lambda allow: (["--allow-all-tools"] if allow == "auto" else []) + ["-p"],
+                "stream": "text", "prompt_arg": True},
+    "goose": {"label": "Goose", "maker": "Block", "exe": ["goose"],
+              "args": lambda allow: ["run", "--no-session", "-t"], "stream": "text", "prompt_arg": True},
+    "aider": {"label": "Aider", "maker": "Aider", "exe": ["aider"],
+              "args": lambda allow: (["--yes-always"] if allow in ("auto", "edits") else []) + ["--message"],
+              "stream": "text", "prompt_arg": True},
+    "droid": {"label": "Droid", "maker": "Factory", "exe": ["droid"],
+              "args": lambda allow: ["exec", "--auto", "medium" if allow == "auto" else "low"],
+              "stream": "text", "prompt_arg": True},
+    "amp": {"label": "Amp", "maker": "Sourcegraph", "exe": ["amp"],
+            "args": lambda allow: (["--dangerously-allow-all"] if allow == "auto" else []) + ["-x"],
+            "stream": "text", "prompt_arg": True},
+    "pi": {"label": "Pi", "maker": "pi.dev", "exe": ["pi"], "args": lambda allow: ["-p"],
+           "stream": "text", "prompt_arg": True},
 }
 # Only these have been run end to end from Hearth; the rest follow their docs.
 VERIFIED = {"claude-code"}
@@ -69,7 +99,7 @@ def available() -> List[Dict[str, Any]]:
     for aid, spec in AGENTS.items():
         path = _which(spec["exe"])
         if path:
-            out.append({"id": aid, "label": spec["label"], "path": path,
+            out.append({"id": aid, "label": spec["label"], "maker": spec.get("maker", ""), "path": path,
                         "tested": aid in VERIFIED, "billing": spec.get("billing", "")})
     return out
 
@@ -79,7 +109,36 @@ def describe() -> str:
     found = available()
     if not found:
         return "No other agent CLIs are installed here."
-    return "Installed here: " + ", ".join(f"{a['id']} ({a['label']})" for a in found) + "."
+    return "Installed here: " + ", ".join(f"{a['label']} (agent='{a['id']}')" for a in found) + "."
+
+
+def _direct_argv(exe: str) -> List[str]:
+    """How to start an installed CLI without cmd.exe in between.
+
+    npm installs a CLI on Windows as a .cmd file, and running a .cmd means
+    cmd.exe parses the arguments: a prompt carrying & or | could run a second
+    command. The shim only starts node on a script, so start that directly.
+    Anything that can't be resolved that way is refused for argument prompts
+    by the caller."""
+    if sys.platform != "win32" or not exe.lower().endswith((".cmd", ".bat")):
+        return [exe]
+    try:
+        text = open(exe, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return [exe]
+    import re as _re
+    found = [t for t in _re.findall(r'"%(?:~?dp0%?)\\?([^"]+?\.(?:(?:c|m)?js|exe))"', text, _re.I)
+             if os.path.basename(t).lower() != "node.exe"]
+    if not found:
+        return [exe]
+    script = os.path.join(os.path.dirname(exe), found[0].lstrip("\\"))
+    if script.lower().endswith(".exe"):           # newer shims wrap a native binary
+        return [script] if os.path.isfile(script) else [exe]
+    node = os.path.join(os.path.dirname(exe), "node.exe")
+    node = node if os.path.isfile(node) else shutil.which("node")
+    if node and os.path.isfile(script):
+        return [node, script]
+    return [exe]
 
 
 def _long_path(p: str) -> str:
@@ -159,7 +218,11 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
         return {"ok": False, "error": f"folder not found: {work}"}
     allow = _allow_level()
     args = spec["args"](allow)
-    argv = [exe] + args + ([prompt] if spec.get("prompt_arg") else [])
+    head = _direct_argv(exe)
+    if spec.get("prompt_arg") and head[0].lower().endswith((".cmd", ".bat")):
+        return {"ok": False, "error": f"{spec['label']} is installed as a script Hearth can't start safely "
+                                      "with a prompt; reinstall it from npm or its own installer"}
+    argv = head + args + ([prompt] if spec.get("prompt_arg") else [])
     agent_id = f"sub_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     tpath = _sa._transcript_path(agent_id)
     _sa._append_transcript(tpath, {"kind": "start", "persona": spec["label"], "name": name or spec["label"],
@@ -216,5 +279,5 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
                 pass
 
     threading.Thread(target=run, daemon=True, name=f"external-{agent}").start()
-    return {"ok": True, "agent_id": agent_id, "agent": agent, "label": spec["label"],
+    return {"ok": True, "agent_id": agent_id, "agent": agent, "label": spec["label"], "maker": spec.get("maker", ""),
             "tested": agent in VERIFIED, "billing": spec.get("billing", "")}

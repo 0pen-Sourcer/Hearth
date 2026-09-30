@@ -1340,6 +1340,58 @@ def _load_settings() -> Dict:
 _SETTINGS_WRITE_LOCK = threading.Lock()
 
 
+_FAVICON_DIR = os.path.join(os.path.expanduser("~"), ".hearth", "favicons")
+_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+def _favicon(domain: str):
+    """A site's own icon, fetched from that site only and cached on disk, for
+    showing which sites a search or a page read touched. (bytes, mime) or None."""
+    d = (domain or "").strip().lower()
+    if d.startswith("www."):
+        d = d[4:]
+    if not _DOMAIN_RE.match(d):
+        return None
+    os.makedirs(_FAVICON_DIR, exist_ok=True)
+    path = os.path.join(_FAVICON_DIR, d)
+    miss = path + ".none"
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            data = f.read()
+        return data, _icon_mime(data)
+    if os.path.isfile(miss) and time.time() - os.path.getmtime(miss) < 86400:
+        return None
+    for url in (f"https://{d}/favicon.ico", f"https://www.{d}/favicon.ico",
+                f"https://{d}/apple-touch-icon.png"):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Hearth"})
+            with urllib.request.urlopen(req, timeout=4) as r:
+                data = r.read(150_000)
+            if len(data) > 64 and _icon_mime(data) != "application/octet-stream":
+                with open(path, "wb") as f:
+                    f.write(data)
+                return data, _icon_mime(data)
+        except Exception:
+            continue
+    open(miss, "w").close()
+    return None
+
+
+def _icon_mime(data: bytes) -> str:
+    if data[:4] == b"\x00\x00\x01\x00":
+        return "image/x-icon"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"GIF":
+        return "image/gif"
+    if data[:2] == b"\xff\xd8":
+        return "image/jpeg"
+    head = data[:200].lstrip().lower()
+    if head.startswith(b"<svg") or (head.startswith(b"<?xml") and b"<svg" in data[:600].lower()):
+        return "image/svg+xml"
+    return "application/octet-stream"
+
+
 def _saved_look() -> str:
     """The saved theme, accent and Simple/Advanced as a JS object literal, for
     the page to apply before its first paint."""
@@ -2048,6 +2100,19 @@ class HearthHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 return self._send_json(500, {"error": str(e)})
+        if path == "/api/favicon":
+            d = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("d", [""])[0]
+            icon = _favicon(d)
+            if not icon:
+                return self.send_error(404, "no icon")
+            data, mime = icon
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=604800")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api/team":
             # Live state of helper agents for the Team view.
             try:
