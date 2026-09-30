@@ -23,11 +23,12 @@ calls (you're the owner). Keep the allowlist tight and the token out of any repo
 from __future__ import annotations
 
 import json
+from . import env as _env
 import os
 
 # A remote chat message has no one at this screen following along — keep the
 # desktop-activity overlay off for bridge-driven runs.
-os.environ.setdefault("JARVIS_NO_GUI", "1")
+_env.setdefault("NO_GUI", "1")
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "discord_bridge.json")
 _DISCORD_MAX = 2000  # Discord's hard per-message character cap

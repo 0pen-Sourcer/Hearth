@@ -12,11 +12,12 @@ Quick start:
 Env:
     LOCAL_API_BASE   default http://localhost:1234/v1
     LOCAL_MODEL      default 'local-model'
-    JARVIS_WORKSPACE default ~/Jarvis  (sandbox for writes)
-    JARVIS_LOCKDOWN  set to 1 to also confine reads to the workspace
+    HEARTH_WORKSPACE default ~/Jarvis  (sandbox for writes)
+    HEARTH_LOCKDOWN  set to 1 to also confine reads to the workspace
 """
 
 import os
+from hearth import env as _env
 import re
 import sys
 import json
@@ -42,9 +43,9 @@ Environment (optional, each overrides the saved setting):
   LOCAL_API_BASE     server address         default http://localhost:1234/v1
   LOCAL_MODEL        model id               default: whatever is loaded
   LOCAL_API_KEY      key for that server
-  JARVIS_CONTEXT     context window in tokens
-  JARVIS_WORKSPACE   where writes are allowed           default ~/Jarvis
-  JARVIS_LOCKDOWN    1 confines reads to the workspace as well
+  HEARTH_CONTEXT     context window in tokens
+  HEARTH_WORKSPACE   where writes are allowed           default ~/Jarvis
+  HEARTH_LOCKDOWN    1 confines reads to the workspace as well
   HEARTH_MANUAL_TOOLS  1 sends the tool list as text instead of natively
 """
 
@@ -237,16 +238,16 @@ def _apply_saved_voice_settings():
     so an explicit launch override is left alone.
     """
     defaults = {
-        "JARVIS_STT_MODEL": ("stt_model", "base.en"),
-        "JARVIS_STT_DEVICE": ("stt_device", "cpu"),
+        "STT_MODEL": ("stt_model", "base.en"),
+        "STT_DEVICE": ("stt_device", "cpu"),
         # Blank means detect per utterance, and an unset variable reads the
         # same way, so there is nothing to export in that case.
-        "JARVIS_STT_LANGUAGE": ("stt_language", ""),
-        "JARVIS_TTS_DEVICE": ("tts_device", "cpu"),
-        "JARVIS_VOICE_SPEED": ("voice_speed", 1.5),
-        "JARVIS_VOICE": ("voice_name", "am_michael"),
-        "JARVIS_VOICE_INPUT_DEVICE": ("voice_input_device", -1),
-        "JARVIS_VOICE_INPUT_NAME": ("voice_input_name", ""),
+        "STT_LANGUAGE": ("stt_language", ""),
+        "TTS_DEVICE": ("tts_device", "cpu"),
+        "VOICE_SPEED": ("voice_speed", 1.5),
+        "VOICE": ("voice_name", "am_michael"),
+        "VOICE_INPUT_DEVICE": ("voice_input_device", -1),
+        "VOICE_INPUT_NAME": ("voice_input_name", ""),
     }
     try:
         import json as _json
@@ -256,15 +257,15 @@ def _apply_saved_voice_settings():
             with open(p, "r", encoding="utf-8") as f:
                 s = _json.load(f) or {}
         for env, (key, fallback) in defaults.items():
-            if os.environ.get(env):
+            if _env.get(env):
                 continue
             val = s.get(key, fallback)
             if val is None or str(val).strip() == "":
                 continue
-            os.environ[env] = str(val)
+            _env.set(env, val)
         # listen binds its size at import, which already happened above, so
         # exporting alone would not move it.
-        want = os.environ.get("JARVIS_STT_MODEL", "")
+        want = _env.get("STT_MODEL", "")
         if want and getattr(stt, "MODEL_SIZE", "") != want:
             stt.set_model(want)
     except Exception:
@@ -376,18 +377,18 @@ def _save_persisted_perms(perms: Dict[str, str]) -> None:
             json.dump(perms, f, indent=2)
     except OSError:
         pass
-USE_LMSTUDIO_HISTORY = os.getenv("JARVIS_LMSTUDIO_HISTORY", "0") == "1"
+USE_LMSTUDIO_HISTORY = _env.get("LMSTUDIO_HISTORY", "0") == "1"
 # Match this to the model you've loaded in LM Studio. Conservative default.
-CONTEXT_TOKENS = int(os.getenv("JARVIS_CONTEXT", "8192"))
-RESERVED_OUTPUT = int(os.getenv("JARVIS_RESERVED_OUTPUT", "2048"))
+CONTEXT_TOKENS = int(_env.get("CONTEXT", "8192"))
+RESERVED_OUTPUT = int(_env.get("RESERVED_OUTPUT", "2048"))
 # Compact when conversation hits this fraction of context. 0.75 = compact at
 # 75% of window, leaving room for the next turn.
-COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
+COMPACT_AT = float(_env.get("COMPACT_AT", "0.75"))
 # Below this, Hearth's own prompt (persona ~11k + tool schemas ~8k = ~20k)
 # barely fits and there's no room left for conversation, so the model overflows
 # almost immediately. Used to floor Hearth's builtin server and to warn when a
 # user pins something too small.
-MIN_USABLE_CTX = int(os.getenv("JARVIS_MIN_CTX", "24576"))  # 24K
+MIN_USABLE_CTX = int(_env.get("MIN_CTX", "24576"))  # 24K
 # (Tool-loop control + malformed-markup stripping now live in
 # hearth/loop_guard.py - outcome-hash based, not a magic per-tool count.)
 
@@ -436,11 +437,11 @@ def _is_reasoning_param_error(e: Exception) -> bool:
     return False
 
 
-VOICE_ON = os.getenv("JARVIS_VOICE_ON", "0") == "1"
+VOICE_ON = _env.get("VOICE_ON", "0") == "1"
 # Opt-in: also mirror conversation into LM Studio's threads folder so the
 # chat shows up in LM Studio's chat list. Writes to a dedicated file
 # (jarvis_cli.conversation.json) - does NOT touch your other threads.
-LMSTUDIO_SYNC = os.getenv("JARVIS_LMSTUDIO_SYNC", "0") == "1"
+LMSTUDIO_SYNC = _env.get("LMSTUDIO_SYNC", "0") == "1"
 LMSTUDIO_SYNC_PATH = os.path.expanduser(
     r"~/.lmstudio/conversations/jarvis_cli.conversation.json"
 )
@@ -900,7 +901,7 @@ class JarvisCLI:
         self.current_model = LOCAL_MODEL if os.getenv("LOCAL_MODEL") else autodetect_model()
         # Whether the user pinned context via env / /context. If they did,
         # we don't auto-override when they /model switch.
-        self._context_pinned = os.getenv("JARVIS_CONTEXT") is not None
+        self._context_pinned = _env.get("CONTEXT") is not None
         self.messages: List[Dict] = []
         self.all_chats_cache: List[Dict] = []
         self.active_chat_file: str = ""
@@ -964,8 +965,8 @@ class JarvisCLI:
         # ONE thinking toggle:
         #   /think on  → model reasons AND we show the body inline
         #   /think off → model skips reasoning entirely (no compute spent)
-        # Default off. Set JARVIS_THINK=1 to start on.
-        self.think_on = os.getenv("JARVIS_THINK", "0") == "1"
+        # Default off. Set HEARTH_THINK=1 to start on.
+        self.think_on = _env.get("THINK", "0") == "1"
         # Cloud reasoning models that 400 on `reasoning_effort` (e.g. plain
         # grok-4, grok-3 - only grok-3-mini / grok-4.3+ expose it). Populated
         # lazily the first time a model rejects the param, so we send it once,
@@ -980,9 +981,9 @@ class JarvisCLI:
         # /sleep mode - the assistant stays silent until the user says the wake word.
         # Anything else is ignored. Use /wake to come back out.
         self.sleep_mode = False
-        self._sleep_wake_word = (os.environ.get("JARVIS_WAKE_WORD", "jarvis")
+        self._sleep_wake_word = (_env.get("WAKE_WORD", "jarvis")
                                  .strip().lower())
-        self.auto_approve = os.getenv("JARVIS_AUTO_APPROVE", "0") == "1"
+        self.auto_approve = _env.get("AUTO_APPROVE", "0") == "1"
         # Lazy-init: prompt_toolkit needs a real terminal to construct a
         # session; we delay that until first input read so importing /
         # smoke-testing the module doesn't fail in a pipe.
@@ -1191,7 +1192,7 @@ class JarvisCLI:
 
     def save_history(self):
         """Always saves to ~/Jarvis/logs/jarvis_history.json (local, safe).
-        If JARVIS_LMSTUDIO_SYNC=1, also mirrors into a DEDICATED file under
+        If HEARTH_LMSTUDIO_SYNC=1, also mirrors into a DEDICATED file under
         ~/.lmstudio/conversations/ so the chat shows up in LM Studio's UI.
         Never writes to your existing LM Studio threads - only the dedicated
         jarvis_cli.conversation.json file."""
@@ -2061,7 +2062,7 @@ class JarvisCLI:
             tok = bool((cfg.get("bot_token") or "").strip())
             ids = cfg.get("allowed_chat_ids") or []
             ntfy = (cfg.get("ntfy_topic") or os.environ.get("HEARTH_NTFY_TOPIC")
-                    or os.environ.get("JARVIS_NTFY_TOPIC") or "").strip()
+                    or _env.get("NTFY_TOPIC") or "").strip()
             print(f"\n{C_BRAND}Reach Hearth from your phone{C_RESET}  {C_DIM}(all of these are opt-in, no OAuth){C_RESET}")
             print(f"  {C_BOT}Telegram bridge{C_RESET} (two-way): "
                   + (f"{C_OK}configured{C_RESET} {C_DIM}({len(ids)} allowed chat id"
@@ -3224,7 +3225,7 @@ class JarvisCLI:
                 # and by voice mode, and from settings.json on the next launch
                 # and by the window. Setting only the module left all three on
                 # the old size.
-                os.environ["JARVIS_STT_MODEL"] = stt.MODEL_SIZE
+                _env.set("STT_MODEL", stt.MODEL_SIZE)
                 if _save_setting("stt_model", stt.MODEL_SIZE):
                     print(f"{C_DIM}  saved, and the window uses it too{C_RESET}")
             return True
@@ -3299,7 +3300,7 @@ class JarvisCLI:
             elif parts[1].lower() == "speed":
                 if len(parts) >= 3:
                     new_speed = voice.set_speed(parts[2])
-                    os.environ["JARVIS_VOICE_SPEED"] = str(new_speed)
+                    _env.set("VOICE_SPEED", str(new_speed))
                     _saved = _save_setting("voice_speed", new_speed)
                     print(f"{C_OK}TTS speed → {new_speed:g}x{C_RESET}"
                           + (f"  {C_DIM}saved{C_RESET}" if _saved else ""))
@@ -3320,7 +3321,7 @@ class JarvisCLI:
             elif parts[1].lower() in ("set", "voice", "name") and len(parts) >= 3:
                 vname = parts[2]
                 voice.set_default_voice(vname)
-                os.environ["JARVIS_VOICE"] = vname
+                _env.set("VOICE", vname)
                 _saved = _save_setting("voice_name", vname)
                 print(f"{C_OK}voice → {vname}{C_RESET}"
                       + (f"  {C_DIM}saved{C_RESET}" if _saved else ""))
@@ -3333,7 +3334,7 @@ class JarvisCLI:
                 # bare /voice <name> shortcut
                 vname = parts[1]
                 voice.set_default_voice(vname)
-                os.environ["JARVIS_VOICE"] = vname
+                _env.set("VOICE", vname)
                 _saved = _save_setting("voice_name", vname)
                 print(f"{C_OK}voice → {vname}{C_RESET}"
                       + (f"  {C_DIM}saved{C_RESET}" if _saved else ""))
@@ -3444,12 +3445,12 @@ class JarvisCLI:
                 print(f"{C_ERR}no input device numbered {idx}. "
                       f"/voice devices lists them.{C_RESET}")
                 return
-        os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(idx)
+        _env.set("VOICE_INPUT_DEVICE", str(idx))
         saved = _save_setting("voice_input_device", idx)
         # Kept by name as well: the number changes when hardware comes and goes.
         name = next((d.get("name", "") for d in (stt.list_input_devices() or [])
                      if d.get("index") == idx), "") if idx >= 0 else ""
-        os.environ["JARVIS_VOICE_INPUT_NAME"] = name
+        _env.set("VOICE_INPUT_NAME", name)
         _save_setting("voice_input_name", name)
         try:
             stt.rescan_devices()
@@ -3977,8 +3978,8 @@ class JarvisCLI:
     async def _maybe_run_onboarding(self) -> None:
         """First-run wizard. Asks ~5 quick questions, writes prefs to memory
         and rules.md so the persona has user context from message #1. Skip
-        with JARVIS_NO_ONBOARDING=1 or by hitting Ctrl-C."""
-        if os.environ.get("JARVIS_NO_ONBOARDING") in ("1", "true", "yes"):
+        with HEARTH_NO_ONBOARDING=1 or by hitting Ctrl-C."""
+        if _env.get("NO_ONBOARDING") in ("1", "true", "yes"):
             return
         if not self._is_first_run():
             return
@@ -3994,7 +3995,7 @@ class JarvisCLI:
         # workspace on another drive. Skip if already chosen (pointer exists).
         try:
             from hearth.tools import _WORKSPACE_POINTER, set_workspace_location, WORKSPACE as _CUR_WS
-            if not os.path.isfile(_WORKSPACE_POINTER) and not os.environ.get("JARVIS_WORKSPACE"):
+            if not os.path.isfile(_WORKSPACE_POINTER) and not _env.get("WORKSPACE"):
                 _path_eg = "like D:\\Hearth" if os.name == "nt" else "like ~/hearth or /mnt/disk/hearth"
                 loc = input(
                     f"  {C_TOOL}Where should I keep my files - memory, documents, models?{C_RESET}\n"
@@ -4373,7 +4374,7 @@ class JarvisCLI:
         # Every boot (after the one-time onboarding), cheaply re-check the machine
         # in the background and relearn into memory ONLY if it changed since last
         # launch (drive plugged in/out, GPU swap) - so context never goes stale.
-        if os.environ.get("JARVIS_NO_ONBOARDING") not in ("1", "true", "yes"):
+        if _env.get("NO_ONBOARDING") not in ("1", "true", "yes"):
             def _env_refresh():
                 try:
                     from hearth import environment as _env

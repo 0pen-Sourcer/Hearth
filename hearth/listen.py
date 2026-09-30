@@ -26,6 +26,7 @@ ONE-TIME SETUP:
 from __future__ import annotations
 
 import os
+from . import env as _env
 import re
 import sys
 import time
@@ -47,12 +48,12 @@ from . import voice as _voice
 VOICES_DIR = os.path.join(WORKSPACE, "voices")
 # faster-whisper model size: base.en (~150MB) is the sweet spot for speed/quality
 # on CPU. Override via env if user has a beefier setup.
-MODEL_SIZE = os.environ.get("JARVIS_STT_MODEL", "base.en")
-COMPUTE_TYPE = os.environ.get("JARVIS_STT_COMPUTE", "int8")  # CPU-friendly
+MODEL_SIZE = _env.get("STT_MODEL", "base.en")
+COMPUTE_TYPE = _env.get("STT_COMPUTE", "int8")  # CPU-friendly
 # Empty means let the model decide from the audio. A fixed code here was
 # forcing English on every utterance, so a multilingual model handed back a
 # rough English rendering of whatever was said rather than the words.
-LANGUAGE = os.environ.get("JARVIS_STT_LANGUAGE", "").strip()
+LANGUAGE = _env.get("STT_LANGUAGE", "").strip()
 
 
 def list_input_devices() -> list:
@@ -176,8 +177,9 @@ _MIC_METER_CODE = (
     "    import sounddevice as sd, numpy as np, queue\n"
     "    try: sd._terminate(); sd._initialize()\n"     # fresh PortAudio -> sees a just-plugged mic
     "    except Exception: pass\n"
-    "    v=(os.environ.get('JARVIS_VOICE_INPUT_DEVICE','') or '').strip()\n"
-    "    idx=int(v) if v.lstrip('-').isdigit() and int(v)>=0 else None\n"
+    "    import hearth.listen as L\n"
+    "    idx=L.input_device_index()\n"          # the picked mic, by name, in this table
+
     "    q=queue.Queue()\n"
     "    def cb(indata, frames, t, s):\n"
     "        try: q.put_nowait(float(np.abs(indata).max()))\n"
@@ -307,7 +309,7 @@ def mic_claimed() -> bool:
 
 def selected_input_name() -> str:
     """The mic picked in Settings > Voice, by name, or '' for none picked."""
-    return (os.environ.get("JARVIS_VOICE_INPUT_NAME", "") or "").strip()
+    return (_env.get("VOICE_INPUT_NAME", "") or "").strip()
 
 
 # A device number is an index into one PortAudio's table at one moment:
@@ -358,7 +360,7 @@ def input_device_index():
             return index_for_name(name, sounddevice_inputs())
         except Exception:
             return None
-    v = (os.environ.get("JARVIS_VOICE_INPUT_DEVICE", "") or "").strip()
+    v = (_env.get("VOICE_INPUT_DEVICE", "") or "").strip()
     if v.lstrip("-").isdigit():
         idx = int(v)
         return idx if idx >= 0 else None
@@ -385,21 +387,21 @@ def is_system_audio_device(name: str) -> bool:
     rather than a real microphone."""
     n = (name or "").lower()
     return any(h in n for h in _SYSTEM_AUDIO_HINTS)
-DEVICE = os.environ.get("JARVIS_STT_DEVICE", "cpu")  # "cuda" if you want GPU
+DEVICE = _env.get("STT_DEVICE", "cpu")  # "cuda" if you want GPU
 SAMPLE_RATE = 16000  # Whisper input rate
 
 # Tunable thresholds — RMS-based VAD. Works without webrtcvad.
-SPEECH_RMS = float(os.environ.get("JARVIS_STT_THRESHOLD", "0.012"))
-SILENCE_TAIL_S = float(os.environ.get("JARVIS_STT_SILENCE_TAIL", "1.2"))
-MAX_UTTERANCE_S = float(os.environ.get("JARVIS_STT_MAX_UTTERANCE", "30"))
+SPEECH_RMS = float(_env.get("STT_THRESHOLD", "0.012"))
+SILENCE_TAIL_S = float(_env.get("STT_SILENCE_TAIL", "1.2"))
+MAX_UTTERANCE_S = float(_env.get("STT_MAX_UTTERANCE", "30"))
 MIN_SPEECH_S = 0.4  # ignore very short blips
 
 # Optional wake-word filter for continuous mode. If set, `/listen on` only
 # triggers a turn when the user opens with this phrase. Empty = no filter
 # (current behavior — every speech burst goes through).
-#   JARVIS_WAKE_WORD="jarvis"
-#   JARVIS_WAKE_WORD="hey jarvis"
-WAKE_WORD = os.environ.get("JARVIS_WAKE_WORD", "").strip().lower()
+#   HEARTH_WAKE_WORD="jarvis"
+#   HEARTH_WAKE_WORD="hey jarvis"
+WAKE_WORD = _env.get("WAKE_WORD", "").strip().lower()
 
 
 _PUNCT_STRIP = re.compile(r"^[^\w]+|[^\w]+$")
@@ -457,7 +459,7 @@ def set_device(device: str) -> str:
         return f"STT device must be 'cpu' or 'cuda' (got {device!r})"
     with _load_lock:
         DEVICE = device
-        os.environ["JARVIS_STT_DEVICE"] = device
+        _env.set("STT_DEVICE", device)
         _model = None
     return f"STT device -> {device}"
 
@@ -490,10 +492,10 @@ def _try_load_model():
         # their home dir clutter. Falls back to default cache.
         download_root = os.path.join(VOICES_DIR, "whisper")
         os.makedirs(download_root, exist_ok=True)
-        # Device pick: an explicit JARVIS_STT_DEVICE wins; otherwise auto-detect
+        # Device pick: an explicit HEARTH_STT_DEVICE wins; otherwise auto-detect
         # CUDA so a GPU box isn't silently stuck on slow CPU whisper (the ~10s
         # latency). GPU → float16 (fast); CPU → int8 (CPU-friendly).
-        _explicit = os.environ.get("JARVIS_STT_DEVICE")
+        _explicit = _env.get("STT_DEVICE")
         if _explicit:
             _device_now = _explicit.strip().lower()
         elif cuda_available():
@@ -663,8 +665,8 @@ def _transcribe_language() -> Optional[str]:
     Read on every call rather than captured at import, because the setting is
     applied by writing the environment and reloading the model in place.
     """
-    lang = (os.environ.get("JARVIS_STT_LANGUAGE", "") or "").strip().lower()
-    size = (os.environ.get("JARVIS_STT_MODEL", MODEL_SIZE) or "").strip().lower()
+    lang = (_env.get("STT_LANGUAGE", "") or "").strip().lower()
+    size = (_env.get("STT_MODEL", MODEL_SIZE) or "").strip().lower()
     if size.endswith(".en"):
         return "en"
     return lang or None
@@ -740,11 +742,11 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
     # pick up speaker echo and feedback-loop on the assistant's own voice. Tunable
     # via env var; default 5x makes normal-volume TTS not trigger but a
     # human speaking AT or louder than the speakers still interrupts.
-    TTS_MULT = float(os.environ.get("JARVIS_STT_TTS_THRESHOLD_MULT", "5.0"))
+    TTS_MULT = float(_env.get("STT_TTS_THRESHOLD_MULT", "5.0"))
     # Post-stop debounce: after we kill TTS, the speakers keep playing for
     # ~200-400ms (audio buffer). Wait that out before recording so we don't
     # transcribe the assistant's own tail.
-    POST_STOP_DEBOUNCE_S = float(os.environ.get("JARVIS_STT_POST_STOP_DEBOUNCE", "0.4"))
+    POST_STOP_DEBOUNCE_S = float(_env.get("STT_POST_STOP_DEBOUNCE", "0.4"))
 
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1,

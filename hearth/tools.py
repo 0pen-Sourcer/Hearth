@@ -4,13 +4,14 @@ Two trust zones:
   - Reads can go anywhere on disk (the assistant must KNOW your machine).
   - Writes / deletes / moves are sandboxed to WORKSPACE (~/Jarvis by default).
 
-Override sandbox: set env JARVIS_WORKSPACE to any folder.
-Tighten reads too: set env JARVIS_LOCKDOWN=1 to confine reads to the workspace.
+Override sandbox: set env HEARTH_WORKSPACE to any folder.
+Tighten reads too: set env HEARTH_LOCKDOWN=1 to confine reads to the workspace.
 """
 
 from __future__ import annotations
 
 import os
+from . import env as _env
 from collections import OrderedDict
 import re
 from functools import lru_cache
@@ -40,7 +41,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Where Hearth keeps everything (memory, conversations, skills, settings).
 # Resolution order:
-#   1. JARVIS_WORKSPACE env  (rename feature + power users)
+#   1. HEARTH_WORKSPACE env  (rename feature + power users)
 #   2. pointer file ~/.hearth/workspace.txt  (so a user whose C: is full can
 #      put the workspace on D:/E: — written by onboarding / Settings)
 #   3. default ~/Jarvis
@@ -50,7 +51,7 @@ _WORKSPACE_POINTER = os.path.join(os.path.expanduser("~"), ".hearth", "workspace
 
 
 def _resolve_workspace() -> str:
-    env = os.environ.get("JARVIS_WORKSPACE")
+    env = _env.get("WORKSPACE")
     if env and env.strip():
         return os.path.abspath(env.strip())
     try:
@@ -78,11 +79,11 @@ def set_workspace_location(path: str) -> str:
 
 WORKSPACE = os.path.abspath(_resolve_workspace())
 # Propagate the resolved path into the env so every other module that does
-# `os.environ.get("JARVIS_WORKSPACE") or ~/Jarvis` (llmserver, mcp_client,
+# `_env.get("WORKSPACE") or ~/Jarvis` (llmserver, mcp_client,
 # memory, jobs, web) aligns to the SAME workspace — including one chosen via
 # the pointer file, not just the env var. tools.py is imported first, so this
 # runs before those modules resolve their own WORKSPACE.
-os.environ["JARVIS_WORKSPACE"] = WORKSPACE
+_env.set("WORKSPACE", WORKSPACE)
 # A file being written is staged beside its target and renamed onto it, so the
 # rename is atomic and a crash leaves the previous version. Killing the process
 # between the two steps leaves the staged file behind, and the cleanup on the
@@ -160,9 +161,9 @@ _LOCKDOWN_POINTER = os.path.join(os.path.expanduser("~"), ".hearth", "lockdown")
 
 
 def read_locked() -> bool:
-    """Confine reads to the workspace? Checked live per read. Env JARVIS_LOCKDOWN
+    """Confine reads to the workspace? Checked live per read. Env HEARTH_LOCKDOWN
     wins (1/0); otherwise the persisted pointer set by the in-app toggle."""
-    v = (os.environ.get("JARVIS_LOCKDOWN", "") or "").strip().lower()
+    v = (_env.get("LOCKDOWN", "") or "").strip().lower()
     if v in ("1", "true", "yes"):
         return True
     if v in ("0", "false", "no"):
@@ -182,11 +183,11 @@ def set_lockdown(on: bool) -> bool:
             f.write("1" if on else "0")
     except Exception:
         pass
-    os.environ["JARVIS_LOCKDOWN"] = "1" if on else "0"
+    _env.set("LOCKDOWN", "1" if on else "0")
     return bool(on)
 
 # Extra writeable roots — paths the user has explicitly opted in to,
-# either via the JARVIS_EXTRA_WORKSPACES env var (semicolon- or
+# either via the HEARTH_EXTRA_WORKSPACES env var (semicolon- or
 # comma-separated) or via the /allow runtime command in the CLI.
 # Writes/edits/deletes/moves succeed when the resolved path is under any
 # of these in addition to the main WORKSPACE.
@@ -194,7 +195,7 @@ EXTRA_WORKSPACES: List[str] = []
 
 
 def _parse_extra_env() -> List[str]:
-    raw = os.environ.get("JARVIS_EXTRA_WORKSPACES", "").strip()
+    raw = _env.get("EXTRA_WORKSPACES", "").strip()
     if not raw:
         return []
     parts = [p.strip().strip('"').strip("'") for p in raw.replace(";", ",").split(",")]
@@ -469,12 +470,12 @@ def _resolve_write(p: str) -> str:
             return _grant(p)
     else:
         # No host prompt (headless / MCP client). If the user gave this session
-        # blanket trust (JARVIS_AUTO_APPROVE=1) — the same opt-in that already
+        # blanket trust (HEARTH_AUTO_APPROVE=1) — the same opt-in that already
         # lets run_command touch anything — honor writes too, so an MCP session
         # isn't stuck able to DELETE via run_command yet blocked from a simple
         # edit_file. A background sub-agent never rides this; it gets no trust.
         _auto = os.environ.get("HEARTH_AUTO_APPROVE",
-                               os.environ.get("JARVIS_AUTO_APPROVE", "0")) == "1"
+                               _env.get("AUTO_APPROVE", "0")) == "1"
         _sub = False
         try:
             from .subagents import in_subagent as _in_sub
@@ -489,9 +490,9 @@ def _resolve_write(p: str) -> str:
         f"Write blocked — '{p}' escapes workspace ({WORKSPACE}).\n"
         f"Extra allowed paths:\n  {extras}\n"
         f"To allow it: in the CLI/GUI run /allow <path>. From an MCP client or "
-        f"headless, add the folder to JARVIS_EXTRA_WORKSPACES (semicolon- or "
+        f"headless, add the folder to HEARTH_EXTRA_WORKSPACES (semicolon- or "
         f"comma-separated) in the Hearth server's env, or set "
-        f"JARVIS_AUTO_APPROVE=1 to trust the whole session, then restart Hearth."
+        f"HEARTH_AUTO_APPROVE=1 to trust the whole session, then restart Hearth."
     )
 
 
@@ -3353,7 +3354,7 @@ def _rewrite_python_invocation(cmd: str, shell: str = "powershell") -> str:
     )
 
 
-# Patterns we refuse to run without explicit JARVIS_AUTO_APPROVE=1 — these
+# Patterns we refuse to run without explicit HEARTH_AUTO_APPROVE=1 — these
 # are the "instantly regretted" kind: filesystem destruction, registry
 # nukes, process murder of common-name targets, force-shutdown, killing
 # everything in a folder. We block at the run_command layer because the
@@ -3531,7 +3532,7 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
     # keep working. Neither renames when the agent is renamed — these are the
     # framework's API, not the persona's.
     _auto = os.environ.get("HEARTH_AUTO_APPROVE",
-                           os.environ.get("JARVIS_AUTO_APPROVE", "0")) == "1"
+                           _env.get("AUTO_APPROVE", "0")) == "1"
     if _autonomous:
         _approved = False   # no prompt was ever shown for a sub-agent's call
         # Sub-agents need their OWN opt-in. Blanket auto-approve is consent for
@@ -3553,7 +3554,7 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
                 f"retry with `--force`, don't try to bypass with another shell, "
                 f"don't pipe to a different cmdlet. Just ask first.\n"
                 f"If the user truly wants this command auto-run, they can set "
-                f"JARVIS_AUTO_APPROVE=1."
+                f"HEARTH_AUTO_APPROVE=1."
             )
     return None
 
@@ -5574,7 +5575,7 @@ def _memory_forget(p: Dict) -> str:
 
 # --------------------------------------------------------------------------
 # Forge WebUI orchestration (Stable Diffusion image generation).
-# Point JARVIS_FORGE_DIR at your local Forge / SD-WebUI install (e.g.
+# Point HEARTH_FORGE_DIR at your local Forge / SD-WebUI install (e.g.
 # D:\AI\sd-webui-forge). We boot it with --api so /sdapi/v1/* is exposed.
 # --------------------------------------------------------------------------
 
@@ -5601,7 +5602,7 @@ def _autodetect_forge_dir() -> str:
     except Exception:
         pass
     # Env var next
-    env_dir = (os.environ.get("JARVIS_FORGE_DIR") or "").strip()
+    env_dir = (_env.get("FORGE_DIR") or "").strip()
     if env_dir:
         _ld = _forge_launch_dir(env_dir)
         if _ld:
@@ -5703,8 +5704,8 @@ def _looks_like_forge(path: str) -> bool:
 
 
 FORGE_DIR = _autodetect_forge_dir()
-FORGE_URL = os.environ.get("JARVIS_FORGE_URL", "http://127.0.0.1:7860")
-FORGE_BOOT_TIMEOUT = int(os.environ.get("JARVIS_FORGE_BOOT_TIMEOUT", "180"))
+FORGE_URL = _env.get("FORGE_URL", "http://127.0.0.1:7860")
+FORGE_BOOT_TIMEOUT = int(_env.get("FORGE_BOOT_TIMEOUT", "180"))
 
 # Light up the local Forge image-gen tools when an install is actually present
 # (or HEARTH_ENABLE_FORGE=1 forces them). They're deferred, so they don't bloat
@@ -5725,7 +5726,7 @@ _forge_proc: Optional[subprocess.Popen] = None
 # isn't hoarded — the LLM (or the desktop) gets its VRAM back. Each
 # forge_generate bumps the timer; a daemon watcher kills Forge once idle.
 _forge_last_used: float = 0.0
-_forge_idle_timeout: int = int(os.environ.get("JARVIS_FORGE_IDLE_TIMEOUT", "300"))
+_forge_idle_timeout: int = int(_env.get("FORGE_IDLE_TIMEOUT", "300"))
 _forge_idle_watcher_on: bool = False
 # When the active brain is Hearth's builtin llama.cpp server (not LM Studio),
 # it can't JIT-unload — so to free VRAM for Forge we fully STOP it and remember
@@ -5735,7 +5736,7 @@ _builtin_paused: "Optional[Dict[str, Any]]" = None
 
 def _start_forge_idle_watcher() -> None:
     """Spawn (once) a daemon that shuts Forge down after _forge_idle_timeout
-    seconds without a generation. Set JARVIS_FORGE_IDLE_TIMEOUT=0 to disable."""
+    seconds without a generation. Set HEARTH_FORGE_IDLE_TIMEOUT=0 to disable."""
     global _forge_idle_watcher_on
     if _forge_idle_watcher_on or _forge_idle_timeout <= 0:
         return
@@ -5785,7 +5786,7 @@ def _forge_status(p: Dict) -> str:
         "ready": reachable,
     }
     if not os.path.isdir(FORGE_DIR):
-        info["error"] = f"FORGE_DIR not found: {FORGE_DIR} — set JARVIS_FORGE_DIR"
+        info["error"] = f"FORGE_DIR not found: {FORGE_DIR} — set HEARTH_FORGE_DIR"
     return json.dumps(info, indent=2)
 
 
@@ -8595,7 +8596,7 @@ def standing_permission(name: str) -> str:
             return "allow"
     except Exception:
         pass
-    if (os.environ.get("HEARTH_AUTO_APPROVE") or os.environ.get("JARVIS_AUTO_APPROVE")) == "1":
+    if (os.environ.get("HEARTH_AUTO_APPROVE") or _env.get("AUTO_APPROVE")) == "1":
         return "allow"
     try:
         with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:

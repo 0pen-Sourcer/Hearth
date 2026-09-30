@@ -32,6 +32,7 @@ and the rest of Hearth keeps working silently.
 from __future__ import annotations
 
 import os
+from . import env as _env
 import sys
 import threading
 import time
@@ -45,11 +46,11 @@ VOICES_DIR = os.path.join(WORKSPACE, "voices")
 os.makedirs(VOICES_DIR, exist_ok=True)
 
 # Default voice id for Kokoro — am_michael is calm and neutral.
-DEFAULT_KOKORO_VOICE = os.environ.get("JARVIS_VOICE", "am_michael")
+DEFAULT_KOKORO_VOICE = _env.get("VOICE", "am_michael")
 # 1.0 = Kokoro's natural rate. Voiceover testing kept this at 1.0 (anything
 # higher starts to sound rushed during long answers). Override per session
-# with /voice speed <n> or set JARVIS_VOICE_SPEED before launch.
-DEFAULT_SPEED = float(os.environ.get("JARVIS_VOICE_SPEED", "1.0"))
+# with /voice speed <n> or set HEARTH_VOICE_SPEED before launch.
+DEFAULT_SPEED = float(_env.get("VOICE_SPEED", "1.0"))
 
 _engine: Optional[Tuple[str, object]] = None  # ("kokoro" | "piper", obj)
 _lock = threading.Lock()
@@ -182,7 +183,7 @@ def _find(*candidates: str) -> Optional[str]:
 
 
 # Same release the installer pulls from. Auto-fetched on first TTS use if the
-# files aren't already on disk (set JARVIS_NO_AUTODOWNLOAD=1 to opt out).
+# files aren't already on disk (set HEARTH_NO_AUTODOWNLOAD=1 to opt out).
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/latest/download/kokoro-v1.0.onnx"
 KOKORO_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/latest/download/voices-v1.0.bin"
 
@@ -244,7 +245,7 @@ def can_install_models() -> bool:
     state there and the GUI offers an install rather than reporting a fault."""
     if models_present():
         return False
-    if os.environ.get("JARVIS_NO_AUTODOWNLOAD") == "1":
+    if _env.get("NO_AUTODOWNLOAD") == "1":
         return False
     try:
         import kokoro_onnx  # type: ignore  # noqa: F401
@@ -264,8 +265,8 @@ def download_models(progress: "Optional[Callable[[str, int, int], None]]" = None
     global _last_load_error
     if models_present():
         return True
-    if os.environ.get("JARVIS_NO_AUTODOWNLOAD") == "1":
-        _last_load_error = "auto-download disabled (JARVIS_NO_AUTODOWNLOAD=1)"
+    if _env.get("NO_AUTODOWNLOAD") == "1":
+        _last_load_error = "auto-download disabled (HEARTH_NO_AUTODOWNLOAD=1)"
         return False
     os.makedirs(VOICES_DIR, exist_ok=True)
     jobs = []
@@ -322,15 +323,15 @@ def _ensure_kokoro_models(allow_download: bool = False) -> bool:
     nothing is bundled, and booting used to download the whole engine just to
     answer "is voice available?". Only an actual speak() passes allow_download
     =True, so the download happens when the user genuinely uses voice, not on
-    launch. Honors JARVIS_NO_AUTODOWNLOAD=1 and never downloads on LITE."""
+    launch. Honors HEARTH_NO_AUTODOWNLOAD=1 and never downloads on LITE."""
     global _last_load_error
     if _find("kokoro") and _find("voices"):
         return True
     if not allow_download:
         _last_load_error = "voice models not downloaded yet (use voice once to fetch them)"
         return False
-    if os.environ.get("JARVIS_NO_AUTODOWNLOAD") == "1":
-        _last_load_error = "kokoro models missing and auto-download disabled (JARVIS_NO_AUTODOWNLOAD=1)"
+    if _env.get("NO_AUTODOWNLOAD") == "1":
+        _last_load_error = "kokoro models missing and auto-download disabled (HEARTH_NO_AUTODOWNLOAD=1)"
         return False
     os.makedirs(VOICES_DIR, exist_ok=True)
     try:
@@ -374,7 +375,7 @@ def _try_kokoro(allow_download: bool = False):
     # but is really "wrong wheel installed". The fallback exposes the real
     # state via `last_load_error` so the GUI can prompt the user to install
     # the right wheel (or just stay on CPU, which is plenty fast for Kokoro).
-    tts_device = os.environ.get("JARVIS_TTS_DEVICE", "cpu").lower()
+    tts_device = _env.get("TTS_DEVICE", "cpu").lower()
     try:
         import onnxruntime as _ort  # type: ignore
         available = set(_ort.get_available_providers())
@@ -793,10 +794,10 @@ def reset_abort() -> None:
 # more seams. Result: "patched together" robotic speech. This replaces it with a
 # producer/consumer: ONE synth thread stays AHEAD of playback filling a queue,
 # and ONE play thread writes chunks into a SINGLE persistent output stream with
-# no gap between them. Set JARVIS_TTS_GAPLESS=0 to fall back to the old path.
+# no gap between them. Set HEARTH_TTS_GAPLESS=0 to fall back to the old path.
 import queue as _queue
 
-_TTS_GAPLESS = os.environ.get("JARVIS_TTS_GAPLESS", "1") != "0"
+_TTS_GAPLESS = _env.get("TTS_GAPLESS", "1") != "0"
 _synth_q: "_queue.Queue" = _queue.Queue()
 _audio_q: "_queue.Queue" = _queue.Queue(maxsize=6)  # bounded: synth stays ~ahead
 _pipe_lock = threading.Lock()
@@ -972,7 +973,7 @@ def speak(text: str, blocking: bool = False,
 
 
 def _speak_legacy(text, blocking, voice, speed) -> str:
-    """Pre-pipeline path (JARVIS_TTS_GAPLESS=0): synth+play one chunk at a time."""
+    """Pre-pipeline path (HEARTH_TTS_GAPLESS=0): synth+play one chunk at a time."""
     def _run():
         if _abort.is_set():
             return

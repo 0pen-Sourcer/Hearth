@@ -24,13 +24,13 @@ We aim to acknowledge within 72 hours and ship a fix within 14 days for critical
 Hearth assumes:
 
 - **The local user is trusted.** Hearth runs *for* you, not against you. The permission prompts are speed bumps, not defenses against a malicious user.
-- **The local LLM is semi-trusted.** A model can hallucinate or be jailbroken into running bad shell commands. That's why risky tools (writes, run_command, app launching) ask for confirmation by default — `JARVIS_AUTO_APPROVE=1` removes that safety on purpose.
-- **The filesystem outside `~/Jarvis/` is read-only by default.** Writes need `/allow <path>` or `JARVIS_EXTRA_WORKSPACES`.
+- **The local LLM is semi-trusted.** A model can hallucinate or be jailbroken into running bad shell commands. That's why risky tools (writes, run_command, app launching) ask for confirmation by default — `HEARTH_AUTO_APPROVE=1` removes that safety on purpose.
+- **The filesystem outside `~/Jarvis/` is read-only by default.** Writes need `/allow <path>` or `HEARTH_EXTRA_WORKSPACES`.
 - **Network traffic is opt-in.** Web search / fetch only happen when the model calls those tools. Nothing else phones home — no telemetry, no analytics, no crash reporting.
 
 Out of scope (we don't claim to defend against these):
 
-- A malicious LLM with `JARVIS_AUTO_APPROVE=1` set. The user explicitly disabled the safety bumper.
+- A malicious LLM with `HEARTH_AUTO_APPROVE=1` set. The user explicitly disabled the safety bumper.
 - A malicious user with shell access. They already have shell access.
 - Side-channel attacks on the LLM's responses. Use a model you trust.
 - Sandbox escapes via tool-call argument injection — we string-sanitize and use parameterized argument lists where possible, but a determined model + a careless user can probably escape eventually. Don't run Hearth as root.

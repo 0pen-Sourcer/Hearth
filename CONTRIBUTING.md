@@ -37,7 +37,7 @@ The pattern is: one function in [`hearth/tools.py`](hearth/tools.py) (`_my_tool(
 
 ### 4. Voice presets & wake-words
 
-`/listen on` works but doesn't filter for a wake word. Adding `JARVIS_WAKE_WORD=hey jarvis` (and a fast keyword-spotting layer like Porcupine or [openWakeWord](https://github.com/dscripka/openWakeWord)) would make ambient mode shippable for people whose mic picks up TV.
+`/listen on` works but doesn't filter for a wake word. Adding `HEARTH_WAKE_WORD=hey jarvis` (and a fast keyword-spotting layer like Porcupine or [openWakeWord](https://github.com/dscripka/openWakeWord)) would make ambient mode shippable for people whose mic picks up TV.
 
 ### 5. Share a skill (no code needed)
 

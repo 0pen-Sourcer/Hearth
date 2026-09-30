@@ -136,10 +136,10 @@ A background thread listens with whisper (energy-gated — only transcribes when
 
 **Customize phrases** via env var (settings.json soon):
 ```powershell
-$env:JARVIS_WAKE_PHRASES = "jarvis,hearth,computer"
+$env:HEARTH_WAKE_PHRASES = "jarvis,hearth,computer"
 ```
 
-Tune detection sensitivity + the idle-CPU budget via the `JARVIS_WAKE_*` env vars.
+Tune detection sensitivity + the idle-CPU budget via the `HEARTH_WAKE_*` env vars.
 
 ---
 
@@ -279,7 +279,7 @@ Tested on 8GB VRAM:
 ## Workspace layout
 
 ```
-~/Jarvis/                  ← agent's home (override with $env:JARVIS_WORKSPACE)
+~/Jarvis/                  ← agent's home (override with $env:HEARTH_WORKSPACE)
 ├── memory/                ← per-fact .md files
 │   ├── MEMORY.md          ← always-loaded index
 │   └── <fact>.md
@@ -299,7 +299,7 @@ Tested on 8GB VRAM:
 └── uploads/               ← files you dragged into the GUI
 ```
 
-Reads default to **unrestricted** (whole disk — Jarvis needs to know your machine). Writes/deletes/moves **confined** to workspace. Override with `JARVIS_LOCKDOWN=1` to confine reads too.
+Reads default to **unrestricted** (whole disk — Jarvis needs to know your machine). Writes/deletes/moves **confined** to workspace. Override with `HEARTH_LOCKDOWN=1` to confine reads too.
 
 ---
 

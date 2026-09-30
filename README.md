@@ -186,7 +186,7 @@ The same tool executor is exposed through `hearth/mcp_server.py`, so any MCP-awa
 
 
 ```
-~/Jarvis/                  ← the agent's home (override with $env:JARVIS_WORKSPACE)
+~/Jarvis/                  ← the agent's home (override with $env:HEARTH_WORKSPACE)
 ├── soul.md                ← self-written identity, loaded into every prompt
 ├── rules.md               ← plain-text house rules, re-read every turn
 ├── memory/
@@ -201,7 +201,7 @@ The same tool executor is exposed through `hearth/mcp_server.py`, so any MCP-awa
 └── subagents/             ← per-worker transcripts
 ```
 
-Reads default to your whole disk (the assistant needs to know your machine). Writes, deletes, and moves are confined to the workspace unless you grant access to a folder. Set `JARVIS_LOCKDOWN=1` to confine reads to the workspace too.
+Reads default to your whole disk (the assistant needs to know your machine). Writes, deletes, and moves are confined to the workspace unless you grant access to a folder. Set `HEARTH_LOCKDOWN=1` to confine reads to the workspace too.
 
 </details>
 
@@ -216,17 +216,17 @@ Reads default to your whole disk (the assistant needs to know your machine). Wri
 | `LOCAL_API_BASE` | auto-detected | OpenAI-compatible endpoint |
 | `LOCAL_API_KEY` | (none) | API key for the endpoint, if it needs one |
 | `LOCAL_MODEL` | auto-detected | Override the served model id |
-| `JARVIS_WORKSPACE` | `~/Jarvis` | Where memory/logs/voices live |
-| `JARVIS_LOCKDOWN` | `0` | `1` = confine reads to the workspace too |
-| `JARVIS_AUTO_APPROVE` | `0` | `1` = skip risky-tool permission prompts |
-| `JARVIS_EXTRA_WORKSPACES` | (none) | Extra paths writes are allowed in |
-| `JARVIS_VOICE` | `am_michael` | Kokoro voice id |
-| `JARVIS_VOICE_SPEED` | `1.0` | TTS playback rate |
-| `JARVIS_STT_DEVICE` | auto | force `cpu` or `cuda` for speech-to-text (auto-detects GPU when unset) |
-| `JARVIS_WAKE_WORD` | (none) | If set, continuous listen only triggers on this prefix |
-| `JARVIS_BUILTIN_PORT` | `1234` | Port for the bundled llama.cpp server |
-| `JARVIS_COMPACT_AT` | `0.75` | Auto-compact context past this fraction |
-| `JARVIS_NO_ONBOARDING` | `0` | `1` = skip the first-run setup |
+| `HEARTH_WORKSPACE` | `~/Jarvis` | Where memory/logs/voices live |
+| `HEARTH_LOCKDOWN` | `0` | `1` = confine reads to the workspace too |
+| `HEARTH_AUTO_APPROVE` | `0` | `1` = skip risky-tool permission prompts |
+| `HEARTH_EXTRA_WORKSPACES` | (none) | Extra paths writes are allowed in |
+| `HEARTH_VOICE` | `am_michael` | Kokoro voice id |
+| `HEARTH_VOICE_SPEED` | `1.0` | TTS playback rate |
+| `HEARTH_STT_DEVICE` | auto | force `cpu` or `cuda` for speech-to-text (auto-detects GPU when unset) |
+| `HEARTH_WAKE_WORD` | (none) | If set, continuous listen only triggers on this prefix |
+| `HEARTH_BUILTIN_PORT` | `1234` | Port for the bundled llama.cpp server |
+| `HEARTH_COMPACT_AT` | `0.75` | Auto-compact context past this fraction |
+| `HEARTH_NO_ONBOARDING` | `0` | `1` = skip the first-run setup |
 | `HEARTH_PERSONA_NAME` | `JARVIS` | Assistant name |
 | `HEARTH_PERSONA` | (none) | Tone overlay: `bro` / `chill` / `professional` / `formal` |
 | `HEARTH_ALL_TOOLS` | `0` | `1` = load every tool up front instead of on demand |
@@ -274,7 +274,7 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 
 ## Voice setup
 
-**Text-to-speech (Kokoro):** ~80 MB ONNX model. Runs on CPU in real time, or offloads to your GPU via CUDA (NVIDIA) or DirectML (any GPU). The installer offers to download the model; pick a voice with `JARVIS_VOICE`.
+**Text-to-speech (Kokoro):** ~80 MB ONNX model. Runs on CPU in real time, or offloads to your GPU via CUDA (NVIDIA) or DirectML (any GPU). The installer offers to download the model; pick a voice with `HEARTH_VOICE`.
 
 **Speech-to-text (faster-whisper):** the `base.en` model (~150 MB) auto-downloads on first `/listen on`. It auto-detects CUDA and uses the GPU when available, otherwise CPU. Use `/listen` for one-shot or `/listen on` for continuous mode with barge-in.
 
@@ -288,7 +288,7 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 
 **Is anything sent to the cloud?** Only web search/fetch (DuckDuckGo), and only when the model invokes them. No telemetry.
 
-**Will it touch my files unexpectedly?** Writes are confined to the workspace by default and risky tools prompt for permission the first time per session. `JARVIS_AUTO_APPROVE=1` removes the prompts.
+**Will it touch my files unexpectedly?** Writes are confined to the workspace by default and risky tools prompt for permission the first time per session. `HEARTH_AUTO_APPROVE=1` removes the prompts.
 
 **Does it work offline?** Yes, except web search/fetch.
 

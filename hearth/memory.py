@@ -23,6 +23,7 @@ Hard caps:
 from __future__ import annotations
 
 import json
+from . import env as _env
 import os
 import re
 import threading
@@ -39,8 +40,8 @@ MEM_DIR = os.path.join(WORKSPACE, "memory")
 _ARCHIVE_DIR = os.path.join(MEM_DIR, "_archive")
 # Per-(type, sub_category) char budget before eviction triggers. Picked so
 # typical clusters (~25 facts of 200-300 chars each) don't churn; only the
-# bloated buckets get pruned. Tuneable via JARVIS_MEM_SUBCAT_CAP env var.
-_SUBCAT_CHAR_CAP = int(os.environ.get("JARVIS_MEM_SUBCAT_CAP", "6000"))
+# bloated buckets get pruned. Tuneable via HEARTH_MEM_SUBCAT_CAP env var.
+_SUBCAT_CHAR_CAP = int(_env.get("MEM_SUBCAT_CAP", "6000"))
 # When an archived fact gets recalled this many times via sibling pull, it
 # promotes back into the hot store. Three hits = "user keeps coming back
 # to this topic, stop hiding it".
@@ -49,8 +50,8 @@ _PROMOTE_THRESHOLD = 3
 # `expires_at`. After it passes they auto-archive (unless still being recalled
 # — see expire_stale). "in class 12" is seasonal, "left earbud died" transient,
 # name/birthday/hardware are durable (no expiry). Tuneable via env.
-_SEASONAL_DAYS = int(os.environ.get("JARVIS_MEM_SEASONAL_DAYS", "300"))
-_TRANSIENT_DAYS = int(os.environ.get("JARVIS_MEM_TRANSIENT_DAYS", "21"))
+_SEASONAL_DAYS = int(_env.get("MEM_SEASONAL_DAYS", "300"))
+_TRANSIENT_DAYS = int(_env.get("MEM_TRANSIENT_DAYS", "21"))
 INDEX_PATH = os.path.join(MEM_DIR, "MEMORY.md")
 RULES_PATH = os.path.join(WORKSPACE, "rules.md")
 
@@ -1352,11 +1353,11 @@ def read_rules() -> str:
 # ---------------------------------------------------------------------------
 
 SOUL_PATH = os.path.join(WORKSPACE, "soul.md")
-SOUL_MAX_CHARS = int(os.environ.get("JARVIS_SOUL_MAX_CHARS", "1500"))
+SOUL_MAX_CHARS = int(_env.get("SOUL_MAX_CHARS", "1500"))
 # Per-call write cap: forces the model to be deliberate. Stops it from
 # slamming a 1500-char essay into soul.md in one go. Multi-call edits
 # still allowed (model can append in steps), just no single dump.
-SOUL_PER_WRITE_CAP = int(os.environ.get("JARVIS_SOUL_PER_WRITE_CAP", "400"))
+SOUL_PER_WRITE_CAP = int(_env.get("SOUL_PER_WRITE_CAP", "400"))
 
 DEFAULT_SOUL = """\
 # Soul
@@ -1433,7 +1434,7 @@ def append_soul(line: str) -> str:
 # ---------------------------------------------------------------------------
 
 PROFILE_PATH = os.path.join(WORKSPACE, "profile.md")
-PROFILE_MAX_CHARS = int(os.environ.get("JARVIS_PROFILE_MAX_CHARS", "1500"))
+PROFILE_MAX_CHARS = int(_env.get("PROFILE_MAX_CHARS", "1500"))
 _PROFILE_HEADER = "# Profile — who the user is + how they want replies"
 
 

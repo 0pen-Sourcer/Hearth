@@ -23,6 +23,7 @@ Modes:
 from __future__ import annotations
 
 import asyncio
+from . import env as _env
 import json
 import os
 import re
@@ -69,7 +70,7 @@ def in_subagent() -> bool:
     """True while a sub-agent's own tool call is executing on this thread.
 
     Sub-agents run with no human watching, so tools use this to refuse the
-    blanket auto-approve escape hatch. A user setting JARVIS_AUTO_APPROVE=1 is
+    blanket auto-approve escape hatch. A user setting HEARTH_AUTO_APPROVE=1 is
     consenting to skip prompts for commands THEY can see scroll past, not to
     hand a background agent unreviewed shell access."""
     return bool(getattr(_DEPTH_TLS, "in_tool", False))
@@ -86,7 +87,7 @@ _DEFAULT_MAX_TURNS = 8
 # Sidechain transcripts (one JSONL per subagent run) live here so a parent
 # can `read_file` them for live progress, and so backgrounded subagents
 # leave an audit trail even after the parent has moved on.
-_TRANSCRIPT_DIR = Path(os.environ.get("JARVIS_WORKSPACE")
+_TRANSCRIPT_DIR = Path(_env.get("WORKSPACE")
                        or (Path.home() / "Jarvis")) / "subagents"
 
 # Background subagents put their final result-dict here so anyone (the chat

@@ -14,6 +14,7 @@ Nothing here logs a query anywhere but the provider being asked.
 from __future__ import annotations
 
 import json
+from . import env as _env
 import os
 import random
 import re
@@ -43,7 +44,7 @@ def _next_start() -> int:
 
 def _settings() -> dict:
     try:
-        base = os.environ.get("JARVIS_WORKSPACE") or os.path.expanduser("~/Jarvis")
+        base = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
         with open(os.path.join(base, "settings.json"), encoding="utf-8") as f:
             return json.load(f) or {}
     except Exception:

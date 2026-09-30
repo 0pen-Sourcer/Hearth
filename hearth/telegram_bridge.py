@@ -24,6 +24,7 @@ owner), so keep allowed_chat_ids tight and the token out of any repo.
 from __future__ import annotations
 
 import asyncio
+from . import env as _env
 import json
 import mimetypes
 import os
@@ -32,7 +33,7 @@ import urllib.request
 
 # A remote chat message has no one at this screen following along — keep the
 # desktop-activity overlay off for bridge-driven runs.
-os.environ.setdefault("JARVIS_NO_GUI", "1")
+_env.setdefault("NO_GUI", "1")
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "phone_bridge.json")
 _TG_MAX = 4096

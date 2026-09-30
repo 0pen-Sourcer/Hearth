@@ -150,12 +150,12 @@ if (-not $NoVoice) {
     if ($dev -eq 'gpu') {
         Write-Step "Configuring voice for GPU (CUDA) + installing onnxruntime-gpu"
         & $venvPython -m pip install --quiet onnxruntime-gpu
-        [Environment]::SetEnvironmentVariable("JARVIS_TTS_DEVICE", "cuda", "User")
-        [Environment]::SetEnvironmentVariable("JARVIS_STT_DEVICE", "cuda", "User")
-        Write-OK "voice set to GPU (JARVIS_TTS_DEVICE / JARVIS_STT_DEVICE = cuda, user env). Reopen your terminal for it to take effect."
+        [Environment]::SetEnvironmentVariable("HEARTH_TTS_DEVICE", "cuda", "User")
+        [Environment]::SetEnvironmentVariable("HEARTH_STT_DEVICE", "cuda", "User")
+        Write-OK "voice set to GPU (HEARTH_TTS_DEVICE / HEARTH_STT_DEVICE = cuda, user env). Reopen your terminal for it to take effect."
     } else {
-        [Environment]::SetEnvironmentVariable("JARVIS_TTS_DEVICE", "cpu", "User")
-        [Environment]::SetEnvironmentVariable("JARVIS_STT_DEVICE", "cpu", "User")
+        [Environment]::SetEnvironmentVariable("HEARTH_TTS_DEVICE", "cpu", "User")
+        [Environment]::SetEnvironmentVariable("HEARTH_STT_DEVICE", "cpu", "User")
         Write-OK "voice set to CPU (recommended - no VRAM contention with your LLM)."
     }
 } else {
@@ -305,7 +305,7 @@ if (-not $NoRealtimeVoice) {
 
 # ----- 4. Workspace --------------------------------------------------------
 Write-Step "Setting up ~/Jarvis workspace"
-$workspace = if ($env:JARVIS_WORKSPACE) { $env:JARVIS_WORKSPACE } else { Join-Path $HOME 'Jarvis' }
+$workspace = if ($env:HEARTH_WORKSPACE) { $env:HEARTH_WORKSPACE } else { Join-Path $HOME 'Jarvis' }
 foreach ($sub in @('', 'memory', 'logs', 'voices', 'screenshots')) {
     $p = if ($sub) { Join-Path $workspace $sub } else { $workspace }
     if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }

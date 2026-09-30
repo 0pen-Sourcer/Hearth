@@ -21,13 +21,14 @@ Default wake phrases:
     "jarvis", "hey jarvis", "hi jarvis", "wake up jarvis",
     "yo jarvis", "jarvis wake up"
 
-Override via env var JARVIS_WAKE_PHRASES (comma-separated):
-    JARVIS_WAKE_PHRASES="jarvis,j a r v i s,hearth"
+Override via env var HEARTH_WAKE_PHRASES (comma-separated):
+    HEARTH_WAKE_PHRASES="jarvis,j a r v i s,hearth"
 """
 
 from __future__ import annotations
 
 import os
+from . import env as _env
 import threading
 import time
 from typing import Callable, List, Optional
@@ -51,7 +52,7 @@ DEFAULT_WAKE_PHRASES = [
 
 
 def _wake_phrases() -> List[str]:
-    env = os.environ.get("JARVIS_WAKE_PHRASES", "").strip()
+    env = _env.get("WAKE_PHRASES", "").strip()
     if env:
         return [p.strip().lower() for p in env.split(",") if p.strip()]
     # Whatever the user typed in Settings, Voice. Without this the phrases were
@@ -88,9 +89,9 @@ def _normalize(t: str) -> str:
 # only when it is long enough that one letter is not most of the word, and only
 # when the first letter still agrees. That accepts jarmis, jervis and javis
 # while refusing travis, service, harvest, and it stops a name like "hearth"
-# waking on "earth". Set JARVIS_WAKE_EDITS=0 to require an exact match.
+# waking on "earth". Set HEARTH_WAKE_EDITS=0 to require an exact match.
 def _wake_edit_budget(name: str) -> int:
-    env = os.environ.get("JARVIS_WAKE_EDITS", "").strip()
+    env = _env.get("WAKE_EDITS", "").strip()
     if env:
         try:
             return max(0, int(env))

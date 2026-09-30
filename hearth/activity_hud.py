@@ -16,6 +16,7 @@ the HUD and is swallowed. show()/done()/hide() are safe to call from any thread.
 from __future__ import annotations
 
 import os
+from . import env as _env
 import sys
 import threading
 import time
@@ -74,13 +75,13 @@ _DONE = 0x008FD87B        # green dot (#7bd88f in BGR)
 
 def _enabled() -> bool:
     """HUD is on unless disabled, and only where a real desktop exists. Off for
-    the phone/chat bridges and one-shot headless runs (JARVIS_NO_GUI=1)."""
+    the phone/chat bridges and one-shot headless runs (HEARTH_NO_GUI=1)."""
     if sys.platform != "win32":
         return False
-    v = os.environ.get("JARVIS_ACTIVITY_HUD")
+    v = _env.get("ACTIVITY_HUD")
     if v is not None:
         return v.strip().lower() not in ("0", "false", "no", "off")
-    if os.environ.get("JARVIS_NO_GUI") == "1":
+    if _env.get("NO_GUI") == "1":
         return False
     try:
         from .web import _load_settings

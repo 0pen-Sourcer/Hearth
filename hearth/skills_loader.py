@@ -31,6 +31,7 @@ available without bloating tool schemas.
 from __future__ import annotations
 
 import os
+from . import env as _env
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,7 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple
 #   1. User skills  ~/Jarvis/skills/   (writable, where new ones land)
 #   2. Bundled      hearth/skills/     (ship-with-Hearth defaults)
 # Same-name user skill shadows the bundled one (user wins).
-_USER_SKILLS_DIR = Path(os.environ.get("JARVIS_WORKSPACE")
+_USER_SKILLS_DIR = Path(_env.get("WORKSPACE")
                         or (Path.home() / "Jarvis")) / "skills"
 _BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 

@@ -23,6 +23,7 @@ Workflow from a brand-new install:
 from __future__ import annotations
 
 import json
+from . import env as _env
 import math
 import os
 import re
@@ -35,7 +36,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-WORKSPACE = Path(os.environ.get("JARVIS_WORKSPACE", Path.home() / "Jarvis"))
+WORKSPACE = Path(_env.get("WORKSPACE", Path.home() / "Jarvis"))
 
 # Models can live on a different drive than the workspace, so a user whose C: is
 # full can keep GGUFs on D:/E:/X: without moving their chats + memory too.
@@ -148,14 +149,14 @@ def save_model_config(model_path: str, config: Dict[str, Any]) -> None:
     except Exception:
         pass
 
-BUILTIN_PORT = int(os.environ.get("JARVIS_BUILTIN_PORT", "1234"))
+BUILTIN_PORT = int(_env.get("BUILTIN_PORT", "1234"))
 BUILTIN_HOST = "127.0.0.1"
 # Key the builtin server is spawned with; every local caller must send it.
 BUILTIN_API_KEY = "hearth-builtin"
 # Smallest context Hearth's own server will boot at. Persona (~11K) + tool
 # schemas (~8K) are ~20K tokens, so below ~24K the prompt overflows with no room
 # for a reply.
-MIN_USABLE_CTX = int(os.environ.get("JARVIS_MIN_CTX", "24576"))  # 24K
+MIN_USABLE_CTX = int(_env.get("MIN_CTX", "24576"))  # 24K
 
 # Concurrent request slots on the built-in server. llama.cpp splits --ctx-size
 # EVENLY across slots, so N slots that each hold a usable prompt need N *
@@ -2090,11 +2091,11 @@ def start_builtin(model_path: str, port: Optional[int] = None,
             # buffer. The native server spills gracefully, so keep this LEAN to
             # pack as many layers as possible onto the GPU (the rest land on CPU
             # RAM, which is fine when you have the RAM). Tunable via
-            # JARVIS_VRAM_RESERVE_GB — lower = more GPU layers, but too low can
+            # HEARTH_VRAM_RESERVE_GB — lower = more GPU layers, but too low can
             # OOM at load. The old llama-cpp-python wheel still needs its big 2.3.
             if _use_native:
                 try:
-                    _reserve = float(os.environ.get("JARVIS_VRAM_RESERVE_GB", "0.6"))
+                    _reserve = float(_env.get("VRAM_RESERVE_GB", "0.6"))
                 except (TypeError, ValueError):
                     _reserve = 0.6
             else:

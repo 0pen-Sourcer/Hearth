@@ -30,6 +30,7 @@ GET  /api/persona               → current system prompt (for settings preview)
 from __future__ import annotations
 
 import argparse
+from . import env as _env
 import asyncio
 import base64
 import json
@@ -1310,17 +1311,17 @@ def _load_settings() -> Dict:
     except Exception:
         pass
     # Apply device prefs as env vars BEFORE models load
-    os.environ["JARVIS_STT_DEVICE"] = defaults.get("stt_device", "cpu")
-    os.environ["JARVIS_STT_MODEL"]  = defaults.get("stt_model",  "base.en")
-    os.environ["JARVIS_STT_LANGUAGE"] = defaults.get("stt_language", "")
-    os.environ["JARVIS_TTS_DEVICE"] = defaults.get("tts_device", "cpu")
-    os.environ["JARVIS_VOICE_SPEED"] = str(defaults.get("voice_speed", 1.5))
-    os.environ["JARVIS_VOICE"]      = defaults.get("voice_name", "am_michael")
+    _env.set("STT_DEVICE", defaults.get("stt_device", "cpu"))
+    _env.set("STT_MODEL", defaults.get("stt_model",  "base.en"))
+    _env.set("STT_LANGUAGE", defaults.get("stt_language", ""))
+    _env.set("TTS_DEVICE", defaults.get("tts_device", "cpu"))
+    _env.set("VOICE_SPEED", str(defaults.get("voice_speed", 1.5)))
+    _env.set("VOICE", defaults.get("voice_name", "am_michael"))
     # Selected mic index (-1 = OS default). Drives both STT paths via
     # listen.input_device_index(). The mic picker (Settings → Voice) writes it.
-    os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(defaults.get("voice_input_device", -1))
+    _env.set("VOICE_INPUT_DEVICE", str(defaults.get("voice_input_device", -1)))
     # The same pick by name, which is what the mic is looked up by.
-    os.environ["JARVIS_VOICE_INPUT_NAME"] = str(defaults.get("voice_input_name", "") or "")
+    _env.set("VOICE_INPUT_NAME", str(defaults.get("voice_input_name", "") or ""))
     # Agent name → persona module reads this at import-time via
     # HEARTH_PERSONA_NAME. Setting it here means the very next chat turn
     # picks up the user's renamed agent. On boot, this fires before any
@@ -1370,16 +1371,16 @@ def _save_settings_locked(d: Dict) -> Dict:
         except Exception:
             pass
     # Re-apply env vars + reload voice/listen so new device picks effect
-    os.environ["JARVIS_STT_DEVICE"] = cur.get("stt_device", "cpu")
-    os.environ["JARVIS_STT_MODEL"]  = cur.get("stt_model",  "base.en")
-    os.environ["JARVIS_STT_LANGUAGE"] = cur.get("stt_language", "")
-    os.environ["JARVIS_TTS_DEVICE"] = cur.get("tts_device", "cpu")
-    os.environ["JARVIS_VOICE_SPEED"] = str(cur.get("voice_speed", 1.5))
-    os.environ["JARVIS_VOICE"]      = cur.get("voice_name", "am_michael")
+    _env.set("STT_DEVICE", cur.get("stt_device", "cpu"))
+    _env.set("STT_MODEL", cur.get("stt_model",  "base.en"))
+    _env.set("STT_LANGUAGE", cur.get("stt_language", ""))
+    _env.set("TTS_DEVICE", cur.get("tts_device", "cpu"))
+    _env.set("VOICE_SPEED", str(cur.get("voice_speed", 1.5)))
+    _env.set("VOICE", cur.get("voice_name", "am_michael"))
     # Mic pick. Every voice session builds its own recorder, so the next one
     # opens the chosen device; a running session keeps its mic until it ends.
-    os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(cur.get("voice_input_device", -1))
-    os.environ["JARVIS_VOICE_INPUT_NAME"] = str(cur.get("voice_input_name", "") or "")
+    _env.set("VOICE_INPUT_DEVICE", str(cur.get("voice_input_device", -1)))
+    _env.set("VOICE_INPUT_NAME", str(cur.get("voice_input_name", "") or ""))
     # Keep the runtime chat model in sync with the saved pick. Without this a
     # cloud model swap (grok-4.20 -> grok-4.3) saved to disk but the next
     # /chat + the status poller still used the old LOCAL_MODEL, so the topbar
@@ -1540,8 +1541,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         loopback Host header: a page that rebinds its domain to 127.0.0.1 still
         sends `Host: evil.com`, so this blocks it while the local GUI (Host:
         127.0.0.1:8765 / localhost:8765) passes. Users who deliberately expose the
-        web UI on their LAN opt out with JARVIS_ALLOW_LAN=1."""
-        if os.environ.get("JARVIS_ALLOW_LAN") in ("1", "true", "yes"):
+        web UI on their LAN opt out with HEARTH_ALLOW_LAN=1."""
+        if _env.get("ALLOW_LAN") in ("1", "true", "yes"):
             return True
         raw = (self.headers.get("Host") or "").strip().lower()
         if not raw:
@@ -1873,12 +1874,12 @@ class HearthHandler(BaseHTTPRequestHandler):
                 devs = []
             cur = -1
             try:
-                cur = int(os.environ.get("JARVIS_VOICE_INPUT_DEVICE", "-1"))
+                cur = int(_env.get("VOICE_INPUT_DEVICE", "-1"))
             except ValueError:
                 cur = -1
             return self._send_json(200, {
                 "devices": devs, "selected": cur,
-                "selected_name": os.environ.get("JARVIS_VOICE_INPUT_NAME", "")})
+                "selected_name": _env.get("VOICE_INPUT_NAME", "")})
         if path == "/api/voice/install-status":
             return self._send_json(200, _VOICE_INSTALL or {"running": False})
         if path == "/api/voice/status":
@@ -2918,10 +2919,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             tts_dev = settings.get("tts_device", "cpu")
             stt_dev = settings.get("stt_device", "cpu")
             stt_mdl = settings.get("stt_model", "base.en")
-            os.environ["JARVIS_TTS_DEVICE"] = tts_dev
-            os.environ["JARVIS_STT_DEVICE"] = stt_dev
-            os.environ["JARVIS_STT_MODEL"]  = stt_mdl
-            os.environ["JARVIS_STT_LANGUAGE"] = settings.get("stt_language", "")
+            _env.set("TTS_DEVICE", tts_dev)
+            _env.set("STT_DEVICE", stt_dev)
+            _env.set("STT_MODEL", stt_mdl)
+            _env.set("STT_LANGUAGE", settings.get("stt_language", ""))
             details = {}
             if _voice:
                 try:
@@ -3723,7 +3724,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         """Open the OS file explorer with the given path selected. Reveal follows
         the READ policy, not the write policy: the Files view browses the whole
         disk, so revealing what you're already looking at must work anywhere. Only
-        JARVIS_LOCKDOWN (which also confines reads) restricts it to the workspace.
+        HEARTH_LOCKDOWN (which also confines reads) restricts it to the workspace.
         Cross-site POSTs are already blocked by the Host guard, and reveal just
         opens Explorer at an existing path (no data access). Non-blocking spawn."""
         from .tools import list_extra_workspaces, read_locked, path_within
@@ -3811,7 +3812,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if new_name == current_name:
             return self._send_json(200, {"ok": True, "noop": True, "name": new_name})
         # Compute target workspace. Use the PARENT of current WORKSPACE so a
-        # user who already set $JARVIS_WORKSPACE=D:\Stuff\Jarvis gets the
+        # user who already set $HEARTH_WORKSPACE=D:\Stuff\Jarvis gets the
         # rename done in-place (D:\Stuff\Cortana), not yanked back to ~.
         cur_ws = os.path.realpath(WORKSPACE)
         parent = os.path.dirname(cur_ws)
@@ -3843,7 +3844,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             # rename from this process because settings.json / DB files may
             # still hold a handle on Windows. Spawn a detached python that
             # outlives us, waits for our PID to exit, then does the move +
-            # relaunches the tray with JARVIS_WORKSPACE pointing at the
+            # relaunches the tray with HEARTH_WORKSPACE pointing at the
             # new folder. Same drive => os.rename (instant). Cross-drive
             # => copytree + rmtree fallback.
             here = os.path.dirname(os.path.abspath(__file__))
@@ -3881,7 +3882,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "    except Exception as e:\n"
                 "        print('rename failed:', e); sys.exit(1)\n"
                 "env = os.environ.copy()\n"
-                "env['JARVIS_WORKSPACE'] = new\n"
+                "env['HEARTH_WORKSPACE'] = new\n"
                 f"env['HEARTH_PERSONA_NAME'] = {new_name!r}\n"
                 "flags = 0\n"
                 "if sys.platform == 'win32':\n"
@@ -3979,7 +3980,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "except Exception as e:\n"
                 "    print('relocate failed:', e); sys.exit(1)\n"
                 "env = os.environ.copy()\n"
-                "env['JARVIS_WORKSPACE'] = new\n"
+                "env['HEARTH_WORKSPACE'] = new\n"
                 "flags = 0\n"
                 "if sys.platform == 'win32':\n"
                 "    flags = 0x08000000 | subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008\n"
@@ -4723,14 +4724,14 @@ def _auto_boot_preferred_model_async() -> None:
 
     Without this, "default model" was a stored string nothing read on boot
     — the user had to click Use this in the Models tab every launch. Now
-    Hearth honors the setting automatically. Skip with JARVIS_NO_AUTOBOOT=1.
+    Hearth honors the setting automatically. Skip with HEARTH_NO_AUTOBOOT=1.
 
     Match logic: the saved `preferred_model` may be the LM Studio short id
     ('harmonic-hermes-9b'), a filename ('Qwen3.5-9B-Harmonic.Q4_K_M.gguf'),
     or a full path. We try in order: exact path, exact filename, then
     case-insensitive slug-match against each disk model's filename.
     """
-    if os.environ.get("JARVIS_NO_AUTOBOOT") in ("1", "true", "yes"):
+    if _env.get("NO_AUTOBOOT") in ("1", "true", "yes"):
         return
     # Honor the user's Settings → Server → "Auto-boot last model on launch"
     # toggle. Default True so the existing behavior is preserved.
@@ -4881,8 +4882,8 @@ def _maybe_learn_environment_async() -> None:
     """On first run (no memory yet), detect hardware/models/drive-map into memory
     so the GUI model has the same machine context the CLI gets from onboarding.
     Runs in a background thread so it never delays server startup. Skip with
-    JARVIS_NO_ONBOARDING=1."""
-    if os.environ.get("JARVIS_NO_ONBOARDING") in ("1", "true", "yes"):
+    HEARTH_NO_ONBOARDING=1."""
+    if _env.get("NO_ONBOARDING") in ("1", "true", "yes"):
         return
     onboarded = False
     try:

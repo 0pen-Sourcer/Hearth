@@ -40,13 +40,14 @@ PERMISSION POLICY
 Headless mode bypasses the interactive `[y/n/a/N]` prompts on risky tools —
 there's no human there to answer. By default this is enabled (the runner is
 expected to be supervising). To enforce strict permissions, set the
-environment variable `JARVIS_AUTO_APPROVE=0` before invocation; risky tool
+environment variable `HEARTH_AUTO_APPROVE=0` before invocation; risky tool
 calls will then auto-DENY instead of auto-allowing.
 """
 
 from __future__ import annotations
 
 import argparse
+from . import env as _env
 import asyncio
 import json
 import os
@@ -69,7 +70,7 @@ def _brain_from_settings() -> dict:
     localhost:1234 and failing, because it read the environment and nothing
     else."""
     try:
-        base = os.environ.get("JARVIS_WORKSPACE") or os.path.expanduser("~/Jarvis")
+        base = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
         with open(os.path.join(base, "settings.json"), encoding="utf-8") as f:
             s = json.load(f) or {}
     except Exception:
@@ -197,9 +198,9 @@ WRAP_UP_AT_FRACTION = 0.75
 # alone is ~8K tokens, so trim chopped the persona in half before history
 # even arrived. The autodetect_context() probe overrides this when LM Studio
 # reports a real loaded_context_length.
-CONTEXT_TOKENS = int(os.getenv("JARVIS_CONTEXT", "32768"))
-RESERVED_OUTPUT = int(os.getenv("JARVIS_RESERVED_OUTPUT", "2048"))
-COMPACT_AT = float(os.getenv("JARVIS_COMPACT_AT", "0.75"))
+CONTEXT_TOKENS = int(_env.get("CONTEXT", "32768"))
+RESERVED_OUTPUT = int(_env.get("RESERVED_OUTPUT", "2048"))
+COMPACT_AT = float(_env.get("COMPACT_AT", "0.75"))
 
 
 _OR_CATALOG_CACHE = {}   # model_id -> context_length (or None = known miss)
@@ -308,17 +309,17 @@ def resolve_context_tokens(model_id: str) -> tuple:
     provider table.
 
     Precedence:
-      1. JARVIS_CONTEXT env var (hard pin — testing / debugging)
+      1. HEARTH_CONTEXT env var (hard pin — testing / debugging)
       2. Endpoint probe (LM Studio / Ollama / built-in expose loaded_context)
       3. Per-provider known-context table (cloud endpoints don't expose ctx)
       4. CONTEXT_TOKENS default (32K)
     """
-    pinned = os.getenv("JARVIS_CONTEXT")
+    pinned = _env.get("CONTEXT")
     if pinned:
         try:
             v = int(pinned)
             if v > 0:
-                return v, f"JARVIS_CONTEXT={v // 1024}K (env pin)"
+                return v, f"HEARTH_CONTEXT={v // 1024}K (env pin)"
         except ValueError:
             pass
     # Built-in server: use the context we ACTUALLY booted it with, not the model's
@@ -910,7 +911,7 @@ async def run_once(
              # Use the source string we computed above — covers env override,
              # endpoint probe, and the per-provider table (Grok 1M, Gemini 1M,
              # GPT-4o 128K, Claude 200K, etc).
-             source=("env JARVIS_CONTEXT" if os.getenv("JARVIS_CONTEXT")
+             source=("env HEARTH_CONTEXT" if _env.get("CONTEXT")
                      else context_source))
     except Exception:
         pass
@@ -1672,7 +1673,7 @@ async def run_once(
                 #    coroutine resolving to same. The GUI uses this to pop a
                 #    modal and wait for the user's click. The CLI has its own
                 #    parallel implementation in hearth_cli.py.
-                # 2. Otherwise the legacy JARVIS_AUTO_APPROVE env var applies:
+                # 2. Otherwise the legacy HEARTH_AUTO_APPROVE env var applies:
                 #    when set to "0", risky tools are auto-denied (no UI).
                 from .tools import is_risky  # single source — see tools.py
                 if is_risky(name) and permission_check is not None:
@@ -1742,10 +1743,10 @@ async def run_once(
                         })
                         continue
                 elif is_risky(name):
-                    if os.environ.get("JARVIS_AUTO_APPROVE", "1") == "0":
+                    if _env.get("AUTO_APPROVE", "1") == "0":
                         tool_result = (
                             f"The user declined this tool call. Strict permission "
-                            f"mode is on (JARVIS_AUTO_APPROVE=0) and '{name}' "
+                            f"mode is on (HEARTH_AUTO_APPROVE=0) and '{name}' "
                             f"is risky."
                         )
                         gd = guard.after(name, args, tool_result)
@@ -2192,7 +2193,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # One-shot CLI runs have no chat window watching — keep the desktop-activity
     # overlay out of the way (unless explicitly forced on).
-    os.environ.setdefault("JARVIS_NO_GUI", "1")
+    _env.setdefault("NO_GUI", "1")
 
     emit = emit_json if args.format == "json" else emit_text
     try:

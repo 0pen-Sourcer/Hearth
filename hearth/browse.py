@@ -24,6 +24,7 @@ hidden browser (CI / servers / no display).
 from __future__ import annotations
 
 import atexit
+from . import env as _env
 import os
 import queue
 import threading
@@ -149,7 +150,7 @@ class _BrowserWorker(threading.Thread):
             # the proprietary codecs (H.264/AAC) YouTube needs. Override the dir
             # with HEARTH_BROWSE_PROFILE_DIR.
             prof_dir = os.getenv("HEARTH_BROWSE_PROFILE_DIR") or os.path.join(
-                os.environ.get("JARVIS_WORKSPACE") or os.path.expanduser("~/Jarvis"),
+                _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis"),
                 ".browser_profile")
             self._browser = None
             self._context = None

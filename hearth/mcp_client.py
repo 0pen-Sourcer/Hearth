@@ -26,6 +26,7 @@ Config shape: standard mcp.json
 from __future__ import annotations
 
 import asyncio
+from . import env as _env
 import json
 import os
 import re
@@ -68,7 +69,7 @@ def _is_secret_env(name: str) -> bool:
 
 
 def _workspace() -> Path:
-    env = os.environ.get("JARVIS_WORKSPACE")
+    env = _env.get("WORKSPACE")
     if env and env.strip():
         return Path(env.strip())
     try:

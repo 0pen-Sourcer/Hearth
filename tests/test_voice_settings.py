@@ -62,10 +62,11 @@ _writers = [p for p in _tree
 check("nothing sets the override, so the fallback chain is what runs", not _writers)
 
 # ------------------------------------------------------- window and CLI agree
-_ENV = re.compile(r'os\.environ\[\s*["\'](JARVIS_(?:STT|TTS|VOICE)[A-Z_]*)["\']\s*\]\s*=')
+# Settings are exported through hearth.env (HEARTH_* with a JARVIS_* fallback).
+_ENV = re.compile(r'_env\.set\(\s*["\']((?:STT|TTS|VOICE)[A-Z_]*)["\']')
 gui = set(_ENV.findall(open(os.path.join(ROOT, "hearth", "web.py"), encoding="utf-8").read()))
 cli_src = open(os.path.join(ROOT, "hearth_cli.py"), encoding="utf-8").read()
-cli = set(_ENV.findall(cli_src)) | set(re.findall(r'"(JARVIS_(?:STT|TTS|VOICE)[A-Z_]*)":', cli_src))
+cli = set(_ENV.findall(cli_src)) | set(re.findall(r'"((?:STT|TTS|VOICE)[A-Z_]*)":\s*\(', cli_src))
 
 check("the window does export voice settings", len(gui) >= 5)
 missing = sorted(gui - cli)

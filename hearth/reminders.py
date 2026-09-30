@@ -14,6 +14,7 @@ the user said, using the local time it is given every turn.
 from __future__ import annotations
 
 import json
+from . import env as _env
 import os
 import re
 import threading
@@ -337,7 +338,7 @@ def _push_phone(title: str, body: str) -> bool:
     raises."""
     import os as _os
     topic = (_os.environ.get("HEARTH_NTFY_TOPIC")
-             or _os.environ.get("JARVIS_NTFY_TOPIC") or "").strip()
+             or __env.get("NTFY_TOPIC") or "").strip()
     if not topic:
         # Fall back to the topic saved from the GUI (Settings -> Reach from phone),
         # which writes settings.json rather than an env var.
