@@ -116,8 +116,16 @@ def download_patch(on_progress=None, tag: str = "") -> dict:
 
 # Components a repair can and cannot restore. Kept beside repair() so the two
 # never disagree about what the patch actually carries.
+# Checked file by file: a folder that exists can still be missing the one file
+# that starts the app.
 _REPAIRABLE = [
-    ("Hearth code", ["hearth"], "the app itself"),
+    ("Hearth code", ["hearth/__init__.py", "hearth/web.py", "hearth/tools.py",
+                     "hearth/headless.py", "hearth/ui.html", "hearth_cli.py"],
+     "the app itself"),
+    ("Skills and helpers", ["hearth/skills", "hearth/subagents"],
+     "file-making skills and the helper agents' instructions"),
+    ("Icons and art", ["assets/icon.png", "assets/mark.svg", "assets/team/manifest.json"],
+     "the logo, tray icon and Team room"),
     ("Speech output", ["kokoro_onnx", "espeakng_loader"], "voice replies"),
     ("Speech input", ["faster_whisper", "RealtimeSTT", "silero_vad"], "the mic"),
     ("Audio devices", ["_sounddevice_data", "pyaudio"], "playback and capture"),
@@ -128,7 +136,27 @@ _REPAIRABLE = [
 _UNPATCHABLE = [
     ("Speech runtime", ["onnxruntime"], "reinstall to restore"),
     ("Transcribe runtime", ["ctranslate2"], "reinstall to restore"),
+    ("Window", ["webview", "clr_loader"], "reinstall to restore"),
+    ("Desktop control", ["uiautomation", "comtypes"], "reinstall to restore"),
+    ("Web browsing", ["playwright"], "reinstall to restore"),
 ]
+
+
+def _engine_ok() -> bool:
+    """A usable built-in engine exists, shipped with the app or downloaded later."""
+    try:
+        from . import llmserver
+        return bool(llmserver.find_native_llama_server())
+    except Exception:
+        return False
+
+
+def _needs_engine() -> bool:
+    try:
+        from . import edition
+        return not edition.is_lite()
+    except Exception:
+        return True
 
 
 def repair_plan() -> dict:
@@ -154,6 +182,13 @@ def repair_plan() -> dict:
         missing = _state(mods)
         items.append({"label": label, "note": note, "repairable": True,
                       "missing": missing, "ok": not missing})
+    # The engine is not in the patch, but the same official build can be
+    # downloaded again, so it is repairable rather than a reinstall.
+    if _needs_engine():
+        ok = _engine_ok()
+        items.append({"label": "Model engine", "repairable": True,
+                      "note": "runs local models (a larger download, about 600 MB)",
+                      "missing": [] if ok else ["llama-server"], "ok": ok})
     for label, mods, note in _UNPATCHABLE:
         missing = _state(mods)
         items.append({"label": label, "note": note, "repairable": False,
@@ -166,10 +201,11 @@ def repair_plan() -> dict:
 
 def repair(on_progress=None) -> dict:
     """Restore a fouled-up install by re-fetching THIS version's patch and
-    re-applying it. The patch carries Hearth's code plus the loose voice stack
-    (torch/scipy/soundfile/halo), so a file someone deleted or corrupted in that
-    layer comes back. It does NOT restore the bundled engine / onnxruntime (too
-    big to patch) — those need a full reinstall. apply_patch is atomic (it backs
+    re-applying it. The patch carries Hearth's code, skills, art and the loose
+    voice stack, so a file deleted or corrupted in that layer comes back. A
+    missing model engine is downloaded again from the official llama.cpp
+    releases. onnxruntime, ctranslate2 and the window/desktop/browser libraries
+    are too big to patch and need a full reinstall. apply_patch is atomic (it backs
     up and rolls back), so a failed repair leaves the install as it was."""
     if not can_patch():
         return {"ok": False, "error":
@@ -183,10 +219,24 @@ def repair(on_progress=None) -> dict:
     if not got.get("ok"):
         return got
     r = apply_patch(got["path"])
-    if r.get("ok"):
-        return {"ok": True, "restored": r.get("files", 0),
-                "note": "restored the code + voice files; restart Hearth to load them"}
-    return r
+    if not r.get("ok"):
+        return r
+    out = {"ok": True, "restored": r.get("files", 0),
+           "note": "restored the app, art and voice files; restart Hearth to load them"}
+    if _needs_engine() and not _engine_ok():
+        try:
+            from . import llmserver
+            e = llmserver.download_llama_runtime(on_progress=on_progress, force=True)
+        except Exception as ex:
+            e = {"ok": False, "error": f"{type(ex).__name__}: {ex}"}
+        if e.get("ok"):
+            out["engine"] = e.get("tag")
+            out["note"] = "restored the app and the model engine; restart Hearth to load them"
+        else:
+            out["engine_error"] = e.get("error") or "engine download failed"
+            out["note"] = ("restored the app, but the model engine could not be "
+                           f"downloaded: {out['engine_error']}")
+    return out
 
 
 # Written before a patch starts replacing files and removed once it has
@@ -236,6 +286,7 @@ def recover_interrupted_patch() -> dict:
             except OSError:
                 pass
         os.remove(marker)
+        shutil.rmtree(backup, ignore_errors=True)
         print(f"[hearth.updater] recovered an interrupted update: "
               f"{restored} file(s) restored, {dropped} removed", flush=True)
         return {"ok": True, "recovered": True, "restored": restored, "removed": dropped}
@@ -311,6 +362,9 @@ def apply_patch(path: str) -> dict:
         os.remove(marker)
     except OSError:
         pass
+    # Nothing is left to roll back once the patch is in, and the backup is the
+    # size of everything it replaced (torch included, hundreds of MB).
+    shutil.rmtree(backup, ignore_errors=True)
     _sync_registry_version()
     return {"ok": True, "files": len(names)}
 

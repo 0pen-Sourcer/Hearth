@@ -43,7 +43,8 @@ _BINARY_INCLUDES = ["torch", "scipy", "scipy.libs", "numpy.libs", "halo", "spinn
 
 # Too large to sit in a code patch, so a repair cannot restore them and says so
 # rather than reporting success over a still-broken install.
-_UNPATCHABLE = ["onnxruntime", "ctranslate2"]
+_UNPATCHABLE = ["onnxruntime", "ctranslate2", "webview", "clr_loader",
+                "uiautomation", "comtypes", "playwright"]
 # Pure-Python packages the voice recorder imports that PyInstaller freezes into
 # the exe rather than shipping loose, so they are absent from the dist tree and
 # from any base install that never had torch. Sourced straight from the venv and
@@ -61,23 +62,34 @@ _DIST_INTERNAL = next((d for d in _DIST_CANDIDATES if os.path.isdir(d)),
                       _DIST_CANDIDATES[0])
 
 
+def code_members() -> list[tuple[str, str]]:
+    """(source, archive path) for Hearth's own files.
+
+    The whole package tree, since skills and the helper agents' instructions
+    live in subfolders and change between releases like the code does, plus
+    assets/, which the window serves its logo and Team room art from.
+    hearth_cli.py sits at the bundle root rather than inside the package."""
+    members: list[tuple[str, str]] = []
+    for top in ("hearth", "assets"):
+        for dirpath, dirs, files in os.walk(os.path.join(ROOT, top)):
+            dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+            for f in sorted(files):
+                if f.endswith((".pyc", ".pyo", ".bak")) or f == ".gitkeep":
+                    continue
+                src = os.path.join(dirpath, f)
+                members.append((src, os.path.relpath(src, ROOT).replace(os.sep, "/")))
+    cli = os.path.join(ROOT, "hearth_cli.py")
+    if os.path.isfile(cli):
+        members.append((cli, "hearth_cli.py"))
+    return members
+
+
 def main() -> int:
     out_dir = os.path.join(ROOT, "Output")
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"hearth-code-{HEARTH_VERSION}.zip")
 
-    # Exactly the files the packaged app loads from disk. ui.html is included
-    # because the GUI is a real part of the code layer, and hearth_cli.py sits
-    # at the bundle root rather than inside the package.
-    members: list[tuple[str, str]] = []
-    hearth_dir = os.path.join(ROOT, "hearth")
-    for name in sorted(os.listdir(hearth_dir)):
-        if name.endswith(".py") or name == "ui.html":
-            members.append((os.path.join(hearth_dir, name), f"hearth/{name}"))
-    cli = os.path.join(ROOT, "hearth_cli.py")
-    if os.path.isfile(cli):
-        members.append((cli, "hearth_cli.py"))
-
+    members = code_members()
     code_count = len(members)
 
     # Bundled-dependency additions for this release, pulled from the built dist so

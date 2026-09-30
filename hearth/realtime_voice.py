@@ -28,6 +28,7 @@ Environment:
 from __future__ import annotations
 
 import os
+import sys
 from . import env as _env
 import re
 import threading
@@ -164,13 +165,38 @@ def status() -> dict:
     }
 
 
+def _cudnn_present() -> bool:
+    """Whether cuDNN's working libraries can be found, not just its loader.
+
+    ctranslate2 ships only cudnn64_9.dll, which loads the real kernels from
+    cudnn_ops64_9.dll and friends at the first convolution. Without them the
+    speech model on the graphics card dies partway through loading, after the
+    wait for it has already run out."""
+    if os.name != "nt":
+        return True
+    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    try:
+        import ctranslate2  # type: ignore
+        dirs.append(os.path.dirname(ctranslate2.__file__))
+    except Exception:
+        pass
+    if getattr(sys, "_MEIPASS", ""):
+        dirs.append(os.path.join(sys._MEIPASS, "nvidia", "cudnn", "bin"))
+    try:
+        import nvidia.cudnn  # type: ignore
+        dirs += [os.path.join(p, "bin") for p in nvidia.cudnn.__path__]
+    except Exception:
+        pass
+    return any(os.path.isfile(os.path.join(d, "cudnn_ops64_9.dll")) for d in dirs)
+
+
 def _stt_device() -> tuple:
     """(device, compute_type) for the speech model, from the "Listening runs
     on" setting. The graphics card when chosen and usable; otherwise the
     processor with 8-bit weights, which is several times faster there than the
     float32 the model falls back to on its own."""
     want = (_env.get("STT_DEVICE") or "cpu").lower()
-    if want == "cuda":
+    if want == "cuda" and _cudnn_present():
         try:
             import ctranslate2  # type: ignore
             if ctranslate2.get_cuda_device_count() > 0:

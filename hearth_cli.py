@@ -2065,8 +2065,8 @@ class JarvisCLI:
             return True
         if low == "/repair":
             # Restore a fouled-up install by re-applying this version's patch
-            # (Hearth's code + the voice files). Bundled engine deps aren't in
-            # the patch, so those still need a reinstall.
+            # (code, skills, art, voice files) and re-downloading a missing
+            # model engine.
             try:
                 from hearth import updater
                 if not updater.can_patch():
@@ -2079,7 +2079,9 @@ class JarvisCLI:
                         sys.stdout.flush()
                 r = updater.repair(on_progress=_rp)
                 print()
-                if r.get("ok"):
+                if r.get("ok") and r.get("engine_error"):
+                    print(f"{C_OK}Repaired {r.get('restored', 0)} files.{C_RESET} {C_ERR}{r.get('note')}{C_RESET}")
+                elif r.get("ok"):
                     print(f"{C_OK}Repaired {r.get('restored', 0)} files.{C_RESET} {C_DIM}Restart Hearth to load them.{C_RESET}")
                 else:
                     print(f"{C_ERR}Repair failed: {r.get('error')}{C_RESET}")

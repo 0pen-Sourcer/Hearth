@@ -4572,7 +4572,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Repair install</div>
-            <div class="hint">Restore Hearth's code and voice files if something got deleted or corrupted, by re-downloading and re-applying this version. The bundled engine still needs a reinstall. <span id="repair-status"></span></div>
+            <div class="hint">Checks every part of Hearth and puts back whatever is missing or broken: the app, its art, voice, and the model engine. Your chats, memories and files are not touched. <span id="repair-status"></span></div>
           </div>
           <button class="btn-mini" id="btn-repair">Repair</button>
         </div>
@@ -5305,7 +5305,7 @@ function showRepairPlanModal(plan) {
       + (cannot.length ? ` ${cannot.length} need${cannot.length === 1 ? 's' : ''} a full reinstall.` : '')
       + `</div>`
     : `<div style="font-size:13px;color:var(--fg-dim);padding:2px 0 10px">`
-      + `Everything is present. Repairing anyway re-applies this version's code and voice files over the top.</div>`;
+      + `Everything is present. Repairing anyway puts this version's files back over the top.</div>`;
 
   const html = summary + items.map(row).join('')
     + `<div style="font-size:12px;color:var(--fg-faint);padding:10px 2px 0">`
@@ -11951,7 +11951,8 @@ async function refreshSettings() {
               if (ev.ok) {
                 dlUpsert(REPAIR_DL_ID, { status: 'done', pct: 100 });
                 if (st) st.textContent = 'restored ' + (ev.restored || 0) + ' files';
-                toast('Repaired', 'Restart Hearth to load the restored files.', 'ok', 8000);
+                if (ev.engine_error) toast('Repaired, except the model engine', ev.note || ev.engine_error, 'warn', 12000);
+                else toast('Repaired', 'Restart Hearth to load the restored files.', 'ok', 8000);
               } else {
                 dlUpsert(REPAIR_DL_ID, { status: 'error' });
                 if (st) st.textContent = '';

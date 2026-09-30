@@ -57,7 +57,10 @@ def _list_from_patch(name):
 
 
 shipped = _list_from_patch("_BINARY_INCLUDES") | _list_from_patch("_VENV_PURE_INCLUDES")
-promised = {m for _, mods, _ in updater._REPAIRABLE for m in mods if m != "hearth"}
+# Hearth's own files are checked against the packed list below; these are the
+# bundled libraries taken from the build.
+promised = {m for _, mods, _ in updater._REPAIRABLE for m in mods
+            if "/" not in m and m != "hearth_cli.py"}
 missing = sorted(promised - shipped)
 check("every part repair promises is one the patch ships"
       + (", missing " + ", ".join(missing) if missing else ""), not missing)
@@ -67,6 +70,25 @@ patch_unpatchable = _list_from_patch("_UNPATCHABLE")
 check("the two unpatchable lists agree", plan_unpatchable == patch_unpatchable)
 check("nothing is called both repairable and unpatchable",
       not (promised & plan_unpatchable))
+
+# ------------------------------------------- the patch carries Hearth's own files
+# It used to pack only hearth/*.py and ui.html, so the skills, the helper
+# agents' instructions and every icon and piece of art never updated and never
+# came back after a repair, while the plan called the app intact.
+import build_patch                                                  # noqa: E402
+
+packed = {arc for _, arc in build_patch.code_members()}
+for want in ("hearth/ui.html", "hearth_cli.py", "hearth/subagents/coder.md",
+             "hearth/skills/make-pdf/SKILL.md", "assets/icon.png", "assets/mark.svg"):
+    check(f"the patch packs {want}", want in packed)
+if os.path.isdir(os.path.join(ROOT, "assets", "team")):
+    check("the patch packs the Team room art", "assets/team/manifest.json" in packed)
+check("no compiled or backup files are packed",
+      not any(a.endswith((".pyc", ".bak")) or "__pycache__" in a for a in packed))
+own = [m for _, mods, _ in updater._REPAIRABLE for m in mods if "/" in m or m == "hearth_cli.py"]
+unpacked = [m for m in own if not any(a == m or a.startswith(m + "/") for a in packed)]
+check("every file repair checks for is one the patch restores"
+      + (", missing " + ", ".join(unpacked) if unpacked else ""), not unpacked)
 
 print()
 if FAILS:
