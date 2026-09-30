@@ -7915,6 +7915,14 @@ def _launch_team(p: Dict) -> str:
     return f"{r.get('note', 'Team launched.')}\nTeam: {who}"
 
 
+def _external_agents_line() -> str:
+    try:
+        from . import external_agents as _xa
+        return _xa.describe()
+    except Exception:
+        return ""
+
+
 _HANDLERS["launch_team"] = _launch_team
 TOOL_DEFINITIONS.append({
     "name": "launch_team",
@@ -7926,13 +7934,19 @@ TOOL_DEFINITIONS.append({
         "watch agents work at once. Decompose the user's goal into focused "
         "members, each with a clear scoped prompt. Agents act autonomously in "
         "the background (the coder persona can write files + run commands), so "
-        "only use this when the user explicitly wants a team.",
+        "only use this when the user explicitly wants a team. A member can also be "
+        "another agent CLI the user has installed (Claude Code, Codex, Gemini CLI, "
+        "OpenCode...), run on the user's own account; set `agent` for that and "
+        "`folder` for where it works. " + _external_agents_line(),
     "parameters": {"type": "object", "properties": {
         "members": {"type": "array", "items": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Short label, e.g. 'Architect', 'Frontend'."},
             "persona": {"type": "string", "enum": ["coder", "researcher", "archivist", "summarizer"],
                         "description": "Sub-agent role. Default 'coder'."},
             "prompt": {"type": "string", "description": "The scoped task for this member."},
+            "agent": {"type": "string", "description": "Leave out for a Hearth helper. Or one of: "
+                      "claude-code, codex, gemini-cli, opencode, qwen-code, crush, cursor-agent, copilot."},
+            "folder": {"type": "string", "description": "Working folder for an external agent. Default: the workspace."},
         }, "required": ["prompt"]}},
     }, "required": ["members"]},
 })
@@ -8535,6 +8549,9 @@ _normalize_tool_workspace_paths()
 _RISKY_TOOLS: set = {
     "write_file", "edit_file", "create_directory", "delete_path", "move_path",
     "run_command", "start_job", "open_app", "open_url", "open_in_browser",
+    # A team can include other agent CLIs, which act under their own permission
+    # rules rather than Hearth's, so starting one is asked about.
+    "launch_team",
     # These act outside the machine: one sends a message to a phone, the other
     # downloads and installs code.
     "send_to_phone", "install_skill",
@@ -8546,7 +8563,7 @@ _RISKY_TOOLS: set = {
     "disk_usage", "forge_generate", "forge_shutdown",
     "generate_image", "generate_video",
 }
-_NEVER_PERM: set = {"ask_user", "spawn_subagent", "launch_team"}
+_NEVER_PERM: set = {"ask_user", "spawn_subagent"}
 
 # Minted per process and never written down, so only code inside this process
 # that imports it can mark a call approved. A model emitting the key name gets

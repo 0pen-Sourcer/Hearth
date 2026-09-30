@@ -239,7 +239,20 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not prompt:
             dropped.append({"name": name, "reason": "no prompt"})
             continue
-        if len(spawned) >= _MAX_TEAM:
+        runtime = (m.get("agent") or "").strip().lower()
+        if runtime and runtime != "hearth":
+            # Another agent CLI, on the user's own install; it does not use the
+            # local model, so it does not count against the local team limit.
+            from . import external_agents
+            r = external_agents.spawn(runtime, prompt, name=name, cwd=(m.get("folder") or "").strip())
+            if r.get("ok"):
+                spawned.append({"name": name, "persona": r.get("label", runtime), "external": True,
+                                "agent_id": r.get("agent_id"),
+                                "transcript": str(subagents._transcript_path(r.get("agent_id")))})
+            else:
+                dropped.append({"name": name, "reason": str(r.get("error") or "did not start")})
+            continue
+        if sum(1 for x in spawned if not x.get("external")) >= _MAX_TEAM:
             dropped.append({"name": name, "reason": f"over the team limit of {_MAX_TEAM} here"})
             continue
         r = subagents.spawn_subagent(persona=persona, prompt=prompt,

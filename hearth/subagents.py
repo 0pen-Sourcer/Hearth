@@ -294,7 +294,7 @@ def _read_agent(p: Path) -> Dict[str, Any]:
                     if pending:
                         pending.pop(0)
                     prev = rec.get("preview") or ""
-                    if prev.startswith("(not run:") and "permission" in prev:
+                    if (prev.startswith("(not run:") and "permission" in prev) or                             "requested permissions" in prev:
                         info["blocked"] = rec.get("name") or ""
                 elif k == "assistant_final":
                     info["preview"] = str(rec.get("text") or "")[:240]
