@@ -184,6 +184,12 @@ jobs:
         run: |
           python tests/test_team.py
 
+      - name: Voice sessions end cleanly and stay apart
+        # Every session leaked its mic reader and a Whisper process, and a
+        # stream closing late took the next session's ready and then stopped it.
+        run: |
+          python tests/test_voice_session.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through

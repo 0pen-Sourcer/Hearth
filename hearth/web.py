@@ -68,10 +68,8 @@ try:
 except Exception:
     _rt_voice = None
 
-# Realtime caption + utterance queue. Filled by the recorder callbacks and
-# drained by the SSE-style /api/voice/realtime/stream handler.
+# Per-stream event queues for /api/voice/realtime/stream.
 import queue as _queue_mod
-_rt_event_queue: "_queue_mod.Queue[dict]" = _queue_mod.Queue()
 
 # Window reference for single-instance focus. desktop.py sets this to its
 # pywebview window object so /api/focus can bring it to front when a second
@@ -1349,16 +1347,9 @@ def _save_settings_locked(d: Dict) -> Dict:
     os.environ["JARVIS_TTS_DEVICE"] = cur.get("tts_device", "cpu")
     os.environ["JARVIS_VOICE_SPEED"] = str(cur.get("voice_speed", 1.5))
     os.environ["JARVIS_VOICE"]      = cur.get("voice_name", "am_michael")
-    # Mic pick — apply + drop the cached recorder so the NEXT voice session
-    # rebuilds on the chosen device (no restart needed).
-    _new_mic = str(cur.get("voice_input_device", -1))
-    if os.environ.get("JARVIS_VOICE_INPUT_DEVICE") != _new_mic:
-        os.environ["JARVIS_VOICE_INPUT_DEVICE"] = _new_mic
-        try:
-            from . import realtime_voice as _rv
-            _rv.reset_recorder()
-        except Exception:
-            pass
+    # Mic pick. Every voice session builds its own recorder, so the next one
+    # opens the chosen device; a running session keeps its mic until it ends.
+    os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(cur.get("voice_input_device", -1))
     # Keep the runtime chat model in sync with the saved pick. Without this a
     # cloud model swap (grok-4.20 -> grok-4.3) saved to disk but the next
     # /chat + the status poller still used the old LOCAL_MODEL, so the topbar
@@ -2922,25 +2913,22 @@ class HearthHandler(BaseHTTPRequestHandler):
                         details["stt_warning"] = load_err
                 except Exception as e:
                     details["stt"] = f"{type(e).__name__}: {e}"
-            # Realtime voice recorder: kill so it rebuilds with new model next time
+            # A running voice session ends; the next one loads the new model.
             if _rt_voice:
                 try:
                     _rt_voice.stop_continuous()
-                    _rt_voice.reset_recorder()
                     details["realtime"] = "will rebuild on next start"
                 except Exception as e:
                     details["realtime"] = f"{type(e).__name__}: {e}"
             return self._send_json(200, {"ok": True, "details": details})
         if path == "/api/voice/realtime/stop":
+            # The stream that owns the session notices within a second and
+            # closes with "stopped".
             if _rt_voice:
                 try:
                     _rt_voice.stop_continuous()
                 except Exception:
                     pass
-            try:
-                _rt_event_queue.put({"type": "stopped"})
-            except Exception:
-                pass
             return self._send_json(200, {"ok": True})
         if path == "/api/focus":
             # Single-instance hook — another launch attempt asked us to surface
@@ -4250,77 +4238,55 @@ class HearthHandler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return False
 
-        # Drain any leftover events from a prior session.
-        while True:
-            try:
-                _rt_event_queue.get_nowait()
-            except Exception:
-                break
-
-        # Wire callbacks into the shared queue.
-        def _on_partial(text: str) -> None:
-            try:
-                _rt_event_queue.put({"type": "partial", "text": text})
-            except Exception:
-                pass
-
-        def _on_final(text: str) -> None:
-            try:
-                _rt_event_queue.put({"type": "final", "text": text})
-            except Exception:
-                pass
+        # This stream's own queue. A shared one let a stream that was still
+        # closing take the next session's events, "ready" among them.
+        events: "_queue_mod.Queue[dict]" = _queue_mod.Queue()
+        put = events.put
 
         def _on_barge() -> None:
-            # Cut TTS HERE, server-side, the instant the VAD fires. Previously
-            # this only queued an event and waited for the client to POST
-            # /api/voice/stop back — a full round-trip before any audio stopped,
-            # which is why barge-in felt dead. Stopping locally makes it
-            # immediate; the queued event is just for the HUD.
+            # Cut TTS here, server-side, the instant the VAD fires; the event
+            # is only for the HUD.
             try:
                 if _voice:
                     _voice.stop()
             except Exception:
                 pass
+            put({"type": "barge"})
+
+        _ready_fired = threading.Event()
+
+        def _on_ready() -> None:
+            _ready_fired.set()
+            # A mic fallback (the picked device would not open) is known by
+            # now; ship it with 'ready' so the UI can say which mic it is using.
+            ev = {"type": "ready"}
             try:
-                _rt_event_queue.put({"type": "barge"})
+                w = _rt_voice.mic_warning()
+                if w:
+                    ev["warning"] = w
             except Exception:
                 pass
+            put(ev)
 
+        lease = None
         try:
-            _rt_voice.set_caption_callback(_on_partial)
-            _rt_voice.set_barge_callback(_on_barge)
-            _ready_fired = threading.Event()
-            def _on_ready() -> None:
-                _ready_fired.set()
-                # The recorder is built by now, so a mic-fallback (picked device
-                # wouldn't open, using the OS default) has already been recorded.
-                # Ship it with 'ready' so the UI can warn instead of the user
-                # staring at a "listening" grid that can't hear their real mic.
-                ev = {"type": "ready"}
-                try:
-                    w = _rt_voice.mic_warning()
-                    if w:
-                        ev["warning"] = w
-                except Exception:
-                    pass
-                _rt_event_queue.put(ev)
-            _rt_voice.set_ready_callback(_on_ready)
-            _rt_voice.set_error_callback(
-                lambda m: _rt_event_queue.put({"type": "error", "message": m}))
             if _voice:
-                _voice.set_level_sink(lambda v: _rt_event_queue.put({"type": "level", "v": v}))
+                _voice.set_level_sink(lambda v: put({"type": "level", "v": v}))
             # "warming" until the STT model finishes loading; the ready callback
-            # above flips it to listening once the recorder can actually hear.
+            # flips it to listening once the recorder can actually hear.
             emit({"type": "warming"})
-            msg = _rt_voice.start_continuous(_on_final)
-            emit({"type": "started", "detail": msg})
-            # Watchdog: if the recorder never reaches "ready" (a missing voice
-            # component in a packaged build, or a first-run model download that
-            # stalls), the UI would sit on "warming" forever with no clue. Fire a
-            # loud, mute-proof toast after a grace period instead.
+            lease = _rt_voice.start_continuous(
+                lambda t: put({"type": "final", "text": t}),
+                on_caption=lambda t: put({"type": "partial", "text": t}),
+                on_barge=_on_barge, on_ready=_on_ready,
+                on_error=lambda m: put({"type": "error", "message": m}))
+            emit({"type": "started"})
+            # If the recorder never reaches ready (a component missing from a
+            # packaged build, a first-run model download that stalls), say so
+            # rather than sit on "warming".
             def _warm_watchdog():
                 if not _ready_fired.is_set():
-                    _rt_event_queue.put({"type": "warn_slow", "message":
+                    put({"type": "warn_slow", "message":
                         "Voice is still starting. First run downloads a small "
                         "speech model, which can take a minute. If it never "
                         "starts, a voice component may be missing from this "
@@ -4328,10 +4294,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             _wt = threading.Timer(45.0, _warm_watchdog)
             _wt.daemon = True
             _wt.start()
-            # Raise the desktop HUD too. It self-hides whenever the Hearth GUI is
-            # the foreground window (focus-based handoff in voice_overlay), so
-            # there's no double grid — it only appears when you've tabbed away to
-            # a game / another app, driven by the same real TTS amplitude.
+            # The desktop HUD hides itself while the Hearth window has focus.
             try:
                 from . import voice_overlay as _vo
                 _vo.start()
@@ -4341,30 +4304,38 @@ class HearthHandler(BaseHTTPRequestHandler):
             emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
             return
 
-        # Drain events until client disconnects or stop posted.
+        # Drain until the client goes, or the session this stream owns ends
+        # (stopped from elsewhere, or handed to a newer stream).
+        last_beat = time.time()
         try:
             while True:
                 try:
-                    ev = _rt_event_queue.get(timeout=15.0)
+                    ev = events.get(timeout=1.0)
                 except Exception:
-                    if not emit({"type": "heartbeat"}):
+                    if not _rt_voice.owns(lease):
+                        emit({"type": "stopped"})
                         break
+                    if time.time() - last_beat >= 15.0:
+                        last_beat = time.time()
+                        if not emit({"type": "heartbeat"}):
+                            break
                     continue
                 if not emit(ev):
                     break
-                if ev.get("type") == "stopped":
-                    break
+                if ev.get("type") in ("stopped", "error"):
+                    if ev.get("type") == "stopped" or not _rt_voice.is_listening():
+                        break
         finally:
-            try:
-                _rt_voice.set_caption_callback(None)
-                _rt_voice.set_barge_callback(None)
-                if _voice:
-                    _voice.set_level_sink(None)
-                _rt_voice.stop_continuous()
-                from . import voice_overlay as _vo
-                _vo.stop()
-            except Exception:
-                pass
+            # Only the owner tears down. A stream that closes after a newer one
+            # took over must leave that session, its level meter and HUD alone.
+            if _rt_voice.stop_continuous(lease):
+                try:
+                    if _voice:
+                        _voice.set_level_sink(None)
+                    from . import voice_overlay as _vo
+                    _vo.stop()
+                except Exception:
+                    pass
 
     def _mic_meter_stream(self) -> None:
         """Stream the live input level from the SELECTED mic as NDJSON so the GUI

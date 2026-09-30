@@ -3215,11 +3215,6 @@ class JarvisCLI:
                 os.environ["JARVIS_STT_MODEL"] = stt.MODEL_SIZE
                 if _save_setting("stt_model", stt.MODEL_SIZE):
                     print(f"{C_DIM}  saved, and the window uses it too{C_RESET}")
-                try:
-                    from hearth import realtime_voice as _rv
-                    _rv.reset_recorder()
-                except Exception:
-                    pass
             return True
         if low == "/sleep":
             self.sleep_mode = True
@@ -3439,13 +3434,6 @@ class JarvisCLI:
                 return
         os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(idx)
         saved = _save_setting("voice_input_device", idx)
-        # Drop the cached recorder so the next voice session opens the new
-        # device rather than the one it was built on.
-        try:
-            from hearth import realtime_voice as _rv
-            _rv.reset_recorder()
-        except Exception:
-            pass
         try:
             stt.rescan_devices()
         except Exception:

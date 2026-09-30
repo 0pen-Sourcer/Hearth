@@ -36,20 +36,35 @@ from typing import Callable, Optional
 from . import voice as _tts
 
 _REALTIME_AVAILABLE: Optional[bool] = None
-_recorder = None
-_recorder_lock = threading.Lock()
-_listening = False
-_listen_thread: Optional[threading.Thread] = None
-_stop_flag = threading.Event()
 
-# Caption callback — UI sets this to get live partial transcripts.
-_caption_cb: Optional[Callable[[str], None]] = None
-# Barge-in callback — UI sets this to be notified the instant the user
-# starts speaking (silero VAD start). Lets the GUI kill TTS + abort the
-# LLM stream so a phone-call-like interrupt works.
-_barge_cb: Optional[Callable[[], None]] = None
-_ready_cb: Optional[Callable[[], None]] = None  # fires once the STT model is loaded
-_error_cb: Optional[Callable[[str], None]] = None  # fires if the recorder can't build
+
+class _Session:
+    """One voice session: its own recorder, stop signal and callbacks.
+
+    Everything used to be module-wide. A session that was ending shared the
+    stop flag, the callbacks and the recorder slot with the one starting after
+    it, so reopening voice within a few seconds had the old loop clear-flag its
+    way back to life, then stop the new session when its dead recorder errored.
+    Each session now owns its state, and only its current owner (the lease
+    handed out by start_continuous) can stop it.
+    """
+
+    def __init__(self, lease: int, on_utterance, on_caption, on_barge, on_ready, on_error):
+        self.lease = lease
+        self.stop = threading.Event()
+        self.recorder = None
+        self.thread: Optional[threading.Thread] = None
+        self.listening = False
+        self.on_utterance = on_utterance
+        self.on_caption = on_caption    # live partial transcripts, ~10/sec
+        self.on_barge = on_barge        # the user started talking over TTS
+        self.on_ready = on_ready        # the model loaded and the mic is open
+        self.on_error = on_error        # the recorder could not start, or died
+
+
+_session: Optional[_Session] = None
+_session_lock = threading.Lock()
+_next_lease = 0
 # Echo guard: speech must sustain this long before it counts as a barge, so a
 # blip of the assistant's own voice bleeding through the speakers (VAD start then a
 # quick VAD stop cancels the timer) doesn't self-interrupt. Needed now that a
@@ -142,13 +157,13 @@ def _language() -> str:
 def status() -> dict:
     return {
         "available": is_available(),
-        "listening": _listening,
+        "listening": is_listening(),
         "model": _model_size(),
         "engine": "RealtimeSTT (silero VAD + faster-whisper, streaming)",
     }
 
 
-def _build_recorder():
+def _build_recorder(sess: Optional[_Session] = None):
     """Lazily build the AudioToTextRecorder with ChatGPT-voice-mode tuning.
 
     Endpoint detection at 0.3s (snappy), live partials every 100ms (visible
@@ -195,7 +210,7 @@ def _build_recorder():
         # speakers — they're noise, not signal.
         if _tts.is_speaking():
             return
-        cb = _caption_cb
+        cb = sess.on_caption if sess is not None else None
         if cb is not None and text:
             try:
                 cb(text)
@@ -212,7 +227,7 @@ def _build_recorder():
         _barge_grace_until = max(_barge_grace_until, time.time() + 8.0)
         if _BARGE_DEBUG:
             print("[barge] FIRING -> stop TTS", flush=True)
-        cb = _barge_cb
+        cb = sess.on_barge if sess is not None else None
         if cb is not None:
             try: cb()
             except Exception: pass
@@ -463,84 +478,52 @@ def _looks_like_echo(text: str) -> bool:
     return hits / len(words) >= 0.65
 
 
-def reset_recorder():
-    """Drop the cached recorder so the next voice session rebuilds it — e.g.
-    after the user picks a different mic. A live session keeps its recorder
-    until it ends; the change lands on the next start."""
-    global _recorder
-    with _recorder_lock:
-        _recorder = None
-
-
-def _get_recorder():
-    global _recorder
-    with _recorder_lock:
-        if _recorder is None:
-            _recorder = _build_recorder()
-        return _recorder
-
-
-def set_caption_callback(cb: Optional[Callable[[str], None]]) -> None:
-    """Register a function to receive live partial transcripts.
-    Called frequently (~10/sec) while the user is speaking."""
-    global _caption_cb
-    _caption_cb = cb
-
-
-def set_barge_callback(cb: Optional[Callable[[], None]]) -> None:
-    """Register a function to fire the instant silero VAD says user is
-    speaking. Used by the GUI to kill TTS + abort the LLM stream for
-    snappy, phone-call-like barge-in."""
-    global _barge_cb
-    _barge_cb = cb
-
-
-def set_error_callback(cb: Optional[Callable[[str], None]]) -> None:
-    """Register a function to fire with a message if the recorder can't build
-    (missing voice dependency, model that won't load) so the UI can surface it
-    instead of sitting on 'warming' until the watchdog trips."""
-    global _error_cb
-    _error_cb = cb
-
-
-def set_ready_callback(cb: Optional[Callable[[], None]]) -> None:
-    """Register a function to fire once the STT model has finished loading and
-    the recorder is actually listening (start_continuous returns before that)."""
-    global _ready_cb
-    _ready_cb = cb
-
-
-def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
-    """Block until stop_continuous() — feed each finalized utterance to the callback."""
-    global _listening, _barge_grace_until
+def _shutdown_recorder(rec) -> None:
+    """End a recorder for good. stop() only pauses recording: its mic reader
+    and transcription processes stay alive holding the mic and a Whisper
+    model, measured at two processes and ~785 MB per voice session with the
+    smallest model. shutdown() is what releases them."""
+    if rec is None:
+        return
     try:
-        rec = _get_recorder()
+        rec.shutdown()
+    except Exception:
+        pass
+
+
+def _call(cb, *args) -> None:
+    if cb is not None:
+        try:
+            cb(*args)
+        except Exception:
+            pass
+
+
+def _continuous_loop(sess: _Session) -> None:
+    """Run one session until it is stopped, feeding each finished utterance to
+    its current sink. The recorder is shut down on the way out, always."""
+    global _barge_grace_until
+    try:
+        rec = _build_recorder(sess)
     except NoUsableMic as e:
         # No real mic — don't listen (would transcribe the speakers). Surface the
         # plain reason, not a scary "recorder failed" stack.
         print(f"[hearth.realtime_voice] {e}")
-        _listening = False
-        if _error_cb is not None:
-            try: _error_cb(str(e))
-            except Exception: pass
+        _call(sess.on_error, str(e))
         return
     except Exception as e:
         print(f"[hearth.realtime_voice] recorder init failed: {e}")
-        _listening = False
-        if _error_cb is not None:
-            try: _error_cb(f"Voice recorder failed to start: {e}")
-            except Exception: pass
+        _call(sess.on_error, f"Voice recorder failed to start: {e}")
+        return
+    sess.recorder = rec
+    if sess.stop.is_set():          # stopped while the model was loading
+        _shutdown_recorder(rec)
         return
 
-    _listening = True
-    # The recorder is now built (the STT model finished loading above). Signal
-    # ready so the HUD leaves the "warming up" state — start_continuous returns
-    # before this, so without it the UI shows "listening" while the model is
-    # still loading and can't actually hear anything.
-    cb = _ready_cb
-    if cb is not None:
-        try: cb()
-        except Exception: pass
+    sess.listening = True
+    # The model has loaded. Signal ready so the HUD leaves "warming up";
+    # start_continuous returns long before this.
+    _call(sess.on_ready)
     # Discard whatever the recorder buffered BEFORE this session started. The mic
     # keeps capturing while the window is closed / during wake-word listening; without
     # this, the first rec.text() calls drain that backlog and the stray phrases get
@@ -551,7 +534,7 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
         pass
     _err_streak = 0   # consecutive rec.text() failures — a disconnected mic
     try:
-        while not _stop_flag.is_set():
+        while not sess.stop.is_set():
             try:
                 # Block until silero detects an endpoint and faster-whisper
                 # returns the finalized text. ~200-400ms after you stop talking.
@@ -567,21 +550,19 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
                 # failed' forever. Don't spin on it — after a short streak, stop voice
                 # cleanly with a message instead of letting it silently recover onto
                 # some other (maybe system-audio) device.
+                if sess.stop.is_set():
+                    break           # shut down on purpose; text() gave up
                 _err_streak += 1
                 print(f"[hearth.realtime_voice] rec.text() error ({_err_streak}): {e}", flush=True)
                 if _err_streak >= 4:
                     print("[hearth.realtime_voice] mic looks disconnected — stopping voice", flush=True)
-                    if _error_cb is not None:
-                        try:
-                            _error_cb("Your microphone disconnected, so voice mode stopped. "
-                                      "Reconnect it and start voice again.")
-                        except Exception:
-                            pass
-                    _stop_flag.set()
+                    _call(sess.on_error, "Your microphone disconnected, so voice mode "
+                                         "stopped. Reconnect it and start voice again.")
+                    sess.stop.set()
                     break
                 time.sleep(0.3)
                 continue
-            if _stop_flag.is_set():
+            if sess.stop.is_set():
                 break
             if not text:
                 continue
@@ -642,66 +623,81 @@ def _continuous_loop(on_utterance: Callable[[str], None]) -> None:
             # chats rebinds this (below) without restarting the loop, so
             # utterances reach the live stream, not a dead one.
             try:
-                (_on_utterance_ref or on_utterance)(text)
+                sess.on_utterance(text)
             except Exception as e:
                 print(f"[hearth.realtime_voice] on_utterance error: {e}")
     finally:
-        _listening = False
+        sess.listening = False
+        _shutdown_recorder(rec)
 
 
-# The live utterance sink. start_continuous rebinds this on every (re)entry so a
-# reopened overlay redirects to its NEW stream without restarting the recorder.
-_on_utterance_ref: Optional[Callable[[str], None]] = None
+def start_continuous(on_utterance: Callable[[str], None], *,
+                     on_caption: Optional[Callable[[str], None]] = None,
+                     on_barge: Optional[Callable[[], None]] = None,
+                     on_ready: Optional[Callable[[], None]] = None,
+                     on_error: Optional[Callable[[str], None]] = None) -> Optional[int]:
+    """Begin listening and return a lease; only that lease can stop it.
 
-
-def start_continuous(on_utterance: Callable[[str], None]) -> str:
-    """Begin continuous listening. Rebindable — if the recorder is already warm
-    (overlay reopened, chat switched) this repoints the sink and re-signals ready
-    instead of starting a second loop, so the UI never sticks on 'warming up'."""
-    global _listen_thread, _on_utterance_ref
+    A session that is still running (the overlay reopened, the chat switched)
+    is handed to the new caller instead of being rebuilt, so the model does not
+    reload. Returns None when realtime voice is not installed."""
+    global _session, _next_lease
     if not is_available():
-        return "RealtimeSTT not installed — falling back to hearth.listen"
-    _on_utterance_ref = on_utterance
-    # Clear the stop flag FIRST. A previous close set it; without clearing, the
-    # loop hits `if _stop_flag.is_set(): break` on the next utterance and DROPS
-    # it — that's the "FINAL printed but nothing reached the LLM" after a reopen.
-    _stop_flag.clear()
-    # Rebind onto a loop that's GENUINELY still alive (chat switch / instant
-    # reopen on a warm recorder). Guard on thread liveness AND a live recorder so
-    # a stale _listening flag can never leave us signalling ready with no loop
-    # actually running (which reads as "stuck on warming").
-    if (_listening and _listen_thread is not None
-            and _listen_thread.is_alive() and _recorder is not None):
-        rc = _ready_cb
-        if rc is not None:
-            try: rc()
-            except Exception: pass
-        return "Realtime voice already listening"
-    _listen_thread = threading.Thread(
-        target=_continuous_loop, args=(on_utterance,), daemon=True,
-    )
-    _listen_thread.start()
-    return "Realtime voice listening"
+        return None
+    old_rec = None
+    with _session_lock:
+        _next_lease += 1
+        lease = _next_lease
+        cur = _session
+        if (cur is not None and not cur.stop.is_set()
+                and cur.thread is not None and cur.thread.is_alive()):
+            cur.lease = lease
+            cur.on_utterance, cur.on_caption = on_utterance, on_caption
+            cur.on_barge, cur.on_ready, cur.on_error = on_barge, on_ready, on_error
+            if cur.listening:
+                _call(on_ready)
+            return lease
+        if cur is not None:
+            cur.stop.set()
+            old_rec = cur.recorder
+        sess = _Session(lease, on_utterance, on_caption, on_barge, on_ready, on_error)
+        sess.thread = threading.Thread(target=_continuous_loop, args=(sess,),
+                                       daemon=True, name=f"hearth-voice-{lease}")
+        _session = sess
+    if old_rec is not None:
+        threading.Thread(target=_shutdown_recorder, args=(old_rec,), daemon=True).start()
+    sess.thread.start()
+    return lease
 
 
-def stop_continuous() -> str:
-    """Halt the listening loop AND drop the recorder singleton so the next open
-    builds a fresh, working one. Reusing a .stop()'d recorder was what left voice
-    stuck on 'warming up' after a close and reopen. Also releases the mic so the
-    wake-word listener can take it back."""
-    global _recorder
-    _stop_flag.set()
-    if _recorder is not None:
-        try:
-            _recorder.stop()
-        except Exception:
-            pass
-    reset_recorder()
-    return "Realtime voice stopped"
+def stop_continuous(lease: Optional[int] = None) -> bool:
+    """Stop the running session and release its mic and model. With a lease,
+    only if that lease still owns it, so a stream that is closing late cannot
+    stop the session that replaced it. Returns whether anything was stopped."""
+    global _session
+    with _session_lock:
+        cur = _session
+        if cur is None or (lease is not None and cur.lease != lease):
+            return False
+        _session = None
+        cur.stop.set()
+        rec = cur.recorder
+    if rec is not None:
+        # Shutting down waits on the recorder's processes; the loop thread
+        # also exits once text() returns, and shutdown is idempotent.
+        threading.Thread(target=_shutdown_recorder, args=(rec,), daemon=True).start()
+    return True
+
+
+def owns(lease: Optional[int]) -> bool:
+    """True while `lease` is the owner of the running session."""
+    cur = _session
+    return lease is not None and cur is not None and cur.lease == lease
 
 
 def is_listening() -> bool:
-    return _listening
+    cur = _session
+    return bool(cur is not None and cur.listening)
 
 
 # ----------------------------------------------------------------------------
