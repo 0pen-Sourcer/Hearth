@@ -772,14 +772,34 @@
   .tm-detail p { margin: 0; white-space: pre-wrap; }
   .tm-empty { margin: 60px auto; max-width: 420px; text-align: center; color: var(--fg-dim); }
   .tm-empty h3 { color: var(--fg); font-weight: 600; margin: 12px 0 6px; font-size: 15px; }
-  .tm-room { flex: 1; min-height: 0; padding: 0 24px 24px; display: flex; }
-  .tm-stage { position: relative; margin: auto; aspect-ratio: 3 / 2; width: min(100%, calc((100vh - 190px) * 1.5)); }
+  .tm-room { flex: 1; min-height: 0; padding: 0 24px 16px; display: flex; gap: 14px; }
+  .tm-room-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .tm-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; flex-shrink: 0; }
+  .tm-card { flex: 0 0 188px; display: grid; grid-template-columns: 40px 1fr; gap: 8px; align-items: center;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-1); cursor: pointer; }
+  .tm-card:hover { border-color: var(--border-strong); }
+  .tm-card.sel { border-color: var(--accent-line); background: var(--accent-bg); }
+  .tm-card .tm-face { width: 40px; height: 40px; border-radius: 9px; background: var(--bg-3); overflow: hidden; position: relative; }
+  .tm-card .tm-face canvas { position: absolute; left: 50%; top: 0; transform: translateX(-50%); image-rendering: pixelated; }
+  .tm-card b { display: block; font-size: 12.5px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tm-card small { display: block; font-size: 11px; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tm-card i { font-style: normal; font-size: 10.5px; }
+  .tm-card i.working { color: var(--ok); } .tm-card i.done { color: var(--accent-2); }
+  .tm-card i.failed, .tm-card i.needs { color: var(--err); } .tm-card i.stopped { color: var(--fg-faint); }
+  .tm-side { flex: 0 0 300px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-1);
+    padding: 14px 16px; overflow-y: auto; font-size: 12.5px; color: var(--fg-dim); }
+  .tm-side h4 { margin: 0 0 2px; color: var(--fg); font-size: 14px; }
+  .tm-side .tm-side-sub { color: var(--fg-faint); font-size: 11.5px; margin-bottom: 10px; }
+  .tm-side b { display: block; color: var(--fg); font-size: 11.5px; margin: 12px 0 3px; }
+  .tm-side p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
+  .tm-side .tm-close { float: right; background: none; border: none; color: var(--fg-faint); font-size: 16px; line-height: 1; }
+  .tm-stage { position: relative; margin: 0 auto; aspect-ratio: 3 / 2; width: min(100%, calc((100vh - 270px) * 1.5)); flex-shrink: 0; }
   .tm-stage canvas { width: 100%; height: 100%; display: block; border-radius: var(--r-lg); image-rendering: pixelated; }
   .tm-labels { position: absolute; inset: 0; pointer-events: none; }
   .tm-label { position: absolute; transform: translate(-50%, -100%); background: color-mix(in srgb, var(--bg-0) 82%, transparent);
     color: var(--fg); font-size: 11px; padding: 2px 7px; border-radius: 6px; white-space: nowrap; pointer-events: auto; cursor: pointer;
     border: 1px solid var(--border); }
-  .tm-label em { font-style: normal; color: var(--fg-dim); margin-left: 4px; }
+  .tm-label.sel { border-color: var(--accent); }
   .tm-label.needs, .tm-label.failed { border-color: var(--err); }
   .tm-label.needs::after, .tm-label.failed::after { content: '!'; position: absolute; top: -8px; right: -8px; width: 16px; height: 16px;
     border-radius: 50%; background: var(--err); color: #fff; font-weight: 700; font-size: 11px; display: grid; place-items: center; }
@@ -3481,7 +3501,7 @@
         <h2>Team</h2>
         <span class="sub" id="team-sub">helpers JARVIS starts for bigger jobs</span>
         <div class="grow"></div>
-        <div class="logs-tabs" hidden>
+        <div class="logs-tabs" id="tm-tabs" hidden>
           <button class="tm-tab active" data-tm="list">List</button>
           <button class="tm-tab" data-tm="room">Room</button>
         </div>
@@ -3498,7 +3518,11 @@
       </div>
       <div class="tm-list" id="tm-list"></div>
       <div class="tm-room" id="tm-room" hidden>
-        <div class="tm-stage" id="tm-stage"><canvas id="tm-canvas"></canvas><div class="tm-labels" id="tm-labels"></div></div>
+        <div class="tm-room-main">
+          <div class="tm-stage" id="tm-stage"><canvas id="tm-canvas"></canvas><div class="tm-labels" id="tm-labels"></div></div>
+          <div class="tm-strip" id="tm-strip"></div>
+        </div>
+        <aside class="tm-side" id="tm-side" hidden></aside>
       </div>
     </section>
 
@@ -16532,6 +16556,10 @@ async function teamPoll() {
 }
 function teamOpen() {
   teamPoll();
+  // The room needs its art; without it there is only the list.
+  if ($('tm-tabs').hidden) {
+    fetch('/assets/team/manifest.json', { cache: 'no-store' }).then(r => { if (r.ok) $('tm-tabs').hidden = false; }).catch(() => {});
+  }
   clearInterval(TEAM.timer);
   TEAM.timer = setInterval(teamPoll, 2000);
   if (TEAM.tab === 'room') roomStart();
@@ -16603,24 +16631,88 @@ setTimeout(teamPoll, 1500);
 TEAM.timer = setInterval(teamPoll, 8000);
 
 // ------------------------------------------------------------ the room
-// Coordinates are in the room image's own pixels (1536 x 1024).
+// The room is built in layers: the empty room, then everything that stands in
+// it (desks, people, chair backs, furniture) drawn back to front by where it
+// touches the floor, each with a soft contact shadow. A worker sits in front
+// of a desk with their back to the viewer and the chair drawn over them, and
+// that desk's laptop opens while they are producing something.
+// Coordinates are the room image's own pixels (1536 x 1024).
 const ROOM = {
-  W: 1536, H: 1024, raf: 0, last: 0, imgs: {}, bg: null, people: new Map(), frames: null, cell: [104, 144],
-  desks: [[345, 668], [618, 668], [920, 668], [1195, 668], [318, 915], [612, 915], [926, 915], [1224, 915]],
+  W: 1536, H: 1024, raf: 0, last: 0, imgs: {}, bg: null, props: null, man: null,
+  people: new Map(), sel: null,
+  // Desk anchors: the middle of each desk's front edge, on the floor.
+  desks: [[330, 648], [610, 648], [900, 648], [1190, 648], [330, 886], [610, 886], [900, 886], [1190, 886]],
   spots: {
-    door: [92, 900], fire: [760, 440], fireSide: [860, 450], shelfL: [410, 395], shelfR: [1120, 395],
-    board: [170, 520], windowSeat: [1395, 440], coffee: [1370, 640], windowL: [175, 360], rug: [700, 470],
+    door: [96, 905], fire: [760, 470], fireSide: [868, 478], shelfL: [410, 398], shelfR: [1122, 398],
+    board: [178, 525], windowSeat: [1392, 442], coffee: [1362, 650], windowL: [182, 372], rug: [700, 478],
   },
-  aisleY: 705, aisleTop: 470, aisleX: [190, 480, 770, 1060, 1360],
+  aisleY: 722, aisleTop: 492, aisleX: [186, 470, 755, 1045, 1352],
 };
-function roomFrame(name) { return ROOM.frames ? Math.max(0, ROOM.frames.indexOf(name)) : 0; }
+const SEAT_DY = 2, CHAIR_DY = 50;
+// Everyone shares the drawn body for their role; hair and skin come from the
+// person's id, so each helper looks like someone and keeps that look.
+const HAIRS = [[0.07, 0.55, 0.13], [0.05, 0.45, 0.30], [0.02, 0.62, 0.34], [0.11, 0.55, 0.52],
+               [0.08, 0.20, 0.62], [0.06, 0.35, 0.22], [0.98, 0.45, 0.34], [0.09, 0.08, 0.10]];
+const SKINS = [0.86, 0.76, 0.66, 0.54, 0.44, 0.36];
+function _rgb2hsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  if (mx === mn) return [0, 0, l];
+  const d = mx - mn, s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  let h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h / 6, s, l];
+}
+function _hsl2rgb(h, s, l) {
+  if (!s) return [l * 255, l * 255, l * 255];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = t => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+  return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
+}
+const _looks = new Map();
+function roomLook(role, seed) {
+  const key = role + ':' + seed;
+  if (_looks.has(key)) return _looks.get(key);
+  const src = ROOM.imgs[role] || ROOM.imgs.custom;
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const x = c.getContext('2d');
+  x.drawImage(src, 0, 0);
+  if (role !== 'main') {
+    const [hh, hs, hl] = HAIRS[seed % HAIRS.length];
+    const skinL = SKINS[(seed >> 3) % SKINS.length];
+    const [cw, ch] = ROOM.man.cell;
+    const im = x.getImageData(0, 0, c.width, c.height), d = im.data;
+    for (let py = 0; py < c.height; py++) {
+      for (let px = 0; px < c.width; px++) {
+        const i = (py * c.width + px) * 4;
+        if (d[i + 3] < 10) continue;
+        const [h, sa, l] = _rgb2hsl(d[i], d[i + 1], d[i + 2]);
+        const yInCell = py % ch;
+        let out = null;
+        if (h > 0.03 && h < 0.13 && sa > 0.25 && l > 0.52 && l < 0.9) {
+          // skin: keep the shading, move the tone
+          out = _hsl2rgb(0.07, Math.min(0.62, sa), Math.max(0.12, Math.min(0.93, l * skinL / 0.74)));
+        } else if (yInCell < ch * 0.42 && h > 0.02 && h < 0.14 && l < 0.46 && sa > 0.12) {
+          // hair: the dark browns in the top of the frame
+          out = _hsl2rgb(hh, hs, Math.max(0.05, Math.min(0.85, hl * (l / 0.26))));
+        }
+        if (out) { d[i] = out[0]; d[i + 1] = out[1]; d[i + 2] = out[2]; }
+      }
+    }
+    x.putImageData(im, 0, 0);
+  }
+  _looks.set(key, c);
+  return c;
+}
+function roomFrame(name) { return ROOM.man ? Math.max(0, ROOM.man.frames.indexOf(name)) : 0; }
 async function roomLoad() {
   if (ROOM.bg) return true;
   try {
-    const man = await (await fetch('/assets/team/manifest.json')).json();
-    ROOM.frames = man.frames; ROOM.cell = man.cell;
+    const man = await (await fetch('/assets/team/manifest.json', { cache: 'no-store' })).json();
+    ROOM.man = man;
     const load = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
     ROOM.bg = await load('/assets/team/room.png');
+    if (man.props) ROOM.props = await load('/assets/team/props.png');
     for (const r of man.roles) ROOM.imgs[r] = await load(`/assets/team/${r}.png`);
     return true;
   } catch { return false; }
@@ -16631,22 +16723,24 @@ function roomDeskFor(id) {
   return null;
 }
 function roomRoute(from, to) {
-  // Walk along the aisles so nobody strolls through a desk.
+  // Along the aisles, so nobody walks through a desk.
   const near = x => ROOM.aisleX.reduce((b, v) => Math.abs(v - x) < Math.abs(b - x) ? v : b, ROOM.aisleX[0]);
-  const high = from[1] < 560 && to[1] < 560;
-  const y = high ? ROOM.aisleTop : ROOM.aisleY;
-  const pts = [];
-  if (!high) pts.push([near(from[0]), from[1]]);
-  pts.push([pts.length ? pts[0][0] : from[0], y]);
-  pts.push([high ? to[0] : near(to[0]), y]);
-  if (!high) pts.push([near(to[0]), to[1]]);
-  pts.push(to);
+  const top = y => y < 560;
+  if (top(from[1]) && top(to[1])) return [[from[0], ROOM.aisleTop], [to[0], ROOM.aisleTop], to];
+  const pts = [[near(from[0]), from[1]]];
+  if (top(from[1]) !== top(to[1]) || Math.abs(from[1] - to[1]) > 40) {
+    const y = ROOM.aisleY;
+    pts.push([near(from[0]), y], [near(to[0]), y]);
+  }
+  pts.push([near(to[0]), to[1]], to);
   return pts;
 }
+function roomSeat(p) {
+  const d = ROOM.desks[p.desk];
+  return [d[0], d[1] + SEAT_DY];
+}
 function roomGoal(p, a) {
-  // What the person should be doing now, from the agent's real state.
-  const desk = p.desk != null ? ROOM.desks[p.desk] : ROOM.spots.rug;
-  const beside = [desk[0] + 58, desk[1] - 30];
+  // Where the person should be and what they are doing, from real state.
   if (a.role === 'main') {
     const ms = String(window._mainState || 'idle');
     const perm = $('perm-strip') && !$('perm-strip').hidden;
@@ -16655,28 +16749,29 @@ function roomGoal(p, a) {
     if (/calling|running|writing .* call/.test(ms)) return { at: ROOM.spots.board, pose: 'think' };
     return { at: ROOM.spots.fireSide, pose: 'think' };
   }
+  const seat = p.desk != null ? roomSeat(p) : ROOM.spots.rug;
+  const beside = [seat[0] + 92, seat[1] + 6];
   if (a.status === 'working') {
     if (a.blocked) return { at: beside, pose: 'raise' };
     if (a.activity === 'tool' && READING_TOOLS.test(a.tool || '')) {
-      return { at: (p.desk || 0) % 2 ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: 'read', jitter: true };
+      return { at: (p.desk || 0) % 2 ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: 'read', spread: true };
     }
-    return { at: desk, pose: 'type', seated: true };
+    return { at: seat, pose: 'type', seated: true };
   }
   if (a.status === 'failed') return { at: beside, pose: 'raise' };
   if (a.status === 'stopped') return { at: beside, pose: 'idle' };
-  // Done: stretch once, then free time until cleared.
   const since = Date.now() - (p.doneAt || Date.now());
-  if (since < 2500) return { at: p.pos, pose: 'stretch' };
+  if (since < 2600) return { at: p.pos, pose: 'stretch' };
   const leisure = [['fire', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfL', 'read'], ['windowL', 'gaze'], ['shelfR', 'read']];
-  const slot = Math.floor((Date.now() + p.seed * 7000) / 16000);
+  const slot = Math.floor((Date.now() + p.seed * 7000) / 18000);
   const [spot, pose] = leisure[(slot + p.seed) % leisure.length];
-  return { at: ROOM.spots[spot], pose, jitter: true };
+  return { at: ROOM.spots[spot], pose, spread: true };
 }
 function roomSync(list) {
-  const want = [...list.filter(a => a.status === 'working' || a.status === 'done' || a.status === 'failed' || a.status === 'stopped').slice(0, 8)];
-  want.push({ id: '__main', role: 'main', name: (typeof _agentName === 'function' && _agentName()) || 'JARVIS', status: 'working' });
+  const want = list.filter(a => ['working', 'done', 'failed', 'stopped'].includes(a.status)).slice(0, 8);
+  want.push({ id: '__main', role: 'main', persona: 'main', name: (typeof _agentName === 'function' && _agentName()) || 'JARVIS', status: 'working' });
   const ids = new Set(want.map(a => a.id));
-  for (const [id, p] of ROOM.people) if (!ids.has(id)) { p.leaving = true; p.path = roomRoute(p.pos, ROOM.spots.door); }
+  for (const [id, p] of ROOM.people) if (!ids.has(id) && !p.leaving) { p.leaving = true; p.path = roomRoute(p.pos, ROOM.spots.door); }
   for (const a0 of want) {
     const a = { ...a0, role: a0.role || teamRole(a0.persona) };
     let p = ROOM.people.get(a.id);
@@ -16685,7 +16780,6 @@ function roomSync(list) {
             seed: Math.abs([...a.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 97, desk: null, dir: 1 };
       if (a.role !== 'main') {
         p.desk = roomDeskFor(a.id);
-        // New arrivals come through the door one after another.
         const queued = [...ROOM.people.values()].filter(q => q.enterAt && q.enterAt > performance.now()).length;
         p.enterAt = performance.now() + queued * 900;
       }
@@ -16695,6 +16789,7 @@ function roomSync(list) {
     if (a.status === 'done' && !p.doneAt) p.doneAt = Date.now() - 5000;
     p.agent = a;
   }
+  roomStripRender();
 }
 function roomTick(t) {
   const dt = Math.min(0.1, (t - (ROOM.last || t)) / 1000);
@@ -16704,7 +16799,7 @@ function roomTick(t) {
     p.waiting = false;
     if (!p.leaving) {
       const g = roomGoal(p, p.agent);
-      const target = g.jitter ? [g.at[0] + (p.seed % 5 - 2) * 22, g.at[1] + (p.seed % 3 - 1) * 12] : g.at;
+      const target = g.spread ? [g.at[0] + (p.seed % 5 - 2) * 24, g.at[1] + (p.seed % 3 - 1) * 10] : g.at;
       const endPt = p.path.length ? p.path[p.path.length - 1] : p.pos;
       if (Math.hypot(endPt[0] - target[0], endPt[1] - target[1]) > 4) p.path = roomRoute(p.pos, target);
       p.goal = g;
@@ -16712,7 +16807,7 @@ function roomTick(t) {
     if (p.path.length) {
       const [tx, ty] = p.path[0];
       const dx = tx - p.pos[0], dy = ty - p.pos[1], dist = Math.hypot(dx, dy);
-      const step = 110 * dt;
+      const step = 115 * dt;
       if (dist <= step) { p.pos = [tx, ty]; p.path.shift(); }
       else { p.pos = [p.pos[0] + dx / dist * step, p.pos[1] + dy / dist * step]; }
       p.walkDir = Math.abs(dx) > Math.abs(dy) ? 'side' : (dy < 0 ? 'up' : 'down');
@@ -16720,67 +16815,159 @@ function roomTick(t) {
       p.walking = true;
     } else {
       p.walking = false;
-      if (p.leaving) ROOM.people.delete(id);
+      if (p.leaving) { ROOM.people.delete(id); roomStripRender(); }
     }
   }
   roomDraw(t);
   ROOM.raf = requestAnimationFrame(roomTick);
 }
+function roomProp(name) { return ROOM.man && ROOM.man.props ? ROOM.man.props[name] : null; }
 function roomDraw(t) {
   const cv = $('tm-canvas'); if (!cv || !ROOM.bg) return;
   const stage = $('tm-stage');
   const w = stage.clientWidth, h = stage.clientHeight, dpr = window.devicePixelRatio || 1;
-  if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
   const ctx = cv.getContext('2d');
   ctx.imageSmoothingEnabled = false;
-  const k = cv.width / ROOM.W, ky = cv.height / ROOM.H;
+  const kx = cv.width / ROOM.W, ky = cv.height / ROOM.H;
   ctx.drawImage(ROOM.bg, 0, 0, cv.width, cv.height);
-  // Firelight flicker over the hearth.
-  const fl = 0.06 + 0.04 * Math.sin(t / 180) + 0.02 * Math.sin(t / 67);
-  const grad = ctx.createRadialGradient(770 * k, 280 * ky, 10 * k, 770 * k, 280 * ky, 520 * k);
-  grad.addColorStop(0, `rgba(255,150,60,${fl})`); grad.addColorStop(1, 'rgba(255,150,60,0)');
-  ctx.fillStyle = grad; ctx.fillRect(0, 0, cv.width, cv.height);
-  const [cw, ch] = ROOM.cell;
-  const people = [...ROOM.people.values()].sort((a, b) => a.pos[1] - b.pos[1]);
-  const labels = [];
-  for (const p of people) {
+
+  // Everything that stands on the floor, with the y where it touches it.
+  const items = [];
+  const seated = new Map();
+  for (const p of ROOM.people.values()) {
+    if (!p.waiting && !p.walking && p.desk != null && p.goal && p.goal.seated) seated.set(p.desk, p);
+  }
+  if (ROOM.props) {
+    ROOM.desks.forEach((d, i) => {
+      const worker = seated.get(i);
+      items.push({ kind: 'prop', name: worker ? 'desk_on' : 'desk', x: d[0], y: d[1], shadow: [104, 10] });
+      items.push({ kind: 'prop', name: 'chair', x: d[0], y: d[1] + CHAIR_DY, shadow: [26, 6], cover: !!worker });
+    });
+    if (ROOM.man.room_empty) {
+      items.push({ kind: 'prop', name: 'armchair', x: 540, y: 440, shadow: [62, 9] });
+      items.push({ kind: 'prop', name: 'side_table', x: 650, y: 428, shadow: [24, 6] });
+    }
+  }
+  for (const p of ROOM.people.values()) {
     if (p.waiting) continue;
-    const img = ROOM.imgs[p.agent.role] || ROOM.imgs.custom; if (!img) continue;
+    items.push({ kind: 'person', p, x: p.pos[0], y: p.pos[1], shadow: [22, 6] });
+  }
+  items.sort((a, b) => a.y - b.y);
+
+  // Contact shadows first, so no shadow lands on top of anything.
+  ctx.fillStyle = 'rgba(12, 8, 5, 0.34)';
+  for (const it of items) {
+    if (!it.shadow || (it.kind === 'person' && it.p.goal && it.p.goal.seated && !it.p.walking)) continue;
+    ctx.beginPath();
+    ctx.ellipse(it.x * kx, (it.y - 2) * ky, it.shadow[0] * kx, it.shadow[1] * ky, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const [cw, ch] = ROOM.man.cell;
+  const labels = [];
+  for (const it of items) {
+    if (it.kind === 'prop') {
+      const r = roomProp(it.name); if (!r) continue;
+      const [sx, sy, sw, sh] = r;
+      ctx.drawImage(ROOM.props, sx, sy, sw, sh, Math.round((it.x - sw / 2) * kx), Math.round((it.y - sh) * ky), Math.round(sw * kx), Math.round(sh * ky));
+      if (it.name === 'desk_on') {
+        // The screen breathes a little while someone works at it.
+        const glow = 0.10 + 0.06 * Math.sin(t / 260 + it.x);
+        const g = ctx.createRadialGradient(it.x * kx, (it.y - sh + 40) * ky, 2, it.x * kx, (it.y - sh + 40) * ky, 70 * kx);
+        g.addColorStop(0, `rgba(127,179,191,${glow})`); g.addColorStop(1, 'rgba(127,179,191,0)');
+        ctx.fillStyle = g; ctx.fillRect((it.x - 80) * kx, (it.y - sh - 20) * ky, 160 * kx, 130 * ky);
+      }
+      continue;
+    }
+    const p = it.p;
+    if (!ROOM.imgs[p.agent.role] && !ROOM.imgs.custom) continue;
+    const img = roomLook(p.agent.role, p.seed);
     let frame, flip = false;
     if (p.walking) {
-      const step = Math.floor(t / 220 + p.seed) % 2 ? 1 : 2;
+      const step = Math.floor(t / 210 + p.seed) % 2 ? 1 : 2;
       frame = roomFrame(`walk_${p.walkDir}_${step}`);
       flip = p.walkDir === 'side' && p.dir < 0;
     } else {
       frame = roomFrame(p.goal ? p.goal.pose : 'idle');
     }
-    const bob = !p.walking && p.goal && p.goal.pose === 'type' ? Math.round(Math.sin(t / 140 + p.seed) * 1.2) : 0;
-    const x = p.pos[0] * k, y = p.pos[1] * ky;
+    const typing = !p.walking && p.goal && p.goal.pose === 'type';
+    const bob = typing ? Math.round(Math.sin(t / 130 + p.seed) * 1.3) : (!p.walking ? Math.round(Math.sin(t / 700 + p.seed) * 0.8) : 0);
     ctx.save();
-    ctx.translate(Math.round(x), Math.round(y + bob * ky));
+    ctx.translate(Math.round(p.pos[0] * kx), Math.round((p.pos[1] + bob) * ky));
     if (flip) ctx.scale(-1, 1);
-    ctx.drawImage(img, frame * cw, 0, cw, ch, Math.round(-cw * k / 2), Math.round(-ch * ky), Math.round(cw * k), Math.round(ch * ky));
+    ctx.drawImage(img, frame * cw, 0, cw, ch, Math.round(-cw * kx / 2), Math.round(-ch * ky), Math.round(cw * kx), Math.round(ch * ky));
     ctx.restore();
-    labels.push({ p, x: x / dpr, y: (y - ch * ky * 0.86) / dpr });
+    const headY = typing ? p.pos[1] - 100 : p.pos[1] - 128;
+    labels.push({ p, x: p.pos[0] * kx / dpr, y: headY * ky / dpr });
   }
+
+  // Firelight over everything, so the room and the people share one light.
+  const fl = 0.07 + 0.035 * Math.sin(t / 170) + 0.02 * Math.sin(t / 61);
+  const grad = ctx.createRadialGradient(770 * kx, 290 * ky, 10 * kx, 770 * kx, 290 * ky, 640 * kx);
+  grad.addColorStop(0, `rgba(255,150,60,${fl})`); grad.addColorStop(1, 'rgba(255,150,60,0)');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, cv.width, cv.height);
+
   const box = $('tm-labels');
   box.innerHTML = '';
   for (const { p, x, y } of labels) {
     const a = p.agent;
     const st = teamNeedsYou(a) ? 'needs' : a.status;
     const el = document.createElement('div');
-    el.className = 'tm-label ' + st;
+    el.className = 'tm-label ' + (a.role === 'main' ? '' : st) + (ROOM.sel === p.id ? ' sel' : '');
     el.style.left = x + 'px'; el.style.top = y + 'px';
-    const act = a.role === 'main' ? '' : (a.status === 'working' ? (a.activity === 'tool' ? a.tool : 'thinking') : (a.status === 'done' ? 'done' : ''));
-    el.innerHTML = `${esc(a.name || a.persona || 'helper')}${act ? `<em>${esc(act)}</em>` : ''}`;
-    el.title = a.role === 'main' ? '' : teamActivity(a);
-    el.addEventListener('click', () => {
-      if (a.role === 'main') { showView('chat'); return; }
-      TEAM.open.add(a.id);
-      document.querySelector('.tm-tab[data-tm="list"]').click();
-    });
+    el.textContent = a.name || a.persona || 'helper';
+    el.addEventListener('click', () => roomSelect(p.id));
     box.appendChild(el);
   }
+}
+function roomFace(role, seed) {
+  // The head and shoulders of the idle frame, for the portrait strip.
+  const img = (ROOM.imgs[role] || ROOM.imgs.custom) ? roomLook(role, seed || 0) : null;
+  const c = document.createElement('canvas');
+  c.width = 40; c.height = 40;
+  if (!img) return c;
+  const x = c.getContext('2d');
+  x.imageSmoothingEnabled = false;
+  const [cw, ch] = ROOM.man.cell;
+  x.drawImage(img, (cw - 60) / 2, ch - 124, 60, 60, 0, 0, 40, 40);
+  return c;
+}
+function roomStripRender() {
+  const strip = $('tm-strip'); if (!strip || !ROOM.man) return;
+  const people = [...ROOM.people.values()].filter(p => !p.leaving)
+    .sort((a, b) => (a.agent.role === 'main' ? -1 : b.agent.role === 'main' ? 1 : 0));
+  strip.innerHTML = '';
+  for (const p of people) {
+    const a = p.agent;
+    const st = a.role === 'main' ? 'working' : (teamNeedsYou(a) ? 'needs' : a.status);
+    const word = a.role === 'main'
+      ? (/idle/.test(String(window._mainState || 'idle')) ? 'by the fire' : String(window._mainState))
+      : { working: a.activity === 'tool' ? a.tool : 'thinking', needs: 'needs you', done: 'done', failed: "didn't finish", stopped: 'stopped' }[st];
+    const card = document.createElement('div');
+    card.className = 'tm-card' + (ROOM.sel === p.id ? ' sel' : '');
+    const face = document.createElement('div'); face.className = 'tm-face'; face.appendChild(roomFace(a.role, p.seed));
+    const txt = document.createElement('div');
+    txt.innerHTML = `<b>${esc(a.name || a.persona)}</b><small>${esc(a.role === 'main' ? 'runs the house' : (a.persona || ''))}</small><i class="${st}">${esc(word || '')}</i>`;
+    card.append(face, txt);
+    card.addEventListener('click', () => roomSelect(p.id));
+    strip.appendChild(card);
+  }
+}
+function roomSelect(id) {
+  ROOM.sel = ROOM.sel === id ? null : id;
+  const side = $('tm-side');
+  const p = ROOM.people.get(ROOM.sel);
+  if (!p) { side.hidden = true; roomStripRender(); return; }
+  const a = p.agent;
+  if (a.role === 'main') { ROOM.sel = null; side.hidden = true; showView('chat'); return; }
+  side.hidden = false;
+  side.innerHTML = `<button class="tm-close" title="Close">×</button><h4>${esc(a.name || a.persona)}</h4>
+    <div class="tm-side-sub">${esc(a.persona || '')} · ${a.tools_used || 0} steps · ${teamAgo(a.updated)}</div>
+    <p>${esc(teamActivity(a))}</p>
+    <b>Asked to</b><p>${esc(a.prompt || '')}</p>
+    ${a.preview ? `<b>${a.status === 'working' ? 'Latest' : 'Result'}</b><p>${esc(a.preview)}</p>` : ''}`;
+  side.querySelector('.tm-close').addEventListener('click', () => roomSelect(id));
+  roomStripRender();
 }
 async function roomStart() {
   if (ROOM.raf) return;
