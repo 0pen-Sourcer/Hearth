@@ -1620,7 +1620,10 @@ class JarvisCLI:
             # swapping the built-in server's model keeps the URL identical, so
             # returning here is why a GUI swap never reached the CLI. Trust the
             # server over settings.json, which may name a model it isn't serving.
-            live = _probe_live_model(url, LOCAL_API_KEY) or model
+            # Only a local server's list is what it has loaded; a cloud
+            # provider's is its whole catalog, whose first entry is not a pick.
+            live = (_probe_live_model(url, LOCAL_API_KEY) if _is_local_endpoint(url)
+                    else None) or model
             if live and live != self.current_model:
                 self.current_model = live
                 print(f"{C_DIM}↳ model synced → {_model_name_short(live)}{C_RESET}")
