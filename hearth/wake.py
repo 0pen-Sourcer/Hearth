@@ -30,16 +30,18 @@ from __future__ import annotations
 import os
 import threading
 import time
-from queue import Queue
 from typing import Callable, List, Optional
 
 
 # ----- Configuration -----
 
 SAMPLE_RATE = 16000
-WINDOW_SEC = 2.5  # rolling window of audio to transcribe per detection
-ENERGY_THRESHOLD = 0.012  # RMS threshold to wake the transcriber
-SILENCE_TAIL_S = 0.7      # how long quiet must persist before we cut a window
+BLOCK_S = 0.1             # the mic is read in blocks this long
+ENERGY_THRESHOLD = 0.012  # RMS a block needs to count as sound
+SILENCE_TAIL_S = 0.7      # quiet that ends an utterance
+PREROLL_S = 0.3           # kept from before the onset: a soft first consonant
+MAX_UTTERANCE_S = 4.0     # a wake word opens a sentence; the rest is not needed
+MIN_UTTERANCE_S = 0.3
 COOLDOWN_S = 4.0          # don't fire twice in this window after a wake
 
 DEFAULT_WAKE_PHRASES = [
@@ -136,29 +138,48 @@ def _matches_wake(transcript: str, phrases: List[str]) -> Optional[str]:
     return None
 
 
-def _wake_input_device() -> Optional[int]:
-    """The mic the user picked in Settings > Voice. Read from settings.json
-    DIRECTLY, not the JARVIS_VOICE_INPUT_DEVICE env var, because the wake
-    listener runs in the tray process where that env var is never set — so
-    without this, wake always listened on the OS default mic and missed a user
-    who talks into a different one."""
-    try:
-        from .web import _load_settings
-        from . import listen as _ll
-        cfg = _load_settings() or {}
-        name = str(cfg.get("voice_input_name", "") or "").strip()
-        if name:
-            # Looked up by name in this process's device table: the number
-            # saved beside it is from another process and may point elsewhere.
-            return _ll.index_for_name(name, _ll.sounddevice_inputs())
-        v = int(cfg.get("voice_input_device", -1))
-        return v if v >= 0 else None
-    except Exception:
-        try:
-            from . import listen as _ll
-            return _ll.input_device_index()
-        except Exception:
+class _Segmenter:
+    """Cuts the stream of mic blocks into utterances for the wake check.
+
+    An utterance starts at the first block over the energy threshold, carries
+    the PREROLL_S before it, and runs, quiet blocks included, until
+    SILENCE_TAIL_S of quiet. Keeping only the loud blocks, as this once did,
+    cut out consonants and the gaps between words and handed the recognizer
+    glued audio; starting at the first loud block lost the first syllable;
+    and a rolling window kept the end of a long sentence, dropping the wake
+    word that opens it.
+    """
+
+    def __init__(self, threshold: float = ENERGY_THRESHOLD, block_s: float = BLOCK_S):
+        from collections import deque
+        self.threshold = threshold
+        self.block_s = block_s
+        self.preroll = deque(maxlen=max(1, round(PREROLL_S / block_s)))
+        self.buf: list = []
+        self.in_voice = False
+        self.quiet_s = 0.0
+
+    def feed(self, block):
+        """Take one block (1-D float array); return an utterance when one ends."""
+        import numpy as np
+        loud = float(np.sqrt(np.mean(block * block))) > self.threshold
+        if not self.in_voice:
+            if loud:
+                self.in_voice = True
+                self.quiet_s = 0.0
+                self.buf = [b.copy() for b in self.preroll] + [block.copy()]
+            else:
+                self.preroll.append(block.copy())
             return None
+        self.quiet_s = 0.0 if loud else self.quiet_s + self.block_s
+        if len(self.buf) * self.block_s < MAX_UTTERANCE_S:
+            self.buf.append(block.copy())
+        if self.quiet_s < SILENCE_TAIL_S:
+            return None
+        audio = np.concatenate(self.buf)
+        self.buf, self.in_voice = [], False
+        self.preroll.clear()
+        return audio if len(audio) * self.block_s / len(block) >= MIN_UTTERANCE_S else None
 
 
 # ----- Listener -----
@@ -200,120 +221,102 @@ class WakeListener:
             self._thread.join(timeout=2.0)
         self._thread = None
 
-    def _loop(self) -> None:
+    def _open_mic(self):
+        """(stream, '') or (None, why). The picked mic, looked up by name in this
+        process's device table; with none picked, the Windows default input when
+        it is a real mic. Never a guess among other devices: that is how wake
+        ended up on a virtual mic that records nothing, or on a loopback of the
+        speakers that woke on a video saying the name."""
         import sounddevice as sd
-        import numpy as np
         from . import listen as _ll
-
-        block_dur = 0.1  # 100ms blocks
-        block_size = int(self.sample_rate * block_dur)
-        # Rolling buffer ~ WINDOW_SEC long
-        max_blocks = int(WINDOW_SEC / block_dur)
-        buf: list = []
-        in_voice = False
-        quiet_since: Optional[float] = None
-
-        _dev = _wake_input_device()
-
-        def _open(dev):
-            s = sd.InputStream(
-                samplerate=self.sample_rate, channels=1,
-                dtype="float32", blocksize=block_size, device=dev,
-            )
-            s.start()
-            return s
-
-        # Loopback guard: never let wake listen on a system-audio device. On this
-        # user's box the picked BT mic failed and the OLD code fell back to the OS
-        # default — a loopback of the speakers — so a reel saying "jarvis" woke
-        # Hearth. Resolve to a REAL mic; if none, don't listen to system audio.
         try:
-            from .listen import is_system_audio_device
-            import sounddevice as _sd
-            def _name(ix):
-                try: return str(_sd.query_devices(ix).get("name", ""))
-                except Exception: return ""
-            if _dev is not None and is_system_audio_device(_name(_dev)):
-                print("[hearth.wake] selected wake device is system-audio; not listening", flush=True)
-                return
-            if _dev is None:
-                _di = _sd.query_devices(kind="input")
-                _dn = str(_di.get("name", "")) if isinstance(_di, dict) else ""
-                if _dn and is_system_audio_device(_dn):
-                    _dev = -1   # default is a loopback — force the real-mic search below
+            from .web import _load_settings
+            cfg = _load_settings() or {}
         except Exception:
-            pass
-
-        def _first_real_wake_mic(skip=None):
+            cfg = {}
+        name = str(cfg.get("voice_input_name", "") or "").strip()
+        dev = None
+        if name:
+            dev = _ll.index_for_name(name, _ll.sounddevice_inputs())
+            if dev is None:
+                return None, f"your mic '{name}' is not connected; wake is paused until it is"
+        else:
             try:
-                from .listen import is_system_audio_device, list_input_devices
-                for d in list_input_devices():
-                    if d["index"] == skip or is_system_audio_device(d["name"]):
-                        continue
-                    try:
-                        return _open(d["index"]), d["name"]
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-            return None, ""
-
-        stream = None
-        if _dev is not None and _dev >= 0:
-            try:
-                stream = _open(_dev)
-            except Exception:
-                print(f"[hearth.wake] mic {_dev} failed to open; trying a real mic", flush=True)
-        if stream is None and (_dev is None):
-            try:
-                stream = _open(None)   # OS default, already confirmed a real mic
-            except Exception:
-                pass
-        if stream is None:
-            s, nm = _first_real_wake_mic(skip=_dev if (_dev is not None and _dev >= 0) else None)
-            if s is not None:
-                stream = s
-                print(f"[hearth.wake] using '{nm}'", flush=True)
-        if stream is None:
-            print("[hearth.wake] no real mic available; wake off "
-                  "(won't listen to system audio)", flush=True)
-            return
-
-        try:
-            while not self._stop.is_set():
+                legacy = int(cfg.get("voice_input_device", -1))
+            except (TypeError, ValueError):
+                legacy = -1
+            if legacy >= 0:
+                dev = legacy
                 try:
-                    block, _ = stream.read(block_size)
+                    name = str(sd.query_devices(dev).get("name", ""))
                 except Exception:
-                    time.sleep(0.1)
-                    continue
-                pcm = block[:, 0]
-                rms = float(np.sqrt(np.mean(pcm * pcm)))
+                    return None, f"the saved mic (input {dev}) is gone; pick it again in Settings > Voice"
+            else:
+                try:
+                    name = str(sd.query_devices(kind="input").get("name", ""))
+                except Exception:
+                    return None, "no microphone is connected"
+        if _ll.is_system_audio_device(name):
+            return None, (f"'{name}' records your speakers, not a microphone; pick your "
+                          "microphone in Settings > Voice")
+        try:
+            st = sd.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32",
+                                blocksize=int(self.sample_rate * BLOCK_S), device=dev)
+            st.start()
+            return st, ""
+        except Exception as e:
+            return None, f"'{name}' would not open ({type(e).__name__})"
 
-                if rms > ENERGY_THRESHOLD:
-                    in_voice = True
-                    quiet_since = None
-                    buf.append(pcm.copy())
-                    if len(buf) > max_blocks:
-                        buf.pop(0)
-                else:
-                    if in_voice:
-                        if quiet_since is None:
-                            quiet_since = time.time()
-                        if time.time() - quiet_since > SILENCE_TAIL_S:
-                            # End of utterance — transcribe what we have
-                            if buf and time.time() - self._last_wake_ts > COOLDOWN_S:
-                                audio = np.concatenate(buf)
-                                if len(audio) > self.sample_rate * 0.3:
-                                    self._maybe_wake(audio)
-                            buf = []
-                            in_voice = False
-                            quiet_since = None
-        finally:
+    @staticmethod
+    def _close(stream) -> None:
+        if stream is not None:
             try:
                 stream.stop()
                 stream.close()
             except Exception:
                 pass
+
+    def _loop(self) -> None:
+        from . import listen as _ll
+        block_n = int(self.sample_rate * BLOCK_S)
+        seg = _Segmenter()
+        stream, said = None, ""
+        try:
+            while not self._stop.is_set():
+                if _ll.mic_claimed():
+                    # Voice mode has the mic: let go, and come back after.
+                    if stream is not None:
+                        self._close(stream)
+                        stream = None
+                        seg = _Segmenter()
+                    _ll.wake_released.set()
+                    self._stop.wait(0.2)
+                    continue
+                if stream is None:
+                    stream, why = self._open_mic()
+                    if stream is None:
+                        if why != said:
+                            print(f"[hearth.wake] {why}", flush=True)
+                            said = why
+                        self._stop.wait(3.0)
+                        continue
+                    said = ""
+                    _ll.wake_released.clear()
+                try:
+                    block, _ = stream.read(block_n)
+                except Exception as e:
+                    # A headset that dropped: reopen by name rather than spin.
+                    print(f"[hearth.wake] the mic stopped ({type(e).__name__}); reopening", flush=True)
+                    self._close(stream)
+                    stream = None
+                    _ll.wake_released.set()
+                    continue
+                audio = seg.feed(block[:, 0])
+                if audio is not None and time.time() - self._last_wake_ts > COOLDOWN_S:
+                    self._maybe_wake(audio)
+        finally:
+            self._close(stream)
+            _ll.wake_released.set()
 
     def _maybe_wake(self, audio) -> None:
         from . import listen as _ll

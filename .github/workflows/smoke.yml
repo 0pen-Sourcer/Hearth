@@ -200,6 +200,12 @@ jobs:
         run: |
           python tests/test_settings_save.py
 
+      - name: The wake word hears whole phrases and yields the mic
+        # It cut quiet sounds and the start of long sentences out of what it
+        # transcribed, and held the mic through voice mode.
+        run: |
+          python tests/test_wake.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through

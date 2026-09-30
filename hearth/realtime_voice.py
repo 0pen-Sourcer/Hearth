@@ -499,6 +499,17 @@ def _call(cb, *args) -> None:
 
 
 def _continuous_loop(sess: _Session) -> None:
+    """Hold the mic for the session's whole life, so the wake listener lets go
+    of it first."""
+    from .listen import claim_mic, release_mic
+    claim_mic()
+    try:
+        _run_session(sess)
+    finally:
+        release_mic()
+
+
+def _run_session(sess: _Session) -> None:
     """Run one session until it is stopped, feeding each finished utterance to
     its current sink. The recorder is shut down on the way out, always."""
     global _barge_grace_until

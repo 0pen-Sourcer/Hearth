@@ -276,6 +276,35 @@ def mic_test(seconds: float = 1.6) -> dict:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+# The wake listener and voice mode run in one process and want the same mic.
+# A Bluetooth headset opens for one capture at a time, and two listeners also
+# means two transcriptions of every word. Voice mode claims the mic; the wake
+# listener lets go while any claim is held and says when it has.
+_mic_claims = 0
+_mic_claims_lock = threading.Lock()
+wake_released = threading.Event()
+wake_released.set()
+
+
+def claim_mic(wait_s: float = 2.0) -> None:
+    """Take the mic for voice mode, waiting briefly for the wake listener to
+    close its stream."""
+    global _mic_claims
+    with _mic_claims_lock:
+        _mic_claims += 1
+    wake_released.wait(wait_s)
+
+
+def release_mic() -> None:
+    global _mic_claims
+    with _mic_claims_lock:
+        _mic_claims = max(0, _mic_claims - 1)
+
+
+def mic_claimed() -> bool:
+    return _mic_claims > 0
+
+
 def selected_input_name() -> str:
     """The mic picked in Settings > Voice, by name, or '' for none picked."""
     return (os.environ.get("JARVIS_VOICE_INPUT_NAME", "") or "").strip()
