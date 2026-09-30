@@ -5,8 +5,10 @@
 # single session. Each edition is moved to its own dist_<edition>\Hearth so the
 # second build can't clobber the first, then Inno Setup packages each.
 #
-#   Full  -> dist_full\Hearth  -> Output\Hearth-Setup-v0.7.0-preview.exe
-#   Lite  -> dist_lite\Hearth  -> Output\Hearth-Setup-Lite-v0.7.0-preview.exe
+#   Full  -> dist_full\Hearth  -> Output\Hearth-Setup-v<version>.exe
+#   Lite  -> dist_lite\Hearth  -> Output\Hearth-Setup-Lite-v<version>.exe
+#
+# Both are checked by scripts\verify_build.py before either is packaged.
 #
 # Run with Hearth fully closed (tray Quit) so no bundled file is locked.
 
