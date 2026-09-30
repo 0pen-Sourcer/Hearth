@@ -1,7 +1,7 @@
 """A distinct on-screen marker that rides with Hearth's cursor while it controls
 the desktop, so its actions always read apart from the user's own mouse.
 
-Draws a violet ring + soft glow at a point via a pure-ctypes layered window (no
+Draws an ember ring + soft glow at a point via a pure-ctypes layered window (no
 third-party deps, works in the packaged build). Best-effort and fully guarded: if
 the overlay can't be created for any reason it silently no-ops, so it can NEVER
 break an actual click. The marker is Windows-first for now (so is the desktop-
@@ -19,8 +19,8 @@ from ctypes import wintypes
 _WIN = sys.platform == "win32"
 _ENABLED = os.environ.get("HEARTH_AGENT_CURSOR", "1") not in ("0", "false", "no")
 
-# Brand violet (matches the app): #8b5cf6.
-_R, _G, _B = 139, 92, 246
+# Hearth's ember accent: #e07b4c.
+_R, _G, _B = 224, 123, 76
 _SIZE = 46                      # overlay is _SIZE x _SIZE px, centered on the cursor
 _OUT = _SIZE / 2 - 2            # ring outer radius
 _IN = _OUT - 5                  # ring inner radius

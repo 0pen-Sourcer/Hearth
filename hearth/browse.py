@@ -41,7 +41,7 @@ _INSTALL_HINT = (
 _worker: "Optional[_BrowserWorker]" = None
 _lock = threading.Lock()
 
-# A violet cursor dot that marks where the AGENT is acting. It is driven ONLY by
+# A cursor dot that marks where the AGENT is acting. It is driven ONLY by
 # the agent's clicks (see _CURSOR_GLIDE_JS) — it deliberately does NOT follow the
 # user's physical mouse. (It used to: a mousemove listener made the dot chase the
 # real cursor, so when the user moved their mouse the agent's indicator jumped to
@@ -56,9 +56,9 @@ _CURSOR_JS = r"""
     // Visible from the moment the page loads so users see the agent is in
     // control. Starts centered at top of viewport, glides on the first click.
     c.style.cssText = 'position:fixed;left:50%;top:80px;width:18px;height:18px;'
-      + 'border:2px solid #7c5cff;border-radius:50%;background:rgba(124,92,255,.25);'
+      + 'border:2px solid #e07b4c;border-radius:50%;background:rgba(224,123,76,.25);'
       + 'z-index:2147483647;pointer-events:none;margin:-9px 0 0 -9px;'
-      + 'box-shadow:0 0 12px #7c5cff;opacity:.85;'
+      + 'box-shadow:0 0 12px #e07b4c;opacity:.85;'
       + 'transition:left .45s ease, top .45s ease, opacity .2s';
     (document.body || document.documentElement).appendChild(c);
     // Auto-fade if the agent doesn't act soon after load; a glide pops it back.

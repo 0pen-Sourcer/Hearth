@@ -35,7 +35,7 @@ from .tools import WORKSPACE
 
 
 def _icon_image():
-    """Load assets/icon.png if present; fall back to a simple violet H tile."""
+    """Load assets/icon.png if present; fall back to a plain ember tile."""
     try:
         from PIL import Image, ImageDraw, ImageFont  # type: ignore
     except ImportError:
@@ -47,11 +47,11 @@ def _icon_image():
             return Image.open(icon_path).convert("RGBA")
         except Exception:
             pass
-    # Fallback — generate a 64x64 violet "H" on dark bg
-    img = Image.new("RGBA", (64, 64), (10, 10, 12, 255))
+    # Fallback: a 64x64 ember "H" on dark bg
+    img = Image.new("RGBA", (64, 64), (28, 25, 22, 255))
     draw = ImageDraw.Draw(img)
     # Simple H letterform — three rectangles
-    accent = (139, 92, 246, 255)
+    accent = (224, 123, 76, 255)
     # Left vertical
     draw.rectangle([(14, 12), (24, 52)], fill=accent)
     # Right vertical

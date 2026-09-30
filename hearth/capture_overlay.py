@@ -1,6 +1,6 @@
 """On-screen cue shown while Hearth is about to take a screenshot.
 
-A topmost, click-through, layered window showing a few purple dots that count
+A topmost, click-through, layered window showing a few ember dots that count
 down, so the user can SEE the shutter is coming during the screenshot delay —
 instead of wondering whether anything is happening. No text; just the dots.
 
@@ -19,8 +19,8 @@ import threading
 import time
 from math import ceil as _ceil
 
-_PURPLE = 0x00E060A0  # win32 COLORREF is 0x00BBGGRR — this is a violet (a0,60,e0)
-_DIM = 0x00603040     # spent-dot color (dim violet)
+_LIT = 0x004C7BE0     # win32 COLORREF is 0x00BBGGRR: ember (e0,7b,4c)
+_DIM = 0x00263D70     # spent dot, dim ember
 _BG_KEY = 0x00010101  # near-black color-key painted transparent
 _PILL = 0x00181114    # dark pill background (#141118), matches the activity HUD
 _MAX_DOTS = 5         # hard cap so a huge delay can't carpet the screen with dots
@@ -69,12 +69,12 @@ def _run(duration: float) -> None:
                 # Render the dots as a font glyph so they're ClearType-smooth
                 # (GDI Ellipse has no anti-aliasing — that's the "torn pixels").
                 # Font is created once (in _run) and reused. Lit dots bright
-                # violet, spent dots dim.
+                # ember, spent dots dim.
                 old_font = win32gui.SelectObject(hdc, _font[0]) if _font[0] else None
                 win32gui.SetBkMode(hdc, win32con.TRANSPARENT)
                 x = 12
                 for i in range(total_dots):
-                    win32gui.SetTextColor(hdc, _PURPLE if i < lit else _DIM)
+                    win32gui.SetTextColor(hdc, _LIT if i < lit else _DIM)
                     win32gui.DrawText(hdc, "●", -1,
                                       (x, 0, x + 22, rect[3]),
                                       win32con.DT_CENTER | win32con.DT_VCENTER

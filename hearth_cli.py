@@ -449,17 +449,16 @@ LMSTUDIO_SYNC_PATH = os.path.expanduser(
 # ---- ANSI palette ---------------------------------------------------------
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
-# Brand gradient - Hearth's violet → lavender → soft-rose theme. Matches the
-# GUI's --accent (#8b5cf6 → #a78bfa) so the CLI feels like the same product.
-GRAD = ["\033[38;5;99m",  "\033[38;5;141m", "\033[38;5;177m",
-        "\033[38;5;183m", "\033[38;5;219m", "\033[38;5;225m"]
-C_BRAND = "\033[38;5;141m"   # bright violet
+# Brand gradient, ember to firelight, matching the GUI's default accent.
+GRAD = ["\033[38;5;166m", "\033[38;5;172m", "\033[38;5;173m",
+        "\033[38;5;209m", "\033[38;5;215m", "\033[38;5;223m"]
+C_BRAND = "\033[38;5;209m"   # ember
 C_USER = "\033[1;97m"
-C_BOT = "\033[38;5;183m"     # lavender (matches assistant bubble vibe)
-C_TOOL = "\033[38;5;220m"
-C_OK = "\033[38;5;120m"
+C_BOT = "\033[38;5;223m"     # warm off-white
+C_TOOL = "\033[38;5;179m"
+C_OK = "\033[38;5;114m"
 C_DIM = "\033[38;5;240m"
-C_FRAME = "\033[38;5;103m"
+C_FRAME = "\033[38;5;138m"
 C_ERR = "\033[1;31m"
 C_WARN = "\033[38;5;215m"
 C_ACCENT = C_BRAND

@@ -40,12 +40,11 @@ _stop = threading.Event()
 _thread = None
 
 
-def _violet(intensity: float) -> int:
-    """Hearth violet COLORREF (0x00BBGGRR) scaled by intensity 0..1 — brighter
-    dots read as 'energy', dim ones as the resting grid. Matches the GUI voice
-    grid's purple (≈ #9D7BFF); the old 0xE0/0x60/0xC0 was magenta/pink."""
+def _ember(intensity: float) -> int:
+    """Hearth's ember accent as a COLORREF (0x00BBGGRR), scaled by intensity
+    0..1: brighter dots read as energy, dim ones as the resting grid."""
     k = max(0.12, min(1.0, intensity))
-    r, g, b = int(0x9D * k), int(0x7B * k), int(0xFF * k)
+    r, g, b = int(0xE0 * k), int(0x7B * k), int(0x4C * k)
     return (b << 16) | (g << 8) | r
 
 
@@ -112,7 +111,7 @@ def _run() -> None:
                         dist = hypot(c - cx, r - cy)
                         inten = max(0.0, min(1.0, (reach - dist) / 1.6))
                         inten = max(0.14, inten)        # resting grid always faintly visible
-                        win32gui.SetTextColor(mem, _violet(inten))
+                        win32gui.SetTextColor(mem, _ember(inten))
                         x = _PAD + c * _SP
                         y = _PAD + r * _SP
                         win32gui.DrawText(mem, "●", -1, (x, y, x + _SP, y + _SP),

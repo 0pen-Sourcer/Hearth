@@ -27,8 +27,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 _C = {
-    "dim": "\033[2m", "reset": "\033[0m", "violet": "\033[38;5;141m",
-    "lav": "\033[38;5;183m", "ok": "\033[38;5;42m", "tool": "\033[38;5;180m",
+    "dim": "\033[2m", "reset": "\033[0m", "brand": "\033[38;5;209m",
+    "lav": "\033[38;5;223m", "ok": "\033[38;5;42m", "tool": "\033[38;5;180m",
     "warn": "\033[38;5;203m", "bold": "\033[1m",
 }
 
@@ -39,7 +39,7 @@ def _render_entry(e: Dict[str, Any]) -> Optional[str]:
     C = _C
     k = e.get("kind")
     if k == "start":
-        return (f"{C['violet']}{C['bold']}▶ {e.get('persona', 'agent')}{C['reset']}  "
+        return (f"{C['brand']}{C['bold']}▶ {e.get('persona', 'agent')}{C['reset']}  "
                 f"{C['dim']}{(e.get('prompt') or '')[:240]}{C['reset']}")
     if k == "route":
         tools = ", ".join(e.get("tools_exposed") or [])
@@ -77,7 +77,7 @@ def watch(path: str, title: str = "") -> int:
     except Exception:
         pass
     hdr = title or os.path.basename(path)
-    print(f"{_C['violet']}{_C['bold']}╭─ {hdr} ─╮{_C['reset']}\n", flush=True)
+    print(f"{_C['brand']}{_C['bold']}╭─ {hdr} ─╮{_C['reset']}\n", flush=True)
     pos = 0
     ended = False
     idle = 0.0

@@ -958,7 +958,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "prompt":       {"type": "string", "description": "What to draw. Be specific — 'a glowing violet H logo on a charcoal background, minimalist, vector style'."},
+                "prompt":       {"type": "string", "description": "What to draw. Be specific — 'a cozy reading nook at dusk, warm lamp light, soft watercolor'."},
                 "n":            {"type": "integer", "description": "How many to generate (1-4). Default 1."},
                 "aspect_ratio": {"type": "string", "description": "1:1 | 16:9 | 9:16 | 4:3 | 3:4 | 3:2 | 2:3 etc. Default 1:1."},
                 "resolution":   {"type": "string", "description": "xAI: '1k' or '2k'. Default '1k'."},
