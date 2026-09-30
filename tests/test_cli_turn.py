@@ -87,6 +87,12 @@ class _Model(http.server.BaseHTTPRequestHandler):
             self.wfile.write(_chunk({"role": "assistant",
                                      "content": "It is time to test."}))
             self.wfile.write(_chunk({}, "stop"))
+            # The server's own count of what it received, far from any estimate.
+            self.wfile.write(("data: " + json.dumps({
+                "id": "x", "object": "chat.completion.chunk", "model": MODEL,
+                "choices": [], "usage": {"prompt_tokens": 7777,
+                                         "completion_tokens": 5, "total_tokens": 7782},
+            }) + "\n\n").encode())
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
 
@@ -106,7 +112,7 @@ env.update({
 })
 try:
     p = subprocess.run([sys.executable, "-X", "utf8", CLI],
-                       input=b"what time is it\n", capture_output=True,
+                       input=b"what time is it\n/tokens\n", capture_output=True,
                        timeout=180, env=env, cwd=ROOT)
     out = (p.stdout + p.stderr).decode("utf-8", "replace")
     code = p.returncode
@@ -115,6 +121,9 @@ except subprocess.TimeoutExpired as e:
     code = None
 srv.shutdown()
 
+_tok = next((l for l in out.splitlines() if "tokens /" in l), "")
+check(f"/tokens reports what the server measured, not an estimate: {_tok.strip()!r}",
+      "measured" in _tok)
 check("the terminal did not crash", "fatal" not in out.lower()
       and "Traceback" not in out)
 check(f"and exited cleanly (exit {code})", code == 0)

@@ -2681,9 +2681,10 @@ class JarvisCLI:
                 print(f"{C_DIM}(no activity yet){C_RESET}")
             return True
         if low == "/tokens":
-            est = estimate_tokens(self.messages)
+            est = self._ctx_used()
             pct = est / self.context_tokens * 100
-            print(f"  ~{est} tokens / {self.context_tokens} ({pct:.0f}%)")
+            how = "measured" if getattr(self, "_ctx_measured", False) else "estimated"
+            print(f"  {est} tokens / {self.context_tokens} ({pct:.0f}%, {how})")
             return True
         if low.startswith("/context"):
             parts = cmd.split()
@@ -2735,7 +2736,7 @@ class JarvisCLI:
                           f"will overflow fast. 24K+ is comfortable.{C_RESET}")
             else:
                 # Live usage, not just the limit — persona + tools + chat.
-                used = estimate_tokens(self.messages)
+                used = self._ctx_used()
                 try:
                     tool_tok = len(json.dumps(self.openai_tools)) // CHARS_PER_TOKEN
                 except Exception:
@@ -3516,9 +3517,14 @@ class JarvisCLI:
             return os.path.basename(m)
         return m
 
+    def _ctx_used(self) -> int:
+        """Tokens the conversation takes: our estimate, corrected by what the
+        server last reported it actually received."""
+        return max(0, estimate_tokens(self.messages) + getattr(self, "_ctx_bias", 0))
+
     def _footer_prompt(self) -> str:
         try:
-            est = estimate_tokens(self.messages)
+            est = self._ctx_used()
             pct = int(est / self.context_tokens * 100)
         except Exception:
             pct = 0
@@ -5297,6 +5303,19 @@ class JarvisCLI:
                 _stats_on = (_json.load(_sf).get("gen_stats") is not False)
         except Exception:
             _stats_on = True
+        # The server's prompt_tokens is what the model actually saw. Keep the
+        # difference from our own estimate of the same request, so the footer,
+        # /tokens and /context read the real context rather than a guess.
+        try:
+            _u = getattr(_s_last_chunk, "usage", None)
+            _pt = int(getattr(_u, "prompt_tokens", 0) or 0) if _u else 0
+            if _pt > 0:
+                _tools_tok = (len(json.dumps(create_kwargs.get("tools") or []))
+                              // CHARS_PER_TOKEN)
+                self._ctx_bias = (_pt - _tools_tok) - estimate_tokens(send_messages)
+                self._ctx_measured = True
+        except Exception:
+            pass
         if _stats_on and not tool_calls_dict and (content_captured or _s_first):
             try:
                 from hearth.headless import _compute_gen_stats
