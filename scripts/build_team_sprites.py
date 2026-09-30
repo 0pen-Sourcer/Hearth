@@ -36,7 +36,7 @@ FRAMES = [
     ("walk_down_1", "walk", 3, 2, 0), ("walk_up_1", "walk", 3, 2, 1), ("walk_side_1", "walk", 3, 2, 2),
     ("walk_down_2", "walk", 3, 2, 3), ("walk_up_2", "walk", 3, 2, 4), ("walk_side_2", "walk", 3, 2, 5),
 ]
-STAND_H = 118          # standing height in room pixels (the room is 1536 wide)
+STAND_H = 132          # standing height in room pixels (the room is 1536 wide)
 CELL_W, CELL_H = 104, 144
 COLORS = 40
 # Furniture, in grid order, with its width in room pixels (measured from the

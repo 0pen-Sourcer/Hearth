@@ -1,0 +1,71 @@
+{
+ "cell": [
+  104,
+  144
+ ],
+ "frames": [
+  "idle",
+  "type",
+  "raise",
+  "stretch",
+  "read",
+  "coffee",
+  "think",
+  "gaze",
+  "walk_down_1",
+  "walk_up_1",
+  "walk_side_1",
+  "walk_down_2",
+  "walk_up_2",
+  "walk_side_2"
+ ],
+ "roles": [
+  "coder",
+  "researcher",
+  "summarizer",
+  "librarian",
+  "archivist",
+  "coordinator",
+  "custom",
+  "main"
+ ],
+ "props": {
+  "desk": [
+   0,
+   0,
+   233,
+   144
+  ],
+  "desk_on": [
+   237,
+   0,
+   233,
+   146
+  ],
+  "chair": [
+   474,
+   0,
+   80,
+   93
+  ],
+  "armchair": [
+   558,
+   0,
+   145,
+   134
+  ],
+  "side_table": [
+   707,
+   0,
+   60,
+   82
+  ],
+  "mug": [
+   771,
+   0,
+   22,
+   25
+  ]
+ },
+ "room_empty": true
+}

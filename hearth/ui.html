@@ -16718,12 +16718,14 @@ const ROOM = {
   // Desk anchors: the middle of each desk's front edge, on the floor.
   desks: [[330, 648], [610, 648], [900, 648], [1190, 648], [330, 886], [610, 886], [900, 886], [1190, 886]],
   spots: {
-    door: [96, 905], fire: [760, 470], fireSide: [868, 478], shelfL: [410, 398], shelfR: [1122, 398],
+    door: [96, 905], fire: [760, 470], fireSide: [868, 478], hearthside: [640, 492], shelfL: [410, 398], shelfR: [1122, 398],
     board: [178, 525], windowSeat: [1392, 442], coffee: [1362, 650], windowL: [182, 372], rug: [700, 478],
   },
   aisleY: 722, aisleTop: 492, aisleX: [186, 470, 755, 1045, 1352],
 };
-const SEAT_DY = 2, CHAIR_DY = 50;
+// SEAT_DY sets where a seated worker sorts (just in front of the desk);
+// SIT_LIFT only raises where they are drawn, so head and shoulders clear the chair.
+const SEAT_DY = 4, CHAIR_DY = 50, SIT_LIFT = 16;
 // Everyone shares the drawn body for their role; hair and skin come from the
 // person's id, so each helper looks like someone and keeps that look.
 const HAIRS = [[0.07, 0.55, 0.13], [0.05, 0.45, 0.30], [0.02, 0.62, 0.34], [0.11, 0.55, 0.52],
@@ -16837,7 +16839,7 @@ function roomGoal(p, a) {
   if (a.status === 'stopped') return { at: beside, pose: 'idle' };
   const since = Date.now() - (p.doneAt || Date.now());
   if (since < 2600) return { at: p.pos, pose: 'stretch' };
-  const leisure = [['fire', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfL', 'read'], ['windowL', 'gaze'], ['shelfR', 'read']];
+  const leisure = [['hearthside', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfL', 'read'], ['windowL', 'gaze'], ['shelfR', 'read']];
   const slot = Math.floor((Date.now() + p.seed * 7000) / 18000);
   const [spot, pose] = leisure[(slot + p.seed) % leisure.length];
   return { at: ROOM.spots[spot], pose, spread: true };
@@ -16968,11 +16970,12 @@ function roomDraw(t) {
     const typing = !p.walking && p.goal && p.goal.pose === 'type';
     const bob = typing ? Math.round(Math.sin(t / 130 + p.seed) * 1.3) : (!p.walking ? Math.round(Math.sin(t / 700 + p.seed) * 0.8) : 0);
     ctx.save();
-    ctx.translate(Math.round(p.pos[0] * kx), Math.round((p.pos[1] + bob) * ky));
+    const lift = typing ? SIT_LIFT : 0;
+    ctx.translate(Math.round(p.pos[0] * kx), Math.round((p.pos[1] + bob - lift) * ky));
     if (flip) ctx.scale(-1, 1);
     ctx.drawImage(img, frame * cw, 0, cw, ch, Math.round(-cw * kx / 2), Math.round(-ch * ky), Math.round(cw * kx), Math.round(ch * ky));
     ctx.restore();
-    const headY = typing ? p.pos[1] - 100 : p.pos[1] - 128;
+    const headY = typing ? p.pos[1] - 112 - lift : p.pos[1] - 142;
     labels.push({ p, x: p.pos[0] * kx / dpr, y: headY * ky / dpr });
   }
 
