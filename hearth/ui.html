@@ -136,6 +136,10 @@
 
   :root[data-ui="simple"] .status .st-detail { display: none; }
   .mode-btn { gap: 7px; }
+  .tool.t-slow .t-ms { color: var(--warn, #d9a441); }
+  #mode-menu { min-width: 320px; }
+  #mode-menu .think-menu-item { align-items: flex-start; line-height: 1.4; }
+  #mode-menu .sub { display: inline-block; margin-top: 2px; }
   .mode-btn .mode-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); }
   .mode-btn[data-mode="edits"] .mode-dot { background: var(--accent); }
   .mode-btn[data-mode="auto"] .mode-dot { background: var(--warn); }
@@ -3460,7 +3464,10 @@
         </button>
         <div class="think-menu" id="think-menu"></div>
         </div>
-        <button class="toggle-btn mode-btn" id="btn-mode" title="Approval mode (Shift+Tab)"><span class="mode-dot"></span><span class="mode-label">ask</span></button>
+        <div style="position:relative">
+        <button class="toggle-btn mode-btn" id="btn-mode" title="What runs without asking (Shift+Tab)"><span class="mode-dot"></span><span class="mode-label">ask</span></button>
+        <div class="think-menu" id="mode-menu"></div>
+        </div>
         <!-- Context-usage ring. Inline next to controls instead of a detached
              pill above. Conic-gradient fills as ctx fills; percent in center;
              tooltip shows raw used/budget. Hidden until first context_state event. -->
@@ -5565,7 +5572,13 @@ function paintModeButton() {
   const m = APPROVAL_MODES.find(x => x.id === approvalMode());
   b.dataset.mode = m.id;
   b.querySelector('.mode-label').textContent = m.short;
-  b.title = `${m.name}: ${m.what} (Shift+Tab to change)`;
+  b.title = `${m.name}: ${m.what} (Shift+Tab cycles)`;
+  const menu = $('mode-menu');
+  if (menu) {
+    menu.innerHTML = APPROVAL_MODES.map(x => `<button class="think-menu-item${x.id === m.id ? ' sel' : ''}" data-mode="${x.id}">`
+      + `<span class="tick">${x.id === m.id ? '✓' : ''}</span>`
+      + `<span>${x.name}<br><span class="sub">${x.what}</span></span></button>`).join('');
+  }
 }
 async function setApprovalMode(id) {
   await saveSetting('approval_mode', id);
@@ -5578,7 +5591,21 @@ function cycleApprovalMode() {
   const i = APPROVAL_MODES.findIndex(m => m.id === approvalMode());
   setApprovalMode(APPROVAL_MODES[(i + 1) % APPROVAL_MODES.length].id);
 }
-$('btn-mode').addEventListener('click', cycleApprovalMode);
+(function wireModeMenu() {
+  const btn = $('btn-mode'), menu = $('mode-menu');
+  if (!btn || !menu) return;
+  paintModeButton();
+  const close = () => menu.classList.remove('open');
+  btn.addEventListener('click', (e) => { e.stopPropagation(); paintModeButton(); menu.classList.toggle('open'); });
+  document.addEventListener('click', (e) => { if (!menu.contains(e.target) && !btn.contains(e.target)) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  menu.addEventListener('click', (e) => {
+    const it = e.target.closest('.think-menu-item');
+    if (!it) return;
+    close();
+    setApprovalMode(it.dataset.mode);
+  });
+})();
 $('input').addEventListener('keydown', (e) => {
   if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleApprovalMode(); }
 });
@@ -5971,8 +5998,7 @@ function applyBrainState() {
   const wrap = $$id('ctx-ring-wrap');
   if (wrap && b.ctxTotal) {
     const f = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
-    wrap.title = `model context: ${f(b.ctxTotal)} total = ${f(b.ctxEffective || b.ctxTotal)} effective + ${f(b.ctxTools || 0)} tool schemas\n` +
-                 `source: ${b.ctxSource || '?'}`;
+    if (!wrap.title) wrap.title = `The model holds ${f(b.ctxTotal)}; ${f(b.ctxTools || 0)} of it describes the tools.`;
   }
 
   // Memory count — one number, two badges.
@@ -6316,13 +6342,33 @@ async function _updateCtxRingFromHistory() {
   // Add the persona/system-prompt base the backend reports: the live ring counts
   // it, so without it the idle ring reads low then jumps the instant a turn runs.
   const used = Math.round(chars / 4) + ((b && b.base) || 0);
-  const p = Math.max(0, Math.min(100, Math.round(100 * used / eff)));
-  const shouldShow = p >= 70 || wrap.classList.contains('compacting');
-  wrap.hidden = !shouldShow;
-  ring.style.setProperty('--ctx-deg', (p * 3.6).toFixed(1) + 'deg');
-  pct.textContent = p + '%';
-  wrap.classList.toggle('warn', p >= 70 && p < 90);
-  wrap.classList.toggle('hot', p >= 90);
+  _paintCtxRing(used, eff, STATE._compactAt || 0.75, false);
+}
+
+// One reading for the ring whether a turn is running or not: how much room is
+// left before this chat gets compacted. The idle estimate used to show the
+// share used while the live one showed the share left, so the same chat read
+// 71% at rest and 31% a second later.
+function _paintCtxRing(used, budget, at, measured) {
+  const wrap = document.getElementById('ctx-ring-wrap');
+  const ring = document.getElementById('ctx-ring');
+  const pct  = document.getElementById('ctx-ring-pct');
+  if (!wrap || !ring || !pct || !budget) return;
+  at = Math.max(0.05, Math.min(1, at || 0.75));
+  const room = Math.max(1, Math.round(budget * at));
+  const left = Math.max(0, Math.min(100, Math.round((1 - used / room) * 100)));
+  // A compaction just ran, so leave it alone until the next turn rather
+  // than reappearing at a low number the moment room was made.
+  wrap.hidden = !((left <= 30 && !STATE._ctxQuiet) || wrap.classList.contains('compacting'));
+  ring.style.setProperty('--ctx-deg', (left * 3.6).toFixed(1) + 'deg');
+  pct.textContent = left + '%';
+  const fmt = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  const bb = STATE._ctxBudget || {};
+  wrap.title = `${left}% room left in this chat${measured ? '' : ' (estimate)'}\n` +
+               `${fmt(used)} of ${fmt(room)} used. Past that, older messages get summarized.\n` +
+               (bb.total ? `The model holds ${fmt(bb.total)}; ${fmt(bb.tools || 0)} of it describes the tools.` : '');
+  wrap.classList.toggle('hot',  left <= 10);
+  wrap.classList.toggle('warn', left > 10 && left <= 30);
 }
 
 function renderChat() {
@@ -6688,7 +6734,20 @@ function appendPart(node, msgDiv) {
   if (!body) { $('chat-body').appendChild(node); return; }
   const actions = body.querySelector(':scope > .actions');
   const last = actions ? actions.previousElementSibling : body.lastElementChild;
-  if (_foldsIntoRun(node) && document.documentElement.dataset.ui !== 'advanced') {
+  const _simple = document.documentElement.dataset.ui !== 'advanced';
+  // Reasoning between tool calls belongs to the run it sits in, so a run stays
+  // one line instead of breaking at every thought.
+  if (_simple && node.classList && node.classList.contains('think') && last) {
+    if (last.classList.contains('tool-run')) { last._cards.appendChild(node); return; }
+    if (_foldsIntoRun(last)) {
+      const run = makeToolRun();
+      body.insertBefore(run, last);
+      run._cards.appendChild(last);
+      run._cards.appendChild(node);
+      return;
+    }
+  }
+  if (_foldsIntoRun(node) && _simple) {
     if (last && last.classList.contains('tool-run')) { last._cards.appendChild(node); return; }
     if (last && _foldsIntoRun(last)) {
       const run = makeToolRun();
@@ -6897,7 +6956,7 @@ function fillCommandCard(args, result, body) {
   wrap.className = 'cmdbox';
   wrap.innerHTML =
     (cmd ? `<div class="cmd-row cmd-in"><code>${esc(cmd)}</code></div>` : '') +
-    `<div class="cmd-row cmd-out${failed ? ' bad' : ''}"><code>${esc(out || '(no output)')}</code></div>`;
+    (result === null ? '' : `<div class="cmd-row cmd-out${failed ? ' bad' : ''}"><code>${esc(out || '(no output)')}</code></div>`);
   body.appendChild(wrap);
   return true;
 }
@@ -6922,6 +6981,23 @@ function _argPreview(args) {
   let out = parts.join('  ·  ');
   if (out.length > 140) out = out.slice(0, 140) + '…';
   return out;
+}
+
+// A running tool counts up on its own card, so a long command reads as running
+// rather than stuck. While a permission question is open the card says so.
+function _startToolClock(t) {
+  if (!t || !t.ms) return;
+  const t0 = Date.now();
+  t._clock = setInterval(() => {
+    if (!t.div.isConnected) return _stopToolClock(t);
+    if (pendingPermId) { t.ms.textContent = 'waiting for you'; return; }
+    const s = Math.floor((Date.now() - t0) / 1000);
+    t.ms.textContent = s >= 3 ? (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`) : '';
+  }, 1000);
+}
+function _stopToolClock(t) {
+  if (t && t._clock) { clearInterval(t._clock); t._clock = null; }
+  if (t && t.div) t.div.classList.remove('t-slow');
 }
 
 function makeToolCard(name, args) {
@@ -8530,6 +8606,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   } finally {
     _clearPromptPoll();  // stop the prompt-% poll if the turn ended before any event
     _liveStatsStop();    // stop the live tok/s ticker on any stream end (error/abort too)
+    try { _stopToolClock(pendingTool); } catch {}
     // Flush any steer chips whose confirmation never arrived (turn ended first),
     // so none linger into the next turn.
     for (const c of _steerChips) { if (c && c.parentNode) c.remove(); }
@@ -8611,9 +8688,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
     activeThink.classList.remove('active', 'open');
     const startedAt = activeThink._startedAt;
     if (startedAt) {
-      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      // Reasoning that arrives in one burst has no real duration to report.
+      const secs = (Date.now() - startedAt) / 1000;
       const label = activeThink.querySelector('.think-label');
-      if (label) label.textContent = `thought for ${seconds}s`;
+      if (label) label.textContent = secs >= 0.5 ? `thought for ${secs.toFixed(1)}s` : 'thought';
     }
     activeThink._closedAt = Date.now();
   }
@@ -8658,11 +8736,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
     if (ev.type === 'slow_tool') {
       // Watchdog fires this when a tool takes >30s / >90s. Tell the user
       // the loop didn't hang - it's a slow tool. They can hit Stop or wait.
-      const sec = ev.elapsed_s || 0;
-      const tip = ev.suggestion === 'stop'
-        ? 'Still running. Hit Stop if you want to bail - model can move it to a background subagent on the next turn.'
-        : 'Still running. Want to keep waiting, or hit Stop and ask the model to background it?';
-      toast(`${ev.name} is taking ${sec}s`, tip, 'warn', 6000);
+      if (pendingTool && pendingTool.div) {
+        pendingTool.div.classList.add('t-slow');
+        pendingTool.ms.title = 'Still running. Stop ends it; the next message can ask for it to run in the background.';
+      }
       return;
     }
 
@@ -8794,9 +8871,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
       assistantMsg.events.push(pendingToolEvent);
       appendPart(pendingTool.div, live);
       if (pendingTool.div._toolName === 'run_command') {
-        fillCommandCard(pendingTool.div._toolArgs, '(waiting for approval — expand to see full command)', pendingTool.body);
+        fillCommandCard(pendingTool.div._toolArgs, null, pendingTool.body);
         pendingTool.div.classList.add('open');
       }
+      _startToolClock(pendingTool);
       setState(`calling ${ev.name}…`);
       // Voice mode has no tool cards to look at, so mirror the tool name into
       // the HUD. Without this the overlay sits on "thinking…" through a 30s
@@ -8934,6 +9012,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
           requestAnimationFrame(() => { _p.style.opacity = '0'; });
           setTimeout(() => { try { _p.remove(); } catch {} }, 440);
         }
+        _stopToolClock(pendingTool);
         if (ev.ms != null) pendingTool.ms.textContent = `${ev.ms}ms`;
         if (pendingToolEvent) {
           pendingToolEvent.result = raw;
@@ -9126,38 +9205,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // compaction point rather than the whole budget, since the budget is
       // never reached: compaction fires first.
       const wrap = document.getElementById('ctx-ring-wrap');
-      const ring = document.getElementById('ctx-ring');
-      const pct  = document.getElementById('ctx-ring-pct');
-      if (wrap && ring && pct) {
-        const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
-        const p = Math.max(0, Math.min(100, ev.pct || 0));
-        const at = Math.max(0.05, Math.min(1, ev.compact_at || 0.75));
-        // How much of the room before compaction is still free.
-        const left = Math.max(0, Math.min(100, Math.round((1 - (p / 100) / at) * 100)));
-        // A compaction just ran, so leave it alone until the next turn rather
-        // than reappearing at a low number the moment room was made.
-        const shouldShow = (left <= 30 && !STATE._ctxQuiet)
-                           || wrap.classList.contains('compacting');
-        wrap.hidden = !shouldShow;
-        // The arc drains as the room runs out.
-        ring.style.setProperty('--ctx-deg', (left * 3.6).toFixed(1) + 'deg');
-        pct.textContent = left + '%';
-        // Build a tooltip that explains the math: chat usage / effective
-        // budget (which is total_ctx minus tool-schema overhead). Without
-        // this, users wondered why a 1M-context Grok showed 200K - because
-        // ~9K is permanent tool-schema overhead the chat can't use.
-        const b = STATE._ctxBudget || {};
-        const total = b.total ? fmt(b.total) : '?';
-        const tools = b.tools ? fmt(b.tools) : '?';
-        const src = b.source ? ` · source: ${b.source}` : '';
-        const meas = ev.measured ? ' (server-measured)' : ' (estimated)';
-        wrap.title = `${left}% of room left before this chat is compacted${meas}\n` +
-                     `using ${fmt(ev.used||0)} of ${fmt(Math.round((ev.budget||0)*at))} before that happens\n` +
-                     `model context: ${total} total = ${fmt(ev.budget||0)} usable + ${tools} tool schemas${src}`;
-        wrap.classList.toggle('hot',  left <= 10);
-        wrap.classList.toggle('warn', left > 10 && left <= 30);
-        wrap.classList.remove('compacting');
-      }
+      if (wrap) wrap.classList.remove('compacting');
+      if (ev.compact_at) STATE._compactAt = ev.compact_at;
+      _paintCtxRing(ev.used || 0, ev.budget || 0, ev.compact_at, !!ev.measured);
       return;
     }
 

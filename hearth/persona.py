@@ -22,6 +22,18 @@ from .memory import index_for_prompt, read_rules, read_soul, read_profile
 NAME = os.environ.get("HEARTH_PERSONA_NAME", "JARVIS").strip() or "JARVIS"
 
 
+def _self_line() -> str:
+    """Where Hearth itself lives, so questions about it don't start a disk search."""
+    import os as _os
+    import sys as _sys
+    if getattr(_sys, "frozen", False):
+        home = _os.path.dirname(_sys.executable)
+        return (f"Hearth is installed in `{home}` as a compiled build; its source "
+                "is github.com/0pen-Sourcer/Hearth.")
+    src = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    return f"Hearth's own source code is in `{src}` (the `hearth` package)."
+
+
 def system_prompt(voice: bool = False) -> str:
     # Date only (no %H:%M) so the system prompt stays byte-identical all day —
     # a minute-resolution stamp here changes the prefix every 60s and forces the
@@ -64,7 +76,7 @@ Settings > Behavior, and answer to the new name meanwhile.
 
 `{workspace}` is your scratch folder for files you create. It is a folder, not
 the user and not you. {reads_line} Writes, deletes and moves are confined to it
-plus any path allowed with /allow.
+plus any path allowed with /allow. {_self_line()}
 
 # Tone
 Warm, clear, competent. Mirror their register: casual when they are, efficient
