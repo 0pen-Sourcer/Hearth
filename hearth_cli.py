@@ -4859,6 +4859,22 @@ class JarvisCLI:
                     retryable = _info.retryable
                 except Exception:
                     _info, retryable = None, False
+                if (retryable and attempt < 2
+                        and getattr(_info, "category", "") == "context_overflow"):
+                    # The same prompt overflows again however long we wait; one
+                    # big tool result can do it in a step. Shrink it, harder
+                    # each time (1/2, then 1/4 of the budget), as the window does.
+                    from hearth.tools import _truncate_kept_tool_results
+                    _msgs = _truncate_kept_tool_results(
+                        list(create_kwargs.get("messages") or []),
+                        max_chars=max(400, 1200 // (attempt + 1)))
+                    _msgs = trim_to_budget(
+                        _msgs, max(2048, int(self.context_tokens * 0.5 ** (attempt + 1))),
+                        RESERVED_OUTPUT)
+                    create_kwargs["messages"] = sanitize_tool_pairing(_msgs)
+                    print(f"{C_DIM}↻ prompt overflowed the context; trimmed it and "
+                          f"retrying{C_RESET}")
+                    continue
                 if retryable and attempt < 2:
                     delay = 0.5 * (2 ** attempt)
                     # Name the actual failure. "hiccup" reads as a transient

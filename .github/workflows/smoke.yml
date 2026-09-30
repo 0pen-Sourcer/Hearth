@@ -220,6 +220,10 @@ jobs:
         run: |
           python tests/test_vision_check.py
 
+      - name: The terminal shrinks a prompt that overflows instead of resending it
+        run: |
+          python tests/test_cli_overflow.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through
