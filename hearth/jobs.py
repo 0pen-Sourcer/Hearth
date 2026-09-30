@@ -125,25 +125,16 @@ def _normalize_ps_command(command: str) -> str:
 
 
 def _spawn(command: str, cwd: str, shell: str) -> subprocess.Popen:
-    """Spawn the child with stdout+stderr both pointed at the .out file in
-    line-buffered append mode. Hidden console on Windows."""
-    if sys.platform == "win32" and shell != "cmd":
+    """Spawn the child with stdout+stderr both on one pipe, read as UTF-8 (the
+    shells are set to write it), line-buffered. Hidden console on Windows."""
+    from . import shells
+    if shell == "powershell":
         command = _normalize_ps_command(command)
-        argv = ["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
-        return subprocess.Popen(
-            argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1, creationflags=_NO_WINDOW,
-        )
-    if sys.platform == "win32":
-        return subprocess.Popen(
-            command, cwd=cwd, shell=True,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1, creationflags=_NO_WINDOW,
-        )
+    args, use_shell = shells.argv(command, shell)
     return subprocess.Popen(
-        ["/bin/sh", "-c", command], cwd=cwd,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1,
+        args, cwd=cwd, shell=use_shell, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+        bufsize=1, env=shells.child_env(), creationflags=_NO_WINDOW,
     )
 
 
@@ -285,7 +276,7 @@ def get_job_result(job_id: str) -> Dict[str, Any]:
 
 
 def start_job(command: str, cwd: Optional[str] = None,
-              shell: str = "powershell",
+              shell: str = "",
               description: str = "") -> Dict[str, Any]:
     """Start a background job. Returns {ok, job_id, log_path}.
 
@@ -294,6 +285,10 @@ def start_job(command: str, cwd: Optional[str] = None,
     """
     if not command or not command.strip():
         return {"ok": False, "error": "command is empty"}
+    from . import shells
+    shell, why = shells.normalize_shell(shell)
+    if why:
+        return {"ok": False, "error": why}
     cwd = cwd or WORKSPACE
     job_id = _new_job_id()
     meta = {

@@ -206,6 +206,12 @@ jobs:
         run: |
           python tests/test_wake.py
 
+      - name: Commands report their real output and exit status
+        # PowerShell garbled non-English names, crashed Python children that
+        # printed them, hid failures behind exit 0, and bash had no way in.
+        run: |
+          python tests/test_run_command.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through

@@ -29,6 +29,8 @@ import subprocess
 import urllib.request
 import urllib.parse
 from datetime import datetime
+
+from . import shells as _shells
 from html.parser import HTMLParser
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -862,7 +864,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "run_command",
         "description": (
-            "Run a single-line shell command (PowerShell on Windows). python and pip "
+            "Run a shell command. " + _shells.describe() + " python and pip "
             "run in Hearth's own environment. Times out after 120s by default, up to "
             "300 (use 180 or more for pip installs). Set detached=true for anything "
             "that does not exit on its own, like a server or a launcher. Destructive "
@@ -875,7 +877,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "command": {"type": "string"},
                 "cwd": {"type": "string", "description": "Working dir. Default = workspace."},
                 "timeout": {"type": "integer", "description": "Seconds. Default 120, max 300. Ignored when detached=true."},
-                "shell": {"type": "string", "description": "Optional. 'cmd' to force cmd.exe on Windows. Default = powershell."},
+                "shell": {"type": "string", "enum": _shells.available(),
+                          "description": "Which shell runs it. Default: the first one listed."},
                 "detached": {"type": "boolean", "description": "If true, spawn in a new console and return immediately with the PID. Use for daemons / UI launchers / dev servers that don't self-terminate."},
             },
             "required": ["command"],
@@ -896,7 +899,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "properties": {
                 "command":     {"type": "string"},
                 "cwd":         {"type": "string", "description": "Working dir. Default = workspace."},
-                "shell":       {"type": "string", "description": "'cmd' to force cmd.exe on Windows. Default = powershell."},
+                "shell":       {"type": "string", "enum": _shells.available(),
+                                "description": "Which shell runs it, as for run_command. Default: the first one listed."},
                 "description": {"type": "string", "description": "Short label for the job ('install torch', 'download Hermes-3 GGUF'). Shown in list_jobs."},
             },
             "required": ["command"],
@@ -3553,14 +3557,16 @@ def _run_command(p: Dict) -> str:
     else:
         cwd = WORKSPACE
     timeout = min(int(p.get("timeout") or 120), 300)
-    shell_pref = (p.get("shell") or "").lower().strip()
+    shell, shell_note = _shells.normalize_shell(p.get("shell"))
+    if shell_note:
+        return f"Error (run_command): {shell_note}."
     detached = bool(p.get("detached"))
 
     # Repair the two PowerShell mistakes models make most (a leading quoted exe
     # path needs the `&` call operator; a bare `python` off PATH → the running
     # interpreter) so a valid command doesn't die on a shell technicality. Same
-    # normalizer the background-jobs path uses. PowerShell only, never cmd.
-    if sys.platform == "win32" and shell_pref != "cmd":
+    # normalizer the background-jobs path uses. PowerShell only.
+    if shell == "powershell":
         try:
             from .jobs import _normalize_ps_command
             cmd = _normalize_ps_command(cmd)
@@ -3573,23 +3579,12 @@ def _run_command(p: Dict) -> str:
     # immediately. Without this, run_command blocks until the timeout.
     if detached:
         try:
-            if sys.platform == "win32" and shell_pref != "cmd":
-                # Detached launchers (game launchers, daemons, dev servers)
-                # WANT their own console window since they print to stdout —
-                # so we keep CREATE_NEW_CONSOLE here. But the PARENT shell
-                # call should still be invisible.
-                proc = subprocess.Popen(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
-                    cwd=cwd,
-                    creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
-                )
-            elif sys.platform == "win32":
-                proc = subprocess.Popen(
-                    cmd, cwd=cwd, shell=True,
-                    creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
-                )
-            else:
-                proc = subprocess.Popen(shlex.split(cmd), cwd=cwd)
+            # A launcher that prints wants its own console window.
+            args, use_shell = _shells.argv(cmd, shell)
+            proc = subprocess.Popen(
+                args, cwd=cwd, shell=use_shell, env=_shells.child_env(),
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+                if sys.platform == "win32" else 0)
         except Exception as e:
             return f"Error launching detached: {e}"
         return (
@@ -3622,36 +3617,10 @@ def _run_command(p: Dict) -> str:
         )
 
     try:
-        if sys.platform == "win32" and shell_pref != "cmd":
-            # Prefer PowerShell on Windows by default — `dir`, `where`,
-            # `tasklist` etc. all work as aliases, AND `Get-ChildItem`,
-            # `Get-Process`, etc. work natively. Lets the model use the
-            # full Windows toolbox without hitting a wall.
-            r = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
-                cwd=cwd, capture_output=True, timeout=timeout,
-                creationflags=_NO_WINDOW,
-            )
-        elif sys.platform == "win32":
-            # explicit shell=cmd path
-            r = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True,
-                               timeout=timeout, creationflags=_NO_WINDOW)
-        else:
-            # POSIX (Linux/macOS). shlex.split + no shell means pipes,
-            # redirects, &&, ;, globs, command-substitution etc. silently
-            # fail (the operators get passed as literal argv to the first
-            # program). Windows routes through PowerShell which handles all
-            # of that — match the behavior here by detecting shell
-            # metacharacters and routing through a real shell when present.
-            _shell_meta = ("|", ">", "<", "&", ";", "$(", "`", "*", "?",
-                           "(", ")", "{", "}", "~", "\n")
-            if any(tok in cmd for tok in _shell_meta):
-                _sh = shutil.which("bash") or "/bin/sh"
-                r = subprocess.run([_sh, "-c", cmd], cwd=cwd,
-                                   capture_output=True, timeout=timeout)
-            else:
-                r = subprocess.run(shlex.split(cmd), cwd=cwd,
-                                   capture_output=True, timeout=timeout)
+        args, use_shell = _shells.argv(cmd, shell)
+        r = subprocess.run(args, cwd=cwd, shell=use_shell, capture_output=True,
+                           timeout=timeout, env=_shells.child_env(),
+                           creationflags=_NO_WINDOW)
     except subprocess.TimeoutExpired:
         return f"Error: '{cmd}' timed out after {timeout}s."
     except Exception as e:
@@ -6350,7 +6319,7 @@ _HANDLERS = {
     "start_job":  lambda p: (_destructive_refusal(p, p.get("command", ""), "start_job")
         or __import__("hearth.jobs", fromlist=["start_job"]).start_job(
         p.get("command", ""), cwd=p.get("cwd"),
-        shell=(p.get("shell") or "powershell"),
+        shell=p.get("shell") or "",
         description=p.get("description", ""))),
     "job_status": lambda p: __import__("hearth.jobs", fromlist=["get_job"]).get_job(p.get("job_id", "")),
     "job_wait":   lambda p: __import__("hearth.jobs", fromlist=["wait_job"]).wait_job(
