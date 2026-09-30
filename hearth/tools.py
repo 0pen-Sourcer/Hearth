@@ -2779,15 +2779,20 @@ def _grep_search(p: Dict) -> str:
         if ci:
             args.append("-i")
         if glob:
-            args += ["-g", glob]
-        args += [pattern, base]
+            args.append(f"--glob={glob}")
+        # -e and -- keep the pattern and path from being read as options: a
+        # pattern like "--pre=prog" would otherwise run prog on every file.
+        args += ["-e", pattern, "--", base]
         try:
-            r = subprocess.run(args, capture_output=True, text=True, timeout=30,
+            r = subprocess.run(args, capture_output=True, timeout=30,
                                creationflags=_NO_WINDOW)
-            out = r.stdout.strip() or "(no matches)"
-            return f"ripgrep: {pattern} in {base}\n{out}"
         except subprocess.TimeoutExpired:
             return "Error: ripgrep timed out."
+        out = (r.stdout or b"").decode("utf-8", errors="replace").strip()
+        if r.returncode not in (0, 1):     # 1 is "no matches"; more is an error
+            err = (r.stderr or b"").decode("utf-8", errors="replace").strip()
+            return f"Error: ripgrep could not search: {err[:400] or f'exit {r.returncode}'}"
+        return f"ripgrep: {pattern} in {base}\n{out or '(no matches)'}"
 
     flags = re.IGNORECASE if ci else 0
     try:

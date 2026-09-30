@@ -224,6 +224,11 @@ jobs:
         run: |
           python tests/test_cli_overflow.py
 
+      - name: A search pattern cannot become a ripgrep option
+        # --pre=PROGRAM runs a program on every file searched.
+        run: |
+          python tests/test_grep_search.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through
