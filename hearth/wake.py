@@ -247,11 +247,10 @@ class WakeListener:
             except (TypeError, ValueError):
                 legacy = -1
             if legacy >= 0:
-                dev = legacy
-                try:
-                    name = str(sd.query_devices(dev).get("name", ""))
-                except Exception:
-                    return None, f"the saved mic (input {dev}) is gone; pick it again in Settings > Voice"
+                name, why = _ll.name_for_numbered_pick(legacy)
+                if not name:
+                    return None, why + "; wake is paused until it is" if "not connected" in why else why
+                dev = _ll.index_for_name(name, _ll.sounddevice_inputs())
             else:
                 try:
                     name = str(sd.query_devices(kind="input").get("name", ""))

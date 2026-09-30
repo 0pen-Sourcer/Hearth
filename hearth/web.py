@@ -4734,6 +4734,23 @@ def _resume_downloads_async() -> None:
     threading.Thread(target=_go, daemon=True, name="resume-downloads").start()
 
 
+def _migrate_numbered_mic() -> None:
+    """Older versions saved the picked mic as a device number, which points at a
+    different device once anything is plugged in or out. Convert it to the mic's
+    name once, while the number still means a real microphone."""
+    try:
+        cur = _load_settings()
+        if (cur.get("voice_input_name") or "").strip():
+            return
+        from . import listen as _ll
+        name, _ = _ll.name_for_numbered_pick(cur.get("voice_input_device", -1))
+        if name:
+            _save_settings({"voice_input_name": name})
+            _env.set("VOICE_INPUT_NAME", name)
+    except Exception:
+        pass
+
+
 def _auto_boot_preferred_model_async() -> None:
     """If the user picked a default model in Settings (`preferred_model`) and
     nothing's already serving on the configured endpoint, boot Hearth's
@@ -4990,6 +5007,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     _auto_boot_preferred_model_async()
     _start_memory_maintenance_loop()
     _resume_downloads_async()
+    threading.Thread(target=_migrate_numbered_mic, daemon=True).start()
     # Bring configured phone bridges (Discord/Telegram/WhatsApp) online so the
     # user doesn't have to flip a Start toggle every session. Backgrounded
     # because each spawn waits ~1.6s to fail-fast on a bad token.

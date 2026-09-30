@@ -131,10 +131,27 @@ idx, msg = pick("Stereo Mix (Realtek(R) Audio)")
 check("picking a loopback is refused", idx is None and "not a microphone" in msg)
 
 # ------------------------------------------------------- the older number pick
-os.environ["JARVIS_VOICE_INPUT_NAME"] = ""
-os.environ["JARVIS_VOICE_INPUT_DEVICE"] = "7"
-check("a pick saved only as a number is still honoured by the terminal's lookup",
-      L.input_device_index() == 7)
+# The number was an index into the table of the day it was saved. Unplugging a
+# headset renumbers the table, and the same number can then name a speaker.
+SD_TABLE = [(3, "Realtek Digital Output (Realtek(R) Audio)", 0, "MME"),
+            (7, "Microphone (USB Mic)", 1, "MME"),
+            (8, "Stereo Mix (Realtek(R) Audio)", 2, "MME"),
+            (9, "Microphone (USB Mic)", 1, "Windows WASAPI")]
+L.sounddevice_inputs = lambda: SD_TABLE
+for k in ("HEARTH_VOICE_INPUT_NAME", "JARVIS_VOICE_INPUT_NAME"):
+    os.environ.pop(k, None)
+os.environ["HEARTH_VOICE_INPUT_DEVICE"] = "7"
+check("a pick saved only as a number is looked up as the mic it named",
+      L.input_device_index() == 9)
+check("the number converts to that mic's name", L.name_for_numbered_pick(7) == ("Microphone (USB Mic)", ""))
+name, why = L.name_for_numbered_pick(3)
+check(f"a number that now points at a speaker output is not opened: {why!r}",
+      name == "" and "not connected" in why)
+os.environ["HEARTH_VOICE_INPUT_DEVICE"] = "3"
+check("and voice falls to the default instead of that speaker", L.input_device_index() is None)
+name, why = L.name_for_numbered_pick(8)
+check("a number that points at a loopback is refused", name == "" and "not a microphone" in why)
+os.environ.pop("HEARTH_VOICE_INPUT_DEVICE", None)
 
 print()
 if FAILS:

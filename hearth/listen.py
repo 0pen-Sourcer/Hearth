@@ -350,6 +350,30 @@ def sounddevice_inputs() -> list:
             for i, d in enumerate(sd.query_devices())]
 
 
+def name_for_numbered_pick(idx) -> tuple:
+    """A mic pick saved by an older version as a device number, as a name.
+
+    The number only meant something in the device table of the moment it was
+    saved; unplugging a headset renumbers the table, and the same number can
+    then point at a speaker output. Returns (name, "") when the number is a
+    real microphone now, or ("", why) when it is not."""
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        return "", ""
+    if idx < 0:
+        return "", ""
+    try:
+        dev = next((d for d in sounddevice_inputs() if d[0] == idx), None)
+    except Exception:
+        return "", "no microphone is connected"
+    if dev is None or dev[2] <= 0:
+        return "", "the mic you picked is not connected"
+    if is_system_audio_device(dev[1]):
+        return "", f"'{dev[1]}' is not a microphone; pick yours in Settings > Voice"
+    return dev[1], ""
+
+
 def input_device_index():
     """The picked mic's index in sounddevice's table, or None for the OS
     default. A pick saved by name is looked up now; an older pick saved only
@@ -362,8 +386,12 @@ def input_device_index():
             return None
     v = (_env.get("VOICE_INPUT_DEVICE", "") or "").strip()
     if v.lstrip("-").isdigit():
-        idx = int(v)
-        return idx if idx >= 0 else None
+        legacy, _ = name_for_numbered_pick(int(v))
+        if legacy:
+            try:
+                return index_for_name(legacy, sounddevice_inputs())
+            except Exception:
+                return None
     return None
 
 

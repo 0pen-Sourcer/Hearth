@@ -263,6 +263,12 @@ def _apply_saved_voice_settings():
             if val is None or str(val).strip() == "":
                 continue
             _env.set(env, val)
+        # An older pick saved only as a device number is looked up by name,
+        # since the number moves when devices are plugged in or out.
+        if not _env.get("VOICE_INPUT_NAME") and s.get("voice_input_device") not in (None, -1, "-1"):
+            _legacy, _ = stt.name_for_numbered_pick(s.get("voice_input_device"))
+            if _legacy:
+                _env.set("VOICE_INPUT_NAME", _legacy)
         # listen binds its size at import, which already happened above, so
         # exporting alone would not move it.
         want = _env.get("STT_MODEL", "")
