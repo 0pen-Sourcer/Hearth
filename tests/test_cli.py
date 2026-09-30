@@ -36,7 +36,7 @@ def check(label, cond):
         FAILS.append(label)
 
 
-def run(args, stdin=subprocess.DEVNULL, timeout=120, home=None):
+def run(args, stdin=subprocess.DEVNULL, timeout=120, home=None, extra_env=None):
     # A scratch workspace and no server, so this touches nothing real and does
     # not depend on a model being loaded.
     env = dict(os.environ)
@@ -47,6 +47,7 @@ def run(args, stdin=subprocess.DEVNULL, timeout=120, home=None):
     env["LOCAL_API_BASE"] = "http://127.0.0.1:9/v1"
     env["JARVIS_NO_ONBOARDING"] = "1"
     env["HEARTH_NO_UPDATE_CHECK"] = "1"
+    env.update(extra_env or {})
     env["PYTHONIOENCODING"] = "utf-8"
     t0 = time.time()
     try:
@@ -105,6 +106,40 @@ code, out, _ = run([], stdin=b"/lockdown status\n", timeout=150, home=home)
 check("a new session still has it on", "lockdown ON" in out)
 code, out, _ = run([], stdin=b"/lockdown off\n", timeout=150, home=home)
 check("/lockdown off turns it off", "lockdown OFF" in out)
+
+# -------------------------------------------------------------- local brains
+# /brain lmstudio and /brain builtin were refused for want of an API key, and
+# every local choice pinned the model to qwen2.5-7b-instruct whatever was loaded.
+import http.server                                                  # noqa: E402
+import json as _json                                                # noqa: E402
+import threading                                                    # noqa: E402
+
+
+class _Models(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *_a):
+        pass
+
+    def do_GET(self):
+        body = _json.dumps({"object": "list", "data": [{"id": "standin-9b"}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+_srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Models)
+threading.Thread(target=_srv.serve_forever, daemon=True).start()
+code, out, _ = run([], stdin=b"/brain builtin\n", timeout=150, home=home,
+                   extra_env={"JARVIS_BUILTIN_PORT": str(_srv.server_address[1])})
+check("/brain builtin switches without asking for a key", "brain → builtin" in out
+      and "no saved key" not in out)
+check("and reports the model the server has loaded, not a pinned one",
+      "standin-9b" in out and "qwen2.5-7b-instruct" not in out)
+code, out, _ = run([], stdin=b"/brain lmstudio\n", timeout=150, home=home)
+check("/brain lmstudio switches without asking for a key",
+      "brain → lmstudio" in out and "no saved key" not in out)
+_srv.shutdown()
 
 print()
 if FAILS:

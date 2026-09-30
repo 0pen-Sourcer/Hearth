@@ -2346,10 +2346,18 @@ class JarvisCLI:
             # confirmation print differs so first-timers know which one they
             # just picked. The conflict detection in llmserver.start_builtin
             # keeps them from colliding at runtime.
+            # A local server is asked what it has loaded (below), so no model
+            # name is pinned: a pinned one made LM Studio load a model that may
+            # not be there. None of the three needs a key.
+            try:
+                from hearth.llmserver import BUILTIN_PORT as _bport
+            except Exception:
+                _bport = 1234
+            _LOCAL = ("local", "lmstudio", "builtin")
             presets_url_model = {
-                "local":      ("http://localhost:1234/v1", "qwen2.5-7b-instruct"),
-                "lmstudio":   ("http://localhost:1234/v1", "qwen2.5-7b-instruct"),
-                "builtin":    ("http://localhost:1234/v1", "qwen2.5-7b-instruct"),
+                "local":      ("http://localhost:1234/v1", ""),
+                "lmstudio":   ("http://localhost:1234/v1", ""),
+                "builtin":    (f"http://localhost:{_bport}/v1", ""),
                 "grok":       ("https://api.x.ai/v1",       "grok-4.3"),
                 "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash"),
                 "openai":     ("https://api.openai.com/v1", "gpt-4o-mini"),
@@ -2380,7 +2388,7 @@ class JarvisCLI:
                 else:
                     saved_entry = saved_keys.get(provider) or {}
                     key = saved_entry.get("key", "")
-                    if not key and provider != "local":
+                    if not key and provider not in _LOCAL:
                         print(f"{C_ERR}no saved key for {provider}. Use: /brain {provider} <api-key>{C_RESET}")
                         print(f"{C_DIM}(saved next time; type just /brain {provider} after that){C_RESET}")
                         return True
@@ -2388,8 +2396,8 @@ class JarvisCLI:
                 if provider in saved_keys and saved_keys[provider].get("model"):
                     model_hint = saved_keys[provider]["model"]
             else:
-                print(f"{C_ERR}Unknown provider {provider!r}. "
-                      f"Try: local, grok, gemini, openai, openrouter, custom, forget.{C_RESET}")
+                print(f"{C_ERR}Unknown provider {provider!r}. Try: local, lmstudio, builtin, "
+                      f"grok, gemini, openai, openrouter, custom, forget.{C_RESET}")
                 return True
 
             # Mutate the runtime + env so the next chat call picks up the new
@@ -2399,6 +2407,9 @@ class JarvisCLI:
             if model_hint:
                 LOCAL_MODEL = model_hint
                 self.current_model = model_hint
+            elif provider in _LOCAL:
+                LOCAL_MODEL = ""                 # the server says what it has
+                os.environ.pop("LOCAL_MODEL", None)
             os.environ["LOCAL_API_BASE"] = url
             if key:
                 os.environ["LOCAL_API_KEY"] = key
@@ -2415,7 +2426,7 @@ class JarvisCLI:
 
             # Persist: save the key under its provider key so future
             # `/brain <provider>` (no arg) auto-loads it.
-            if provider != "local" and key:
+            if provider not in _LOCAL and key:
                 saved_keys[provider] = {"url": url, "key": key, "model": model_hint}
                 _save_keys(saved_keys)
                 # tighten file perms on POSIX (no-op on Windows; NTFS ACL
@@ -2454,21 +2465,12 @@ class JarvisCLI:
             # every request against it. Ask the endpoint what it's actually
             # serving and report that, or say plainly that nothing is up yet.
             _shown = model_hint
-            if provider == "local":
-                _live = None
-                try:
-                    import urllib.request as _u
-                    _rq = _u.Request(url.rstrip("/") + "/models", headers={
-                        "Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
-                    with _u.urlopen(_rq, timeout=2) as _r:
-                        _ids = [m.get("id") for m in (_json.load(_r).get("data") or [])]
-                    _live = next((i for i in _ids if i), None)
-                except Exception:
-                    _live = None
+            if provider in _LOCAL:
+                _live = _probe_live_model(url, LOCAL_API_KEY or "hearth-builtin")
                 if _live:
                     LOCAL_MODEL = _live
-                    self.current_model = _live
                     os.environ["LOCAL_MODEL"] = _live
+                self.current_model = _live or ""
                 _shown = _live
             print(f"{C_OK}brain → {provider}{C_RESET}  "
                   f"{C_DIM}({url}"
@@ -2560,7 +2562,12 @@ class JarvisCLI:
         if low == "/history":
             for m in self.messages[-5:]:
                 role = m.get("role", "?")
-                content = (m.get("content") or "")[:140].replace("\n", " ")
+                content = m.get("content") or ""
+                if isinstance(content, list):   # text and image parts
+                    content = " ".join(
+                        b.get("text", "") if b.get("type") == "text" else "[image]"
+                        for b in content if isinstance(b, dict))
+                content = str(content)[:140].replace("\n", " ")
                 print(f"  [{role}] {content}")
             return True
         if low == "/workspace":
