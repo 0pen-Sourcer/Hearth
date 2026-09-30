@@ -2860,6 +2860,22 @@ class JarvisCLI:
                 print(f"{C_OK}multi-line mode: off{C_RESET}")
                 print(f"{C_DIM}  Enter = submit · Esc+Enter = newline · paste = single block{C_RESET}")
             return True
+        if low == "/mode" or low.startswith("/mode "):
+            from hearth.tools import approval_mode, APPROVAL_MODES
+            words = {"ask": "Ask: asks before anything that acts on your machine",
+                     "edits": "Auto-edit: file edits in the workspace go through; commands still ask",
+                     "auto": "Auto: runs without asking, except destructive commands, deletes and moves"}
+            arg = low[5:].strip()
+            if not arg:
+                cur = approval_mode()
+                arg = APPROVAL_MODES[(APPROVAL_MODES.index(cur) + 1) % len(APPROVAL_MODES)]
+            arg = {"auto-edit": "edits", "autoedit": "edits", "edit": "edits"}.get(arg, arg)
+            if arg not in APPROVAL_MODES:
+                print(f"{C_ERR}/mode ask | edits | auto{C_RESET}")
+                return True
+            _save_setting("approval_mode", arg)
+            print(f"{C_OK}{words[arg]}{C_RESET}")
+            return True
         if low == "/perms":
             if not self.tool_perms:
                 print(f"{C_DIM}(no per-tool permissions saved yet){C_RESET}")
@@ -5458,30 +5474,16 @@ class JarvisCLI:
             preview_full = json.dumps(args, ensure_ascii=False)
             is_risky = _is_risky(name)
 
-            # Path-scoped auto-approval: for file-touching tools, a path arg
-            # that resolves inside the workspace sandbox runs without a prompt
-            # (prompting on every workspace edit is permission fatigue).
-            _path_safe = False
-            try:
-                _path_arg = args.get("path") if isinstance(args, dict) else None
-                if _path_arg and isinstance(_path_arg, str) and name in (
-                    "write_file", "edit_file", "create_directory", "delete_path", "move_path",
-                ):
-                    from hearth.tools import WORKSPACE as _WS
-                    try:
-                        _abs = os.path.abspath(os.path.expanduser(_path_arg))
-                        _path_safe = os.path.normpath(_abs).lower().startswith(
-                            os.path.normpath(_WS).lower())
-                    except Exception:
-                        _path_safe = False
-            except Exception:
-                _path_safe = False
-
             # Will a [y/n/a/N] prompt actually fire? Only then do we need the
             # full args on screen.
+            try:
+                from hearth.tools import mode_allows as _mode_allows
+                _mode_ok = _mode_allows(name, args)
+            except Exception:
+                _mode_ok = False
             _will_prompt = (is_risky
                             and not self.auto_approve
-                            and not _path_safe
+                            and not _mode_ok
                             and self.tool_perms.get(name) not in ("always", "never"))
 
             # Tool card: a per-family violet glyph + bold name + a compact,
@@ -5516,7 +5518,7 @@ class JarvisCLI:
 
             if (_is_risky(name)
                     and not self.auto_approve
-                    and not _path_safe
+                    and not _mode_ok
                     and self.tool_perms.get(name) != "always"):
                 if self.tool_perms.get(name) == "never":
                     denied = True

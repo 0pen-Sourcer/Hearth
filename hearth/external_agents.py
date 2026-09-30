@@ -102,7 +102,11 @@ def _allow_level() -> str:
     files in its folder, and never more than the user allowed Hearth."""
     if _env.get("AUTO_APPROVE") in ("1", "true", "yes"):
         return "auto"
-    return "edits"
+    try:
+        from .tools import approval_mode
+        return "auto" if approval_mode() == "auto" else "edits"
+    except Exception:
+        return "edits"
 
 
 def _parse_claude(line: str, emit: Callable[[Dict[str, Any]], None], state: Dict[str, Any]) -> None:

@@ -261,6 +261,10 @@ jobs:
         run: |
           python tests/test_external_agents.py
 
+      - name: Ask, Auto-edit and Auto decide the same way everywhere
+        run: |
+          python tests/test_approval_modes.py
+
       - name: The public tool reference matches the code
         # docs/TOOLS.md is generated; it said 93 tools long after there were more.
         if: matrix.os == 'windows-latest'

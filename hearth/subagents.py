@@ -806,7 +806,7 @@ async def _run_subagent_async(
             # auto-approve. Without this a sub-agent ran commands the user's own
             # setting would have stopped to ask about.
             from .tools import standing_permission
-            _perm = standing_permission(name)
+            _perm = standing_permission(name, args)
             if _perm != "allow":
                 content = (
                     f"(not run: {name} is set to never run in Settings.)" if _perm == "deny"

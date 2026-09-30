@@ -8598,7 +8598,45 @@ def is_risky(name: str) -> bool:
 # PROVIDER FORMAT CONVERTERS
 # ============================================================
 
-def standing_permission(name: str) -> str:
+APPROVAL_MODES = ("ask", "edits", "auto")
+_EDIT_TOOLS = {"write_file", "edit_file", "create_directory"}
+_SHELL_TOOLS = {"run_command", "start_job"}
+# Undoable only with effort, so Auto still asks about them.
+_ALWAYS_ASK_IN_AUTO = {"delete_path", "move_path"}
+
+
+def approval_mode() -> str:
+    """How much runs without asking: 'ask' (anything that acts on the
+    machine), 'edits' (file edits in the workspace go through), or 'auto'
+    (everything except destructive commands and deletes/moves). Chosen in the
+    window or with /mode in the terminal; the old YOLO switch reads as auto."""
+    try:
+        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
+            s = json.load(f) or {}
+    except Exception:
+        s = {}
+    m = str(s.get("approval_mode") or "").strip().lower()
+    if m in APPROVAL_MODES:
+        return m
+    return "auto" if s.get("yolo") else "ask"
+
+
+def mode_allows(name: str, args=None) -> bool:
+    """True when the current approval mode lets this call run without asking."""
+    m = approval_mode()
+    if m == "auto":
+        if name in _ALWAYS_ASK_IN_AUTO:
+            return False
+        if name in _SHELL_TOOLS:
+            cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
+            return bool(cmd) and _is_destructive(cmd) is None
+        return True
+    if m == "edits":
+        return name in _EDIT_TOOLS
+    return False
+
+
+def standing_permission(name: str, args=None) -> str:
     """'allow', 'deny' or 'ask': what the user has already decided about a
     tool, for a caller that cannot put a question to them, such as a sub-agent
     working in the background. A tool that is not risky is 'allow'."""
@@ -8615,13 +8653,7 @@ def standing_permission(name: str) -> str:
         pass
     if (os.environ.get("HEARTH_AUTO_APPROVE") or _env.get("AUTO_APPROVE")) == "1":
         return "allow"
-    try:
-        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
-            if (json.load(f) or {}).get("yolo"):
-                return "allow"
-    except Exception:
-        pass
-    return "ask"
+    return "allow" if mode_allows(name, args) else "ask"
 
 
 def _denied_tools() -> set:

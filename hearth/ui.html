@@ -135,6 +135,16 @@
   }
 
   :root[data-ui="simple"] .status .st-detail { display: none; }
+  .mode-btn { gap: 7px; }
+  .mode-btn .mode-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); }
+  .mode-btn[data-mode="edits"] .mode-dot { background: var(--accent); }
+  .mode-btn[data-mode="auto"] .mode-dot { background: var(--warn); }
+  .mode-btn[data-mode="auto"] { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .mode-opt { display: flex; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-lg);
+    margin-bottom: 8px; cursor: pointer; align-items: flex-start; }
+  .mode-opt.on { border-color: var(--accent-line); background: var(--accent-bg); }
+  .mode-opt b { display: block; color: var(--fg); font-size: 13px; }
+  .mode-opt small { color: var(--fg-dim); font-size: 12px; }
   .ap-block { border: 1px solid var(--border); border-radius: var(--r-lg); padding: 14px 16px; margin: 0 0 14px; background: var(--bg-1); }
   .ap-title { font-weight: 600; color: var(--fg); }
   .ap-hint { color: var(--fg-dim); font-size: 12px; margin: 2px 0 12px; }
@@ -3424,6 +3434,7 @@
         </button>
         <div class="think-menu" id="think-menu"></div>
         </div>
+        <button class="toggle-btn mode-btn" id="btn-mode" title="Approval mode (Shift+Tab)"><span class="mode-dot"></span><span class="mode-label">ask</span></button>
         <!-- Context-usage ring. Inline next to controls instead of a detached
              pill above. Conic-gradient fills as ctx fills; percent in center;
              tooltip shows raw used/budget. Hidden until first context_state event. -->
@@ -5494,7 +5505,6 @@ async function showPermsModal() {
   let p;
   try { p = await api('/api/permissions'); }
   catch (e) { toast('Perms error', e.message, 'err'); return; }
-  const yolo = !!(STATE.settings && STATE.settings.yolo);
   const post = (b) => api('/api/permission/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
   const row = (n) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border)">
       <span style="font-family:var(--mono);font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis">${esc(n)}</span>
@@ -5504,10 +5514,9 @@ async function showPermsModal() {
   const allowed = (p.always_allow || []).map(row).join('') || none;
   const denied = (p.always_deny || []).map(row).join('') || none;
   const html = `
-    <label style="display:flex;align-items:center;gap:10px;padding:10px 0;margin-bottom:6px;border-bottom:1px solid var(--border)">
-      <input type="checkbox" id="perm-yolo" ${yolo ? 'checked' : ''} style="width:16px;height:16px">
-      <span style="font-size:13px"><b>YOLO mode</b> — auto-approve every tool, no prompts ever. <span style="color:var(--err)">Risky: it can run/delete/move without asking.</span></span>
-    </label>
+    <div id="perm-modes">${APPROVAL_MODES.map(m => `<div class="mode-opt${m.id === approvalMode() ? ' on' : ''}" data-mode="${m.id}">
+      <span class="mode-dot" style="margin-top:5px;width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${m.dot}"></span>
+      <div><b>${m.name}</b><small>${m.what}</small></div></div>`).join('')}</div>
     <div style="font-weight:600;font-size:13px;margin:10px 0 2px;color:var(--fg)">Always allowed</div>${allowed}
     <div style="font-weight:600;font-size:13px;margin:14px 0 2px;color:var(--fg)">Always denied</div>${denied}`;
   showModal('Tool permissions', html, [
@@ -5517,13 +5526,48 @@ async function showPermsModal() {
   document.querySelectorAll('#modal-body [data-perm-rm]').forEach(b => {
     b.onclick = async () => { await post({ name: b.dataset.permRm }); showPermsModal(); };
   });
-  const y = document.getElementById('perm-yolo');
-  if (y) y.onchange = async () => {
-    await saveSetting('yolo', y.checked);
-    if (STATE.settings) STATE.settings.yolo = y.checked;
-    toast(y.checked ? 'YOLO on — tools auto-run' : 'YOLO off — prompts back', '', y.checked ? 'warn' : 'ok');
-  };
+  document.querySelectorAll('#perm-modes .mode-opt').forEach(o => {
+    o.onclick = async () => { await setApprovalMode(o.dataset.mode); showPermsModal(); };
+  });
 }
+
+// Approval mode: how much runs without asking. The same three modes as /mode
+// in the terminal; the backend applies them to every tool call.
+const APPROVAL_MODES = [
+  { id: 'ask', name: 'Ask', short: 'ask', dot: 'var(--fg-faint)',
+    what: 'Asks before anything that acts on your machine.' },
+  { id: 'edits', name: 'Auto-edit', short: 'auto-edit', dot: 'var(--accent)',
+    what: 'File edits in your workspace go through. Commands and everything else still ask.' },
+  { id: 'auto', name: 'Auto', short: 'auto', dot: 'var(--warn)',
+    what: 'Runs without asking, except commands that delete, move or stop things, which still ask.' },
+];
+function approvalMode() {
+  const st = STATE.settings || {};
+  if (APPROVAL_MODES.some(m => m.id === st.approval_mode)) return st.approval_mode;
+  return st.yolo ? 'auto' : 'ask';
+}
+function paintModeButton() {
+  const b = $('btn-mode'); if (!b) return;
+  const m = APPROVAL_MODES.find(x => x.id === approvalMode());
+  b.dataset.mode = m.id;
+  b.querySelector('.mode-label').textContent = m.short;
+  b.title = `${m.name}: ${m.what} (Shift+Tab to change)`;
+}
+async function setApprovalMode(id) {
+  await saveSetting('approval_mode', id);
+  STATE.settings = Object.assign({}, STATE.settings || {}, { approval_mode: id });
+  paintModeButton();
+  const m = APPROVAL_MODES.find(x => x.id === id);
+  toast(m.name, m.what, id === 'auto' ? 'warn' : 'ok', 2600);
+}
+function cycleApprovalMode() {
+  const i = APPROVAL_MODES.findIndex(m => m.id === approvalMode());
+  setApprovalMode(APPROVAL_MODES[(i + 1) % APPROVAL_MODES.length].id);
+}
+$('btn-mode').addEventListener('click', cycleApprovalMode);
+$('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleApprovalMode(); }
+});
 
 // Permission modal - used when the bridge fires permission_request.
 // Buttons: Allow (just this once) · Always · Deny · Never.
@@ -11122,6 +11166,7 @@ async function refreshSettings() {
   try {
     const s = await api('/api/settings');
     STATE.settings = s;
+    paintModeButton();
     refreshToolPerms();
     // Sync the chat-input placeholder with the configured agent name so
     // "Message JARVIS" becomes "Message Cortana" the moment the user
