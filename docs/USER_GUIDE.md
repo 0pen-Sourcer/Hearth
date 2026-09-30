@@ -145,19 +145,21 @@ Tune detection sensitivity + the idle-CPU budget via the `JARVIS_WAKE_*` env var
 
 ## Reminders
 
-Natural-language parser. All of these work:
+Say it however you like. Hearth works out the exact time from what you said and the
+current time, and the reminder reads back the day and time in words, so you can see
+it landed where you meant.
 
-| Say | Stored as |
+| Say | Set for |
 |---|---|
 | `in 25 minutes` | now + 25min |
 | `in 2 hours` | now + 2h |
 | `tomorrow at 7am` | tomorrow 07:00 |
 | `tonight at 9pm` | today 21:00 |
 | `next monday at 10am` | nearest future Monday 10:00 |
-| `2026-05-30 14:30` | ISO direct |
-| `9pm` | today 21:00 (rolls to tomorrow if past) |
+| `on the 30th at half two` | the 30th, 14:30 |
+| `every weekday at 9am` | a recurring reminder |
 
-When the time hits: Windows toast notification (via plyer / win10toast), **plus voice readout** if TTS is enabled. In the CLI the reminder also prints into the chat — Windows often suppresses the toast (Focus Assist / notification settings), so a reminder that came due while you were away still shows up the moment you're back at the terminal. Set an [ntfy](https://ntfy.sh) topic (see below) and it pushes to your phone too.
+When the time hits: Windows toast notification (via plyer / win10toast), **plus voice readout** if TTS is enabled. In the CLI the reminder also prints into the chat, since Windows often suppresses the toast (Focus Assist / notification settings), so a reminder that came due while you were away still shows up the moment you're back at the terminal. Set an [ntfy](https://ntfy.sh) topic (see below) and it pushes to your phone too.
 
 Storage: `~/Jarvis/reminders.json`. Edit by hand if you want.
 

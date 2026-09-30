@@ -1,6 +1,6 @@
 # Roadmap
 
-Hearth runs your Windows machine for you: files, shell, apps, a real browser, and
+Hearth runs your Windows machine for you, including files, shell, apps, a real browser, and
 the desktop itself. You reach it from a terminal, a desktop app, your phone, an MCP
 client, or a headless script, and it runs on whatever OpenAI-compatible model you
 point it at, local or cloud, with no account and no telemetry.
@@ -8,57 +8,60 @@ point it at, local or cloud, with no account and no telemetry.
 This is where it is and where it's going. Dates are intent, not promises. I build
 this in my spare time, so things land when they're actually good, not on a schedule.
 
-## Where it is now (v0.7-preview)
+## Where it is now (v0.7.6-preview)
 
 The core is stable and I use it every day:
 
-- Reading and writing files, running the shell, opening apps, and driving a real
-  Chromium browser you can watch. These are the tools that get used constantly and
-  they're solid.
-- Memory that persists across sessions and folds the relevant facts back into
-  context on its own.
-- Reminders, background jobs, sub-agents, and skills you can install from a link
-  or have it write for itself on the spot.
-- Desktop control through the accessibility tree: `smart_click` takes a point from
+- Reading and writing files, running commands in PowerShell, cmd or bash, opening
+  apps, and driving a real browser, including the Chrome you already use.
+- Memory that persists across sessions, folds the relevant facts back into context
+  on its own, and records it when something about you changes.
+- Reminders, background jobs, sub-agents, teams of agents you can watch, and skills
+  you can install from a link or have it write for itself on the spot.
+- Desktop control through the accessibility tree. `smart_click` takes a point from
   the vision model, snaps it to the real named control underneath, clicks that, and
-  re-checks the screen to confirm it worked, instead of guessing at a pixel. This is
-  reliable on native Windows apps and on Chromium/Electron apps; it's weaker on
-  canvas-drawn UIs and games that don't expose their controls, and improving that is
-  on the list below.
-- Voice: local listen (Whisper) and speak (Kokoro), hands-free with barge-in. This
-  works but it's preview-quality, expect rough edges.
-- The bundled llama.cpp server is optional and also preview-quality. If you already
-  run LM Studio or Ollama, point Hearth at that instead.
+  re-checks the screen to confirm it worked. A marked capture numbers every control
+  so it can click by number. This is reliable on native Windows apps and on
+  Chromium/Electron apps, and weaker on canvas-drawn UIs and games that don't
+  expose their controls.
+- Voice in eight languages, local listen (Whisper) and speak (Kokoro), hands-free,
+  with a wake word. Interrupting by voice works on headphones.
+- Your phone through Telegram, Discord or WhatsApp, running the full agent on your PC.
+- An optional bundled llama.cpp engine. If you already run LM Studio or Ollama,
+  point Hearth at that instead.
 
-Honest note on the tool count: there are around 100 tools, but they aren't equal.
-About forty are core and rock-solid. The rest are more specialized (image and video
-generation, local Stable Diffusion via Forge, email, some desktop-control cases) and
-depend on setup you may not have, a cloud key, a Forge install, an app that exposes
-its controls. Those stay hidden until the model actually needs one, so you don't
-trip over them.
+There are around 100 tools, and they aren't equal. About forty are core. The rest
+are specialized (image and video generation, local Stable Diffusion via Forge,
+email, some desktop-control cases) and depend on setup you may not have. Those stay
+held back until the model actually needs one, so you don't trip over them.
 
 ## What I'm working on next
 
-- Making `smart_click` reliable on the hard surfaces: an OCR fallback when the
-  accessibility tree is sparse, and a plain coordinate click when there's no named
-  control to snap to.
-- A guided mode: instead of doing a task silently, it walks you through an app step
-  by step, narrating and handing you the wheel at each point.
-- Multi-monitor and fullscreen awareness for the control loop.
-- General reliability polish on the long-tail tools so fewer of them need setup to
-  be useful.
+- Interrupting by voice on speakers, not only headphones, with echo cancellation on the
+  microphone, and "Jarvis, stop" as the interrupt while Hearth is talking.
+- Onboarding that asks what it needs once, in a conversation. Your name, how you
+  want it to talk, headphones or speakers, and where your files live.
+- Your look, with a light theme and an accent colour in the app, and matching accents in
+  the terminal.
+- A view of your agents in the app, showing who is working, who is waiting on you, who is
+  done, and a click to see what each one did.
+- Sub-agents and teams asking permission the same way Hearth does, so your
+  permission settings hold whoever is doing the work.
 
 ## Further out
 
+- A proactive side, with reminders and background agents that reach out to you first,
+  watch for changes that matter, and wait for your go-ahead before anything with
+  consequences.
+- Making `smart_click` reliable on the hard surfaces, with an OCR fallback when the
+  accessibility tree is sparse, and multi-monitor and fullscreen awareness.
+- A guided mode. Instead of doing a task silently, it walks you through an app step
+  by step, narrating and handing you the wheel at each point.
 - Mac and Linux. The CLI, the web UI, and most tools already run from source on
   Linux today (files, shell, screenshots, app launching, web, reminders). What's
-  still Windows-only is the desktop-control layer and the one-click installer, so
-  full parity on other platforms is the real work here.
-- A bigger skills ecosystem on top of what's already there: easier discovery of
-  what other people have shared, and an idle curator that refines and prunes the
-  tools the agent writes for itself.
-- A proactive side: reminders and background agents that reach out to you first
-  instead of waiting to be asked.
+  still Windows-only is the desktop-control layer and the one-click installer.
+- A bigger skills ecosystem, with easier discovery of what other people have shared, and
+  an idle curator that refines and prunes the skills the agent writes for itself.
 
 ## What I won't change
 

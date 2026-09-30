@@ -233,6 +233,13 @@ jobs:
         run: |
           python tests/test_write_containment.py
 
+      - name: The public tool reference matches the code
+        # docs/TOOLS.md is generated; it said 93 tools long after there were more.
+        if: matrix.os == 'windows-latest'
+        run: |
+          python scripts/gen_tools_doc.py
+          git diff --exit-code -- docs/TOOLS.md
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through

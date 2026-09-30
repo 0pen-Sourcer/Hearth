@@ -2,6 +2,50 @@
 
 Notable changes to Hearth. Format loosely follows [Keep a Changelog](https://keepachangelog.com); semver is not strict pre-1.0.
 
+## v0.7.6-preview
+
+Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
+
+### Security
+- The local API refuses requests from other sites; a page in any browser tab could read stored keys and call tools.
+- Command approval is a per-process token, so model output cannot approve its own call. The destructive-command guard covers PowerShell's aliases and .NET forms, and background jobs share it.
+- MCP tools go through the permission prompt and no longer inherit credentials from the environment. `smart_click` and `browse_key` are gated like the other input tools.
+- Write confinement compares real paths, so a link inside the workspace cannot carry a write outside it. `grep_search` passes its pattern after `-e` and `--`. `web_fetch` takes http(s) only, so `file://` no longer bypasses read lockdown. CLI `/lockdown` uses the persisted toggle.
+- WhatsApp's own-chat mode answers only the linked number's own chat. More key shapes are redacted. The TUI is removed.
+
+### Voice
+- Speak and listen in the eight languages the voice bank ships (54 voices); multilingual Whisper sizes and a spoken-language setting.
+- Voice sessions end with the recorder shut down, releasing the mic and the Whisper process; each session owns its recorder and callbacks, so reopening voice no longer stalls or stops.
+- The mic is saved by name and looked up in the table of the library that opens it; no fallback to a virtual or loopback device.
+- The wake word keeps a pre-roll and every block of an utterance, keeps the start of long speech, and releases the mic while voice mode runs.
+- Failures in synthesis, playback and transcription are reported. A settings save no longer unloads the TTS engine.
+
+### Agent
+- Persona cut from about 10K to 2K tokens and always-on tool descriptions roughly halved. Native tool calls on the standalone llama.cpp engine.
+- Deferred tools are all named to the model and selectable by name; every tool has a category.
+- Mistral and Command-R turns keep every call; a partly unparsed reply is reported rather than dropped.
+- Reminders take an ISO time or a duration, converted by the model, and read back the stored time in words.
+
+### Commands
+- `run_command` and `start_job` run in PowerShell, cmd or bash (Git Bash or WSL), with UTF-8 output and exit codes that reflect errors.
+
+### Memory
+- Slugs keep non-Latin titles; the index is derived from the fact files and heals itself. Extraction can update a saved fact, archiving the previous version. Supersede and curate act only on exact matches.
+
+### Bridges and teams
+- Bridges log to `<workspace>/logs/<channel>_bridge.log` instead of an undrained pipe. WhatsApp sends files; all bridges send quoted paths with spaces.
+- Team panes render tool results and failures; `launch_team` reports members that did not start.
+
+### Terminal
+- Fixed the first-tool-call crash, the Ctrl+Z spin, `--help`, `/brain lmstudio` and `/brain builtin`, model sync on cloud brains, vision detection on llama.cpp, context-overflow retries and `/history` with images.
+
+### Models, updates and storage
+- Measured load progress; downloads that pause, resume and recover from a bad range; updates that recover from an interrupted patch; atomic chat, settings and reminder writes; reminders that fire once across processes.
+
+## v0.7.1 to v0.7.5
+
+See [v0.7.3](docs/RELEASE_NOTES_v0.7.3.md), [v0.7.4](docs/RELEASE_NOTES_v0.7.4.md) and [v0.7.5](docs/RELEASE_NOTES_v0.7.5.md).
+
 ## v0.7-preview
 
 First public release. Windows-first; macOS/Linux support is partial.
@@ -28,7 +72,7 @@ First public release. Windows-first; macOS/Linux support is partial.
 - Web search and fetch via DuckDuckGo.
 - Persistent per-fact memory with recall tracking, automatic cold-fact archiving and warm-back, and overlap detection on save.
 - Reminders (one-shot and recurring) set in natural language, optionally firing a tool when due, with catch-up on next launch for reminders missed while closed (surfaced in the CLI chat, since Windows often suppresses the toast), an optional ntfy phone push, and their own sidebar tab in the desktop app.
-- Skills: prose+script workflow bundles the model loads on demand. Built-in skills generate documents (PDF, PPTX, XLSX, diagrams, ASCII art, PDF split/merge). **Shareable**: install a skill from a GitHub repo or local path with `/skill install <source>` (or the `install_skill` tool when a link is pasted in chat) — install discloses the declared tools + shipped scripts and asks before writing; scripts run only through the normal command-permission prompt. Scaffold your own with `/skill new`; the assistant can also author one when it notices a repeated workflow.
+- Skills: prose+script workflow bundles the model loads on demand. Built-in skills generate documents (PDF, PPTX, XLSX, diagrams, ASCII art, PDF split/merge). **Shareable**: install a skill from a GitHub repo or local path with `/skill install <source>` (or the `install_skill` tool when a link is pasted in chat). Install discloses the declared tools + shipped scripts and asks before writing; scripts run only through the normal command-permission prompt. Scaffold your own with `/skill new`; the assistant can also author one when it notices a repeated workflow.
 - Sub-agents (researcher, coder, archivist, librarian, summarizer, PDF coordinator) with per-agent tool allowlists and a tightened prompt, runnable synchronously or in the background with results delivered on the next turn. Fork depth is bounded.
 - Watch-a-team mode (opt-in): spawn several sub-agents at once and open a live terminal pane per agent (Windows Terminal split-panes, or tmux on Linux/macOS) to watch them work side by side.
 - Background jobs for long-running operations, returning a job id immediately.
@@ -38,7 +82,7 @@ First public release. Windows-first; macOS/Linux support is partial.
 - A `soul.md` self-identity file loaded into every prompt, and end-to-end agent rename (avatar, persona, and workspace folder).
 - Optional cloud image/video generation and local Stable Diffusion (Forge) image generation.
 - Memory migration from prior agent layouts (API keys are never copied), including pasting a memory dump from ChatGPT/Claude.
-- Phone reach: a Telegram bridge (bot token only, no OAuth) to message Hearth from your phone — it runs the full agent on your PC and replies, files included, gated by a chat-id allowlist.
+- Phone reach: a Telegram bridge (bot token only, no OAuth) to message Hearth from your phone. It runs the full agent on your PC and replies, files included, gated by a chat-id allowlist.
 - Opt-in auto-update: check GitHub for a newer release and install (`/update` in the CLI, a button in Settings).
 - Optionally launch at login (desktop tray), so reminders fire before you open Hearth.
 

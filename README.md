@@ -152,7 +152,7 @@ Hearth runs from source on macOS and Linux. The CLI and web UI work, and most to
 
 **Image and video generation.** Optional tools for cloud image/video generation, plus integration with a local Stable Diffusion (Forge) install for fully local image generation.
 
-**A long tool list isn't context bloat.** Hearth has ~100 tools, but the model never sees all of them at once. A core set loads by default; the rest stay behind a `load_tools` meta-tool the model calls on demand and then uses inline, so the per-turn prompt stays small no matter how many tools exist. The model only ever loads what it needs. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+**A long tool list isn't context bloat.** Hearth has ~100 tools, but only a core set is loaded with its full description. The model sees the names of the rest and pulls one in through `load_tools` when it needs it, so the per-turn prompt stays small no matter how many tools exist. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 ---
 

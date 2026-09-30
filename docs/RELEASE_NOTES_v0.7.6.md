@@ -1,6 +1,62 @@
-v0.7.6 is a fix release across desktop control, voice, memory, models, cloud providers, and the interface.
+v0.7.6 is a large fix release. Most of it is about Hearth doing what it says it did, and telling you plainly when it can't, across security, voice, memory, commands, the phone bridges, desktop control, models and the terminal.
 
 If you are on v0.7.2 or newer, Hearth patches itself, no reinstall. On v0.7.0 or v0.7.1 you need the installer one more time, then you are on the small updates for good. Updating never touches your chats, memory, or models.
+
+## Security
+
+A web page open in any browser tab could reach Hearth's local server, read the API keys saved in Settings and run a tool. The server now refuses any request that comes from another site, while Hearth's own window, the terminal, the phone bridges and your scripts work as before.
+
+A model could approve its own destructive command by adding one field to the call, which a web page or a file could talk it into. Approval now comes from you and nothing else. The guard that stops commands like deleting a folder only knew one spelling of most of them, and PowerShell has many, so it now catches the ways those commands are ordinarily written. Background jobs had no guard and no prompt at all while the same command run directly was refused, and now they have both.
+
+Tools from MCP servers ask before they run, like every other tool that acts on your machine, and they no longer receive your cloud key or mail password along with the rest of the environment. Clicking by picture and pressing keys in the browser now ask as well, the same as the clicks and typing that always did.
+
+Writes stay inside your workspace, judged by where they actually land. A shortcut folder inside the workspace that pointed somewhere else used to let a write go straight through it without a question. A search pattern could hand options to the search engine underneath, including one that runs a program on every file it reads, and a web fetch of a local file could read past the read lockdown. Both are closed. In the terminal, /lockdown on now really confines reads, where before it only said it did.
+
+With the WhatsApp bridge's own-chat option on, Hearth answered every message you sent from that number, in whatever chat you sent it, and posted its reply there. It now answers only your own chat. The masking that hides keys from anything posted publicly knows the shapes of more of them, Groq, Telegram, Discord, Stripe and npm among them. The old full-screen terminal interface is gone, since it approved everything it was asked.
+
+## Voice
+
+Hearth speaks and listens in eight languages, not one. The voice bank has always installed 54 voices covering English, Hindi, Spanish, French, Italian, Portuguese, Japanese and Mandarin, and only the English ones were reachable. They are all in the picker now, each one reading its own language properly rather than being handed English sounds. Transcription has the multilingual Whisper sizes alongside the English-only ones, with a spoken-language setting that detects each utterance on its own unless you name one. Speech in a script that ends its sentences differently starts playing as soon as the first sentence is ready, the same as English always did.
+
+Voice mode turns on reliably. Turning it off used to leave the microphone held and a speech model in memory, around 800 MB each time, so leaving voice mode to change a setting and coming straight back could fail to start at all, or sit on warming up forever. Every session now ends cleanly and a new one starts on its own.
+
+The microphone you pick is the one that gets used. It was remembered by a number that Windows changes whenever a headset connects or a USB device comes and goes, so it quietly pointed at something else. It is remembered by name now. When the Windows default input is Stereo Mix, which is really your speakers, Hearth tells you and lists your microphones instead of guessing, where it used to pick a virtual device that records silence and then look like voice was broken.
+
+The wake word hears whole phrases. It used to drop the quiet parts of speech and keep only the end of a long sentence, which is exactly where the name isn't. On the same recorded phrases it now wakes on all fifteen where it woke on nine, including a full command like "Jarvis, open Spotify and play the new album". While voice mode is on, the wake listener lets go of the microphone, so a Bluetooth headset that only allows one app at a time works in voice mode.
+
+When speech fails, Hearth says so. Synthesis and playback run behind a queue, which meant a failure after the request had been accepted was silent in every direction, with nothing written anywhere to explain it. Now it names what went wrong, and the preview button tells you rather than just going quiet. A transcription that fails is no longer indistinguishable from not having said anything. Saving a setting no longer unloads the voice, so the next reply is not held up reloading it.
+
+Voice starts on an updated install. The update now carries the maths library the speech stack loads at startup, along with the rest of its dependencies, so a patched install behaves the same as a fresh one. The microphone test runs in its own process, so a headset you plug in after opening Hearth is picked up without a restart.
+
+## Faster on local models
+
+The instructions Hearth sends with every message are about a fifth of their old size and the tool descriptions about half, so on a 32K local model the fixed part of every request went from nearly two thirds of the context to about a third. Replies start sooner and a long chat lasts longer before it has to be compacted. On the standalone engine Hearth now uses the model's own tool-calling format instead of reading calls out of plain text.
+
+When a model asks for several things at once, all of them run. Mistral and Command-R models had every call after the first dropped, and a reply with twenty calls where one had a small formatting slip ran nineteen and lost the last without a word. Tools Hearth keeps in reserve until they are needed were partly invisible to the model, so it now always sees their names and can pull any of them in.
+
+## Commands
+
+Commands run in bash as well as PowerShell and cmd, wherever Git Bash or WSL is installed, and the model is told which shells your machine has so it writes the right syntax rather than hitting a wall on "&&". File names in Hindi, Chinese or with accents come back as they are instead of as question marks, and a Python script printing them no longer crashes. A command that fails reports that it failed, where an error followed by anything that worked used to read as success. The same applies to commands running in the background.
+
+## Memory
+
+A memory with a title in Hindi, Chinese or Japanese used to overwrite the whole memory index, and the index could drift until it listed only part of what Hearth remembers. The index is now rebuilt from the memories themselves and repairs itself whenever the two disagree, so everything you told it is in view again.
+
+When something changes, Hearth records the change. Telling it you moved to Linux used to leave it believing you were on Windows, because a fact it already knew was never updated, and it now replaces the old fact and keeps the previous version in the archive. It also no longer archives the wrong fact when a new one replaces an old one, or merges facts that only differ by a number, like two different exam scores.
+
+Recall reads each memory file once and reuses it, so a lookup stays fast as your memory grows. Saving a fact returns immediately, with the archiving of older facts moved into the background and running on its own schedule.
+
+Passive memory works on reasoning models. Hearth notices durable facts on its own without you saying "remember that", and it now has the room to finish writing them and can read the reply even when a model buries it in its reasoning. It also never competes with you for the model. If you send a message while it is working, your message goes first and the facts are picked up on the next pass.
+
+## Reminders
+
+Reminders are set for the time you meant. Hearth works out the exact time from what you said, and the reminder reads back the day and the time in plain words, so a slip shows up at once rather than at midnight. With the window and the terminal both open a reminder fires once instead of twice, and a reminder set while another one is firing is no longer lost.
+
+## Phone and teams
+
+A bridge started from the window stopped answering after a while and still showed as running, and now it keeps going. Its output goes to a log the window can show, for Telegram and WhatsApp as well as Discord. WhatsApp sends files back the way Telegram and Discord do, and all three send files whose paths have spaces in them. Announcements from the developer reach you now, where none ever could before.
+
+When Hearth launches a team of agents, each agent's window shows what its tools returned rather than empty lines, and an agent that failed says so rather than showing as done. If a team member could not start, Hearth is told which one and why, instead of believing that part of the job is being done.
 
 ## Desktop control
 
@@ -18,23 +74,17 @@ Clicking and typing can run as a single action, so nothing can slip in between t
 
 Declining an action and telling Hearth what to do instead now makes it do that thing, rather than only acknowledging it.
 
-## Memory
-
-Recall reads each memory file once and reuses it, so a lookup stays fast as your memory grows. Saving a fact returns immediately, with the archiving of older facts moved into the background and running on its own schedule.
-
-Passive memory works on reasoning models. Hearth notices durable facts on its own without you saying "remember that", and it now has the room to finish writing them and can read the reply even when a model buries it in its reasoning. It also never competes with you for the model. If you send a message while it is working, your message goes first and the facts are picked up on the next pass.
-
 ## Cloud models
 
 Reasoning is visible on OpenRouter and other providers that stream their thinking in a different field than local servers do. You can set how hard a model thinks, low, medium or high, on models that support it. A cloud model reports its real context window rather than a fixed guess, so a large context model shows what it actually has. Images reach cloud models that can see them. The model list is sorted and searchable instead of hundreds of unordered lines, and a cloud brain reads as online rather than loaded, since nothing is held in your VRAM.
 
-## Voice
+## Models
 
-Hearth speaks and listens in eight languages, not one. The voice bank has always installed 54 voices covering English, Hindi, Spanish, French, Italian, Portuguese, Japanese and Mandarin, and only the English ones were reachable. They are all in the picker now, each one reading its own language properly rather than being handed English sounds. Transcription has the multilingual Whisper sizes alongside the English-only ones, with a spoken-language setting that detects each utterance on its own unless you name one. Speech in a script that ends its sentences differently starts playing as soon as the first sentence is ready, the same as English always did.
+Loading a model shows real progress on the sticker instead of a blinking dot, and it names the model that is actually loading rather than the one that was there before. That progress is now measured rather than guessed at from the engine's log. The engine prints everything it knows about a model before it reads a single byte of it, so the bar used to jump most of the way up in the first second or two and then sit still for the whole real wait. It moves steadily for the length of the load instead, all the way through, and a model loading on its own when you open Hearth gets the same bar as one you picked by hand.
 
-When speech fails, Hearth says so. Synthesis and playback run behind a queue, which meant a failure after the request had been accepted was silent in every direction, with nothing written anywhere to explain it. Now it names what went wrong, and the preview button tells you rather than just going quiet. A transcription that fails is no longer indistinguishable from not having said anything.
+A download that was interrupted in an awkward place used to stay broken forever, failing the same way on every retry with nothing you could do about it from inside the app. It starts over cleanly now, and pausing a download really pauses it, where resuming used to write a corrupted file. Every model links to its page on Hugging Face, so you can check the licence and what it was trained for without leaving the app, and a model Hearth downloaded remembers exactly which repo it came from. With no server running, the model list shows what is on your disk rather than saying there is nothing.
 
-Voice starts on an updated install. The update now carries the maths library the speech stack loads at startup, along with the rest of its dependencies, so a patched install behaves the same as a fresh one. The microphone test runs in its own process, so a headset you plug in after opening Hearth is picked up without a restart.
+On an RTX 50-series card Hearth no longer starts its bundled runtime, which has no kernels for those GPUs and would return empty replies on longer prompts. It asks you to install the standalone engine instead, which is one click in Models.
 
 ## Reading a run
 
@@ -42,19 +92,15 @@ File edits render as a diff with line numbers and a change count, in tight rows.
 
 The window is responsive, so a narrow or half snapped window moves the sidebar into a drawer. Chat titles come from the first real exchange, so a chat that opens with a greeting still gets a title about the actual subject. Optional sound cues mark a finished turn, an error, or a permission request, all off by default, and user messages can sit in chat bubbles if you prefer, also off by default.
 
-## Models
+## The terminal
 
-Loading a model shows real progress on the sticker instead of a blinking dot, and it names the model that is actually loading rather than the one that was there before. That progress is now measured rather than guessed at from the engine's log. The engine prints everything it knows about a model before it reads a single byte of it, so the bar used to jump most of the way up in the first second or two and then sit still for the whole real wait. It moves steadily for the length of the load instead, all the way through, and a model loading on its own when you open Hearth gets the same bar as one you picked by hand.
-
-A download that was interrupted in an awkward place used to stay broken forever, failing the same way on every retry with nothing you could do about it from inside the app. It starts over cleanly now. Every model links to its page on Hugging Face, so you can check the licence and what it was trained for without leaving the app, and a model Hearth downloaded remembers exactly which repo it came from. With no server running, the model list shows what is on your disk rather than saying there is nothing.
-
-On an RTX 50-series card Hearth no longer starts its bundled runtime, which has no kernels for those GPUs and would return empty replies on longer prompts. It asks you to install the standalone engine instead, which is one click in Models.
+The terminal no longer crashes on the first tool call of a session, and Ctrl+Z ends it instead of spinning forever. --help and --version answer instead of starting the whole app. /brain lmstudio and /brain builtin work, and switching to a local brain uses whatever model is actually loaded rather than naming one you may not have. A setting saved while on a cloud brain no longer switches to a random model from the provider's catalog. The terminal knows whether the loaded model can see, a prompt that overflows the context is trimmed and retried rather than resent until the turn dies, and /history shows messages that carry an image.
 
 ## Elsewhere
 
-Updating is safe to interrupt. If the power goes or you kill Hearth while it is replacing files, the next start puts it back the way it was rather than leaving you with an install that will not open. Your chats survive being killed mid-save too, and a save that got cut off no longer leaves a ghost copy of the chat sitting in the sidebar.
+Searching past chats finds what you asked about. Most questions used to report no match even when there was one.
 
-Reminders understand how people actually say times. "at 3pm", "friday 6pm", "at noon", "in an hour", "in a couple of hours" all work, where before they were turned down. "tonight at 11" means eleven at night, which it did not before.
+Updating is safe to interrupt. If the power goes or you kill Hearth while it is replacing files, the next start puts it back the way it was rather than leaving you with an install that will not open. Your chats survive being killed mid-save too, and a save that got cut off no longer leaves a ghost copy of the chat sitting in the sidebar.
 
 Asking Hearth for a capability it does not have gets a straight answer instead of a handful of unrelated tools. And it can tell you your charge level, whether you are plugged in and roughly how long you have left.
 
