@@ -2336,14 +2336,14 @@ def start_builtin(model_path: str, port: Optional[int] = None,
         global _log_fh
         log_fh = open(log_path, "ab")
         _log_fh = log_fh
-        _env = dict(os.environ)
+        child_env = dict(os.environ)
         if _use_native and _native.get("dll_dirs"):
             # ggml-cuda.dll + the CUDA runtime (cudart/cublas) live next to the
             # native exe / in its vendor dir — put them on PATH so it loads.
-            _env["PATH"] = os.pathsep.join(_native["dll_dirs"]) + os.pathsep + _env.get("PATH", "")
+            child_env["PATH"] = os.pathsep.join(_native["dll_dirs"]) + os.pathsep + child_env.get("PATH", "")
         spawned = subprocess.Popen(
             cmd, stdout=log_fh, stderr=subprocess.STDOUT,
-            creationflags=_NO_WINDOW, env=_env,
+            creationflags=_NO_WINDOW, env=child_env,
         )
         # Hand the child off to the Windows Job Object so it dies with us
         # even on Ctrl-C, force-kill, or unhandled crash. This is the actual

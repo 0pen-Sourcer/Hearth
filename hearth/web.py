@@ -2027,6 +2027,13 @@ class HearthHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 return self._send_json(500, {"error": str(e)})
+        if path == "/api/team":
+            # Live state of helper agents for the Team view.
+            try:
+                from . import subagents as _sa
+                return self._send_json(200, {"agents": _sa.team_state()})
+            except Exception as e:
+                return self._send_json(500, {"error": str(e)})
         if path == "/api/subagent/activity":
             # Recent subagent runs (from ~/Jarvis/subagents/*.jsonl) for
             # the Logs tab's "agents" subview. Newest first, capped.
@@ -4908,15 +4915,15 @@ def _maybe_learn_environment_async() -> None:
 
     def _go():
         try:
-            from hearth import environment as _env
+            from hearth import environment as _envmod
             if onboarded:
                 # Already onboarded: only relearn if the machine actually changed
                 # (drive plugged in, GPU swap) so context stays fresh without churn.
-                msg = _env.refresh_environment_if_changed(endpoint=LOCAL_API_BASE)
+                msg = _envmod.refresh_environment_if_changed(endpoint=LOCAL_API_BASE)
                 if msg:
                     print(f"  [hearth.web] machine changed — {msg}", flush=True)
             else:
-                print(f"  [hearth.web] {_env.learn_environment(endpoint=LOCAL_API_BASE)}", flush=True)
+                print(f"  [hearth.web] {_envmod.learn_environment(endpoint=LOCAL_API_BASE)}", flush=True)
         except Exception as e:
             print(f"  [hearth.web] machine scan skipped: {e}", flush=True)
 

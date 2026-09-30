@@ -50,6 +50,25 @@ for f in glob.glob(os.path.join(ROOT, "hearth", "*.py")) + [os.path.join(ROOT, "
             offenders.append(f"{os.path.relpath(f, ROOT)}:{n}")
 check(f"no module reads a JARVIS_ variable directly {offenders[:5]}", not offenders)
 
+# A function that assigns or imports a local named _env makes every _env.get()
+# in that function refer to the local, so the reads above it crash with
+# UnboundLocalError. Loading a model failed that way.
+import ast
+shadowed = []
+for f in glob.glob(os.path.join(ROOT, "hearth", "*.py")) + [os.path.join(ROOT, "hearth_cli.py")]:
+    src = open(f, encoding="utf-8").read()
+    if "env as _env" not in src:
+        continue
+    for fn in ast.walk(ast.parse(src)):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for n in ast.walk(fn):
+            binds = (isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and n.id == "_env") or \
+                    (isinstance(n, (ast.Import, ast.ImportFrom)) and any((a.asname or a.name) == "_env" for a in n.names))
+            if binds:
+                shadowed.append(f"{os.path.relpath(f, ROOT)}:{n.lineno} in {fn.name}")
+check(f"no function rebinds _env over the settings module {sorted(set(shadowed))[:5]}", not shadowed)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

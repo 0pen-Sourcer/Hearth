@@ -4376,8 +4376,8 @@ class JarvisCLI:
         if _env.get("NO_ONBOARDING") not in ("1", "true", "yes"):
             def _env_refresh():
                 try:
-                    from hearth import environment as _env
-                    msg = _env.refresh_environment_if_changed(endpoint=LOCAL_API_BASE)
+                    from hearth import environment as _envmod
+                    msg = _envmod.refresh_environment_if_changed(endpoint=LOCAL_API_BASE)
                     if msg:
                         print(f"\n{C_DIM}● machine changed since last time — {msg}{C_RESET}")
                 except Exception:
