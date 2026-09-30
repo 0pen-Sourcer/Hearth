@@ -520,6 +520,17 @@ def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
     base = os.environ.get("LOCAL_API_BASE", "")
     key = os.environ.get("LOCAL_API_KEY", "") or "hearth-builtin"
     model = os.environ.get("LOCAL_MODEL", "")
+    # A helper model, when one is running, is there for exactly this: helpers
+    # get their own model and the main one stays free for the conversation.
+    # Premium work stays on the main brain.
+    if cost_class != "premium":
+        try:
+            from . import llmserver as _ls
+            hs = _ls.helper_status()
+            if hs.get("running"):
+                return hs["url"], "hearth-builtin", ""
+        except Exception:
+            pass
     if cost_class == "cheap":
         lower = base.lower()
         is_cloud = any(host in lower for host in

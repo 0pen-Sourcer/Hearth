@@ -3481,6 +3481,21 @@ class HearthHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass  # best-effort — preference is a nice-to-have
             return self._send_json(200, result)
+        if path == "/api/llmserver/helper":
+            # A second, smaller model for helpers and sub-agents. An empty
+            # model_path stops it and forgets the choice.
+            from . import llmserver
+            body = self._read_json()
+            mp = (body.get("model_path") or "").strip()
+            if not mp:
+                _save_settings({"helper_model": ""})
+                return self._send_json(200, llmserver.stop_helper())
+            ctx = int(body.get("ctx") or 16384)
+            r = llmserver.start_helper(mp, ctx=ctx)
+            if r.get("ok"):
+                _save_settings({"helper_model": mp, "helper_ctx": ctx})
+                llmserver.invalidate_status_cache()
+            return self._send_json(200, r)
         if path == "/api/llmserver/stop":
             from . import llmserver
             stop_result = llmserver.stop_builtin()
@@ -4752,6 +4767,27 @@ def _migrate_numbered_mic() -> None:
         pass
 
 
+def _auto_boot_helper_async() -> None:
+    """Start the helper model the user picked, after the main model has had
+    its turn at the GPU, so the main one gets first claim on VRAM."""
+    def _go():
+        try:
+            from . import llmserver
+            s = _load_settings()
+            mp = (s.get("helper_model") or "").strip()
+            if not mp or not os.path.isfile(mp):
+                return
+            deadline = time.time() + 240
+            time.sleep(8)
+            while time.time() < deadline and llmserver._starting_paths:
+                time.sleep(2)
+            r = llmserver.start_helper(mp, ctx=int(s.get("helper_ctx") or 16384))
+            print(f"  [hearth.web] helper model: {'ready' if r.get('ok') else r.get('error')}", flush=True)
+        except Exception as e:
+            print(f"  [hearth.web] helper model skipped: {e}", flush=True)
+    threading.Thread(target=_go, daemon=True, name="helper-boot").start()
+
+
 def _auto_boot_preferred_model_async() -> None:
     """If the user picked a default model in Settings (`preferred_model`) and
     nothing's already serving on the configured endpoint, boot Hearth's
@@ -5006,6 +5042,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     _start_reminder_watcher()
     _maybe_learn_environment_async()
     _auto_boot_preferred_model_async()
+    _auto_boot_helper_async()
     _start_memory_maintenance_loop()
     _resume_downloads_async()
     threading.Thread(target=_migrate_numbered_mic, daemon=True).start()

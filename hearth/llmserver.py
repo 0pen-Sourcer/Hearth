@@ -3513,6 +3513,7 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
         "builtin_owned": bool(_proc and _proc.poll() is None),
         "disk_models": _disk,
         "partial_downloads": list_partial_downloads(),
+        "helper": helper_status(),
         "is_lite": _is_lite_edition(),
         "full_url": FULL_DOWNLOAD_URL,
         "local_models": _local,
@@ -3568,6 +3569,101 @@ def force_local_rescan() -> Dict[str, Any]:
     return {"ok": True, "scanning": True}
 
 
+# ---------------------------------------------------------------------------
+# Helper model: a second, smaller model on its own port, so helpers and
+# sub-agents have a model of their own while the main one keeps the chat.
+# Two servers rather than one server juggling two models keeps the main
+# model's load path exactly as it is.
+# ---------------------------------------------------------------------------
+HELPER_PORT = int(_env.get("HELPER_PORT", "1235"))
+_helper: Dict[str, Any] = {"proc": None, "info": {}}
+
+
+def helper_base() -> str:
+    return f"http://{BUILTIN_HOST}:{HELPER_PORT}/v1"
+
+
+def helper_status() -> Dict[str, Any]:
+    p = _helper["proc"]
+    running = p is not None and p.poll() is None
+    info = dict(_helper["info"]) if running else {}
+    return {"running": running, "url": helper_base() if running else "",
+            "model_path": info.get("model_path", ""), "model": info.get("model", ""),
+            "ctx": info.get("ctx", 0)}
+
+
+def stop_helper() -> Dict[str, Any]:
+    p = _helper["proc"]
+    was = p is not None and p.poll() is None
+    if was:
+        try:
+            p.terminate()
+            try:
+                p.wait(timeout=6)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait(timeout=3)
+        except Exception:
+            pass
+    _helper["proc"], _helper["info"] = None, {}
+    return {"ok": True, "was_running": was}
+
+
+def start_helper(model_path: str, ctx: int = 16384, n_gpu_layers: int = -1,
+                 slots: int = 2, wait_s: float = 120.0) -> Dict[str, Any]:
+    """Start the helper model on HELPER_PORT. Needs the llama.cpp engine.
+    `ctx` is per helper; `slots` helpers can run on it at once."""
+    if not model_path or not Path(model_path).is_file():
+        return {"ok": False, "error": f"model file not found: {model_path}"}
+    native = find_native_llama_server()
+    if not native:
+        return {"ok": False, "error": "a helper model needs the llama.cpp engine; install it in Models > Engine"}
+    stop_helper()
+    blackwell = (detect_gpu_compute_cap() or 0.0) >= 12.0
+    cmd = [native["exe"], "--model", model_path, "--host", BUILTIN_HOST, "--port", str(HELPER_PORT),
+           "--ctx-size", str(int(ctx) * max(1, slots)), "--parallel", str(max(1, slots)),
+           "--n-gpu-layers", str(999 if n_gpu_layers == -1 else n_gpu_layers),
+           "--api-key", BUILTIN_API_KEY, "--batch-size", "1024", "--ubatch-size", "512"]
+    # Same KV choice as the main model: q8_0 with flash attention, except on
+    # RTX 50-series where this engine's flash kernels misbehave on long context.
+    cmd += (["--flash-attn", "off"] if blackwell else
+            ["--flash-attn", "on", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"])
+    env = dict(os.environ)
+    if native.get("dll_dirs"):
+        env["PATH"] = os.pathsep.join(native["dll_dirs"]) + os.pathsep + env.get("PATH", "")
+    logs_dir = WORKSPACE / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / "llama_helper.log"
+    try:
+        log_fh = open(log_path, "wb")
+        proc = subprocess.Popen(cmd, stdout=log_fh, stderr=subprocess.STDOUT,
+                                creationflags=_NO_WINDOW, env=env)
+    except OSError as e:
+        return {"ok": False, "error": f"could not start the helper model: {e}"}
+    try:
+        _assign_to_job(proc)
+    except Exception:
+        pass
+    _helper["proc"] = proc
+    _helper["info"] = {"model_path": model_path, "model": Path(model_path).stem, "ctx": ctx}
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            _helper["proc"], _helper["info"] = None, {}
+            tail = ""
+            try:
+                tail = log_path.read_text(encoding="utf-8", errors="replace")[-600:]
+            except OSError:
+                pass
+            hint = " (out of VRAM: try a smaller helper or fewer GPU layers)" if "out of memory" in tail.lower() else ""
+            return {"ok": False, "error": f"the helper model stopped while loading{hint}", "log_tail": tail}
+        if external_server_running(helper_base(), timeout=0.5, api_key=BUILTIN_API_KEY):
+            return {"ok": True, "url": helper_base(), "model": _helper["info"]["model"]}
+        time.sleep(0.5)
+    stop_helper()
+    return {"ok": False, "error": "the helper model did not start within two minutes"}
+
+
 def _atexit():
     """Best-effort cleanup so we don't leave a llama.cpp server orphaned."""
     if _proc is not None and _proc.poll() is None:
@@ -3575,6 +3671,10 @@ def _atexit():
             stop_builtin()
         except Exception:
             pass
+    try:
+        stop_helper()
+    except Exception:
+        pass
 
 
 import atexit as _atexit_module

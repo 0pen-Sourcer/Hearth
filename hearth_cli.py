@@ -1655,12 +1655,40 @@ class JarvisCLI:
           /models use <path|n>   - boot built-in server with a disk model (n = number from /models disk)
           /models engine         - show the inference engine; `engine install` / `engine update` to fetch llama.cpp
           /models stop           - stop the built-in server
+          /models helper <n|path|off> - a second, smaller model for helpers and sub-agents
         """
         from hearth import llmserver
         parts = raw.strip().split(None, 2)
         sub = parts[1].lower() if len(parts) > 1 else ""
         arg = parts[2] if len(parts) > 2 else ""
 
+        if sub == "helper":
+            hs = llmserver.helper_status()
+            if not arg:
+                print(f"{C_OK}helper model: {hs['model']}{C_RESET}" if hs["running"]
+                      else f"{C_DIM}no helper model. /models helper <n> loads one from /models disk.{C_RESET}")
+                return
+            if arg.lower() in ("off", "stop", "none"):
+                llmserver.stop_helper()
+                _save_setting("helper_model", "")
+                print(f"{C_OK}helper model stopped{C_RESET}")
+                return
+            path = arg
+            if arg.isdigit():
+                cache = getattr(self, "_cli_disk_cache", None) or llmserver.scan_disk_for_models()
+                idx = int(arg) - 1
+                if not (0 <= idx < len(cache)):
+                    print(f"{C_ERR}Out of range - run /models disk to see the list.{C_RESET}")
+                    return
+                path = cache[idx].get("path")
+            print(f"{C_DIM}starting the helper model…{C_RESET}")
+            r = await asyncio.to_thread(llmserver.start_helper, path)
+            if r.get("ok"):
+                _save_setting("helper_model", path)
+                print(f"{C_OK}helper model ready: {r.get('model')}{C_RESET}{C_DIM}  helpers and sub-agents use it; the main model stays on the chat{C_RESET}")
+            else:
+                print(f"{C_ERR}{r.get('error')}{C_RESET}")
+            return
         if sub == "stop":
             r = llmserver.stop_builtin()
             if r.get("ok") and r.get("was_running"):
@@ -1953,7 +1981,7 @@ class JarvisCLI:
             print(f"  {C_DIM}── Endpoint / model ─────────────────────────{C_RESET}")
             print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET}, {C_TOOL}/provider{C_RESET}) switch brain: local / grok / gemini / openai / openrouter / custom")
             print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server, disk, picks")
-            print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop{C_RESET}  full picker. `use`/`get` retarget THIS session - no restart.")
+            print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop|helper{C_RESET}  full picker; `helper` loads a second, smaller model for helpers")
             print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model on current server (alias: /load)")
             print(f"  {C_DIM}── Chat / context ───────────────────────────{C_RESET}")
             print(f"  {C_TOOL}/tools{C_RESET}                 list available tools")
