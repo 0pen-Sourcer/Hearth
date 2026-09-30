@@ -1,15 +1,12 @@
-"""Pausing or cancelling a model download.
+"""Pausing a model download, and closing the window during one.
 
-The window's Pause and Cancel for a model only aborted the browser's side of
-the request. The server's progress writer caught the broken pipe that followed
-and carried on, and nothing handed the download loop a way to stop, so the
-transfer ran to completion in the background after the interface said paused.
-Pressing Resume then started a second download appending to the same part file
-while the first was still writing it, which is two writers interleaving bytes
-into one model file.
+The download runs in the backend, so closing the window (which drops the
+progress connection) must not stop it, while Pause must stop it and keep the
+part file. Resume, or a second start for the same file, must never put two
+writers on one part file.
 
-This runs the real endpoint against a deliberately slow local file server,
-drops the connection partway, and watches the part file.
+This runs the real endpoints against a deliberately slow local file server
+and watches the part file.
 
     .\\.venv\\Scripts\\python.exe tests\\test_download_cancel.py
 """
@@ -81,6 +78,8 @@ _real_dir = llmserver.MODELS_DIR
 llmserver.MODELS_DIR = type(_real_dir)(MODELS)
 _real_url = getattr(llmserver, "_hf_resolve_url", None)
 llmserver._hf_resolve_url = lambda repo, filename: FILE_URL
+_real_pending = llmserver._PENDING_DL_PATH
+llmserver._PENDING_DL_PATH = os.path.join(MODELS, "pending_download.json")
 
 
 class _Quiet(web.HearthHandler):
@@ -113,19 +112,30 @@ def part_size():
         return 0
 
 
-# ------------------------------------------------ drop the connection midway
+# ---------------------------------- close the window, then pause for real
 sock = start_download()
 deadline = time.time() + 10
 while part_size() < 512 * 1024 and time.time() < deadline:
     time.sleep(0.05)
 check("the download starts and writes a part file", part_size() > 0)
 
-sock.close()                    # what Pause does from the window's side
-time.sleep(1.2)                 # long enough for a few progress writes to fail
+sock.close()                    # the window closes; the download should carry on
+time.sleep(0.5)
+before = part_size()
+time.sleep(1.0)
+check(f"closing the window does not stop the download ({before} -> {part_size()} bytes)",
+      part_size() > before)
+
+c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
+c.request("POST", "/api/llmserver/download-pause", json.dumps({"filename": "model.gguf"}),
+          {"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{PORT}"})
+c.getresponse().read()
+c.close()
+time.sleep(1.0)
 size_at_pause = part_size()
 time.sleep(2.0)
 size_later = part_size()
-check(f"after the connection drops the part file stops growing "
+check(f"after Pause the part file stops growing "
       f"({size_at_pause} -> {size_later} bytes)", size_later == size_at_pause)
 check("and it is not quietly finished in the background",
       not os.path.exists(FINAL))
@@ -188,6 +198,7 @@ else:
 api.shutdown()
 files.shutdown()
 llmserver.MODELS_DIR = _real_dir
+llmserver._PENDING_DL_PATH = _real_pending
 if _real_url is not None:
     llmserver._hf_resolve_url = _real_url
 

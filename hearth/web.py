@@ -2109,6 +2109,45 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200 if ok else 404, {"ok": ok})
         return self._not_found()
 
+    def _stream_model_download(self, repo: str, filename: str, *,
+                               found: Optional[Dict[str, Any]] = None,
+                               error: str = "") -> None:
+        """Report a model download as NDJSON: {type:"progress", done, total}
+        while it runs, then {type:"done", ok, path|error}. The download itself
+        runs on a backend thread (llmserver), so closing the window drops this
+        connection and the transfer carries on; pausing is its own call."""
+        from . import llmserver
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        def send(obj: Dict[str, Any]) -> None:
+            self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            if error or not repo or not filename:
+                return send({"type": "done", "ok": False,
+                             "error": error or "repo and filename required"})
+            if found:
+                return send({"type": "done", **found})
+            llmserver.start_model_download(repo, filename)
+            last = None
+            while True:
+                st = llmserver.model_download_state(filename) or {}
+                if st.get("status") != "downloading":
+                    res = st.get("result") or {"ok": False, "error": "download stopped"}
+                    return send({"type": "done", **res})
+                cur = (st.get("done"), st.get("total"))
+                if cur != last and cur[1]:
+                    last = cur
+                    send({"type": "progress", "done": cur[0], "total": cur[1]})
+                time.sleep(0.25)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            return
+
     def do_POST(self) -> None:
         if not self._request_allowed():
             return self._send_json(403, {"error": "forbidden origin"})
@@ -3448,46 +3487,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             body = self._read_json()
             repo = (body.get("repo") or "").strip()
             filename = (body.get("filename") or "").strip()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("X-Accel-Buffering", "no")
-            self.end_headers()
-            _last_emit = [0.0]
-            # The window pauses or cancels a model download by dropping this
-            # connection. The broken pipe that followed was swallowed here and
-            # nothing told the download loop, so the transfer ran on to the end
-            # after the interface said paused, and Resume then started a second
-            # writer on the same part file. A dropped connection is the stop
-            # signal now.
-            _gone = [False]
-
-            def emit(obj: Dict[str, Any]) -> None:
-                if _gone[0]:
-                    return
-                try:
-                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-                    _gone[0] = True
-
-            def on_progress(done: int, total: int) -> None:
-                now = time.time()
-                if now - _last_emit[0] < 0.2 and done != total:
-                    return
-                _last_emit[0] = now
-                emit({"type": "progress", "done": done, "total": total})
-
-            llmserver.save_pending_download(repo, filename)  # so Resume knows the repo
-            try:
-                result = llmserver.download_from_hf_repo(repo, filename, on_progress=on_progress,
-                                                         cancel=lambda: _gone[0])
-                if result.get("ok"):
-                    llmserver.clear_pending_download()
-                emit({"type": "done", **result})
-            except Exception as e:
-                emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
-            return
+            return self._stream_model_download(repo, filename)
+        if path == "/api/llmserver/download-pause":
+            from . import llmserver
+            body = self._read_json()
+            return self._send_json(200, {"ok": llmserver.pause_model_download(
+                (body.get("filename") or "").strip())})
         if path == "/api/runtime/install":
             # Download Hearth's own llama.cpp runtime (the native llama-server.exe
             # + CUDA DLLs). Streams NDJSON progress like the model download. The
@@ -3553,39 +3558,11 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import llmserver
             body = self._read_json()
             pick_id = (body.get("pick_id") or "").strip()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("X-Accel-Buffering", "no")
-            self.end_headers()
-            _last_emit = [0.0]
-            # A dropped connection is the stop signal: see download-hf above.
-            _gone = [False]
-
-            def emit(obj: Dict[str, Any]) -> None:
-                if _gone[0]:
-                    return
-                try:
-                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-                    _gone[0] = True
-
-            def on_progress(done: int, total: int) -> None:
-                now = time.time()
-                # Throttle to ~5 events/sec so we don't drown the socket.
-                if now - _last_emit[0] < 0.2 and done != total:
-                    return
-                _last_emit[0] = now
-                emit({"type": "progress", "done": done, "total": total})
-
-            try:
-                result = llmserver.download_model(pick_id, on_progress=on_progress,
-                                                  cancel=lambda: _gone[0])
-                emit({"type": "done", **result})
-            except Exception as e:
-                emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
-            return
+            pick = next((p for p in llmserver.TOP_PICKS if p["id"] == pick_id), None)
+            if not pick:
+                return self._stream_model_download("", "", error=f"unknown pick id: {pick_id!r}")
+            found = llmserver.existing_pick_copy(pick)
+            return self._stream_model_download(pick["hf_repo"], pick["hf_file"], found=found)
         return self._not_found()
 
     def _not_found(self):
@@ -4717,6 +4694,20 @@ def _apply_saved_llm_endpoint() -> None:
 _apply_saved_llm_endpoint()
 
 
+def _resume_downloads_async() -> None:
+    """Pick up model downloads that were cut off by a restart or crash."""
+    def _go():
+        time.sleep(5)                       # let the network and the server settle
+        try:
+            from . import llmserver
+            started = llmserver.resume_interrupted_downloads()
+            if started:
+                print(f"[hearth.web] resuming downloads: {', '.join(started)}", file=sys.stderr)
+        except Exception as e:
+            print(f"[hearth.web] download resume failed: {e}", file=sys.stderr)
+    threading.Thread(target=_go, daemon=True, name="resume-downloads").start()
+
+
 def _auto_boot_preferred_model_async() -> None:
     """If the user picked a default model in Settings (`preferred_model`) and
     nothing's already serving on the configured endpoint, boot Hearth's
@@ -4972,6 +4963,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     _maybe_learn_environment_async()
     _auto_boot_preferred_model_async()
     _start_memory_maintenance_loop()
+    _resume_downloads_async()
     # Bring configured phone bridges (Discord/Telegram/WhatsApp) online so the
     # user doesn't have to flip a Start toggle every session. Backgrounded
     # because each spawn waits ~1.6s to fail-fast on a bad token.
@@ -5024,6 +5016,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     _maybe_learn_environment_async()
     _auto_boot_preferred_model_async()
     _start_memory_maintenance_loop()
+    _resume_downloads_async()
 
     try:
         server.serve_forever()

@@ -14714,7 +14714,13 @@ function dlToggle(force) {
           if (kind === 'engine') api('/api/runtime/cancel', { method: 'POST' }).catch(() => {});
           else if (kind === 'update') api('/api/update/cancel', { method: 'POST' }).catch(() => {});
           else if (kind === 'voice') api('/api/voice/install-cancel', { method: 'POST' }).catch(() => {});
-          else if (d.abort) { try { d.abort.abort(); } catch {} }   // model: client abort, .part stays
+          else {
+            // Model downloads run in the backend; stop it there. .part stays.
+            if (d.filename) api('/api/llmserver/download-pause', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filename: d.filename }) }).catch(() => {});
+            if (d.abort) { try { d.abort.abort(); } catch {} }
+          }
           dlUpsert(id, { status: 'paused' });
         } else if (ds.dlact === 'resume') {
           if (kind === 'engine') runtimeInstall();
@@ -14876,7 +14882,8 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
     modelPath = await streamDownload(res, bar, label, detail, filename);
   } catch (e) {
-    if (e && e.name === 'AbortError') { dlUpsert(filename, { status: 'paused' }); return; }  // user paused; .part kept
+    if (e && e.name === 'AbortError') { dlUpsert(filename, { status: 'paused' }); return; }  // paused from the overlay; .part kept
+    if (e && e.name === 'TypeError') { dlUpsert(filename, { status: 'paused' }); return; }   // connection lost; the backend keeps going
     label.textContent = 'Error'; detail.textContent = e.message; dlUpsert(filename, { status: 'error' }); return;
   }
   if (modelPath) {
@@ -14929,13 +14936,16 @@ function showResumableDownload(s) {
       toast('Resume from Discover', 'Search the same model + click Download — it resumes from the ' + part.gb + ' GB already there.', 'ok', 7000);
     }
   };
-  // Continue on its own: auto-resume once per session when the repo is known.
-  if (repo && !_autoResumedDl) {
+  // Follow a download the backend is already running (it keeps going while
+  // the window is closed), or continue one that was cut off rather than paused.
+  if (repo && (part.active || (!part.paused && !_autoResumedDl))) {
     _autoResumedDl = true;
     rb.hidden = true;
     modelsDownloadHF(repo, part.filename, {});
+  } else if (part.paused) {
+    $('models-dl-label').textContent = 'Paused: ' + part.filename;
   } else if (!repo) {
-    $('models-dl-label').textContent = 'Interrupted download — ' + part.filename;
+    $('models-dl-label').textContent = 'Interrupted download: ' + part.filename;
   }
 }
 

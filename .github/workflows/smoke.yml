@@ -237,6 +237,14 @@ jobs:
         run: |
           python tests/test_convo_loading.py
 
+      - name: Settings are read under HEARTH_ names, old JARVIS_ ones too
+        run: |
+          python tests/test_env_names.py
+
+      - name: Model downloads run without the window and resume after a restart
+        run: |
+          python tests/test_model_downloads.py
+
       - name: The public tool reference matches the code
         # docs/TOOLS.md is generated; it said 93 tools long after there were more.
         if: matrix.os == 'windows-latest'

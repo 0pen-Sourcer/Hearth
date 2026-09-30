@@ -900,6 +900,21 @@ def _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded) -> in
     return done
 
 
+def existing_pick_copy(pick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A curated pick already on disk (LM Studio, Ollama, HF cache or ours),
+    so a click on Download uses that copy instead of pulling it again."""
+    target_name = pick["hf_file"].lower()
+    try:
+        for existing in scan_disk_for_models():
+            fn = (existing.get("filename") or "").lower()
+            if fn == target_name:
+                return {"ok": True, "path": existing["path"], "already": True,
+                        "source": existing.get("source", "disk")}
+    except Exception:
+        pass
+    return None
+
+
 def download_model(pick_id: str,
                    on_progress: Optional[Callable[[int, int], None]] = None,
                    cancel: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
@@ -921,21 +936,9 @@ def download_model(pick_id: str,
     # somewhere Hearth knows how to find it? LM Studio users routinely have
     # the same GGUF cached under .lmstudio/models/<author>/<repo>/ and there's
     # no reason to redownload it into ~/Jarvis/models/.
-    target_name = pick["hf_file"].lower()
-    try:
-        for existing in scan_disk_for_models():
-            fn = (existing.get("filename") or "").lower()
-            if fn == target_name:
-                return {
-                    "ok": True,
-                    "path": existing["path"],
-                    "already": True,
-                    "source": existing.get("source", "disk"),
-                }
-    except Exception:
-        # scan failure should NEVER block the user from downloading — fall
-        # through to the normal HF path.
-        pass
+    found = existing_pick_copy(pick)
+    if found:
+        return found
 
     url = _hf_resolve_url(pick["hf_repo"], pick["hf_file"])
     dest = MODELS_DIR / pick["hf_file"]
@@ -3102,21 +3105,128 @@ _STATUS_TTL_SECONDS = 8.0
 _PENDING_DL_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "pending_download.json")
 
 
-def save_pending_download(repo: str, filename: str) -> None:
-    """Remember what's downloading so Resume can re-request it after a restart."""
+def _read_pending() -> Dict[str, Dict[str, Any]]:
+    """{filename: {"repo": ..., "paused": bool}} for every unfinished download.
+    Older installs stored a single {"repo", "filename"} pair; that still reads."""
+    try:
+        with open(_PENDING_DL_PATH, encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except Exception:
+        return {}
+    if "downloads" in data:
+        return {k: dict(v) for k, v in (data.get("downloads") or {}).items() if isinstance(v, dict)}
+    if data.get("filename"):
+        return {data["filename"]: {"repo": data.get("repo", ""), "paused": False}}
+    return {}
+
+
+def _write_pending(entries: Dict[str, Dict[str, Any]]) -> None:
     try:
         os.makedirs(os.path.dirname(_PENDING_DL_PATH), exist_ok=True)
-        with open(_PENDING_DL_PATH, "w", encoding="utf-8") as f:
-            json.dump({"repo": repo, "filename": filename}, f)
+        tmp = _PENDING_DL_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"downloads": entries}, f, indent=1)
+        os.replace(tmp, _PENDING_DL_PATH)
     except Exception:
         pass
 
 
-def clear_pending_download() -> None:
+def save_pending_download(repo: str, filename: str, paused: bool = False) -> None:
+    """Remember which repo a download comes from so it can resume after a restart."""
+    with _dl_lock:
+        entries = _read_pending()
+        entries[filename] = {"repo": repo, "paused": bool(paused)}
+        _write_pending(entries)
+
+
+def clear_pending_download(filename: Optional[str] = None) -> None:
+    """Forget one download (or all of them when no filename is given)."""
+    with _dl_lock:
+        entries = _read_pending() if filename else {}
+        entries.pop(filename, None)
+        _write_pending(entries)
+
+
+# Model downloads run on a backend thread, not on the window's HTTP request, so
+# closing the window to the tray doesn't stop them. The window watches progress
+# and can reattach; only an explicit pause or discard stops a transfer.
+_dl_lock = _threading.RLock()
+_dl_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def _run_download_job(job: Dict[str, Any]) -> None:
+    def on_progress(done: int, total: int) -> None:
+        job["done"], job["total"] = done, total
+
     try:
-        os.remove(_PENDING_DL_PATH)
-    except Exception:
-        pass
+        result = download_from_hf_repo(job["repo"], job["filename"], on_progress=on_progress,
+                                       cancel=job["stop"].is_set)
+    except Exception as e:
+        result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    job["result"] = result
+    if result.get("ok"):
+        job["status"] = "done"
+        clear_pending_download(job["filename"])
+        _status_cache.pop("disk_models_cache", None)
+        _status_cache.pop("disk_scan_ts", None)
+    elif result.get("cancelled"):
+        job["status"] = "paused"
+    else:
+        job["status"] = "error"
+
+
+def start_model_download(repo: str, filename: str) -> Dict[str, Any]:
+    """Start a download, or return the one already running for this file."""
+    name = filename.split("/")[-1]
+    with _dl_lock:
+        job = _dl_jobs.get(name)
+        if job and job["status"] == "downloading":
+            return job
+        save_pending_download(repo, filename)
+        job = {"repo": repo, "filename": filename, "status": "downloading",
+               "done": 0, "total": 0, "result": None, "stop": _threading.Event()}
+        _dl_jobs[name] = job
+        _threading.Thread(target=_run_download_job, args=(job,), daemon=True,
+                          name=f"download-{name}").start()
+        return job
+
+
+def model_download_state(filename: str) -> Optional[Dict[str, Any]]:
+    job = _dl_jobs.get(filename.split("/")[-1])
+    if not job:
+        return None
+    return {k: job[k] for k in ("repo", "filename", "status", "done", "total", "result")}
+
+
+def pause_model_download(filename: str) -> bool:
+    """Stop a running download and keep its partial file. A paused download is
+    not resumed automatically at the next start."""
+    name = filename.split("/")[-1]
+    with _dl_lock:
+        entries = _read_pending()
+        if name in entries:
+            entries[name]["paused"] = True
+            _write_pending(entries)
+        job = _dl_jobs.get(name)
+        if job and job["status"] == "downloading":
+            job["stop"].set()
+            return True
+    return False
+
+
+def resume_interrupted_downloads() -> List[str]:
+    """Continue every download that was cut off (app closed, crash, network drop)
+    rather than paused, as long as its partial file is still there."""
+    started = []
+    for name, entry in _read_pending().items():
+        if entry.get("paused") or not entry.get("repo"):
+            continue
+        if not (MODELS_DIR / (name + ".part")).is_file():
+            clear_pending_download(name)
+            continue
+        start_model_download(entry["repo"], name)
+        started.append(name)
+    return started
 
 
 try:
@@ -3180,27 +3290,23 @@ def clear_server_log() -> bool:
         return False
 
 
-def _load_pending_download() -> dict:
-    try:
-        with open(_PENDING_DL_PATH, encoding="utf-8") as f:
-            return json.load(f) or {}
-    except Exception:
-        return {}
-
-
 def list_partial_downloads() -> List[Dict[str, Any]]:
     """Interrupted downloads (*.gguf.part) in MODELS_DIR, for the GUI resume UI.
     Attaches the saved repo (if known) so Resume re-requests it directly."""
     out: List[Dict[str, Any]] = []
-    pend = _load_pending_download()
+    pend = _read_pending()
     try:
         for p in MODELS_DIR.glob("*.gguf.part"):
             try:
                 fn = p.name[:-5]
+                job = _dl_jobs.get(fn)
                 out.append({"filename": fn,
                             "gb": round(p.stat().st_size / (1024 ** 3), 2),
                             "path": str(p),
-                            "repo": pend.get("repo", "") if pend.get("filename") == fn else ""})
+                            "repo": (pend.get(fn) or {}).get("repo", "")
+                                    or next((t["hf_repo"] for t in TOP_PICKS if t["hf_file"] == fn), ""),
+                            "paused": bool((pend.get(fn) or {}).get("paused")),
+                            "active": bool(job and job["status"] == "downloading")})
             except OSError:
                 pass
     except Exception:
@@ -3225,17 +3331,20 @@ def discard_partial(filename: str) -> Dict[str, Any]:
         return {"ok": False, "error": "outside models dir"}
     if not target.name.endswith(".gguf.part") or not target.is_file():
         return {"ok": False, "error": "no such partial download"}
+    job = _dl_jobs.get(target.name[:-5])
+    if job and job["status"] == "downloading":
+        job["stop"].set()
+        for _ in range(50):            # let the writer close the file first
+            if job["status"] != "downloading":
+                break
+            time.sleep(0.1)
     freed = 0
     try:
         freed = target.stat().st_size
         target.unlink()
     except OSError as e:
         return {"ok": False, "error": str(e)}
-    try:                       # drop the resume pointer so it can't reappear
-        if _load_pending_download().get("filename") == target.name[:-5]:
-            clear_pending_download()
-    except Exception:
-        pass
+    clear_pending_download(target.name[:-5])   # so it can't reappear
     return {"ok": True, "freed_gb": round(freed / (1024 ** 3), 2)}
 
 

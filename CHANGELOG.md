@@ -40,7 +40,7 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - Fixed the first-tool-call crash, the Ctrl+Z spin, `--help`, `/brain lmstudio` and `/brain builtin`, model sync on cloud brains, vision detection on llama.cpp, context-overflow retries and `/history` with images.
 
 ### Models, updates and storage
-- Measured load progress; downloads that pause, resume and recover from a bad range; updates that recover from an interrupted patch; atomic chat, settings and reminder writes; reminders that fire once across processes.
+- Measured load progress; downloads that pause, resume, recover from a bad range, keep going with the window closed and pick up after a restart; updates that recover from an interrupted patch; atomic chat, settings and reminder writes; reminders that fire once across processes.
 
 ## v0.7.1 to v0.7.5
 
