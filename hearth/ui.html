@@ -9244,23 +9244,19 @@ async function handleSlash(raw) {
       obShow();
       return true;
     case '/help':
-      showModal('Slash commands', [
-        '/help                 this list',
-        '/welcome              show the first-run welcome card',
-        '/clear                wipe THIS chat (keeps system prompt)',
-        '/compact              ask the assistant to summarize older turns + extract facts to memory',
-        '/perms                show which risky tools are currently allowed/denied (persisted to disk)',
-        '/perms clear          reset both lists',
-        '/tools                show all tools the assistant can call',
-        '/voice on|off         TTS auto-speak toggle (chat view)',
-        '/think on|off         show model reasoning inline',
-        '/allow <path>         extend write access to a folder this session',
-        '/model <id>           load a model by id',
-        '/models               list available models',
-        '/mem                  jump to Memory view',
-        '/log                  jump to Logs view',
-        '/exit /quit           close the app window',
-      ].join('\n'), [{ label: 'Close' }]);
+      // Built from the same list the / menu shows, so the two cannot drift.
+      showModal('Slash commands',
+        SLASH_COMMANDS.map(x => x.cmd.padEnd(22) + x.desc).join('\n'), [{ label: 'Close' }]);
+      return true;
+    case '/mode': {
+      const want = { 'auto-edit': 'edits', autoedit: 'edits', edit: 'edits' }[arg.toLowerCase()] || arg.toLowerCase();
+      if (!want) cycleApprovalMode();
+      else if (APPROVAL_MODES.some(m => m.id === want)) setApprovalMode(want);
+      else toast('/mode ask | edits | auto', '', 'err');
+      return true;
+    }
+    case '/team':
+      showView('team');
       return true;
     case '/clear':
       if (c) {
@@ -13494,9 +13490,13 @@ const SLASH_COMMANDS = [
   { cmd: '/think on',     desc: 'show model reasoning inline' },
   { cmd: '/think off',    desc: 'hide model reasoning' },
   { cmd: '/allow',        desc: 'extend write access to a folder - /allow <path>' },
+  { cmd: '/mode',         desc: 'what runs without asking: ask, edits or auto (Shift+Tab also cycles)' },
+  { cmd: '/team',         desc: 'open the Team view: helpers and agents at work' },
+  { cmd: '/files',        desc: 'open the Files view' },
+  { cmd: '/settings',     desc: 'open Settings' },
   { cmd: '/mem',          desc: 'jump to the Memory view' },
   { cmd: '/log',          desc: 'jump to the Logs view' },
-  { cmd: '/exit',         desc: 'close the app window' },
+  { cmd: '/exit',         desc: 'close the app window (or /quit)' },
 ];
 let slashIdx = -1;
 

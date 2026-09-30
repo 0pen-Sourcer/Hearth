@@ -1035,12 +1035,13 @@ class JarvisCLI:
             # win — the command list is long and otherwise must be memorized.
             try:
                 from prompt_toolkit.completion import WordCompleter
-                _slash = ["/help", "/brain", "/endpoint", "/models", "/model",
-                          "/tools", "/voice", "/listen", "/mem", "/log",
-                          "/compact", "/context", "/think", "/agent", "/jobs",
-                          "/mcp", "/migrate", "/name", "/allow", "/perms",
-                          "/lockdown", "/learn",
-                          "/clear", "/exit", "/skill", "/update", "/multi"]
+                _slash = ["/help", "/brain", "/endpoint", "/provider", "/models", "/model", "/load",
+                          "/tools", "/clear", "/compact", "/context", "/tokens", "/chats", "/chat",
+                          "/history", "/workspace", "/log", "/mem", "/curate", "/rules", "/name",
+                          "/learn", "/migrate", "/import-memory", "/import", "/jobs", "/mcp", "/agent", "/skill",
+                          "/skills", "/voice", "/voices", "/stt", "/listen", "/sleep", "/wake", "/think",
+                          "/multi", "/mode", "/perms", "/allow", "/disallow", "/allowed", "/lockdown",
+                          "/about", "/update", "/repair", "/phone", "/exit", "/quit"]
                 _completer = WordCompleter(_slash, ignore_case=True, sentence=False)
             except Exception:
                 _completer = None
@@ -1950,7 +1951,7 @@ class JarvisCLI:
         if low == "/help":
             print(f"{C_BOT}Commands:{C_RESET}")
             print(f"  {C_DIM}── Endpoint / model ─────────────────────────{C_RESET}")
-            print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET})       switch brain: local / grok / gemini / openai / openrouter / custom")
+            print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET}, {C_TOOL}/provider{C_RESET}) switch brain: local / grok / gemini / openai / openrouter / custom")
             print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server, disk, picks")
             print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop{C_RESET}  full picker. `use`/`get` retarget THIS session - no restart.")
             print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model on current server (alias: /load)")
@@ -1968,8 +1969,9 @@ class JarvisCLI:
             print(f"  {C_TOOL}/curate [apply]{C_RESET}        find + merge duplicate-topic memories (archive older)")
             print(f"  {C_TOOL}/rules{C_RESET}                 show rules.md path")
             print(f"  {C_TOOL}/name [NewName]{C_RESET}        show / set agent name (JARVIS, Cortana, Friday…)")
+            print(f"  {C_TOOL}/learn{C_RESET}                 re-scan this PC (hardware, models, drives) into memory")
             print(f"  {C_TOOL}/migrate <hermes|openclaw>{C_RESET}  import memory/skills/config from another agent")
-            print(f"  {C_TOOL}/import-memory [file]{C_RESET}      pull your memory out of ChatGPT/Claude (paste reply to a file, then import)")
+            print(f"  {C_TOOL}/import-memory [file]{C_RESET}  pull your memory out of ChatGPT/Claude (alias: /import)")
             print(f"  {C_TOOL}/jobs [all|<id>|kill <id>]{C_RESET}    background jobs (disk_usage / start_job / etc.)")
             print(f"  {C_TOOL}/mcp [edit|config|run]{C_RESET}     Model Context Protocol - Hearth as server / configure outbound")
             print(f"  {C_TOOL}/agent [<slug> \"<prompt>\"]{C_RESET}  list personas / spawn a sub-agent synchronously")
@@ -1982,21 +1984,24 @@ class JarvisCLI:
             print(f"  {C_TOOL}/stt [model]{C_RESET}           show/switch STT model (tiny.en/base.en/small.en/...)")
             print(f"  {C_TOOL}/listen{C_RESET}                one-shot voice input (record → transcribe)")
             print(f"  {C_TOOL}/listen on|off{C_RESET}         continuous voice-in with TTS interrupt")
+            print(f"  {C_TOOL}/sleep{C_RESET} / {C_TOOL}/wake{C_RESET}          go quiet until the wake word (or /wake)")
             print(f"  {C_TOOL}/context <n|auto>{C_RESET}      set context window (or auto-detect)")
             print(f"  {C_TOOL}/think [on|off]{C_RESET}        toggle reasoning (off = fast, no thinking)")
             print(f"  {C_TOOL}/multi{C_RESET}                 toggle multi-line input mode")
+            print(f"  {C_TOOL}/mode [ask|edits|auto]{C_RESET} what runs without asking (no argument = next mode)")
             print(f"  {C_TOOL}/perms{C_RESET}                 show saved tool permissions (persist across restarts)")
             print(f"  {C_TOOL}/perms forget <tool>{C_RESET}   forget the saved decision for one tool")
             print(f"  {C_TOOL}/perms reset{C_RESET}           forget ALL saved tool decisions")
             print(f"  {C_TOOL}/allow <path>{C_RESET}          let the assistant write under <path> this session")
             print(f"  {C_TOOL}/disallow <path>{C_RESET}       revoke an /allow")
             print(f"  {C_TOOL}/allowed{C_RESET}               list paths the assistant can write to")
+            print(f"  {C_TOOL}/lockdown [on|off]{C_RESET}     keep reads inside the workspace too")
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
             print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
             print(f"  {C_TOOL}/repair{C_RESET}                restore deleted/corrupted files by re-applying this version")
             print(f"  {C_TOOL}/phone{C_RESET}                 reach Hearth from your phone (Telegram + ntfy status)")
             print(f"  {C_TOOL}/skill [install <src>]{C_RESET}  list / install / remove shareable skills (GitHub or local)")
-            print(f"  {C_TOOL}/exit{C_RESET}                  quit (or just say bye)")
+            print(f"  {C_TOOL}/exit{C_RESET}                  quit (or /quit, or just say bye)")
             print()
             print(f"  {C_DIM}@<path>{C_RESET}                attach a file inline in your prompt")
             print(f"  {C_DIM}Esc+Enter{C_RESET}              insert newline (paste multi-line works)")

@@ -265,6 +265,10 @@ jobs:
         run: |
           python tests/test_approval_modes.py
 
+      - name: Every slash command is listed, and every listed one exists
+        run: |
+          python tests/test_slash_commands.py
+
       - name: The public tool reference matches the code
         # docs/TOOLS.md is generated; it said 93 tools long after there were more.
         if: matrix.os == 'windows-latest'
