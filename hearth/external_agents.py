@@ -225,7 +225,8 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
     argv = head + args + ([prompt] if spec.get("prompt_arg") else [])
     agent_id = f"sub_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     tpath = _sa._transcript_path(agent_id)
-    _sa._append_transcript(tpath, {"kind": "start", "persona": spec["label"], "name": name or spec["label"],
+    name = _sa.helper_name(name, spec["label"], agent)
+    _sa._append_transcript(tpath, {"kind": "start", "persona": spec["label"], "name": name,
                                    "prompt": prompt, "runtime": agent, "cwd": work})
     _sa._append_transcript(tpath, {"kind": "route", "runtime": agent, "exe": exe, "allow": allow,
                                    "billing": spec.get("billing", "")})

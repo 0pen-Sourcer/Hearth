@@ -94,6 +94,14 @@ unserved = sorted(c for c in called
 check("every endpoint the window calls is answered"
       + (": " + ", ".join(unserved) if unserved else ""), not unserved)
 
+# ------------------------------------------------- send keeps its arguments
+# send() is wrapped after it is defined. A wrapper that passed on only the
+# first argument turned notification flushes into ordinary turns and lost the
+# short text shown for attachments on regenerate.
+wraps = re.findall(r"send = async function\(([^)]*)\)\s*\{([\s\S]*?)\n\};", MAIN)
+check("every wrapper of send passes on all its arguments",
+      wraps and all("_origSend(forced, displayAs, opts)" in body for _, body in wraps))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

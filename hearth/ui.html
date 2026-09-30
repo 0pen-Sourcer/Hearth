@@ -30,6 +30,16 @@
       var cur = 'classic'; try { cur = localStorage.getItem('hearth_theme') || 'classic'; } catch (e) {}
       if (cur === 'system') root.dataset.theme = resolve('system');
     });
+    // Classic keeps the original H as the window and tab icon.
+    function lookIcon(m) {
+      var classic = m === 'classic';
+      try {
+        var link = document.querySelector('link[rel="icon"]');
+        if (link) link.href = classic ? '/assets/icon_classic.png' : '/assets/icon.png';
+      } catch (e) {}
+      try { if (window.pywebview && window.pywebview.api && window.pywebview.api.set_icon) window.pywebview.api.set_icon(m); } catch (e) {}
+    }
+    if (mode === 'classic') document.addEventListener('DOMContentLoaded', function () { lookIcon('classic'); });
     function remember(body) {
       try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {}
     }
@@ -48,6 +58,7 @@
       if (m) body.ui_theme = m;
       if (a) body.ui_accent = a;
       remember(body);
+      if (m) lookIcon(m);
     };
   })();
 </script>
@@ -832,13 +843,36 @@
   .tm-side b { display: block; color: var(--fg); font-size: 11.5px; margin: 12px 0 3px; }
   .tm-side p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
   .tm-side .tm-close { float: right; background: none; border: none; color: var(--fg-faint); font-size: 16px; line-height: 1; }
-  .tm-stage { position: relative; margin: 0 auto; aspect-ratio: 3 / 2; width: min(100%, calc((100vh - 270px) * 1.5)); flex-shrink: 0; }
+  .tm-stage { position: relative; margin: 0 auto; aspect-ratio: 3 / 2; width: min(100%, calc((100vh - 336px) * 1.5)); flex-shrink: 0; }
   .tm-stage canvas { width: 100%; height: 100%; display: block; border-radius: var(--r-lg); image-rendering: pixelated; }
   .tm-labels { position: absolute; inset: 0; pointer-events: none; }
   .tm-label { position: absolute; transform: translate(-50%, -100%); background: color-mix(in srgb, var(--bg-0) 82%, transparent);
     color: var(--fg); font-size: 11px; padding: 2px 7px; border-radius: 6px; white-space: nowrap; pointer-events: auto; cursor: pointer;
     border: 1px solid var(--border); }
   .tm-label.sel { border-color: var(--accent); }
+  .hx-mini { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 4px;
+    background: var(--hx); color: #fff; font: 700 9px var(--sans); margin-right: 6px; vertical-align: 1px; }
+  .tm-label .hx-mini { display: inline-grid; place-items: center; width: 12px; height: 12px; border-radius: 3px;
+    background: var(--hx); color: #fff; font: 700 8px var(--sans); margin-right: 5px; vertical-align: -1px; }
+  /* What someone says when clicked, or JARVIS's reply, over their head. */
+  .tm-say { position: absolute; transform: translate(-50%, calc(-100% - 26px)); max-width: 260px; pointer-events: none;
+    background: var(--bg-1); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 12px;
+    padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
+  .tm-say::after { content: ''; position: absolute; left: calc(50% + var(--tail, 0px)); bottom: -6px; width: 10px; height: 10px; margin-left: -5px;
+    background: var(--bg-1); border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); transform: rotate(45deg); }
+  .tm-say.dots { font-weight: 700; letter-spacing: 2px; padding: 4px 11px; }
+  .tm-compose { display: flex; gap: 8px; margin: 10px 24px 16px; }
+  .tm-compose input { flex: 1; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-lg);
+    color: var(--fg); padding: 10px 14px; font: 14px var(--sans); outline: none; }
+  .tm-compose input:focus { border-color: var(--accent); }
+  .tm-compose button { background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--r-lg);
+    padding: 0 16px; font: 600 13px var(--sans); cursor: pointer; }
+  #tm-canvas { cursor: pointer; }
+  .tm-name .hx-mini { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 4px;
+    background: var(--hx); color: #fff; font: 700 9px var(--sans); margin-right: 6px; vertical-align: 1px; }
+  .tm-open-log { margin-top: 8px; background: none; border: 1px solid var(--border); color: var(--fg-dim);
+    border-radius: var(--r); padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .tm-open-log:hover { color: var(--fg); border-color: var(--border-strong); }
   .tm-label.needs, .tm-label.failed { border-color: var(--err); }
   .tm-label.needs::after, .tm-label.failed::after { content: '!'; position: absolute; top: -8px; right: -8px; width: 16px; height: 16px;
     border-radius: 50%; background: var(--err); color: #fff; font-weight: 700; font-size: 11px; display: grid; place-items: center; }
@@ -1859,7 +1893,7 @@
   .list-empty { color: var(--fg-faint); font-size: 13px; text-align: center;
     padding: 30px 14px; opacity: .8; }
 
-  /* Sub-agent transcript viewer (Reminders & tasks -> tap a task). The modal
+  /* Sub-agent transcript viewer (Team -> See every step). The modal
      body already scrolls and is monospaced/pre-wrap, so override to prose here
      and let the modal own the single scrollbar. */
   .tx-wrap { font-family: var(--sans); white-space: normal; }
@@ -3420,7 +3454,7 @@
         </button>
         <button class="nav-btn" data-view="reminders">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          Reminders &amp; tasks
+          Reminders
           <span class="count" id="nav-rem-count"></span>
         </button>
         <button class="nav-btn" data-view="skills">
@@ -3432,7 +3466,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           Files
         </button>
-        <button class="nav-btn" data-view="logs" data-adv>
+        <button class="nav-btn" data-view="logs">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
           Logs
         </button>
@@ -3633,17 +3667,16 @@
         </div>
         <aside class="tm-side" id="tm-side" hidden></aside>
       </div>
+      <form class="tm-compose" id="tm-compose" autocomplete="off">
+        <input id="tm-input" placeholder="Talk to JARVIS…" />
+        <button type="submit" title="Send">Send</button>
+      </form>
     </section>
 
     <section class="view" id="view-reminders">
       <div class="view-head">
-        <h2>Reminders &amp; tasks</h2>
-        <span class="sub" id="rtab-sub">one-shot &amp; recurring - set them in chat</span>
-        <div class="grow"></div>
-        <div class="logs-tabs">
-          <button class="rt-tab active" data-rtab="reminders">Reminders</button>
-          <button class="rt-tab" data-rtab="tasks">Background tasks</button>
-        </div>
+        <h2>Reminders</h2>
+        <span class="sub" id="rtab-sub">one-shot &amp; recurring - set them in chat. Helpers working in the background are in Team.</span>
       </div>
       <div id="rtab-reminders">
         <div class="hint" style="padding:0 24px 12px;color:var(--fg-dim);font-size:12.5px;line-height:1.5;">
@@ -3653,14 +3686,6 @@
         </div>
         <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 24px 24px;margin:0;">
           <div class="list-empty">loading reminders…</div>
-        </div>
-      </div>
-      <div id="rtab-tasks" hidden>
-        <div class="hint" style="padding:0 24px 12px;color:var(--fg-dim);font-size:12.5px;line-height:1.5;">
-          Sub-agents you spawn run in the background. Tap one to watch its transcript, tool by tool.
-        </div>
-        <div id="tasks-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 24px 24px;margin:0;">
-          <div class="list-empty">no background tasks yet</div>
         </div>
       </div>
     </section>
@@ -4239,8 +4264,8 @@
           <div class="ap-title">Interface</div>
           <div class="ap-hint">How much of the machinery shows while Hearth works.</div>
           <div class="ap-modes ap-two" id="ap-ui">
-            <button type="button" class="ap-mode" data-ui="simple"><b>Simple</b><small>For everyday use. Tool steps fold into one line, and logs, engine flags and per-tool permissions stay out of the way.</small></button>
-            <button type="button" class="ap-mode" data-ui="advanced"><b>Advanced</b><small>Everything: each tool call as its own card, every counter, Logs, MCP servers and the built-in server's settings.</small></button>
+            <button type="button" class="ap-mode" data-ui="simple"><b>Simple</b><small>For everyday use. Tool steps fold into one line, and engine flags and per-tool permissions stay out of the way.</small></button>
+            <button type="button" class="ap-mode" data-ui="advanced"><b>Advanced</b><small>Everything: each tool call as its own card, every counter, MCP servers and the built-in server's settings.</small></button>
           </div>
         </div>
         <div class="ap-block">
@@ -8061,7 +8086,7 @@ function showView(name) {
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
   if (name === 'team') teamOpen(); else teamClose();
   if (name === 'memory') refreshMemory();
-  if (name === 'reminders') setRemindersView(document.querySelector('.rt-tab.active')?.dataset.rtab || 'reminders');
+  if (name === 'reminders') refreshReminders();
   if (name === 'skills') refreshSkills();
   if (name === 'files') refreshFiles(STATE.filePath || '');
   if (name === 'logs') { refreshLogs(); startLogsAutoRefresh(); }
@@ -9170,6 +9195,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
           // expanded, which is the thing you actually want to check.
           if (pendingTool.div._toolName === 'run_command' && pendingTool.div._toolArgs) {
             fillCommandCard(pendingTool.div._toolArgs, raw, pendingTool.body);
+            // Open while it runs; once it has finished cleanly it folds away.
+            if (!/^\s*(error|traceback)|exit code [1-9]|command failed/i.test(raw.slice(0, 400)))
+              pendingTool.div.classList.remove('open');
           } else {
             pendingTool.body.textContent = raw;
           }
@@ -10711,62 +10739,6 @@ function stopLoadProgress() {
 // ============================================================
 // SERVER settings pane - live status card + actions
 // ============================================================
-// Reminders <-> Background tasks sub-tab switch (same UX as the Logs tabs).
-function setRemindersView(which) {
-  document.querySelectorAll('.rt-tab').forEach(b => b.classList.toggle('active', b.dataset.rtab === which));
-  const rv = document.getElementById('rtab-reminders'), tv = document.getElementById('rtab-tasks');
-  if (rv) rv.hidden = which !== 'reminders';
-  if (tv) tv.hidden = which !== 'tasks';
-  const sub = document.getElementById('rtab-sub');
-  if (sub) sub.textContent = which === 'tasks'
-    ? 'sub-agents you spawned - tap one to watch it'
-    : 'one-shot & recurring - set them in chat';
-  if (which === 'tasks') refreshTasks(); else refreshReminders();
-}
-document.querySelectorAll('.rt-tab').forEach(b =>
-  b.addEventListener('click', () => setRemindersView(b.dataset.rtab)));
-
-// Background tasks (sub-agents) for the Reminders & tasks tab. Reads the same
-// transcript activity the audit trail uses; clicking a row opens its transcript
-// so you can watch what a background agent actually did, tool by tool.
-async function refreshTasks() {
-  const box = document.getElementById('tasks-box');
-  if (!box) return;
-  try {
-    const r = await api('/api/subagent/activity?limit=40');
-    const agents = (r && r.agents) || [];
-    if (!agents.length) {
-      box.innerHTML = '<div class="list-empty">No background tasks yet.<br>Ask for one - <i>"research X in the background"</i>.</div>';
-      return;
-    }
-    const rel = (m) => { const s = Date.now() / 1000 - (m || 0);
-      return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + 'm ago'
-        : s < 86400 ? Math.round(s / 3600) + 'h ago' : Math.round(s / 86400) + 'd ago'; };
-    const statusPill = (s) => s === 'running' ? '<span class="pill pill-soft">⟳ running</span>'
-      : s === 'failed' ? '<span class="pill pill-bad">failed</span>'
-      : '<span class="pill pill-ok">done</span>';
-    box.innerHTML = agents.map(a => {
-      const title = a.name || a.prompt || ((a.persona || 'sub-agent') + ' task');
-      return `
-      <div class="lcard" data-agent="${esc(a.agent_id)}" style="cursor:pointer">
-        <div class="lc-main">
-          <div style="color:var(--fg);font-weight:600;font-size:13px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(title)}</div>
-          <div class="lc-badges" style="align-items:center">
-            ${a.persona ? '<span class="pill pill-soft">' + esc(a.persona) + '</span>' : ''}
-            ${statusPill(a.status)}
-            <span style="color:var(--fg-faint);font-size:11px">${rel(a.mtime)}</span>
-          </div>
-        </div>
-        <span class="model-row-chevron" aria-hidden="true">▾</span>
-      </div>`;
-    }).join('');
-    box.querySelectorAll('[data-agent]').forEach(el =>
-      el.addEventListener('click', () => openTaskTranscript(el.getAttribute('data-agent'))));
-  } catch (e) {
-    box.innerHTML = '<div class="list-empty">Could not load tasks.</div>';
-  }
-}
-
 async function openTaskTranscript(agentId) {
   try {
     const r = await api('/api/subagent/transcript?agent_id=' + encodeURIComponent(agentId));
@@ -15786,10 +15758,15 @@ function hideWelcomeCard(remember) {
 
 // Hide the welcome card on the first real user message (it's done its job).
 const _origSend = send;
-send = async function(forced = null) {
+// Every argument goes through: dropping the options turned a notification
+// flush into a visible "you" message carrying the sentinel.
+send = async function(forced = null, displayAs = null, opts = {}) {
   const p = (forced ?? input.value).trim();
   if (p) hideWelcomeCard(false);
-  return _origSend(forced);
+  if (p && !opts.notify && !opts.silent) roomIntentFrom(p);
+  const out = await _origSend(forced, displayAs, opts);
+  if (p && !opts.notify) roomAfterReply();
+  return out;
 };
 
 // ============================================================
@@ -17182,6 +17159,15 @@ function teamRole(persona) {
 }
 const READING_TOOLS = /^(web_search|web_fetch|read_file|grep_search|find_file|list_dir|summarize_file|search_chats|browse|memory_recall|read_pdf)/;
 function teamNeedsYou(a) { return !!a.blocked && a.status === 'working'; }
+// A helper run by another agent CLI carries that CLI's monogram before its name.
+function teamMini(a) {
+  const h = a && a.runtime && HARNESS[a.runtime];
+  return h ? `<span class="hx-mini" style="--hx:${h.c}" title="${esc(h.label + ' by ' + h.maker)}">${esc(h.label[0])}</span>` : '';
+}
+function teamWhat(a) {
+  const h = a && a.runtime && HARNESS[a.runtime];
+  return h ? h.label + ' · ' + h.maker : (a.persona || '');
+}
 function teamActivity(a) {
   if (a.status === 'failed') return "Didn't finish: " + (a.preview || 'no reason given');
   if (a.status === 'stopped') return 'Stopped when Hearth closed';
@@ -17262,12 +17248,16 @@ function teamRender() {
     row.innerHTML = `
       <div class="tm-ava tm-ini" style="--h:${_teamHue(a.name || a.id)}">${esc((a.name || a.persona || '?').slice(0, 1).toUpperCase())}</div>
       <div style="min-width:0">
-        <div class="tm-name">${esc(a.name || a.persona || 'helper')}<small>${esc(a.persona || '')}</small></div>
+        <div class="tm-name">${teamMini(a)}${esc(a.name || a.persona || 'helper')}<small>${esc(teamWhat(a))}</small></div>
         <div class="tm-act">${esc(teamActivity(a))}</div>
       </div>
       <div class="tm-meta"><div class="tm-chip ${st}">${label}</div><div>${a.tools_used ? a.tools_used + ' steps · ' : ''}${teamAgo(a.updated)}</div></div>
-      ${TEAM.open.has(a.id) ? `<div class="tm-detail"><b>Asked to</b><p>${esc(a.prompt || '')}</p>${a.preview ? `<b>${a.status === 'working' ? 'Latest' : 'Result'}</b><p>${esc(a.preview)}</p>` : ''}</div>` : ''}`;
-    row.addEventListener('click', () => { TEAM.open.has(a.id) ? TEAM.open.delete(a.id) : TEAM.open.add(a.id); teamRender(); });
+      ${TEAM.open.has(a.id) ? `<div class="tm-detail"><b>Asked to</b><p>${esc(a.prompt || '')}</p>${a.preview ? `<b>${a.status === 'working' ? 'Latest' : 'Result'}</b><p>${esc(a.preview)}</p>` : ''}<button class="tm-open-log" data-log="${esc(a.id)}">See every step</button></div>` : ''}`;
+    row.addEventListener('click', (e) => {
+      const log = e.target.closest('[data-log]');
+      if (log) { e.stopPropagation(); openTaskTranscript(log.dataset.log); return; }
+      TEAM.open.has(a.id) ? TEAM.open.delete(a.id) : TEAM.open.add(a.id); teamRender();
+    });
     box.appendChild(row);
   }
 }
@@ -17298,7 +17288,7 @@ TEAM.timer = setInterval(teamPoll, 8000);
 // Coordinates are the room image's own pixels (1536 x 1024).
 const ROOM = {
   W: 1536, H: 1024, raf: 0, last: 0, imgs: {}, bg: null, props: null, man: null,
-  people: new Map(), sel: null,
+  people: new Map(), sel: null, says: new Map(), hits: [], labelSig: '', intent: null,
   // Desk anchors: the middle of each desk's front edge, on the floor.
   desks: [[330, 648], [610, 648], [900, 648], [1190, 648], [330, 886], [610, 886], [900, 886], [1190, 886]],
   spots: {
@@ -17400,16 +17390,43 @@ function roomSeat(p) {
   const d = ROOM.desks[p.desk];
   return [d[0], d[1] + SEAT_DY];
 }
+// Where JARVIS thinks changes from turn to turn, and what it is doing picks
+// the place: reading at a shelf, writing at a free desk, pacing by the board.
+const MAIN_THINK = [['fireSide', 'think'], ['hearthside', 'think'], ['windowSeat', 'think'], ['board', 'think'], ['rug', 'think']];
+const MAIN_IDLE = [['fire', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfR', 'read'], ['hearthside', 'gaze']];
+const MAIN_IDLE_WORDS = { fire: 'by the fire', windowSeat: 'at the window', coffee: 'making coffee', shelfR: 'reading', hearthside: 'by the hearth',
+                         shelfL: 'reading', rug: 'stretching' };
+function roomMainIdleWord(p) {
+  if (ROOM.intent && ROOM.intent.until > Date.now()) return MAIN_IDLE_WORDS[ROOM.intent.spot] || 'around';
+  return MAIN_IDLE_WORDS[MAIN_IDLE[Math.floor(Date.now() / 45000 + p.seed) % MAIN_IDLE.length][0]];
+}
+function roomMainGoal(p) {
+  const ms = String(window._mainState || 'idle');
+  const busy = !/idle/.test(ms);
+  if (busy && !p.wasBusy) { p.turn = (p.turn || 0) + 1; p.desk = null; }
+  p.wasBusy = busy;
+  const now = Date.now();
+  if (p.pokeUntil > now) return { at: p.pos, pose: p.pokePose || 'raise' };
+  if ($('perm-strip') && !$('perm-strip').hidden) return { at: ROOM.spots.rug, pose: 'raise' };
+  if (ROOM.intent && ROOM.intent.until > now) return { at: ROOM.spots[ROOM.intent.spot], pose: ROOM.intent.pose };
+  if (!busy) {
+    const [spot, pose] = MAIN_IDLE[Math.floor(now / 45000 + p.seed) % MAIN_IDLE.length];
+    return { at: ROOM.spots[spot], pose };
+  }
+  const tool = (ms.match(/calling ([a-z_]+)/) || [])[1] || '';
+  if (/read|grep|find|list|search|fetch|browse|recall|pdf/.test(tool))
+    return { at: p.turn % 2 ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: 'read' };
+  if (/write|edit|create|run_command|start_job|delegate/.test(tool)) {
+    if (p.desk == null) p.desk = roomDeskFor(p.id);
+    if (p.desk != null) return { at: roomSeat(p), pose: 'type', seated: true };
+  }
+  const [spot, pose] = MAIN_THINK[(p.turn + p.seed) % MAIN_THINK.length];
+  return { at: ROOM.spots[spot], pose };
+}
 function roomGoal(p, a) {
   // Where the person should be and what they are doing, from real state.
-  if (a.role === 'main') {
-    const ms = String(window._mainState || 'idle');
-    const perm = $('perm-strip') && !$('perm-strip').hidden;
-    if (perm) return { at: ROOM.spots.rug, pose: 'raise' };
-    if (/idle/.test(ms)) return { at: ROOM.spots.fire, pose: 'gaze' };
-    if (/calling|running|writing .* call/.test(ms)) return { at: ROOM.spots.board, pose: 'think' };
-    return { at: ROOM.spots.fireSide, pose: 'think' };
-  }
+  if (a.role === 'main') return roomMainGoal(p);
+  if (p.pokeUntil > Date.now()) return { at: p.pos, pose: p.pokePose || 'raise', seated: false };
   const seat = p.desk != null ? roomSeat(p) : ROOM.spots.rug;
   const beside = [seat[0] + 92, seat[1] + 6];
   if (a.status === 'working') {
@@ -17455,6 +17472,11 @@ function roomSync(list) {
 function roomTick(t) {
   const dt = Math.min(0.1, (t - (ROOM.last || t)) / 1000);
   ROOM.last = t;
+  const busyNow = !/idle/.test(String(window._mainState || 'idle'));
+  const mainSay = ROOM.says.get('__main');
+  if (busyNow && (!mainSay || mainSay.until < Date.now() || mainSay.text === '•••')) {
+    if (!mainSay || mainSay.text !== '•••' || mainSay.until < Date.now() + 500) roomSay('__main', '•••', 1500);
+  }
   for (const [id, p] of ROOM.people) {
     if (p.enterAt && t < p.enterAt) { p.waiting = true; continue; }
     p.waiting = false;
@@ -17525,7 +17547,7 @@ function roomDraw(t) {
     ctx.fill();
   }
   const [cw, ch] = ROOM.man.cell;
-  const labels = [];
+  const labels = [], hits = [];
   for (const it of items) {
     if (it.kind === 'prop') {
       const r = roomProp(it.name); if (!r) continue;
@@ -17561,6 +17583,8 @@ function roomDraw(t) {
     ctx.restore();
     const headY = typing ? p.pos[1] - 112 - lift : p.pos[1] - 142;
     labels.push({ p, x: p.pos[0] * kx / dpr, y: headY * ky / dpr });
+    hits.push({ p, x0: (p.pos[0] - 34) * kx / dpr, x1: (p.pos[0] + 34) * kx / dpr,
+                y0: (p.pos[1] - (typing ? 118 : 138) - lift) * ky / dpr, y1: (p.pos[1] - lift + 4) * ky / dpr, z: p.pos[1] });
   }
 
   // Firelight over everything, so the room and the people share one light.
@@ -17569,18 +17593,108 @@ function roomDraw(t) {
   grad.addColorStop(0, `rgba(255,150,60,${fl})`); grad.addColorStop(1, 'rgba(255,150,60,0)');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, cv.width, cv.height);
 
+  ROOM.hits = hits;
+  // Labels and speech are redrawn only when something about them changed, so
+  // a click on one lands on the same element it was aimed at.
+  const now = Date.now();
+  const sig = labels.map(({ p, x, y }) => {
+    const say = ROOM.says.get(p.id);
+    return [p.id, Math.round(x), Math.round(y), p.agent.status, p.agent.blocked, ROOM.sel === p.id,
+            say && say.until > now ? say.text : ''].join('|');
+  }).join('~');
+  if (sig === ROOM.labelSig) return;
+  ROOM.labelSig = sig;
   const box = $('tm-labels');
   box.innerHTML = '';
+  const placed = [];
   for (const { p, x, y } of labels) {
     const a = p.agent;
     const st = teamNeedsYou(a) ? 'needs' : a.status;
     const el = document.createElement('div');
     el.className = 'tm-label ' + (a.role === 'main' ? '' : st) + (ROOM.sel === p.id ? ' sel' : '');
     el.style.left = x + 'px'; el.style.top = y + 'px';
-    el.textContent = a.name || a.persona || 'helper';
-    el.addEventListener('click', () => roomSelect(p.id));
+    el.innerHTML = teamMini(a) + esc(a.name || a.persona || 'helper');
+    el.addEventListener('click', () => roomPoke(p));
     box.appendChild(el);
+    const say = ROOM.says.get(p.id);
+    if (say && say.until > now) {
+      const b = document.createElement('div');
+      b.className = 'tm-say' + (say.text === '•••' ? ' dots' : '');
+      b.style.left = x + 'px'; b.style.top = y + 'px';
+      b.textContent = say.text;
+      box.appendChild(b);
+      // Kept inside the room; the tail still points at whoever is speaking.
+      const bw = b.offsetWidth, sw = box.clientWidth;
+      const cx = Math.max(bw / 2 + 6, Math.min(sw - bw / 2 - 6, x));
+      b.style.left = cx + 'px';
+      b.style.setProperty('--tail', (x - cx) + 'px');
+      // Two people close together: the later bubble sits above the other.
+      let r = b.getBoundingClientRect(), lift = 0;
+      for (const o of placed) {
+        if (r.left < o.right + 4 && r.right > o.left - 4 && r.top - lift < o.bottom + 4 && r.bottom - lift > o.top - 4)
+          lift += (r.bottom - lift) - o.top + 6;
+      }
+      if (lift) { b.style.top = (y - lift) + 'px'; r = b.getBoundingClientRect(); }
+      placed.push(r);
+      if (!say.shown) {
+        say.shown = true;
+        const sp = springEasing(0.4, 0.8);
+        b.animate([{ opacity: 0, transform: 'translate(-50%, calc(-100% - 18px)) scale(.9)' },
+                   { opacity: 1, transform: 'translate(-50%, calc(-100% - 26px)) scale(1)' }], { duration: sp.duration, easing: sp.easing });
+      }
+    }
   }
+}
+// Something said over someone's head for a while.
+function roomSay(id, text, ms = 3600) {
+  ROOM.says.set(id, { text: String(text || '').slice(0, 220), until: Date.now() + ms });
+  ROOM.labelSig = '';
+}
+// Clicking someone: they turn, wave and say where they are with the work.
+const MAIN_HELLOS = ['Hey. What do you need?', 'Right here.', "Mm? I'm listening.", 'Say the word.', 'At your service.'];
+function roomPoke(p) {
+  const a = p.agent, now = Date.now();
+  p.pokeUntil = now + 1400;
+  p.pokePose = ['raise', 'stretch', 'raise', 'gaze'][Math.floor(Math.random() * 4)];
+  if (a.role === 'main') {
+    const busy = !/idle/.test(String(window._mainState || 'idle'));
+    roomSay(p.id, busy ? 'Still on it. Give me a moment.' : MAIN_HELLOS[Math.floor(Math.random() * MAIN_HELLOS.length)]);
+    const inp = $('tm-input'); if (inp) inp.focus();
+    return;
+  }
+  const short = (t, n = 90) => { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+  let line;
+  if (teamNeedsYou(a)) line = `I need your OK to use ${a.blocked}.`;
+  else if (a.status === 'working') line = a.activity === 'tool' ? `Busy with ${a.tool}. ${short(a.prompt, 60)}` : `On it: ${short(a.prompt, 70)}`;
+  else if (a.status === 'done') line = a.preview ? `Done. ${short(a.preview)}` : 'All done.';
+  else if (a.status === 'failed') line = `Didn't make it. ${short(a.preview, 70)}`;
+  else line = 'Stopped when Hearth closed.';
+  roomSay(p.id, line, 4200);
+  roomSelect(p.id, true);
+}
+// What was asked for moves JARVIS in the room: coffee, a book, the fire.
+const ROOM_INTENTS = [
+  [/\b(coffee|tea|chai|brew|espresso|latte|drink)\b/i, 'coffee', 'coffee'],
+  [/\b(book|read|library|shelf)\b/i, 'shelfL', 'read'],
+  [/\b(fire|fireplace|warm|cold|cozy|cosy)\b/i, 'fire', 'gaze'],
+  [/\b(window|outside|stars?|sky|rain|moon|night)\b/i, 'windowSeat', 'gaze'],
+  [/\b(stretch|tired|break|rest|relax)\b/i, 'rug', 'stretch'],
+];
+function roomIntentFrom(text) {
+  for (const [re, spot, pose] of ROOM_INTENTS) {
+    if (re.test(text)) { ROOM.intent = { spot, pose, until: Date.now() + 25000 }; return; }
+  }
+}
+// JARVIS's answer, over its head, when the room is open.
+function roomAfterReply() {
+  if (STATE.view !== 'team' || !ROOM.people.has('__main')) return;
+  const c = activeConvo();
+  const last = c && [...(c.messages || [])].reverse().find(m => m.role === 'assistant');
+  if (!last || !last.content) return;
+  let t = String(last.content).replace(/```[\s\S]*?```/g, ' ').replace(/[#*_`>|]/g, '').replace(/\s+/g, ' ').trim();
+  const first = t.match(/^.{20,200}?[.!?](\s|$)/);
+  t = first ? first[0].trim() : (t.length > 200 ? t.slice(0, 199) + '…' : t);
+  roomSay('__main', t, Math.min(12000, 3500 + t.length * 45));
 }
 function roomFace(role, seed) {
   // The head and shoulders of the idle frame, for the portrait strip.
@@ -17603,34 +17717,52 @@ function roomStripRender() {
     const a = p.agent;
     const st = a.role === 'main' ? 'working' : (teamNeedsYou(a) ? 'needs' : a.status);
     const word = a.role === 'main'
-      ? (/idle/.test(String(window._mainState || 'idle')) ? 'by the fire' : String(window._mainState))
+      ? (/idle/.test(String(window._mainState || 'idle')) ? roomMainIdleWord(p) : String(window._mainState))
       : { working: a.activity === 'tool' ? a.tool : 'thinking', needs: 'needs you', done: 'done', failed: "didn't finish", stopped: 'stopped' }[st];
     const card = document.createElement('div');
     card.className = 'tm-card' + (ROOM.sel === p.id ? ' sel' : '');
     const face = document.createElement('div'); face.className = 'tm-face'; face.appendChild(roomFace(a.role, p.seed));
     const txt = document.createElement('div');
-    txt.innerHTML = `<b>${esc(a.name || a.persona)}</b><small>${esc(a.role === 'main' ? 'runs the house' : (a.persona || ''))}</small><i class="${st}">${esc(word || '')}</i>`;
+    txt.innerHTML = `<b>${teamMini(a)}${esc(a.name || a.persona)}</b><small>${esc(a.role === 'main' ? 'runs the house' : teamWhat(a))}</small><i class="${st}">${esc(word || '')}</i>`;
     card.append(face, txt);
-    card.addEventListener('click', () => roomSelect(p.id));
+    card.addEventListener('click', () => roomPoke(p));
     strip.appendChild(card);
   }
 }
-function roomSelect(id) {
-  ROOM.sel = ROOM.sel === id ? null : id;
+function roomSelect(id, keep = false) {
+  ROOM.sel = keep ? id : (ROOM.sel === id ? null : id);
   const side = $('tm-side');
   const p = ROOM.people.get(ROOM.sel);
   if (!p) { side.hidden = true; roomStripRender(); return; }
   const a = p.agent;
-  if (a.role === 'main') { ROOM.sel = null; side.hidden = true; showView('chat'); return; }
+  if (a.role === 'main') { ROOM.sel = null; side.hidden = true; roomStripRender(); return; }
   side.hidden = false;
-  side.innerHTML = `<button class="tm-close" title="Close">×</button><h4>${esc(a.name || a.persona)}</h4>
-    <div class="tm-side-sub">${esc(a.persona || '')} · ${a.tools_used || 0} steps · ${teamAgo(a.updated)}</div>
+  side.innerHTML = `<button class="tm-close" title="Close">×</button><h4>${teamMini(a)}${esc(a.name || a.persona)}</h4>
+    <div class="tm-side-sub">${esc(teamWhat(a))} · ${a.tools_used || 0} steps · ${teamAgo(a.updated)}</div>
     <p>${esc(teamActivity(a))}</p>
     <b>Asked to</b><p>${esc(a.prompt || '')}</p>
-    ${a.preview ? `<b>${a.status === 'working' ? 'Latest' : 'Result'}</b><p>${esc(a.preview)}</p>` : ''}`;
-  side.querySelector('.tm-close').addEventListener('click', () => roomSelect(id));
+    ${a.preview ? `<b>${a.status === 'working' ? 'Latest' : 'Result'}</b><p>${esc(a.preview)}</p>` : ''}
+    <button class="tm-open-log">See every step</button>`;
+  side.querySelector('.tm-close').addEventListener('click', () => roomSelect(null));
+  side.querySelector('.tm-open-log').addEventListener('click', () => openTaskTranscript(a.id));
   roomStripRender();
 }
+$('tm-canvas').addEventListener('click', (e) => {
+  const r = $('tm-canvas').getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  const hit = ROOM.hits.filter(h => x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1).sort((a, b) => b.z - a.z)[0];
+  if (hit) roomPoke(hit.p);
+});
+$('tm-compose').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const inp = $('tm-input');
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = '';
+  // Mid-turn it steers the running one, like typing in the chat does.
+  if (STATE.streaming) { steerMessage(text); roomSay('__main', 'Noted.', 1800); return; }
+  send(text);
+});
 async function roomStart() {
   if (ROOM.raf) return;
   if (!(await roomLoad())) return;

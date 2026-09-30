@@ -18,6 +18,83 @@ import webbrowser
 from typing import Optional
 
 
+def _own_hwnd() -> int:
+    """This process's main top-level window, or 0."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        cur_pid = ctypes.windll.kernel32.GetCurrentProcessId()
+        found = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def _enum(hwnd, _l):
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value == cur_pid and not user32.GetWindow(hwnd, 4):
+                rect = wintypes.RECT()
+                user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                area = (rect.right - rect.left) * (rect.bottom - rect.top)
+                if area > 10000:
+                    found.append((area, hwnd))
+            return True
+
+        user32.EnumWindows(_enum, 0)
+        return max(found)[1] if found else 0
+    except Exception:
+        return 0
+
+
+def _icon_file(look: str) -> Optional[str]:
+    """The window icon for a look: the H for Classic, the hearth otherwise.
+    Windows wants an .ico for a window icon; elsewhere a .png works."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    dirs = [os.path.join(os.path.dirname(here), "assets"),
+            os.path.join(getattr(sys, "_MEIPASS", ""), "assets")]
+    stem = "icon_classic" if look == "classic" else "icon"
+    for d in dirs:
+        for name in (stem + ".ico", "icon.ico", stem + ".png", "icon.png"):
+            f = os.path.join(d, name)
+            if os.path.isfile(f):
+                return f
+    return None
+
+
+def _set_window_icon(look: str) -> bool:
+    """Swap the running window's title-bar and taskbar icon."""
+    f = _icon_file(look)
+    hwnd = _own_hwnd()
+    if not f or not hwnd or not f.lower().endswith(".ico"):
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.LoadImageW.restype = ctypes.c_void_p
+        user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+        IMAGE_ICON, LR_LOADFROMFILE, WM_SETICON = 1, 0x10, 0x80
+        big = user32.LoadImageW(None, f, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+        small = user32.LoadImageW(None, f, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+        if big:
+            user32.SendMessageW(hwnd, WM_SETICON, 1, big)
+        if small:
+            user32.SendMessageW(hwnd, WM_SETICON, 0, small)
+        return bool(big or small)
+    except Exception:
+        return False
+
+
+def _saved_look(url: str) -> str:
+    try:
+        import json as _json
+        import urllib.request
+        with urllib.request.urlopen(url.rstrip("/") + "/api/settings", timeout=2) as r:
+            return str(_json.load(r).get("ui_theme") or "classic")
+    except Exception:
+        return "classic"
+
+
 def _force_foreground_win() -> bool:
     """Bring OUR OWN top-level window to the foreground on Windows, beating the
     foreground-lock that makes a bare SetForegroundWindow no-op (just flashes the
@@ -120,20 +197,8 @@ def main(argv: Optional[list] = None) -> int:
     # PyWebView on Windows REQUIRES an .ico file for the window icon
     # (PNG raises System.ArgumentException). Prefer .ico, fall back to .png
     # (which works on Linux), else no icon at all.
-    here = os.path.dirname(os.path.abspath(__file__))
-    asset_dir = os.path.join(os.path.dirname(here), "assets")
-    # In PyInstaller bundles, _MEIPASS holds the unpacked tree
-    bundle_assets = os.path.join(getattr(sys, "_MEIPASS", ""), "assets")
-    icon_path = None
-    for candidate in (
-        os.path.join(asset_dir, "icon.ico"),
-        os.path.join(bundle_assets, "icon.ico"),
-        os.path.join(asset_dir, "icon.png"),
-        os.path.join(bundle_assets, "icon.png"),
-    ):
-        if candidate and os.path.isfile(candidate):
-            icon_path = candidate
-            break
+    # Classic keeps the original H; the other looks use the hearth.
+    icon_path = _icon_file(_saved_look(args.url))
     kwargs = dict(
         width=args.width, height=args.height, min_size=(900, 600),
         background_color="#0a0a0c",
@@ -160,6 +225,9 @@ def main(argv: Optional[list] = None) -> int:
     _win_holder = {}
 
     class _WinApi:
+        def set_icon(self, look):
+            return _set_window_icon(str(look or ""))
+
         def focus_window(self):
             win = _win_holder.get("win")
             # pywebview's own restore/show first (un-minimize, cross-platform)...

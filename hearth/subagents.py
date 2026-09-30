@@ -26,6 +26,7 @@ import asyncio
 from . import env as _env
 import json
 import os
+import random
 import re
 import threading
 import time
@@ -268,7 +269,7 @@ _TEAM_CACHE: Dict[str, Tuple[Tuple[float, int], Dict[str, Any]]] = {}
 def _read_agent(p: Path) -> Dict[str, Any]:
     """What one transcript says about its agent: who it is, what it is doing
     right now, and how it ended if it has."""
-    info: Dict[str, Any] = {"id": p.stem, "persona": "", "name": "", "prompt": "",
+    info: Dict[str, Any] = {"id": p.stem, "persona": "", "name": "", "runtime": "", "prompt": "",
                             "ended": None, "tools_used": 0, "activity": "thinking",
                             "tool": "", "blocked": "", "preview": "", "started": ""}
     pending: List[str] = []
@@ -283,6 +284,7 @@ def _read_agent(p: Path) -> Dict[str, Any]:
                 if k == "start":
                     info["persona"] = rec.get("persona") or ""
                     info["name"] = rec.get("name") or ""
+                    info["runtime"] = rec.get("runtime") or ""
                     info["prompt"] = (rec.get("prompt") or "").strip()[:200]
                     info["started"] = rec.get("ts") or ""
                 elif k == "assistant_tool_call":
@@ -386,6 +388,27 @@ def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
         f"  <result>{notif.get('result_text', '')}</result>\n"
         f"</task-notification>"
     )
+
+
+# First names for helpers the model didn't name. A role ("coder") or a
+# product ("Claude Code") is what a helper is, not who; the Team view shows
+# that underneath the name.
+_FIRST_NAMES = ["Maya", "Noah", "Ivy", "Theo", "Clara", "Lucas", "Aria", "Kai", "Zara", "Leo",
+                "Nia", "Omar", "Iris", "Ravi", "Sana", "Milo", "Ezra", "Lena", "Arjun", "Yuki",
+                "Tara", "Finn", "Ada", "Jonah", "Mira", "Dev", "Rosa", "Hugo"]
+
+
+def helper_name(given: str = "", *what: str) -> str:
+    """`given` if it is a real name, else a first name no working helper has."""
+    g = (given or "").strip()
+    generic = {w.strip().lower() for w in what if w} | {"helper", "agent", "subagent", "member", "worker"}
+    if g and g.lower() not in generic:
+        return g
+    with _BG_RESULTS_LOCK:
+        running = set(_BG_RUNNING)
+    busy = {str((hit[1] or {}).get("name") or "").lower() for aid, hit in _TEAM_CACHE.items() if aid in running}
+    free = [n for n in _FIRST_NAMES if n.lower() not in busy] or _FIRST_NAMES
+    return random.choice(free)
 
 
 def _transcript_path(agent_id: str) -> Path:
@@ -691,6 +714,7 @@ async def _run_subagent_async(
     tpath = _transcript_path(agent_id)
     _append_transcript(tpath, {
         "kind": "start", "persona": persona.get("name") or persona.get("slug"),
+        "name": persona.get("_label") or "",
         "prompt": user_prompt, "max_turns": max_turns,
     })
 
@@ -990,7 +1014,7 @@ def spawn_subagent(persona: str, prompt: str,
     # Carry the human label through both paths so the toast / notification /
     # transcript can read it. Empty string is fine — surfaces fall back to
     # the persona slug ("researcher") when no name is given.
-    label = (name or "").strip()
+    label = helper_name(name or "", persona, p.get("name") or "")
     p = dict(p)
     p["_label"] = label
 
