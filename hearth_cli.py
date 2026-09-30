@@ -1065,7 +1065,7 @@ class JarvisCLI:
                 from prompt_toolkit.completion import WordCompleter
                 _slash = ["/help", "/brain", "/endpoint", "/provider", "/models", "/model", "/load",
                           "/tools", "/clear", "/compact", "/context", "/tokens", "/chats", "/chat",
-                          "/history", "/workspace", "/log", "/mem", "/curate", "/rules", "/name", "/me",
+                          "/history", "/workspace", "/log", "/mem", "/curate", "/rules", "/name", "/me", "/team",
                           "/learn", "/migrate", "/import-memory", "/import", "/jobs", "/mcp", "/agent", "/skill",
                           "/skills", "/voice", "/voices", "/stt", "/listen", "/sleep", "/wake", "/think",
                           "/multi", "/mode", "/perms", "/allow", "/disallow", "/allowed", "/lockdown",
@@ -2053,6 +2053,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/allowed{C_RESET}               list paths the assistant can write to")
             print(f"  {C_TOOL}/lockdown [on|off]{C_RESET}     keep reads inside the workspace too")
             print(f"  {C_TOOL}/me{C_RESET}                    what I call you, how I sound, headphones or speakers, what I may do")
+            print(f"  {C_TOOL}/team [n]{C_RESET}              helpers working for me, and every step of one")
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
             print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
             print(f"  {C_TOOL}/repair{C_RESET}                restore deleted/corrupted files by re-applying this version")
@@ -2091,6 +2092,54 @@ class JarvisCLI:
                     print(f"{C_DIM}skipped. run /update anytime.{C_RESET}")
             except Exception as e:
                 print(f"{C_ERR}update unavailable: {type(e).__name__}: {e}{C_RESET}")
+            return True
+        if low == "/team" or low.startswith("/team "):
+            # The same helpers the window's Team view shows, newest first.
+            from hearth import subagents as _sa, external_agents as _xa
+            agents = sorted(_sa.team_state(since_s=7 * 86400, limit=20), key=lambda a: a.get("updated") or 0, reverse=True)
+            arg = cmd.split(None, 1)[1].strip() if " " in cmd.strip() else ""
+            if not agents:
+                print(f"  {C_DIM}No helpers yet. Ask for a bigger job, or hand one to another agent: "
+                      f"\"have Claude Code ...\".{C_RESET}")
+                return True
+            if arg.isdigit() and 1 <= int(arg) <= len(agents):
+                a = agents[int(arg) - 1]
+                path = _sa._transcript_path(a["id"])
+                print(f"  {C_TOOL}{a.get('name') or a.get('persona')}{C_RESET}  {C_DIM}{a.get('persona', '')}{C_RESET}")
+                try:
+                    lines = open(path, encoding="utf-8").read().splitlines()
+                except OSError:
+                    lines = []
+                for ln in lines[-60:]:
+                    try:
+                        rec = json.loads(ln)
+                    except ValueError:
+                        continue
+                    k = rec.get("kind")
+                    if k == "start":
+                        print(f"  {C_DIM}asked:{C_RESET} {str(rec.get('prompt') or '')[:300]}")
+                    elif k == "assistant_tool_call":
+                        for c in rec.get("calls") or []:
+                            print(f"  {C_TOOL}  🔧 {c.get('name')}{C_RESET} {C_DIM}{str(c.get('args') or '')[:140]}{C_RESET}")
+                    elif k == "tool_result":
+                        flat = " ".join(str(rec.get("preview") or "").split())
+                        print(f"  {C_DIM}    ↳ {flat[:140]}{C_RESET}")
+                    elif k == "assistant_final":
+                        print(f"  {C_OK}answer:{C_RESET} {str(rec.get('text') or '')[:1500]}")
+                    elif k == "end" and not rec.get("ok"):
+                        print(f"  {C_ERR}stopped: {rec.get('error')}{C_RESET}")
+                return True
+            labels = {k: v["label"] for k, v in _xa.AGENTS.items()}
+            colour = {"working": C_OK, "done": C_DIM, "failed": C_ERR, "stopped": C_WARN}
+            for n, a in enumerate(agents, 1):
+                st = "needs you" if a.get("blocked") and a.get("status") == "working" else a.get("status", "")
+                what = labels.get(a.get("runtime") or "", a.get("persona") or "helper")
+                doing = (f"using {a['tool']}" if a.get("activity") == "tool" and st == "working"
+                         else (a.get("preview") or a.get("prompt") or ""))
+                doing = doing.replace("\n", " ")[:90]
+                print(f"  {C_DIM}{n:>2}{C_RESET}  {C_TOOL}{(a.get('name') or what):<8}{C_RESET} "
+                      f"{C_DIM}{what:<14}{C_RESET} {colour.get(a.get('status'), C_WARN)}{st:<9}{C_RESET} {C_DIM}{doing}{C_RESET}")
+            print(f"  {C_DIM}/team <n> shows every step of one. Shell jobs are under /jobs.{C_RESET}")
             return True
         if low == "/me":
             # The personal part of first-run setup, any time. Enter keeps an answer.
