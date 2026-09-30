@@ -49,6 +49,16 @@ function Build-Edition([bool]$lite, [string]$destTop) {
 Build-Edition $false "dist_full"
 Build-Edition $true  "dist_lite"
 
+# Check what was built before anything gets packaged: voice, the engine, the
+# edition marker, every tool, the version, and a Defender scan of the exes.
+# Past releases shipped Full without voice, an old engine, and Lite without
+# voice, all of which this catches.
+Write-Host "=== Verifying builds ===" -ForegroundColor Cyan
+& $py scripts\verify_build.py dist_full\Hearth --edition full
+if ($LASTEXITCODE -ne 0) { throw "Full build failed verification - not packaging it." }
+& $py scripts\verify_build.py dist_lite\Hearth --edition lite
+if ($LASTEXITCODE -ne 0) { throw "Lite build failed verification - not packaging it." }
+
 Write-Host "=== Packaging installers ===" -ForegroundColor Cyan
 & $iscc /DSrcDir=dist_full\Hearth Hearth.iss
 if ($LASTEXITCODE -ne 0) { throw "Full installer failed" }
