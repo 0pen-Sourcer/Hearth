@@ -3516,16 +3516,16 @@
              Tree view is the v0.6 hero - same data, hierarchical render. -->
         <!-- Order: Graph first (the hero view), then Tree, then List. -->
         <div class="mem-view-toggle">
-          <button class="mem-view-btn active" data-mem-view="graph" title="Force-directed constellation graph">Graph</button>
+          <button class="mem-view-btn" data-mem-view="graph" title="Force-directed constellation graph">Graph</button>
           <button class="mem-view-btn" data-mem-view="tree" title="Grouped by sub-category">Tree</button>
-          <button class="mem-view-btn" data-mem-view="list" title="Flat searchable list">List</button>
+          <button class="mem-view-btn active" data-mem-view="list" title="Flat searchable list">List</button>
         </div>
         <input type="text" id="mem-search" placeholder="Search…">
       </div>
       <!-- Graph default-visible; List/Tree start hidden. Matches the toggle. -->
-      <div class="list-pane" id="mem-list" hidden></div>
+      <div class="list-pane" id="mem-list"></div>
       <div class="tree-pane" id="mem-tree" hidden></div>
-      <div class="graph-pane" id="mem-graph">
+      <div class="graph-pane" id="mem-graph" hidden>
         <svg id="mem-graph-svg" preserveAspectRatio="xMidYMid meet"></svg>
         <div id="mem-graph-tip" class="graph-tip" hidden></div>
         <div class="graph-help">drag nodes · hover for fact · click to open</div>
@@ -3574,20 +3574,20 @@
         </div>
       </div>
       <div id="rtab-reminders">
-        <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
+        <div class="hint" style="padding:0 24px 12px;color:var(--fg-dim);font-size:12.5px;line-height:1.5;">
           Just ask in chat - <i>"remind me to leave in 30 min"</i>, or
           <i>"every Monday 9am, search for new GPU benchmarks"</i> (those run a tool, not just a toast).
           Missed ones catch up next launch.
         </div>
-        <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 4px;margin:0 4px;">
+        <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 24px 24px;margin:0;">
           <div class="list-empty">loading reminders…</div>
         </div>
       </div>
       <div id="rtab-tasks" hidden>
-        <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
+        <div class="hint" style="padding:0 24px 12px;color:var(--fg-dim);font-size:12.5px;line-height:1.5;">
           Sub-agents you spawn run in the background. Tap one to watch its transcript, tool by tool.
         </div>
-        <div id="tasks-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 4px;margin:0 4px;">
+        <div id="tasks-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 24px 24px;margin:0;">
           <div class="list-empty">no background tasks yet</div>
         </div>
       </div>
@@ -3599,15 +3599,15 @@
         <h2>Skills</h2>
         <span class="sub">workflows Hearth can run - install more, or share your own</span>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;margin:0 4px 10px;">
-        <input type="text" id="skill-install-src" placeholder="install from GitHub:  owner/repo   (or a github URL / local path)" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 12px;font-size:13px;outline:none;" />
+      <div style="display:flex;gap:8px;align-items:center;margin:0 24px 10px;">
+        <input type="text" id="skill-install-src" placeholder="install from GitHub:  owner/repo   (or a github URL / local path)" style="flex:1;min-width:0;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r);color:var(--fg);padding:8px 12px;font-size:13px;outline:none;" />
         <button class="btn-mini" id="btn-skill-install">Install</button>
       </div>
-      <div class="hint" style="padding:0 4px 12px;color:var(--fg-faint);font-size:12px;line-height:1.5;">
+      <div class="hint" style="padding:0 24px 12px;color:var(--fg-dim);font-size:12.5px;line-height:1.5;">
         A skill is a folder with a SKILL.md. Install shows you what it can do before anything lands; its scripts only run through the normal permission prompt. Browse the community index:
         <a href="https://github.com/0pen-sourcer/awesome-hearth-skills" target="_blank" rel="noopener" style="color:var(--accent-2)">awesome-hearth-skills</a>.
       </div>
-      <div id="skills-box" style="overflow-y:auto;max-height:calc(100vh - 230px);padding:2px 4px;margin:0 4px;">
+      <div id="skills-box" style="overflow-y:auto;max-height:calc(100vh - 230px);padding:2px 24px 24px;margin:0;">
         <div class="list-empty">loading skills…</div>
       </div>
     </section>
@@ -9805,7 +9805,7 @@ $('mem-search').addEventListener('input', e => {
 });
 
 // ---- Tree view: collapsible type → sub-category → fact leaves -----------
-let MEM_VIEW = 'graph';                            // 'graph' | 'tree' | 'list' (graph is default hero view)
+let MEM_VIEW = 'list';                            // 'graph' | 'tree' | 'list' (graph is default hero view)
 const _treeCollapsed = new Set();                 // group ids the user collapsed
 const TYPE_LABELS = {
   user:      'User facts',
@@ -10640,6 +10640,11 @@ async function refreshReminders() {
   }
 }
 
+function skillSummary(desc) {
+  const d = String(desc || '');
+  const cut = d.search(/\s(?:Use (?:this )?when|NOT for|Prefer the|Only use)\b/);
+  return (cut > 0 ? d.slice(0, cut) : d).trim().replace(/[\s.,;:—-]+$/, '') + '.';
+}
 async function refreshSkills() {
   const box = document.getElementById('skills-box');
   if (!box) return;
@@ -10694,7 +10699,7 @@ async function refreshSkills() {
         <div class="lcard">
           <div class="lc-main">
             <div class="lc-title">${esc(s.name)}${ver}${badge}</div>
-            <div class="lc-desc">${esc(s.description || '')}</div>
+            <div class="lc-desc">${esc(skillSummary(s.description))}</div>
           </div>
           <div class="lc-actions">${rm}</div>
         </div>`;
