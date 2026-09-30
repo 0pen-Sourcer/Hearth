@@ -151,6 +151,10 @@
   }
 
   :root[data-ui="simple"] .status .st-detail { display: none; }
+  /* Simple is for everyday use: the machinery (logs, engine flags, MCP, the
+     per-tool permission table) shows only in Advanced. */
+  :root:not([data-ui="advanced"]) [data-adv],
+  :root:not([data-ui="advanced"]) .set-card:not(:has(> .field:not([data-adv]))) { display: none !important; }
   .mode-btn { gap: 7px; }
   .tool.t-slow .t-ms { color: var(--warn, #d9a441); }
   #mode-menu { min-width: 320px; }
@@ -3383,7 +3387,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           Files
         </button>
-        <button class="nav-btn" data-view="logs">
+        <button class="nav-btn" data-view="logs" data-adv>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
           Logs
         </button>
@@ -3756,11 +3760,11 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>
             <span>Appearance</span>
           </button>
-          <button class="settings-side-btn" data-st="server">
+          <button class="settings-side-btn" data-st="server" data-adv>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
             <span>Built-in server</span>
           </button>
-          <button class="settings-side-btn" data-st="mcp">
+          <button class="settings-side-btn" data-st="mcp" data-adv>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/><polyline points="22 4 12 14.01 9 11.01"/><path d="M2 12h6"/><path d="M16 12h6"/></svg>
             <span>MCP servers</span>
           </button>
@@ -4080,7 +4084,7 @@
           <div class="switch" data-key="think_default"></div>
         </div>
 
-        <div class="field">
+        <div class="field" data-adv>
           <div class="label">
             <div class="name">Reasoning effort</div>
             <div class="hint">How hard a cloud model thinks when reasoning is on. Model default lets it decide.</div>
@@ -4104,15 +4108,6 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Show memory tool cards</div>
-            <div class="hint">Hearth saves and looks up facts on most turns. Turn this off to hide those steps in the chat; what it remembers doesn't change.</div>
-          </div>
-          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" class="switch-box" id="setting-show-memory-tools"/>
-          </label>
-        </div>
-        <div class="field">
-          <div class="label">
             <div class="name">House rules</div>
             <div class="hint">Things it should always or never do, kept in a file it rereads every turn.</div>
           </div>
@@ -4129,7 +4124,7 @@
           </div>
         </div>
 
-        <div class="field" style="align-items:flex-start;">
+        <div class="field" data-adv style="align-items:flex-start;">
           <div class="label">
             <div class="name">Migrate from another agent</div>
             <div class="hint">Bring memory and skills over from Hermes or OpenClaw. API keys are never copied. Dry-run shows what would change before anything does.</div>
@@ -4166,15 +4161,57 @@
           </div>
         </div>
 
-        <div class="field">
+        <!-- Keep-warm toggle for /brain cloud switches -->
+        <h4 data-adv style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Local server</h4>
+        <div class="field" data-adv>
           <div class="label">
-            <div class="name">Reminders</div>
-            <div class="hint">Now have their own <b>Reminders</b> tab in the left sidebar - view, snooze, and cancel them there.</div>
+            <div class="name">Keep local model loaded when switching to cloud</div>
+            <div class="hint">Off frees graphics memory when you switch to a cloud model. On keeps the local one ready, so switching back is instant.</div>
           </div>
-          <button type="button" class="btn-mini" id="btn-go-reminders">Open Reminders</button>
+          <div class="switch" data-key="keep_local_warm"></div>
         </div>
 
-        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Chat</h4>
+<h4 data-adv style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
+        <div class="hint" data-adv style="margin-bottom:10px;">What each <b>risky</b> tool does when the AI calls it: <b>Ask</b> every time, <b>Allow</b> always, or <b>Deny</b> — a denied tool is hidden from the model entirely (saves the tokens its description would cost). Read-only tools (search, read, list) are always allowed and not shown.</div>
+        <input type="text" id="perm-search" data-adv placeholder="Search tools…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;margin-bottom:10px;">
+        <div id="perm-list" data-adv style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow:auto;"></div>
+
+        </div><!-- /pane behavior -->
+
+        <div class="settings-pane" data-st="appearance" hidden>
+        <h3>Appearance</h3>
+        <div class="ap-block">
+          <div class="ap-title">Mode</div>
+          <div class="ap-hint">Remembered across restarts.</div>
+          <div class="ap-modes" id="ap-modes">
+            <button type="button" class="ap-mode" data-mode="light"><span class="ap-prev ap-prev-light"><i></i><i></i></span><b>Light</b><small>Bright, for daytime</small></button>
+            <button type="button" class="ap-mode" data-mode="dark"><span class="ap-prev ap-prev-dark"><i></i><i></i></span><b>Dark</b><small>Low glare, warm greys</small></button>
+            <button type="button" class="ap-mode" data-mode="system"><span class="ap-prev ap-prev-sys"><i></i><i></i></span><b>System</b><small>Follows your Windows setting</small></button>
+            <button type="button" class="ap-mode" data-mode="classic"><span class="ap-prev ap-prev-classic"><i></i><i></i></span><b>Classic</b><small>The original violet look, the default</small></button>
+          </div>
+        </div>
+        <div class="ap-block">
+          <div class="ap-title">Interface</div>
+          <div class="ap-hint">How much of the machinery shows while Hearth works.</div>
+          <div class="ap-modes ap-two" id="ap-ui">
+            <button type="button" class="ap-mode" data-ui="simple"><b>Simple</b><small>For everyday use. Tool steps fold into one line, and logs, engine flags and per-tool permissions stay out of the way.</small></button>
+            <button type="button" class="ap-mode" data-ui="advanced"><b>Advanced</b><small>Everything: each tool call as its own card, every counter, Logs, MCP servers and the built-in server's settings.</small></button>
+          </div>
+        </div>
+        <div class="ap-block">
+          <div class="ap-title">Accent</div>
+          <div class="ap-hint">One colour for buttons, highlights and links. Everything else stays neutral.</div>
+          <div class="ap-accents" id="ap-accents">
+            <button type="button" class="ap-accent" data-accent="ember" style="--sw:#d9774a"><span></span>Ember</button>
+            <button type="button" class="ap-accent" data-accent="sage" style="--sw:#74a883"><span></span>Sage</button>
+            <button type="button" class="ap-accent" data-accent="ocean" style="--sw:#5b93c2"><span></span>Ocean</button>
+            <button type="button" class="ap-accent" data-accent="rose" style="--sw:#cf7089"><span></span>Rose</button>
+            <button type="button" class="ap-accent" data-accent="violet" style="--sw:#8b6cf0"><span></span>Violet</button>
+            <button type="button" class="ap-accent" data-accent="mono" style="--sw:#a3a09a"><span></span>Mono</button>
+          </div>
+          <div class="ap-accent-note">Classic always uses violet. Pick Light, Dark or System to choose an accent.</div>
+        </div>
+<h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">In the chat</h4>
         <div class="field">
           <div class="label">
             <div class="name">Generation stats</div>
@@ -4198,6 +4235,15 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">Show memory tool cards</div>
+            <div class="hint">Hearth saves and looks up facts on most turns. Turn this off to hide those steps in the chat; what it remembers doesn't change.</div>
+          </div>
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" class="switch-box" id="setting-show-memory-tools"/>
+          </label>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">Sounds</div>
             <div class="hint">A soft cue when a turn finishes, and a low one on an error. Off by default.</div>
           </div>
@@ -4212,7 +4258,7 @@
         </div>
 
         <!-- Toast quiet-mode: user-controlled noise level for popups -->
-        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Toasts</h4>
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Pop-ups</h4>
         <div class="field">
           <div class="label">
             <div class="name">Mute all pop-ups</div>
@@ -4235,68 +4281,6 @@
           <div class="switch" data-key="toast_compacted"></div>
         </div>
 
-        <!-- Keep-warm toggle for /brain cloud switches -->
-        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Local server</h4>
-        <div class="field">
-          <div class="label">
-            <div class="name">Keep local model loaded when switching to cloud</div>
-            <div class="hint">Off frees graphics memory when you switch to a cloud model. On keeps the local one ready, so switching back is instant.</div>
-          </div>
-          <div class="switch" data-key="keep_local_warm"></div>
-        </div>
-
-        <!-- Keyboard shortcuts cheatsheet - grid table of shortcut chips. -->
-        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Keyboard shortcuts</h4>
-        <div class="kbd-grid">
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>8</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>N</kbd></div><div class="kbd-desc">new chat</div></div>
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>L</kbd></div><div class="kbd-desc">focus chat input</div></div>
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>K</kbd></div><div class="kbd-desc">focus model picker</div></div>
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Esc</kbd></div><div class="kbd-desc">stop generation</div></div>
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Enter</kbd></div><div class="kbd-desc">send message</div></div>
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Shift</kbd><span class="kbd-plus">+</span><kbd>Enter</kbd></div><div class="kbd-desc">newline in input</div></div>
-        </div>
-
-        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
-        <div class="hint" style="margin-bottom:10px;">What each <b>risky</b> tool does when the AI calls it: <b>Ask</b> every time, <b>Allow</b> always, or <b>Deny</b> — a denied tool is hidden from the model entirely (saves the tokens its description would cost). Read-only tools (search, read, list) are always allowed and not shown.</div>
-        <input type="text" id="perm-search" placeholder="Search tools…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;margin-bottom:10px;">
-        <div id="perm-list" style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow:auto;"></div>
-
-        </div><!-- /pane behavior -->
-
-        <div class="settings-pane" data-st="appearance" hidden>
-        <h3>Appearance</h3>
-        <div class="ap-block">
-          <div class="ap-title">Mode</div>
-          <div class="ap-hint">Remembered across restarts.</div>
-          <div class="ap-modes" id="ap-modes">
-            <button type="button" class="ap-mode" data-mode="light"><span class="ap-prev ap-prev-light"><i></i><i></i></span><b>Light</b><small>Bright, for daytime</small></button>
-            <button type="button" class="ap-mode" data-mode="dark"><span class="ap-prev ap-prev-dark"><i></i><i></i></span><b>Dark</b><small>Low glare, warm greys</small></button>
-            <button type="button" class="ap-mode" data-mode="system"><span class="ap-prev ap-prev-sys"><i></i><i></i></span><b>System</b><small>Follows your Windows setting</small></button>
-            <button type="button" class="ap-mode" data-mode="classic"><span class="ap-prev ap-prev-classic"><i></i><i></i></span><b>Classic</b><small>The original violet look, the default</small></button>
-          </div>
-        </div>
-        <div class="ap-block">
-          <div class="ap-title">Interface</div>
-          <div class="ap-hint">How much of the machinery shows while Hearth works.</div>
-          <div class="ap-modes ap-two" id="ap-ui">
-            <button type="button" class="ap-mode" data-ui="simple"><b>Simple</b><small>Tool steps fold into one line you can open. A quieter status bar.</small></button>
-            <button type="button" class="ap-mode" data-ui="advanced"><b>Advanced</b><small>Every tool call as its own card, and every counter in the status bar.</small></button>
-          </div>
-        </div>
-        <div class="ap-block">
-          <div class="ap-title">Accent</div>
-          <div class="ap-hint">One colour for buttons, highlights and links. Everything else stays neutral.</div>
-          <div class="ap-accents" id="ap-accents">
-            <button type="button" class="ap-accent" data-accent="ember" style="--sw:#d9774a"><span></span>Ember</button>
-            <button type="button" class="ap-accent" data-accent="sage" style="--sw:#74a883"><span></span>Sage</button>
-            <button type="button" class="ap-accent" data-accent="ocean" style="--sw:#5b93c2"><span></span>Ocean</button>
-            <button type="button" class="ap-accent" data-accent="rose" style="--sw:#cf7089"><span></span>Rose</button>
-            <button type="button" class="ap-accent" data-accent="violet" style="--sw:#8b6cf0"><span></span>Violet</button>
-            <button type="button" class="ap-accent" data-accent="mono" style="--sw:#a3a09a"><span></span>Mono</button>
-          </div>
-          <div class="ap-accent-note">Classic always uses violet. Pick Light, Dark or System to choose an accent.</div>
-        </div>
         </div><!-- /pane appearance -->
 
         <div class="settings-pane" data-st="server" hidden>
@@ -4657,7 +4641,19 @@
           <div class="credit-sub" style="margin-top:10px">Found a bug? Open an issue or DM. Want to support? Star the repo or open Support tab.</div>
         </div>
 
-        </div><!-- /pane about -->
+        <!-- Keyboard shortcuts cheatsheet - grid table of shortcut chips. -->
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Keyboard shortcuts</h4>
+        <div class="kbd-grid">
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>8</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>N</kbd></div><div class="kbd-desc">new chat</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>L</kbd></div><div class="kbd-desc">focus chat input</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>K</kbd></div><div class="kbd-desc">focus model picker</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Esc</kbd></div><div class="kbd-desc">stop generation</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Enter</kbd></div><div class="kbd-desc">send message</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Shift</kbd><span class="kbd-plus">+</span><kbd>Enter</kbd></div><div class="kbd-desc">newline in input</div></div>
+        </div>
+
+                </div><!-- /pane about -->
         </div><!-- /settings-main -->
       </div><!-- /settings-shell -->
     </section>
@@ -11823,8 +11819,6 @@ async function refreshSettings() {
     }
     const goModelsBtn = $('btn-go-models');
     if (goModelsBtn) goModelsBtn.onclick = () => showView('models');
-    const goRemBtn = $('btn-go-reminders');
-    if (goRemBtn) goRemBtn.onclick = () => showView('reminders');
     const editRulesBtn = $('btn-edit-rules');
     if (editRulesBtn) editRulesBtn.onclick = async () => {
       try {
