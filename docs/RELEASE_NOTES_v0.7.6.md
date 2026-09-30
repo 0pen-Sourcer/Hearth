@@ -1,6 +1,20 @@
-v0.7.6 is a large fix release. Most of it is about Hearth doing what it says it did, and telling you plainly when it can't, across security, voice, memory, commands, the phone bridges, desktop control, models and the terminal.
+v0.7.6 brings a new look, a Team view where you can watch helpers work, other coding agents like Claude Code as teammates, and one switch for how much Hearth does without asking. Underneath, it is a large fix release: most of it is about Hearth doing what it says it did, and telling you plainly when it can't, across security, voice, memory, commands, the phone bridges, desktop control, models and the terminal.
 
 If you are on v0.7.2 or newer, Hearth patches itself, no reinstall. On v0.7.0 or v0.7.1 you need the installer one more time, then you are on the small updates for good. Updating never touches your chats, memory, or models.
+
+## New look
+
+Hearth has a warmer palette with one accent colour, a light theme, and a mark that is an actual hearth. Settings has an Appearance page with Light, Dark, System and Classic (the original violet look, H logo included) and six accent colours, and the tray icon follows whichever you pick. Simple mode, the default, folds a run of tool calls into one line such as "Read 3 files, ran 2 commands" that you can open, and keeps the status bar quiet. Advanced shows every card and every counter. Chats can be pinned to the top of the sidebar, and a pin survives a reinstall.
+
+## Team
+
+When JARVIS splits a job across helpers, the Team view shows each one: what it is doing right now, when it finishes, why it didn't, and when it needs your OK for something. The room view shows the same thing as people in a house by the fire, working at desks, reading at the shelves, or raising a hand when they need you.
+
+A helper can also be another coding agent you already use. Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Crush, Cursor Agent and GitHub Copilot CLI run headless on your own install and account, in a folder you choose, and show up in the Team view like any other helper. Claude Code is tested end to end; the others follow their documented one-shot modes. Claude Code's headless mode is billed to the Agent SDK credit that comes with a Claude plan.
+
+## Approval modes
+
+One switch in the chat bar decides what runs without asking, and Shift+Tab cycles it. Ask asks before anything that acts on your machine. Auto-edit lets file edits in your workspace through and asks about the rest. Auto runs without asking, except commands that delete, move or stop things, which still ask. The terminal has the same modes under /mode, and helpers and other agents follow them too. The old all-or-nothing auto-approve switch now works as Auto, so it no longer lets a destructive command through unasked.
 
 ## Security
 

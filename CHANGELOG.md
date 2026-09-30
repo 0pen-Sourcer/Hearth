@@ -6,6 +6,13 @@ Notable changes to Hearth. Format loosely follows [Keep a Changelog](https://kee
 
 Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 
+### Added
+- Team view: live state of every helper from its own transcript, with a room view drawn in layers.
+- Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Crush, Cursor Agent and Copilot CLI as team members, run headless on the user's install.
+- Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar, Shift+Tab), the terminal (/mode), helpers and external agents.
+- Appearance: Light, Dark, System and Classic, six accents, a hearth mark; the tray icon follows the choice. Simple and Advanced interface; runs of tool calls fold into one line in Simple.
+- Pinned chats.
+
 ### Security
 - The local API refuses requests from other sites; a page in any browser tab could read stored keys and call tools.
 - Command approval is a per-process token, so model output cannot approve its own call. The destructive-command guard covers PowerShell's aliases and .NET forms, and background jobs share it.
