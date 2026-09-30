@@ -718,16 +718,29 @@ async def _run_subagent_async(
             # what each subagent actually did (web_search → which query,
             # web_fetch → which URL, run_command → which cmd).
             used.append({"name": name, "args": args})
-            try:
-                # Flag the thread for the duration of the call so tools can tell
-                # an autonomous sub-agent apart from the user-facing loop.
-                _set_subagent_tool_ctx(True)
-                result = execute_tool(name, args)
-                content = str(result) if result is not None else ""
-            except Exception as e:
-                content = f"(tool {name} failed: {type(e).__name__}: {e})"
-            finally:
-                _set_subagent_tool_ctx(False)
+            # A sub-agent works where no one can be asked, so a call that would
+            # prompt runs only on a standing yes: allow-always for the tool, or
+            # auto-approve. Without this a sub-agent ran commands the user's own
+            # setting would have stopped to ask about.
+            from .tools import standing_permission
+            _perm = standing_permission(name)
+            if _perm != "allow":
+                content = (
+                    f"(not run: {name} is set to never run in Settings.)" if _perm == "deny"
+                    else f"(not run: {name} needs the user's permission and a sub-agent "
+                         f"cannot ask. Finish with what you have and say what is left to "
+                         f"do with {name}; the main assistant can ask the user.)")
+            else:
+                try:
+                    # Flag the thread for the duration of the call so tools can
+                    # tell an autonomous sub-agent from the user-facing loop.
+                    _set_subagent_tool_ctx(True)
+                    result = execute_tool(name, args)
+                    content = str(result) if result is not None else ""
+                except Exception as e:
+                    content = f"(tool {name} failed: {type(e).__name__}: {e})"
+                finally:
+                    _set_subagent_tool_ctx(False)
             content_capped = content[:4000]
             messages.append({
                 "role": "tool",

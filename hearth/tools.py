@@ -8580,6 +8580,32 @@ def is_risky(name: str) -> bool:
 # PROVIDER FORMAT CONVERTERS
 # ============================================================
 
+def standing_permission(name: str) -> str:
+    """'allow', 'deny' or 'ask': what the user has already decided about a
+    tool, for a caller that cannot put a question to them, such as a sub-agent
+    working in the background. A tool that is not risky is 'allow'."""
+    if not is_risky(name):
+        return "allow"
+    try:
+        with open(os.path.join(WORKSPACE, "permissions.json"), encoding="utf-8") as f:
+            v = (json.load(f) or {}).get(name)
+        if v == "never":
+            return "deny"
+        if v == "always":
+            return "allow"
+    except Exception:
+        pass
+    if (os.environ.get("HEARTH_AUTO_APPROVE") or os.environ.get("JARVIS_AUTO_APPROVE")) == "1":
+        return "allow"
+    try:
+        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
+            if (json.load(f) or {}).get("yolo"):
+                return "allow"
+    except Exception:
+        pass
+    return "ask"
+
+
 def _denied_tools() -> set:
     """Tools set to always-deny in the Settings permission panel. They're dropped
     from the schema below — no point shipping a tool's description to the model

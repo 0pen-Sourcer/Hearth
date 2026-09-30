@@ -42,7 +42,7 @@ def check(label, cond):
 NOTE = os.path.join(WS, "note.txt")
 with open(NOTE, "w", encoding="utf-8") as f:
     f.write("PANE-VISIBLE-CONTENT")
-STATE = {"calls": 0, "fail": False}
+STATE = {"calls": 0, "fail": False, "call": None}
 
 
 class _Model(http.server.BaseHTTPRequestHandler):
@@ -68,7 +68,8 @@ class _Model(http.server.BaseHTTPRequestHandler):
         if STATE["calls"] % 2 == 1:
             msg = {"role": "assistant", "content": "", "tool_calls": [{
                 "id": "c1", "type": "function",
-                "function": {"name": "read_file", "arguments": json.dumps({"path": NOTE})}}]}
+                "function": STATE["call"] or {"name": "read_file",
+                                              "arguments": json.dumps({"path": NOTE})}}]}
             fin = "tool_calls"
         else:
             msg, fin = {"role": "assistant", "content": "all finished"}, "stop"
@@ -111,6 +112,25 @@ pane = rendered(r["transcript_path"])
 check(f"a failed agent ends on failed, with why: {pane.splitlines()[-1]!r}",
       r.get("ok") is False and "■ failed" in pane and "■ done" not in pane)
 STATE["fail"] = False
+
+# ----------------------------------------------- a sub-agent and your settings
+# A sub-agent ran risky tools with nobody asked, so it could do what the
+# user's own permission setting would have stopped to ask about.
+TARGET = os.path.join(WS, "made_by_agent.txt")
+STATE["call"] = {"name": "write_file",
+                 "arguments": json.dumps({"path": TARGET, "content": "hello"})}
+STATE["calls"] = 0
+r = subagents.spawn_subagent(persona="coder", prompt="write the file", mode="sync")
+check("without your standing permission a sub-agent's risky call does not run",
+      not os.path.exists(TARGET))
+check("and it is told why", "cannot ask" in rendered(r["transcript_path"]))
+with open(os.path.join(WS, "permissions.json"), "w", encoding="utf-8") as f:
+    json.dump({"write_file": "always"}, f)
+STATE["calls"] = 0
+subagents.spawn_subagent(persona="coder", prompt="write the file", mode="sync")
+check("with allow-always for that tool, it runs", os.path.exists(TARGET))
+os.remove(os.path.join(WS, "permissions.json"))
+STATE["call"] = None
 
 # --------------------------------------------------------- who actually started
 # The stand-in runs on 127.0.0.1, so this is a local endpoint: a limit of 4.
