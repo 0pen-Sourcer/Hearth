@@ -277,6 +277,14 @@ jobs:
         run: |
           python tests/test_voice_dropping.py
 
+      - name: The window starts without a script error, in the look that was saved
+        # A line near the top of the page script that touched something declared
+        # further down stopped everything after it: no chats, no model list, dead
+        # buttons. Runs where Playwright and Edge are present, skips elsewhere.
+        if: runner.os == 'Windows'
+        run: |
+          python tests/test_ui_boot.py
+
       - name: The public tool reference matches the code
         # docs/TOOLS.md is generated; it said 93 tools long after there were more.
         if: matrix.os == 'windows-latest'

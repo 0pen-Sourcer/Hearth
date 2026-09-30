@@ -42,9 +42,9 @@ def _look() -> tuple:
     """The window's theme and accent, as it saved them in settings."""
     try:
         s = web_backend._load_settings() or {}
-        return (str(s.get("ui_theme") or "dark"), str(s.get("ui_accent") or "ember"))
+        return (str(s.get("ui_theme") or "classic"), str(s.get("ui_accent") or "ember"))
     except Exception:
-        return ("dark", "ember")
+        return ("classic", "ember")
 
 
 def _tinted_icon(img, accent: str):

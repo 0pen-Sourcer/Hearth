@@ -1340,6 +1340,17 @@ def _load_settings() -> Dict:
 _SETTINGS_WRITE_LOCK = threading.Lock()
 
 
+def _saved_look() -> str:
+    """The saved theme, accent and Simple/Advanced as a JS object literal, for
+    the page to apply before its first paint."""
+    s = _load_settings()
+    look = {"theme": s.get("ui_theme"), "accent": s.get("ui_accent"), "ui": s.get("ui_mode")}
+    ok = {"theme": {"classic", "dark", "light", "system"},
+          "accent": {"ember", "sage", "ocean", "rose", "violet", "mono"},
+          "ui": {"simple", "advanced"}}
+    return json.dumps({k: v for k, v in look.items() if v in ok[k]})
+
+
 def _save_settings(d: Dict) -> Dict:
     with _SETTINGS_WRITE_LOCK:
         return _save_settings_locked(d)
@@ -4618,6 +4629,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         except Exception:
             tag = f"Hearth · v{_ver}"
         payload = payload.replace(b"__HEARTH_EDITION__", tag.encode("utf-8"))
+        payload = payload.replace(b"/*__HEARTH_LOOK__*/{}", _saved_look().encode("utf-8"), 1)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))

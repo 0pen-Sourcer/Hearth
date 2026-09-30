@@ -28,6 +28,18 @@ from . import web as web_backend
 from . import singleton
 
 
+
+def _storage_kwargs() -> dict:
+    """Keep the window's storage between launches. The default is a private
+    window, which forgets every remembered choice (collapsed lists, dismissed
+    hints, the chosen look) each time Hearth starts."""
+    path = os.path.join(os.path.expanduser("~"), ".hearth", "webview")
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError:
+        return {}
+    return {"private_mode": False, "storage_path": path}
+
 def _free_port(start: int = 8765, tries: int = 12) -> int:
     """Walk forward from `start` until we find a free localhost port."""
     for off in range(tries):
@@ -142,7 +154,7 @@ def main(argv: Optional[list] = None) -> int:
 
     def _shutdown_on_close() -> None:
         try:
-            webview.start(gui=None, debug=False)
+            webview.start(gui=None, debug=False, **_storage_kwargs())
         finally:
             _bye()
 

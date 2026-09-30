@@ -6,24 +6,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="/assets/icon.png">
 <script>
-  // Theme and accent are per-window preferences, applied before the first
-  // paint so the window never flashes the wrong colours.
+  // The look is applied before the first paint so the window never flashes the
+  // wrong colours. Settings are the record: the server writes the saved look in
+  // below, since the window's own storage does not survive every restart (the
+  // port can change, and a private window forgets). Classic is the default.
   (function () {
-    var root = document.documentElement, mode = 'dark', accent = 'ember';
-    try { mode = localStorage.getItem('hearth_theme') || 'dark'; accent = localStorage.getItem('hearth_accent') || 'ember'; } catch (e) {}
+    var root = document.documentElement;
+    var saved = /*__HEARTH_LOOK__*/{};
+    function pick(key, local, dflt) {
+      if (saved && saved[key]) return saved[key];
+      try { return localStorage.getItem(local) || dflt; } catch (e) { return dflt; }
+    }
+    var mode = pick('theme', 'hearth_theme', 'classic');
+    var accent = pick('accent', 'hearth_accent', 'ember');
+    var ui = pick('ui', 'hearth_ui', 'simple');
+    try { localStorage.setItem('hearth_theme', mode); localStorage.setItem('hearth_accent', accent); localStorage.setItem('hearth_ui', ui); } catch (e) {}
     var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
     function resolve(m) { return m === 'system' ? (mq && mq.matches ? 'light' : 'dark') : m; }
     root.dataset.theme = resolve(mode);
-    var ui = 'simple'; try { ui = localStorage.getItem('hearth_ui') || 'simple'; } catch (e) {}
     root.dataset.ui = ui;
     if (accent !== 'ember') root.dataset.accent = accent;
     if (mq && mq.addEventListener) mq.addEventListener('change', function () {
-      var cur = 'dark'; try { cur = localStorage.getItem('hearth_theme') || 'dark'; } catch (e) {}
+      var cur = 'classic'; try { cur = localStorage.getItem('hearth_theme') || 'classic'; } catch (e) {}
       if (cur === 'system') root.dataset.theme = resolve('system');
     });
+    function remember(body) {
+      try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {}
+    }
     window.hearthSetInterface = function (u) {
       try { localStorage.setItem('hearth_ui', u); } catch (e) {}
       root.dataset.ui = u;
+      remember({ ui_mode: u });
     };
     window.hearthSetAppearance = function (m, a) {
       if (m) { try { localStorage.setItem('hearth_theme', m); } catch (e) {} root.dataset.theme = resolve(m); }
@@ -31,15 +44,18 @@
         try { localStorage.setItem('hearth_accent', a); } catch (e) {}
         if (a === 'ember') delete root.dataset.accent; else root.dataset.accent = a;
       }
-      // The tray icon follows the look, so the backend keeps a copy.
       var body = {};
       if (m) body.ui_theme = m;
       if (a) body.ui_accent = a;
-      try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {}
+      remember(body);
     };
   })();
 </script>
 <style>
+  /* An element marked hidden stays hidden. Any rule that sets display (flex,
+     grid) otherwise outranks the browser's own [hidden] rule, and the element
+     shows while the code believes it is gone. */
+  [hidden] { display: none !important; }
   /* ============================================================
      PALETTE - warm neutrals and one accent. Themes set the neutrals;
      the accent preset sets one hue and every tint is mixed from it.
@@ -4252,12 +4268,12 @@
         <h3>Appearance</h3>
         <div class="ap-block">
           <div class="ap-title">Mode</div>
-          <div class="ap-hint">Saved for this window.</div>
+          <div class="ap-hint">Remembered across restarts.</div>
           <div class="ap-modes" id="ap-modes">
             <button type="button" class="ap-mode" data-mode="light"><span class="ap-prev ap-prev-light"><i></i><i></i></span><b>Light</b><small>Bright, for daytime</small></button>
-            <button type="button" class="ap-mode" data-mode="dark"><span class="ap-prev ap-prev-dark"><i></i><i></i></span><b>Dark</b><small>Low glare, the default</small></button>
+            <button type="button" class="ap-mode" data-mode="dark"><span class="ap-prev ap-prev-dark"><i></i><i></i></span><b>Dark</b><small>Low glare, warm greys</small></button>
             <button type="button" class="ap-mode" data-mode="system"><span class="ap-prev ap-prev-sys"><i></i><i></i></span><b>System</b><small>Follows your Windows setting</small></button>
-            <button type="button" class="ap-mode" data-mode="classic"><span class="ap-prev ap-prev-classic"><i></i><i></i></span><b>Classic</b><small>The original violet look</small></button>
+            <button type="button" class="ap-mode" data-mode="classic"><span class="ap-prev ap-prev-classic"><i></i><i></i></span><b>Classic</b><small>The original violet look, the default</small></button>
           </div>
         </div>
         <div class="ap-block">
@@ -5594,7 +5610,6 @@ function cycleApprovalMode() {
 (function wireModeMenu() {
   const btn = $('btn-mode'), menu = $('mode-menu');
   if (!btn || !menu) return;
-  paintModeButton();
   const close = () => menu.classList.remove('open');
   btn.addEventListener('click', (e) => { e.stopPropagation(); paintModeButton(); menu.classList.toggle('open'); });
   document.addEventListener('click', (e) => { if (!menu.contains(e.target) && !btn.contains(e.target)) close(); });
@@ -7320,6 +7335,8 @@ async function refreshModels() {
     if (!models.length && !disk.length) {
       sel.innerHTML = '<option value="">(no model loaded - open Models tab)</option>';
     } else {
+      // Models on disk but none running: say so, or the picker shows blank.
+      if (!loadedId) sel.insertAdjacentHTML('beforeend', '<option value="">(no model loaded)</option>');
       // 1) Loaded models from the running server (LM Studio / builtin). We
       //    prefer LM Studio's clean short id ("harmonic-hermes-9b") to the
       //    GGUF filename when both are present - that's what the user picked
@@ -16653,7 +16670,7 @@ window.addEventListener('load', function initSidebarDrawer() {
   const uiBox = document.getElementById('ap-ui');
   const mark = () => {
     if (uiBox) uiBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.ui === cur('hearth_ui', 'simple')));
-    modes.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === cur('hearth_theme', 'dark')));
+    modes.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === cur('hearth_theme', 'classic')));
     accents.querySelectorAll('.ap-accent').forEach(b => b.classList.toggle('on', b.dataset.accent === cur('hearth_accent', 'ember')));
   };
   if (uiBox) uiBox.addEventListener('click', e => {

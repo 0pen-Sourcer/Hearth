@@ -186,11 +186,20 @@ def main(argv: Optional[list] = None) -> int:
 
     _win_holder["win"] = webview.create_window(
         "Hearth", url=args.url, js_api=_WinApi(), **kwargs)
+    # Keep the window's storage between launches; the default private window
+    # forgets every remembered choice each time Hearth starts.
+    keep = {}
+    try:
+        store = os.path.join(os.path.expanduser("~"), ".hearth", "webview")
+        os.makedirs(store, exist_ok=True)
+        keep = {"private_mode": False, "storage_path": store}
+    except OSError:
+        pass
     try:
         if icon_path:
-            webview.start(gui=None, debug=False, icon=icon_path)
+            webview.start(gui=None, debug=False, icon=icon_path, **keep)
         else:
-            webview.start(gui=None, debug=False)
+            webview.start(gui=None, debug=False, **keep)
     except TypeError:
         # Old pywebview without the icon kwarg — retry once without it.
         try:
