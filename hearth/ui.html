@@ -5666,21 +5666,33 @@ function setMemCount(n) {
   applyBrainState();
 }
 
+// The sidebar needs titles, not transcripts, so chats arrive as stubs (title,
+// dates, message count) and a chat's messages load when it is opened. Loading
+// every chat in full at start sent the whole history, tens of MB, to draw a list.
 async function loadConversations() {
   try {
     const r = await api('/api/conversations');
-    STATE.conversations = await Promise.all((r.conversations || []).map(async (meta) => {
-      try {
-        const full = await api(`/api/conversations/${encodeURIComponent(meta.id)}`);
-        return full;
-      } catch {
-        return { ...meta, messages: [] };
-      }
-    }));
+    STATE.conversations = (r.conversations || []).map(meta => ({ ...meta, messages: [], _stub: true }));
   } catch (e) {
     console.error('loadConversations', e);
     STATE.conversations = [];
   }
+}
+
+// Fill in a stub's messages. Shared by every caller, so a chat is fetched once.
+async function ensureConvoLoaded(c) {
+  if (!c || !c._stub) return c;
+  if (!c._loading) {
+    c._loading = api(`/api/conversations/${encodeURIComponent(c.id)}`)
+      .then(full => { Object.assign(c, full); delete c._stub; return c; })
+      .catch(e => { console.error('ensureConvoLoaded', e); return c; })
+      .finally(() => { delete c._loading; });
+  }
+  return c._loading;
+}
+
+function convoMsgCount(c) {
+  return c._stub ? (c.msg_count || 0) : (c.messages || []).length;
 }
 
 async function persistConvo(c) {
@@ -5689,7 +5701,10 @@ async function persistConvo(c) {
     // prompts). They're transient nudges — the live session hides them via
     // renderMsg, but if saved they reload as a fake "you said this" bubble. Strip
     // them; the assistant's actual reply (not silent) still persists.
-    const toSave = { ...c, messages: (c.messages || []).filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__') };
+    // A stub has no messages yet; saving it would erase the chat on disk.
+    if (c._stub) return;
+    const { _loading, ...rest } = c;
+    const toSave = { ...rest, messages: (c.messages || []).filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__') };
     await api('/api/conversations', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -5716,7 +5731,7 @@ function schedulePartialSave(c) {
 function newConversation() {
   // Don't stack up blank sessions — clicking "New chat" repeatedly used to make
   // infinitely many empty chats. If an empty one already exists, jump to it.
-  const empty = STATE.conversations.find(x => !(x.messages || []).length);
+  const empty = STATE.conversations.find(x => !convoMsgCount(x));
   if (empty) {
     setActiveId(empty.id);
     renderConvoList();
@@ -5868,7 +5883,7 @@ function renderConvoRow(c) {
   });
   div.querySelector('.del').addEventListener('click', e => {
     e.stopPropagation();
-    showModal('Delete chat?', `"${c.title}"\n\n${c.messages.length} message(s) will be removed.`, [
+    showModal('Delete chat?', `"${c.title}"\n\n${convoMsgCount(c)} message(s) will be removed.`, [
       { label: 'Cancel' },
       { label: 'Delete', kind: 'danger', onclick: () => { deleteConversation(c.id); toast('Deleted', '', 'ok'); }},
     ]);
@@ -5913,7 +5928,7 @@ function updateChatHeader() {
   const metaEl  = document.getElementById('chat-header-meta');
   if (titleEl) titleEl.textContent = c.title || 'Untitled chat';
   if (metaEl) {
-    const n = (c.messages || []).length;
+    const n = convoMsgCount(c);
     metaEl.textContent = n ? `${n} message${n === 1 ? '' : 's'}` : 'new chat';
   }
   hdr.hidden = false;
@@ -5977,6 +5992,11 @@ function renderChat() {
     wrap.classList.remove('hot', 'warn', 'compacting');
   }
   if (!c) { body.appendChild(emptyState()); return; }
+  if (c._stub) {
+    // Opened for the first time: fetch it, then draw it if it is still the one open.
+    ensureConvoLoaded(c).then(() => { if (activeConvo() === c && !c._stub) renderChat(); });
+    return;
+  }
   if (!c.messages.length) { body.appendChild(emptyState()); return; }
   for (const m of c.messages) {
     // Render the message FIRST so think/tool events render INSIDE the assistant
@@ -7710,6 +7730,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // `opts.silent=true` - don't render a user bubble at all (used by the
   // subagent autofold: model just speaks, no fake "user" turn appears).
   const _silent = !!opts.silent;
+  // The chat has to hold its history before a turn is added to it.
+  await ensureConvoLoaded(activeConvo());
   // A fresh turn ends the quiet period a compaction started, so the ring can
   // warn again if this turn refills the room.
   STATE._ctxQuiet = false;
@@ -8815,13 +8837,14 @@ async function handleSlash(raw) {
     case '/clear':
       if (c) {
         c.messages = [];
+        delete c._stub;          // cleared on purpose, so it is saved empty
         touch(c);
         renderChat();
         toast('Cleared', 'this chat is now empty', 'ok', 1500);
       }
       return true;
     case '/compact':
-      if (!c || c.messages.length < 4) {
+      if (!c || convoMsgCount(c) < 4) {
         toast('Nothing to compact', 'need a few messages first', 'warn');
         return true;
       }
@@ -9948,7 +9971,7 @@ function _refreshEmptyIfShown() {
   // lets CSS morph it (H whitens, mark pops, glow settles) instead of the block
   // tearing down and re-fading in — no abrupt cut between states.
   const c = (typeof activeConvo === 'function') ? activeConvo() : null;
-  if (!c || (c.messages || []).length) return;
+  if (!c || convoMsgCount(c)) return;
   const existing = document.querySelector('.empty');
   if (existing) {
     const st = _computeEmptyState();
@@ -12425,7 +12448,7 @@ async function enterVoiceMode() {
   // conversations like any other chat. Without this, voice-mode messages
   // could end up on a stale/empty convo and vanish on quit.
   let c = activeConvo();
-  if (!c || c.messages.length === 0) {
+  if (!c || convoMsgCount(c) === 0) {
     c = c || newConversation();
     // Leave the title as-is — it gets named from the actual first exchange like
     // any other chat (was force-labelled "Voice chat", which looked odd).
@@ -16088,7 +16111,7 @@ window.addEventListener('load', function initSidebarDrawer() {
   // Also reappears for users who haven't seen it yet (after the existing onboard
   // modal closes - they don't conflict, the modal is centered, this is inline).
   const _c = activeConvo();
-  if (!_c || _c.messages.length === 0) showWelcomeCard(false);
+  if (!_c || convoMsgCount(_c) === 0) showWelcomeCard(false);
 })();
 </script>
 </body>

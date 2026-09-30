@@ -364,28 +364,54 @@ def _convo_path(cid: str) -> str:
     return os.path.join(CONVOS_DIR, f"{safe}.json")
 
 
+# The listing is rebuilt from the files, but a file is only parsed again when
+# its size or modified time changes: parsing every chat on each call took
+# 400 ms at 50 chats and grew with every chat kept.
+_CONVO_META: Dict[str, Tuple[Tuple[float, int], Dict]] = {}
+_CONVO_META_LOCK = threading.Lock()
+
+
 def _list_convos() -> List[Dict]:
     out: List[Dict] = []
     if not os.path.isdir(CONVOS_DIR):
         return out
+    seen = set()
     for fn in os.listdir(CONVOS_DIR):
         # A staged write ends in .json too, and one left behind by a killed save
         # holds a complete conversation, so it listed as a second copy of the
         # chat it was about to become.
         if not fn.endswith(".json") or _is_write_temp(fn):
             continue
+        path = os.path.join(CONVOS_DIR, fn)
         try:
-            with open(os.path.join(CONVOS_DIR, fn), "r", encoding="utf-8") as f:
+            st = os.stat(path)
+        except OSError:
+            continue
+        key = (st.st_mtime, st.st_size)
+        seen.add(fn)
+        with _CONVO_META_LOCK:
+            hit = _CONVO_META.get(fn)
+        if hit and hit[0] == key:
+            out.append(dict(hit[1]))
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
             continue
-        out.append({
+        meta = {
             "id": data.get("id", fn[:-5]),
             "title": data.get("title", "Untitled"),
             "updated": data.get("updated", 0),
             "created": data.get("created", 0),
             "msg_count": len(data.get("messages", [])),
-        })
+        }
+        with _CONVO_META_LOCK:
+            _CONVO_META[fn] = (key, meta)
+        out.append(dict(meta))
+    with _CONVO_META_LOCK:
+        for gone in set(_CONVO_META) - seen:
+            _CONVO_META.pop(gone, None)
     out.sort(key=lambda x: -x.get("updated", 0))
     return out
 
