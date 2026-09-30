@@ -1293,6 +1293,8 @@ def _load_settings() -> Dict:
     # Selected mic index (-1 = OS default). Drives both STT paths via
     # listen.input_device_index(). The mic picker (Settings → Voice) writes it.
     os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(defaults.get("voice_input_device", -1))
+    # The same pick by name, which is what the mic is looked up by.
+    os.environ["JARVIS_VOICE_INPUT_NAME"] = str(defaults.get("voice_input_name", "") or "")
     # Agent name → persona module reads this at import-time via
     # HEARTH_PERSONA_NAME. Setting it here means the very next chat turn
     # picks up the user's renamed agent. On boot, this fires before any
@@ -1350,6 +1352,7 @@ def _save_settings_locked(d: Dict) -> Dict:
     # Mic pick. Every voice session builds its own recorder, so the next one
     # opens the chosen device; a running session keeps its mic until it ends.
     os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(cur.get("voice_input_device", -1))
+    os.environ["JARVIS_VOICE_INPUT_NAME"] = str(cur.get("voice_input_name", "") or "")
     # Keep the runtime chat model in sync with the saved pick. Without this a
     # cloud model swap (grok-4.20 -> grok-4.3) saved to disk but the next
     # /chat + the status poller still used the old LOCAL_MODEL, so the topbar
@@ -1843,7 +1846,9 @@ class HearthHandler(BaseHTTPRequestHandler):
                 cur = int(os.environ.get("JARVIS_VOICE_INPUT_DEVICE", "-1"))
             except ValueError:
                 cur = -1
-            return self._send_json(200, {"devices": devs, "selected": cur})
+            return self._send_json(200, {
+                "devices": devs, "selected": cur,
+                "selected_name": os.environ.get("JARVIS_VOICE_INPUT_NAME", "")})
         if path == "/api/voice/install-status":
             return self._send_json(200, _VOICE_INSTALL or {"running": False})
         if path == "/api/voice/status":

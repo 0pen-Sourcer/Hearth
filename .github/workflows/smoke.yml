@@ -190,6 +190,12 @@ jobs:
         run: |
           python tests/test_voice_session.py
 
+      - name: Which microphone voice opens
+        # A pick saved as a device number pointed elsewhere after any hardware
+        # change, and the fallback opened a virtual mic that records silence.
+        run: |
+          python tests/test_mic_choice.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through

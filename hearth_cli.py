@@ -246,6 +246,7 @@ def _apply_saved_voice_settings():
         "JARVIS_VOICE_SPEED": ("voice_speed", 1.5),
         "JARVIS_VOICE": ("voice_name", "am_michael"),
         "JARVIS_VOICE_INPUT_DEVICE": ("voice_input_device", -1),
+        "JARVIS_VOICE_INPUT_NAME": ("voice_input_name", ""),
     }
     try:
         import json as _json
@@ -3434,6 +3435,11 @@ class JarvisCLI:
                 return
         os.environ["JARVIS_VOICE_INPUT_DEVICE"] = str(idx)
         saved = _save_setting("voice_input_device", idx)
+        # Kept by name as well: the number changes when hardware comes and goes.
+        name = next((d.get("name", "") for d in (stt.list_input_devices() or [])
+                     if d.get("index") == idx), "") if idx >= 0 else ""
+        os.environ["JARVIS_VOICE_INPUT_NAME"] = name
+        _save_setting("voice_input_name", name)
         try:
             stt.rescan_devices()
         except Exception:

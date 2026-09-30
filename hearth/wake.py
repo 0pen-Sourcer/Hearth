@@ -144,7 +144,14 @@ def _wake_input_device() -> Optional[int]:
     who talks into a different one."""
     try:
         from .web import _load_settings
-        v = int((_load_settings() or {}).get("voice_input_device", -1))
+        from . import listen as _ll
+        cfg = _load_settings() or {}
+        name = str(cfg.get("voice_input_name", "") or "").strip()
+        if name:
+            # Looked up by name in this process's device table: the number
+            # saved beside it is from another process and may point elsewhere.
+            return _ll.index_for_name(name, _ll.sounddevice_inputs())
+        v = int(cfg.get("voice_input_device", -1))
         return v if v >= 0 else None
     except Exception:
         try:

@@ -342,114 +342,113 @@ class NoUsableMic(RuntimeError):
     rather than fall back to a system-audio device and transcribe the speakers."""
 
 
-def _probe_device(idx) -> bool:
-    """True if the input device can actually be opened for capture. A Bluetooth
-    HFP mic often enumerates but won't open, so we START a stream briefly instead
-    of trusting check_input_settings. Tries callback mode first (what
-    RealtimeSTT actually uses), then blocking as a fallback — some WDM-KS
-    devices work in callback but not blocking, and vice versa."""
-    import queue as _q
+def _pyaudio_inputs(pa) -> list:
+    """PyAudio's table as [(index, name, input_channels, hostapi)]. RealtimeSTT
+    opens the mic through PyAudio, so its index has to come from this table."""
+    out = []
+    for i in range(pa.get_device_count()):
+        try:
+            d = pa.get_device_info_by_index(i)
+            api = pa.get_host_api_info_by_index(d["hostApi"]).get("name", "")
+            out.append((i, str(d.get("name", "")), int(d.get("maxInputChannels", 0)), api))
+        except Exception:
+            continue
+    return out
+
+
+def _probe_device(pa, idx) -> bool:
+    """Open and read the device the way RealtimeSTT validates it: 16 kHz,
+    16-bit mono, one 512-frame buffer. An easier check here than there let a
+    device through that the recorder then refused, and the session reported
+    ready while hearing nothing."""
+    import pyaudio  # type: ignore
     try:
-        import sounddevice as sd
-        # Callback mode first — matches what RealtimeSTT uses internally.
-        _dummy = _q.Queue()
+        st = pa.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True,
+                     frames_per_buffer=512, input_device_index=idx, start=False)
         try:
-            with sd.InputStream(device=idx, channels=1, samplerate=16000,
-                                callback=lambda *a: _dummy.put_nowait(0)):
+            st.start_stream()
+            data = st.read(512, exception_on_overflow=False)
+        finally:
+            try:
+                st.stop_stream()
+            except Exception:
                 pass
-            return True
-        except Exception:
-            pass
-        # Blocking mode fallback — catches devices that only work one way.
-        try:
-            with sd.InputStream(device=idx, channels=1, samplerate=16000,
-                                blocksize=1024):
-                pass
-            return True
-        except Exception:
-            return False
+            st.close()
+        return len(data) > 0
     except Exception:
         return False
 
 
-def _device_name(idx) -> str:
-    try:
-        import sounddevice as sd
-        return str(sd.query_devices(idx).get("name", ""))
-    except Exception:
-        return ""
-
-
 def _mic_index():
-    """Resolve the microphone to actually open — NEVER a system-audio/loopback
-    device. This is the fix for 'I have no mic yet it transcribed my speakers':
-    when a chosen mic can't open, the old code fell back to the OS default, which
-    on many machines is a loopback capture of whatever the speakers play. Now we
-    refuse that fallback and raise NoUsableMic so voice turns OFF with a clear
-    message instead of looping on system audio."""
+    """The PyAudio index of the mic to open. Never a loopback of the speakers,
+    and never a guess: a device picked by chance among several can be a
+    virtual one that records silence, which looks like voice not working.
+
+    Picked mic: that one. If it is gone or will not open, the Windows default
+    input when that is a real mic, said out loud; otherwise stop and say why.
+    Nothing picked: the Windows default input when it is a real mic that
+    opens; otherwise stop and name the mics there are to pick from."""
     global _mic_warning
     _mic_warning = ""
-    from .listen import (input_device_index, is_system_audio_device,
-                         list_input_devices)
+    import pyaudio  # type: ignore
+    from .listen import is_system_audio_device, selected_input_name
+    pa = pyaudio.PyAudio()
     try:
-        sel = input_device_index()
-    except Exception:
-        sel = None
-
-    def _first_real_mic(skip=None):
-        for d in list_input_devices():
-            if d["index"] == skip or is_system_audio_device(d["name"]):
-                continue
-            if _probe_device(d["index"]):
-                return d
-        return None
-
-    # 1) An explicitly-picked mic.
-    if sel is not None:
-        if is_system_audio_device(_device_name(sel)):
-            raise NoUsableMic("The selected input is a system-audio (loopback) "
-                              "device, not a microphone — it would transcribe your "
-                              "speakers. Pick a real mic in Settings > Voice.")
-        if _probe_device(sel):
-            return sel
-        # Picked mic won't open (Bluetooth HFP often won't). Fall back ONLY to a
-        # real mic, never a loopback.
-        alt = _first_real_mic(skip=sel)
-        if alt is not None:
-            _mic_warning = (f"Your selected mic couldn't open; using '{alt['name']}'. "
-                            "Pick another in Settings > Voice if needed.")
-            return alt["index"]
-        raise NoUsableMic("Your microphone couldn't be opened and there's no other "
-                          "real mic. Voice is off so Hearth doesn't transcribe your "
-                          "speakers — reconnect the mic (or fix the Bluetooth headset) "
-                          "and try again.")
-
-    # 2) No explicit pick — use the OS default only if it's a real mic that
-    # actually opens. Bluetooth HFP devices enumerate but may fail on sustained
-    # capture, so probe before trusting the default.
-    try:
-        import sounddevice as sd
-        di = sd.query_devices(kind="input")
-        dname = str(di.get("name", "")) if isinstance(di, dict) else ""
-    except Exception:
-        dname = ""
-    if dname and not is_system_audio_device(dname):
+        table = _pyaudio_inputs(pa)
+        by_idx = {d[0]: d for d in table}
+        name = selected_input_name()
+        if not name:                                 # a pick saved as a number
+            try:
+                from .listen import input_device_index
+                import sounddevice as sd  # type: ignore
+                legacy = input_device_index()
+                if legacy is not None:
+                    name = str(sd.query_devices(legacy).get("name", ""))
+            except Exception:
+                name = ""
         try:
-            default_idx = sd.default.device[0]
+            d = pa.get_default_input_device_info()
+            default = (int(d["index"]), str(d.get("name", "")))
         except Exception:
-            default_idx = None
-        if default_idx is not None and _probe_device(default_idx):
-            return None   # PortAudio default is a real mic that opens
-        # Default device named real but won't open — fall through to find one that does.
-    alt = _first_real_mic()
-    if alt is not None:
-        if dname:
-            _mic_warning = (f"The system default input is a system-audio device; "
-                            f"using '{alt['name']}' so Hearth doesn't hear your speakers.")
-        return alt["index"]
-    raise NoUsableMic("No real microphone is available (the system default is a "
-                      "system-audio device). Voice is off so Hearth won't transcribe "
-                      "your speakers. Connect a mic and try again.")
+            default = None
+        default_ok = (default is not None and not is_system_audio_device(default[1])
+                      and _probe_device(pa, default[0]))
+
+        if name:
+            from .listen import index_for_name
+            idx = index_for_name(name, table)
+            if is_system_audio_device(name):
+                raise NoUsableMic(f"'{name}' records what your speakers play, not a "
+                                  "microphone. Pick your mic in Settings > Voice.")
+            if idx is not None and _probe_device(pa, idx):
+                return idx
+            why = "is not connected" if idx is None else "would not open"
+            if default_ok and index_for_name(default[1], table) != idx:
+                _mic_warning = (f"'{name}' {why}, so voice is using the Windows "
+                                f"default input, '{default[1]}'.")
+                return default[0]
+            raise NoUsableMic(f"Your microphone '{name}' {why}. Reconnect it, or pick "
+                              "another in Settings > Voice.")
+
+        if default_ok:
+            return default[0]
+        fullest: dict = {}                 # one entry per mic, its fullest name
+        for i, n, ch, _api in table:
+            if ch > 0 and not is_system_audio_device(n) and "@system32" not in n.lower():
+                key = n.strip().lower()[:31]
+                if len(n) > len(fullest.get(key, "")):
+                    fullest[key] = n
+        mics = list(fullest.values())
+        if default is not None and is_system_audio_device(default[1]):
+            lead = (f"The Windows default input is '{default[1]}', which records "
+                    "your speakers, so Hearth will not listen to it.")
+        else:
+            lead = "The Windows default input could not be opened."
+        tail = (" Pick your microphone in Settings > Voice: " + ", ".join(mics[:4]) + "."
+                if mics else " No other microphone is connected.")
+        raise NoUsableMic(lead + tail)
+    finally:
+        pa.terminate()
 
 
 def mic_warning() -> str:

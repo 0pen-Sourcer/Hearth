@@ -276,10 +276,59 @@ def mic_test(seconds: float = 1.6) -> dict:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+def selected_input_name() -> str:
+    """The mic picked in Settings > Voice, by name, or '' for none picked."""
+    return (os.environ.get("JARVIS_VOICE_INPUT_NAME", "") or "").strip()
+
+
+# A device number is an index into one PortAudio's table at one moment:
+# plugging in a headset renumbers it, and the table sounddevice builds is not
+# the one PyAudio (inside RealtimeSTT) builds. So a pick is kept by name and
+# looked up in whichever table is about to open it. The same mic appears once
+# per host API; this is the order it is opened through.
+_HOSTAPI_ORDER = ("wasapi", "mme", "directsound", "wdm-ks")
+
+
+def index_for_name(name: str, devices) -> Optional[int]:
+    """Find `name` among `devices`, [(index, name, input_channels, hostapi)].
+    MME cuts names to 31 characters, so a 31-character name also matches as a
+    prefix of the full one."""
+    want = (name or "").strip().lower()
+    if not want:
+        return None
+    ins = [d for d in devices if d[2] > 0]
+    found = [d for d in ins if d[1].strip().lower() == want]
+    if not found:
+        found = [d for d in ins if len(d[1].strip()) >= 31
+                 and want.startswith(d[1].strip().lower())]
+
+    def rank(d):
+        api = (d[3] or "").lower()
+        return next((i for i, k in enumerate(_HOSTAPI_ORDER) if k in api),
+                    len(_HOSTAPI_ORDER))
+    found.sort(key=rank)
+    return found[0][0] if found else None
+
+
+def sounddevice_inputs() -> list:
+    """sounddevice's table as [(index, name, input_channels, hostapi)]."""
+    import sounddevice as sd  # type: ignore
+    apis = [a.get("name", "") for a in sd.query_hostapis()]
+    return [(i, str(d.get("name", "")), int(d.get("max_input_channels", 0)),
+             apis[d["hostapi"]] if d.get("hostapi") is not None else "")
+            for i, d in enumerate(sd.query_devices())]
+
+
 def input_device_index():
-    """Selected mic index (env JARVIS_VOICE_INPUT_DEVICE, set from settings), or
-    None = let PortAudio pick the OS default. Drives BOTH the CLI sounddevice
-    loop and the GUI RealtimeSTT recorder, so one picker controls both."""
+    """The picked mic's index in sounddevice's table, or None for the OS
+    default. A pick saved by name is looked up now; an older pick saved only
+    as a number is used as it is."""
+    name = selected_input_name()
+    if name:
+        try:
+            return index_for_name(name, sounddevice_inputs())
+        except Exception:
+            return None
     v = (os.environ.get("JARVIS_VOICE_INPUT_DEVICE", "") or "").strip()
     if v.lstrip("-").isdigit():
         idx = int(v)

@@ -12497,24 +12497,30 @@ window.addEventListener('load', () => {
     try {
       const r = await fetch('/api/voice/devices' + (rescan ? '?rescan=1' : '')).then(x => x.json());
       const devs = (r && r.devices) || [];
-      const cur = (r && typeof r.selected === 'number') ? r.selected : parseInt(sel.value, 10) || -1;
-      sel.innerHTML = '<option value="-1">System default</option>' +
-        devs.map(d => `<option value="${d.index}">${String(d.name || ('input ' + d.index)).replace(/</g, '&lt;')}${d.default ? ' (default)' : ''}</option>`).join('');
+      // A pick is kept by name: device numbers change whenever hardware is
+      // plugged in or out, so a number alone can point at another device.
+      const savedName = (r && r.selected_name) || '';
+      const byName = savedName ? devs.find(d => d.name === savedName) : null;
+      const cur = byName ? byName.index
+        : (r && typeof r.selected === 'number') ? r.selected : parseInt(sel.value, 10) || -1;
+      const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+      sel.innerHTML = '<option value="-1" data-name="">System default</option>' +
+        devs.map(d => `<option value="${d.index}" data-name="${esc(d.name || '')}">${esc(d.name || ('input ' + d.index))}${d.default ? ' (default)' : ''}</option>`).join('');
       // Device numbers are assigned by the OS and shift when hardware is
       // unplugged or reordered, so a saved pick can name a device that is no
       // longer there. Assigning it would leave the select blank while the
       // backend still recorded silence from it, which reads as a dead mic with
       // no explanation. Keep the pick, show it as missing, say what to do.
-      const gone = cur >= 0 && !devs.some(d => d.index === cur);
+      const gone = savedName ? !byName : (cur >= 0 && !devs.some(d => d.index === cur));
       const note = document.getElementById('mic-missing');
       if (gone) {
         sel.insertAdjacentHTML('beforeend',
-          `<option value="${cur}">Saved mic (input ${cur}) is not connected</option>`);
+          `<option value="${cur}" data-name="${esc(savedName)}">${esc(savedName || ('Saved mic (input ' + cur + ')'))} is not connected</option>`);
       }
       if (note) {
         note.style.display = gone ? 'block' : 'none';
         note.textContent = gone
-          ? `The mic you picked (input ${cur}) is not plugged in, so nothing is being recorded. `
+          ? `The mic you picked (${savedName || 'input ' + cur}) is not plugged in, so nothing is being recorded. `
             + `Plug it back in and hit Refresh, or choose another one above.`
           : '';
       }
@@ -12524,8 +12530,11 @@ window.addEventListener('load', () => {
   populate();
   sel.addEventListener('change', async () => {
     const idx = parseInt(sel.value, 10);
+    const opt = sel.options[sel.selectedIndex];
+    const name = (opt && opt.dataset.name) || '';
     try {
-      await api('/api/settings', { method: 'POST', body: JSON.stringify({ voice_input_device: isNaN(idx) ? -1 : idx }) });
+      await api('/api/settings', { method: 'POST', body: JSON.stringify({
+        voice_input_device: isNaN(idx) ? -1 : idx, voice_input_name: name }) });
       if (typeof toast === 'function') toast('Mic set', 'restart voice mode to use it', 'ok', 2500);
     } catch (e) {}
   });
