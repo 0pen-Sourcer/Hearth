@@ -438,8 +438,14 @@ def _resolve_write(p: str) -> str:
         p = os.path.join(WORKSPACE, p)
     p = os.path.abspath(p)
 
+    # Judged on where the write lands: folder by folder, case-folded as
+    # Windows compares, with links followed. A text prefix refused the
+    # workspace spelled in another case and let a junction inside it write
+    # anywhere the junction pointed.
+    real = os.path.realpath(p)
+
     def _inside(root: str) -> bool:
-        return p == root or p.startswith(root + os.sep)
+        return path_within(real, os.path.realpath(root))
 
     if _inside(WORKSPACE):
         return p
