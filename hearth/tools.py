@@ -1794,13 +1794,13 @@ def _extract_pdf(path: str, p: Dict) -> str:
     return "\n".join(chunks)
 
 
-def _loaded_model_is_vision() -> bool:
-    """True if the currently-loaded LM Studio (or compatible) model has a
-    vision capability. Probes /api/v0/models for type=='vlm' or capabilities
-    array containing 'vision'/'image_input'. Falls back to name heuristic
-    when v0 endpoint isn't there (Ollama, vLLM, cloud)."""
-    base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1").rstrip("/")
-    model_hint = os.environ.get("LOCAL_MODEL", "").lower()
+def _loaded_model_is_vision(model: Optional[str] = None, base: Optional[str] = None) -> bool:
+    """True if the loaded model can take images. In order: OpenRouter's catalog,
+    llama.cpp's /props (true only with a projector loaded), LM Studio's
+    /api/v0, then the model name. The endpoint and model default to the
+    environment the tools run in; the terminal passes its own."""
+    base = (base or os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
+    model_hint = (model if model is not None else os.environ.get("LOCAL_MODEL", "")).lower()
     host = base.rsplit("/v1", 1)[0]
     # Cloud catalog (OpenRouter): GET /models is public (no auth) and lists each
     # model's architecture.input_modalities. Authoritative for ANY OpenRouter

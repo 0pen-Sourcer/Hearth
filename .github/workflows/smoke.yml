@@ -216,6 +216,10 @@ jobs:
         run: |
           python tests/test_cli_brain_sync.py
 
+      - name: The terminal knows whether the model can see
+        run: |
+          python tests/test_vision_check.py
+
       - name: Masking secrets out of public output
         # It only knows the shapes it was taught, and several that sit on disk
         # on a machine running Hearth were not among them, so they went through

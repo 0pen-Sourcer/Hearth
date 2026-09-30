@@ -3828,53 +3828,18 @@ class JarvisCLI:
         return await asyncio.to_thread(input, prompt_str)
 
     def _is_vision_capable(self) -> bool:
-        """Probe LM Studio's /api/v0/models for the loaded model's true
-        capabilities. Cached per model id so we don't probe every view_image.
-
-        The signals (in priority order):
-          1. `type == "vlm"` field - explicit Vision-Language-Model marker.
-             This is the cleanest answer LM Studio gives us; Qwen3.5-9B has
-             this even though its id doesn't contain "vl".
-          2. "vision" / "image_input" in the `capabilities` array.
-          3. Model id substring match (fallback for non-LM-Studio backends
-             like Ollama where v0 may not exist).
-        """
+        """Whether the model this terminal talks to takes images, asked the
+        same way the tools ask, cached per model."""
         cache = getattr(self, "_vision_cap_cache", {})
         mid = self.current_model or ""
-        if mid in cache:
-            return cache[mid]
-        result = False
-        try:
-            import urllib.request
-            # LOCAL_API_BASE is .../v1 - strip it to get the host
-            host = LOCAL_API_BASE.rsplit("/v1", 1)[0]
-            with urllib.request.urlopen(f"{host}/api/v0/models", timeout=2) as r:
-                data = json.loads(r.read())
-            for m in data.get("data", []):
-                if m.get("id") == mid:
-                    if m.get("type") == "vlm":
-                        result = True
-                    caps = m.get("capabilities") or []
-                    if any(c in caps for c in ("vision", "image_input", "image")):
-                        result = True
-                    break
-        except Exception:
-            pass
-        if not result:
-            # Fallback heuristic - useful when not on LM Studio (Ollama, vLLM)
-            # or on cloud endpoints (Gemini/OpenAI/Anthropic) where the
-            # /api/v0/models probe doesn't exist. These families are multimodal.
-            mlc = mid.lower()
-            if any(s in mlc for s in ("vl", "vision", "gemma-3", "llava",
-                                      "moondream", "internvl", "minicpm-v",
-                                      "gemini", "gpt-4o", "gpt-4.1", "gpt-4-turbo",
-                                      "o3", "o4-mini", "claude-3", "claude-4",
-                                      "claude-sonnet", "claude-opus", "claude-haiku",
-                                      "pixtral", "grok-4", "grok-build", "grok-2-vision")):
-                result = True
-        cache[mid] = result
-        self._vision_cap_cache = cache
-        return result
+        if mid not in cache:
+            try:
+                from hearth.tools import _loaded_model_is_vision
+                cache[mid] = _loaded_model_is_vision(model=mid, base=LOCAL_API_BASE)
+            except Exception:
+                cache[mid] = False
+            self._vision_cap_cache = cache
+        return cache[mid]
 
     def _is_first_run(self) -> bool:
         """True if the user has essentially no memory yet - fresh install.
