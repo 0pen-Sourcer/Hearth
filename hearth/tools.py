@@ -3283,7 +3283,7 @@ def _web_fetch(p: Dict) -> str:
 # SHELL
 # ============================================================
 
-def _rewrite_python_invocation(cmd: str) -> str:
+def _rewrite_python_invocation(cmd: str, shell: str = "powershell") -> str:
     """Route bare `pip`/`python` calls through THIS interpreter
     (`sys.executable`) — Hearth's venv — so `pip install` lands where Hearth
     can see it AND `python script.py` never hits the broken Microsoft Store
@@ -3298,9 +3298,10 @@ def _rewrite_python_invocation(cmd: str) -> str:
     if not cmd or not cmd.strip():
         return cmd
 
-    # PowerShell needs the call operator `&` to run a quoted exe path; harmless
-    # to cmd.exe. See the long note that used to live here.
-    prefix = "& " if sys.platform == "win32" else ""
+    # PowerShell needs the call operator `&` to run a quoted exe path. In cmd
+    # and bash a leading `&` is a syntax error, and bash wants forward slashes.
+    prefix = "& " if (sys.platform == "win32" and shell == "powershell") else ""
+    exe = sys.executable.replace("\\", "/") if shell == "bash" else sys.executable
 
     _frozen = getattr(sys, "frozen", False)
 
@@ -3317,19 +3318,19 @@ def _rewrite_python_invocation(cmd: str) -> str:
                 # In the packaged app sys.executable is Hearth.exe, not python,
                 # and there's no pip. The libs the skills need are bundled, so
                 # tell the model to skip the install and just run its script.
-                return (f'{lead}Write-Output "[packaged build] pip is unavailable '
+                return (f'{lead}echo "[packaged build] pip is unavailable '
                         f'here, but reportlab / python-pptx / matplotlib / '
                         f'openpyxl / pypdfium2 are already bundled - skip the '
                         f'install and run your build script directly."')
-            return f'{lead}{prefix}"{sys.executable}" -m pip {rest}'.rstrip()
+            return f'{lead}{prefix}"{exe}" -m pip {rest}'.rstrip()
         if first in ("python", "python3", "py", "python.exe", "py.exe"):
             if _frozen:
                 # sys.executable is the frozen exe (entrypoint = tray/cli), not a
                 # python interpreter, so `Hearth.exe script.py` would just launch
                 # the app. Route through the --hearth-run-python sentinel the
                 # bundle entrypoints catch and runpy with the bundled libraries.
-                return f'{lead}{prefix}"{sys.executable}" --hearth-run-python {rest}'.rstrip()
-            return f'{lead}{prefix}"{sys.executable}" {rest}'.rstrip()
+                return f'{lead}{prefix}"{exe}" --hearth-run-python {rest}'.rstrip()
+            return f'{lead}{prefix}"{exe}" {rest}'.rstrip()
         return seg
 
     # Split on && / ; / & separators, keeping the separators so we can rejoin
@@ -3547,7 +3548,10 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
 
 
 def _run_command(p: Dict) -> str:
-    cmd = _rewrite_python_invocation(p["command"])
+    shell, shell_note = _shells.normalize_shell(p.get("shell"))
+    if shell_note:
+        return f"Error (run_command): {shell_note}."
+    cmd = _rewrite_python_invocation(p["command"], shell)
     cwd = p.get("cwd")
     _why = _destructive_refusal(p, cmd, "run_command")
     if _why:
@@ -3557,9 +3561,6 @@ def _run_command(p: Dict) -> str:
     else:
         cwd = WORKSPACE
     timeout = min(int(p.get("timeout") or 120), 300)
-    shell, shell_note = _shells.normalize_shell(p.get("shell"))
-    if shell_note:
-        return f"Error (run_command): {shell_note}."
     detached = bool(p.get("detached"))
 
     # Repair the two PowerShell mistakes models make most (a leading quoted exe

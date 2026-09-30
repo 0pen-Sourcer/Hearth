@@ -93,6 +93,14 @@ if shells.bash_path():
 else:
     print("skip  bash is not installed on this machine")
 
+# `python` is pointed at Hearth's own interpreter; that rewrite used
+# PowerShell's call operator in every shell, a syntax error in cmd and bash.
+out = run("python -c \"print(6*7)\"", shell="cmd")
+check(f"python runs under cmd (exit {code(out)})", code(out) == 0 and "42" in out)
+if shells.bash_path():
+    out = run("python -c 'print(6*7)'", shell="bash")
+    check(f"and under bash (exit {code(out)})", code(out) == 0 and "42" in out)
+
 out = run("echo hi", shell="fish")
 check(f"an unknown shell is refused with the ones there are: {out[:90]!r}",
       "unknown shell" in out and "powershell" in out)
