@@ -418,8 +418,7 @@ def _mic_index():
             from .listen import index_for_name
             idx = index_for_name(name, table)
             if is_system_audio_device(name):
-                raise NoUsableMic(f"'{name}' records what your speakers play, not a "
-                                  "microphone. Pick your mic in Settings > Voice.")
+                raise NoUsableMic(f"'{name}' is not a microphone. Pick yours in Settings > Voice.")
             if idx is not None and _probe_device(pa, idx):
                 return idx
             why = "is not connected" if idx is None else "would not open"
@@ -440,12 +439,11 @@ def _mic_index():
                     fullest[key] = n
         mics = list(fullest.values())
         if default is not None and is_system_audio_device(default[1]):
-            lead = (f"The Windows default input is '{default[1]}', which records "
-                    "your speakers, so Hearth will not listen to it.")
+            lead = f"'{default[1]}' is not a microphone."
         else:
-            lead = "The Windows default input could not be opened."
-        tail = (" Pick your microphone in Settings > Voice: " + ", ".join(mics[:4]) + "."
-                if mics else " No other microphone is connected.")
+            lead = "No microphone opened."
+        tail = (" Pick yours in Settings > Voice: " + ", ".join(mics[:4]) + "."
+                if mics else " Connect one and try again.")
         raise NoUsableMic(lead + tail)
     finally:
         pa.terminate()

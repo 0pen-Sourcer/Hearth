@@ -122,7 +122,7 @@ wl = W.WakeListener(on_wake=lambda p: None)
 
 s, why = wl._open_mic()
 check(f"with Stereo Mix as default and no pick, wake does not listen or guess: {why!r}",
-      s is None and "speakers" in why)
+      s is None and "not a microphone" in why)
 SETTINGS["voice_input_name"] = "Headset (boAt Rockerz)"
 s, why = wl._open_mic()
 check("a mic picked by name is the one opened", s is not None and s.device == 2)

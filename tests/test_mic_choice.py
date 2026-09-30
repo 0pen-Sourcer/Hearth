@@ -128,7 +128,7 @@ check(f"a picked mic that is gone falls back to a real default, and says so: {ms
       idx == 4 and "Windows default" in msg)
 
 idx, msg = pick("Stereo Mix (Realtek(R) Audio)")
-check("picking a loopback is refused", idx is None and "speakers" in msg)
+check("picking a loopback is refused", idx is None and "not a microphone" in msg)
 
 # ------------------------------------------------------- the older number pick
 os.environ["JARVIS_VOICE_INPUT_NAME"] = ""

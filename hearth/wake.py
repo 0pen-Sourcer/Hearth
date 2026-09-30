@@ -257,8 +257,7 @@ class WakeListener:
                 except Exception:
                     return None, "no microphone is connected"
         if _ll.is_system_audio_device(name):
-            return None, (f"'{name}' records your speakers, not a microphone; pick your "
-                          "microphone in Settings > Voice")
+            return None, f"'{name}' is not a microphone; pick yours in Settings > Voice"
         try:
             st = sd.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32",
                                 blocksize=int(self.sample_rate * BLOCK_S), device=dev)
