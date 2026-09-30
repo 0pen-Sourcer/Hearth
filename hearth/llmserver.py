@@ -1909,7 +1909,23 @@ def _parse_extra_server_args(extra: Optional[str]) -> List[str]:
     return out
 
 
-def start_builtin(model_path: str, port: Optional[int] = None,
+def start_builtin(model_path: str, *args, **kwargs) -> Dict[str, Any]:
+    """Start the built-in server on a model (see _start_builtin for the options).
+
+    Whatever goes wrong inside, the model is not left marked as loading and the
+    progress bar is told it failed. A crash used to leave both behind, so the
+    window waited on "getting ready" forever and every retry was refused as a
+    duplicate."""
+    try:
+        return _start_builtin(model_path, *args, **kwargs)
+    except Exception as e:
+        with _start_lock:
+            _starting_paths.discard(os.path.normcase(os.path.abspath(model_path)))
+        _set_progress(phase="error", error=f"{type(e).__name__}: {e}")
+        return {"ok": False, "error": f"The model could not start ({type(e).__name__}: {e})"}
+
+
+def _start_builtin(model_path: str, port: Optional[int] = None,
                   ctx: int = 24576, n_gpu_layers: int = -1,
                   n_threads: Optional[int] = None,
                   cache_type_k: Optional[str] = None,
