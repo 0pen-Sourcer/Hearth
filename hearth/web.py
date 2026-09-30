@@ -1328,6 +1328,7 @@ def _save_settings_locked(d: Dict) -> Dict:
               "openrouter", "custom"}
     _was_cloud = _prev_provider in _CLOUD
     _is_cloud_now = _new_provider in _CLOUD
+    _prev_tts_device = cur.get("tts_device", "cpu")
     cur.update({k: v for k, v in d.items() if v is not None})
     os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
     # Atomic: a truncated settings.json (power cut, AV lock mid-write) would
@@ -1383,8 +1384,11 @@ def _save_settings_locked(d: Dict) -> Dict:
             _voice.set_default_voice(str(cur.get("voice_name", "am_michael")))
         except Exception:
             pass
-        try: _voice.reload()
-        except Exception: pass
+        # Dropping the engine makes the next reply reload the whole speech
+        # model first; only a change of the device it runs on needs that.
+        if cur.get("tts_device", "cpu") != _prev_tts_device:
+            try: _voice.reload()
+            except Exception: pass
     return cur
 
 
