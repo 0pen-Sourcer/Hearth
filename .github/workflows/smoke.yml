@@ -249,6 +249,14 @@ jobs:
         run: |
           python tests/test_model_start_failure.py
 
+      - name: The Team view reports what each helper is really doing
+        run: |
+          python tests/test_team_state.py
+
+      - name: Pinned chats stay pinned
+        run: |
+          python tests/test_convo_pins.py
+
       - name: The public tool reference matches the code
         # docs/TOOLS.md is generated; it said 93 tools long after there were more.
         if: matrix.os == 'windows-latest'

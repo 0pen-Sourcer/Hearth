@@ -262,6 +262,88 @@ def list_subagent_activity(limit: int = 50) -> List[Dict[str, Any]]:
     return files[:limit]
 
 
+_TEAM_CACHE: Dict[str, Tuple[Tuple[float, int], Dict[str, Any]]] = {}
+
+
+def _read_agent(p: Path) -> Dict[str, Any]:
+    """What one transcript says about its agent: who it is, what it is doing
+    right now, and how it ended if it has."""
+    info: Dict[str, Any] = {"id": p.stem, "persona": "", "name": "", "prompt": "",
+                            "ended": None, "tools_used": 0, "activity": "thinking",
+                            "tool": "", "blocked": "", "preview": "", "started": ""}
+    pending: List[str] = []
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    rec = json.loads(ln)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                k = rec.get("kind")
+                if k == "start":
+                    info["persona"] = rec.get("persona") or ""
+                    info["name"] = rec.get("name") or ""
+                    info["prompt"] = (rec.get("prompt") or "").strip()[:200]
+                    info["started"] = rec.get("ts") or ""
+                elif k == "assistant_tool_call":
+                    pending = [c.get("name") or "" for c in rec.get("calls") or []]
+                    if rec.get("content"):
+                        info["preview"] = str(rec["content"])[:240]
+                elif k == "tool_result":
+                    info["tools_used"] += 1
+                    if pending:
+                        pending.pop(0)
+                    prev = rec.get("preview") or ""
+                    if prev.startswith("(not run:") and "permission" in prev:
+                        info["blocked"] = rec.get("name") or ""
+                elif k == "assistant_final":
+                    info["preview"] = str(rec.get("text") or "")[:240]
+                elif k == "end":
+                    info["ended"] = "done" if rec.get("ok") else "failed"
+                    if not rec.get("ok"):
+                        info["preview"] = str(rec.get("error") or info["preview"])[:240]
+    except OSError:
+        pass
+    if pending:
+        info["activity"], info["tool"] = "tool", pending[0]
+    return info
+
+
+def team_state(since_s: float = 6 * 3600, limit: int = 24) -> List[Dict[str, Any]]:
+    """Every helper agent that is running, plus those that finished recently,
+    for the Team view. Status is working, done, failed, or stopped (the app
+    closed while it ran: its transcript never got an end line and no thread
+    owns it any more)."""
+    if not _TRANSCRIPT_DIR.exists():
+        return []
+    with _BG_RESULTS_LOCK:
+        running = set(_BG_RUNNING)
+    now = time.time()
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for p in _TRANSCRIPT_DIR.glob("sub_*.jsonl"):
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        live = p.stem in running
+        if not live and now - st.st_mtime > since_s:
+            continue
+        seen.add(p.stem)
+        key = (st.st_mtime, st.st_size)
+        hit = _TEAM_CACHE.get(p.stem)
+        info = hit[1] if hit and hit[0] == key else _read_agent(p)
+        _TEAM_CACHE[p.stem] = (key, info)
+        status = info["ended"] or ("working" if live else "stopped")
+        out.append({**{k: v for k, v in info.items() if k != "ended"},
+                    "status": status, "updated": st.st_mtime})
+    for gone in set(_TEAM_CACHE) - seen:
+        _TEAM_CACHE.pop(gone, None)
+    order = {"working": 0, "failed": 1, "stopped": 2, "done": 3}
+    out.sort(key=lambda a: (order.get(a["status"], 4), -a["updated"]))
+    return out[:limit]
+
+
 def peek_pending_notifications() -> List[Dict[str, Any]]:
     """Return a COPY of pending notifications WITHOUT clearing the queue.
     Used by the GUI's idle poller — surfaces a heads-up banner ("●
