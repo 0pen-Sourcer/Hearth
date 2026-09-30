@@ -2384,8 +2384,8 @@
     border-radius: var(--r);
     outline: none;
     min-width: 240px;
-    font-size: 12px;
-    font-family: var(--mono);
+    font-size: 12.5px;
+    font-family: var(--sans);
     transition: border-color 0.15s var(--ease);
     /* WebKit autofill paints the field background white by default. Override
        it to the dark theme so password fields don't suddenly flash white. */
@@ -2401,6 +2401,27 @@
     transition: background-color 99999s ease-in-out 0s;
   }
   .settings select:focus, .settings input:focus { border-color: var(--accent-line); }
+  .settings input[type="password"], .settings input.mono { font-family: var(--mono); font-size: 12px; }
+  /* Rows are grouped into cards, the same surface Appearance uses, so every
+     page reads as one design. */
+  .set-card { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-1);
+    padding: 0 16px; margin: 0 0 14px; }
+  .set-card > .field:last-child { border-bottom: none; }
+  .set-card > .field { padding: 13px 0; }
+  .settings .field .label .hint { font-size: 12px; color: var(--fg-dim); }
+  /* A checkbox that stands for an on/off setting looks like every other switch. */
+  .settings input.switch-box {
+    appearance: none; -webkit-appearance: none; margin: 0; flex-shrink: 0; cursor: pointer;
+    width: 36px; height: 20px; border-radius: 10px; position: relative;
+    background: var(--bg-3); border: 1px solid var(--border); transition: background .15s, border-color .15s;
+  }
+  .settings input.switch-box::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--fg-faint); transition: left .2s var(--ease), background .2s;
+  }
+  .settings input.switch-box:checked { background: var(--accent); border-color: var(--accent); }
+  .settings input.switch-box:checked::after { left: 18px; background: #fff; }
+  .settings input[type="checkbox"] { accent-color: var(--accent); }
   .voice-status {
     font-size: 11px;
     font-family: var(--mono);
@@ -4055,7 +4076,7 @@
             <div class="hint">By default JARVIS can READ anywhere on your disk (writes are always confined to the workspace). Turn this on to confine reads too. Takes effect immediately, no restart.</div>
           </div>
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="setting-lockdown" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;"/>
+            <input type="checkbox" class="switch-box" id="setting-lockdown"/>
           </label>
         </div>
         <div class="field">
@@ -4064,7 +4085,7 @@
             <div class="hint">JARVIS saves and recalls facts on most turns, so those cards can outnumber the reply itself. Turn this off to keep them out of the chat. It changes nothing about what gets remembered, and the cards come back if you turn it on again, in old chats too.</div>
           </div>
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="checkbox" id="setting-show-memory-tools" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;"/>
+            <input type="checkbox" class="switch-box" id="setting-show-memory-tools"/>
           </label>
         </div>
         <div class="field">
@@ -11409,21 +11430,22 @@ async function refreshSettings() {
     // be in that language: English words spoken through another language's
     // sounds come out as nonsense, which reads as a broken voice rather than a
     // mismatched one.
+    // The sample introduces the assistant by its own name (JARVIS, or
+    // whatever it was renamed to), not by the voice's name.
     const _SAMPLE = {
-      e: 'Hola, asi es como sueno.',
-      f: 'Bonjour, voici ma voix.',
-      h: 'नमस्ते, मेरी आवाज़ ऐसी लगती है।',
-      i: 'Ciao, ecco come suono.',
-      j: 'こんにちは、これが私の声です。',
-      p: 'Ola, e assim que eu soo.',
-      z: '你好，这就是我的声音。',
+      e: n => `Hola, soy ${n}. Asi es como sueno.`,
+      f: n => `Bonjour, je suis ${n}. Voici ma voix.`,
+      h: n => `नमस्ते, मैं ${n} हूँ। मेरी आवाज़ ऐसी लगती है।`,
+      i: n => `Ciao, sono ${n}. Ecco come suono.`,
+      j: n => `こんにちは、${n}です。これが私の声です。`,
+      p: n => `Ola, eu sou ${n}. E assim que eu soo.`,
+      z: n => `你好，我是${n}。这就是我的声音。`,
     };
     function sampleLine(voice) {
+      const who = _agentName();
       const key = String(voice || '')[0];
-      if (_SAMPLE[key]) return _SAMPLE[key];
-      const name = String(voice || '').replace(/^[a-z]{2}_/, '')
-        .replace(/^./, c => c.toUpperCase());
-      return 'This is ' + (name || 'the voice') + '. This is how I sound.';
+      if (_SAMPLE[key]) return _SAMPLE[key](who);
+      return `Hi, I'm ${who}. This is how I sound.`;
     }
     // Wait a short while for a failure from inside the speaking threads, and
     // return its text if one arrives. Silence here means it played.
@@ -15951,7 +15973,7 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
       });
       const r = await fetch('/api/tts', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ text: "Right boss, this is me at " + speed.toFixed(1) + "x. If this feels right, lock it in." }),
+        body: JSON.stringify({ text: `Hi, I'm ${_agentName()}. This is me at ${speed.toFixed(1)}x. If this feels right, lock it in.` }),
       });
       if (r.ok) {
         if (testMsg) testMsg.textContent = '✓ played - adjust and re-test if needed.';
@@ -17055,6 +17077,26 @@ async function roomStart() {
   ROOM.raf = requestAnimationFrame(roomTick);
 }
 function roomStop() { if (ROOM.raf) cancelAnimationFrame(ROOM.raf); ROOM.raf = 0; }
+
+// Settings rows sit in cards, like the Appearance page. Consecutive rows in a
+// pane form one card; a heading or any other block starts the next.
+(function groupSettingsRows() {
+  document.querySelectorAll('.settings-pane').forEach(pane => {
+    let card = null;
+    [...pane.children].forEach(el => {
+      if (el.classList && el.classList.contains('field')) {
+        if (!card) {
+          card = document.createElement('div');
+          card.className = 'set-card';
+          pane.insertBefore(card, el);
+        }
+        card.appendChild(el);
+      } else {
+        card = null;
+      }
+    });
+  });
+})();
 </script>
 </body>
 </html>
