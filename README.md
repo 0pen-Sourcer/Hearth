@@ -142,6 +142,8 @@ Hearth runs from source on macOS and Linux. The CLI and web UI work, and most to
 
 **Background jobs.** Long-running operations (whole-drive scans, big searches) return a job ID immediately and run in a background thread while you keep working. List jobs and collect results when they finish.
 
+**Or think with Claude Code.** Already pay for Claude? Pick Claude Code as the brain and JARVIS runs on it, with no API key, still using Hearth's tools, memory and voice, and still asking before anything risky.
+
 **Hand work to other agents.** Say "have Claude Code fix the failing test" and JARVIS passes the task to that agent, running on your own install and account, and brings back its answer. Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Aider, Goose and several more work the same way, and each shows up in the Team view under its own badge.
 
 **MCP, both directions.** Hearth exposes its own tools as an MCP server, and it also consumes other MCP servers: drop an `mcp.json` in the workspace and their tools appear alongside the built-ins.

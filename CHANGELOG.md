@@ -8,7 +8,8 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 
 ### Added
 - Team view: live state of every helper from its own transcript, with a room view drawn in layers. People react when clicked, JARVIS moves with the work and can be talked to from the room, helpers get first names, and each one's full log opens from the list. `/team` in the terminal.
-- `delegate`: hand one task to another agent CLI and relay its answer. Claude Code, Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Qwen Code, Crush, Cursor Agent, Copilot CLI, Goose, Aider, Droid, Amp and Pi, run headless on the user's install; npm shims are started without cmd.exe.
+- Claude Code as the brain (`hearth/claude_brain.py`): turns run `claude -p` with Hearth's MCP server for tools, the persona appended, one session per chat, and permission questions answered by Hearth through an `approve` tool on its MCP server.
+- `delegate`: hand one task to another agent CLI and relay its answer. Twenty-three agent CLIs including Claude Code, Codex, Antigravity, Gemini CLI, Cline and OpenHands, run headless on the user's install; npm shims are started without cmd.exe.
 - Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar menu, Shift+Tab), the terminal (/mode), helpers and external agents.
 - Appearance: Classic (default), Light, Dark and System, six accents, a hearth mark; tray and window icons follow the choice. Simple and Advanced apply app-wide.
 - First-run setup writes its answers to profile.md, asks headphones or speakers, approval mode and look, and animates on springs; `/me` in the terminal.
