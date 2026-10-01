@@ -75,8 +75,19 @@ r2 = xa.spawn("stand-in-text", "hi there", cwd=work, on_done=lambda i, res: (got
 done.wait(30)
 check("a plain-text agent's output is its result", got.get("ok") and "done: hi there" in got.get("text", ""))
 
+xa.AGENTS["absent"] = {"label": "Absent", "exe": ["hearth-no-such-agent"], "args": lambda allow: [], "stream": "text",
+                       "also": [os.path.join(work, "nowhere", "*", "absent.exe")]}
 check("an agent that is not installed is refused with a reason",
-      "not installed" in (xa.spawn("codex", "x", cwd=work) if not real_which(["codex"]) else {"error": "not installed"}).get("error", ""))
+      "not installed" in xa.spawn("absent", "x", cwd=work).get("error", ""))
+del xa.AGENTS["absent"]
+fake_app = os.path.join(work, "app", "bin", "v2")
+os.makedirs(fake_app, exist_ok=True)
+open(os.path.join(fake_app, "app-agent.exe"), "wb").close()
+xa.AGENTS["app-agent"] = {"label": "App agent", "exe": ["hearth-no-such-agent"], "args": lambda allow: [],
+                          "stream": "text", "also": [os.path.join(work, "app", "bin", "*", "app-agent.exe")]}
+check("an agent CLI kept inside its desktop app is found off PATH",
+      xa.find("app-agent") == os.path.join(fake_app, "app-agent.exe"))
+del xa.AGENTS["app-agent"]
 check("an unknown agent is refused", not xa.spawn("nope", "x").get("ok"))
 
 # launch_team routes a member with an agent to it, outside the local team limit

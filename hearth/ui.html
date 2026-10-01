@@ -3671,8 +3671,8 @@
         <div class="grow"></div>
         <button class="tm-new" id="tm-new" title="Start a helper on a task yourself">+ New helper</button>
         <div class="logs-tabs" id="tm-tabs" hidden>
-          <button class="tm-tab active" data-tm="list">List</button>
           <button class="tm-tab" data-tm="room">Room</button>
+          <button class="tm-tab active" data-tm="list">List</button>
         </div>
       </div>
       <div class="tm-bar" id="tm-bar"><i class="w"></i><i class="d"></i><i class="f"></i></div>
@@ -17339,7 +17339,12 @@ function teamOpen() {
   teamPoll();
   // The room needs its art; without it there is only the list.
   if ($('tm-tabs').hidden) {
-    fetch('/assets/team/manifest.json', { cache: 'no-store' }).then(r => { if (r.ok) $('tm-tabs').hidden = false; }).catch(() => {});
+    // With the art there, the room is what opens first, until a tab is picked.
+    fetch('/assets/team/manifest.json', { cache: 'no-store' }).then(r => {
+      if (!r.ok) return;
+      $('tm-tabs').hidden = false;
+      if (!TEAM.picked && TEAM.tab !== 'room') document.querySelector('.tm-tab[data-tm=room]').click();
+    }).catch(() => {});
   }
   clearInterval(TEAM.timer);
   TEAM.timer = setInterval(teamPoll, 2000);
@@ -17398,7 +17403,8 @@ function teamRender() {
   }
 }
 document.querySelectorAll('#tm-filters .tm-f').forEach(b => b.addEventListener('click', () => { TEAM.filter = b.dataset.f; teamRender(); }));
-document.querySelectorAll('.tm-tab').forEach(b => b.addEventListener('click', () => {
+document.querySelectorAll('.tm-tab').forEach(b => b.addEventListener('click', (e) => {
+  if (e.isTrusted) TEAM.picked = true;
   TEAM.tab = b.dataset.tm;
   document.querySelectorAll('.tm-tab').forEach(x => x.classList.toggle('active', x === b));
   $('tm-list').hidden = TEAM.tab !== 'list';
@@ -17482,7 +17488,7 @@ const ROOM = {
 };
 // SEAT_DY sets where a seated worker sorts (just in front of the desk);
 // SIT_LIFT only raises where they are drawn, so head and shoulders clear the chair.
-const SEAT_DY = 4, CHAIR_DY = 50, SIT_LIFT = 16;
+const SEAT_DY = 4, CHAIR_DY = 18, SIT_LIFT = 48;
 // Everyone shares the drawn body for their role; hair and skin come from the
 // person's id, so each helper looks like someone and keeps that look.
 const HAIRS = [[0.07, 0.55, 0.13], [0.05, 0.45, 0.30], [0.02, 0.62, 0.34], [0.11, 0.55, 0.52],

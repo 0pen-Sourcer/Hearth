@@ -12,6 +12,7 @@ credit that comes with a Claude plan, not to the plan's interactive limits.
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import shutil
@@ -41,7 +42,9 @@ AGENTS: Dict[str, Dict[str, Any]] = {
                     "stream": "claude", "billing": "Agent SDK credit on your Claude plan"},
     "codex": {"label": "Codex", "maker": "OpenAI", "exe": ["codex"],
               "args": lambda allow: ["exec", "--skip-git-repo-check"]
-              + (["--full-auto"] if allow in ("auto", "edits") else []) + ["-"], "stream": "text"},
+              + (["--full-auto"] if allow in ("auto", "edits") else []) + ["-"], "stream": "text",
+              # The Codex desktop app keeps its own copy of the CLI off PATH.
+              "also": [r"%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe", r"~\.codex\.sandbox-bin\codex.exe"]},
     "antigravity": {"label": "Antigravity", "maker": "Google", "exe": ["agy"],
                     "args": lambda allow: (["--dangerously-skip-permissions"] if allow == "auto" else []) + ["-p"],
                     "stream": "text", "prompt_arg": True},
@@ -114,11 +117,24 @@ def _which(names: List[str]) -> Optional[str]:
     return None
 
 
+def find(aid: str) -> Optional[str]:
+    """Where an agent's CLI is: on PATH, or where its desktop app keeps it."""
+    spec = AGENTS.get(aid) or {}
+    path = _which(spec.get("exe") or [])
+    if path:
+        return path
+    for pat in spec.get("also") or []:
+        hits = [p for p in glob.glob(os.path.expandvars(os.path.expanduser(pat))) if os.path.isfile(p)]
+        if hits:
+            return max(hits, key=os.path.getmtime)
+    return None
+
+
 def available() -> List[Dict[str, Any]]:
     """The agent CLIs installed on this machine."""
     out = []
     for aid, spec in AGENTS.items():
-        path = _which(spec["exe"])
+        path = find(aid)
         # A batch file that isn't an npm shim is a launcher of something else:
         # VS Code puts a "copilot" on PATH that offers to install the real CLI
         # and would sit waiting for an answer. Not installed, so not listed.
@@ -236,7 +252,7 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
     spec = AGENTS.get(agent)
     if not spec:
         return {"ok": False, "error": f"unknown agent '{agent}'. Known: {', '.join(AGENTS)}"}
-    exe = _which(spec["exe"])
+    exe = find(agent)
     if not exe:
         return {"ok": False, "error": f"{spec['label']} is not installed on this machine"}
     work = _long_path(os.path.abspath(cwd or _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")))
