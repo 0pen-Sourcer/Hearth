@@ -3133,7 +3133,7 @@
   .ob-seg.ob-slide button.on { background: transparent; border-color: transparent; }
   .ob-seg .ob-seg-hl { position: absolute; z-index: 0; border-radius: var(--r); pointer-events: none;
     border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg-2)); }
-  .ob-hero .ob-arch { stroke-dasharray: 150; }
+  .ob-hero .ob-h { font: 700 30px/1 var(--sans); color: var(--accent); letter-spacing: -0.02em; display: inline-block; }
   /* The whole window repaints from the point that was clicked. */
   ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
   .ob-hero svg { color: var(--accent); }
@@ -4816,7 +4816,7 @@
     <div class="ob-body" id="ob-body">
       <!-- ---- step 1: welcome ---- -->
       <div class="ob-step" data-step="1">
-        <div class="ob-hero"><svg width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path class="ob-arch" d="M15 53V31a17 17 0 0 1 34 0v22M9 53h46" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><path class="ob-flame" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z" fill="currentColor"/></svg></div>
+        <div class="ob-hero"><span class="ob-h" aria-hidden="true">H</span></div>
         <h1 class="ob-title">Hey, I'm <span class="ob-agent-name">JARVIS</span>.</h1>
         <p class="ob-sub">I run on your PC and do real things on it: open apps, find and read your
           files, browse the web, and talk out loud if you want. Nothing leaves this machine unless you
@@ -16193,16 +16193,16 @@ function _obMoveTrack(step, total, instant) {
 
 // A highlight slides between the options of a choice group. Edges on two
 // springs: the one heading toward the new option moves first.
-function _obSlideSeg(box, instant) {
+function _obSlideSeg(box, instant, retry) {
   if (!box) return;
   const on = box.querySelector('button.on');
   let st = _obMotion.segs.get(box);
   if (!st) {
     const hl = document.createElement('div');
     hl.className = 'ob-seg-hl';
+    hl.style.opacity = '0';
     box.prepend(hl);
-    box.classList.add('ob-slide');
-    st = { hl, L: new Spring(0, 0.42, 0.84), R: new Spring(0, 0.42, 0.84), T: 0, H: 0, seen: false };
+    st = { hl, L: new Spring(0, 0.42, 0.84), R: new Spring(0, 0.42, 0.84), T: 0, H: 0, seen: false, tries: 0 };
     _obMotion.segs.set(box, st);
     _springUsers.add(() => {
       if (!st.hl.isConnected) return false;
@@ -16212,8 +16212,20 @@ function _obSlideSeg(box, instant) {
       return !(st.L.settled() && st.R.settled());
     });
   }
-  st.hl.style.opacity = on ? '1' : '0';
-  if (!on || !box.offsetParent) return;
+  if (!retry) st.tries = 0;
+  // Until the step is on screen there is nothing to measure. The picked
+  // option keeps its own outline meanwhile, and this tries again next frame
+  // (a step swap keeps the new step hidden for a few frames).
+  if (!on || !box.offsetParent || !on.offsetWidth) {
+    st.hl.style.opacity = '0';
+    box.classList.remove('ob-slide');
+    st.seen = false;
+    if (on && st.tries++ < 90) requestAnimationFrame(() => _obSlideSeg(box, instant, true));
+    return;
+  }
+  st.tries = 0;
+  box.classList.add('ob-slide');
+  st.hl.style.opacity = '1';
   const L = on.offsetLeft, R = L + on.offsetWidth;
   st.T = on.offsetTop; st.H = on.offsetHeight;
   if (instant || !st.seen || _reduceMotion()) { st.L.jump(L); st.R.jump(R); st.seen = true; _springTick(); return; }
@@ -16264,16 +16276,15 @@ function _obSwap(prevEl, nextEl, dir) {
 }
 
 // First look at a step: its title settles word by word, and on the welcome
-// the mark draws itself.
+// the H settles into its tile.
 function _obEnterExtras(stepEl) {
   if (_reduceMotion()) return;
   const sp = springEasing(0.5, 0.86);
-  const arch = stepEl.querySelector('.ob-arch'), flame = stepEl.querySelector('.ob-flame');
-  if (arch) arch.animate([{ strokeDashoffset: 150 }, { strokeDashoffset: 0 }], { duration: 900, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'backwards' });
-  if (flame) flame.animate(
-    [{ transform: 'scale(0)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }],
-    { duration: sp.duration, easing: sp.easing, delay: 420, fill: 'backwards', transformOrigin: '32px 50px' });
-  if (flame) flame.style.transformOrigin = '32px 50px';
+  const mark = stepEl.querySelector('.ob-h');
+  if (mark) mark.animate(
+    [{ transform: 'translateY(6px) scale(0.86)', opacity: 0, filter: 'blur(3px)' },
+     { transform: 'none', opacity: 1, filter: 'blur(0)' }],
+    { duration: sp.duration, easing: sp.easing, delay: 140, fill: 'backwards' });
   const title = stepEl.querySelector('.ob-title');
   if (title && !title.dataset.split) {
     title.dataset.split = '1';
@@ -16599,28 +16610,28 @@ async function obLoadVoiceStatus() {
     const stt = v.stt && (v.stt.ready || v.stt.available);
     const rt  = v.realtime && v.realtime.available;
     let cls = 'is-good', txt = '';
-    if (tts && stt && rt) txt = 'Real-time voice ready - silero VAD + Kokoro speech.';
-    else if (tts && stt) txt = 'TTS + STT ready (press-to-talk).';
-    else if (tts) { cls = 'is-warn'; txt = 'Speakers ready, mic not set up - install faster-whisper.'; }
-    else if (stt) { cls = 'is-warn'; txt = 'Mic ready, speakers not set up - install kokoro-onnx.'; }
-    else { cls = 'is-warn'; txt = 'Voice isn\'t available yet. You can install it any time from Settings.'; }
+    if (tts && stt && rt) txt = 'Voice is ready. I can hear you and talk back.';
+    else if (tts && stt) txt = 'Voice is ready. Press the mic when you want to talk.';
+    else if (tts) { cls = 'is-warn'; txt = 'I can talk, but I can\'t hear you yet. Listening can be added in Settings, Voice.'; }
+    else if (stt) { cls = 'is-warn'; txt = 'I can hear you, but my voice isn\'t downloaded yet.'; }
+    else { cls = 'is-warn'; txt = 'Voice isn\'t set up yet. You can add it any time from Settings, Voice.'; }
     // GPU vs CPU note: speech-to-text on CPU is the ~10s-latency culprit. Tell
     // the user which they're on; a GPU machine on CPU mode gets a one-click flip.
     let gpuNote = '';
     if (stt && v.stt) {
       const onGpu = v.stt.device === 'cuda';
       const canGpu = !!v.stt.cuda_available;
-      if (onGpu) gpuNote = ' Running on your GPU - fast.';
-      else if (canGpu) gpuNote = ' Your GPU can run this much faster - <a href="#" id="ob-voice-gpu">switch to GPU</a>.';
-      else gpuNote = ' Running on CPU (transcription may lag a few seconds).';
+      if (onGpu) gpuNote = ' It runs on your graphics card, so it\'s quick.';
+      else if (canGpu) gpuNote = ' Your graphics card can do this faster. <a href="#" id="ob-voice-gpu">Use it</a>.';
+      else gpuNote = ' It runs on the processor, so it may take a few seconds to catch what you said.';
     }
     row.className = 'ob-status-row ' + cls;
     const needTTS = !tts;   // speakers (kokoro) not installed
     row.innerHTML = `<span class="ob-dot"></span><span>${esc(txt)}${gpuNote}</span>`
-      + (needTTS ? ` <button type="button" id="ob-install-tts" class="ob-choice" style="margin-left:10px;padding:5px 12px;font-size:12px;">Install speakers</button>` : '');
+      + (needTTS ? ` <button type="button" id="ob-install-tts" class="ob-choice" style="margin-left:10px;padding:6px 12px;font-size:12px;white-space:nowrap;flex:none;" title="A one-time download">Get my voice</button>` : '');
     const instBtn = document.getElementById('ob-install-tts');
     if (instBtn) instBtn.onclick = async () => {
-      instBtn.disabled = true; instBtn.textContent = 'Installing…';
+      instBtn.disabled = true; instBtn.textContent = 'Downloading…';
       try {
         // Speakers (Kokoro) = kokoro-onnx + sounddevice + numpy; the model files
         // auto-download on first speak. /api/voice/install-gpu pip-installs the
@@ -16631,7 +16642,7 @@ async function obLoadVoiceStatus() {
           try {
             const s = await fetch('/api/voice/install-status').then(x => x.json());
             dlMirrorVoice('Voice packages', s);
-            if (s.running) { instBtn.textContent = s.pct != null ? `Installing… ${s.pct}%` : 'Installing…'; return; }
+            if (s.running) { instBtn.textContent = s.pct != null ? `Downloading… ${s.pct}%` : 'Downloading…'; return; }
             if (s.done) {
               clearInterval(poll);
               if (s.ok) {
@@ -16646,13 +16657,13 @@ async function obLoadVoiceStatus() {
                 // button disabled reading "Install failed", so a half-finished
                 // voice setup could never be attempted again from here.
                 instBtn.disabled = false;
-                instBtn.textContent = 'Retry install';
-                toast('Voice setup did not finish', (s.msg || s.error || 'You can retry it here.'), 'warn', 8000);
+                instBtn.textContent = 'Try again';
+                toast('The voice download didn\'t finish', (s.msg || s.error || 'You can try again here.'), 'warn', 8000);
               }
             }
-          } catch { clearInterval(poll); instBtn.disabled = false; instBtn.textContent = 'Install speakers'; }
+          } catch { clearInterval(poll); instBtn.disabled = false; instBtn.textContent = 'Get my voice'; }
         }, 2500);
-      } catch (e) { instBtn.disabled = false; instBtn.textContent = 'Install failed'; toast('Speakers install failed', e.message, 'err', 7000); }
+      } catch (e) { instBtn.disabled = false; instBtn.textContent = 'Try again'; toast('The voice download didn\'t start', e.message, 'err', 7000); }
     };
     const gpuLink = document.getElementById('ob-voice-gpu');
     if (gpuLink) gpuLink.onclick = async (e) => {
