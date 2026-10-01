@@ -83,6 +83,42 @@ def _stream_client_timeout():
     except Exception:
         return 600.0
 
+class Pastes:
+    """A long paste sits in the input line as a short marker and is sent whole.
+    Pasting the same text again swaps its marker for the text."""
+    MIN_LINES = 4
+    MIN_CHARS = 800
+    _MARK = re.compile(r"\[Pasted text #(\d+)(?: \+\d+ lines)?\]")
+
+    def __init__(self) -> None:
+        self._kept: Dict[int, str] = {}
+
+    def marker_for(self, text: str) -> Optional[str]:
+        """The marker to show for this paste, or None when it is short enough
+        to show as it is."""
+        lines = text.count("\n") + 1
+        if lines < self.MIN_LINES and len(text) < self.MIN_CHARS:
+            return None
+        n = len(self._kept) + 1
+        self._kept[n] = text
+        return f"[Pasted text #{n} +{lines} lines]" if lines > 1 else f"[Pasted text #{n}]"
+
+    def marker_of(self, line: str, text: str) -> Optional[str]:
+        """The marker in `line` that stands for exactly this text."""
+        for m in self._MARK.finditer(line):
+            if self._kept.get(int(m.group(1))) == text:
+                return m.group(0)
+        return None
+
+    def holds(self, line: str) -> bool:
+        return any(int(m.group(1)) in self._kept for m in self._MARK.finditer(line))
+
+    def expand(self, line: str) -> str:
+        return self._MARK.sub(lambda m: self._kept.get(int(m.group(1)), m.group(0)), line)
+
+
+PASTES = Pastes()
+
 # Soft dependency: prompt_toolkit gives proper arrow keys, history, ctrl-r.
 # If installed, we use it. Otherwise we fall back to plain input().
 try:
@@ -90,6 +126,8 @@ try:
     from prompt_toolkit.history import FileHistory  # type: ignore
     from prompt_toolkit.formatted_text import ANSI  # type: ignore
     from prompt_toolkit.key_binding import KeyBindings  # type: ignore
+    from prompt_toolkit.keys import Keys  # type: ignore
+    from prompt_toolkit.styles import Style  # type: ignore
     _PT_AVAILABLE = True
 
     class SafeFileHistory(FileHistory):  # type: ignore[misc]
@@ -97,6 +135,8 @@ try:
         writing. Windows terminals occasionally emit them for emojis like 💀,
         which crashes the default FileHistory's UTF-8 encoder."""
         def store_string(self, string: str) -> None:
+            # A marker means nothing in a later session, so the file gets the text.
+            string = PASTES.expand(string)
             # encode/decode round-trip with 'replace' kills surrogates
             cleaned = string.encode("utf-8", "replace").decode("utf-8", "replace")
             super().store_string(cleaned)
@@ -1058,6 +1098,18 @@ class JarvisCLI:
                 else:
                     buf.insert_text("\n")
 
+            @kb.add(Keys.BracketedPaste)
+            def _paste(event):
+                data = event.data.replace("\r\n", "\n").replace("\r", "\n")
+                buf = event.current_buffer
+                mark = PASTES.marker_of(buf.text, data)
+                if mark:
+                    at = buf.text.index(mark)
+                    buf.text = buf.text[:at] + data + buf.text[at + len(mark):]
+                    buf.cursor_position = at + len(data)
+                else:
+                    buf.insert_text(PASTES.marker_for(data) or data)
+
             # Slash-command autocomplete (type-ahead). Only fires on words that
             # start with '/', so normal prose is untouched. Big discoverability
             # win — the command list is long and otherwise must be memorized.
@@ -1080,7 +1132,14 @@ class JarvisCLI:
                 mouse_support=False,
                 completer=_completer,
                 complete_while_typing=True,
+                style=Style.from_dict({"bottom-toolbar": "noreverse #7a7a7a"}),
             )
+            session = self.pt_session
+
+            def _paste_hint(buf):
+                session.bottom_toolbar = "  paste again to expand" if PASTES.holds(buf.text) else None
+
+            session.default_buffer.on_text_changed += _paste_hint
         except Exception:
             # No real console (piped, redirected, etc.) - fall back to input()
             self.pt_session = None
@@ -4063,10 +4122,11 @@ class JarvisCLI:
         self._ensure_pt_session()
         prompt_str = self._footer_prompt()
         if self.pt_session is not None:
-            return await self.pt_session.prompt_async(
+            self.pt_session.bottom_toolbar = None
+            return PASTES.expand(await self.pt_session.prompt_async(
                 ANSI(prompt_str),
                 multiline=self.multiline_mode,
-            )
+            ))
         return await asyncio.to_thread(input, prompt_str)
 
     def _is_vision_capable(self) -> bool:
