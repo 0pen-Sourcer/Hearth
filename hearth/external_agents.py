@@ -81,6 +81,25 @@ AGENTS: Dict[str, Dict[str, Any]] = {
             "stream": "text", "prompt_arg": True},
     "pi": {"label": "Pi", "maker": "pi.dev", "exe": ["pi"], "args": lambda allow: ["-p"],
            "stream": "text", "prompt_arg": True},
+    "cline": {"label": "Cline", "maker": "Cline", "exe": ["cline"],
+              "args": lambda allow: ["-y"] if allow == "auto" else [], "stream": "text", "prompt_arg": True},
+    # Headless Continue leaves out any tool that would need an approval.
+    "continue": {"label": "Continue", "maker": "Continue", "exe": ["cn"], "args": lambda allow: ["-p"],
+                 "stream": "text", "prompt_arg": True},
+    "amazon-q": {"label": "Amazon Q", "maker": "AWS", "exe": ["q"],
+                 "args": lambda allow: ["chat", "--no-interactive"] + (["--trust-all-tools"] if allow == "auto" else []),
+                 "stream": "text", "prompt_arg": True},
+    "kiro": {"label": "Kiro", "maker": "AWS", "exe": ["kiro-cli"],
+             "args": lambda allow: ["chat", "--no-interactive"] + (["--trust-all-tools"] if allow == "auto" else []),
+             "stream": "text", "prompt_arg": True},
+    "kilo": {"label": "Kilo Code", "maker": "Kilo", "exe": ["kilo"],
+             "args": lambda allow: ["run"] + (["--auto"] if allow == "auto" else []), "stream": "text", "prompt_arg": True},
+    # These two act without asking in their headless modes (OpenHands says so;
+    # Augment doesn't say otherwise), so they only run on Auto.
+    "augment": {"label": "Augment", "maker": "Augment Code", "exe": ["auggie"], "args": lambda allow: ["--print"],
+                "stream": "text", "prompt_arg": True, "auto_only": True},
+    "openhands": {"label": "OpenHands", "maker": "All Hands AI", "exe": ["openhands"],
+                  "args": lambda allow: ["--headless", "-t"], "stream": "text", "prompt_arg": True, "auto_only": True},
 }
 # Only these have been run end to end from Hearth; the rest follow their docs.
 VERIFIED = {"claude-code"}

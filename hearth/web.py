@@ -1293,6 +1293,7 @@ _SETTINGS_WRITE_LOCK = threading.Lock()
 
 
 _FAVICON_DIR = os.path.join(os.path.expanduser("~"), ".hearth", "favicons")
+_ICON_MAX = 512_000          # bigger than any sane icon; a file this size is cut off, not kept
 _DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
@@ -1306,7 +1307,10 @@ def _favicon(domain: str):
         return None
     os.makedirs(_FAVICON_DIR, exist_ok=True)
     path = os.path.join(_FAVICON_DIR, d)
-    miss = path + ".none"
+    miss = path + ".miss"
+    # 150,000 bytes was an older read limit: a file exactly that long was cut off.
+    if os.path.isfile(path) and os.path.getsize(path) == 150_000:
+        os.remove(path)
     if os.path.isfile(path):
         with open(path, "rb") as f:
             data = f.read()
@@ -1318,13 +1322,38 @@ def _favicon(domain: str):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Hearth"})
             with urllib.request.urlopen(req, timeout=4) as r:
-                data = r.read(150_000)
-            if len(data) > 64 and _icon_mime(data) != "application/octet-stream":
+                data = r.read(_ICON_MAX + 1)
+            if 64 < len(data) <= _ICON_MAX and _icon_mime(data) != "application/octet-stream":
                 with open(path, "wb") as f:
                     f.write(data)
                 return data, _icon_mime(data)
         except Exception:
             continue
+    # Many sites keep their icon elsewhere and say so in the page itself.
+    try:
+        req = urllib.request.Request(f"https://{d}/", headers={"User-Agent": "Mozilla/5.0 Hearth"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            page = r.read(200_000).decode("utf-8", "replace")
+            base = r.geturl()
+        for tag in re.findall(r"<link\b[^>]*>", page, re.I):
+            # Quoted or not: rel=icon href=/img/x.svg is valid HTML.
+            if not re.search(r"""rel\s*=\s*(["'][^"']*icon|icon)""", tag, re.I):
+                continue
+            m = re.search(r"""href\s*=\s*(?:["']([^"']+)["']|([^\s>]+))""", tag, re.I)
+            if not m:
+                continue
+            url = urllib.parse.urljoin(base, m.group(1) or m.group(2))
+            if not url.startswith("https://"):
+                continue
+            ireq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Hearth"})
+            with urllib.request.urlopen(ireq, timeout=4) as r:
+                data = r.read(_ICON_MAX + 1)
+            if 64 < len(data) <= _ICON_MAX and _icon_mime(data) != "application/octet-stream":
+                with open(path, "wb") as f:
+                    f.write(data)
+                return data, _icon_mime(data)
+    except Exception:
+        pass
     open(miss, "w").close()
     return None
 
