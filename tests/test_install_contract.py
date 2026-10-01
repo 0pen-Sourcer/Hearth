@@ -99,6 +99,50 @@ for vendor, mb, want in (("NVIDIA", 8192, "cuda"), ("AMD", 16384, "vulkan"), ("I
     check(f"{vendor} with {mb} MB gets the {want} build", _ls.engine_backend() == want)
 _gpu.primary = lambda: None
 check("no graphics card gets the CPU build", _ls.engine_backend() == "cpu")
+
+# An engine built for NVIDIA cards is not an engine on a PC without one: it is
+# passed over, the person is told, and a repair fetches the build for the card.
+import tempfile as _tf                                                # noqa: E402
+from pathlib import Path as _Path                                     # noqa: E402
+_eng = _Path(_tf.mkdtemp(prefix="hearth-engine-")) / "b99999"
+_eng.mkdir(parents=True)
+(_eng / "llama-server.exe").write_bytes(b"MZ" + b"0" * (_ls._MIN_SERVER_EXE_BYTES + 8))
+(_eng / "ggml-cuda.dll").write_bytes(b"x")
+check("an engine with CUDA libraries beside it is an NVIDIA build", _ls.engine_build_of(_eng / "llama-server.exe") == "cuda")
+_gpu.primary = lambda: {"vendor": "AMD", "mem_total_mb": 8192, "name": "AMD"}
+check("it doesn't fit a PC with an AMD card", not _ls.engine_fits(_eng / "llama-server.exe"))
+_gpu.primary = lambda: {"vendor": "NVIDIA", "mem_total_mb": 8192, "name": "NVIDIA"}
+check("it fits one with an NVIDIA card", _ls.engine_fits(_eng / "llama-server.exe"))
+(_eng / "ggml-cuda.dll").unlink()
+(_eng / "ggml-vulkan.dll").write_bytes(b"x")
+_gpu.primary = lambda: {"vendor": "AMD", "mem_total_mb": 8192, "name": "AMD"}
+check("a Vulkan build fits any card", _ls.engine_build_of(_eng / "llama-server.exe") == "vulkan"
+      and _ls.engine_fits(_eng / "llama-server.exe"))
+_real_home = os.environ.get("USERPROFILE"), os.environ.get("HOME")
+_home = _tf.mkdtemp(prefix="hearth-home-")
+os.environ["USERPROFILE"] = os.environ["HOME"] = _home
+_mine = _Path(_home) / ".hearth" / "llamacpp" / "b99999"
+_mine.mkdir(parents=True)
+(_mine / "llama-server.exe").write_bytes(b"MZ" + b"0" * (_ls._MIN_SERVER_EXE_BYTES + 8))
+(_mine / "ggml-cuda.dll").write_bytes(b"x")
+_ls.reset_native_cache()
+_real_pref = _ls.get_engine_preference
+_ls.get_engine_preference = lambda: "hearth"
+check("with an AMD card an NVIDIA-only engine on disk is passed over", _ls.find_native_llama_server() is None)
+check("and the person is told which engine to get", _ls.runtime_advice()["nudge"]
+      and "NVIDIA" in _ls.runtime_advice()["short"] and _ls.runtime_advice()["action"] == "install_runtime")
+from hearth import updater as _up                                     # noqa: E402
+check("a repair counts it as missing, so it fetches the one for this card", not _up._engine_ok() and _up._needs_engine())
+_gpu.primary = lambda: {"vendor": "NVIDIA", "mem_total_mb": 8192, "name": "NVIDIA"}
+_ls.reset_native_cache()
+check("on an NVIDIA card the same engine is used", (_ls.find_native_llama_server() or {}).get("label") == "b99999")
+_ls.get_engine_preference = _real_pref
+for _k, _v in zip(("USERPROFILE", "HOME"), _real_home):
+    if _v is None:
+        os.environ.pop(_k, None)
+    else:
+        os.environ[_k] = _v
+_ls.reset_native_cache()
 _gpu.primary = _real_primary
 
 # ------------------------------------------- the patch carries Hearth's own files

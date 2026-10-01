@@ -1110,6 +1110,43 @@ def build_rank(tag: str) -> tuple:
     return (1, int(m.group(1)), "") if m else (0, 0, (tag or "").lower())
 
 
+def engine_build_of(exe) -> str:
+    """What an engine was built for, told by the libraries that sit beside it:
+    "cuda" (NVIDIA only), "vulkan" (any card) or "cpu"."""
+    d = Path(exe).parent
+    try:
+        if (d / "ggml-cuda.dll").is_file() or any(d.glob("cudart64_*.dll")) or "cuda" in d.name.lower():
+            return "cuda"
+        if (d / "ggml-vulkan.dll").is_file():
+            return "vulkan"
+    except OSError:
+        pass
+    return "cpu"
+
+
+def engine_fits(exe) -> bool:
+    """A CUDA build only runs on an NVIDIA card. The others run anywhere."""
+    return engine_build_of(exe) != "cuda" or engine_backend() == "cuda"
+
+
+def unfit_engine() -> Optional[str]:
+    """The build of an engine that is on this PC but can't use its card (an
+    NVIDIA build after the card was changed, or shipped to a PC without one)."""
+    roots = [Path(os.path.expanduser("~/.hearth/llamacpp"))]
+    try:
+        app = Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "frozen", False) \
+            else Path(__file__).resolve().parent.parent
+        roots.append(app / "llamacpp")
+    except Exception:
+        pass
+    for root in roots:
+        if root.is_dir():
+            for exe in root.glob("*/llama-server.exe"):
+                if _usable_server_exe(exe) and not engine_fits(exe):
+                    return engine_build_of(exe)
+    return None
+
+
 def find_native_llama_server() -> Optional[Dict[str, Any]]:
     """Locate a standalone llama.cpp `llama-server.exe` — the official OpenAI-
     compatible server. It's newer than our pinned llama-cpp-python wheel and,
@@ -1146,6 +1183,8 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
     if lms.is_dir():
         candidates += sorted(lms.glob("*nvidia-cuda12*/llama-server.exe"),
                              key=lambda p: build_rank(p.parent.name), reverse=True)
+    # One built for another maker's card is not an engine on this PC.
+    candidates = [c for c in candidates if engine_fits(c)]
     # An explicit choice beats the ranking — the escape hatch when one engine
     # misbehaves on hardware we can't test.
     pref = get_engine_preference()
@@ -1256,6 +1295,13 @@ def runtime_advice() -> Dict[str, Any]:
             "reason": None, "action": None}
     if info.get("engine") == "native":
         return none
+    if unfit_engine() == "cuda":
+        return {"nudge": True, "level": "recommended",
+                "short": "The model engine on this PC is built for NVIDIA cards, and this PC doesn't have one. "
+                         "Get the engine for this card and local models will run.",
+                "reason": "The engine that is installed only runs on NVIDIA graphics cards. This PC has a "
+                          "different card (or none), so it can't start. The right build is a one-time download.",
+                "action": "install_runtime"}
     cap = detect_gpu_compute_cap()
     if cap is None or cap <= _WHEEL_MAX_ARCH:
         # No NVIDIA GPU (a CUDA build buys nothing), or the wheel has real
@@ -1581,9 +1627,14 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     # Already have this exact build — re-pulling 640 MB to land on the same
     # files is pure waste. `force` is the explicit repair path.
     _have = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tagname}"))
-    if not force and _usable_server_exe(_have / "llama-server.exe"):
+    _same_build = _have.is_dir() and engine_build_of(_have / "llama-server.exe") == backend
+    if not force and _same_build and _usable_server_exe(_have / "llama-server.exe"):
         reset_native_cache()
         return {"ok": True, "dir": str(_have), "tag": tagname, "already": True}
+    if _have.is_dir() and not _same_build:
+        # The same release, built for another kind of card: its libraries
+        # must not be left mixed in with the new ones.
+        shutil.rmtree(_have, ignore_errors=True)
 
     # NB: both "llama-<tag>-bin-win-cuda-X-x64.zip" (the binaries) and
     # "cudart-llama-bin-win-cuda-X-x64.zip" (the CUDA runtime) contain the

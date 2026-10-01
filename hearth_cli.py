@@ -312,7 +312,7 @@ def _apply_saved_voice_settings():
         # same way, so there is nothing to export in that case.
         "STT_LANGUAGE": ("stt_language", ""),
         "TTS_DEVICE": ("tts_device", "cpu"),
-        "VOICE_SPEED": ("voice_speed", 1.5),
+        "VOICE_SPEED": ("voice_speed", 1.0),
         "VOICE": ("voice_name", "am_michael"),
         "VOICE_INPUT_DEVICE": ("voice_input_device", -1),
         "VOICE_INPUT_NAME": ("voice_input_name", ""),

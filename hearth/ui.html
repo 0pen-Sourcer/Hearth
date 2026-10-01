@@ -50,6 +50,7 @@
       try { localStorage.setItem('hearth_ui', u); } catch (e) {}
       root.dataset.ui = u;
       remember({ ui_mode: u });
+      document.dispatchEvent(new Event('hearth:look'));
     };
     window.hearthSetAppearance = function (m, a) {
       if (m) { try { localStorage.setItem('hearth_theme', m); } catch (e) {} root.dataset.theme = resolve(m); }
@@ -62,6 +63,7 @@
       if (a) body.ui_accent = a;
       remember(body);
       if (m) lookIcon(m);
+      document.dispatchEvent(new Event('hearth:look'));
     };
   })();
 </script>
@@ -942,9 +944,16 @@
   .tm-i-now i.working { background: var(--ok); } .tm-i-now i.done { background: var(--accent-2); }
   .tm-i-now i.failed, .tm-i-now i.needs { background: var(--err); }
   .tm-side b em { font-style: normal; font-weight: 500; color: var(--fg-faint); margin-left: 6px; }
-  .tm-ask { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
-  .tm-ask:hover { -webkit-line-clamp: unset; }
-  .tm-i-steps { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
+  .tm-side > * { flex: none; }
+  .tm-more { max-height: 7.6em; overflow: hidden; cursor: pointer;
+    -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+  .tm-more.open { max-height: none; -webkit-mask-image: none; mask-image: none; }
+  .tm-final { color: var(--fg-dim); line-height: 1.5; }
+  .tm-final p { margin: 0 0 6px; white-space: normal; }
+  .tm-final ul, .tm-final ol { margin: 0 0 6px; padding-left: 18px; }
+  .tm-final strong, .tm-final b { display: inline; margin: 0; font-size: inherit; color: var(--fg); }
+  .tm-final h1, .tm-final h2, .tm-final h3 { font-size: 12.5px; margin: 6px 0 3px; color: var(--fg); }
+  .tm-i-steps { display: flex; flex-direction: column; }
   .tm-steps { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 34vh; }
   .tm-steps li { display: grid; grid-template-columns: 16px 1fr; column-gap: 8px; align-items: start; padding: 5px 0;
     border-top: 1px solid var(--border); color: var(--fg); }
@@ -960,8 +969,6 @@
   .tm-steps li.told span { color: var(--accent); font-size: 11.5px; }
   .tm-steps li.told small { grid-column: 1; }
   .tm-steps li.none { display: block; color: var(--fg-faint); }
-  .tm-final { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
-  .tm-final:hover { -webkit-line-clamp: unset; }
   .tm-open-log { margin-top: 12px; align-self: flex-start; }
   .tm-side h4 { margin: 0 0 2px; color: var(--fg); font-size: 14px; }
   .tm-side .tm-side-sub { color: var(--fg-faint); font-size: 11.5px; margin-bottom: 10px; }
@@ -1022,6 +1029,7 @@
   .tm-new { background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--r);
     padding: 5px 12px; font: 600 12px var(--sans); cursor: pointer; margin-right: 10px; }
   .nh-wrap { white-space: normal; font-family: var(--sans); }
+  .nh-more { margin: 8px 2px 0; color: var(--fg-faint); font-size: 11.5px; line-height: 1.5; }
   .nh-seg { margin: 4px 0 14px; }
   .nh-seg button { display: flex; gap: 10px; align-items: flex-start; }
   .nh-seg button .hx-mini { margin: 1px 0 0; flex-shrink: 0; }
@@ -3344,6 +3352,7 @@
     font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
     color: var(--accent-2); margin-bottom: 8px; font-weight: 600;
   }
+  :root:not([data-theme="light"]) .ob-select { color-scheme: dark; }
   .ob-input, .ob-select {
     width: 100%; background: var(--bg-2); border: 1px solid var(--border);
     color: var(--fg); padding: 11px 14px; border-radius: var(--r);
@@ -4220,11 +4229,11 @@
         <div class="field">
           <div class="label">
             <div class="name">Voice speed</div>
-            <div class="hint">How fast the voice talks. 1.5 is the default.</div>
+            <div class="hint">How fast the voice talks. 1.0 is the default.</div>
           </div>
           <div style="display:flex; align-items:center; gap:12px; min-width:240px;">
-            <input id="setting-voice-speed" type="range" min="0.5" max="2.5" step="0.1" value="1.5" style="flex:1;">
-            <span id="setting-voice-speed-label" style="min-width:36px; text-align:right; font-variant-numeric:tabular-nums; opacity:0.8;">1.5x</span>
+            <input id="setting-voice-speed" type="range" min="0.5" max="2.5" step="0.1" value="1.0" style="flex:1;">
+            <span id="setting-voice-speed-label" style="min-width:36px; text-align:right; font-variant-numeric:tabular-nums; opacity:0.8;">1.0x</span>
           </div>
         </div>
         <div class="field" style="flex-direction:column; align-items:stretch; gap:6px;">
@@ -5078,8 +5087,7 @@
 
         <!-- Voice picker - revealed only after the user picks "Yes". A small
              curated set (6 curated picks out of Kokoro's 54); the full
-             list stays in Settings → Voice. Speed defaults to 1.5x because
-             1.0 sounds like a turtle for daily-driver pace. The Test button
+             list stays in Settings → Voice. Speed starts at 1.0x. The Test button
              actually speaks the chosen voice/speed combo so the user hears
              it BEFORE committing - no surprises post-onboarding. -->
         <div id="ob-voice-picker" hidden style="margin-top:18px; padding:14px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r);">
@@ -5106,8 +5114,8 @@
               </select>
             </div>
             <div>
-              <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Speed <span id="ob-voice-speed-label" style="opacity:0.7; margin-left:4px;">1.5x</span></label>
-              <input id="ob-voice-speed" type="range" min="0.8" max="2.2" step="0.1" value="1.5" style="width:100%;">
+              <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Speed <span id="ob-voice-speed-label" style="opacity:0.7; margin-left:4px;">1.0x</span></label>
+              <input id="ob-voice-speed" type="range" min="0.8" max="2.2" step="0.1" value="1.0" style="width:100%;">
             </div>
           </div>
           <div style="margin-top:14px;">
@@ -12346,7 +12354,7 @@ async function refreshSettings() {
     const speedInp = $('setting-voice-speed');
     const speedLbl = $('setting-voice-speed-label');
     if (speedInp) {
-      const curSpeed = (typeof s.voice_speed === 'number' && s.voice_speed > 0) ? s.voice_speed : 1.5;
+      const curSpeed = (typeof s.voice_speed === 'number' && s.voice_speed > 0) ? s.voice_speed : 1.0;
       speedInp.value = String(curSpeed);
       if (speedLbl) speedLbl.textContent = curSpeed.toFixed(1) + 'x';
       speedInp.oninput = (e) => {
@@ -16900,7 +16908,8 @@ let obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model
 // picked, so the setup itself changes in front of you.
 const _OB_SEGS = { audio: 'ob-audio', approval: 'ob-approval', look: 'ob-look', uimode: 'ob-uimode' };
 function _obSegValue(key) {
-  if (obState[key]) return obState[key];
+  // The look and how much to show are the app's, not this setup's: always what is in force now.
+  if (obState[key] && key !== 'look' && key !== 'uimode') return obState[key];
   if (key === 'approval') return 'ask';
   if (key === 'look') { try { return localStorage.getItem('hearth_theme') || 'classic'; } catch { return 'classic'; } }
   if (key === 'uimode') return document.documentElement.dataset.ui === 'advanced' ? 'advanced' : 'simple';
@@ -17078,30 +17087,6 @@ async function obLoadBrains() {
   const builtin = s.builtin_running;
   const external = s.external_running;
 
-  // Status banner — Lite has no built-in engine, so local picks won't boot
-  let banner = '';
-  if (s.is_lite) {
-    banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>You're on <b>Hearth Lite</b>, which has no engine of its own for local models. Pick an agent below, use LM Studio or Ollama, or add a cloud brain on the next step. The engine can be added later from Settings.</span></div>`;
-  } else if (builtin) {
-    banner = `<div class="ob-status-row is-good"><span class="ob-dot"></span><span>Hearth's built-in LLM is already running. You're set.</span></div>`;
-  } else if (external) {
-    banner = `<div class="ob-status-row is-good"><span class="ob-dot"></span><span>LM Studio / Ollama detected on this PC - you can use it as-is, or pick another model below.</span></div>`;
-  } else if (disk.length) {
-    banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>Found ${disk.length} model file${disk.length === 1 ? '' : 's'} on your disk. Pick one to boot Hearth's built-in server.</span></div>`;
-  } else {
-    banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>No models found yet. You can get one from the Models tab after setup, or use a cloud model or an agent you already pay for.</span></div>`;
-  }
-  // Second row: the bundled engine has no kernels for this GPU. Only fires on
-  // a card newer than the wheel builds for (see llmserver.runtime_advice) —
-  // silent on CPU-only, older GPUs, and anyone already on a native engine.
-  try {
-    const rt = await api('/api/runtime/info');
-    if (rt.advice && rt.advice.nudge) {
-      banner += `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>${esc(rt.advice.short)}</span></div>`;
-    }
-  } catch {}
-  status.innerHTML = banner;
-
   // Agent programs already on this PC can be the brain on the plan the person
   // pays for, with nothing to download. Others found here take tasks as helpers.
   let brains = [], others = [];
@@ -17111,6 +17096,33 @@ async function obLoadBrains() {
     others = ((await api('/api/team/choices')).agents || []).filter(a => !ids.has(a.id) && !a.refused).map(a => a.label);
   } catch {}
   const here = brains.filter(b => b.installed);
+
+  // What was found, all of it: the agents count as much as the model files.
+  const row = (cls, html) => `<div class="ob-status-row ${cls}"><span class="ob-dot"></span><span>${html}</span></div>`;
+  const n = (k, one) => `${k} ${one}${k === 1 ? '' : 's'}`;
+  const found = [here.length ? n(here.length, 'agent') + ' you already use' : '',
+                 disk.length ? n(disk.length, 'model file') : ''].filter(Boolean).join(' and ');
+  let banner = '';
+  if (s.is_lite) {
+    // Lite has no engine of its own, so a model on disk can't be run by it yet.
+    banner = row('is-warn', `You're on <b>Hearth Lite</b>, which has no engine of its own for local models. ${here.length ? 'Pick an agent below' : 'Set up an agent below'}, use LM Studio or Ollama, or add a cloud brain on the next step. The engine can be added later from Settings.`);
+  } else if (builtin) {
+    banner = row('is-good', "Hearth's built-in engine is already running a model. You're set.");
+  } else if (external) {
+    banner = row('is-good', 'LM Studio or Ollama is running on this PC. You can use it as it is, or pick something else below.');
+  } else if (found) {
+    banner = row('is-good', `Found ${found} on this PC. Pick one below, or skip and choose later.`);
+  } else {
+    banner = row('is-warn', 'Nothing to think with on this PC yet. Set up an agent below, get a model from the Models tab after setup, or add a cloud brain on the next step.');
+  }
+  // Second row: the engine on this PC doesn't suit its graphics card (see
+  // llmserver.runtime_advice). Silent everywhere else.
+  try {
+    const rt = await api('/api/runtime/info');
+    if (rt.advice && rt.advice.nudge) banner += row('is-warn', esc(rt.advice.short));
+  } catch {}
+  status.innerHTML = banner;
+
   blurb.textContent = (builtin || external)
     ? 'Looks good - you already have a brain. Pick a different one if you want, or hit Continue.'
     : here.length ? 'I can think with an agent you already use, or with a model on this PC. Here\'s what I found:'
@@ -17313,7 +17325,7 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
       });
       const r = await fetch('/api/tts', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ text: `Hi, I'm ${_agentName()}. This is me at ${speed.toFixed(1)}x. If this feels right, lock it in.` }),
+        body: JSON.stringify({ text: `Hello. I'm ${_agentName()}. The fire is lit, the house is quiet, and I'm listening.` }),
       });
       if (r.ok) {
         if (testMsg) testMsg.textContent = '✓ played - adjust and re-test if needed.';
@@ -17355,14 +17367,14 @@ async function obFinish(skipped) {
   // Onboarding voice picker - only persist these if the user actually picked
   // "talk + listen" AND tweaked them (the Test button already saved a partial
   // commit, but obFinish is the authoritative save). Defaults are fine if
-  // untouched: am_michael at 1.5x.
+  // untouched: am_michael at 1.0x.
   let pickedVoice;
   let pickedSpeed;
   if (voiceOn) {
     const vSel = document.getElementById('ob-voice-name');
     const sIn  = document.getElementById('ob-voice-speed');
     if (vSel && vSel.value) pickedVoice = vSel.value;
-    if (sIn && sIn.value)   pickedSpeed = parseFloat(sIn.value) || 1.5;
+    if (sIn && sIn.value)   pickedSpeed = parseFloat(sIn.value) || 1.0;
   }
   // The settings save is the one call that has to land. If it fails the answers
   // are gone and onboarding runs again on the next boot, so keep the draft and
@@ -17516,11 +17528,14 @@ async function obFinish(skipped) {
   await _obFoldAway();
 }
 
+// The page after the brain step offers a cloud key. Someone who just picked
+// a brain doesn't need it; it stays in Settings.
+const _obSkips = () => obStep === 3 && !!obState.brain;
 $('ob-next').addEventListener('click', async () => {
-  if (obStep < OB_TOTAL_STEPS) { obStep++; obRender(); return; }
+  if (obStep < OB_TOTAL_STEPS) { obStep++; if (_obSkips()) obStep++; obRender(); return; }
   await obFinish(false);
 });
-$('ob-back').addEventListener('click', () => { if (obStep > 1) { obStep--; obRender(); } });
+$('ob-back').addEventListener('click', () => { if (obStep > 1) { obStep--; if (_obSkips()) obStep--; obRender(); } });
 $('ob-skip').addEventListener('click', () => obFinish(true));
 document.addEventListener('keydown', (e) => {
   if (!$('onboard').classList.contains('open')) return;
@@ -17924,9 +17939,19 @@ window.addEventListener('load', function initSidebarDrawer() {
   };
   if (uiBox) uiBox.addEventListener('click', e => {
     const b = e.target.closest('.ap-mode'); if (!b) return;
-    window.hearthSetInterface(b.dataset.ui); mark();
+    window.hearthSetInterface(b.dataset.ui);
+  });
+  // Set from here, from first-run setup or anywhere else: every view of it follows.
+  document.addEventListener('hearth:look', () => {
+    mark();
+    try { _obPaintSegs(false); } catch {}
     try { renderChat(); } catch {}
   });
+  fetch('/assets/team/manifest.json', { cache: 'no-store' }).then(r => r.json()).then(m => {
+    if (roomBox) roomBox.querySelectorAll('.ap-char i').forEach(i => {
+      i.style.backgroundImage = i.style.backgroundImage.replace(/\.png(\?v=\w+)?/, '.png?v=' + (m.v || ''));
+    });
+  }).catch(() => {});
   modes.addEventListener('click', e => { const b = e.target.closest('.ap-mode'); if (!b) return; window.hearthSetAppearance(b.dataset.mode, null); mark(); });
   accents.addEventListener('click', e => { const b = e.target.closest('.ap-accent'); if (!b) return; window.hearthSetAppearance(null, b.dataset.accent); mark(); });
   mark();
@@ -18121,6 +18146,7 @@ $('tm-new').addEventListener('click', async () => {
     <div class="ob-seg nh-seg" id="nh-jobs">${(c.roles || []).map(jobBtn).join('')}</div>
     ${agents.length ? `<div class="nh-label">Or hand it to an agent<span class="nh-note">on your own account</span></div>
     <div class="ob-seg nh-seg" id="nh-agents">${agents.map(agentBtn).join('')}</div>` : ''}
+    ${(c.more_agents || []).length ? `<p class="nh-more">These are the agent programs installed on this PC. I can also use ${esc(c.more_agents.slice(0, 6).join(', '))}${c.more_agents.length > 6 ? ` and ${c.more_agents.length - 6} more` : ''} once ${c.more_agents.length === 1 ? 'it is' : 'they are'} installed.</p>` : ''}
     <div class="nh-where" id="nh-where" hidden>
       <div class="nh-label">In which folder</div>
       <input class="nh-folder" id="nh-folder" placeholder="${esc(c.workspace || 'the workspace')}">
@@ -18277,7 +18303,8 @@ async function roomLoad() {
   try {
     const man = await (await fetch('/assets/team/manifest.json', { cache: 'no-store' })).json();
     ROOM.man = man;
-    const load = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+    const load = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej;
+                                                    i.src = src + (man.v ? '?v=' + man.v : ''); });
     ROOM.bg = await load('/assets/team/room.png');
     if (man.props) ROOM.props = await load('/assets/team/props.png');
     for (const r of man.roles) ROOM.imgs[r] = await load(`/assets/team/${r}.png`);
@@ -18842,7 +18869,7 @@ function roomStripRender() {
   strip.innerHTML = '';
   for (const p of people) {
     const a = p.agent;
-    const st = a.role === 'main' ? 'working' : (teamNeedsYou(a) ? 'needs' : a.status);
+    const st = a.role === 'main' ? (roomHasBrain() || roomMainBusy() ? 'working' : 'stopped') : (teamNeedsYou(a) ? 'needs' : a.status);
     const word = a.role === 'main'
       ? (pendingPermId ? 'waiting for your OK' : roomMainLine() ? roomMainLine().replace(/…$/, '').toLowerCase()
          : roomHasBrain() ? roomMainIdleWord(p) : roomHas(roomSkin(a), 'sleep') ? 'asleep, no model loaded' : 'no model loaded')
@@ -18903,21 +18930,21 @@ async function roomInspectFill() {
   else { try { story = await api('/api/team/story?id=' + encodeURIComponent(a.id)); } catch { return; } }
   if (ROOM.sel !== p.id) return;                       // someone else was picked while this loaded
   const put = (sel, html) => { const el = side.querySelector(sel); if (el && el.dataset.was !== html) { el.dataset.was = html; el.innerHTML = html; } };
-  const st = main ? 'working' : (teamNeedsYou(a) ? 'needs' : a.status);
+  const st = main ? (roomHasBrain() || roomMainBusy() ? 'working' : 'stopped') : (teamNeedsYou(a) ? 'needs' : a.status);
   const now = main ? (pendingPermId ? 'Waiting for your OK' : roomMainLine() || (roomHasBrain() ? roomMainIdleWord(p) : 'Asleep. No model is loaded.'))
     : a.status === 'working' ? (a.blocked ? `Needs your OK to use ${a.blocked}` : roomHelperLine(a) || 'Thinking…') : teamActivity(a).split(':')[0];
   put('.tm-i-sub', esc(main ? (a.runtime ? 'on ' + teamWhat(a).split(' · ')[0] : 'runs the house')
     : teamWhat(a) + ' · ' + teamAgo(a.updated)));
   put('.tm-i-now', `<i class="${st}"></i>${esc(now.charAt(0).toUpperCase() + now.slice(1))}`);
   const who = story.by === 'you' ? 'you' : (story.by || (typeof _agentName === 'function' && _agentName()) || 'JARVIS');
-  put('.tm-i-asked', story.prompt ? `<b>Asked by ${esc(who)}</b><p class="tm-ask">${esc(story.prompt)}</p>` : '');
+  put('.tm-i-asked', story.prompt ? `<b>Asked by ${esc(who)}</b><p class="tm-ask tm-more">${esc(story.prompt)}</p>` : '');
   const list = side.querySelector('.tm-steps'), stuck = !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 8;
   put('.tm-i-steps', `<b>Steps<em>${story.steps.filter(x => x.told == null).length}</em></b><ol class="tm-steps">${roomStepsHTML(story.steps)}</ol>`);
   const fresh = side.querySelector('.tm-steps');
   if (fresh && stuck) fresh.scrollTop = fresh.scrollHeight;
   ROOM.story = story;
   const tail = story.error ? `<b>${main ? 'Went wrong' : "Didn't finish"}</b><p>${esc(story.error)}</p>`
-    : story.final ? `<b>${story.ended ? (main ? 'Said' : 'Result') : 'So far'}</b><p class="tm-final">${esc(story.final.length > 900 ? story.final.slice(0, 899) + '…' : story.final)}</p>` : '';
+    : story.final ? `<b>${story.ended ? (main ? 'Said' : 'Result') : 'So far'}</b><div class="tm-final tm-more">${renderMD(story.final.length > 4000 ? story.final.slice(0, 3999) + '…' : story.final)}</div>` : '';
   put('.tm-i-result', tail);
 }
 function roomSelect(id, keep = false) {
@@ -18952,6 +18979,8 @@ function roomSelect(id, keep = false) {
   });
   // A step opens to show everything that came back from it.
   if (!side._wired) side.addEventListener('click', (e) => {
+    const more = e.target.closest('.tm-more');
+    if (more) { more.classList.toggle('open'); return; }
     const li = e.target.closest('.tm-steps li[data-n]');
     const st = li && ROOM.story && ROOM.story.steps[+li.dataset.n];
     if (!st || !st.result) return;

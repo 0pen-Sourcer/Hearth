@@ -1208,7 +1208,7 @@ def _load_settings() -> Dict:
         "voice_half_duplex": False,  # hold the mic closed while speaking, for speakers
         "stt_device": "cpu",   # cpu / cuda
         "tts_device": "cpu",   # cpu / cuda / dml
-        "voice_speed": 1.5,    # Kokoro playback rate (0.5x-2.5x). 1.5 is the snappier default that doesn't sound like a turtle.
+        "voice_speed": 1.0,    # Kokoro playback rate (0.5x-2.5x)
         "voice_name": "am_michael",  # Kokoro voice id (am_/af_/bm_/bf_ + name). am_michael = calm neutral baseline.
         "agent_name": "JARVIS",      # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
         "stt_model": "base.en",  # a name ending .en holds English only
@@ -1252,7 +1252,7 @@ def _load_settings() -> Dict:
     _env.set("STT_MODEL", defaults.get("stt_model",  "base.en"))
     _env.set("STT_LANGUAGE", defaults.get("stt_language", ""))
     _env.set("TTS_DEVICE", defaults.get("tts_device", "cpu"))
-    _env.set("VOICE_SPEED", str(defaults.get("voice_speed", 1.5)))
+    _env.set("VOICE_SPEED", str(defaults.get("voice_speed", 1.0)))
     _env.set("VOICE", defaults.get("voice_name", "am_michael"))
     # Selected mic index (-1 = OS default). Drives both STT paths via
     # listen.input_device_index(). The mic picker (Settings → Voice) writes it.
@@ -1378,7 +1378,12 @@ def _team_choices() -> Dict[str, Any]:
             helper_brain = _xa.AGENTS[on]["label"]
     except Exception:
         pass
-    return {"roles": roles, "agents": agents, "workspace": WORKSPACE, "helper_brain": helper_brain}
+    # The agent programs Hearth knows how to run that aren't on this PC, so
+    # the dialog can say the list grows with what gets installed.
+    here = {a["id"] for a in agents}
+    more = [spec["label"] for aid, spec in _xa.AGENTS.items() if aid not in here]
+    return {"roles": roles, "agents": agents, "workspace": WORKSPACE, "helper_brain": helper_brain,
+            "more_agents": more}
 
 
 def _saved_look() -> str:
@@ -1429,7 +1434,7 @@ def _save_settings_locked(d: Dict) -> Dict:
     _env.set("STT_MODEL", cur.get("stt_model",  "base.en"))
     _env.set("STT_LANGUAGE", cur.get("stt_language", ""))
     _env.set("TTS_DEVICE", cur.get("tts_device", "cpu"))
-    _env.set("VOICE_SPEED", str(cur.get("voice_speed", 1.5)))
+    _env.set("VOICE_SPEED", str(cur.get("voice_speed", 1.0)))
     _env.set("VOICE", cur.get("voice_name", "am_michael"))
     # Mic pick. Every voice session builds its own recorder, so the next one
     # opens the chosen device; a running session keeps its mic until it ends.
@@ -1458,7 +1463,7 @@ def _save_settings_locked(d: Dict) -> Dict:
         # the speak() handler reads from DEFAULT_SPEED). The voice id picks
         # up on the next speak() call too.
         try:
-            _voice.set_speed(float(cur.get("voice_speed", 1.5)))
+            _voice.set_speed(float(cur.get("voice_speed", 1.0)))
         except Exception:
             pass
         try:

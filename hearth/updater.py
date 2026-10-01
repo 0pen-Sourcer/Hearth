@@ -152,11 +152,19 @@ def _engine_ok() -> bool:
 
 
 def _needs_engine() -> bool:
+    """Full ships with an engine. Lite doesn't, but someone who added one
+    later has it repaired too."""
     try:
         from . import edition
-        return not edition.is_lite()
+        if not edition.is_lite():
+            return True
     except Exception:
         return True
+    root = os.path.join(os.path.expanduser("~"), ".hearth", "llamacpp")
+    try:
+        return any(os.path.isdir(os.path.join(root, d)) and not d.startswith(".") for d in os.listdir(root))
+    except OSError:
+        return False
 
 
 def repair_plan() -> dict:

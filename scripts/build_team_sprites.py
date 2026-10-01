@@ -319,6 +319,15 @@ def build(art: str) -> None:
     room = Image.open(empty if os.path.isfile(empty) else os.path.join(art, "bg.png")).convert("RGB")
     manifest["room_empty"] = os.path.isfile(empty)
     room.quantize(128, method=Image.MEDIANCUT, dither=Image.NONE).save(os.path.join(OUT, "room.png"), optimize=True)
+    # What the art's addresses end in: a browser that kept an older sheet
+    # would otherwise draw frames the old sheet doesn't have, as nothing.
+    import hashlib
+    digest = hashlib.sha1()
+    for name in sorted(os.listdir(OUT)):
+        if name.endswith(".png"):
+            with open(os.path.join(OUT, name), "rb") as f:
+                digest.update(f.read())
+    manifest["v"] = digest.hexdigest()[:10]
     with open(os.path.join(OUT, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=1)
     print("built", len(ROLES), "atlases in", OUT)

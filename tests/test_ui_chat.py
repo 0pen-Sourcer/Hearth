@@ -308,6 +308,42 @@ with sync_playwright() as pw:
           and dialog["afterInstall"] == ["done", "now", "todo"] and dialog["afterSignIn"] == ["done", "done", "now"]
           and dialog["closed"] and asked == ["install", "signin", "use"])
     check("on Lite it points at the agent instead of a dead end", "Pick an agent below" in setup["banner"])
+    pg.route("**/api/llmserver/status", reply({"disk_models": [{"filename": "a.gguf", "path": "a", "size_gb": 5, "source": "Hearth"},
+                                                                {"filename": "b.gguf", "path": "b", "size_gb": 9, "source": "Hearth"}]}))
+    pg.route("**/api/models", reply({"models": [], "agent_brains": [
+        {"id": "claude-code", "label": "Claude Code", "installed": True, "plan": "Claude"},
+        {"id": "codex", "label": "Codex", "installed": True, "plan": "ChatGPT"}]}))
+    flow = pg.evaluate("""async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms));
+      obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+      await obLoadBrains();
+      const out = { banner: document.getElementById('ob-brain-status').textContent };
+      obStep = 2; obRender(); await wait(300);
+      document.getElementById('ob-next').click(); await wait(300);
+      out.noPick = obStep;
+      document.getElementById('ob-back').click(); await wait(300);
+      obState.brain = JSON.stringify({ kind: 'agent', id: 'claude-code' });
+      document.getElementById('ob-next').click(); await wait(300);
+      out.picked = obStep;
+      document.getElementById('ob-back').click(); await wait(300);
+      out.back = obStep;
+      // How much to show, set in setup, shows the same in Settings; and the other way round.
+      const on = (box) => (document.querySelector(box + ' .on') || { dataset: {} }).dataset;
+      hearthSetInterface('advanced'); await wait(100);
+      out.fromSetup = [on('#ap-ui').ui, on('#ob-uimode').uimode];
+      document.querySelector('#ap-ui [data-ui="simple"]').click(); await wait(100);
+      out.fromSettings = [on('#ap-ui').ui, on('#ob-uimode').uimode];
+      obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+      return out;
+    }""")
+    for pat in ("**/api/llmserver/status", "**/api/models"):
+        pg.unroute(pat)
+    check(f"setup says what it found, agents as well as model files {flow['banner']!r}",
+          "2 agents you already use and 2 model files" in flow["banner"])
+    check(f"after a brain is picked the cloud page is passed over, both ways {flow}",
+          flow["noPick"] == 3 and flow["picked"] == 4 and flow["back"] == 2)
+    check("Simple or Advanced set in one place shows the same in the other",
+          flow["fromSetup"] == ["advanced", "advanced"] and flow["fromSettings"] == ["simple", "simple"])
 
     # An agent brain runs tools side by side: both start, then both finish.
     stream = "\n".join(json.dumps(e) for e in [
