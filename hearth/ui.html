@@ -873,6 +873,13 @@
   #tm-canvas { cursor: pointer; }
   .tm-name .hx-mini { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 4px;
     background: var(--hx); color: #fff; font: 700 9px var(--sans); margin-right: 6px; vertical-align: 1px; }
+  /* One line per entry, like a file explorer, rather than a card each. */
+  .files-pane .item { padding: 6px 12px; margin: 1px 0; background: transparent; border-color: transparent; }
+  .files-pane .item:hover { background: var(--bg-2); border-color: var(--border); }
+  .files-pane .item .body { display: flex; align-items: baseline; gap: 12px; flex: 1; min-width: 0; }
+  .files-pane .item .name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .files-pane .item .file-meta { margin-left: auto; white-space: nowrap; }
+  .files-hidden-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; font-size: 12px; color: var(--fg-dim); cursor: pointer; }
   .tm-new { background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--r);
     padding: 5px 12px; font: 600 12px var(--sans); cursor: pointer; margin-right: 10px; }
   .nh-wrap { white-space: normal; font-family: var(--sans); }
@@ -3732,11 +3739,12 @@
     <section class="view" id="view-files">
       <div class="view-head">
         <h2>Files</h2>
-        <span class="sub" id="files-sub">~/Jarvis</span>
+        <span class="sub" id="files-sub"></span>
         <div class="crumb" id="file-crumb" style="margin-left:auto"></div>
+        <label class="files-hidden-toggle" title="Folders and files starting with a dot or two underscores belong to apps"><input type="checkbox" id="files-show-hidden"> Show hidden</label>
         <button class="btn-mini" id="btn-files-reveal" title="Open this folder in your file explorer" style="margin-left:8px">Open folder</button>
       </div>
-      <div class="list-pane" id="file-list"></div>
+      <div class="list-pane files-pane" id="file-list"></div>
     </section>
 
     <!-- LOGS -->
@@ -10577,6 +10585,13 @@ function renderCrumb(path) {
 function renderFiles(entries) {
   const list = $('file-list');
   list.innerHTML = '';
+  STATE.fileEntries = entries;
+  // Dot folders and __pycache__ belong to apps, not to the person; they stay
+  // out of the way unless asked for.
+  const showHidden = $('files-show-hidden') && $('files-show-hidden').checked;
+  const hidden = entries.filter(f => /^(\.|__)/.test(f.name)).length;
+  if (!showHidden) entries = entries.filter(f => !/^(\.|__)/.test(f.name));
+  $('files-sub').textContent = `${entries.length} item${entries.length === 1 ? '' : 's'}` + (hidden && !showHidden ? ` · ${hidden} hidden` : '');
   if (!entries.length) {
     list.innerHTML = `<div style="color:var(--fg-faint);padding:24px;text-align:center">empty</div>`;
     return;
@@ -10621,6 +10636,7 @@ function renderFiles(entries) {
     list.appendChild(div);
   }
 }
+$('files-show-hidden').addEventListener('change', () => renderFiles(STATE.fileEntries || []));
 function fileIcon(f) {
   if (f.is_dir) return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
   return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
