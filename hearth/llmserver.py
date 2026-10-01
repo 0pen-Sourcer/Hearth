@@ -780,6 +780,37 @@ def _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded) -> in
     return done
 
 
+_proc: Optional[subprocess.Popen] = None
+_proc_info: Dict[str, Any] = {}
+# Kept so the log can be truncated in place while the child still holds it
+# open (Windows won't let another handle rename/delete a locked file).
+_log_fh = None
+
+# Live load-progress snapshot. Written by start_builtin while a model loads,
+# read by /api/llmserver/progress every ~500ms so the GUI can show a real
+# bar instead of an indeterminate spinner. Reset to "idle" once ready.
+#   phase   : starting | loading_weights | initializing_backend | reserving_kv |
+#             starting_http | ready | error | idle
+#   percent : 0..100 (rough but monotonically increasing within a load)
+#   marker  : last interesting llama.cpp log line we noticed
+#   started_at, finished_at : epoch seconds
+_load_progress: Dict[str, Any] = {
+    "phase": "idle",
+    "percent": 0,
+    "marker": "",
+    "started_at": None,
+    "finished_at": None,
+    "error": None,
+}
+
+
+# The stretch of the bar the measured weight read owns. Below it the process
+# has barely started; above it the engine is doing work that is not file reading
+# and has its own log markers.
+_WEIGHT_BAND_BOTTOM = 8
+_WEIGHT_BAND_TOP = 88
+
+
 def _phase_for_line(line: str) -> Optional[Tuple[str, int]]:
     """Map an engine log line to (phase, percent), or None if it says nothing.
 
