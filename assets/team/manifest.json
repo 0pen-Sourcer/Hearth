@@ -27,8 +27,25 @@
   "archivist",
   "coordinator",
   "custom",
-  "main"
+  "main",
+  "main_m"
  ],
+ "extra": {
+  "main": [
+   "sit",
+   "sit_read",
+   "sit_coffee",
+   "talk",
+   "nod",
+   "wave",
+   "side_idle",
+   "side_coffee",
+   "side_read",
+   "tend_fire",
+   "sleep",
+   "pin"
+  ]
+ },
  "props": {
   "desk": [
    0,
@@ -65,6 +82,54 @@
    0,
    22,
    25
+  ],
+  "cat_sleep": [
+   797,
+   0,
+   50,
+   33
+  ],
+  "cat_sit": [
+   851,
+   0,
+   38,
+   44
+  ],
+  "book_open": [
+   893,
+   0,
+   44,
+   23
+  ],
+  "books": [
+   941,
+   0,
+   40,
+   34
+  ],
+  "note": [
+   985,
+   0,
+   20,
+   26
+  ],
+  "kettle": [
+   1009,
+   0,
+   34,
+   44
+  ],
+  "blanket": [
+   1047,
+   0,
+   50,
+   36
+  ],
+  "stool": [
+   1101,
+   0,
+   46,
+   59
   ]
  },
  "room_empty": true

@@ -9,8 +9,10 @@ a manifest the window reads.
 
     python scripts/build_team_sprites.py <art folder>
 
-The art folder holds bg.png, 1-8.png (actions), 9-16.png (walks) and
-old/1-8.png (poses), in role order, and optionally bg_props.png, whose lower
+The art folder holds bg.png, 1-8.png (actions), 9-16.png (walks),
+old/1-8.png (poses), in role order, and optionally 17.png (more poses for the
+main character), 18.png (a second main character), 19.png (small things for
+the room), bg_props.png, whose lower
 part is a 3x2 grid of furniture on magenta (desk, desk in use, chair,
 armchair, side table, mug) and room_empty.png, the room with no furniture.
 """
@@ -42,6 +44,11 @@ COLORS = 40
 # Furniture, in grid order, with its width in room pixels (measured from the
 # room the characters were drawn against, so everything shares one scale).
 PROPS = [("desk", 233), ("desk_on", 233), ("chair", 80), ("armchair", 145), ("side_table", 60), ("mug", 22)]
+MORE_PROPS = [("cat_sleep", 50), ("cat_sit", 38), ("book_open", 44), ("books", 40),
+              ("note", 20), ("kettle", 34), ("blanket", 50), ("stool", 46)]
+# The main character's poses beyond the fourteen everyone has, in sheet order.
+EXTRA_MAIN = ["sit", "sit_read", "sit_coffee", "talk", "nod", "wave",
+              "side_idle", "side_coffee", "side_read", "tend_fire", "sleep", "pin"]
 
 
 def key_magenta(img: Image.Image) -> np.ndarray:
@@ -83,6 +90,86 @@ def sheet_frames(path: str, cols: int, rows: int):
     return out
 
 
+def _drop_edge_bits(cell: np.ndarray, limit: int = 220) -> None:
+    """Clear small pieces that touch a side edge of the cell: what is left of
+    a neighbour after the cut."""
+    mask = cell[..., 3] > 0
+    h, w = mask.shape
+    seen = np.zeros_like(mask)
+    for x0 in (0, 1, 2, w - 3, w - 2, w - 1):
+        for y0 in np.where(mask[:, x0])[0]:
+            if seen[y0, x0]:
+                continue
+            stack, piece = [(y0, x0)], []
+            seen[y0, x0] = True
+            while stack:
+                y, x = stack.pop()
+                piece.append((y, x))
+                for ny, nx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                    if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+            if len(piece) <= limit:
+                for y, x in piece:
+                    cell[y, x, 3] = 0
+
+
+def strip_frames(band: np.ndarray, expect: int):
+    """The frames in one row that was drawn by eye, not on a grid: split where
+    the columns are empty, hand small marks (a sparkle, a wisp of steam) to the
+    figure next to them, and divide a run of touching figures evenly."""
+    solid = (band[..., 3] > 0).sum(0) > 2
+    runs, start = [], None
+    for x, v in enumerate(list(solid) + [False]):
+        if v and start is None:
+            start = x
+        elif not v and start is not None:
+            runs.append([start, x])
+            start = None
+    nominal = band.shape[1] / expect
+    single = [b - a for a, b in runs if 0.5 * nominal <= b - a <= 1.4 * nominal]
+    unit = float(np.median(single)) if single else nominal
+    big = [r for r in runs if r[1] - r[0] >= 0.35 * unit]
+    for a, b in runs:
+        if b - a < 0.35 * unit and big:
+            near = min(big, key=lambda r: min(abs(r[0] - b), abs(a - r[1])))
+            near[0], near[1] = min(near[0], a), max(near[1], b)
+    spans = []
+    for a, b in sorted(big):
+        n = max(1, round((b - a) / unit))
+        # Figures that touch: cut near each even division, at the thinnest column.
+        weight = (band[..., 3] > 0).sum(0)
+        cuts = [a]
+        for i in range(1, n):
+            est = a + (b - a) * i // n
+            lo, hi = max(a + 1, est - 16), min(b - 1, est + 16)
+            cuts.append(lo + int(np.argmin(weight[lo:hi])))
+        cuts.append(b)
+        spans += list(zip(cuts, cuts[1:]))
+    if len(spans) != expect:
+        w = band.shape[1]
+        spans = [(w * i // expect, w * (i + 1) // expect) for i in range(expect)]
+    out = []
+    for a, b in spans:
+        cell = band[:, a:b].copy()
+        # A sliver at the very edge is the neighbour's elbow, not this figure.
+        _drop_edge_bits(cell)
+        out.append((cell, bbox(cell)))
+    return out
+
+
+def rows_of(rgba: np.ndarray, rows: int):
+    """The image cut into its rows of figures, at the empty bands between them."""
+    solid = (rgba[..., 3] > 0).sum(1) > 3
+    ys = np.where(solid)[0]
+    if rows == 1 or not len(ys):
+        return [rgba]
+    mid = rgba.shape[0] // 2
+    gap = [y for y in range(ys[0], ys[-1]) if not solid[y]]
+    cut = min(gap, key=lambda y: abs(y - mid)) if gap else mid
+    return [rgba[:cut], rgba[cut:]]
+
+
 def standing_height(frames, idxs):
     hs = [f[1][3] - f[1][1] for i, f in enumerate(frames) if i in idxs and f[1]]
     return float(np.median(hs)) if hs else 1.0
@@ -109,6 +196,54 @@ def quantize(img: Image.Image) -> Image.Image:
     return rgb
 
 
+def extra_main(art: str, target: float):
+    """The main character's further poses (17.png, two rows of six), each in a
+    cell of its own, at the scale of her standing frames."""
+    path = os.path.join(art, "17.png")
+    if not os.path.isfile(path):
+        return []
+    frames = [f for band in rows_of(key_magenta(Image.open(path)), 2) for f in strip_frames(band, 6)]
+    scale = target / standing_height(frames, {3, 4})
+    return [place(cell, bb, scale) for cell, bb in frames[:len(EXTRA_MAIN)]]
+
+
+def second_main(art: str):
+    """The second main character (18.png): the fourteen frames in one row. His
+    typing frame was drawn with a chair, and the room brings its own, so it is
+    made from his back view instead: head to hips, the rest is behind the chair."""
+    path = os.path.join(art, "18.png")
+    if not os.path.isfile(path):
+        return None
+    frames = strip_frames(key_magenta(Image.open(path)), len(FRAMES))
+    names = [f[0] for f in FRAMES]
+    scale = STAND_H * 1.06 / standing_height(frames, {0, 4, 5, 6, 7})
+    atlas = Image.new("RGBA", (CELL_W * len(FRAMES), CELL_H), (0, 0, 0, 0))
+    for i, (cell, bb) in enumerate(frames):
+        if names[i] == "type":
+            cell, bb = frames[names.index("gaze")]
+            x0, y0, x1, y1 = bb
+            bb = (x0, y0, x1, y0 + round((y1 - y0) * 0.62))
+        atlas.alpha_composite(place(cell, bb, scale), (i * CELL_W, 0))
+    return atlas
+
+
+def more_props(art: str):
+    """Small things for the room (19.png, two rows of four), by name."""
+    path = os.path.join(art, "19.png")
+    if not os.path.isfile(path):
+        return {}
+    frames = [f for band in rows_of(key_magenta(Image.open(path)), 2) for f in strip_frames(band, 4)]
+    out = {}
+    for (name, width), (cell, bb) in zip(MORE_PROPS, frames):
+        x0, y0, x1, y1 = bb
+        crop = Image.fromarray(cell[y0:y1, x0:x1], "RGBA")
+        small = crop.resize((width, max(1, round((y1 - y0) * width / (x1 - x0)))), Image.LANCZOS)
+        a = np.asarray(small).copy()
+        a[..., 3] = np.where(a[..., 3] > 110, 255, 0)
+        out[name] = quantize(Image.fromarray(a, "RGBA"))
+    return out
+
+
 def build(art: str) -> None:
     os.makedirs(OUT, exist_ok=True)
     manifest = {"cell": [CELL_W, CELL_H], "frames": [f[0] for f in FRAMES], "roles": ROLES}
@@ -130,7 +265,20 @@ def build(art: str) -> None:
             if not bb:
                 continue
             atlas.alpha_composite(place(cell, bb, target / ref[sheet]), (i * CELL_W, 0))
+        if role == "main":
+            more = extra_main(art, target)
+            if more:
+                wide = Image.new("RGBA", (atlas.width + CELL_W * len(more), CELL_H), (0, 0, 0, 0))
+                wide.alpha_composite(atlas, (0, 0))
+                for i, im in enumerate(more):
+                    wide.alpha_composite(im, (atlas.width + i * CELL_W, 0))
+                atlas = wide
+                manifest["extra"] = {"main": EXTRA_MAIN}
         quantize(atlas).save(os.path.join(OUT, f"{role}.png"), optimize=True)
+    second = second_main(art)
+    if second:
+        quantize(second).save(os.path.join(OUT, "main_m.png"), optimize=True)
+        manifest["roles"] = ROLES + ["main_m"]
     props_src = os.path.join(art, "bg_props.png")
     if os.path.isfile(props_src):
         rgba = key_magenta(Image.open(props_src))
@@ -157,6 +305,7 @@ def build(art: str) -> None:
             a = np.asarray(small).copy()
             a[..., 3] = np.where(a[..., 3] > 110, 255, 0)
             placed[name] = quantize(Image.fromarray(a, "RGBA"))
+        placed.update(more_props(art))
         x = 0
         sheet = Image.new("RGBA", (sum(im.width for im in placed.values()) + 4 * len(placed),
                                    max(im.height for im in placed.values())), (0, 0, 0, 0))

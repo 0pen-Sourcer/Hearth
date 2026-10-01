@@ -165,7 +165,7 @@ with sync_playwright() as pw:
       const g2 = roomMainGoal(me);
       out.pace = [g1.pose, g1.at[1] === g2.at[1], Math.abs(g1.at[0] - g2.at[0]) >= 150];
       setState('calling memory_save…');
-      out.saving = [roomMainLine(), JSON.stringify(roomMainGoal(me).at) === JSON.stringify(ROOM.spots.board)];
+      out.saving = [roomMainLine(), JSON.stringify(roomMainGoal(me).at) === JSON.stringify(ROOM.spots.pin)];
       roomMemoryHint('memory_recall', '## operating-system-windows  (user, score=22)\\nAll commands run in PowerShell.');
       out.recalled = (ROOM.says.get('__main') || {}).text;
       // Done: answers where it stands, and the card says where it is.
@@ -192,6 +192,20 @@ with sync_playwright() as pw:
       ROOM.says.delete('__main');
       out.lines = ['loading model…', 'ejecting…', 'ready', 'thinking…'].map(st => { setState(st); return roomMainLine(); });
       setState('idle');
+      // Poses only one character was drawn in; the other stands in the nearest it has.
+      const idx = n => ROOM.man.frames.indexOf(n);
+      out.frames = [roomFrame('sleep', 'main') >= ROOM.man.frames.length, roomFrame('sleep', 'main_m') === idx('gaze'),
+                    roomFrame('talk', 'coder') === idx('idle'), roomFrame('read', 'main_m') === idx('read')];
+      // With nothing to think with it sleeps in the armchair; the one with no such pose stays up.
+      const hasBrain = roomHasBrain;
+      roomHasBrain = () => false;
+      me.holdUntil = 0; me.wasBusy = false;
+      const asleep = roomMainGoal(me);
+      localStorage.setItem('hearth_room_look', 'him');
+      const awake = roomMainGoal(me);
+      localStorage.removeItem('hearth_room_look');
+      roomHasBrain = hasBrain;
+      out.sleep = [asleep.pose, !!asleep.sit, awake.pose !== 'sleep', !awake.sit];
       out.helperLine = typeof roomHelperLine === 'function'
         && roomHelperLine({ status: 'working', activity: 'tool', tool: 'read_file', what: 'SPEC.md' });
       showView('chat');
@@ -211,8 +225,11 @@ with sync_playwright() as pw:
           room["holds"] and room["word"] == "right here" and room["walkingWord"] == "on the way")
 
     check(f"it looks out of the window with its back turned, and turns to the room to speak {room['gazing'], room['speaking']}",
-          room["gazing"] == "gaze" and room["speaking"] == "idle")
+          room["gazing"] == "gaze" and room["speaking"] == "talk")
     check("a working helper's tag says what it has in its hands", room["helperLine"] == "Reading SPEC.md")
+    check(f"a pose a character wasn't drawn in falls back to the nearest it has {room['frames']}", all(room["frames"]))
+    check(f"with no model loaded it is asleep in the armchair, if it was drawn asleep {room['sleep']}",
+          room["sleep"] == ["sleep", True, True, True])
     check(f"loading or ejecting a model doesn't show as thinking {room['lines']}",
           room["lines"] == ["Waking up…", "", "", "Thinking…"])
 

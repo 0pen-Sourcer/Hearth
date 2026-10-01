@@ -941,6 +941,10 @@
   .tm-say { position: absolute; transform: translate(-50%, calc(-100% - 26px)); max-width: 260px; pointer-events: none;
     background: var(--bg-1); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 12px;
     padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
+  .ap-char { display: flex; align-items: center; gap: 12px; text-align: left; }
+  .ap-char i { flex: none; width: 52px; height: 72px; background-size: auto 72px; background-position: 0 0;
+    background-repeat: no-repeat; image-rendering: pixelated; }
+  .ap-char span { display: flex; flex-direction: column; gap: 2px; }
   .tm-say.doing { transform: translate(-50%, calc(-100% - 22px)); max-width: 210px; padding: 3px 8px; border-radius: 8px;
     font: 11px/1.4 var(--mono); color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     box-shadow: 0 4px 12px -8px rgba(0,0,0,.5); }
@@ -4410,6 +4414,14 @@
             <button type="button" class="ap-accent" data-accent="mono" style="--sw:#a3a09a"><span></span>Mono</button>
           </div>
           <div class="ap-accent-note">Classic always uses violet. Pick Light, Dark or System to choose an accent.</div>
+        </div>
+        <div class="ap-block">
+          <div class="ap-title">In the room</div>
+          <div class="ap-hint">How your assistant looks in the Team room.</div>
+          <div class="ap-modes ap-two" id="ap-room">
+            <button type="button" class="ap-mode ap-char" data-look="her"><i style="background-image:url(/assets/team/main.png)"></i><span><b>Orange scarf</b><small>Long hair. Sits, reads by the fire, tends it.</small></span></button>
+            <button type="button" class="ap-mode ap-char" data-look="him"><i style="background-image:url(/assets/team/main_m.png)"></i><span><b>Teal scarf</b><small>Short hair. Always on his feet.</small></span></button>
+          </div>
         </div>
 <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">In the chat</h4>
         <div class="field">
@@ -17741,8 +17753,15 @@ window.addEventListener('load', function initSidebarDrawer() {
   const modes = document.getElementById('ap-modes'), accents = document.getElementById('ap-accents');
   if (!modes || !accents) return;
   const cur = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
-  const uiBox = document.getElementById('ap-ui');
+  const uiBox = document.getElementById('ap-ui'), roomBox = document.getElementById('ap-room');
+  if (roomBox) roomBox.addEventListener('click', e => {
+    const b = e.target.closest('.ap-mode'); if (!b) return;
+    try { localStorage.setItem('hearth_room_look', b.dataset.look); } catch {}
+    mark();
+    ROOM.labelSig = ''; roomStripRender();
+  });
   const mark = () => {
+    if (roomBox) roomBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.look === cur('hearth_room_look', 'her')));
     if (uiBox) uiBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.ui === cur('hearth_ui', 'simple')));
     modes.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === cur('hearth_theme', 'classic')));
     accents.querySelectorAll('.ap-accent').forEach(b => b.classList.toggle('on', b.dataset.accent === cur('hearth_accent', 'ember')));
@@ -18013,7 +18032,10 @@ const ROOM = {
   spots: {
     door: [96, 905], fire: [760, 470], fireSide: [868, 478], hearthside: [640, 492], shelfL: [410, 398], shelfR: [1122, 398],
     board: [228, 480], windowSeat: [1316, 488], coffee: [1350, 650], windowL: [296, 430], rug: [700, 478],
+    armchairSeat: [556, 447], hearth: [770, 398], pin: [170, 452],
   },
+  // How far up someone is drawn when seated there, so they sit on it and not in front of it.
+  sitLift: { armchairSeat: 15 },
   fire: [770, 330], gone: new Set(), chatAt: 0,
   aisleY: 722, aisleTop: 492, aisleX: [186, 470, 755, 1045, 1352],
 };
@@ -18048,7 +18070,7 @@ function roomLook(role, seed) {
   c.width = src.width; c.height = src.height;
   const x = c.getContext('2d');
   x.drawImage(src, 0, 0);
-  if (role !== 'main') {
+  if (!role.startsWith('main')) {
     const [hh, hs, hl] = HAIRS[seed % HAIRS.length];
     const skinL = SKINS[(seed >> 3) % SKINS.length];
     const [cw, ch] = ROOM.man.cell;
@@ -18075,7 +18097,25 @@ function roomLook(role, seed) {
   _looks.set(key, c);
   return c;
 }
-function roomFrame(name) { return ROOM.man ? Math.max(0, ROOM.man.frames.indexOf(name)) : 0; }
+// A character that wasn't drawn in a pose stands in the nearest one it has.
+const FRAME_NEAREST = { sit: 'idle', sit_read: 'read', sit_coffee: 'coffee', talk: 'idle', nod: 'idle', wave: 'raise',
+  side_idle: 'idle', side_coffee: 'coffee', side_read: 'read', tend_fire: 'gaze', sleep: 'gaze', pin: 'raise' };
+function roomHas(skin, name) { return !!ROOM.man && ((ROOM.man.extra || {})[skin] || []).includes(name); }
+function roomFrame(name, skin) {
+  if (!ROOM.man) return 0;
+  const base = ROOM.man.frames.indexOf(name);
+  if (base >= 0) return base;
+  const more = ((ROOM.man.extra || {})[skin] || []).indexOf(name);
+  if (more >= 0) return ROOM.man.frames.length + more;
+  return Math.max(0, ROOM.man.frames.indexOf(FRAME_NEAREST[name] || 'idle'));
+}
+// The assistant is drawn as whichever of the two characters was picked.
+function roomSkin(a) {
+  if (a.role !== 'main') return a.role;
+  let look = 'her';
+  try { look = localStorage.getItem('hearth_room_look') || 'her'; } catch {}
+  return look === 'him' && ROOM.imgs.main_m ? 'main_m' : 'main';
+}
 async function roomLoad() {
   if (ROOM.bg) return true;
   try {
@@ -18117,20 +18157,31 @@ const MAIN_IDLE = [['fire', 'gaze'], ['fire', 'think'], ['windowSeat', 'gaze'], 
                    ['windowL', 'gaze'], ['board', 'think']];
 const LEISURE = [['hearthside', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfL', 'read'], ['windowL', 'gaze'],
                  ['shelfR', 'read'], ['fireSide', 'coffee'], ['rug', 'stretch'], ['coffee', 'idle'], ['hearthside', 'coffee'], ['fireSide', 'idle']];
+// The third entry: 's' is seated on that piece of furniture, 'f' is turned the other way.
+const MAIN_IDLE_MORE = [['armchairSeat', 'sit', 's'], ['hearth', 'tend_fire'], ['windowSeat', 'side_idle', 'f'],
+                        ['armchairSeat', 'sit_read', 's'], ['coffee', 'side_coffee', 'f'], ['armchairSeat', 'sit_coffee', 's']];
 const MAIN_IDLE_WORDS = { fire: 'by the fire', windowSeat: 'at the window', coffee: 'making coffee', shelfR: 'reading', hearthside: 'by the hearth',
-                         shelfL: 'reading', rug: 'stretching', windowL: 'at the window', board: 'at the board' };
-// One entry of a list for this stretch of time. Stepping by 5 walks through
-// both lists (12 and 11 long) whole before repeating, and no two entries five
-// apart share a place.
+                         shelfL: 'reading', rug: 'stretching', windowL: 'at the window', board: 'at the board',
+                         armchairSeat: 'in the armchair', hearth: 'tending the fire', sit_read: 'reading' };
+// One entry of a list for this stretch of time. Stepping by 7 walks through a
+// whole list before repeating (none here is a multiple of 7 long); the same
+// place twice running is skipped.
 function roomPick(list, seed, period) {
-  return list[(Math.floor(Date.now() / period) * 5 + seed) % list.length];
+  const at = k => list[(k * 7 + seed) % list.length];
+  const k = Math.floor(Date.now() / period);
+  return at(k)[0] === at(k - 1)[0] ? at(k + 3) : at(k);
+}
+function roomMainIdle(p) {
+  const skin = roomSkin(p.agent);
+  return roomPick(roomHas(skin, 'sit') ? MAIN_IDLE.concat(MAIN_IDLE_MORE) : MAIN_IDLE, p.seed, 45000);
 }
 function roomMainIdleWord(p) {
   // Where it is, not where it is headed: "making coffee" is for the counter.
   if (p.path && p.path.length) return 'on the way';
   if (p.holdUntil > Date.now()) return 'right here';
   if (ROOM.intent && ROOM.intent.until > Date.now()) return MAIN_IDLE_WORDS[ROOM.intent.spot] || 'around';
-  return MAIN_IDLE_WORDS[roomPick(MAIN_IDLE, p.seed, 45000)[0]];
+  const [spot, pose] = roomMainIdle(p);
+  return MAIN_IDLE_WORDS[pose] || MAIN_IDLE_WORDS[spot];
 }
 // Working on a turn. Loading or ejecting a model, "ready" and the like are
 // the app's business, not JARVIS thinking.
@@ -18149,17 +18200,22 @@ function roomMainGoal(p) {
   // usual spot to speak; it stays put a while, then drifts off as before.
   if (!busy && p.wasBusy) { p.holdUntil = now + 9000; p.holdAt = [p.pos[0], p.pos[1]]; }
   p.wasBusy = busy;
-  if (p.pokeUntil > now) return { at: p.pos, pose: p.pokePose || 'raise' };
+  if (p.pokeUntil > now) return { at: p.pos, pose: p.pokePose || 'raise', sit: !!p.pokeSit, lift: p.pokeSit || 0 };
   if ($('perm-strip') && !$('perm-strip').hidden) return { at: ROOM.spots.rug, pose: 'raise' };
   if (ROOM.intent && ROOM.intent.until > now) return { at: ROOM.spots[ROOM.intent.spot], pose: ROOM.intent.pose };
   if (!busy) {
     if (p.holdUntil > now) return { at: p.holdAt || p.pos, pose: 'idle' };
-    const [spot, pose] = roomPick(MAIN_IDLE, p.seed, 45000);
-    return { at: ROOM.spots[spot], pose };
+    // Nothing to think with: asleep in the armchair until a model is loaded.
+    if (!roomHasBrain() && roomHas(roomSkin(p.agent), 'sleep'))
+      return { at: ROOM.spots.armchairSeat, pose: 'sleep', sit: true, lift: ROOM.sitLift.armchairSeat };
+    const [spot, pose, how] = roomMainIdle(p);
+    return { at: ROOM.spots[spot], pose, sit: how === 's', flip: how === 'f', lift: how === 's' ? ROOM.sitLift[spot] || 0 : 0 };
   }
   const tool = (ms.match(/calling ([a-z_]+)/) || [])[1] || '';
   // Something worth remembering gets pinned to the board.
-  if (/^memory_(save|update|write)|^remember/.test(tool)) return { at: ROOM.spots.board, pose: 'raise' };
+  if (/^memory_(save|update|write)|^remember/.test(tool)) {
+    return roomHas(roomSkin(p.agent), 'pin') ? { at: ROOM.spots.pin, pose: 'pin', flip: true } : { at: ROOM.spots.board, pose: 'raise' };
+  }
   if (/read|grep|find|list|search|fetch|browse|recall|pdf/.test(tool))
     return { at: p.turn % 2 ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: 'read' };
   if (/write|edit|create|run_command|start_job|delegate/.test(tool)) {
@@ -18327,7 +18383,12 @@ function roomTick(t) {
       if (Math.hypot(endPt[0] - target[0], endPt[1] - target[1]) > 4) p.path = roomRoute(p.pos, target);
       // Whoever is speaking faces the room, not the wall.
       const say = ROOM.says.get(id);
-      if (g.pose === 'gaze' && say && !say.live && say.until > Date.now()) g.pose = 'idle';
+      if (say && !say.live && say.until > Date.now() && !g.sit && !g.seated) {
+        if (p.agent.role === 'main' && /^(gaze|idle|think|stretch|side_idle|tend_fire)$/.test(g.pose)) {
+          g.pose = /^Noted/.test(say.text) ? 'nod' : 'talk';
+          g.flip = false;
+        } else if (g.pose === 'gaze') g.pose = 'idle';
+      }
       p.goal = g;
       const doing = p.agent.role === 'main' ? '' : roomHelperLine(p.agent);
       if (doing && !p.path.length && (!say || say.live || say.until < Date.now())) {
@@ -18386,6 +18447,12 @@ function roomDraw(t) {
       items.push({ kind: 'prop', name: 'armchair', x: 540, y: 440, shadow: [66, 15, 30], sy: -11 });
       items.push({ kind: 'prop', name: 'side_table', x: 650, y: 428, shadow: [22, 6, 16], sy: -3 });
     }
+    // The cat sleeps on the rug by the fire and sits up to watch when there is work going on.
+    if (roomProp('cat_sleep')) {
+      items.push({ kind: 'prop', name: roomMainBusy() ? 'cat_sit' : 'cat_sleep', x: 868, y: 452, shadow: [19, 5, 5] });
+      items.push({ kind: 'prop', name: 'books', x: 452, y: 446, shadow: [20, 5, 8] });
+      items.push({ kind: 'prop', name: 'stool', x: 1238, y: 418, shadow: [20, 6, 14] });
+    }
   }
   for (const p of ROOM.people.values()) {
     if (p.waiting) continue;
@@ -18408,7 +18475,7 @@ function roomDraw(t) {
     ctx.restore();
   };
   for (const it of items) {
-    if (!it.shadow || (it.kind === 'person' && it.p.goal && it.p.goal.seated && !it.p.walking)) continue;
+    if (!it.shadow || (it.kind === 'person' && it.p.goal && (it.p.goal.seated || it.p.goal.sit) && !it.p.walking)) continue;
     const [rx, ry, tall] = it.shadow, y = it.y - 2 + (it.sy || 0);
     const dx = it.x - ROOM.fire[0], dy = (y - ROOM.fire[1]) * 1.6, d = Math.hypot(dx, dy) || 1;
     const far = Math.min(1, d / 760), len = tall * (0.5 + 1.1 * far);
@@ -18433,28 +18500,31 @@ function roomDraw(t) {
       continue;
     }
     const p = it.p;
-    if (!ROOM.imgs[p.agent.role] && !ROOM.imgs.custom) continue;
-    const img = roomLook(p.agent.role, p.seed);
+    const skin = roomSkin(p.agent);
+    if (!ROOM.imgs[skin] && !ROOM.imgs.custom) continue;
+    const img = roomLook(skin, p.seed);
     let frame, flip = false;
     if (p.walking) {
       const step = Math.floor(t / 210 + p.seed) % 2 ? 1 : 2;
-      frame = roomFrame(`walk_${p.walkDir}_${step}`);
+      frame = roomFrame(`walk_${p.walkDir}_${step}`, skin);
       flip = p.walkDir === 'side' && p.dir < 0;
     } else {
-      frame = roomFrame(p.goal ? p.goal.pose : 'idle');
+      frame = roomFrame(p.goal ? p.goal.pose : 'idle', skin);
+      flip = !!(p.goal && p.goal.flip);
     }
     const typing = !p.walking && p.goal && p.goal.pose === 'type';
     const bob = typing ? Math.round(Math.sin(t / 130 + p.seed) * 1.3) : (!p.walking ? Math.round(Math.sin(t / 700 + p.seed) * 0.8) : 0);
     ctx.save();
-    const lift = typing ? SIT_LIFT : 0;
+    const low = !p.walking && p.goal && (p.goal.sit || p.goal.pose === 'tend_fire');
+    const lift = typing ? SIT_LIFT : (low ? p.goal.lift || 0 : 0);
     ctx.translate(Math.round(p.pos[0] * kx), Math.round((p.pos[1] + bob - lift) * ky));
     if (flip) ctx.scale(-1, 1);
     ctx.drawImage(img, frame * cw, 0, cw, ch, Math.round(-cw * kx / 2), Math.round(-ch * ky), Math.round(cw * kx), Math.round(ch * ky));
     ctx.restore();
-    const headY = typing ? p.pos[1] - 112 - lift : p.pos[1] - 142;
+    const headY = typing ? p.pos[1] - 112 - lift : low ? p.pos[1] - 120 - lift : p.pos[1] - 142;
     labels.push({ p, x: p.pos[0] * kx / dpr, y: headY * ky / dpr });
     hits.push({ p, x0: (p.pos[0] - 34) * kx / dpr, x1: (p.pos[0] + 34) * kx / dpr,
-                y0: (p.pos[1] - (typing ? 118 : 138) - lift) * ky / dpr, y1: (p.pos[1] - lift + 4) * ky / dpr, z: p.pos[1] });
+                y0: (p.pos[1] - (typing || low ? 118 : 138) - lift) * ky / dpr, y1: (p.pos[1] - lift + 4) * ky / dpr, z: p.pos[1] });
   }
 
   // Firelight over everything, so the room and the people share one light.
@@ -18528,6 +18598,9 @@ function roomPoke(p) {
   p.pokeUntil = now + 1400;
   p.pokePose = ['raise', 'stretch', 'raise', 'idle'][Math.floor(Math.random() * 4)];
   if (a.role === 'main') {
+    const seatedNow = p.goal && p.goal.sit && !p.path.length;
+    p.pokeSit = seatedNow ? (p.goal.lift || 0.01) : 0;      // stays in its seat, at the same height
+    p.pokePose = seatedNow ? (p.goal.pose === 'sleep' ? 'sit' : p.goal.pose) : 'wave';
     roomSay(p.id, roomMainBusy() ? 'Still on it. Give me a moment.'
       : !roomHasBrain() ? "I can't think without a model. Load one from the top bar."
       : MAIN_HELLOS[Math.floor(Math.random() * MAIN_HELLOS.length)]);
@@ -18597,11 +18670,11 @@ function roomStripRender() {
     const st = a.role === 'main' ? 'working' : (teamNeedsYou(a) ? 'needs' : a.status);
     const word = a.role === 'main'
       ? (pendingPermId ? 'waiting for your OK' : roomMainLine() ? roomMainLine().replace(/…$/, '').toLowerCase()
-         : roomHasBrain() ? roomMainIdleWord(p) : 'no model loaded')
+         : roomHasBrain() ? roomMainIdleWord(p) : roomHas(roomSkin(a), 'sleep') ? 'asleep, no model loaded' : 'no model loaded')
       : { working: a.activity === 'tool' ? a.tool : 'thinking', needs: 'needs you', done: 'done', failed: "didn't finish", stopped: 'stopped' }[st];
     const card = document.createElement('div');
     card.className = 'tm-card' + (ROOM.sel === p.id ? ' sel' : '');
-    const face = document.createElement('div'); face.className = 'tm-face'; face.appendChild(roomFace(a.role, p.seed));
+    const face = document.createElement('div'); face.className = 'tm-face'; face.appendChild(roomFace(roomSkin(a), p.seed));
     const txt = document.createElement('div');
     txt.innerHTML = `<b>${teamMini(a)}${esc(a.name || a.persona)}</b><small>${esc(a.role === 'main' ? (a.runtime ? 'on ' + teamWhat(a).split(' · ')[0] : 'runs the house') : teamWhat(a))}</small><i class="${st}">${esc(word || '')}</i>`;
     card.append(face, txt);
