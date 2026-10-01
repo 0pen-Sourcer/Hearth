@@ -54,6 +54,8 @@ The microphone you pick is the one that gets used. It was remembered by a number
 
 The wake word hears whole phrases. It used to drop the quiet parts of speech and keep only the end of a long sentence, which is exactly where the name isn't. On the same recorded phrases it now wakes on all fifteen where it woke on nine, including a full command like "Jarvis, open Spotify and play the new album". While voice mode is on, the wake listener lets go of the microphone, so a Bluetooth headset that only allows one app at a time works in voice mode.
 
+On speakers you can still cut in. Speakers mode keeps Hearth from hearing itself by ignoring what the mic picks up while it talks, which also meant you couldn't stop it. Now anything that starts with its name gets through, so "Jarvis, stop" or "Jarvis, open Spotify instead" cuts the speech and goes through as your message. Its own voice coming back through the speakers didn't set it off once in testing.
+
 When speech fails, Hearth says so. Synthesis and playback run behind a queue, which meant a failure after the request had been accepted was silent in every direction, with nothing written anywhere to explain it. Now it names what went wrong, and the preview button tells you rather than just going quiet. A transcription that fails is no longer indistinguishable from not having said anything. Saving a setting no longer unloads the voice, so the next reply is not held up reloading it.
 
 Voice starts on an updated install. The update now carries the maths library the speech stack loads at startup, along with the rest of its dependencies, so a patched install behaves the same as a fresh one. The microphone test runs in its own process, so a headset you plug in after opening Hearth is picked up without a restart.

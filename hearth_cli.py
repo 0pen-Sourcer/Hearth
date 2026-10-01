@@ -3664,7 +3664,7 @@ class JarvisCLI:
             print(f"{C_DIM}half-duplex is {'ON' if cur else 'off'}"
                   f"{' (pinned by the environment)' if pinned else ''}.  "
                   f"ON holds the mic closed while Hearth speaks, which stops a "
-                  f"speaker setup answering itself. Off lets you interrupt by "
+                  f"speaker setup answering itself; saying the name first still cuts in. Off lets you interrupt by "
                   f"voice, which is what you want on a headset.  "
                   f"usage: /voice duplex on|off{C_RESET}")
             return

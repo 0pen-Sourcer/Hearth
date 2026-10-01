@@ -61,6 +61,7 @@ class FakeTTS:
     def seconds_since_spoke(self): return 0.4
     def set_voice_state(self, s): pass
     def last_spoken_text(self): return self.last
+    def stop(self): self.stopped = True
 
 
 rv._REALTIME_AVAILABLE = True
@@ -86,6 +87,12 @@ got = heard_with(["wait, what about tomorrow?"], speakers_mode=False)
 check(f"on headphones a quick reply right after Hearth speaks is sent {got}", got == ["wait, what about tomorrow?"])
 got = heard_with(["wait, what about tomorrow?"], speakers_mode=True)
 check(f"in speakers mode the same words are held back as possible echo {got}", got == [])
+
+from hearth.persona import NAME                                      # noqa: E402
+rv._tts.stopped = False
+got = heard_with([f"{NAME}, stop", "the weather in Delhi is sunny today"], speakers_mode=True)
+check(f"in speakers mode calling {NAME} by name cuts in and is sent {got}", got == [f"{NAME}, stop"])
+check("and it stops Hearth talking", rv._tts.stopped)
 
 print()
 if FAILS:

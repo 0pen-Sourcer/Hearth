@@ -81,6 +81,26 @@ _barge_timer: Optional[threading.Timer] = None
 _barge_grace_until: float = 0.0  # capture user speech (skip echo-tail) until this time
 _barge_fired: bool = False  # a real barge fired this segment (vs an echo blip)
 
+
+def _addressed_by_name(text: str) -> bool:
+    """Whether an utterance opens by calling the assistant by name, allowing a
+    letter off for how speech recognition spells an unusual name ("jarmis")."""
+    try:
+        from . import wake as _w
+        from .persona import NAME
+    except Exception:
+        return False
+    name = _w._normalize(NAME)
+    words = _w._normalize(text).split()[:3]
+    if not name or not words:
+        return False
+    budget = _w._wake_edit_budget(name)
+    for w in words:
+        if w == name or (budget and len(w) >= 4 and w[0] == name[0] and _w._edit_distance(w, name) <= budget):
+            return True
+    return False
+
+
 # Speaker-safe HALF-DUPLEX — OPT-IN, default OFF. On a headset (the common case)
 # the mic can't hear the earpieces, so there's no echo and you WANT to interrupt
 # by voice (barge-in). Forcing half-duplex on everyone broke that — you couldn't
@@ -729,10 +749,19 @@ def _run_session(sess: _Session) -> None:
                 # the hard stop against the self-reply loop on speakers. Flush the
                 # buffer too so accumulated echo can't ride into the next turn.
                 if _tts.is_speaking() or _tts.seconds_since_spoke() < _echo_tail():
-                    print(f"[hearth.realtime_voice] dropped (speakers mode, Hearth was talking): {text!r}", flush=True)
-                    try: rec.clear_audio_queue()
-                    except Exception: pass
-                    continue
+                    # Unless it opens with the assistant's name: "Jarvis, stop".
+                    # Hearth's own voice never starts a sentence with its name,
+                    # so this is the one interruption speakers can safely allow.
+                    if _addressed_by_name(text) and not _looks_like_echo(text):
+                        print(f"[hearth.realtime_voice] interrupted by name: {text!r}", flush=True)
+                        try: _tts.stop()
+                        except Exception: pass
+                        _call(sess.on_barge)
+                    else:
+                        print(f"[hearth.realtime_voice] dropped (speakers mode, Hearth was talking): {text!r}", flush=True)
+                        try: rec.clear_audio_queue()
+                        except Exception: pass
+                        continue
             elif time.time() < _barge_grace_until:
                 # A barge fired and grabbed this utterance — but on speakers the
                 # "barge" can be the assistant's own voice bleeding into the mic. If the
