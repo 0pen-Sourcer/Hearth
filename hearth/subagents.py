@@ -558,7 +558,7 @@ def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
         lower = base.lower()
         is_cloud = any(host in lower for host in
                        ("api.x.ai", "googleapis", "openai.com",
-                        "anthropic.com", "openrouter.ai"))
+                        "anthropic.com", "openrouter.ai", "api.groq.com"))
         # Only divert a cloud parent to local when local is genuinely ready.
         # Otherwise keep the parent's cloud brain so the subagent still runs.
         if is_cloud and _local_server_has_model("http://localhost:1234/v1"):

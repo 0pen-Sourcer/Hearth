@@ -3943,6 +3943,7 @@
             <option value="openai">OpenAI - GPT</option>
             <option value="grok">xAI - Grok</option>
             <option value="openrouter">OpenRouter (any model)</option>
+            <option value="groq">Groq - very fast (paid tier)</option>
             <option value="custom">Other (custom URL)</option>
           </select>
         </div>
@@ -4907,7 +4908,8 @@
             <option value="openai">Cloud - OpenAI GPT</option>
             <option value="grok">Cloud - xAI Grok</option>
             <option value="openrouter">Cloud - OpenRouter (100+ models)</option>
-            <option value="custom">Cloud - Custom / OpenAI-compatible (Groq, Together, …)</option>
+            <option value="groq">Cloud - Groq (very fast, paid tier)</option>
+            <option value="custom">Cloud - Custom / OpenAI-compatible (Together, …)</option>
           </select>
         </div>
         <div class="ob-section" id="ob-cloud-key-row" hidden>
@@ -6131,7 +6133,7 @@ const STATE = {
 // Local STATE.conversations is the in-memory list cache.
 
 // One short cloud-provider set, used everywhere (was re-declared 3×).
-const CLOUD_PROVIDERS = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
+const CLOUD_PROVIDERS = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','groq','custom']);
 // Agent programs on this PC that can be the brain instead of a model endpoint.
 const AGENT_BRAINS = { 'claude-code': 'Claude Code', 'codex': 'Codex' };
 
@@ -8217,6 +8219,7 @@ function providerFromEndpoint(url) {
   if (u.includes('api.anthropic.com')) return { key: 'anthropic', label: 'Anthropic Claude' };
   if (u.includes('api.openai.com')) return { key: 'openai', label: 'OpenAI' };
   if (u.includes('openrouter.ai')) return { key: 'openrouter', label: 'OpenRouter' };
+  if (u.includes('api.groq.com')) return { key: 'groq', label: 'Groq' };
   return { key: 'custom', label: 'cloud' };
 }
 async function refreshState() {
@@ -11299,7 +11302,7 @@ async function refreshServerCard() {
       local: 'Local server',
       anthropic: 'Anthropic Claude',
       gemini: 'Google Gemini', openai: 'OpenAI',
-      grok: 'xAI Grok', openrouter: 'OpenRouter', custom: 'Custom endpoint',
+      grok: 'xAI Grok', openrouter: 'OpenRouter', groq: 'Groq', custom: 'Custom endpoint',
     }[s.llm_provider || 'local'] || (s.llm_provider || 'cloud');
     const usingCloud = (s.llm_provider && s.llm_provider !== 'local');
     let stateText, stateClass;
@@ -11747,7 +11750,7 @@ async function refreshSettings() {
         grok: 'xAI / Grok model', xai: 'xAI / Grok model',
         gemini: 'Gemini model', google: 'Gemini model',
         openai: 'OpenAI model', anthropic: 'Anthropic model',
-        openrouter: 'OpenRouter model', custom: 'Custom-endpoint model',
+        openrouter: 'OpenRouter model', groq: 'Groq model', custom: 'Custom-endpoint model',
       }[(s.llm_provider || '').toLowerCase()] || 'Active model';
       _picker.title = `${provLabel} - click to switch`;
     }
@@ -12117,6 +12120,7 @@ async function refreshSettings() {
         anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint. Sonnet supports up to 1M context.', modelHint: 'Try <code>claude-sonnet-5</code>, <code>claude-opus-4-8</code>, or <code>claude-haiku-4-5</code>.', sample: 'claude-sonnet-5' },
         openai:     { url: 'https://api.openai.com/v1', hint: 'OpenAI GPT models.', modelHint: 'Try <code>gpt-5.1</code> or <code>gpt-5-mini</code>.', sample: 'gpt-5.1' },
         grok:       { url: 'https://api.x.ai/v1', hint: 'xAI Grok models.', modelHint: 'Try <code>grok-4.5</code>.', sample: 'grok-4.5' },
+        groq:       { url: 'https://api.groq.com/openai/v1', hint: 'Groq runs open models very fast. Its free tier allows fewer tokens a minute than one Hearth request, so it needs a paid tier. Keys are at console.groq.com.', modelHint: 'Use a Groq model id. <code>openai/gpt-oss-120b</code> handles tools well.', sample: 'openai/gpt-oss-120b' },
         openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator - gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-4.6-sonnet</code>.', sample: 'anthropic/claude-4.6-sonnet' },
         custom:     { url: '', hint: 'Any OpenAI-compatible server. You set the URL.', modelHint: 'Use whatever model id your server exposes.', sample: '' },
       };
@@ -12929,7 +12933,7 @@ async function saveSetting(key, value) {
       body: JSON.stringify({ [key]: value }),
     });
     if (key === 'llm_provider') {
-      const _CLOUD = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
+      const _CLOUD = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','groq','custom']);
       const wasCloud = _CLOUD.has(_prevProv);
       const isCloudNow = _CLOUD.has(String(value || '').toLowerCase());
       if (wasCloud && !isCloudNow) {
@@ -14783,7 +14787,7 @@ async function refreshModelsView() {
   const usingCloud = provider !== 'local';
   const cloudLabel = {
     gemini: 'Gemini', openai: 'OpenAI', grok: 'Grok',
-    openrouter: 'OpenRouter', custom: 'custom endpoint',
+    openrouter: 'OpenRouter', groq: 'Groq', custom: 'custom endpoint',
   }[provider] || provider;
   // ORDER MATTERS: cloud wins if explicitly picked. Without this, the
   // pill said "External server · LM Studio" whenever LM Studio happened
@@ -14823,7 +14827,7 @@ function _renderModelsHeader(s) {
   const usingCloud = provider !== 'local';
   const cloudLabel = {
     gemini: 'Gemini', openai: 'OpenAI', grok: 'Grok',
-    openrouter: 'OpenRouter', custom: 'custom endpoint',
+    openrouter: 'OpenRouter', groq: 'Groq', custom: 'custom endpoint',
   }[provider] || provider;
   // ORDER MATTERS: cloud wins if explicitly picked. Without this, the
   // pill said "External server · LM Studio" whenever LM Studio happened
@@ -17043,6 +17047,7 @@ async function obFinish(skipped) {
           openai:     { url: 'https://api.openai.com/v1', sample: 'gpt-5.1' },
           grok:       { url: 'https://api.x.ai/v1', sample: 'grok-4.5' },
           openrouter: { url: 'https://openrouter.ai/api/v1', sample: 'anthropic/claude-4.6-sonnet' },
+          groq:       { url: 'https://api.groq.com/openai/v1', sample: 'openai/gpt-oss-120b' },
         };
         const p = PRESETS[obState.cloud.provider] || {};
         // Custom endpoint (Groq, Together, any OpenAI-compatible): take the URL the

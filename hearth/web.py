@@ -1413,7 +1413,7 @@ def _save_settings_locked(d: Dict) -> Dict:
     _prev_provider = (cur.get("llm_provider") or "").strip().lower()
     _new_provider = (d.get("llm_provider") or _prev_provider or "").strip().lower()
     _CLOUD = {"grok", "xai", "gemini", "google", "openai", "anthropic",
-              "openrouter", "custom"}
+              "openrouter", "groq", "custom"}
     _was_cloud = _prev_provider in _CLOUD
     _is_cloud_now = _new_provider in _CLOUD
     _prev_tts_device = cur.get("tts_device", "cpu")
@@ -3382,6 +3382,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 if "api.anthropic.com" in u: return "anthropic"
                 if "api.openai.com" in u: return "openai"
                 if "openrouter.ai" in u: return "openrouter"
+                if "api.groq.com" in u: return "groq"
                 return ""  # unknown host: leave provider as the caller set it
             _detected = _provider_from_url(url)
             if _detected == "local" and provider and provider != "local":

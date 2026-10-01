@@ -2457,6 +2457,7 @@ class JarvisCLI:
                 print(f"  {C_TOOL}/brain gemini [api-key]{C_RESET}          Google Gemini  (key optional if saved)")
                 print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")
                 print(f"  {C_TOOL}/brain openrouter [api-key]{C_RESET}      OpenRouter     (key optional if saved)")
+                print(f"  {C_TOOL}/brain groq [api-key]{C_RESET}            Groq           (very fast, paid tier)")
                 print(f"  {C_TOOL}/brain custom <url> <api-key>{C_RESET}    any OpenAI-compatible server")
                 print(f"  {C_TOOL}/brain claude-code{C_RESET}               Claude Code on this PC, your Claude plan")
                 print(f"  {C_TOOL}/brain codex{C_RESET}                     Codex on this PC, your ChatGPT plan")
@@ -2523,6 +2524,7 @@ class JarvisCLI:
                 "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash"),
                 "openai":     ("https://api.openai.com/v1", "gpt-4o-mini"),
                 "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-3.5-sonnet"),
+                "groq":       ("https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
             }
 
             if provider == "custom":
@@ -4222,18 +4224,15 @@ class JarvisCLI:
                 print(f"  {C_DIM}    No local model is loaded yet. Pick local and I'll "
                       f"help you get one with /models.{C_RESET}")
             brain = ask("Enter to stay local, or type: grok / gemini / openai / openrouter / groq / custom").lower()
-            if brain in ("grok", "gemini", "openai", "openrouter"):
+            if brain in ("grok", "gemini", "openai", "openrouter", "groq"):
                 key = ask(f"Paste your {brain} API key (saved locally, asked once)")
                 if key:
                     await self.handle_command(f"/brain {brain} {key}")
                 else:
                     print(f"  {C_DIM}no key - staying local. Switch anytime with /brain {brain} <key>.{C_RESET}")
-            elif brain in ("custom", "groq"):
-                # Any OpenAI-compatible endpoint. Groq is the fast free one, so
-                # offer its URL as the default when they type 'groq'.
-                _def = "https://api.groq.com/openai/v1" if brain == "groq" else ""
-                _prompt = f"Endpoint URL (Enter for {_def})" if _def else "Endpoint URL (e.g. https://api.groq.com/openai/v1)"
-                url = ask(_prompt).strip() or _def
+            elif brain == "custom":
+                # Any OpenAI-compatible endpoint.
+                url = ask("Endpoint URL (e.g. https://api.together.xyz/v1)").strip()
                 key = ask("Paste your API key (saved locally)")
                 if url and key:
                     await self.handle_command(f"/brain custom {url} {key}")

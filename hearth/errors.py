@@ -68,8 +68,20 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
                  "whether it was launched with an API key set.",
             retryable=False)
 
+    # --- one request bigger than the plan's per-minute allowance ---
+    # Waiting doesn't help: the next try is just as big.
+    if code == 413 or ("request too large" in text and "per minute" in text):
+        import re as _re
+        m = _re.search(r"limit\s*(\d[\d,]*)\D+?requested\s*(\d[\d,]*)", text)
+        n = [int(g.replace(",", "")) for g in m.groups()] if m else []
+        sizes = (f" It allows {n[0]:,} tokens a minute and one request here is {n[1]:,}." if n else "")
+        return ApiErrorInfo("too_big_for_plan",
+            "This provider's plan is too small for Hearth." + sizes +
+            " Use a paid tier with this provider, or pick another one.",
+            retryable=False)
+
     # --- rate limit / quota ---
-    if code == 429 or "rate limit" in text or "quota" in text or "resource_exhausted" in text or "too many requests" in text:
+    if code == 429 or "rate_limit" in text or "rate limit" in text or "quota" in text or "resource_exhausted" in text or "too many requests" in text:
         return ApiErrorInfo("rate_limit",
             "Rate-limited or out of quota. Wait a moment and retry, or switch model/provider.",
             retryable=True)
