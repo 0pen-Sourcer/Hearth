@@ -18032,7 +18032,7 @@ const ROOM = {
   spots: {
     door: [96, 905], fire: [760, 470], fireSide: [868, 478], hearthside: [640, 492], shelfL: [410, 398], shelfR: [1122, 398],
     board: [228, 480], windowSeat: [1316, 488], coffee: [1350, 650], windowL: [296, 430], rug: [700, 478],
-    armchairSeat: [556, 447], hearth: [770, 398], pin: [170, 452],
+    armchairSeat: [556, 447], hearth: [770, 398], pin: [178, 460],
   },
   // How far up someone is drawn when seated there, so they sit on it and not in front of it.
   sitLift: { armchairSeat: 15 },
@@ -18420,6 +18420,23 @@ function roomTick(t) {
   roomDraw(t);
   ROOM.raf = requestAnimationFrame(roomTick);
 }
+// The name carved into the mantel, so a picture of the room says where it is from.
+const ROOM_LETTERS = { H: ['10001', '10001', '10001', '11111', '10001', '10001', '10001'],
+  E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'], A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+  R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'], T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'] };
+function roomCarve(ctx, kx, ky) {
+  const word = 'HEARTH', u = 3, gap = 2;
+  const x0 = 767 - (word.length * (5 + gap) - gap) * u / 2, y0 = 157;
+  // Lit edge first, a step down and right, then the cut itself.
+  for (const [dx, dy, ink] of [[1, 1, 'rgba(255,196,128,0.30)'], [0, 0, 'rgba(58,26,10,0.72)']]) {
+    ctx.fillStyle = ink;
+    [...word].forEach((ch, i) => ROOM_LETTERS[ch].forEach((row, r) => [...row].forEach((on, c) => {
+      if (on !== '1') return;
+      const x = x0 + (i * (5 + gap) + c) * u + dx, y = y0 + r * u + dy;
+      ctx.fillRect(Math.round(x * kx), Math.round(y * ky), Math.ceil(u * kx), Math.ceil(u * ky));
+    })));
+  }
+}
 function roomProp(name) { return ROOM.man && ROOM.man.props ? ROOM.man.props[name] : null; }
 function roomDraw(t) {
   const cv = $('tm-canvas'); if (!cv || !ROOM.bg) return;
@@ -18430,6 +18447,7 @@ function roomDraw(t) {
   ctx.imageSmoothingEnabled = false;
   const kx = cv.width / ROOM.W, ky = cv.height / ROOM.H;
   ctx.drawImage(ROOM.bg, 0, 0, cv.width, cv.height);
+  roomCarve(ctx, kx, ky);
 
   // Everything that stands on the floor, with the y where it touches it.
   const items = [];
