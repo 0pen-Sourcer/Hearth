@@ -211,14 +211,17 @@ def _run() -> None:
             try:
                 from . import voice as _v
                 lvl = _v.current_level()
+                mic = _v.current_mic_level()
                 st = _v.voice_state()
             except Exception:
-                lvl, st = 0.0, "idle"
+                lvl, mic, st = 0.0, 0.0, "idle"
             t = time.time() - start_t
             if lvl > 0.02:
                 target = min(1.0, max(0.35, 0.35 + lvl * 0.75))
             elif st == "thinking":
                 target = 0.42 + 0.16 * (0.5 + 0.5 * sin(t * 1.9))   # slow, shallow breathe
+            elif st == "listening" and mic > 0.03:
+                target = min(1.0, 0.45 + mic * 0.8)                 # your voice, as you talk
             elif st == "listening":
                 target = 0.58 + 0.05 * sin(t * 2.6)                 # steady hold
             else:

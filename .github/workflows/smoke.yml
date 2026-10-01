@@ -281,6 +281,10 @@ jobs:
         run: |
           python tests/test_helper_model.py
 
+      - name: The voice visuals move when you talk
+        run: |
+          python tests/test_voice_levels.py
+
       - name: On headphones, words said right after Hearth speaks are sent
         run: |
           python tests/test_voice_dropping.py

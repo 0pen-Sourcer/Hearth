@@ -567,6 +567,38 @@ def set_level_sink(cb: Optional[Callable[[float], None]]) -> None:
     _level_sink = cb
 
 
+# The microphone's level while voice mode listens, so both the window and the
+# overlay move when you talk, not only when Hearth does.
+_mic_level: float = 0.0
+_mic_level_ts: float = 0.0
+_mic_sink: Optional[Callable[[float], None]] = None
+_mic_sent: float = 0.0
+
+
+def set_mic_sink(cb: Optional[Callable[[float], None]]) -> None:
+    global _mic_sink
+    _mic_sink = cb
+
+
+def set_mic_level(v: float) -> None:
+    """Record the mic's level (0..1) and pass it on about 15 times a second."""
+    global _mic_level, _mic_level_ts, _mic_sent
+    _mic_level = 0.6 * _mic_level + 0.4 * max(0.0, min(1.0, v))
+    _mic_level_ts = time.time()
+    sink = _mic_sink
+    if sink and _mic_level_ts - _mic_sent > 0.066:
+        _mic_sent = _mic_level_ts
+        try:
+            sink(round(_mic_level, 3))
+        except Exception:
+            pass
+
+
+def current_mic_level() -> float:
+    """Latest mic level, or 0.0 when nothing has been heard for a moment."""
+    return _mic_level if time.time() - _mic_level_ts < 0.3 else 0.0
+
+
 # Most-recent TTS amplitude, pollable (decays to 0 when idle).
 _current_level: float = 0.0
 _current_level_ts: float = 0.0

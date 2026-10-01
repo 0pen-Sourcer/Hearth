@@ -12946,6 +12946,7 @@ let voiceGridAnim = null;
 let voiceMicLevel = 0;
 let voiceLevel = 0;
 let _ttsLevel = 0, _lastLevelAt = 0;   // live amplitude streamed from the server's TTS
+let _lastMicAt = 0;                     // last mic level from the server's recorder
 // Utterance stitching: silero endpoints on short pauses, so one spoken sentence
 // arrives as several "final" fragments. Buffer them and only send to chat once
 // the user has actually stopped (no new fragment for _UTTER_GAP ms) — instead of
@@ -13041,7 +13042,7 @@ function _voiceGridFrame(t) {
     // STRICTLY the agent's real TTS amplitude. No live amplitude, collapse to
     // rest and let the silence show, rather than a constant fake bloom.
     target = (t - _lastLevelAt < 220) ? _ttsLevel : 0;
-  } else if (_voiceState === 'listening' && recorder.recording) {
+  } else if (_voiceState === 'listening' && (recorder.recording || t - _lastMicAt < 300)) {
     // Only YOUR mic drives it while listening. Idle listening gets no animation
     // at all: nothing is being said, so nothing should move.
     target = Math.min(1, voiceMicLevel * 1.7);
@@ -13594,6 +13595,12 @@ async function startRealtimeVoice() {
 }
 
 function handleRealtimeEvent(ev) {
+  if (ev.type === 'mic') {
+    // The server's microphone, so listening moves with your voice.
+    voiceMicLevel = ev.v || 0;
+    _lastMicAt = performance.now();
+    return;
+  }
   if (ev.type === 'level') {
     // Light low-pass on the raw amplitude before it drives the grid — the
     // stream is spiky and un-smoothed values made the dots shimmer.

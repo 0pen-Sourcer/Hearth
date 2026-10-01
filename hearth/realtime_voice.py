@@ -225,6 +225,18 @@ def model_downloaded(size: str = "") -> bool:
         return True
 
 
+def _on_mic_chunk(data) -> None:
+    """Every chunk the recorder reads: its loudness, for the voice visuals."""
+    try:
+        import numpy as np
+        a = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+        if a.size:
+            from . import voice as _v
+            _v.set_mic_level(min(1.0, float(np.sqrt(np.mean(a * a))) * 6.0))
+    except Exception:
+        pass
+
+
 def _build_recorder(sess: Optional[_Session] = None):
     """Lazily build the AudioToTextRecorder with ChatGPT-voice-mode tuning.
 
@@ -388,6 +400,7 @@ def _build_recorder(sess: Optional[_Session] = None):
         on_vad_detect_start=_on_vad_start,
         on_recording_start=_on_speech_start,
         on_recording_stop=_on_speech_stop,
+        on_recorded_chunk=_on_mic_chunk,
         # Quiet.
         spinner=False,
         level=40,

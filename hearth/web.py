@@ -4372,6 +4372,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         try:
             if _voice:
                 _voice.set_level_sink(lambda v: put({"type": "level", "v": v}))
+                _voice.set_mic_sink(lambda v: put({"type": "mic", "v": v}))
             # "warming" until the STT model finishes loading; the ready callback
             # flips it to listening once the recorder can actually hear.
             _detail = ""
@@ -4438,6 +4439,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 try:
                     if _voice:
                         _voice.set_level_sink(None)
+                        _voice.set_mic_sink(None)
                     from . import voice_overlay as _vo
                     _vo.stop()
                 except Exception:
