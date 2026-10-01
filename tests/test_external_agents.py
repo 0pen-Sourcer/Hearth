@@ -35,18 +35,22 @@ work = tempfile.mkdtemp(prefix="hearth-xa-")
 subagents._TRANSCRIPT_DIR = __import__("pathlib").Path(work) / "subagents"
 fake = os.path.join(work, "fake_claude.py")
 with open(fake, "w", encoding="utf-8") as f:
-    f.write("""import sys, json
-prompt = sys.stdin.read()
+    f.write("""import sys, json, time
+prompt = json.loads(sys.stdin.readline())["message"]["content"][0]["text"]     # stdin stays open
 out = lambda o: print(json.dumps(o), flush=True)
 out({"type": "system", "subtype": "init", "model": "stand-in"})
 out({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "a.txt"}}]}})
 out({"type": "user", "message": {"content": [{"type": "tool_result", "content": [{"type": "text", "text": "hello"}]}]}})
 out({"type": "assistant", "message": {"content": [{"type": "text", "text": "The file says hello."}]}})
-out({"type": "result", "subtype": "success", "is_error": False, "result": "The file says hello. (" + prompt.strip() + ")"})
+if "slowly" in prompt:
+    time.sleep(1.5)
+heard = [json.loads(more)["message"]["content"][0]["text"] for more in ([sys.stdin.readline()] if "slowly" in prompt else [])]
+out({"type": "result", "subtype": "success", "is_error": False,
+     "result": "The file says hello. (" + prompt.strip() + ")" + "".join(" Heard: " + h for h in heard)})
 """)
 
 xa.AGENTS["stand-in"] = {"label": "Stand-in", "exe": ["stand-in"], "args": lambda allow: [fake],
-                         "stream": "claude"}
+                         "stream": "claude", "takes_messages": True}
 xa.AGENTS["stand-in-text"] = {"label": "Text agent", "exe": ["stand-in"], "args": lambda allow: ["-c",
                               "import sys; print('line one'); print('done: ' + sys.stdin.read().strip())"],
                               "stream": "text"}
@@ -140,6 +144,20 @@ if sys.platform == "win32":
     xa._which = lambda names: bad if names == ["stand-in-shim"] else (sys.executable if names == ["stand-in"] else real_which(names))
     r = xa.spawn("stand-in-shim", "hi & del x", cwd=work)
     check("a shim it can't see through is refused rather than given a prompt", not r.get("ok"))
+
+# An agent that reads messages while it works can be told something part-way.
+told_done, told_got = threading.Event(), {}
+xa._which = lambda names: sys.executable if names == ["stand-in"] else real_which(names)
+r = xa.spawn("stand-in", "read it slowly", cwd=work, on_done=lambda i, res: (told_got.update(res), told_done.set()))
+time.sleep(0.5)
+check("an agent that reads messages while it works can be told something",
+      subagents.can_tell(r["agent_id"]) and subagents.tell_subagent(r["agent_id"], "skip the footnotes").get("ok"))
+told_done.wait(30)
+check(f"and it acts on it before it finishes {told_got.get('text')!r}", "skip the footnotes" in told_got.get("text", ""))
+check("once it has finished it can't be told any more", not subagents.can_tell(r["agent_id"]))
+r2 = xa.spawn("stand-in-text", "hi", cwd=work)
+check("an agent that takes one prompt and runs to the end can't be told",
+      not subagents.can_tell(r2["agent_id"]))
 
 # With an agent program as the brain and no local model to run helpers on,
 # a helper runs on that agent, briefed with its role.

@@ -984,7 +984,10 @@ def can_tell(agent_id: str) -> bool:
     """Whether a helper is one of Hearth's own and still working, so a message
     can reach it."""
     with _INBOX_LOCK:
-        return agent_id in _INBOX
+        if agent_id in _INBOX:
+            return True
+    from . import external_agents as _xa
+    return _xa.can_tell(agent_id)
 
 
 def tell_subagent(agent_id: str, message: str, sender: str = "the user") -> Dict[str, Any]:
@@ -997,11 +1000,17 @@ def tell_subagent(agent_id: str, message: str, sender: str = "the user") -> Dict
             _INBOX[agent_id].append(f"A message from {sender} while you work: {text}")
             _append_transcript(_transcript_path(agent_id), {"kind": "told", "from": sender, "text": text})
             return {"ok": True, "note": "It will read this before its next step."}
+    from . import external_agents as _xa
+    passed = _xa.tell(agent_id, f"A message from {sender} while you work: {text}")
+    if passed is not None:
+        if passed.get("ok"):
+            _append_transcript(_transcript_path(agent_id), {"kind": "told", "from": sender, "text": text})
+        return passed
     with _BG_RESULTS_LOCK:
         running = agent_id in _BG_RUNNING
     if running:
-        return {"ok": False, "error": "This helper is another agent's own program, which runs its task to the "
-                                      "end and can't take a message part-way."}
+        return {"ok": False, "error": "This agent's program runs its task to the end and can't take a "
+                                      "message part-way."}
     return {"ok": False, "error": "that helper has already finished"}
 
 

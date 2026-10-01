@@ -30,7 +30,8 @@ _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 def _claude_cmd(allow: str) -> List[str]:
     mode = {"auto": "auto", "edits": "acceptEdits"}.get(allow, "plan")
-    return ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode]
+    return ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+            "--permission-mode", mode]
 
 
 # id -> how to run it. `args` builds the arguments (the prompt goes on stdin
@@ -38,8 +39,11 @@ def _claude_cmd(allow: str) -> List[str]:
 # how much the user lets agents do on their own: "auto" or "edits". `maker`
 # is the company behind it, shown next to its agents in the Team view.
 AGENTS: Dict[str, Dict[str, Any]] = {
+    # Claude Code reads messages on stdin while it works, so it can be told
+    # things part-way; the others take one prompt and run to the end.
     "claude-code": {"label": "Claude Code", "maker": "Anthropic", "exe": ["claude"], "args": _claude_cmd,
-                    "stream": "claude", "billing": "Agent SDK credit on your Claude plan"},
+                    "stream": "claude", "takes_messages": True,
+                    "billing": "Agent SDK credit on your Claude plan"},
     "codex": {"label": "Codex", "maker": "OpenAI", "exe": ["codex"],
               "args": lambda allow: ["exec", "--skip-git-repo-check"]
               + (["--full-auto"] if allow in ("auto", "edits") else []) + ["-"], "stream": "text",
@@ -240,6 +244,35 @@ def update(aid: str) -> Dict[str, Any]:
     return {"ok": True, "version": installed_version(aid)}
 
 
+# Running agents that can be told something: agent id -> its process.
+_OPEN: Dict[str, Any] = {}
+_OPEN_LOCK = threading.Lock()
+
+
+def _user_line(text: str) -> str:
+    return json.dumps({"type": "user", "message": {"role": "user",
+                                                   "content": [{"type": "text", "text": text}]}}) + "\n"
+
+
+def can_tell(agent_id: str) -> bool:
+    with _OPEN_LOCK:
+        return agent_id in _OPEN
+
+
+def tell(agent_id: str, text: str) -> Optional[Dict[str, Any]]:
+    """Give a running agent a message. None when it isn't one that can take it."""
+    with _OPEN_LOCK:
+        proc = _OPEN.get(agent_id)
+        if proc is None:
+            return None
+        try:
+            proc.stdin.write(_user_line(text))
+            proc.stdin.flush()
+        except (OSError, ValueError):
+            return {"ok": False, "error": "it finished before the message reached it"}
+    return {"ok": True, "note": "It will read this at its next step."}
+
+
 def describe() -> str:
     """One line for tool descriptions: what can be delegated to here."""
     found = available()
@@ -388,16 +421,32 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
             proc = subprocess.Popen(argv, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                                     creationflags=_NO_WINDOW)
+            listening = bool(spec.get("takes_messages"))
             try:
-                if not spec.get("prompt_arg"):
-                    proc.stdin.write(prompt)
-                proc.stdin.close()
+                if listening:
+                    proc.stdin.write(_user_line(prompt))
+                    proc.stdin.flush()
+                    with _OPEN_LOCK:
+                        _OPEN[agent_id] = proc
+                else:
+                    if not spec.get("prompt_arg"):
+                        proc.stdin.write(prompt)
+                    proc.stdin.close()
             except OSError:
                 pass
             for line in proc.stdout:
                 line = line.rstrip("\n")
                 if spec["stream"] == "claude":
                     _parse_claude(line, emit, state)
+                    if listening and "result" in state:
+                        # It has answered. Closing stdin is what lets it exit.
+                        listening = False
+                        with _OPEN_LOCK:
+                            _OPEN.pop(agent_id, None)
+                            try:
+                                proc.stdin.close()
+                            except OSError:
+                                pass
                 elif line.strip():
                     out_lines.append(line)
             code = proc.wait()
@@ -411,6 +460,8 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
                 err = "" if ok else f"exited with code {code}: " + "\n".join(out_lines[-5:])
         except Exception as e:
             ok, text, err = False, "", f"{type(e).__name__}: {e}"
+        with _OPEN_LOCK:
+            _OPEN.pop(agent_id, None)
         if text:
             emit({"kind": "assistant_final", "text": text[:4000]})
         result = {"ok": ok, "text": text, "error": err, "persona": spec["label"], "name": name or spec["label"],

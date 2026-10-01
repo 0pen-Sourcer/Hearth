@@ -688,7 +688,8 @@ async def run_once(
         if _cb.active():
             return await _cb.run_turn(prompt, emit=emit, history=history,
                                       permission_check=permission_check if supervised else None,
-                                      should_cancel=should_cancel, voice=voice, model=model)
+                                      should_cancel=should_cancel, voice=voice, model=model,
+                                      drain_steer=drain_steer)
     except ImportError:
         pass
     try:

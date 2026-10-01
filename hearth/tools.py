@@ -745,8 +745,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "Give a helper that is still working a message: a correction, an "
             "extra detail, a change of direction. It reads it before its next "
             "step. Pass the 'sub_...' agent_id from spawn_subagent. Works for "
-            "Hearth's own helpers; a task handed to another agent's program "
-            "runs to the end and can't take one.",
+            "Hearth's own helpers and for Claude Code; other agents' programs "
+            "run a task to the end and can't take one.",
         "parameters": {
             "type": "object",
             "properties": {

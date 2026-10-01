@@ -474,22 +474,68 @@ def _permission_mode() -> str:
 
 
 # ---------------------------------------------------------------- one turn
+def _said(drain_steer) -> List[str]:
+    """What was typed while the turn ran, if anything."""
+    if drain_steer is None:
+        return []
+    try:
+        return [s.strip() for s in (drain_steer() or []) if (s or "").strip()]
+    except Exception:
+        return []
+
+
+def user_line(text: str) -> bytes:
+    """One user message in the JSON-lines form Claude Code reads on stdin."""
+    return (json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}})
+            + "\n").encode("utf-8")
+
+
 async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
                    permission_check=None, should_cancel=None, voice: bool = False,
-                   model: Optional[str] = None) -> int:
-    """One turn on whichever agent program is the brain."""
+                   model: Optional[str] = None, drain_steer=None) -> int:
+    """One turn on whichever agent program is the brain. Something said while
+    it works reaches it: Claude Code reads it part-way; Codex and Cursor run a
+    step to its end, so they are given it as soon as that step finishes."""
     other = {"codex": "codex_brain", "cursor-agent": "cursor_brain"}.get(current() or "")
-    if other:
-        import importlib
-        mod = importlib.import_module("." + other, __package__)
-        return await mod.run_turn(prompt, emit=emit, history=history, permission_check=permission_check,
-                                  should_cancel=should_cancel, voice=voice)
-    return await _run_claude(prompt, emit=emit, history=history, permission_check=permission_check,
-                             should_cancel=should_cancel, voice=voice)
+    if not other:
+        return await _run_claude(prompt, emit=emit, history=history, permission_check=permission_check,
+                                 should_cancel=should_cancel, voice=voice, drain_steer=drain_steer)
+    import importlib
+    mod = importlib.import_module("." + other, __package__)
+    # Several steps are still one reply: one "done", one full text.
+    replies: List[str] = []
+    last_done: Dict[str, Any] = {}
+
+    def relay(kind: str, **fields) -> None:
+        if kind == "assistant":
+            replies.append(str(fields.get("content") or ""))
+        elif kind == "done":
+            last_done.clear()
+            last_done.update(fields)
+        else:
+            emit(kind, **fields)
+
+    hist = list(history or [])
+    while True:
+        rc = await mod.run_turn(prompt, emit=relay, history=hist, permission_check=permission_check,
+                                should_cancel=should_cancel, voice=voice)
+        said = _said(drain_steer) if rc == 0 and not (should_cancel and should_cancel()) else []
+        if not said:
+            break
+        for s in said:
+            emit("steered", text=s)
+        hist = hist + [{"role": "user", "content": prompt}, {"role": "assistant", "content": replies[-1] if replies else ""}]
+        prompt = "\n".join(said)
+        emit("assistant_chunk", content="\n\n")
+    if replies:
+        emit("assistant", content="\n\n".join(r for r in replies if r))
+    emit("done", **(last_done or {"reason": "finished"}))
+    return rc
 
 
 async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
-                      permission_check=None, should_cancel=None, voice: bool = False) -> int:
+                      permission_check=None, should_cancel=None, voice: bool = False,
+                      drain_steer=None) -> int:
     exe = claude_exe()
     if not exe:
         emit("error", message=("Claude Code isn't installed on this PC. Install it from "
@@ -506,7 +552,8 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
         earlier = _transcript(history)
         if earlier:
             text_in = f"Earlier in this conversation:\n{earlier}\n\nNow the user says:\n{prompt}"
-    args = exe + ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+    args = exe + ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                  "--include-partial-messages",
                   "--mcp-config", _mcp_config(),
                   "--permission-prompt-tool", "mcp__hearth__approve",
                   "--permission-mode", _permission_mode(),
@@ -539,14 +586,27 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
             *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
             creationflags=0x08000000 if sys.platform == "win32" else 0)
-        proc.stdin.write(text_in.encode("utf-8"))
+        proc.stdin.write(user_line(text_in))
         await proc.stdin.drain()
-        proc.stdin.close()
+        open_in = True                            # stdin stays open so it can be told things
+
+        async def pass_on() -> bool:
+            """Give Claude Code what was said while it works. It reads it at
+            its next step, the same as typing to it in a terminal."""
+            said = _said(drain_steer) if open_in else []
+            for s in said:
+                proc.stdin.write(user_line(s))
+                emit("steered", text=s)
+            if said:
+                await proc.stdin.drain()
+            return bool(said)
+
         while True:
             if should_cancel and should_cancel():
                 proc.kill()
                 emit("cancelled", message="stopped by user")
                 break
+            await pass_on()
             try:
                 line = await asyncio.wait_for(proc.stdout.readline(), timeout=0.5)
             except asyncio.TimeoutError:
@@ -614,6 +674,13 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
                 result = ev
                 sid = ev.get("session_id") or sid
                 final_text = ev.get("result") or ""
+                # Finished, unless something was said in the meantime: then
+                # that is its next step. Closing stdin is what lets it exit.
+                if await pass_on():
+                    gap = bool(text_parts)
+                elif open_in:
+                    open_in = False
+                    proc.stdin.close()
         await proc.wait()
         err = (await proc.stderr.read()).decode("utf-8", "replace").strip()
     except Exception as e:

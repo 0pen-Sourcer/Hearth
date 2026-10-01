@@ -42,8 +42,8 @@ cb.set_bridge_url("http://127.0.0.1:9")
 argv_log = os.path.join(work, "argv.jsonl")
 fake = os.path.join(work, "fake_claude.py")
 with open(fake, "w", encoding="utf-8") as f:
-    f.write(f"""import json, sys
-said = sys.stdin.read()
+    f.write(f"""import json, sys, time
+said = sys.stdin.readline()                       # stdin stays open: one message a line
 out = lambda o: print(json.dumps(o), flush=True)
 if '"initialize"' in said:
     out({{"type": "control_response", "response": {{"subtype": "success", "request_id": "models", "response": {{"models": [
@@ -56,6 +56,7 @@ if '"initialize"' in said:
         {{"value": "haiku", "resolvedModel": "claude-haiku-4-5", "displayName": "Haiku",
           "description": "Haiku 4.5 \\u00b7 Fastest for quick answers"}}]}}}}}})
     sys.exit(0)
+said = json.loads(said)["message"]["content"][0]["text"]
 open({argv_log!r}, "a").write(json.dumps({{"argv": sys.argv[1:], "stdin": said}}) + "\\n")
 out({{"type": "system", "subtype": "init", "session_id": "sess-123"}})
 for w in ["I'm ", "JARVIS."]:
@@ -72,6 +73,11 @@ out({{"type": "stream_event", "event": {{"type": "content_block_delta", "delta":
 out({{"type": "result", "subtype": "success", "is_error": False, "session_id": "sess-123", "num_turns": 3, "total_cost_usd": 0.01, "result": "I'm JARVIS.Done.",
      "modelUsage": {{"claude-haiku-4-5": {{"outputTokens": 12, "contextWindow": 200000}},
                     "claude-opus-5-5": {{"outputTokens": 480, "contextWindow": 1000000}}}}}})
+# Anything said while it worked is its next step; stdin closing ends it.
+for more in sys.stdin:
+    told = json.loads(more)["message"]["content"][0]["text"]
+    out({{"type": "stream_event", "event": {{"type": "content_block_delta", "delta": {{"type": "text_delta", "text": "Told: " + told}}}}}})
+    out({{"type": "result", "subtype": "success", "is_error": False, "session_id": "sess-123", "num_turns": 4, "total_cost_usd": 0.02, "result": "Told: " + told}})
 """)
 cb.claude_exe = lambda: [sys.executable, fake]
 
@@ -137,6 +143,21 @@ turn("quick one", [])
 argv = json.loads(open(argv_log).read().splitlines()[-1])["argv"]
 check("a model that takes no effort level isn't given one", "--effort" not in argv and "haiku" in argv)
 cb.chosen_model, cb.chosen_effort = real_model, real_effort
+
+# Something typed while it works reaches it, in the same run.
+waiting = ["actually, use tabs"]
+events = []
+asyncio.run(cb.run_turn("format it", emit=lambda t, **f: events.append((t, f)), history=[],
+                        permission_check=lambda n, a: "allow",
+                        drain_steer=lambda: [waiting.pop()] if waiting else []))
+argv = json.loads(open(argv_log).read().splitlines()[-1])["argv"]
+check("it is started able to take messages while it works",
+      argv[argv.index("--input-format") + 1] == "stream-json")
+check("what is typed mid-reply is passed on and shown as passed on",
+      ("steered", {"text": "actually, use tabs"}) in events)
+check("and it acts on it in the same run",
+      "Told: actually, use tabs" in "".join(f["content"] for t, f in events if t == "assistant_chunk"))
+check("the turn still ends once, with done", [t for t, _ in events].count("done") == 1 and events[-1][0] == "done")
 
 # Permission questions
 asked = []
