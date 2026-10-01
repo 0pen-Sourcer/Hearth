@@ -420,7 +420,9 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
         try:
             proc = subprocess.Popen(argv, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                    creationflags=_NO_WINDOW)
+                                    creationflags=_NO_WINDOW,
+                                    # A helper does its task; it doesn't send helpers of its own.
+                                    env=dict(os.environ, HEARTH_HELPER="1"))
             listening = bool(spec.get("takes_messages"))
             try:
                 if listening:

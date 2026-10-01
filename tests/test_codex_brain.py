@@ -139,8 +139,12 @@ answers = []
 class _Ask(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
-        answers.append(body["tool"])
-        out = json.dumps({"behavior": VERDICT[0], "message": "The user declined this."}).encode()
+        if self.path == "/api/brain/tool":
+            passed.append((body["tool"], body["input"]))
+            out = json.dumps({"result": '{"ok": true, "status": "launched"}'}).encode()
+        else:
+            answers.append(body["tool"])
+            out = json.dumps({"behavior": VERDICT[0], "message": "The user declined this."}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
@@ -151,7 +155,8 @@ class _Ask(BaseHTTPRequestHandler):
 
 
 VERDICT = ["deny"]
-srv = ThreadingHTTPServer(("127.0.0.1", 0), _Ask)
+passed: list = []
+srv =ThreadingHTTPServer(("127.0.0.1", 0), _Ask)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 os.environ.update(HEARTH_BRAIN_URL=f"http://127.0.0.1:{srv.server_address[1]}",
                   HEARTH_BRAIN_TOKEN="t", HEARTH_BRAIN_GATE="1")
@@ -167,7 +172,22 @@ check("on a yes it runs", os.path.exists(target))
 answers.clear()
 mcp_server._run("read_file", {"path": target})
 check("a safe tool doesn't ask", answers == [])
-check("Codex gets no approve tool to call", "approve" not in {t.name for t in mcp_server.mcp._tool_manager.list_tools()})
+offered = {t.name for t in mcp_server.mcp._tool_manager.list_tools()}
+check("Codex gets no approve tool to call", "approve" not in offered)
+check("as Hearth's brain it can send helpers and talk to them",
+      {"spawn_subagent", "tell_subagent", "get_subagent_result"} <= offered)
+out = mcp_server._run("spawn_subagent", {"persona": "researcher", "prompt": "look it up", "name": "Maya"})
+check("a helper call is run by the Hearth that started the server, where helpers live",
+      passed == [("spawn_subagent", {"persona": "researcher", "prompt": "look it up", "name": "Maya"})]
+      and "launched" in out)
+import subprocess                                                    # noqa: E402
+listed = lambda extra: subprocess.run(
+    [sys.executable, "-X", "utf8", "-c",
+     "from hearth import mcp_server as m; print(sorted(t.name for t in m.mcp._tool_manager.list_tools()))"],
+    capture_output=True, text=True, cwd=ROOT, env={**os.environ, **extra}).stdout
+check("a helper gets no helpers of its own", "spawn_subagent" not in listed({"HEARTH_HELPER": "1"}))
+check("another app using Hearth's server isn't offered them either",
+      "spawn_subagent" not in listed({"HEARTH_BRAIN_URL": "", "HEARTH_BRAIN_TOKEN": ""}))
 srv.shutdown()
 
 print()

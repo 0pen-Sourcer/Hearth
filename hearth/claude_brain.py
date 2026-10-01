@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -63,14 +64,15 @@ def ensure_bridge() -> None:
 
     class _Ask(BaseHTTPRequestHandler):
         def do_POST(self):
-            if self.path != "/api/brain/permission":
+            if self.path not in ("/api/brain/permission", "/api/brain/tool"):
                 self.send_error(404)
                 return
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             except ValueError:
                 body = {}
-            out = json.dumps(decide(str(body.get("token") or ""), str(body.get("tool") or ""),
+            answer = decide if self.path.endswith("permission") else run_tool
+            out = json.dumps(answer(str(body.get("token") or ""), str(body.get("tool") or ""),
                                     body.get("input") or {})).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -363,6 +365,55 @@ def decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
             "message": ("The user declined: " + reason) if reason else "The user declined this."}
 
 
+# ---------------------------------------------------------------- helpers
+# Tools whose state lives in this process, not in the MCP server the brain
+# talks to. The server passes these calls here, so a helper the brain sends
+# is one of Hearth's own: it shows in the Team view and can be told things.
+HEARTH_SIDE = ("spawn_subagent", "tell_subagent", "get_subagent_result")
+_sent: Dict[str, int] = {}     # helpers this turn sent -> checks since one was last seen running
+
+
+def run_tool(token: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    if token != _TOKEN or name not in HEARTH_SIDE:
+        return {"result": "Error: not a Hearth session"}
+    from .tools import execute_tool
+    args = dict(args or {})
+    if name == "spawn_subagent":
+        args["mode"] = "background"               # the turn waits for it and hands over its report
+    out = str(execute_tool(name, args))
+    if name == "spawn_subagent":
+        import re
+        m = re.search(r"sub_\d+_[0-9a-f]{6}", out)
+        if m and '"launched"' in out:
+            _sent[m.group(0)] = 0
+    return {"result": out}
+
+
+def helper_news(emit=None) -> List[str]:
+    """Reports from helpers that have finished, worded for the brain."""
+    from . import subagents as _sa
+    out = []
+    for n in _sa.drain_pending_notifications():
+        _sent.pop(n.get("agent_id"), None)
+        if emit:
+            emit("subagent_done", **_sa.card_fields(n))
+        out.append(_sa.format_notification_as_user_message(n))
+    return out
+
+
+def helpers_out() -> bool:
+    """Whether a helper this turn sent has yet to report. One that stopped
+    running without a report (its report is queued a moment after it stops)
+    is given a few checks, then let go."""
+    from . import subagents as _sa
+    live = _sa.still_running(_sent)
+    for aid in list(_sent):
+        _sent[aid] = 0 if aid in live else _sent[aid] + 1
+        if _sent[aid] > 6:
+            _sent.pop(aid, None)
+    return bool(_sent)
+
+
 # ---------------------------------------------------------------- sessions
 def _load_sessions() -> Dict[str, Any]:
     try:
@@ -440,6 +491,9 @@ def persona_text(voice: bool, host: str = "Claude Code", tools: str = "mcp__hear
         f"assistant, under the name and persona below. Hearth's own tools are available "
         f"as {tools}: use them for the desktop, apps, windows, screenshots, "
         f"memory, reminders, the phone and anything outside a code folder. {own_tools} "
+        f"To hand work to helpers, use Hearth's spawn_subagent, not {host}'s own sub-agents: "
+        f"Hearth's helpers appear in the user's Team view, and each one's report is given to you "
+        f"when it finishes, so after sending them you can simply end your message. "
         f"Answer as the persona, never as {host}.\n\n")
     return preface + system_prompt(voice=voice)
 
@@ -473,6 +527,30 @@ def _permission_mode() -> str:
         return "default"
 
 
+def quick(prompt: str, timeout: float = 45) -> str:
+    """A short answer from the brain with no tools, persona or session: for a
+    chat's title. Empty when the agent isn't there or doesn't answer in time."""
+    provider = current()
+    exe = exe_for(provider) if provider else None
+    if not exe:
+        return ""
+    if provider == "claude-code":
+        args = exe + ["-p", "--model", "haiku", "--no-session-persistence", "--strict-mcp-config", "--tools", ""]
+    elif provider == "codex":
+        args = exe + ["exec", "--skip-git-repo-check", "--sandbox", "read-only",
+                      "-c", 'model_reasoning_effort="low"', "-"]
+    else:
+        return ""              # Cursor counts every request against the plan, a title included
+    import tempfile
+    try:
+        r = subprocess.run(args, input=prompt.encode("utf-8"), capture_output=True, timeout=timeout,
+                           cwd=tempfile.gettempdir(),
+                           creationflags=0x08000000 if sys.platform == "win32" else 0)
+    except Exception:
+        return ""
+    return r.stdout.decode("utf-8", "replace").strip() if r.returncode == 0 else ""
+
+
 # ---------------------------------------------------------------- one turn
 def _said(drain_steer) -> List[str]:
     """What was typed while the turn ran, if anything."""
@@ -495,7 +573,19 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                    model: Optional[str] = None, drain_steer=None) -> int:
     """One turn on whichever agent program is the brain. Something said while
     it works reaches it: Claude Code reads it part-way; Codex and Cursor run a
-    step to its end, so they are given it as soon as that step finishes."""
+    step to its end, so they are given it as soon as that step finishes.
+    A helper's report reaches it the same way, and the turn waits for helpers
+    it sent."""
+    _sent.clear()
+    news = helper_news(emit)
+    from .headless import NOTIFY_FLUSH
+    if prompt.strip() == NOTIFY_FLUSH:
+        if not news:
+            emit("done", reply="", iterations=0)
+            return 0
+        prompt = "\n\n".join(news)
+    elif news:
+        prompt = "\n\n".join(news) + "\n\n" + prompt
     other = {"codex": "codex_brain", "cursor-agent": "cursor_brain"}.get(current() or "")
     if not other:
         return await _run_claude(prompt, emit=emit, history=history, permission_check=permission_check,
@@ -519,13 +609,18 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     while True:
         rc = await mod.run_turn(prompt, emit=relay, history=hist, permission_check=permission_check,
                                 should_cancel=should_cancel, voice=voice)
-        said = _said(drain_steer) if rc == 0 and not (should_cancel and should_cancel()) else []
-        if not said:
+        said, news = [], []
+        while rc == 0 and not (should_cancel and should_cancel()):
+            said, news = _said(drain_steer), helper_news(emit)
+            if said or news or not helpers_out():
+                break
+            await asyncio.sleep(0.5)
+        if not said and not news:
             break
         for s in said:
             emit("steered", text=s)
         hist = hist + [{"role": "user", "content": prompt}, {"role": "assistant", "content": replies[-1] if replies else ""}]
-        prompt = "\n".join(said)
+        prompt = "\n".join(said + news)
         emit("assistant_chunk", content="\n\n")
     if replies:
         emit("assistant", content="\n\n".join(r for r in replies if r))
@@ -597,16 +692,25 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
             for s in said:
                 proc.stdin.write(user_line(s))
                 emit("steered", text=s)
-            if said:
+            news = helper_news(emit) if open_in else []
+            for n in news:
+                proc.stdin.write(user_line(n))
+            if said or news:
                 await proc.stdin.drain()
-            return bool(said)
+            return bool(said or news)
 
+        answered = False                          # it has finished a reply and waits on stdin
         while True:
             if should_cancel and should_cancel():
                 proc.kill()
                 emit("cancelled", message="stopped by user")
                 break
-            await pass_on()
+            if await pass_on():
+                # Something said, or a helper's report: that is its next step.
+                gap, answered = bool(text_parts), False
+            elif answered and open_in and not helpers_out():
+                open_in = False
+                proc.stdin.close()                # closing stdin is what lets it exit
             try:
                 line = await asyncio.wait_for(proc.stdout.readline(), timeout=0.5)
             except asyncio.TimeoutError:
@@ -652,7 +756,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
                         name, shown = hearth_view(b.get("name", ""), b.get("input") or {})
                         tool_names[b.get("id", "")] = (name, time.time())
                         gap = True
-                        emit("tool_call", name=name, args=shown)
+                        emit("tool_call", name=name, args=shown, id=b.get("id", ""))
                     elif b.get("type") == "text" and not streamed and b.get("text"):
                         text_parts.append(b["text"])
                         emit("assistant_chunk", content=b["text"])
@@ -669,18 +773,12 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
                     if isinstance(body, list):
                         body = "\n".join(x.get("text", "") for x in body if isinstance(x, dict))
                     emit("tool_result", name=hit[0], content=str(body or "")[:20000],
-                         ms=int((time.time() - hit[1]) * 1000))
+                         ms=int((time.time() - hit[1]) * 1000), id=b.get("tool_use_id", ""))
             elif t == "result":
                 result = ev
                 sid = ev.get("session_id") or sid
                 final_text = ev.get("result") or ""
-                # Finished, unless something was said in the meantime: then
-                # that is its next step. Closing stdin is what lets it exit.
-                if await pass_on():
-                    gap = bool(text_parts)
-                elif open_in:
-                    open_in = False
-                    proc.stdin.close()
+                answered = True
         await proc.wait()
         err = (await proc.stderr.read()).decode("utf-8", "replace").strip()
     except Exception as e:

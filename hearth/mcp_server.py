@@ -159,22 +159,37 @@ _APPROVED: List[tuple] = []
 _BRAIN_GATE = os.environ.get("HEARTH_BRAIN_GATE", "") == "1"
 
 
-def _ask_hearth(tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
+def _post_hearth(route: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
     import urllib.request
     req = urllib.request.Request(
-        _BRAIN_URL + "/api/brain/permission",
+        _BRAIN_URL + route,
         data=json.dumps({"token": _BRAIN_TOKEN, "tool": tool, "input": inp}).encode("utf-8"),
         headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=240) as r:
+        return json.load(r)
+
+
+def _ask_hearth(tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
     try:
-        with urllib.request.urlopen(req, timeout=240) as r:
-            return json.load(r)
+        return _post_hearth("/api/brain/permission", tool, inp)
     except Exception as e:
         return {"behavior": "deny", "message": f"Couldn't reach Hearth to ask: {e}"}
+
+
+# Helpers live in the Hearth that started this server, so their tools run there.
+# A helper started by Hearth gets none of them: it does its task and reports.
+_IN_HEARTH = (("spawn_subagent", "tell_subagent", "get_subagent_result")
+              if (_BRAIN_URL and _BRAIN_TOKEN and not os.environ.get("HEARTH_HELPER")) else ())
 
 
 def _run(name: str, args: Dict[str, Any]):
     import time as _t
     from hearth.tools import APPROVAL_TOKEN, _RISKY_TOOLS
+    if name in _IN_HEARTH:
+        try:
+            return str(_post_hearth("/api/brain/tool", name, args).get("result") or "")
+        except Exception as e:
+            return f"Error: couldn't reach Hearth: {e}"
     now = _t.time()
     hit = next((a for a in _APPROVED if a[0] == name and now - a[1] < 60), None)
     if hit:
@@ -272,9 +287,11 @@ for td in TOOL_DEFINITIONS:
     if td["name"] in _SKIP_DYNAMIC:
         _mcp_exposed += 1
         continue  # registered manually above with proper return type
-    if td["name"] in _MCP_NEVER:
+    if td["name"] in _IN_HEARTH:
+        pass      # Hearth's own brain: its helpers run in Hearth and report back to it
+    elif td["name"] in _MCP_NEVER:
         continue  # needs Hearth's own UI — useless / hangs on an external host
-    if not _MCP_ALL_TOOLS and (td["name"] in _DEFERRED_TOOLS or td["name"] in _MCP_DIET_EXTRA):
+    elif not _MCP_ALL_TOOLS and (td["name"] in _DEFERRED_TOOLS or td["name"] in _MCP_DIET_EXTRA):
         continue  # niche / redundant tool — kept off the host's list to save its context
     fn = _make_tool(td["name"], td["description"], td["parameters"])
     mcp.tool(name=td["name"], description=td["description"])(fn)

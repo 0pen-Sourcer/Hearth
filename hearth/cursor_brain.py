@@ -33,8 +33,10 @@ _LIST_CACHE = os.path.join(_base._HOME, "cursor_models.json")
 _VIEW = {"readToolCall": ("read_file", "path"), "shellToolCall": ("run_command", "command"),
          "editToolCall": ("edit_file", "path"), "writeToolCall": ("write_file", "path"),
          "lsToolCall": ("list_directory", "path"), "globToolCall": ("find_file", "globPattern"),
-         "grepToolCall": ("grep_search", "pattern"), "webSearchToolCall": ("web_search", "query"),
+         "grepToolCall": ("grep_search", "pattern"), "webSearchToolCall": ("web_search", "searchTerm"),
          "webFetchToolCall": ("web_fetch", "url"), "deleteToolCall": ("delete_path", "path")}
+# Cursor's name for an argument -> the one Hearth's card for that tool reads.
+_SHOWN_AS = {"globPattern": "name", "searchTerm": "query"}
 # Cursor looking up a tool's schema: bookkeeping, not work.
 _QUIET = {"getMcpToolsToolCall", "updateTodosToolCall", "todoToolCall"}
 
@@ -50,7 +52,7 @@ def hearth_view(call: Dict[str, Any]) -> Tuple[str, Dict[str, Any], Dict[str, An
         return str(args.get("toolName") or args.get("name") or "tool"), args.get("args") or {}, body
     if kind in _VIEW:
         name, key = _VIEW[kind]
-        shown = {("command" if name == "run_command" else key if key != "globPattern" else "name"): args.get(key, "")}
+        shown = {_SHOWN_AS.get(key, key): args.get(key, "")}
         if kind == "editToolCall" and "streamContent" in args:
             name, shown = "write_file", {"path": args.get("path", ""), "content": args.get("streamContent", "")}
         return name, shown, body
@@ -71,6 +73,10 @@ def _result_text(body: Dict[str, Any]) -> str:
         return json.dumps(ok)[:2000] if ok else ""
     for key, val in res.items():                               # rejected, writePermissionDenied, error
         why = (val or {}).get("reason") or (val or {}).get("error") or key
+        if key == "rejected" and why == "User Rejected":
+            # Cursor's wording for a tool of its own that isn't allowed when
+            # it runs unattended. Nobody was asked.
+            why = "Cursor doesn't run this tool of its own here. Hearth's tools do the same job."
         return f"Not done: {why}"
     return ""
 
@@ -145,6 +151,7 @@ def write_project_config(cwd: str) -> None:
         allow = [t for t in p.get("allow") or [] if t != f"Mcp({SERVER}:*)"] + [f"Mcp({SERVER}:*)"]
         deny = [t for t in p.get("deny") or [] if t != "Write(**)"] + (["Write(**)"] if ask else [])
         p["allow"], p["deny"] = allow, deny
+        data["autoAcceptWebSearch"] = True          # a search changes nothing; Hearth's own needs no yes either
 
     _merge_json(os.path.join(cwd, ".cursor", "mcp.json"), mcp)
     _merge_json(os.path.join(cwd, ".cursor", "cli.json"), perms)
@@ -175,7 +182,8 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     if not session:
         persona = _base.persona_text(
             voice, host="Cursor", tools=f"the {SERVER} MCP tools",
-            own_tools="Your own shell is turned off here: run commands with Hearth's run_command, which asks the user.")
+            own_tools=("Your own shell and web fetch are turned off here: run commands with Hearth's "
+                       "run_command, which asks the user, and open pages with Hearth's web_fetch."))
         earlier = _base._transcript(history) if history else ""
         text_in = (persona + "\n\n---\n\n"
                    + (f"Earlier in this conversation:\n{earlier}\n\nNow the user says:\n" if earlier else "")
@@ -236,7 +244,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                 piece = "".join(b.get("text", "") for b in (ev.get("message") or {}).get("content") or []
                                 if isinstance(b, dict) and b.get("type") == "text")
                 if stretch and piece == stretch:
-                    stretch = ""
+                    stretch, gap = "", True               # what follows is a new paragraph
                     continue
                 stretch += piece
                 if piece:
@@ -252,13 +260,13 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                 if ev.get("subtype") == "started":
                     started[cid] = (name, time.time())
                     gap, stretch = True, ""
-                    emit("tool_call", name=name, args=shown)
+                    emit("tool_call", name=name, args=shown, id=cid)
                 elif ev.get("subtype") == "completed":
                     hit = started.pop(cid, None)
                     if hit is None:
-                        emit("tool_call", name=name, args=shown)
+                        emit("tool_call", name=name, args=shown, id=cid)
                     emit("tool_result", name=name, content=_result_text(body)[:20000],
-                         ms=int((time.time() - hit[1]) * 1000) if hit else 0)
+                         ms=int((time.time() - hit[1]) * 1000) if hit else 0, id=cid)
             elif t == "result":
                 result = ev
                 sid = ev.get("session_id") or sid

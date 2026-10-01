@@ -214,13 +214,13 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
             elif t == "item.started":
                 if kind == "command_execution":
                     started[iid] = time.time()
-                    emit("tool_call", name="run_command", args={"command": item.get("command", "")})
+                    emit("tool_call", name="run_command", args={"command": item.get("command", "")}, id=iid)
                 elif kind == "mcp_tool_call":
                     started[iid] = time.time()
-                    emit("tool_call", name=item.get("tool", ""), args=item.get("arguments") or {})
+                    emit("tool_call", name=item.get("tool", ""), args=item.get("arguments") or {}, id=iid)
                 elif kind == "web_search":
                     started[iid] = time.time()
-                    emit("tool_call", name="web_search", args={"query": item.get("query", "")})
+                    emit("tool_call", name="web_search", args={"query": item.get("query", "")}, id=iid)
             elif t == "item.completed":
                 t_start = started.pop(iid, None)
                 ms = int((time.time() - t_start) * 1000) if t_start else 0
@@ -232,28 +232,28 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                     emit("thinking_chunk", content=item["text"])
                 elif kind == "command_execution":
                     if t_start is None:
-                        emit("tool_call", name="run_command", args={"command": item.get("command", "")})
+                        emit("tool_call", name="run_command", args={"command": item.get("command", "")}, id=iid)
                     out = str(item.get("aggregated_output") or "")
                     code = item.get("exit_code")
                     if code not in (None, 0):
                         out = (out + f"\n(exit code {code})").strip()
-                    emit("tool_result", name="run_command", content=out[:20000], ms=ms)
+                    emit("tool_result", name="run_command", content=out[:20000], ms=ms, id=iid)
                 elif kind == "file_change":
                     changes = item.get("changes") or []
                     paths = [str(c.get("path") or "") for c in changes if isinstance(c, dict)]
-                    emit("tool_call", name="edit_file", args={"path": paths[0] if paths else ""})
-                    emit("tool_result", name="edit_file", ms=ms,
+                    emit("tool_call", name="edit_file", args={"path": paths[0] if paths else ""}, id=iid)
+                    emit("tool_result", name="edit_file", ms=ms, id=iid,
                          content="\n".join(f"{c.get('kind', 'update')}: {c.get('path', '')}"
                                            for c in changes if isinstance(c, dict)))
                 elif kind == "mcp_tool_call":
                     if t_start is None:
-                        emit("tool_call", name=item.get("tool", ""), args=item.get("arguments") or {})
+                        emit("tool_call", name=item.get("tool", ""), args=item.get("arguments") or {}, id=iid)
                     body = _mcp_text(item.get("result"))
                     if item.get("error"):
                         body = "Error: " + str((item.get("error") or {}).get("message") or item.get("error"))
-                    emit("tool_result", name=item.get("tool", ""), content=body[:20000], ms=ms)
+                    emit("tool_result", name=item.get("tool", ""), content=body[:20000], ms=ms, id=iid)
                 elif kind == "web_search":
-                    emit("tool_result", name="web_search", content=item.get("query", ""), ms=ms)
+                    emit("tool_result", name="web_search", content=item.get("query", ""), ms=ms, id=iid)
             elif t == "turn.completed":
                 usage = ev.get("usage") or {}
             elif t == "turn.failed":

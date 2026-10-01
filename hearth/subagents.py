@@ -358,6 +358,19 @@ def peek_pending_notifications() -> List[Dict[str, Any]]:
         return [dict(n) for n in _PENDING_NOTIFICATIONS]
 
 
+def card_fields(notif: Dict[str, Any]) -> Dict[str, Any]:
+    """What a `subagent_done` event carries for one notification."""
+    return {"agent_id": notif.get("agent_id"), "persona": notif.get("persona"), "name": notif.get("name"),
+            "status": notif.get("status"), "summary": notif.get("summary"),
+            "result_text": notif.get("result_text"), "elapsed_s": notif.get("elapsed_s"),
+            "used_tools": notif.get("used_tools") or []}
+
+
+def still_running(agent_ids) -> "set[str]":
+    with _BG_RESULTS_LOCK:
+        return set(agent_ids) & _BG_RUNNING
+
+
 def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
     """Render one notification dict as a <task-notification> block, led by an
     explicit SYSTEM-event banner so the model never mistakes it for the user

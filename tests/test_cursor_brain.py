@@ -65,9 +65,16 @@ out({{"type": "tool_call", "subtype": "started", "call_id": "c2", "tool_call": {
 out({{"type": "tool_call", "subtype": "completed", "call_id": "c2", "tool_call": {{"mcpToolCall": {{"args": {{"toolName": "open_app", "args": {{"name": "Spotify"}}}}, "result": {{"success": {{"content": [{{"text": {{"text": "Opened Spotify"}}}}]}}}}}}}}}})
 out({{"type": "tool_call", "subtype": "started", "call_id": "c3", "tool_call": {{"shellToolCall": {{"args": {{"command": "del x"}}}}}}}})
 out({{"type": "tool_call", "subtype": "completed", "call_id": "c3", "tool_call": {{"shellToolCall": {{"result": {{"rejected": {{"reason": ""}}}}}}}}}})
+# Two calls side by side: both start, then both finish.
+out({{"type": "tool_call", "subtype": "started", "call_id": "c4", "tool_call": {{"webSearchToolCall": {{"args": {{"searchTerm": "wan 2.2 vram"}}}}}}}})
+out({{"type": "tool_call", "subtype": "started", "call_id": "c5", "tool_call": {{"mcpToolCall": {{"args": {{"toolName": "get_time", "args": {{}}}}}}}}}})
+out({{"type": "tool_call", "subtype": "completed", "call_id": "c4", "tool_call": {{"webSearchToolCall": {{"args": {{"searchTerm": "wan 2.2 vram"}}, "result": {{"rejected": {{"reason": "User Rejected"}}}}}}}}}})
+out({{"type": "tool_call", "subtype": "completed", "call_id": "c5", "tool_call": {{"mcpToolCall": {{"args": {{"toolName": "get_time", "args": {{}}}}, "result": {{"success": {{"content": [{{"text": {{"text": "noon"}}}}]}}}}}}}}}})
 piece("Milk and eggs.")
-out({{"type": "assistant", "message": {{"content": [{{"type": "text", "text": "Milk and eggs."}}]}}}})
-out({{"type": "result", "subtype": "success", "is_error": False, "result": "On it.Milk and eggs.", "session_id": sid,
+piece("Milk and eggs.")                           # repeated whole, mid-turn
+piece("Anything else?")
+out({{"type": "assistant", "message": {{"content": [{{"type": "text", "text": "Anything else?"}}]}}}})
+out({{"type": "result", "subtype": "success", "is_error": False, "result": "On it.Milk and eggs.Anything else?", "session_id": sid,
      "usage": {{"inputTokens": 900, "outputTokens": 12}}}})
 """)
 real_exe_for = cb.exe_for
@@ -89,12 +96,19 @@ ev = turn("what's on my list?", [])
 chunks = "".join(f["content"] for t, f in ev if t == "assistant_chunk")
 calls = [(f["name"], f["args"]) for t, f in ev if t == "tool_call"]
 results = {f["name"]: f["content"] for t, f in ev if t == "tool_result"}
-check(f"each stretch of text reaches the chat once {chunks!r}", chunks == "On it.\n\nMilk and eggs.")
+check(f"each stretch of text reaches the chat once, as its own paragraph {chunks!r}",
+      chunks == "On it.\n\nMilk and eggs.\n\nAnything else?")
 check("its thinking shows as thinking", any(t == "thinking_chunk" for t, _ in ev))
 check("its own file read shows as read_file", ("read_file", {"path": "list.txt"}) in calls)
 check("a Hearth tool shows under its own name with its result",
       ("open_app", {"name": "Spotify"}) in calls and results.get("open_app") == "Opened Spotify")
-check("looking up a tool's schema is left out", len(calls) == 3)
+check("looking up a tool's schema is left out", len(calls) == 5)
+by_id = {f["id"]: f["content"] for t, f in ev if t == "tool_result"}
+check("calls made side by side carry their ids, so each result finds its own call",
+      [f["id"] for t, f in ev if t == "tool_call"] == ["c1", "c2", "c3", "c4", "c5"] and by_id.get("c5") == "noon")
+check("its own web search shows what was searched for", ("web_search", {"query": "wan 2.2 vram"}) in calls)
+check("a tool of its own that Cursor turned away isn't blamed on the user",
+      by_id.get("c4", "").startswith("Not done") and "User Rejected" not in by_id.get("c4", ""))
 check("a command Cursor's own shell was refused says so", results.get("run_command", "").startswith("Not done"))
 check("the turn ends with done, naming Cursor", ev[-1][0] == "done" and ev[-1][1]["stats"]["brain"] == "Cursor")
 
@@ -109,6 +123,7 @@ cli = json.load(open(os.path.join(work, ".cursor", "cli.json")))
 mcp = json.load(open(os.path.join(work, ".cursor", "mcp.json")))
 check("the folder allows Hearth's server, and on Ask turns Cursor's direct writes away",
       "Mcp(hearth_brain:*)" in cli["permissions"]["allow"] and "Write(**)" in cli["permissions"]["deny"])
+check("its own web search is allowed, as Hearth's is", cli.get("autoAcceptWebSearch") is True)
 check("what was already in that file stays",
       "Shell(ls)" in cli["permissions"]["allow"] and "Read(secrets/**)" in cli["permissions"]["deny"]
       and cli.get("theme") == "mine")

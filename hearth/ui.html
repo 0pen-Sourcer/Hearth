@@ -9264,6 +9264,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // Track tool cards being filled in (by call index)
   let pendingTool = null;
   let pendingToolEvent = null;
+  // Calls an agent brain runs side by side, by id, so each result lands on
+  // its own call and not on whichever was started last.
+  const openTools = new Map();
   let _partialTool = null;   // live "generating arguments…" card, pre-tool_call
   // Streaming TTS buffer. Declared at MODULE scope (see below) because the
   // barge-in callback in voiceCycle clears it too; a `let` here made it local
@@ -9663,12 +9666,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
                                    result: '', ms: 0, pos: assistantMsg.content.length });
         pendingTool = null;
         pendingToolEvent = assistantMsg.events[assistantMsg.events.length - 1];
+        if (ev.id) openTools.set(ev.id, { tool: null, event: pendingToolEvent });
         setState(`calling ${ev.name}…`);
         return;
       }
       pendingTool = makeToolCard(ev.name, ev.args || {});
       pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0, pos: assistantMsg.content.length };
       assistantMsg.events.push(pendingToolEvent);
+      if (ev.id) openTools.set(ev.id, { tool: pendingTool, event: pendingToolEvent });
       appendPart(pendingTool.div, live);
       if (pendingTool.div._toolName === 'run_command') {
         fillCommandCard(pendingTool.div._toolArgs, null, pendingTool.body);
@@ -9744,6 +9749,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // Tool done, back to thinking until the next call or the reply starts.
       setState('thinking…');   // clear the stuck "calling X…" the moment X returns
       if (voiceModeOn) setVoiceStatus('thinking…');
+      if (ev.id && openTools.has(ev.id)) {
+        ({ tool: pendingTool, event: pendingToolEvent } = openTools.get(ev.id));
+        openTools.delete(ev.id);
+      }
       if (pendingTool) {
         // Stop the cycling beats, but keep the cooking panel on screen until the
         // real media loads, then crossfade it out so the image develops in place.

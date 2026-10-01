@@ -111,6 +111,9 @@ check("a file being written is passed on while Claude Code is still writing it",
       bool(partial) and partial[0]["name"] == "write_file" and "line one" in partial[0]["args_text"])
 check("Claude Code's bookkeeping is left out", all(n != "ToolSearch" for n, _ in calls))
 check("each tool gets its result", results == ["run_command", "edit_file"])
+check("calls made side by side carry their ids, so each result finds its own call",
+      [f["id"] for t, f in ev if t == "tool_call"] == ["t1", "t2"]
+      and [(f["id"], f["content"]) for t, f in ev if t == "tool_result"] == [("t1", "Wednesday"), ("t2", "edited")])
 check("the full reply is reported for the bridges", any(t == "assistant" and f["content"].endswith("Done.") for t, f in ev))
 check("the turn ends with done", ev[-1][0] == "done")
 first = json.loads(open(argv_log).read().splitlines()[0])
@@ -158,6 +161,77 @@ check("what is typed mid-reply is passed on and shown as passed on",
 check("and it acts on it in the same run",
       "Told: actually, use tabs" in "".join(f["content"] for t, f in events if t == "assistant_chunk"))
 check("the turn still ends once, with done", [t for t, _ in events].count("done") == 1 and events[-1][0] == "done")
+
+# Helpers. The brain sends one of Hearth's own through the bridge, the turn
+# stays open until it reports, and the report is handed over in the same run.
+import threading                                                     # noqa: E402
+import time                                                          # noqa: E402
+from hearth import subagents as sa                                   # noqa: E402
+from hearth import tools                                             # noqa: E402
+
+tools._notify = lambda *a, **k: None
+real_execute = tools.execute_tool
+AID = "sub_1700000000000_abc123"
+
+
+def stand_in_spawn(name, args):
+    with sa._BG_RESULTS_LOCK:
+        sa._BG_RUNNING.add(AID)
+
+    def finish():
+        time.sleep(1.5)
+        with sa._BG_RESULTS_LOCK:
+            sa._BG_RUNNING.discard(AID)
+        sa._default_completion_cb(AID, {"ok": True, "text": "17*23 = 391", "name": "Maya", "persona": "researcher"})
+
+    threading.Thread(target=finish, daemon=True).start()
+    return json.dumps({"ok": True, "status": "launched", "agent_id": AID, "mode": args.get("mode")})
+
+
+tools.execute_tool = stand_in_spawn
+events, sent = [], []
+
+
+def emit_and_spawn(t, **f):
+    events.append((t, f))
+    if t == "tool_call" and not sent:                 # the brain calling spawn_subagent
+        sent.append(cb.run_tool(cb._TOKEN, "spawn_subagent", {"persona": "researcher", "prompt": "17*23", "mode": "sync"}))
+
+
+t0 = time.time()
+asyncio.run(cb.run_turn("ask Maya", emit=emit_and_spawn, history=[], permission_check=lambda n, a: "allow"))
+said = "".join(f["content"] for t, f in events if t == "assistant_chunk")
+check("a helper the brain sends is started in the background, whatever mode it asked for",
+      '"mode": "background"' in sent[0]["result"])
+check("the turn stays open until the helper has reported", time.time() - t0 >= 1.4)
+check("its report is handed to the brain in the same run", "Told: [SYSTEM NOTIFICATION" in said and "17*23 = 391" in said)
+check("and shows in the chat as a finished helper",
+      any(t == "subagent_done" and f["name"] == "Maya" and f["agent_id"] == AID for t, f in events))
+check("then the turn ends once", [t for t, _ in events].count("done") == 1)
+tools.execute_tool = real_execute
+
+check("a helper call without the right token is refused",
+      cb.run_tool("nope", "spawn_subagent", {})["result"].startswith("Error"))
+check("only the helper tools are run this way", cb.run_tool(cb._TOKEN, "run_command", {"command": "x"})["result"].startswith("Error"))
+
+# A report that was waiting when the user next speaks goes in ahead of what they said.
+sa._default_completion_cb("sub_1_aaaaaa", {"ok": True, "text": "the file has 40 lines", "name": "Noah"})
+turn("anything new?", [])
+last = json.loads(open(argv_log).read().splitlines()[-1])["stdin"]
+check("a report that was waiting reaches the brain with the next message",
+      "the file has 40 lines" in last and last.rstrip().endswith("anything new?"))
+
+# The window's idle check-in carries no message of its own.
+from hearth.headless import NOTIFY_FLUSH                             # noqa: E402
+runs = len(open(argv_log).read().splitlines())
+ev = turn(NOTIFY_FLUSH, [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "I'm JARVIS."}])
+check("an idle check-in with nothing to report doesn't start the agent",
+      len(open(argv_log).read().splitlines()) == runs and ev[-1][0] == "done")
+sa._default_completion_cb("sub_2_bbbbbb", {"ok": True, "text": "backup finished", "name": "Ivy"})
+turn(NOTIFY_FLUSH, [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "I'm JARVIS."}])
+last = json.loads(open(argv_log).read().splitlines()[-1])["stdin"]
+check("one with a report gives the brain the report, never the marker",
+      "backup finished" in last and NOTIFY_FLUSH not in last)
 
 # Permission questions
 asked = []

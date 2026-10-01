@@ -204,6 +204,29 @@ with sync_playwright() as pw:
           and stats[1].startswith("claude-opus-5-5") and stats[1].endswith("$0.027"))
 
     check(f"the page raised no errors {errors[:2]}", not errors)
+    # An agent brain runs tools side by side: both start, then both finish.
+    stream = "\n".join(json.dumps(e) for e in [
+        {"type": "tool_call", "name": "read_file", "args": {"path": "a.txt"}, "id": "a"},
+        {"type": "tool_call", "name": "grep_search", "args": {"pattern": "x"}, "id": "b"},
+        {"type": "tool_result", "name": "read_file", "content": "what a.txt says", "ms": 5, "id": "a"},
+        {"type": "tool_result", "name": "grep_search", "content": "3 matches", "ms": 7, "id": "b"},
+        {"type": "assistant_chunk", "content": "Both done."},
+        {"type": "assistant", "content": "Both done."},
+        {"type": "done", "duration_ms": 10, "iterations": 1, "reason": "finished"}]) + "\n"
+    pg.route("**/chat", lambda r: r.fulfill(status=200, content_type="application/x-ndjson", body=stream))
+    paired = pg.evaluate("""async () => {
+      const c = newConversation();
+      STATE.loadedModel = { id: 'x', state: 'loaded' };
+      document.getElementById('input').value = 'read both';
+      await send();
+      await new Promise(r => setTimeout(r, 400));
+      const m = c.messages[c.messages.length - 1];
+      return (m.events || []).filter(e => e.kind === 'tool').map(e => [e.name, e.result]);
+    }""")
+    pg.unroute("**/chat")
+    check(f"with two tools running at once, each result lands on its own call {paired}",
+          paired == [["read_file", "what a.txt says"], ["grep_search", "3 matches"]])
+
     browser.close()
 srv.shutdown()
 

@@ -3065,6 +3065,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import claude_brain
             return self._send_json(200, claude_brain.decide(
                 str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
+        if path == "/api/brain/tool":
+            # A helper tool the brain called: run here, where helpers live.
+            body = self._read_json() or {}
+            from . import claude_brain
+            return self._send_json(200, claude_brain.run_tool(
+                str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
         if path == "/api/agents/update":
             # Asked for from the "a newer one is out" prompt; never on its own.
             body = self._read_json() or {}
@@ -4717,8 +4723,32 @@ class HearthHandler(BaseHTTPRequestHandler):
         # to a verbatim truncate when on cloud — title would be "draw me a
         # glowing logo" instead of "Hearth Logo Design". Now: use whatever
         # the chat is actually pointed at.
+        def _clean(title: str) -> str:
+            # Strip wrappers / "Title:" prefix from chatty models
+            title = title.strip().strip('"\'`*').strip()
+            for prefix in ("Title:", "title:", "TITLE:", "Here is", "Here's"):
+                if title.startswith(prefix):
+                    title = title[len(prefix):].strip(' :"\'`*').strip()
+            title = title.split("\n", 1)[0]
+            # Hard cap at 6 words — anything more is the model echoing the prompt
+            words = title.split()
+            if len(words) > 6:
+                title = " ".join(words[:6])
+            return title[:50].strip(' .,:;')
+
+        prompt = (
+            f"Output ONLY a 3-5 word title (no quotes, no preamble) that captures "
+            f"what this conversation is about. Ignore greetings like 'hi'/'yo'. "
+            f"Nothing else.\n\n"
+            f"Conversation:\n{first[:500]}\n\n"
+            f"Title:"
+        )
         settings = _load_settings()
         provider = (settings.get("llm_provider") or "").lower()
+        from . import claude_brain
+        if provider in claude_brain.BRAINS:
+            # An agent program is the brain: there is no model endpoint to ask.
+            return self._send_json(200, {"title": _clean(claude_brain.quick(prompt)) or _fallback(first)})
         is_cloud = provider not in ("", "local", "lmstudio", "builtin")
         model_id = (settings.get("llm_model") or "").strip()
         if not model_id:
@@ -4734,13 +4764,6 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "gemini": "gemini-2.5-flash",
                 "openai": "gpt-4o-mini",
             }.get(provider, "gpt-4o-mini")
-        prompt = (
-            f"Output ONLY a 3-5 word title (no quotes, no preamble) that captures "
-            f"what this conversation is about. Ignore greetings like 'hi'/'yo'. "
-            f"Nothing else.\n\n"
-            f"Conversation:\n{first[:500]}\n\n"
-            f"Title:"
-        )
         payload = {
             "model": model_id,
             "messages": [{"role": "user", "content": prompt}],
@@ -4765,18 +4788,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if not isinstance(resp, dict) or resp.get("error"):
             return self._send_json(200, {"title": _fallback(first)})
         try:
-            title = resp["choices"][0]["message"]["content"].strip()
-            # Strip wrappers / "Title:" prefix from chatty models
-            title = title.strip('"\'`*').strip()
-            for prefix in ("Title:", "title:", "TITLE:", "Here is", "Here's"):
-                if title.startswith(prefix):
-                    title = title[len(prefix):].strip(' :"\'`*').strip()
-            title = title.split("\n", 1)[0]
-            # Hard cap at 6 words — anything more is the model echoing the prompt
-            words = title.split()
-            if len(words) > 6:
-                title = " ".join(words[:6])
-            title = title[:50].strip(' .,:;')
+            title = _clean(resp["choices"][0]["message"]["content"])
             return self._send_json(200, {"title": title or _fallback(first)})
         except Exception:
             return self._send_json(200, {"title": _fallback(first)})

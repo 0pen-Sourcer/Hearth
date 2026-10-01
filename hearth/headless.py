@@ -244,6 +244,11 @@ def _openrouter_catalog_context(model_id: str) -> Optional[int]:
         return None
 
 
+# What the window sends, when idle, for a turn that has no user message: only
+# to let the model report a due reminder or a finished helper. Must match ui.html.
+NOTIFY_FLUSH = "__HEARTH_NOTIFY_FLUSH__"
+
+
 def port_reachable(base_url: str, timeout: float = 0.6) -> bool:
     """Fast TCP pre-check for a model-server endpoint. Returns False quickly when
     nothing accepts on host:port. On some Windows boxes a REFUSED loopback
@@ -821,8 +826,7 @@ async def run_once(
     # it (idle) only to let the model surface a due reminder / finished subagent.
     # The notification itself becomes the trailing user-role message: the model
     # reads and reports it, but no user bubble is ever rendered for it, since the
-    # user never typed it. Sentinel must match ui.html's flush call.
-    NOTIFY_FLUSH = "__HEARTH_NOTIFY_FLUSH__"
+    # user never typed it.
     _is_flush = prompt.strip() == NOTIFY_FLUSH
 
     # Background subagent completions + due reminders queue up between turns;
@@ -838,13 +842,7 @@ async def run_once(
         pending = _sa.drain_pending_notifications()
 
         def _emit_card(notif):
-            emit("subagent_done", agent_id=notif.get("agent_id"),
-                 persona=notif.get("persona"), name=notif.get("name"),
-                 status=notif.get("status"),
-                 summary=notif.get("summary"),
-                 result_text=notif.get("result_text"),
-                 elapsed_s=notif.get("elapsed_s"),
-                 used_tools=notif.get("used_tools") or [])
+            emit("subagent_done", **_sa.card_fields(notif))
 
         if _is_flush:
             for notif in pending:
