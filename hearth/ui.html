@@ -17496,8 +17496,12 @@ function roomGoal(p, a) {
   if (p.pokeUntil > Date.now()) return { at: p.pos, pose: p.pokePose || 'raise', seated: false };
   const seat = p.desk != null ? roomSeat(p) : ROOM.spots.rug;
   const beside = [seat[0] + 92, seat[1] + 6];
+  // Beside JARVIS, where a helper goes to report or to ask.
+  const main = ROOM.people.get('__main');
+  const byMain = main ? [main.pos[0] + (p.seed % 2 ? 70 : -70), main.pos[1] + 18] : ROOM.spots.rug;
   if (a.status === 'working') {
-    if (a.blocked) return { at: beside, pose: 'raise' };
+    // Needing an OK is a reason to go and ask, not to wait at the desk.
+    if (a.blocked) return { at: byMain, pose: 'raise' };
     if (a.activity === 'tool' && READING_TOOLS.test(a.tool || '')) {
       return { at: (p.desk || 0) % 2 ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: 'read', spread: true };
     }
@@ -17507,6 +17511,8 @@ function roomGoal(p, a) {
   if (a.status === 'stopped') return { at: beside, pose: 'idle' };
   const since = Date.now() - (p.doneAt || Date.now());
   if (since < 2600) return { at: p.pos, pose: 'stretch' };
+  // A finished helper reports to JARVIS before it does anything else.
+  if (since < 12000 && !p.reported) return { at: byMain, pose: 'idle', report: true };
   const leisure = [['hearthside', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfL', 'read'], ['windowL', 'gaze'], ['shelfR', 'read']];
   const slot = Math.floor((Date.now() + p.seed * 7000) / 18000);
   const [spot, pose] = leisure[(slot + p.seed) % leisure.length];
@@ -17531,7 +17537,11 @@ function roomSync(list) {
       ROOM.people.set(a.id, p);
     }
     if (a.status === 'done' && p.agent && p.agent.status !== 'done') p.doneAt = Date.now();
-    if (a.status === 'done' && !p.doneAt) p.doneAt = Date.now() - 5000;
+    if (a.status === 'done' && !p.doneAt) {
+      p.doneAt = Date.now() - 5000;
+      // Finished before the room was open: nothing new to report.
+      p.reported = Date.now() / 1000 - (a.updated || 0) > 60;
+    }
     p.agent = a;
   }
   roomStripRender();
@@ -17553,6 +17563,12 @@ function roomTick(t) {
       const endPt = p.path.length ? p.path[p.path.length - 1] : p.pos;
       if (Math.hypot(endPt[0] - target[0], endPt[1] - target[1]) > 4) p.path = roomRoute(p.pos, target);
       p.goal = g;
+    }
+    // Arrived beside JARVIS with a finished job: say so, once.
+    if (!p.path.length && p.goal && p.goal.report && !p.reported) {
+      p.reported = true;
+      const prev = String(p.agent.preview || '').replace(/\s+/g, ' ').trim();
+      roomSay(p.id, prev ? 'Done. ' + (prev.length > 90 ? prev.slice(0, 89) + '…' : prev) : 'All done.', 4500);
     }
     if (p.path.length) {
       const [tx, ty] = p.path[0];
