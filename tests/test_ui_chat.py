@@ -46,6 +46,13 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.clos
 srv = web._QuietHTTPServer(("127.0.0.1", port), web.HearthHandler)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 
+import json                                                          # noqa: E402
+import urllib.request                                                # noqa: E402
+
+vs = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/voice/status", timeout=30))
+check("setup is told speech is available exactly when the voice module says it is ready",
+      "available" in vs["tts"] and vs["tts"]["available"] == bool(vs["tts"].get("ready")))
+
 with sync_playwright() as pw:
     try:
         browser = pw.chromium.launch(channel="msedge")

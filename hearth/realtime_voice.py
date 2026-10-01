@@ -51,7 +51,8 @@ class _Session:
     handed out by start_continuous) can stop it.
     """
 
-    def __init__(self, lease: int, on_utterance, on_caption, on_barge, on_ready, on_error):
+    def __init__(self, lease: int, on_utterance, on_caption, on_barge, on_ready, on_error,
+                 on_notice=None):
         self.lease = lease
         self.stop = threading.Event()
         self.recorder = None
@@ -62,6 +63,7 @@ class _Session:
         self.on_barge = on_barge        # the user started talking over TTS
         self.on_ready = on_ready        # the model loaded and the mic is open
         self.on_error = on_error        # the recorder could not start, or died
+        self.on_notice = on_notice      # something worth telling the person once
 
 
 _session: Optional[_Session] = None
@@ -109,13 +111,57 @@ def _addressed_by_name(text: str) -> bool:
 # text-similarity echo guard catches speaker bleed. So barge stays ON by default;
 # a speaker+mic user who still loops turns half-duplex on in Settings > Voice
 # (or HEARTH_VOICE_HALF_DUPLEX=1), which holds the mic closed while Hearth speaks.
+# This session heard Hearth's own words come back through the mic. From then
+# on it is treated as speakers, whatever the setting says: nobody should have
+# to find a switch to stop an assistant answering itself.
+_echo_seen: bool = False
+# Mute: nothing heard while it is on is kept, and a recording that began
+# before it went off is dropped whole, so unmuting never sends what was said
+# while muted.
+_muted: bool = False
+_unmuted_at: float = 0.0
+_rec_started_at: float = 0.0
+
+
 def _half_duplex() -> bool:
     """Shared with the CLI capture loop; see voice.half_duplex_enabled."""
+    if os.environ.get("HEARTH_VOICE_HALF_DUPLEX") is None and _echo_seen:
+        return True
     try:
         from . import voice as _v
         return _v.half_duplex_enabled()
     except Exception:
         return False
+
+
+def set_muted(on: bool) -> None:
+    global _muted, _unmuted_at
+    on = bool(on)
+    if _muted and not on:
+        _unmuted_at = time.time()
+    _muted = on
+
+
+def is_muted() -> bool:
+    return _muted
+
+
+def _said_while_muted() -> bool:
+    """Whether the utterance just finished belongs to a muted stretch."""
+    return _muted or _rec_started_at < _unmuted_at
+
+
+def _heard_own_voice(sess) -> None:
+    """Hearth's own words came back as an utterance: the mic hears the
+    speakers. Switch this session to speakers mode and say so once."""
+    global _echo_seen
+    if _echo_seen or _half_duplex():
+        return
+    _echo_seen = True
+    print("[hearth.realtime_voice] own voice heard through the mic; speakers mode on for this session", flush=True)
+    _call(getattr(sess, "on_notice", None),
+          "I can hear myself through your speakers, so I'll stop listening while I talk. "
+          "Start with my name to cut in.")
 # How long after TTS stops the mic stays deaf, to swallow the acoustic tail +
 # device/transcription buffering that arrives late on speakers.
 # Echo tail lives in voice.py so the realtime path and the CLI capture loop
@@ -337,7 +383,7 @@ def _build_recorder(sess: Optional[_Session] = None):
         # Live partial transcript while user speaks. Drop captions arriving
         # mid-TTS so we never caption the assistant's own voice through the
         # speakers — they're noise, not signal.
-        if _tts.is_speaking():
+        if _tts.is_speaking() or _muted:
             return
         cb = sess.on_caption if sess is not None else None
         if cb is not None and text:
@@ -370,7 +416,9 @@ def _build_recorder(sess: Optional[_Session] = None):
         # If TTS is mid-sentence, this is a barge: open the capture-grace NOW so
         # the interrupting words survive the echo-drop in the loop, and arm the
         # guard timer to stop TTS on your first word.
-        if not _tts.is_speaking():
+        global _rec_started_at
+        _rec_started_at = time.time()
+        if _muted or not _tts.is_speaking():
             return
         if _half_duplex():
             # Speaker-safe: never let audio-over-TTS arm a barge. On speakers that
@@ -731,6 +779,9 @@ def _run_session(sess: _Session) -> None:
             text = text.strip()
             if not text:
                 continue
+            if _said_while_muted():
+                print("[hearth.realtime_voice] dropped (said while muted)", flush=True)
+                continue
             # Don't dispatch our own TTS playback as user input. With speaker->mic
             # bleed (common on shared/virtual audio devices like Steam's), the mic
             # transcribes the assistant's own voice and feeds it back as a "user" turn.
@@ -770,6 +821,7 @@ def _run_session(sess: _Session) -> None:
                 # pass straight through. Either way, consume the grace.
                 _barge_grace_until = 0.0
                 if _looks_like_echo(text):
+                    _heard_own_voice(sess)
                     print(f"[hearth.realtime_voice] dropped (repeat of Hearth's own words): {text!r}", flush=True)
                     try: rec.clear_audio_queue()
                     except Exception: pass
@@ -785,6 +837,7 @@ def _run_session(sess: _Session) -> None:
             # assistant just said, it's that echo, not a real turn — drop it. A
             # headset user's words don't overlap, so they pass straight through.
             if _tts.seconds_since_spoke() < 6.0 and _looks_like_echo(text):
+                _heard_own_voice(sess)
                 print(f"[hearth.realtime_voice] dropped (repeat of Hearth's own words): {text!r}", flush=True)
                 try: rec.clear_audio_queue()
                 except Exception: pass
@@ -809,7 +862,8 @@ def start_continuous(on_utterance: Callable[[str], None], *,
                      on_caption: Optional[Callable[[str], None]] = None,
                      on_barge: Optional[Callable[[], None]] = None,
                      on_ready: Optional[Callable[[], None]] = None,
-                     on_error: Optional[Callable[[str], None]] = None) -> Optional[int]:
+                     on_error: Optional[Callable[[str], None]] = None,
+                     on_notice: Optional[Callable[[str], None]] = None) -> Optional[int]:
     """Begin listening and return a lease; only that lease can stop it.
 
     A session that is still running (the overlay reopened, the chat switched)
@@ -828,13 +882,19 @@ def start_continuous(on_utterance: Callable[[str], None], *,
             cur.lease = lease
             cur.on_utterance, cur.on_caption = on_utterance, on_caption
             cur.on_barge, cur.on_ready, cur.on_error = on_barge, on_ready, on_error
+            cur.on_notice = on_notice
+            set_muted(False)            # whoever takes the session over starts unmuted
             if cur.listening:
                 _call(on_ready)
             return lease
         if cur is not None:
             cur.stop.set()
             old_rec = cur.recorder
-        sess = _Session(lease, on_utterance, on_caption, on_barge, on_ready, on_error)
+        sess = _Session(lease, on_utterance, on_caption, on_barge, on_ready, on_error, on_notice)
+        # A new session starts unmuted and with no echo on record.
+        global _echo_seen, _muted
+        _echo_seen = False
+        _muted = False
         sess.thread = threading.Thread(target=_continuous_loop, args=(sess,),
                                        daemon=True, name=f"hearth-voice-{lease}")
         _session = sess

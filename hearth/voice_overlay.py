@@ -14,7 +14,7 @@ import os
 import sys
 import threading
 import time
-from math import hypot, sin
+from math import hypot
 
 
 def _corner_xy(sw: int, sh: int, width: int, height: int):
@@ -40,12 +40,45 @@ _stop = threading.Event()
 _thread = None
 
 
-def _ember(intensity: float) -> int:
-    """Hearth's ember accent as a COLORREF (0x00BBGGRR), scaled by intensity
-    0..1: brighter dots read as energy, dim ones as the resting grid."""
+# The accent of each look, as the app paints it. Classic is violet whatever
+# accent is picked; the others use the picked accent.
+_ACCENTS = {"ember": (0xD9, 0x77, 0x4A), "sage": (0x74, 0xA8, 0x83), "ocean": (0x5B, 0x93, 0xC2),
+            "rose": (0xCF, 0x70, 0x89), "violet": (0x8B, 0x6C, 0xF0), "mono": (0xA3, 0xA0, 0x9A)}
+_CLASSIC = (0x8B, 0x5C, 0xF6)
+
+
+def accent_rgb(settings: dict) -> tuple:
+    """The dot colour for the saved look."""
+    if (settings.get("ui_theme") or "classic") == "classic":
+        return _CLASSIC
+    return _ACCENTS.get(settings.get("ui_accent") or "ember", _ACCENTS["ember"])
+
+
+def _saved_accent() -> tuple:
+    try:
+        from .web import _load_settings
+        return accent_rgb(_load_settings())
+    except Exception:
+        return _CLASSIC
+
+
+def _dot(intensity: float, rgb: tuple) -> int:
+    """The accent as a COLORREF (0x00BBGGRR), scaled by intensity 0..1:
+    brighter dots read as energy, dim ones as the resting grid."""
     k = max(0.12, min(1.0, intensity))
-    r, g, b = int(0xE0 * k), int(0x7B * k), int(0x4C * k)
+    r, g, b = int(rgb[0] * k), int(rgb[1] * k), int(rgb[2] * k)
     return (b << 16) | (g << 8) | r
+
+
+def grid_level(state: str, tts_level: float, mic_level: float) -> float:
+    """How far the bloom reaches, 0..1, by the same rules as the grid in the
+    window: Hearth's voice while it speaks, your mic while it listens, and
+    nothing moving when nothing is being said."""
+    if tts_level > 0.02:
+        return min(1.0, max(0.35, 0.35 + tts_level * 0.75))
+    if state == "listening" and mic_level > 0.03:
+        return min(1.0, mic_level * 0.85)
+    return 0.0
 
 
 def start() -> None:
@@ -79,7 +112,9 @@ def _run() -> None:
         hinst = win32api.GetModuleHandle(None)
         cls = "HearthVoiceHUD"
         start_t = time.time()
-        state = {"level": 0.3}          # shared pulse level, updated each frame
+        # level: the bloom's reach. ring: the radius of the thinking ring, or
+        # None. rgb: the look's accent, re-read now and then.
+        state = {"level": 0.0, "ring": None, "rgb": _saved_accent()}
         font = [None]
 
         def _wnd_proc(hwnd, msg, wparam, lparam):
@@ -106,12 +141,18 @@ def _run() -> None:
                 cx, cy = (_COLS - 1) / 2.0, (_ROWS - 1) / 2.0
                 maxd = hypot(cx, cy)
                 reach = state["level"] * (maxd + 0.8)
+                ring = state["ring"]
                 for r in range(_ROWS):
                     for c in range(_COLS):
                         dist = hypot(c - cx, r - cy)
-                        inten = max(0.0, min(1.0, (reach - dist) / 1.6))
+                        if ring is not None:
+                            inten = 0.6 if abs(dist - ring) < 0.85 else 0.0
+                        else:
+                            inten = max(0.0, min(1.0, (reach - dist) / 1.6))
+                        if dist < 0.7:
+                            inten = max(inten, 0.5)     # the centre stays lit, as in the window
                         inten = max(0.14, inten)        # resting grid always faintly visible
-                        win32gui.SetTextColor(mem, _ember(inten))
+                        win32gui.SetTextColor(mem, _dot(inten, state["rgb"]))
                         x = _PAD + c * _SP
                         y = _PAD + r * _SP
                         win32gui.DrawText(mem, "●", -1, (x, y, x + _SP, y + _SP),
@@ -172,7 +213,21 @@ def _run() -> None:
 
         _shown = True
         _last_topmost = 0.0
+        _last_check = 0.0
         while not _stop.is_set():
+            # Once a second: follow the look, and leave when voice has ended.
+            # The HUD belongs to a voice session; whoever started it may never
+            # get to call stop() (a window closed mid-reply, a dropped stream).
+            _now = time.time()
+            if _now - _last_check > 1.0:
+                _last_check = _now
+                state["rgb"] = _saved_accent()
+                try:
+                    from . import realtime_voice as _rtv
+                    if _rtv._session is None and _now - start_t > 3.0:
+                        break
+                except Exception:
+                    pass
             # Focus-based handoff: when the Hearth GUI window is foreground it
             # draws its OWN in-app grid, so hide this desktop HUD to avoid two
             # grids. Show it only when focus is elsewhere (a game / other app) —
@@ -206,8 +261,8 @@ def _run() -> None:
                 except Exception:
                     pass
                 _shown = True
-            # Motion per state: speaking=amplitude-reactive, thinking=pulse,
-            # listening=steady hold, idle=slow breathe.
+            # The same motion as the grid in the window, so the two never
+            # disagree: thinking is one slow ring, everything else a bloom.
             try:
                 from . import voice as _v
                 lvl = _v.current_level()
@@ -216,18 +271,15 @@ def _run() -> None:
             except Exception:
                 lvl, mic, st = 0.0, 0.0, "idle"
             t = time.time() - start_t
-            if lvl > 0.02:
-                target = min(1.0, max(0.35, 0.35 + lvl * 0.75))
-            elif st == "thinking":
-                target = 0.42 + 0.16 * (0.5 + 0.5 * sin(t * 1.9))   # slow, shallow breathe
-            elif st == "listening" and mic > 0.03:
-                target = min(1.0, 0.45 + mic * 0.8)                 # your voice, as you talk
-            elif st == "listening":
-                target = 0.58 + 0.05 * sin(t * 2.6)                 # steady hold
+            if st == "thinking" and lvl <= 0.02:
+                ph = (t % 3.2) / 3.2
+                state["ring"] = ph * (hypot((_COLS - 1) / 2.0, (_ROWS - 1) / 2.0) + 1) if ph < 0.9 else -9.0
+                state["level"] = 0.0
             else:
-                target = 0.30 + 0.06 * sin(t * 2.0)                 # calm breathe
-            # Ease toward target (~0.22/frame @60fps) for smooth motion.
-            state["level"] += (target - state["level"]) * 0.22
+                state["ring"] = None
+                target = grid_level(st, lvl, mic)
+                # Gentle attack, slower release: raw amplitude is spiky.
+                state["level"] += (target - state["level"]) * (0.22 if target > state["level"] else 0.08)
             try:
                 # bErase=False: WM_PAINT repaints every pixel from the back
                 # buffer, so asking Windows to blank it first only adds flicker.

@@ -1967,7 +1967,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             rt_status = {"available": False}
             if _voice:
                 try:
-                    tts_status = _voice.status()
+                    tts_status = dict(_voice.status())
+                    # The fallbacks here and the setup screen say "available";
+                    # the module itself says "ready". One answer for both.
+                    tts_status["available"] = bool(tts_status.get("ready"))
                 except Exception as e:
                     tts_status = {"available": False, "reason": f"{type(e).__name__}: {e}"}
             if _listen:
@@ -3050,6 +3053,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import claude_brain
             return self._send_json(200, claude_brain.decide(
                 str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
+        if path == "/api/voice/realtime/mute":
+            # The mic button in voice mode. Kept here, not in the page: the
+            # recorder is what has to stop keeping what it hears.
+            body = self._read_json() or {}
+            from . import realtime_voice as _rtv
+            _rtv.set_muted(bool(body.get("muted")))
+            return self._send_json(200, {"ok": True, "muted": _rtv.is_muted()})
         if path == "/api/brain/agent":
             # Pick an agent program as the brain from the model sticker, or
             # with no provider go back to the model endpoint in Settings.
@@ -4518,7 +4528,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 lambda t: put({"type": "final", "text": t}),
                 on_caption=lambda t: put({"type": "partial", "text": t}),
                 on_barge=_on_barge, on_ready=_on_ready,
-                on_error=lambda m: put({"type": "error", "message": m}))
+                on_error=lambda m: put({"type": "error", "message": m}),
+                on_notice=lambda m: put({"type": "notice", "message": m}))
             emit({"type": "started"})
             # If the recorder never reaches ready (a component missing from a
             # packaged build, a first-run model download that stalls), say so

@@ -13963,6 +13963,12 @@ $('voice-mic-toggle').addEventListener('click', () => {
   if (rtVoiceActive) {
     _voiceMuted = !_voiceMuted;
     setMicUI();
+    // What was half-said or half-heard when the button was pressed goes too.
+    if (_utterTimer) { clearTimeout(_utterTimer); _utterTimer = null; }
+    _utterBuf = '';
+    setVoiceTranscript('');
+    api('/api/voice/realtime/mute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ muted: _voiceMuted }) }).catch(() => {});
     return;
   }
   // Not listening (voice stopped or failed): start it again. Press-to-talk is
@@ -14122,6 +14128,10 @@ function handleRealtimeEvent(ev) {
     // stream is spiky and un-smoothed values made the dots shimmer.
     _ttsLevel = _ttsLevel * 0.45 + (ev.v || 0) * 0.55;
     _lastLevelAt = performance.now();
+    return;
+  }
+  if (ev.type === 'notice') {
+    toast('Speakers mode is on', ev.message || '', 'ok', 9000);
     return;
   }
   if (ev.type === 'partial') {

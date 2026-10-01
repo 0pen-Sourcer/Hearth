@@ -80,6 +80,23 @@ time.sleep(0.4)
 check("a mic that stops reporting reads as silent", voice.current_mic_level() == 0.0)
 voice.set_mic_sink(None)
 
+# The desktop grid follows the window's: its colour and when it moves.
+from hearth import voice_overlay as vo                               # noqa: E402
+
+check("the desktop grid takes the look's accent",
+      vo.accent_rgb({"ui_theme": "dark", "ui_accent": "ocean"}) == (0x5B, 0x93, 0xC2)
+      and vo.accent_rgb({"ui_theme": "classic", "ui_accent": "ocean"}) == (0x8B, 0x5C, 0xF6))
+check("nothing moves while nothing is said", vo.grid_level("idle", 0.0, 0.0) == 0.0
+      and vo.grid_level("listening", 0.0, 0.0) == 0.0)
+check("your voice moves it while it listens, Hearth's while it speaks",
+      vo.grid_level("listening", 0.0, 0.5) > 0.3 and vo.grid_level("speaking", 0.4, 0.0) > 0.5)
+if sys.platform == "win32":
+    vo.start()
+    time.sleep(1.0)
+    up = vo._thread is not None and vo._thread.is_alive()
+    time.sleep(4.5)
+    check("with no voice session the desktop grid takes itself down", up and not vo._thread.is_alive())
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
