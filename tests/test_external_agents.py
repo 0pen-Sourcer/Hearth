@@ -218,6 +218,68 @@ check("a run that works clears the mark", "turned-away" not in xa.refused())
 check("a plain failure isn't taken for an account refusing",
       xa.why_failed(["Traceback", "ValueError: bad path", "    at x (y.js:1:2)"]) == "bad path"
       and not any(w in "bad path" for w in xa._ACCOUNT_WORDS))
+# Codex and Cursor say what they are doing as they go, so their steps show
+# while they work, the way Claude Code's do.
+codex_out = os.path.join(work, "fake_codex.py")
+with open(codex_out, "w", encoding="utf-8") as f:
+    f.write("""import json, sys
+sys.stdin.read()
+out = lambda o: print(json.dumps(o), flush=True)
+print("2026-10-02 INFO starting", flush=True)
+out({"type": "thread.started", "thread_id": "th-1"})
+out({"type": "item.started", "item": {"id": "i1", "type": "command_execution", "command": "git status"}})
+out({"type": "item.completed", "item": {"id": "i1", "type": "command_execution", "command": "git status", "aggregated_output": "clean", "exit_code": 0}})
+out({"type": "item.completed", "item": {"id": "i2", "type": "file_change", "changes": [{"path": "notes.txt", "kind": "update"}]}})
+out({"type": "item.completed", "item": {"id": "i3", "type": "agent_message", "text": "The tree is clean."}})
+out({"type": "turn.completed", "usage": {}})
+""")
+cursor_out = os.path.join(work, "fake_cursor.py")
+with open(cursor_out, "w", encoding="utf-8") as f:
+    f.write("""import json, sys
+out = lambda o: print(json.dumps(o), flush=True)
+if "limit" in sys.argv[-1]:
+    print("ActionRequiredError: You've hit your usage limit Get Cursor Pro for more Agent usage.", flush=True)
+    sys.exit(1)
+out({"type": "system", "subtype": "init", "session_id": "s"})
+out({"type": "tool_call", "subtype": "started", "call_id": "c1", "tool_call": {"readToolCall": {"args": {"path": "docs/SPEC.md"}}}})
+out({"type": "tool_call", "subtype": "completed", "call_id": "c1", "tool_call": {"readToolCall": {"args": {"path": "docs/SPEC.md"}, "result": {"success": {"content": "the spec"}}}}})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "The spec is short."})
+""")
+xa.AGENTS["stand-in-codex"] = {"label": "Codex stand-in", "exe": ["stand-in"], "stream": "codex",
+                               "args": lambda allow: [codex_out]}
+xa.AGENTS["stand-in-cursor"] = {"label": "Cursor stand-in", "exe": ["stand-in"], "stream": "cursor",
+                                "args": lambda allow: [cursor_out], "prompt_arg": True}
+
+
+def run_agent(aid, prompt):
+    done, got = threading.Event(), {}
+    r = xa.spawn(aid, prompt, on_done=lambda i, res: (got.update(res), done.set()))
+    done.wait(30)
+    rows = [json.loads(l) for l in open(got["transcript_path"], encoding="utf-8")]
+    return r, got, rows
+
+
+r, got, rows = run_agent("stand-in-codex", "check the tree")
+calls = [(c["name"], c["args"]) for row in rows if row["kind"] == "assistant_tool_call" for c in row["calls"]]
+check(f"Codex's steps are written down as it works {calls}",
+      calls == [("run_command", '{"command": "git status"}'), ("edit_file", '{"path": "notes.txt"}')]
+      and [row["preview"] for row in rows if row["kind"] == "tool_result"] == ["clean", "update: notes.txt"])
+check("and its last message is the result, not its log lines", got["ok"] and got["text"] == "The tree is clean." and got["turns"] == 2)
+state = {a["id"]: a for a in subagents.team_state()}[r["agent_id"]]
+check("the Team view counts its steps", state["tools_used"] == 2 and state["status"] == "done")
+
+r, got, rows = run_agent("stand-in-cursor", "read the spec")
+calls = [(c["name"], c["args"]) for row in rows if row["kind"] == "assistant_tool_call" for c in row["calls"]]
+check(f"Cursor's steps are written down the same way {calls}",
+      calls == [("read_file", '{"path": "docs/SPEC.md"}')] and got["ok"] and got["text"] == "The spec is short.")
+r, got, rows = run_agent("stand-in-cursor", "over the limit")
+check(f"a Cursor run that never starts says why {got.get('error')!r}",
+      not got["ok"] and got["error"].startswith("You've hit your usage limit") and "stand-in-cursor" in xa.refused())
+check("the real Codex and Cursor are run in their step-by-step modes",
+      "--json" in xa.AGENTS["codex"]["args"]("edits") and "--full-auto" not in xa.AGENTS["codex"]["args"]("auto")
+      and xa.AGENTS["codex"]["stream"] == "codex"
+      and "stream-json" in xa.AGENTS["cursor-agent"]["args"]("edits") and xa.AGENTS["cursor-agent"]["stream"] == "cursor")
+
 gem = xa.AGENTS["gemini-cli"]["args"]
 check("Gemini CLI is run trusting its folder, with the approval level the switch allows",
       gem("auto") == ["--skip-trust", "--approval-mode=yolo", "-p"]

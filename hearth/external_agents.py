@@ -4,8 +4,9 @@ the rest, run headless on the user's own install and subscription.
 Each one runs in the background in a working folder and writes the same
 transcript as Hearth's own helpers (start, route, tool calls, final text,
 end), so it shows up in the Team view and its result reaches the main
-assistant the same way. Claude Code's stream is parsed event by event; the
-others run in their one-shot mode and their output is the result.
+assistant the same way. Claude Code, Codex and Cursor report each step as
+they go, so their work shows while it happens; the others run in their
+one-shot mode and their output is the result.
 
 Claude Code note: its headless mode (`claude -p`) is billed to the Agent SDK
 credit that comes with a Claude plan, not to the plan's interactive limits.
@@ -34,6 +35,13 @@ def _claude_cmd(allow: str) -> List[str]:
             "--permission-mode", mode]
 
 
+def _codex_cmd(allow: str) -> List[str]:
+    """Headless Codex has nobody to ask, so it never stops to: it works inside
+    its folder, with the network only when the user chose Auto."""
+    return (["exec", "--json", "--skip-git-repo-check", "-c", 'approval_policy="never"', "-s", "workspace-write"]
+            + (["-c", "sandbox_workspace_write.network_access=true"] if allow == "auto" else []) + ["-"])
+
+
 # id -> how to run it. `args` builds the arguments (the prompt goes on stdin
 # unless `prompt_arg` is set). `stream` names the output parser. `allow` is
 # how much the user lets agents do on their own: "auto" or "edits". `maker`
@@ -44,9 +52,7 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     "claude-code": {"label": "Claude Code", "maker": "Anthropic", "exe": ["claude"], "args": _claude_cmd,
                     "stream": "claude", "takes_messages": True,
                     "billing": "Agent SDK credit on your Claude plan"},
-    "codex": {"label": "Codex", "maker": "OpenAI", "exe": ["codex"],
-              "args": lambda allow: ["exec", "--skip-git-repo-check"]
-              + (["--full-auto"] if allow in ("auto", "edits") else []) + ["-"], "stream": "text",
+    "codex": {"label": "Codex", "maker": "OpenAI", "exe": ["codex"], "args": _codex_cmd, "stream": "codex",
               # The Codex desktop app keeps its own copy of the CLI off PATH.
               "also": [r"%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe", r"~\.codex\.sandbox-bin\codex.exe"]},
     "antigravity": {"label": "Antigravity", "maker": "Google", "exe": ["agy"],
@@ -71,8 +77,9 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     "crush": {"label": "Crush", "maker": "Charm", "exe": ["crush"], "args": lambda allow: ["run"],
               "stream": "text", "prompt_arg": True},
     "cursor-agent": {"label": "Cursor Agent", "maker": "Cursor", "exe": ["cursor-agent"],
-                     "args": lambda allow: ["-p"] + (["--force"] if allow == "auto" else []),
-                     "stream": "text", "prompt_arg": True,
+                     "args": lambda allow: ["-p", "--output-format", "stream-json", "--trust"]
+                     + (["--force"] if allow == "auto" else []),
+                     "stream": "cursor", "prompt_arg": True,
                      "also": [os.path.join("%LOCALAPPDATA%", "cursor-agent", "cursor-agent.cmd")]},
     "copilot": {"label": "Copilot CLI", "maker": "GitHub", "exe": ["copilot"],
                 "args": lambda allow: (["--allow-all-tools"] if allow == "auto" else []) + ["-p"],
@@ -435,6 +442,96 @@ def _parse_claude(line: str, emit: Callable[[Dict[str, Any]], None], state: Dict
             state["error"] = ev.get("result") or ev.get("subtype") or "the agent stopped with an error"
 
 
+def _step(emit, state: Dict[str, Any], key: str, name: str, args: Any) -> None:
+    emit({"kind": "assistant_tool_call", "content": "", "calls": [{"name": name, "args": json.dumps(args or {})[:400]}]})
+    state.setdefault("open", {})[key] = name
+
+
+def _step_done(emit, state: Dict[str, Any], key: str, name: str, body: str) -> None:
+    if key not in state.get("open", {}):
+        _step(emit, state, key, name, {})
+    state["open"].pop(key, None)
+    emit({"kind": "tool_result", "name": name, "chars": len(body), "preview": body[:400]})
+    state["tools"] = state.get("tools", 0) + 1
+
+
+def _parse_codex(line: str, emit: Callable[[Dict[str, Any]], None], state: Dict[str, Any]) -> bool:
+    """One line of `codex exec --json`. False when it isn't one of its events."""
+    try:
+        ev = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(ev, dict) or "type" not in ev:
+        return False
+    t, item = ev["type"], ev.get("item") or {}
+    kind, key = item.get("type"), str(item.get("id") or "")
+    shown = {"command_execution": ("run_command", {"command": item.get("command", "")}),
+             "mcp_tool_call": (item.get("tool", "tool"), item.get("arguments") or {}),
+             "web_search": ("web_search", {"query": item.get("query", "")}),
+             "file_change": ("edit_file", {"path": next((str(c.get("path") or "") for c in item.get("changes") or []
+                                                         if isinstance(c, dict)), "")})}.get(kind)
+    if t == "item.started" and shown:
+        _step(emit, state, key, *shown)
+    elif t == "item.completed" and shown:
+        if kind == "command_execution":
+            body = str(item.get("aggregated_output") or "")
+        elif kind == "mcp_tool_call":
+            body = "\n".join(str(c.get("text") or "") for c in (item.get("result") or {}).get("content") or []
+                             if isinstance(c, dict))
+        elif kind == "file_change":
+            body = "\n".join(f"{c.get('kind', 'update')}: {c.get('path', '')}" for c in item.get("changes") or []
+                             if isinstance(c, dict))
+        else:
+            body = str(item.get("query") or "")
+        if key not in state.get("open", {}):
+            _step(emit, state, key, *shown)
+        _step_done(emit, state, key, shown[0], body)
+    elif t == "item.completed" and kind == "agent_message" and item.get("text"):
+        state["last_text"] = (state.get("last_text", "") + "\n\n" + item["text"]).strip()
+    elif t == "turn.completed":
+        state["ok"], state["result"] = True, state.get("last_text", "")
+    elif t in ("turn.failed", "error"):
+        state["ok"] = False
+        state["error"] = str((ev.get("error") or {}).get("message") or ev.get("message") or "the turn failed")
+    return True
+
+
+def _parse_cursor(line: str, emit: Callable[[Dict[str, Any]], None], state: Dict[str, Any]) -> bool:
+    """One line of `cursor-agent -p --output-format stream-json`."""
+    try:
+        ev = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(ev, dict) or "type" not in ev:
+        return False
+    t = ev["type"]
+    if t == "tool_call":
+        from .cursor_brain import hearth_view, _result_text
+        name, shown, body = hearth_view(ev.get("tool_call") or {})
+        key = str(ev.get("call_id") or "")
+        if name and ev.get("subtype") == "started":
+            _step(emit, state, key, name, shown)
+        elif name and ev.get("subtype") == "completed":
+            if key not in state.get("open", {}):
+                _step(emit, state, key, name, shown)
+            _step_done(emit, state, key, name, _result_text(body))
+    elif t == "result":
+        state["ok"] = not ev.get("is_error")
+        state["result"] = str(ev.get("result") or "")
+        if not state["ok"]:
+            state["error"] = state["result"] or str(ev.get("subtype") or "the agent stopped with an error")
+    return True
+
+
+def _parse_claude_line(line: str, emit, state) -> bool:
+    _parse_claude(line, emit, state)
+    return line.lstrip().startswith("{")
+
+
+# Agents that report each step: the name of their output format -> its reader.
+_READERS = {"claude": _parse_claude_line, "codex": _parse_codex, "cursor": _parse_cursor}
+
+
 def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
           on_done: Optional[Callable[[str, Dict[str, Any]], None]] = None) -> Dict[str, Any]:
     """Start an external agent in the background. Returns {ok, agent_id} or {ok: False, error}."""
@@ -491,10 +588,10 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
                     proc.stdin.close()
             except OSError:
                 pass
+            read = _READERS.get(spec["stream"])
             for line in proc.stdout:
                 line = line.rstrip("\n")
-                if spec["stream"] == "claude":
-                    _parse_claude(line, emit, state)
+                if read and read(line, emit, state):
                     if listening and "result" in state:
                         # It has answered. Closing stdin is what lets it exit.
                         listening = False
@@ -507,10 +604,13 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
                 elif line.strip():
                     out_lines.append(line)
             code = proc.wait()
-            if spec["stream"] == "claude":
+            if "ok" in state:
                 ok = bool(state.get("ok")) and code == 0
                 text = state.get("result") or state.get("last_text", "")
-                err = state.get("error") or (f"exited with code {code}" if not ok else "")
+                err = "" if ok else (state.get("error") or why_failed(out_lines) or f"exited with code {code}")
+            elif spec["stream"] == "claude":
+                ok, text = False, state.get("last_text", "")
+                err = why_failed(out_lines) or f"exited with code {code}"
             else:
                 text = "\n".join(out_lines[-200:])
                 ok = code == 0
