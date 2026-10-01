@@ -119,6 +119,11 @@ def available() -> List[Dict[str, Any]]:
     out = []
     for aid, spec in AGENTS.items():
         path = _which(spec["exe"])
+        # A batch file that isn't an npm shim is a launcher of something else:
+        # VS Code puts a "copilot" on PATH that offers to install the real CLI
+        # and would sit waiting for an answer. Not installed, so not listed.
+        if path and spec.get("prompt_arg") and _direct_argv(path)[0].lower().endswith((".cmd", ".bat")):
+            path = None
         if path:
             out.append({"id": aid, "label": spec["label"], "maker": spec.get("maker", ""), "path": path,
                         "tested": aid in VERIFIED, "billing": spec.get("billing", "")})
