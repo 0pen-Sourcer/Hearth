@@ -7798,8 +7798,8 @@ $('model-select').addEventListener('change', async (e) => {
       // crash with "Requested tokens exceed context window" on the first
       // multi-turn chat. The "8K stays sticky in saved per-model cfg" bug.
       if (plannedCtx && plannedCtx < 16384) {
-        toast('Ctx too small for safe chat',
-          `This model is loaded at ${(plannedCtx/1024).toFixed(0)}K but persona + tools already use ~18K. Open Models tab > expand this row > raise ctx, then reload.`,
+        toast('Too little memory for a chat',
+          `This model has room for ${(plannedCtx/1024).toFixed(0)}K, and Hearth's own instructions already take about 18K. In Models, open this model, raise its context size and load it again.`,
           'warn', 12000);
       }
       // Surface a non-blocking VRAM warning (model loaded but the math says
@@ -10061,7 +10061,7 @@ function renderMem(filter) {
           { label: 'Delete', kind: 'danger', onclick: async () => {
             try {
               const dr = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
-              if (dr && dr.ok === false) { toast('Delete failed', dr.error || 'backend rejected', 'err'); return; }
+              if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || 'no reason given', 'err'); return; }
               toast('Deleted', m.name, 'ok');
               refreshMemory(); refreshState();
             } catch (e) { toast('Delete failed', e.message, 'err'); }
@@ -10076,7 +10076,7 @@ function renderMem(filter) {
           try {
             const r = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
             if (r && r.ok === false) {
-              toast('Delete failed', r.error || 'backend rejected', 'err');
+              toast("Couldn't delete it", r.error || 'no reason given', 'err');
               return;
             }
             toast('Deleted', m.name, 'ok');
@@ -10197,7 +10197,7 @@ function renderMemTree(filter) {
           { label: 'Delete', kind: 'danger', onclick: async () => {
             try {
               const dr = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
-              if (dr && dr.ok === false) { toast('Delete failed', dr.error || 'backend rejected', 'err'); return; }
+              if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || 'no reason given', 'err'); return; }
               toast('Deleted', m.name, 'ok');
               refreshMemory(); refreshState();
             } catch (e) { toast('Delete failed', e.message, 'err'); }
@@ -10405,7 +10405,7 @@ function renderMemGraph(filter) {
         { label: 'Delete', kind: 'danger', onclick: async () => {
           try {
             const dr = await api(`/api/memory/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
-            if (dr && dr.ok === false) { toast('Delete failed', dr.error || 'backend rejected', 'err'); return; }
+            if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || 'no reason given', 'err'); return; }
             toast('Deleted', d.name, 'ok');
             refreshMemory(); refreshState();
           } catch (e) { toast('Delete failed', e.message, 'err'); }
@@ -11638,16 +11638,16 @@ async function refreshSettings() {
           const after = await api('/api/voice/status');
           const warn = after.tts && after.tts.last_load_warning;
           if (warn) {
-            toast('TTS fell back to CPU', warn, 'warn', 8000);
+            toast('Speech runs on the processor instead', warn, 'warn', 8000);
             // onnxruntime lists CUDA optimistically; if the runtime actually
             // failed, snap the dropdown back to CPU so the UI matches reality
             // instead of showing GPU + "installed ✓" while running on CPU.
             ttsDev.value = 'cpu';
             await saveSetting('tts_device', 'cpu');
           } else {
-            toast('TTS', 'switched to ' + v, 'ok');
+            toast('Speech', 'now runs on the ' + (v === 'cpu' ? 'processor' : 'graphics card'), 'ok');
           }
-        } catch (err) { toast('TTS device', err.message, 'err'); }
+        } catch (err) { toast("Couldn't switch where speech runs", err.message, 'err'); }
       });
     }
 
@@ -11724,7 +11724,7 @@ async function refreshSettings() {
             method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ text: sampleLine(voiceSel ? voiceSel.value : '') }),
           });
-          if (!r.ok) toast('Voice test', 'playback failed — make sure TTS is enabled above', 'warn', 5000);
+          if (!r.ok) toast('Voice test', "Couldn't play it. Make sure speaking is turned on above.", 'warn', 5000);
           else {
             // Speaking happens behind a queue, so the request answers before
             // anything has been synthesized and a failure after that point used
@@ -11746,7 +11746,7 @@ async function refreshSettings() {
           const r = await api('/api/voice/reload', { method: 'POST' });
           const warn = r && r.details && r.details.stt_warning;
           if (warn) {
-            toast('STT', warn, 'warn', 8000);
+            toast('Listening', warn, 'warn', 8000);
             // Snap the dropdown back to the actual device so it doesn't lie.
             const actual = (r.details.stt || '').match(/on (\w+)$/);
             if (actual && actual[1] !== v) {
@@ -11754,10 +11754,10 @@ async function refreshSettings() {
               await saveSetting('stt_device', actual[1]);
             }
           } else {
-            toast('STT', 'switched to ' + v, 'ok');
+            toast('Listening', 'now runs on the ' + (v === 'cpu' ? 'processor' : 'graphics card'), 'ok');
           }
         }
-        catch (err) { toast('STT device', err.message, 'err'); }
+        catch (err) { toast("Couldn't switch where listening runs", err.message, 'err'); }
       });
     }
     // An .en model holds no other language, so offering a choice of language
@@ -11793,13 +11793,13 @@ async function refreshSettings() {
         // minute for small.en), and a vanished toast made it look frozen.
         sttMdl.disabled = true;
         setDlDot($('stt-dl-dot'), 'active');
-        toast('Whisper', 'Downloading ' + mdl + ' — first time only, up to ~1-2 min for bigger models. Hang tight, the app stays responsive.', 'info', 90000);
+        toast('Getting the listening model', mdl + ', first time only. Bigger ones take a minute or two, and Hearth stays usable meanwhile.', 'info', 90000);
         try {
           await api('/api/voice/reload', { method: 'POST' });
           setDlDot($('stt-dl-dot'), 'done');
           if ($('stt-model-err')) $('stt-model-err').style.display = 'none';
           markLoadedOption(sttMdl, mdl);
-          toast('Whisper ready', mdl + ' loaded', 'ok');
+          toast('Listening model ready', mdl, 'ok');
         } catch (err) {
           setDlDot($('stt-dl-dot'), 'idle');
           const msg = err.message || 'unknown';
@@ -11813,7 +11813,7 @@ async function refreshSettings() {
             if (links[0]) links[0].onclick = (ev) => { ev.preventDefault(); eEl.style.display='none'; sttMdl.dispatchEvent(new Event('change')); return false; };
             if (links[1]) links[1].onclick = (ev) => { ev.preventDefault(); navigator.clipboard.writeText(full); return false; };
           }
-          toast('STT model', 'download/load failed: ' + msg, 'err', 8000);
+          toast("Couldn't get the listening model", msg, 'err', 8000);
         }
         finally { sttMdl.disabled = false; }
       };
@@ -11908,7 +11908,7 @@ async function refreshSettings() {
           key: llmKey.value.trim(),
           model: llmMdl.value.trim(),
         };
-        if (!body.url) { toast('Endpoint URL is required', '', 'warn'); return; }
+        if (!body.url) { toast('Add the server address', 'Something like http://localhost:1234/v1', 'warn'); return; }
         if (body.provider !== 'local' && !body.key) {
           toast('API key needed', body.provider + ' requires a key', 'warn');
           return;
@@ -12649,7 +12649,7 @@ async function saveSetting(key, value) {
       const wasCloud = _CLOUD.has(_prevProv);
       const isCloudNow = _CLOUD.has(String(value || '').toLowerCase());
       if (wasCloud && !isCloudNow) {
-        toast('Sweeping local model catalog', 'One sec - checking LM Studio, Ollama, HF cache, Downloads.', 'ok', 4000);
+        toast('Looking for models on this PC', 'Checking LM Studio, Ollama, the Hugging Face cache and Downloads.', 'ok', 4000);
         // Pull a fresh Models render so the scanning banner shows up.
         if (typeof refreshModelsView === 'function') refreshModelsView();
         // Poll until scanning clears, then refresh once more for the
@@ -12714,9 +12714,9 @@ async function speakText(text, force = false) {
       detail = body.error || (body.detail && (body.detail.reason || body.detail.last_load_error)) || '';
     } catch {}
     if (r.status === 503) {
-      toast('TTS not available', detail || 'Open Settings → Voice and enable TTS (Kokoro). Falls back to nothing if voice models aren\'t in ~/Jarvis/voices/.', 'warn', 7000);
+      toast('Speaking is off', detail || 'Turn it on in Settings > Voice. Its voice files download the first time.', 'warn', 7000);
     } else {
-      toast('Speak failed', detail || `HTTP ${r.status}`, 'err', 6000);
+      toast("Couldn't speak that", detail || `the speech engine answered ${r.status}`, 'err', 6000);
     }
   } catch (e) {
     toast('Speak failed', e.message || 'network', 'err', 6000);
@@ -12875,7 +12875,7 @@ async function transcribe() {
     });
     return r.text || '';
   } catch (e) {
-    toast('STT error', e.message, 'err');
+    toast("Couldn't understand that", e.message, 'err');
     return '';
   } finally { setState('idle'); }
 }
@@ -15406,7 +15406,7 @@ document.querySelectorAll('.models-tab').forEach(t => {
     rescanBtn.addEventListener('click', async () => {
       try {
         await api('/api/llmserver/rescan');
-        toast('Sweeping local model catalog', 'Checking LM Studio, Ollama, HF cache, Downloads.', 'ok', 3000);
+        toast('Looking for models on this PC', 'Checking LM Studio, Ollama, the Hugging Face cache and Downloads.', 'ok', 3000);
         if (typeof refreshModelsView === 'function') refreshModelsView();
         const watcher = setInterval(async () => {
           try {
