@@ -1204,6 +1204,7 @@ def _load_settings() -> Dict:
         "auto_load_model": True,
         "voice_tts": False,
         "voice_stt": False,
+        "sounds": True,        # a soft cue when a turn finishes, a low one on an error
         "voice_mic_hint_dismissed": False,  # first-voice mic tip, "don't show again"
         "voice_half_duplex": False,  # hold the mic closed while speaking, for speakers
         "stt_device": "cpu",   # cpu / cuda
@@ -1380,10 +1381,8 @@ def _team_choices() -> Dict[str, Any]:
         pass
     # The agent programs Hearth knows how to run that aren't on this PC, so
     # the dialog can say the list grows with what gets installed.
-    here = {a["id"] for a in agents}
-    more = [spec["label"] for aid, spec in _xa.AGENTS.items() if aid not in here]
     return {"roles": roles, "agents": agents, "workspace": WORKSPACE, "helper_brain": helper_brain,
-            "more_agents": more}
+            "more_agents": _xa.missing()}
 
 
 def _saved_look() -> str:
@@ -4249,7 +4248,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         if not path:
             return self._send_json(400, {"error": "missing path"})
         try:
-            real = os.path.realpath(path)
+            # The Files tab names things from the workspace down.
+            real = os.path.realpath(path if os.path.isabs(path) else os.path.join(WORKSPACE, path))
         except Exception:
             return self._send_json(400, {"error": "bad path"})
         ws_real = os.path.realpath(WORKSPACE)

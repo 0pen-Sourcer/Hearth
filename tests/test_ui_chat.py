@@ -345,6 +345,41 @@ with sync_playwright() as pw:
     check("Simple or Advanced set in one place shows the same in the other",
           flow["fromSetup"] == ["advanced", "advanced"] and flow["fromSettings"] == ["simple", "simple"])
 
+    extras = pg.evaluate("""async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms));
+      const out = {};
+      // Which character, picked anywhere, shows as picked everywhere.
+      const on = (box) => (document.querySelector(box + ' .on') || { dataset: {} }).dataset;
+      hearthSetRoomLook('him'); await wait(100);
+      out.him = [on('#ap-room').look, on('#ob-roomlook').roomlook];
+      hearthSetRoomLook('her'); await wait(100);
+      out.her = [on('#ap-room').look, on('#ob-roomlook').roomlook];
+      // The tour: a ring and a card, Next moves on, Skip ends it for good.
+      startTour(); await wait(300);
+      const title = () => (document.querySelector('#tour-card b') || {}).textContent;
+      out.tour = [title(), !!document.getElementById('tour-ring')];
+      document.querySelector('#tour-card [data-t="next"]').click(); await wait(300);
+      out.tour.push(title());
+      document.querySelector('#tour-card [data-t="skip"]').click(); await wait(100);
+      out.tour.push(!!document.getElementById('tour-ring'), localStorage.getItem('hearth_tour_done'));
+      // A voice test reads a different line each time.
+      out.quotes = voiceQuote().text !== voiceQuote().text;
+      // While a local model is loading, the eject button stops the load.
+      STATE.brain.kind = 'local'; STATE.brain.loaded = false;
+      showLoadProgress('loading_weights', 12, '');
+      out.stop = [document.getElementById('btn-eject').hidden, document.getElementById('btn-eject-label').textContent];
+      hideLoadProgress();
+      out.eject = [document.getElementById('btn-eject').hidden, document.getElementById('btn-eject-label').textContent];
+      return out;
+    }""")
+    check(f"the character picked in one place shows as picked in the other {extras['him'], extras['her']}",
+          extras["him"] == ["him", "him"] and extras["her"] == ["her", "her"])
+    check(f"the tour points at one thing at a time, moves on, and can be skipped {extras['tour']}",
+          extras["tour"] == ["What I think with", True, "Talk to me", False, "1"])
+    check("a voice test reads a different line each time", extras["quotes"])
+    check(f"while a model is loading the eject button stops it {extras['stop'], extras['eject']}",
+          extras["stop"] == [False, "stop"] and extras["eject"] == [True, "eject"])
+
     # An agent brain runs tools side by side: both start, then both finish.
     stream = "\n".join(json.dumps(e) for e in [
         {"type": "tool_call", "name": "read_file", "args": {"path": "a.txt"}, "id": "a"},

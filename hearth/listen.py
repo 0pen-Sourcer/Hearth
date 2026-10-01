@@ -555,9 +555,37 @@ def _try_load_model():
                     return _model
                 except Exception as e2:
                     e = e2
+            # Weights that are on disk and still won't load are damaged: they
+            # are removed and fetched again, once.
+            if model_present() and _drop_model_files():
+                try:
+                    _model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8", download_root=download_root)
+                    DEVICE, COMPUTE_TYPE = "cpu", "int8"
+                    _last_load_error = None
+                    return _model
+                except Exception as e3:
+                    e = e3
             _last_load_error = f"whisper load failed: {type(e).__name__}: {e}"
             return None
     return _model
+
+
+def _model_dirs() -> list:
+    """The folders under the whisper cache that hold the selected size."""
+    root = os.path.join(VOICES_DIR, "whisper")
+    want = (MODEL_SIZE or "").lower().replace(".", "").replace("-", "")
+    if not want or not os.path.isdir(root):
+        return []
+    return [os.path.join(root, d) for d in os.listdir(root)
+            if want in d.lower().replace(".", "").replace("-", "").replace("_", "") and os.path.isdir(os.path.join(root, d))]
+
+
+def _drop_model_files() -> bool:
+    import shutil
+    dirs = _model_dirs()
+    for d in dirs:
+        shutil.rmtree(d, ignore_errors=True)
+    return bool(dirs)
 
 
 def model_present() -> bool:

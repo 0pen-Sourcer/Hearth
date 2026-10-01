@@ -31,6 +31,7 @@ def check(label, cond):
         FAILS.append(label)
 
 
+REAL_AGENTS = list(xa.AGENTS)          # before the stand-ins below join them
 work = tempfile.mkdtemp(prefix="hearth-xa-")
 xa._REFUSED = os.path.join(work, "agents_refused.json")
 subagents._TRANSCRIPT_DIR = __import__("pathlib").Path(work) / "subagents"
@@ -304,6 +305,18 @@ check("the real three use their makers' installers and their own status commands
       and xa.SETUP["codex"]["status"] == ["login", "status"]
       and xa.SETUP["claude-code"]["signed"]('{\n  "loggedin": true,\n') and not xa.SETUP["claude-code"]["signed"]('{"loggedin": false}')
       and xa.SETUP["codex"]["signed"]("logged in using chatgpt") and not xa.SETUP["codex"]["signed"]("not logged in"))
+
+# Every agent Hearth can run that isn't here comes with a way to get it.
+check("every agent has a page to get it from", not [aid for aid in REAL_AGENTS if aid not in xa.SITES])
+check("the three with a full setup say so, and the rest point at an installer or their page",
+      xa.how_to_get("claude-code") == "setup" and xa.how_to_get("aider") == "site"
+      and xa.how_to_get("opencode") in ("install", "site"))
+real_avail = xa.available
+xa.available = lambda: [{"id": "claude-code"}]
+gone = {a["id"]: a for a in xa.missing()}
+check("what isn't on the PC is listed with its page", "claude-code" not in gone and gone["goose"]["site"] == "https://goose-docs.ai"
+      and gone["codex"]["get"] == "setup")
+xa.available = real_avail
 
 gem = xa.AGENTS["gemini-cli"]["args"]
 check("Gemini CLI is run trusting its folder, with the approval level the switch allows",

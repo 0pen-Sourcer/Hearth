@@ -95,10 +95,12 @@ FULL_DOWNLOAD_URL = "https://github.com/0pen-sourcer/hearth/releases"
 
 
 def _is_lite_edition() -> bool:
-    """True on a packaged Lite build (no bundled server). Source = Full."""
+    """True on a Lite install that still has no engine for local models. Once
+    one has been added, Lite does everything Full does, so it is treated as
+    Full wherever that matters."""
     try:
         from . import edition
-        return edition.is_lite()
+        return edition.is_lite() and not find_native_llama_server()
     except Exception:
         return False
 
@@ -2329,6 +2331,13 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
     while time.time() < deadline:
         # If a concurrent call replaced the global _proc with a different
         # subprocess, our work is moot — abandon ship cleanly.
+        if _proc is None and time.time() - _stop_asked[0] < 60:
+            # Stopped on purpose while it was still loading: not a failure.
+            try: spawned.terminate()
+            except Exception: pass
+            with _start_lock: _starting_paths.discard(normalized_path)
+            _set_progress(phase="idle", percent=0, marker="", error=None, finished_at=time.time())
+            return {"ok": False, "stopped": True, "error": "Stopped before it finished loading."}
         if _proc is None or _proc is not spawned:
             try: spawned.terminate()
             except Exception: pass
@@ -2337,6 +2346,11 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
                           finished_at=time.time())
             return {"ok": False, "error": "superseded by a newer model load",
                     "log_path": str(log_path)}
+        if spawned.poll() is not None and time.time() - _stop_asked[0] < 60:
+            # Stopped on purpose while it was still loading: not a failure.
+            with _start_lock: _starting_paths.discard(normalized_path)
+            _set_progress(phase="idle", percent=0, marker="", error=None, finished_at=time.time())
+            return {"ok": False, "stopped": True, "error": "Stopped before it finished loading."}
         if spawned.poll() is not None:
             tail = _log_tail()
             hint = ""
@@ -2492,9 +2506,14 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
     return result
 
 
+_stop_asked = [0.0]           # when a stop was last asked for, so a load that dies then isn't called a failure
+
+
 def stop_builtin() -> Dict[str, Any]:
-    """Terminate the running builtin server, if any."""
+    """Terminate the running builtin server, if any. A model that is still
+    loading is stopped the same way."""
     global _proc, _proc_info
+    _stop_asked[0] = time.time()
     if _proc is None or _proc.poll() is not None:
         _proc = None
         _proc_info = {}

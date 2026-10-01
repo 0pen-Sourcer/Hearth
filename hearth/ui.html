@@ -1000,7 +1000,25 @@
   .tm-say { position: absolute; transform: translate(-50%, calc(-100% - 26px)); max-width: 260px; pointer-events: none;
     background: var(--bg-1); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 12px;
     padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
+  .ob-seg-faces button { display: flex; align-items: center; gap: 10px; text-align: left; }
+  .ob-seg-faces i { flex: none; width: 36px; height: 50px; background-size: auto 50px; background-position: 0 0;
+    background-repeat: no-repeat; image-rendering: pixelated; }
+  .ob-seg-faces span { display: flex; flex-direction: column; }
   .ap-char { display: flex; align-items: center; gap: 12px; text-align: left; }
+  #tour-ring { position: fixed; z-index: 9000; border-radius: 12px; pointer-events: none;
+    box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(0, 0, 0, .62); }
+  #tour-card { position: fixed; z-index: 9001; width: 300px; background: var(--bg-1); border: 1px solid var(--border-strong);
+    border-radius: var(--r-lg); padding: 14px 16px; box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .7); font-family: var(--sans); }
+  #tour-card b { display: block; color: var(--fg); font-size: 14px; margin-bottom: 4px; }
+  #tour-card p { margin: 0 0 12px; color: var(--fg-dim); font-size: 12.5px; line-height: 1.5; }
+  .tour-row { display: flex; align-items: center; gap: 8px; }
+  .tour-row span { flex: 1; color: var(--fg-faint); font-size: 11.5px; }
+  .tour-row button { background: none; border: 1px solid var(--border); color: var(--fg-dim); border-radius: var(--r);
+    padding: 5px 12px; font: 600 12px var(--sans); cursor: pointer; }
+  .tour-row button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
+  .ap-tour { margin-top: 10px; background: none; border: 1px solid var(--border); color: var(--fg-dim); border-radius: var(--r);
+    padding: 6px 12px; font: 12px var(--sans); cursor: pointer; }
+  .ap-tour:hover { color: var(--fg); border-color: var(--border-strong); }
   .ap-char i { flex: none; width: 52px; height: 72px; background-size: auto 72px; background-position: 0 0;
     background-repeat: no-repeat; image-rendering: pixelated; }
   .ap-char span { display: flex; flex-direction: column; gap: 2px; }
@@ -1029,7 +1047,18 @@
   .tm-new { background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--r);
     padding: 5px 12px; font: 600 12px var(--sans); cursor: pointer; margin-right: 10px; }
   .nh-wrap { white-space: normal; font-family: var(--sans); }
-  .nh-more { margin: 8px 2px 0; color: var(--fg-faint); font-size: 11.5px; line-height: 1.5; }
+  .nh-more { margin: 0 2px 4px; color: var(--fg-faint); font-size: 12px; }
+  .nh-more summary { cursor: pointer; padding: 4px 0; }
+  .nh-more summary:hover { color: var(--fg-dim); }
+  .nh-more-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; max-height: 190px; overflow-y: auto; }
+  .nh-more-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: var(--r); color: var(--fg); font-size: 12.5px; }
+  .nh-more-row > span:nth-child(2) { flex: 1; min-width: 0; }
+  .nh-more-row small { display: block; color: var(--fg-faint); font-size: 10.5px; }
+  .nh-more-row a, .nh-more-row button { flex: none; font: 600 11.5px var(--sans); color: var(--accent-2); background: none;
+    border: 1px solid var(--border); border-radius: var(--r); padding: 3px 9px; text-decoration: none; cursor: pointer; }
+  .nh-more-row a:hover, .nh-more-row button:hover { border-color: var(--accent); }
+  .nh-more-row button:disabled { opacity: .6; cursor: default; }
   .nh-seg { margin: 4px 0 14px; }
   .nh-seg button { display: flex; gap: 10px; align-items: flex-start; }
   .nh-seg button .hx-mini { margin: 1px 0 0; flex-shrink: 0; }
@@ -3594,7 +3623,7 @@
       </button>
       <button class="btn-mini danger" id="btn-eject" title="Unload model" hidden>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3l8 9H4z"/><path d="M4 21h16"/></svg>
-        eject
+        <span id="btn-eject-label">eject</span>
       </button>
     </div>
 
@@ -4483,6 +4512,7 @@
             <button type="button" class="ap-mode ap-char" data-look="her"><i style="background-image:url(/assets/team/main.png)"></i><span><b>Orange scarf</b><small>Long hair. Sits, reads by the fire, tends it.</small></span></button>
             <button type="button" class="ap-mode ap-char" data-look="him"><i style="background-image:url(/assets/team/main_m.png)"></i><span><b>Teal scarf</b><small>Short hair. Always on his feet.</small></span></button>
           </div>
+          <button type="button" class="ap-tour" onclick="startTour()">Show me around again</button>
         </div>
 <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">In the chat</h4>
         <div class="field">
@@ -4518,7 +4548,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Sounds</div>
-            <div class="hint">A soft cue when a turn finishes, and a low one on an error. Off by default.</div>
+            <div class="hint">A soft cue when a turn finishes, and a low one on an error.</div>
           </div>
           <div class="switch" data-key="sounds"></div>
         </div>
@@ -5213,6 +5243,13 @@
             <button type="button" data-uimode="advanced">Advanced<small>Every step, logs and engine settings</small></button>
           </div>
         </div>
+        <div class="ob-section">
+          <div class="ob-label">In the room</div>
+          <div class="ob-seg ob-seg-faces" id="ob-roomlook">
+            <button type="button" data-roomlook="her"><i style="background-image:url(/assets/team/main.png)"></i><span>Orange scarf<small>Sits, reads, tends the fire</small></span></button>
+            <button type="button" data-roomlook="him"><i style="background-image:url(/assets/team/main_m.png)"></i><span>Teal scarf<small>Always on his feet</small></span></button>
+          </div>
+        </div>
       </div>
 
       <!-- ---- step 7: migrate ---- -->
@@ -5504,14 +5541,32 @@ async function api(path, opts = {}) {
   return r.json();
 }
 
+// What a voice test reads: a line worth hearing, a different one each time.
+const VOICE_QUOTES = [
+  ['To strive, to seek, to find, and not to yield.', 'Tennyson'],
+  ['A journey of a thousand miles begins with a single step.', 'Lao Tzu'],
+  ['We know what we are, but know not what we may be.', 'Shakespeare'],
+  ['Forever is composed of nows.', 'Emily Dickinson'],
+  ['Keep your face always toward the sunshine, and shadows will fall behind you.', 'Walt Whitman'],
+  ['You have power over your mind, not outside events. Realize this, and you will find strength.', 'Marcus Aurelius'],
+  ['Do not go where the path may lead. Go instead where there is no path, and leave a trail.', 'Emerson'],
+  ['I am not afraid of storms, for I am learning how to sail my ship.', 'Louisa May Alcott'],
+  ['It is never too late to be what you might have been.', 'George Eliot'],
+  ['Luck is what happens when preparation meets opportunity.', 'Seneca'],
+];
+let _voiceQuoteAt = Math.floor(Math.random() * VOICE_QUOTES.length);
+function voiceQuote() {
+  const [text, by] = VOICE_QUOTES[_voiceQuoteAt++ % VOICE_QUOTES.length];
+  return { text, by };
+}
 const _toastLast = {};
-// Optional audio cues (Settings → Sounds, default off): a soft rising two-note on
+// Audio cues (Settings → Sounds, on unless turned off): a soft rising two-note on
 // a completed turn, a low two-tone on error. Generated with the Web Audio API so
 // there are NO asset files to bundle or load, and it stays silent unless enabled.
 let _audioCtx = null;
 function _playSound(kind) {
   try {
-    if (!(STATE.settings && STATE.settings.sounds)) return;
+    if (STATE.settings && STATE.settings.sounds === false) return;
     _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     const ctx = _audioCtx, now = ctx.currentTime;
     const tone = (freq, start, dur, vol) => {
@@ -6405,8 +6460,14 @@ function applyBrainState() {
 
   // Eject only makes sense for a LOCAL, currently-loaded model (frees VRAM).
   // Cloud brains use no local VRAM → no eject affordance at all.
-  const ej = $$id('btn-eject');
-  if (ej) ej.hidden = (b.kind === 'cloud') || !b.loaded;
+  // While a local model is still loading the same button stops the load.
+  const ej = $$id('btn-eject'), loading = !!STATE.loadingNow && b.kind !== 'cloud';
+  if (ej) {
+    ej.hidden = (b.kind === 'cloud') || !(b.loaded || loading);
+    ej.title = loading ? 'Stop loading this model' : 'Unload model';
+    const lab = $$id('btn-eject-label');
+    if (lab) lab.textContent = loading ? 'stop' : 'eject';
+  }
 
   // Brand subtitle: "· local" / "· xAI Grok" / "· Gemini" …
   const bsub = $$id('brand-sub');
@@ -8452,7 +8513,7 @@ $('model-select').addEventListener('change', async (e) => {
           'err',
           15000,
         );
-      } else {
+      } else if (!(r && r.stopped)) {
         toast('Load failed', (r && r.error) || 'unknown', 'err', 7000);
       }
     }
@@ -8473,6 +8534,15 @@ $('model-select').addEventListener('change', async (e) => {
 });
 
 $('btn-eject').addEventListener('click', async () => {
+  // Still loading: stop it now, no question asked, nothing was in use yet.
+  if (STATE.loadingNow && STATE.brain.kind !== 'cloud') {
+    try {
+      await api('/api/llmserver/stop', { method: 'POST' });
+      toast('Stopped', 'The model was not loaded.', 'ok', 3000);
+    } catch (e) { toast("Couldn't stop it", e.message, 'err'); }
+    hideLoadProgress(); stopLoadProgress();
+    return;
+  }
   // Eject is hidden for cloud brains (no local VRAM to free) and when nothing
   // is loaded — applyBrainState enforces that. Guard anyway.
   if (!STATE.brain.loaded || STATE.brain.kind === 'cloud') return;
@@ -11258,6 +11328,8 @@ function renderFiles(entries) {
       readBtn.title = 'Read'; actions.append(readBtn);
       readBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
+        const kind = /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name) ? 'image' : /\.(mp4|webm|mov|m4v)$/i.test(f.name) ? 'video' : '';
+        if (kind) { openLightbox('/file?path=' + encodeURIComponent(fullPath), kind, fullPath); return; }
         try {
           const r = await api(`/api/file?path=${encodeURIComponent(fullPath)}&op=read`);
           showModal(f.name, r.content, [{ label: 'Close' }]);
@@ -11351,6 +11423,7 @@ function stickerSetLoadingModel(pathOrId, name) {
 }
 
 function showLoadProgress(phase, percent, marker) {
+  if (!STATE.loadingNow) { STATE.loadingNow = true; try { applyBrainState(); } catch {} }
   _stickerProgress(phase, percent);
   const box = $('st-loading');
   if (!box) return;
@@ -11361,6 +11434,7 @@ function showLoadProgress(phase, percent, marker) {
   if (marker) box.title = marker;
 }
 function hideLoadProgress() {
+  if (STATE.loadingNow) { STATE.loadingNow = false; try { applyBrainState(); } catch {} }
   _stickerProgress(null, null);
   const box = $('st-loading');
   if (box) box.hidden = true;
@@ -12396,7 +12470,7 @@ async function refreshSettings() {
       const who = _agentName();
       const key = String(voice || '')[0];
       if (_SAMPLE[key]) return _SAMPLE[key](who);
-      return `Hi, I'm ${who}. This is how I sound.`;
+      return voiceQuote().text;
     }
     // Wait a short while for a failure from inside the speaking threads, and
     // return its text if one arrives. Silence here means it played.
@@ -15873,6 +15947,7 @@ function modelsWireRowClicks(pane) {
 }
 
 function modelsShowStartFailure(r, fname, origBody) {
+  if (r && r.stopped) return;                 // stopped on purpose, nothing went wrong
   const err = r.error || 'unknown error';
   const tail = r.log_tail || '';
   const logPath = r.log_path || '';
@@ -16906,13 +16981,14 @@ let obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model
 
 // Segmented choices. Look and how-much-to-show apply the moment they're
 // picked, so the setup itself changes in front of you.
-const _OB_SEGS = { audio: 'ob-audio', approval: 'ob-approval', look: 'ob-look', uimode: 'ob-uimode' };
+const _OB_SEGS = { audio: 'ob-audio', approval: 'ob-approval', look: 'ob-look', uimode: 'ob-uimode', roomlook: 'ob-roomlook' };
 function _obSegValue(key) {
   // The look and how much to show are the app's, not this setup's: always what is in force now.
-  if (obState[key] && key !== 'look' && key !== 'uimode') return obState[key];
+  if (obState[key] && key !== 'look' && key !== 'uimode' && key !== 'roomlook') return obState[key];
   if (key === 'approval') return 'ask';
   if (key === 'look') { try { return localStorage.getItem('hearth_theme') || 'classic'; } catch { return 'classic'; } }
   if (key === 'uimode') return document.documentElement.dataset.ui === 'advanced' ? 'advanced' : 'simple';
+  if (key === 'roomlook') { try { return localStorage.getItem('hearth_room_look') || 'her'; } catch { return 'her'; } }
   return '';
 }
 function _obPaintSegs(instant = true) {
@@ -16933,6 +17009,7 @@ for (const [key, id] of Object.entries(_OB_SEGS)) {
     obState[key] = b.dataset[key];
     if (key === 'look') revealLook(e.clientX, e.clientY, () => hearthSetAppearance(obState.look));
     if (key === 'uimode') hearthSetInterface(obState.uimode);
+    if (key === 'roomlook') hearthSetRoomLook(obState.roomlook);
     _obPaintSegs(false);
     _saveOnboardingDraft();
   });
@@ -17325,10 +17402,10 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
       });
       const r = await fetch('/api/tts', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ text: `Hello. I'm ${_agentName()}. The fire is lit, the house is quiet, and I'm listening.` }),
+        body: JSON.stringify({ text: (window._obQuote = voiceQuote()).text }),
       });
       if (r.ok) {
-        if (testMsg) testMsg.textContent = '✓ played - adjust and re-test if needed.';
+        if (testMsg) testMsg.textContent = `✓ ${window._obQuote.by}. Press again for another.`;
       } else {
         if (testMsg) testMsg.textContent = '✗ playback failed - see Settings → Voice for details.';
       }
@@ -17526,6 +17603,7 @@ async function obFinish(skipped) {
   } catch {}
   _clearOnboardingDraft();
   await _obFoldAway();
+  if (!skipped) startTour();
 }
 
 // The page after the brain step offers a cloud key. Someone who just picked
@@ -17927,9 +18005,7 @@ window.addEventListener('load', function initSidebarDrawer() {
   const uiBox = document.getElementById('ap-ui'), roomBox = document.getElementById('ap-room');
   if (roomBox) roomBox.addEventListener('click', e => {
     const b = e.target.closest('.ap-mode'); if (!b) return;
-    try { localStorage.setItem('hearth_room_look', b.dataset.look); } catch {}
-    mark();
-    ROOM.labelSig = ''; roomStripRender();
+    hearthSetRoomLook(b.dataset.look);
   });
   const mark = () => {
     if (roomBox) roomBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.look === cur('hearth_room_look', 'her')));
@@ -17948,7 +18024,7 @@ window.addEventListener('load', function initSidebarDrawer() {
     try { renderChat(); } catch {}
   });
   fetch('/assets/team/manifest.json', { cache: 'no-store' }).then(r => r.json()).then(m => {
-    if (roomBox) roomBox.querySelectorAll('.ap-char i').forEach(i => {
+    document.querySelectorAll('.ap-char i, .ob-seg-faces i').forEach(i => {
       i.style.backgroundImage = i.style.backgroundImage.replace(/\.png(\?v=\w+)?/, '.png?v=' + (m.v || ''));
     });
   }).catch(() => {});
@@ -18146,7 +18222,14 @@ $('tm-new').addEventListener('click', async () => {
     <div class="ob-seg nh-seg" id="nh-jobs">${(c.roles || []).map(jobBtn).join('')}</div>
     ${agents.length ? `<div class="nh-label">Or hand it to an agent<span class="nh-note">on your own account</span></div>
     <div class="ob-seg nh-seg" id="nh-agents">${agents.map(agentBtn).join('')}</div>` : ''}
-    ${(c.more_agents || []).length ? `<p class="nh-more">These are the agent programs installed on this PC. I can also use ${esc(c.more_agents.slice(0, 6).join(', '))}${c.more_agents.length > 6 ? ` and ${c.more_agents.length - 6} more` : ''} once ${c.more_agents.length === 1 ? 'it is' : 'they are'} installed.</p>` : ''}
+    ${(c.more_agents || []).length ? `<details class="nh-more" open><summary>${c.more_agents.length} more I can use once ${c.more_agents.length === 1 ? 'it is' : 'they are'} on this PC</summary>
+      <div class="nh-more-list">${c.more_agents.map(a => {
+        const h = HARNESS[a.id] || { c: 'var(--accent)', label: a.label };
+        const act = a.get === 'setup' ? `<button type="button" data-get="setup" data-agent="${esc(a.id)}">Set up</button>`
+          : a.get === 'install' ? `<button type="button" data-get="install" data-agent="${esc(a.id)}">Install</button>`
+          : `<a href="${esc(a.site)}" target="_blank" rel="noopener">Get</a>`;
+        return `<div class="nh-more-row"><span class="hx-mini" style="--hx:${h.c}">${harnessMark(h)}</span><span>${esc(a.label)}<small>${esc(a.maker)}</small></span>${act}</div>`;
+      }).join('')}</div></details>` : ''}
     <div class="nh-where" id="nh-where" hidden>
       <div class="nh-label">In which folder</div>
       <input class="nh-folder" id="nh-folder" placeholder="${esc(c.workspace || 'the workspace')}">
@@ -18167,6 +18250,23 @@ $('tm-new').addEventListener('click', async () => {
       setTimeout(teamPoll, 400);
     } },
   ]);
+  // One that isn't here: set it up or install it without leaving, then show the list again.
+  const moreList = document.querySelector('#modal-body .nh-more-list');
+  if (moreList) moreList.addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-get]');
+    if (!b) return;
+    if (b.dataset.get === 'setup') { $('modal').classList.remove('open'); agentSetup(b.dataset.agent); return; }
+    b.disabled = true; b.textContent = 'Installing…';
+    try {
+      await api('/api/agents/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.agent }) });
+      $('modal').classList.remove('open');
+      askToast('Installed', 'Open it once to sign in, then it is ready to take tasks.', 'Open it',
+               () => api('/api/agents/signin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.agent }) }).catch(() => {}));
+    } catch (err) {
+      b.disabled = false; b.textContent = 'Install';
+      toast("Couldn't install it", String(err.message || err).replace(/^\d+\s*/, ''), 'warn', 9000);
+    }
+  });
   const boxes = [$('nh-jobs'), $('nh-agents')].filter(Boolean);
   const where = $('nh-where');
   const choose = (b, instant) => {
@@ -18291,6 +18391,73 @@ function roomFrame(name, skin) {
   if (more >= 0) return ROOM.man.frames.length + more;
   return Math.max(0, ROOM.man.frames.indexOf(FRAME_NEAREST[name] || 'idle'));
 }
+// A short walk round the app after setup: one ring that moves from thing to
+// thing and a card beside it. Skippable at every stop, and never shown twice
+// unless asked for.
+const TOUR_STOPS = [
+  { sel: '#mp-trigger', title: 'What I think with', text: 'A model on this PC, a cloud one, or an agent you already use. Change it here whenever you like.' },
+  { sel: '#input', title: 'Talk to me', text: 'Type here, or press the mic and say it. Ask for something on your PC: a file, an app, a search.' },
+  { sel: '.nav-btn[data-view="team"]', title: 'The room', text: 'Bigger jobs go to helpers. They work here where you can watch, and clicking anyone shows what they are doing.' },
+  { sel: '.nav-btn[data-view="memory"]', title: 'What I remember', text: 'What I have learned about you and your work. Read it, change it, or delete it.' },
+  { sel: '.nav-btn[data-view="models"]', title: 'Models', text: 'Find a model, see whether it fits this PC, and download it. Nothing is downloaded unless you ask.' },
+  { sel: '.nav-btn[data-view="settings"]', title: 'Settings', text: 'Voice, looks, what I may do without asking, and your phone. You can take this tour again from Appearance.' },
+];
+function startTour() {
+  if (document.getElementById('tour-ring')) return;
+  const ring = document.createElement('div'); ring.id = 'tour-ring';
+  const card = document.createElement('div'); card.id = 'tour-card';
+  document.body.append(ring, card);
+  let at = -1, last = null;
+  const end = () => {
+    ring.remove(); card.remove();
+    document.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('resize', place);
+    try { localStorage.setItem('hearth_tour_done', '1'); } catch {}
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); end(); } else if (e.key === 'Enter' || e.key === 'ArrowRight') { e.stopPropagation(); go(1); } };
+  const place = (animate) => {
+    const el = document.querySelector(TOUR_STOPS[at].sel);
+    if (!el) return;
+    const r = el.getBoundingClientRect(), pad = 6;
+    const box = { left: r.left - pad, top: r.top - pad, width: r.width + pad * 2, height: r.height + pad * 2 };
+    const to = { left: box.left + 'px', top: box.top + 'px', width: box.width + 'px', height: box.height + 'px' };
+    if (animate === true && last && !_reduceMotion()) {
+      const sp = springEasing(0.42, 0.86);
+      ring.animate([last, to], { duration: sp.duration, easing: sp.easing });
+    }
+    Object.assign(ring.style, to);
+    last = to;
+    // The card sits beside the thing: to its right when there is room, else under it.
+    const cw = 300, right = box.left + box.width + 16 + cw < window.innerWidth;
+    const x = right ? box.left + box.width + 16 : Math.max(12, Math.min(window.innerWidth - cw - 12, box.left));
+    const y = right ? Math.max(12, Math.min(window.innerHeight - 190, box.top)) : Math.min(window.innerHeight - 190, box.top + box.height + 14);
+    card.style.left = x + 'px'; card.style.top = y + 'px';
+  };
+  const go = (step) => {
+    at += step;
+    if (at >= TOUR_STOPS.length) { end(); return; }
+    const st = TOUR_STOPS[at];
+    card.innerHTML = `<b>${esc(st.title)}</b><p>${esc(st.text)}</p>
+      <div class="tour-row"><span>${at + 1} of ${TOUR_STOPS.length}</span><button type="button" data-t="skip">Skip</button><button type="button" class="primary" data-t="next">${at === TOUR_STOPS.length - 1 ? 'Done' : 'Next'}</button></div>`;
+    if (!_reduceMotion()) card.animate([{ opacity: 0.3, filter: 'blur(5px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 220, easing: 'ease-out' });
+    place(true);
+  };
+  card.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.t === 'skip') end(); else go(1);
+  });
+  document.addEventListener('keydown', onKey, true);
+  window.addEventListener('resize', place);
+  showView('chat');
+  go(1);
+}
+// Which of the two characters the assistant is drawn as. Said to every view of it.
+function hearthSetRoomLook(look) {
+  try { localStorage.setItem('hearth_room_look', look); } catch {}
+  ROOM.labelSig = '';
+  try { roomStripRender(); } catch {}
+  document.dispatchEvent(new Event('hearth:look'));
+}
 // The assistant is drawn as whichever of the two characters was picked.
 function roomSkin(a) {
   if (a.role !== 'main') return a.role;
@@ -18356,7 +18523,9 @@ function roomPick(list, seed, period) {
 }
 function roomMainIdle(p) {
   const skin = roomSkin(p.agent);
-  return roomPick(roomHas(skin, 'sit') ? MAIN_IDLE.concat(MAIN_IDLE_MORE) : MAIN_IDLE, p.seed, 45000);
+  // At a window you look out of it. Someone not drawn side-on does that with their back to the room.
+  const plain = MAIN_IDLE.filter(([spot, pose]) => !(spot.startsWith('window') && pose !== 'gaze'));
+  return roomPick(roomHas(skin, 'sit') ? MAIN_IDLE.concat(MAIN_IDLE_MORE) : plain, p.seed, 45000);
 }
 function roomMainIdleWord(p) {
   // Where it is, not where it is headed: "making coffee" is for the counter.
@@ -18650,7 +18819,8 @@ function roomDraw(t) {
     }
     // The cat sleeps on the rug by the fire and sits up to watch when there is work going on.
     if (roomProp('cat_sleep')) {
-      items.push({ kind: 'prop', name: roomMainBusy() ? 'cat_sit' : 'cat_sleep', x: 868, y: 452, shadow: [19, 5, 5] });
+      const up = roomMainBusy() || ROOM.catUntil > Date.now();
+      items.push({ kind: 'prop', name: up ? 'cat_sit' : 'cat_sleep', x: 868, y: 452, shadow: [19, 5, 5] });
       items.push({ kind: 'prop', name: 'books', x: 452, y: 446, shadow: [20, 5, 8] });
       items.push({ kind: 'prop', name: 'stool', x: 1238, y: 418, shadow: [20, 6, 14] });
     }
@@ -18734,11 +18904,15 @@ function roomDraw(t) {
   grad.addColorStop(0, `rgba(255,150,60,${fl})`); grad.addColorStop(1, 'rgba(255,150,60,0)');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, cv.width, cv.height);
 
+  // The cat: woken by a click, it sits up, says its piece and goes back to sleep.
+  hits.push({ cat: true, x0: (868 - 28) * kx / dpr, x1: (868 + 28) * kx / dpr, y0: (452 - 42) * ky / dpr, y1: (452 + 4) * ky / dpr, z: 452 });
+  if (ROOM.catSay && ROOM.catSay.until > Date.now()) labels.push({ cat: ROOM.catSay.text, x: 868 * kx / dpr, y: (452 - 44) * ky / dpr });
   ROOM.hits = hits;
   // Labels and speech are redrawn only when something about them changed, so
   // a click on one lands on the same element it was aimed at.
   const now = Date.now();
-  const sig = labels.map(({ p, x, y }) => {
+  const sig = labels.map(({ p, x, y, cat }) => {
+    if (cat) return 'cat|' + cat;
     const say = ROOM.says.get(p.id);
     return [p.id, Math.round(x), Math.round(y), p.agent.status, p.agent.blocked, p.agent.runtime, ROOM.sel === p.id,
             say && say.until > now ? say.text : ''].join('|');
@@ -18748,7 +18922,15 @@ function roomDraw(t) {
   const box = $('tm-labels');
   box.innerHTML = '';
   const placed = [];
-  for (const { p, x, y } of labels) {
+  for (const { p, x, y, cat } of labels) {
+    if (cat) {
+      const b = document.createElement('div');
+      b.className = 'tm-say doing';
+      b.style.left = x + 'px'; b.style.top = y + 'px';
+      b.textContent = cat;
+      box.appendChild(b);
+      continue;
+    }
     const a = p.agent;
     const st = teamNeedsYou(a) ? 'needs' : a.status;
     const el = document.createElement('div');
@@ -19002,6 +19184,13 @@ $('tm-canvas').addEventListener('click', (e) => {
   const r = $('tm-canvas').getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
   const hit = ROOM.hits.filter(h => x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1).sort((a, b) => b.z - a.z)[0];
+  if (hit && hit.cat) {
+    const said = ['Mrrp.', 'Purr…', 'Mrow?', '…', 'Prrt.'];
+    ROOM.catUntil = Date.now() + 5000;
+    ROOM.catSay = { text: said[Math.floor(Math.random() * said.length)], until: Date.now() + 2200 };
+    ROOM.labelSig = '';
+    return;
+  }
   if (hit) roomPoke(hit.p);
 });
 $('tm-compose').addEventListener('submit', (e) => {

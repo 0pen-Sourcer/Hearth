@@ -143,6 +143,38 @@ _ui = open(os.path.join(ROOT, "hearth", "ui.html"), encoding="utf-8").read()
 check("the window asks whether a failure landed after the button was pressed",
       "speakErrorSince" in _ui and "last_speak_error_at" in _ui)
 
+# Voice files that are damaged read as missing, so they get fetched again.
+import tempfile as _tf                                                # noqa: E402
+from hearth import voice as _v, listen as _l                          # noqa: E402
+_real_dir = _v.VOICES_DIR
+_v.VOICES_DIR = _tf.mkdtemp(prefix="hearth-voices-")
+open(os.path.join(_v.VOICES_DIR, "kokoro-v1.0.onnx.part"), "wb").write(b"0" * 4096)
+check("a download that never finished is not taken for the voice model", _v._find("kokoro") is None)
+open(os.path.join(_v.VOICES_DIR, "kokoro-v1.0.onnx"), "wb").write(b"0" * 4096)
+open(os.path.join(_v.VOICES_DIR, "voices-v1.0.bin"), "wb").write(b"0" * 4096)
+check("files cut short count as present until they are looked at", _v.models_present())
+check("a cut-off voice model is removed", sorted(_v.drop_damaged_models()) == ["kokoro-v1.0.onnx", "voices-v1.0.bin"]
+      and not _v.models_present())
+_v._MIN_BYTES = {"kokoro": 10, "voices": 10}
+open(os.path.join(_v.VOICES_DIR, "kokoro-v1.0.onnx"), "wb").write(b"0" * 4096)
+open(os.path.join(_v.VOICES_DIR, "voices-v1.0.bin"), "wb").write(b"0" * 4096)
+check("whole files are left alone when the failure isn't about them",
+      _v.drop_damaged_models("CUDAExecutionProvider is not available") == [] and _v.models_present())
+check("and removed when the failure is about the file",
+      len(_v.drop_damaged_models("InvalidProtobuf: [ONNXRuntimeError] Protobuf parsing failed")) == 2)
+_v.VOICES_DIR = _real_dir
+_real_ldir, _real_size = _l.VOICES_DIR, _l.MODEL_SIZE
+_l.VOICES_DIR, _l.MODEL_SIZE = _tf.mkdtemp(prefix="hearth-whisper-"), "base.en"
+_snap = os.path.join(_l.VOICES_DIR, "whisper", "models--Systran--faster-whisper-base.en", "snapshots", "abc")
+os.makedirs(_snap)
+open(os.path.join(_snap, "model.bin"), "wb").write(b"junk")
+os.makedirs(os.path.join(_l.VOICES_DIR, "whisper", "models--Systran--faster-whisper-small.en"))
+check("the listening model on disk is found", _l.model_present())
+check("damaged, it is removed, and another size is left alone",
+      _l._drop_model_files() and not _l.model_present()
+      and os.path.isdir(os.path.join(_l.VOICES_DIR, "whisper", "models--Systran--faster-whisper-small.en")))
+_l.VOICES_DIR, _l.MODEL_SIZE = _real_ldir, _real_size
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

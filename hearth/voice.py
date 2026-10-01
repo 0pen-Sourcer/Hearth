@@ -176,10 +176,42 @@ def last_speak_error() -> dict:
 
 def _find(*candidates: str) -> Optional[str]:
     for fn in os.listdir(VOICES_DIR) if os.path.isdir(VOICES_DIR) else []:
+        if fn.endswith(".part"):
+            continue                    # a download that never finished is not the file
         for cand in candidates:
             if cand in fn.lower():
                 return os.path.join(VOICES_DIR, fn)
     return None
+
+
+# Far below their real sizes (about 310 MB and 27 MB): under this a file is a
+# cut-off download or what an antivirus left of it.
+_MIN_BYTES = {"kokoro": 50 * 1024 * 1024, "voices": 5 * 1024 * 1024}
+_DAMAGE_WORDS = ("protobuf", "corrupt", "unexpected end", "not a valid", "pickle", "bad magic",
+                 "truncat", "eoferror", "badzipfile", "cannot reshape")
+
+
+def drop_damaged_models(error: str = "") -> List[str]:
+    """Remove voice files that can't be what they should be, so they read as
+    missing and get fetched again. A file is damaged when it is far too small,
+    or when loading failed with an error that points at the file itself."""
+    gone = []
+    blames_file = any(w in (error or "").lower() for w in _DAMAGE_WORDS)
+    for key, floor in _MIN_BYTES.items():
+        path = _find(key)
+        if not path:
+            continue
+        try:
+            small = os.path.getsize(path) < floor
+        except OSError:
+            small = True
+        if small or blames_file:
+            try:
+                os.remove(path)
+                gone.append(os.path.basename(path))
+            except OSError:
+                pass
+    return gone
 
 
 # Same release the installer pulls from. Auto-fetched on first TTS use if the
@@ -347,6 +379,9 @@ def _ensure_kokoro_models(allow_download: bool = False) -> bool:
     return bool(_find("kokoro") and _find("voices"))
 
 
+_healing = [False]            # one re-fetch per failure, never a loop
+
+
 def _try_kokoro(allow_download: bool = False):
     global _last_load_error
     if not _ensure_kokoro_models(allow_download=allow_download):
@@ -411,6 +446,18 @@ def _try_kokoro(allow_download: bool = False):
             os.environ["ORT_PROVIDERS"] = ",".join(providers)
             return Kokoro(model, voices)
     except Exception as e:
+        # The files themselves may be the fault: half a download, or what an
+        # antivirus left. They are removed so they read as missing, and fetched
+        # again at once when speaking is what asked for them.
+        if drop_damaged_models(f"{type(e).__name__}: {e}"):
+            if allow_download and not _healing[0]:
+                _healing[0] = True
+                try:
+                    return _try_kokoro(allow_download=True)
+                finally:
+                    _healing[0] = False
+            _last_load_error = "The voice files on this PC were damaged, so I removed them. Get them again from Settings, Voice."
+            return None
         _last_load_error = (
             f"Kokoro init failed: {type(e).__name__}: {e}. "
             f"(model={os.path.basename(model)}, voices={os.path.basename(voices)}, "

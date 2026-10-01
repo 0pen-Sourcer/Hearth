@@ -119,6 +119,17 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     "openhands": {"label": "OpenHands", "maker": "All Hands AI", "exe": ["openhands"],
                   "args": lambda allow: ["--headless", "-t"], "stream": "text", "prompt_arg": True, "auto_only": True},
 }
+# Where each one is got from, for the ones that aren't on the PC.
+SITES = {"claude-code": "https://claude.com/claude-code", "codex": "https://chatgpt.com/codex",
+         "antigravity": "https://antigravity.google", "gemini-cli": "https://github.com/google-gemini/gemini-cli",
+         "grok": "https://x.ai/cli", "kimi": "https://github.com/MoonshotAI/kimi-cli", "opencode": "https://opencode.ai",
+         "qwen-code": "https://github.com/QwenLM/qwen-code", "crush": "https://github.com/charmbracelet/crush",
+         "cursor-agent": "https://cursor.com/cli", "copilot": "https://github.com/github/copilot-cli",
+         "goose": "https://goose-docs.ai", "aider": "https://aider.chat", "droid": "https://factory.ai",
+         "amp": "https://ampcode.com", "pi": "https://pi.dev", "cline": "https://cline.bot",
+         "continue": "https://continue.dev", "amazon-q": "https://aws.amazon.com/q/developer/",
+         "kiro": "https://kiro.dev", "kilo": "https://kilo.ai", "augment": "https://www.augmentcode.com",
+         "openhands": "https://all-hands.dev"}
 # Only these have been run end to end from Hearth; the rest follow their docs.
 VERIFIED = {"claude-code"}
 
@@ -354,10 +365,28 @@ def setup_state(fresh: bool = False) -> List[Dict[str, Any]]:
              "installed": bool(find(aid)), "signed_in": signed_in(aid, fresh)} for aid in SETUP]
 
 
+def how_to_get(aid: str) -> str:
+    """What Hearth can do about an agent that isn't here: "setup" (install and
+    sign in from the dialog), "install" (it comes from npm and Node is on this
+    PC), or "site" (its maker's page)."""
+    if aid in SETUP:
+        return "setup"
+    if aid in NPM_PACKAGES and (shutil.which("npm.cmd") or shutil.which("npm")):
+        return "install"
+    return "site"
+
+
+def missing() -> List[Dict[str, Any]]:
+    """The agent programs Hearth can run that aren't on this PC, each with how to get it."""
+    here = {a["id"] for a in available()}
+    return [{"id": aid, "label": spec["label"], "maker": spec.get("maker", ""), "site": SITES.get(aid, ""),
+             "get": how_to_get(aid)} for aid, spec in AGENTS.items() if aid not in here and aid in SITES]
+
+
 def install(aid: str) -> Dict[str, Any]:
     """Install an agent with its maker's installer. Asked for by the person,
     from the setup dialog; never on its own."""
-    how = SETUP.get(aid)
+    how = SETUP.get(aid) or ({"npm": NPM_PACKAGES[aid]} if aid in NPM_PACKAGES and aid in AGENTS else None)
     if not how:
         return {"ok": False, "error": "that isn't an agent Hearth can install"}
     if find(aid):
@@ -386,8 +415,9 @@ def install(aid: str) -> Dict[str, Any]:
 def sign_in(aid: str) -> Dict[str, Any]:
     """Open the agent's own sign-in in a window of its own; it opens the
     browser from there. Hearth never sees the account or its password."""
-    how = SETUP.get(aid)
-    exe = find(aid) if how else None
+    # One with no sign-in command of its own is simply opened: it asks on its first run.
+    how = SETUP.get(aid) or {"login": []}
+    exe = find(aid) if aid in AGENTS else None
     if not exe:
         return {"ok": False, "error": "install it first"}
     argv = _direct_argv(exe) + how["login"]

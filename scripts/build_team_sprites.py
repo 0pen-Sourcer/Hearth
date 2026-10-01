@@ -216,6 +216,11 @@ def second_main(art: str):
         return None
     frames = strip_frames(key_magenta(Image.open(path)), len(FRAMES))
     names = [f[0] for f in FRAMES]
+    # His walk was drawn direction by direction (down, down, up, up, side,
+    # side); everyone else's goes step by step (down, up, side, then again).
+    drawn = ["walk_down_1", "walk_down_2", "walk_up_1", "walk_up_2", "walk_side_1", "walk_side_2"]
+    walk = {name: frames[8 + k] for k, name in enumerate(drawn)}
+    frames = [walk.get(n, f) for n, f in zip(names, frames)]
     scale = STAND_H * 1.06 / standing_height(frames, {0, 4, 5, 6, 7})
     atlas = Image.new("RGBA", (CELL_W * len(FRAMES), CELL_H), (0, 0, 0, 0))
     for i, (cell, bb) in enumerate(frames):
