@@ -142,6 +142,8 @@ Hearth runs from source on macOS and Linux. The CLI and web UI work, and most to
 
 **Background jobs.** Long-running operations (whole-drive scans, big searches) return a job ID immediately and run in a background thread while you keep working. List jobs and collect results when they finish.
 
+**Hand work to other agents.** Say "have Claude Code fix the failing test" and JARVIS passes the task to that agent, running on your own install and account, and brings back its answer. Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Aider, Goose and several more work the same way, and each shows up in the Team view under its own badge.
+
 **MCP, both directions.** Hearth exposes its own tools as an MCP server, and it also consumes other MCP servers: drop an `mcp.json` in the workspace and their tools appear alongside the built-ins.
 
 **Voice.** Text-to-speech (Kokoro) streams sentence by sentence; speech-to-text (faster-whisper) supports a continuous-listen mode with mid-sentence barge-in, talk over a reply and it cuts on your first word, then answers what you interrupted with. Both auto-detect your hardware, text-to-speech on CUDA or DirectML, speech-to-text on CUDA, either falling back to CPU. Solid on a headset; still sharpening for speaker setups.
@@ -286,9 +288,9 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 
 **Can it use a cloud model?** Optionally. Set a cloud endpoint in Settings or via env vars. Local is the default; your files, voice, and memory stay local either way.
 
-**Is anything sent to the cloud?** Only web search/fetch (DuckDuckGo), and only when the model invokes them. No telemetry.
+**Is anything sent to the cloud?** Only web search (DuckDuckGo) and the pages it then reads, along with those sites' own icons, and only when the model calls them. A cloud model or another agent CLI gets what you choose to send it. No telemetry.
 
-**Will it touch my files unexpectedly?** Writes are confined to the workspace by default and risky tools prompt for permission the first time per session. `HEARTH_AUTO_APPROVE=1` removes the prompts.
+**Will it touch my files unexpectedly?** Writes are confined to the workspace by default. A switch in the chat bar decides what runs without asking: Ask checks with you before anything acts on your machine, Auto-edit lets edits inside the workspace through, and Auto runs the rest on its own but still asks before anything that deletes, moves or stops things.
 
 **Does it work offline?** Yes, except web search/fetch.
 
