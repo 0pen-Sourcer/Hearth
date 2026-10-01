@@ -967,12 +967,12 @@
   .tm-new { background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--r);
     padding: 5px 12px; font: 600 12px var(--sans); cursor: pointer; margin-right: 10px; }
   .nh-wrap { white-space: normal; font-family: var(--sans); }
-  .nh-picks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin: 4px 0 14px; max-height: 260px; overflow: auto; }
-  .nh-pick { text-align: left; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r);
-    padding: 8px 10px; color: var(--fg); cursor: pointer; font: 600 12.5px var(--sans); display: flex; gap: 8px; align-items: flex-start; }
-  .nh-pick small { display: block; font-weight: 400; color: var(--fg-dim); font-size: 11.5px; margin-top: 2px; line-height: 1.35; }
-  .nh-pick.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-2)); }
-  .nh-pick .hx-mini { margin: 1px 0 0; flex-shrink: 0; }
+  .nh-seg { margin: 4px 0 14px; }
+  .nh-seg button { display: flex; gap: 10px; align-items: flex-start; }
+  .nh-seg button .hx-mini { margin: 1px 0 0; flex-shrink: 0; }
+  .nh-ico { width: 16px; height: 16px; flex: none; margin-top: 1px; color: var(--fg-dim); }
+  .nh-seg button.on .nh-ico { color: var(--accent); }
+  .nh-note { float: right; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--fg-faint); }
   .nh-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--fg-dim); margin: 0 0 6px; font-weight: 600; }
   .nh-task, .nh-folder { width: 100%; box-sizing: border-box; background: var(--bg-0); border: 1px solid var(--border);
     border-radius: var(--r); color: var(--fg); padding: 9px 11px; font: 13px var(--sans); outline: none; margin-bottom: 12px; }
@@ -3166,6 +3166,9 @@
     border-radius: var(--r);
     padding: 12px;
   }
+  /* A form in a dialog is the dialog, not a boxed read-out inside it. */
+  .modal .modal-body:has(.nh-wrap) { max-height: none; overflow: visible; background: none; border: none; padding: 0; }
+  .modal:has(.nh-wrap) { width: 640px; }
   .modal .modal-actions {
     margin-top: 16px;
     display: flex; gap: 8px; justify-content: flex-end;
@@ -17758,7 +17761,8 @@ function teamMini(a) {
 }
 function teamWhat(a) {
   const h = a && a.runtime && (HARNESS[a.runtime] || BRAIN_MARKS[a.runtime]);
-  return h ? h.label + ' · ' + h.maker : (a.persona || '');
+  const job = TEAM_JOBS[String(a && a.persona || '').toLowerCase()];
+  return h ? h.label + ' · ' + h.maker : (job ? job[0].toLowerCase() : (a.persona || ''));
 }
 function teamActivity(a) {
   if (a.status === 'failed') return "Didn't finish: " + (a.preview || 'no reason given');
@@ -17869,34 +17873,49 @@ document.querySelectorAll('.tm-tab').forEach(b => b.addEventListener('click', (e
   if (TEAM.tab === 'room') roomStart(); else roomStop();
   teamRender();
 }));
-// Start a helper by hand: one of Hearth's roles, or a task for an agent CLI.
+// What each of Hearth's own helpers does, in the words a person would use.
+// The role names (researcher, archivist) stay inside: they decide which tools
+// a helper gets, and mean nothing on a button.
+const TEAM_JOBS = {
+  researcher: ['Search the web', 'Looks things up, reads pages, answers', 'globe'],
+  coder:      ['Work on code', 'Writes and runs code in a folder', 'term'],
+  archivist:  ['Search my files', 'Digs through your drives and folders', 'folder'],
+  summarizer: ['Sum up a file', 'Reads one file and gives you the gist', 'file'],
+};
+// Start a helper by hand: say what to do, then who does it.
 $('tm-new').addEventListener('click', async () => {
   let c;
   try { c = await api('/api/team/choices'); } catch (e) { toast("Couldn't list helpers", e.message, 'err'); return; }
-  const ROLE_ABOUT = { coder: 'Writes and runs code in a folder', researcher: 'Searches the web, reads, and answers',
-                       archivist: 'Long searches through your drives and files', summarizer: 'Reads one file and sums it up' };
-  const roleBtn = r => `<button type="button" class="nh-pick" data-kind="persona" data-id="${esc(r.id)}">
-      <span class="hx-mini" style="--hx:var(--fg-dim)">${esc(r.label[0])}</span><span>${esc(r.label)}<small>${esc(ROLE_ABOUT[r.id] || r.about)}</small></span></button>`;
-  const agentBtn = a => {
-    const h = HARNESS[a.id] || { c: 'var(--accent)' };
-    return `<button type="button" class="nh-pick" data-kind="agent" data-id="${esc(a.id)}">
-      <span class="hx-mini" style="--hx:${h.c}">${harnessMark(HARNESS[a.id] || { label: a.label })}</span><span>${esc(a.label)}<small>${esc(a.maker)}${a.billing ? ' · ' + esc(a.billing) : ''}${a.tested ? '' : ' · new in Hearth'}</small></span></button>`;
+  const ico = k => `<svg class="nh-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${_TOOL_ICONS[k] || _TOOL_ICONS.file}</svg>`;
+  const jobBtn = r => {
+    const j = TEAM_JOBS[r.id] || [r.label, r.about || '', 'users'];
+    return `<button type="button" data-kind="persona" data-id="${esc(r.id)}">${ico(j[2])}<span>${esc(j[0])}<small>${esc(j[1])}</small></span></button>`;
   };
+  const agentBtn = a => {
+    const h = HARNESS[a.id] || { c: 'var(--accent)', label: a.label };
+    return `<button type="button" data-kind="agent" data-id="${esc(a.id)}">
+      <span class="hx-mini" style="--hx:${h.c}">${harnessMark(h)}</span><span>${esc(a.label)}<small>${esc(a.maker)}${a.billing ? ' · ' + esc(a.billing) : ''}</small></span></button>`;
+  };
+  const agents = c.agents || [];
   const html = `<div class="nh-wrap">
-    <div class="nh-label">Who</div>
-    <div class="nh-picks" id="nh-picks">${(c.roles || []).map(roleBtn).join('')}${(c.agents || []).map(agentBtn).join('')}</div>
     <div class="nh-label">What should they do</div>
-    <textarea class="nh-task" id="nh-task" placeholder="Everything they need to know; they don't see your chat."></textarea>
-    <div class="nh-label">Where</div>
-    <input class="nh-folder" id="nh-folder" placeholder="${esc(c.workspace || 'the workspace')}"></div>`;
+    <textarea class="nh-task" id="nh-task" placeholder="Everything they need to know. They don't see your chat."></textarea>
+    <div class="nh-label">One of mine${c.helper_brain ? `<span class="nh-note">runs on ${esc(c.helper_brain)}</span>` : ''}</div>
+    <div class="ob-seg nh-seg" id="nh-jobs">${(c.roles || []).map(jobBtn).join('')}</div>
+    ${agents.length ? `<div class="nh-label">Or hand it to an agent<span class="nh-note">on your own account</span></div>
+    <div class="ob-seg nh-seg" id="nh-agents">${agents.map(agentBtn).join('')}</div>` : ''}
+    <div class="nh-where" id="nh-where" hidden>
+      <div class="nh-label">In which folder</div>
+      <input class="nh-folder" id="nh-folder" placeholder="${esc(c.workspace || 'the workspace')}">
+    </div></div>`;
   let pick = null;
   showModal('New helper', html, [
     { label: 'Cancel' },
     { label: 'Start', kind: 'primary', busyLabel: 'Starting…', onclick: async () => {
       const task = $('nh-task').value.trim();
-      if (!pick) { toast('Pick who should do it', '', 'warn'); return false; }
       if (!task) { toast('Say what they should do', '', 'warn'); $('nh-task').focus(); return false; }
-      const body = { task, folder: $('nh-folder').value.trim() };
+      if (!pick) { toast('Pick who should do it', '', 'warn'); return false; }
+      const body = { task, folder: $('nh-where').hidden ? '' : $('nh-folder').value.trim() };
       body[pick.kind] = pick.id;
       try {
         await api('/api/team/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -17905,15 +17924,28 @@ $('tm-new').addEventListener('click', async () => {
       setTimeout(teamPoll, 400);
     } },
   ]);
-  const box = $('nh-picks');
-  box.addEventListener('click', (e) => {
-    const b = e.target.closest('.nh-pick');
-    if (!b) return;
-    box.querySelectorAll('.nh-pick').forEach(x => x.classList.toggle('on', x === b));
+  const boxes = [$('nh-jobs'), $('nh-agents')].filter(Boolean);
+  const where = $('nh-where');
+  const choose = (b, instant) => {
     pick = { kind: b.dataset.kind, id: b.dataset.id };
-  });
-  const first = box.querySelector('.nh-pick');
-  if (first) first.click();
+    boxes.forEach(box => {
+      box.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+      _obSlideSeg(box, instant);
+    });
+    // A folder only matters to someone working on code in it.
+    const needs = pick.kind === 'agent' || pick.id === 'coder';
+    if (needs === where.hidden) {
+      where.hidden = !needs;
+      if (needs && !_reduceMotion()) {
+        const sp = springEasing(0.36, 0.9);
+        where.animate([{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }],
+                      { duration: sp.duration, easing: sp.easing });
+      }
+    }
+  };
+  boxes.forEach(box => box.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) choose(b, false); }));
+  const first = boxes[0] && boxes[0].querySelector('button');
+  if (first) requestAnimationFrame(() => choose(first, true));
   setTimeout(() => $('nh-task').focus(), 60);
 });
 $('tm-clear').addEventListener('click', () => {

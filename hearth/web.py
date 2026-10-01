@@ -1368,7 +1368,16 @@ def _team_choices() -> Dict[str, Any]:
         roles.append({"id": p["slug"], "label": p["slug"].replace("_", " ").title(), "about": desc[:120]})
     agents = [{"id": a["id"], "label": a["label"], "maker": a.get("maker", ""),
                "tested": a.get("tested", False), "billing": a.get("billing", "")} for a in _xa.available()]
-    return {"roles": roles, "agents": agents, "workspace": WORKSPACE}
+    # Where Hearth's own helpers run when it isn't the local model, so the
+    # dialog can say so.
+    helper_brain = ""
+    try:
+        on = _sa._agent_for_helpers()
+        if on:
+            helper_brain = _xa.AGENTS[on]["label"]
+    except Exception:
+        pass
+    return {"roles": roles, "agents": agents, "workspace": WORKSPACE, "helper_brain": helper_brain}
 
 
 def _saved_look() -> str:

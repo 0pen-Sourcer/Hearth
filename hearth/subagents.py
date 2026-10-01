@@ -960,6 +960,68 @@ def get_subagent_result(agent_id: str) -> Dict[str, Any]:
     return {"ok": False, "error": f"no subagent with id {agent_id}"}
 
 
+def _agent_for_helpers() -> Optional[str]:
+    """The agent program helpers should run on: the one that is the brain,
+    when no local model is there to run them. With Claude Code or Codex as
+    the brain a local model is optional, so a helper can't depend on one."""
+    try:
+        from . import claude_brain as _cb
+        agent = _cb.current()
+    except Exception:
+        return None
+    if not agent:
+        return None
+    try:
+        from . import llmserver as _ls
+        if _ls.helper_status().get("running"):
+            return None
+    except Exception:
+        pass
+    base = os.environ.get("LOCAL_API_BASE", "") or "http://localhost:1234/v1"
+    try:
+        from .headless import port_reachable
+        if port_reachable(base) and _local_server_has_model(base):
+            return None
+    except Exception:
+        pass
+    return agent
+
+
+def _spawn_on_agent(agent: str, p: Dict[str, Any], persona: str, prompt: str,
+                    label: str, mode: str) -> Dict[str, Any]:
+    """Run a helper's task on the agent brain, briefed with the helper's role."""
+    from . import external_agents as _xa
+    brief = (f"You are working as a helper for the user's assistant, in this role: "
+             f"{p.get('name') or persona}.\n\n{p.get('body') or ''}\n\nYour task:\n{prompt}\n\n"
+             f"Report what you found or did, briefly, when you are done.")
+    done = threading.Event()
+    got: Dict[str, Any] = {}
+
+    def _finished(agent_id: str, result: Dict[str, Any]) -> None:
+        got.update(result)
+        done.set()
+        if mode == "background" and _BG_COMPLETION_CB:
+            _BG_COMPLETION_CB(agent_id, result)
+
+    r = _xa.spawn(agent, brief, name=label, on_done=_finished)
+    if not r.get("ok"):
+        return r
+    if mode == "background":
+        return {"ok": True, "status": "launched", "agent_id": r["agent_id"], "persona": persona,
+                "name": label, "transcript_path": str(_transcript_path(r["agent_id"])),
+                "note": ("Helper " + (f"'{label}' " if label else "") + "is running in the background on "
+                         f"{_xa.AGENTS[agent]['label']}. When it finishes you'll see a <task-notification>.")}
+    done.wait(timeout=1800)
+    if not done.is_set():
+        return {"ok": False, "error": "the helper is still running after 30 minutes", "persona": persona,
+                "name": label, "agent_id": r["agent_id"]}
+    out = dict(got)
+    out["persona"] = persona
+    if label:
+        out["name"] = label
+    return out
+
+
 def spawn_subagent(persona: str, prompt: str,
                    max_turns: Optional[int] = None,
                    mode: str = "sync",
@@ -1017,6 +1079,10 @@ def spawn_subagent(persona: str, prompt: str,
     label = helper_name(name or "", persona, p.get("name") or "")
     p = dict(p)
     p["_label"] = label
+
+    on_agent = _agent_for_helpers()
+    if on_agent:
+        return _spawn_on_agent(on_agent, p, persona, prompt, label, mode)
 
     if mode == "background":
         _cap, _cap_why = concurrency_capacity()

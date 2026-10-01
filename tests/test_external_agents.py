@@ -141,6 +141,27 @@ if sys.platform == "win32":
     r = xa.spawn("stand-in-shim", "hi & del x", cwd=work)
     check("a shim it can't see through is refused rather than given a prompt", not r.get("ok"))
 
+# With an agent program as the brain and no local model to run helpers on,
+# a helper runs on that agent, briefed with its role.
+from hearth import claude_brain as cb                                # noqa: E402
+from hearth import headless as hl                                    # noqa: E402
+
+os.environ["LOCAL_API_BASE"] = "http://127.0.0.1:9/v1"
+xa._which = lambda names: sys.executable if names == ["stand-in"] else real_which(names)
+real_current = cb.current
+cb.current = lambda: "stand-in"
+r = subagents.spawn_subagent("researcher", "find the tallest building", mode="sync")
+check("a helper runs on the agent brain when no local model is serving",
+      r.get("ok") and "tallest building" in r.get("text", "") and r.get("persona") == "researcher")
+check("and is told its role", "helper" in r.get("text", "") and "researcher" in r.get("text", "").lower())
+real_reach, real_has = hl.port_reachable, subagents._local_server_has_model
+hl.port_reachable, subagents._local_server_has_model = (lambda *a, **k: True), (lambda base: True)
+check("with a local model serving, helpers stay on it", subagents._agent_for_helpers() is None)
+hl.port_reachable, subagents._local_server_has_model = real_reach, real_has
+cb.current = lambda: None
+check("with a model endpoint as the brain, nothing changes", subagents._agent_for_helpers() is None)
+cb.current = real_current
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
