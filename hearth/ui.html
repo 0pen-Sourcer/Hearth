@@ -16966,7 +16966,7 @@ async function obLoadBrains() {
   // Status banner — Lite has no built-in engine, so local picks won't boot
   let banner = '';
   if (s.is_lite) {
-    banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>You're on <b>Hearth Lite</b> — no built-in engine to run local models. Pick a cloud brain next, or download the Full edition / install the GPU engine in Settings → Built-in server.</span></div>`;
+    banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>You're on <b>Hearth Lite</b>, which has no engine of its own for local models. Pick an agent below, use LM Studio or Ollama, or add a cloud brain on the next step. The engine can be added later from Settings.</span></div>`;
   } else if (builtin) {
     banner = `<div class="ob-status-row is-good"><span class="ob-dot"></span><span>Hearth's built-in LLM is already running. You're set.</span></div>`;
   } else if (external) {
@@ -16987,14 +16987,39 @@ async function obLoadBrains() {
   } catch {}
   status.innerHTML = banner;
 
+  // Agent programs already on this PC can be the brain on the plan the person
+  // pays for, with nothing to download. Others found here take tasks as helpers.
+  let brains = [], others = [];
+  try { brains = ((await api('/api/models')).agent_brains || []); } catch {}
+  try {
+    const ids = new Set(brains.map(b => b.id));
+    others = ((await api('/api/team/choices')).agents || []).filter(a => !ids.has(a.id) && !a.refused).map(a => a.label);
+  } catch {}
+  const here = brains.filter(b => b.installed);
   blurb.textContent = (builtin || external)
     ? 'Looks good - you already have a brain. Pick a different one if you want, or hit Continue.'
+    : here.length ? 'I can think with an agent you already use, or with a model on this PC. Here\'s what I found:'
     : 'I look in LM Studio, Ollama, HuggingFace cache, and Downloads automatically. Here\'s what I found:';
+  const tip = $('ob-brain-tip');
+  if (tip) {
+    const missing = brains.filter(b => !b.installed).map(b => b.label);
+    tip.innerHTML = (others.length ? `Also on this PC: <b>${esc(others.join(', '))}</b>. I can hand tasks to ${others.length === 1 ? 'it' : 'them'} from the Team tab.<br>` : '')
+      + (missing.length ? `I can also run on ${esc(missing.join(', '))}: install it, sign in, and pick it from the model menu.<br>` : '')
+      + `No model yet? The <b>Models</b> tab lets you search and download one. You can skip this step.`;
+  }
 
   // Onboarding shows ONLY models already on disk — downloads belong in the
   // Models tab (keeps onboarding clean, not overwhelming). The body scrolls,
   // so all disk models are reachable without trapping the Continue button.
   const slots = [];
+  for (const b of here) {
+    slots.push({
+      title: b.label,
+      sub: `Runs on your ${b.plan} plan. Nothing to download, and my tools, memory and voice stay the same.`,
+      badge: 'agent',
+      data: { kind: 'agent', id: b.id },
+    });
+  }
   for (const m of disk) {
     slots.push({
       title: m.filename,
@@ -17003,7 +17028,7 @@ async function obLoadBrains() {
     });
   }
   if (!slots.length) {
-    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>No models on disk yet — skip this, then grab one in the Models tab (one click).</span></div>';
+    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>Nothing to pick yet. Skip this, then get a model in the Models tab.</span></div>';
     return;
   }
   let html = '';
@@ -17288,6 +17313,12 @@ async function obFinish(skipped) {
     if (obState.brain) {
       try {
         const pick = JSON.parse(obState.brain);
+        if (pick.kind === 'agent' && pick.id) {
+          await api('/api/brain/agent', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ provider: pick.id }),
+          }).catch(e => toast("Couldn't switch to it", e.message.replace(/^\d+\s*/, ''), 'warn', 6000));
+        }
         if (pick.kind === 'disk' && pick.path) {
           api('/api/llmserver/start', {
             method: 'POST', headers: {'Content-Type':'application/json'},

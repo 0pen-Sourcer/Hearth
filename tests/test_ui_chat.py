@@ -243,6 +243,33 @@ with sync_playwright() as pw:
           and stats[1].startswith("claude-opus-5-5") and stats[1].endswith("$0.027"))
 
     check(f"the page raised no errors {errors[:2]}", not errors)
+    # First-run setup offers the agents already on the PC as a brain, and names
+    # the other agent programs found as helpers.
+    reply = lambda body: (lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(body)))
+    pg.route("**/api/llmserver/status", reply({"disk_models": [], "is_lite": True}))
+    pg.route("**/api/models", reply({"models": [], "agent_brains": [
+        {"id": "claude-code", "label": "Claude Code", "installed": True, "plan": "Claude"},
+        {"id": "codex", "label": "Codex", "installed": False, "plan": "ChatGPT"}]}))
+    pg.route("**/api/team/choices", reply({"roles": [], "agents": [
+        {"id": "claude-code", "label": "Claude Code"}, {"id": "gemini-cli", "label": "Gemini CLI", "refused": "ended"},
+        {"id": "opencode", "label": "OpenCode", "refused": ""}]}))
+    setup = pg.evaluate("""async () => {
+      obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+      await obLoadBrains();
+      const picks = [...document.querySelectorAll('#ob-brain-choices .ob-choice')];
+      picks[0].click();
+      return { titles: picks.map(b => b.querySelector('.ob-choice-title').textContent),
+               tip: document.getElementById('ob-brain-tip').textContent,
+               banner: document.getElementById('ob-brain-status').textContent, picked: JSON.parse(obState.brain) };
+    }""")
+    for pat in ("**/api/llmserver/status", "**/api/models", "**/api/team/choices"):
+        pg.unroute(pat)
+    check(f"setup offers an agent that is installed as the brain, and picking it is remembered {setup['titles']}",
+          setup["titles"] == ["Claude Code"] and setup["picked"] == {"kind": "agent", "id": "claude-code"})
+    check("it names the other agents found as helpers, leaves out one its account refused, and says which could be added",
+          "OpenCode" in setup["tip"] and "Gemini CLI" not in setup["tip"] and "Codex" in setup["tip"])
+    check("on Lite it points at the agent instead of a dead end", "Pick an agent below" in setup["banner"])
+
     # An agent brain runs tools side by side: both start, then both finish.
     stream = "\n".join(json.dumps(e) for e in [
         {"type": "tool_call", "name": "read_file", "args": {"path": "a.txt"}, "id": "a"},

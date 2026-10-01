@@ -2057,8 +2057,8 @@ class JarvisCLI:
             print(f"{C_BOT}Commands:{C_RESET}")
             print(f"  {C_DIM}── Endpoint / model ─────────────────────────{C_RESET}")
             print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET}, {C_TOOL}/provider{C_RESET}) switch brain: local / grok / gemini / openai / openrouter / custom")
-            print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server, disk, picks")
-            print(f"  {C_TOOL}/models disk|picks|hf|get|use|stop|helper{C_RESET}  full picker; `helper` loads a second, smaller model for helpers")
+            print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server and models on disk")
+            print(f"  {C_TOOL}/models disk|hf|get|use|stop|helper{C_RESET}  find, download and load; `helper` loads a second, smaller model for helpers")
             print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model on current server (alias: /load)")
             print(f"  {C_DIM}── Chat / context ───────────────────────────{C_RESET}")
             print(f"  {C_TOOL}/tools{C_RESET}                 list available tools")
@@ -4336,8 +4336,22 @@ class JarvisCLI:
             else:
                 print(f"  {C_DIM}    No local model is loaded yet. Pick local and I'll "
                       f"help you get one with /models.{C_RESET}")
-            brain = ask("Enter to stay local, or type: grok / gemini / openai / openrouter / groq / custom").lower()
-            if brain in ("grok", "gemini", "openai", "openrouter", "groq"):
+            # An agent program already on this PC can be the brain on the plan
+            # its owner pays for, with nothing to download.
+            agents = {}
+            try:
+                from hearth import claude_brain as _cb
+                agents = {c["id"].split("-")[0]: c for c in _cb.choices() if c["installed"]}
+            except Exception:
+                pass
+            if agents:
+                print(f"  {C_DIM}    Or an agent you already use, on your own plan: "
+                      f"{', '.join(c['label'] for c in agents.values())}. My tools, memory and voice stay the same.{C_RESET}")
+            brain = ask("Enter to stay local, or type: " + " / ".join(list(agents) + [
+                "grok", "gemini", "openai", "openrouter", "groq", "custom"])).lower()
+            if brain in agents:
+                await self.handle_command(f"/brain {agents[brain]['id']}")
+            elif brain in ("grok", "gemini", "openai", "openrouter", "groq"):
                 key = ask(f"Paste your {brain} API key (saved locally, asked once)")
                 if key:
                     await self.handle_command(f"/brain {brain} {key}")
@@ -4354,7 +4368,7 @@ class JarvisCLI:
             print()
             # Staying local -> help them pick + boot a model right now, so setup
             # ends with a WORKING server instead of a dead endpoint.
-            if _is_local_endpoint(LOCAL_API_BASE):
+            if brain not in agents and _is_local_endpoint(LOCAL_API_BASE):
                 await self._onboard_pick_local_model()
         except (KeyboardInterrupt, EOFError):
             print()
