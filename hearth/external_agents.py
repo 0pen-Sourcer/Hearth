@@ -51,7 +51,9 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     # things part-way; the others take one prompt and run to the end.
     "claude-code": {"label": "Claude Code", "maker": "Anthropic", "exe": ["claude"], "args": _claude_cmd,
                     "stream": "claude", "takes_messages": True,
-                    "billing": "Agent SDK credit on your Claude plan"},
+                    "billing": "Agent SDK credit on your Claude plan",
+                    # Its own installer puts it here, which a running Hearth's PATH doesn't have yet.
+                    "also": [r"~\.local\bin\claude.exe", "~/.local/bin/claude"]},
     "codex": {"label": "Codex", "maker": "OpenAI", "exe": ["codex"], "args": _codex_cmd, "stream": "codex",
               # The Codex desktop app keeps its own copy of the CLI off PATH.
               "also": [r"%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe", r"~\.codex\.sandbox-bin\codex.exe"]},
@@ -302,6 +304,109 @@ def update(aid: str) -> Dict[str, Any]:
         tail = [l for l in ((r.stderr or "") + (r.stdout or "")).splitlines() if l.strip()][-2:]
         return {"ok": False, "error": " ".join(tail)[:300] or f"npm exited with code {r.returncode}"}
     return {"ok": True, "version": installed_version(aid)}
+
+
+# ---------------------------------------------------------------- setup
+# Getting an agent onto the PC and signed in, with its maker's own installer
+# and its own sign-in, so nobody has to open a terminal. `win` and `sh` are the
+# one-line installers each maker publishes; `npm` is the fallback where there
+# is none. `status` asks the CLI itself whether it is signed in.
+SETUP: Dict[str, Dict[str, Any]] = {
+    "claude-code": {"win": "irm https://claude.ai/install.ps1 | iex",
+                    "sh": "curl -fsSL https://claude.ai/install.sh | bash",
+                    "npm": "@anthropic-ai/claude-code", "login": ["auth", "login"], "status": ["auth", "status"],
+                    "signed": lambda out: '"loggedin":true' in out.replace(" ", "")},
+    "codex": {"npm": "@openai/codex", "login": ["login"], "status": ["login", "status"],
+              "signed": lambda out: "logged in" in out and "not logged in" not in out,
+              "needs": "Codex comes with the ChatGPT desktop app, or installs with Node.js. Get either one, then try again."},
+    "cursor-agent": {"win": "irm 'https://cursor.com/install?win32=true' | iex",
+                     "sh": "curl https://cursor.com/install -fsS | bash",
+                     "login": ["login"], "status": ["status"],
+                     "signed": lambda out: "logged in as" in out},
+}
+_SIGNED: Dict[str, tuple] = {}            # agent id -> (when asked, answer)
+
+
+def signed_in(aid: str, fresh: bool = False) -> Optional[bool]:
+    """Whether an installed agent is signed in, asked of the agent itself.
+    None when it isn't installed or can't say. Kept two minutes."""
+    how = SETUP.get(aid)
+    exe = find(aid) if how else None
+    if not exe:
+        return None
+    hit = _SIGNED.get(aid)
+    if hit and not fresh and time.time() - hit[0] < 120:
+        return hit[1]
+    try:
+        r = subprocess.run(_direct_argv(exe) + how["status"], capture_output=True, text=True, timeout=40,
+                           encoding="utf-8", errors="replace", creationflags=_NO_WINDOW,
+                           cwd=os.path.expanduser("~"))
+        answer = bool(how["signed"](((r.stdout or "") + (r.stderr or "")).lower()))
+    except Exception:
+        return None
+    _SIGNED[aid] = (time.time(), answer)
+    return answer
+
+
+def setup_state(fresh: bool = False) -> List[Dict[str, Any]]:
+    """Each agent Hearth can set up: here or not, signed in or not."""
+    return [{"id": aid, "label": AGENTS[aid]["label"], "maker": AGENTS[aid].get("maker", ""),
+             "installed": bool(find(aid)), "signed_in": signed_in(aid, fresh)} for aid in SETUP]
+
+
+def install(aid: str) -> Dict[str, Any]:
+    """Install an agent with its maker's installer. Asked for by the person,
+    from the setup dialog; never on its own."""
+    how = SETUP.get(aid)
+    if not how:
+        return {"ok": False, "error": "that isn't an agent Hearth can install"}
+    if find(aid):
+        return {"ok": True, "already": True}
+    line = how.get("win" if sys.platform == "win32" else "sh")
+    if line:
+        argv = (["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", line]
+                if sys.platform == "win32" else ["bash", "-lc", line])
+    else:
+        npm = shutil.which("npm.cmd") or shutil.which("npm")
+        if not npm or not how.get("npm"):
+            return {"ok": False, "error": how.get("needs") or "there is no installer for it on this system"}
+        argv = [npm, "install", "-g", how["npm"]]
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace",
+                           creationflags=_NO_WINDOW)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if not find(aid):
+        said = why_failed(((r.stdout or "") + "\n" + (r.stderr or "")).splitlines())
+        return {"ok": False, "error": said or f"the installer finished (code {r.returncode}) but {AGENTS[aid]['label']} "
+                                              "isn't where it should be"}
+    return {"ok": True}
+
+
+def sign_in(aid: str) -> Dict[str, Any]:
+    """Open the agent's own sign-in in a window of its own; it opens the
+    browser from there. Hearth never sees the account or its password."""
+    how = SETUP.get(aid)
+    exe = find(aid) if how else None
+    if not exe:
+        return {"ok": False, "error": "install it first"}
+    argv = _direct_argv(exe) + how["login"]
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(argv, creationflags=0x00000010, cwd=os.path.expanduser("~"))     # CREATE_NEW_CONSOLE
+        else:
+            import shlex
+            term = next((t for t in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm") if shutil.which(t)), None)
+            if sys.platform == "darwin":
+                subprocess.Popen(["osascript", "-e", f'tell app "Terminal" to do script "{shlex.join(argv)}"'])
+            elif term:
+                subprocess.Popen([term, "-e", shlex.join(argv)])
+            else:
+                return {"ok": False, "error": "run `" + shlex.join([os.path.basename(argv[0])] + how["login"]) + "` in a terminal"}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    _SIGNED.pop(aid, None)
+    return {"ok": True}
 
 
 # Running agents that can be told something: agent id -> its process.

@@ -280,6 +280,31 @@ check("the real Codex and Cursor are run in their step-by-step modes",
       and xa.AGENTS["codex"]["stream"] == "codex"
       and "stream-json" in xa.AGENTS["cursor-agent"]["args"]("edits") and xa.AGENTS["cursor-agent"]["stream"] == "cursor")
 
+# Setting an agent up: whether it is signed in is asked of the agent itself.
+says = os.path.join(work, "signed.txt")
+open(says, "w").write("Not logged in")
+xa.SETUP["stand-in"] = {"login": ["login"], "status": ["-c", f"print(open({says!r}).read())"],
+                        "signed": lambda out: "logged in as" in out}
+xa.SETUP["absent"] = {"needs": "Get the desktop app first.", "login": ["login"], "status": ["status"], "signed": lambda out: False}
+xa.AGENTS["absent"] = {"label": "Absent", "exe": ["hearth-no-such-agent"], "args": lambda allow: [], "stream": "text"}
+check("an installed agent that is signed out says so", xa.signed_in("stand-in") is False)
+open(says, "w").write("Logged in as someone@example.com")
+check("the answer is kept for a while, and asked again when it matters",
+      xa.signed_in("stand-in") is False and xa.signed_in("stand-in", fresh=True) is True)
+check("one that isn't installed has no answer", xa.signed_in("absent") is None)
+state = {a["id"]: a for a in xa.setup_state()}
+check("the setup list says which are here and which are signed in",
+      state["stand-in"]["installed"] and state["stand-in"]["signed_in"] is True and not state["absent"]["installed"])
+check("installing one that is already here does nothing", xa.install("stand-in") == {"ok": True, "already": True})
+check("one with no installer for this system says what to get instead",
+      xa.install("absent") == {"ok": False, "error": "Get the desktop app first."})
+check("sign-in needs it installed first", not xa.sign_in("absent")["ok"])
+check("the real three use their makers' installers and their own status commands",
+      "claude.ai/install" in xa.SETUP["claude-code"]["win"] and "cursor.com/install" in xa.SETUP["cursor-agent"]["win"]
+      and xa.SETUP["codex"]["status"] == ["login", "status"]
+      and xa.SETUP["claude-code"]["signed"]('{\n  "loggedin": true,\n') and not xa.SETUP["claude-code"]["signed"]('{"loggedin": false}')
+      and xa.SETUP["codex"]["signed"]("logged in using chatgpt") and not xa.SETUP["codex"]["signed"]("not logged in"))
+
 gem = xa.AGENTS["gemini-cli"]["args"]
 check("Gemini CLI is run trusting its folder, with the approval level the switch allows",
       gem("auto") == ["--skip-trust", "--approval-mode=yolo", "-p"]

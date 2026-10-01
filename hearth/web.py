@@ -1677,6 +1677,10 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/agents/updates":
             from . import external_agents as _xa
             return self._send_json(200, {"updates": _xa.updates()})
+        if path == "/api/agents/setup":
+            # Which agents are here and signed in, for the setup dialog.
+            from . import external_agents as _xa
+            return self._send_json(200, {"agents": _xa.setup_state(fresh=self._query().get("fresh") == "1")})
         if path == "/api/brain/agent/models":
             from . import claude_brain
             aid = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("id", [""])[0]
@@ -3077,6 +3081,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import claude_brain
             return self._send_json(200, claude_brain.run_tool(
                 str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
+        if path in ("/api/agents/install", "/api/agents/signin"):
+            # The setup dialog's two buttons: get the agent, then sign in to it.
+            body = self._read_json() or {}
+            from . import external_agents as _xa
+            r = (_xa.install if path.endswith("install") else _xa.sign_in)(str(body.get("id") or ""))
+            return self._send_json(200 if r.get("ok") else 400, r)
         if path == "/api/agents/update":
             # Asked for from the "a newer one is out" prompt; never on its own.
             body = self._read_json() or {}

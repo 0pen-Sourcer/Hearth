@@ -451,6 +451,23 @@
   .mp-get { flex: none; font-size: 11.5px; color: var(--accent-2); text-decoration: none; padding: 3px 8px;
     border: 1px solid var(--border); border-radius: 99px; }
   .mp-get:hover { border-color: var(--accent); }
+  .mp-get[role="button"] { cursor: pointer; }
+  .as-steps { display: flex; flex-direction: column; gap: 10px; min-width: 420px; font-family: var(--sans); white-space: normal; }
+  #modal-body:has(.as-steps) { background: none; border: none; padding: 0; }
+  .as-step { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border);
+    border-radius: var(--r-lg); background: var(--bg-1); }
+  .as-step i { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-style: normal;
+    font-size: 12px; font-weight: 600; background: var(--bg-2); color: var(--fg-dim); }
+  .as-step > div { flex: 1; min-width: 0; }
+  .as-step b { display: block; color: var(--fg); font-size: 13.5px; }
+  .as-step small { display: block; color: var(--fg-faint); font-size: 12px; line-height: 1.45; margin-top: 2px; }
+  .as-step button { flex: none; background: var(--accent); color: var(--on-accent, #fff); border: none; border-radius: var(--r);
+    padding: 7px 14px; font: 600 12.5px var(--sans); cursor: pointer; }
+  .as-step button:disabled { opacity: .7; cursor: default; }
+  .as-step.done i { background: var(--ok); color: #0b0b0b; }
+  .as-step.now { border-color: var(--border-strong); }
+  .as-step.todo { opacity: .55; }
+  .as-note { margin: 2px 2px 0; color: var(--err); font-size: 12.5px; }
   .mp-empty { padding: 14px 12px; color: var(--fg-dim); font-size: 12.5px; }
   .mp-more { flex: none; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
     color: var(--fg-dim); transition: transform .25s var(--ease), background .15s var(--ease); }
@@ -6303,6 +6320,7 @@ const CLOUD_PROVIDERS = new Set(['grok','xai','gemini','google','openai','anthro
 const AGENT_BRAINS = { 'claude-code': 'Claude Code', 'codex': 'Codex', 'cursor-agent': 'Cursor' };
 // Whose plan each runs on.
 const AGENT_PLANS = { 'claude-code': 'Claude', 'codex': 'ChatGPT', 'cursor-agent': 'Cursor' };
+const AGENT_MAKERS = { 'claude-code': 'Anthropic', 'codex': 'OpenAI', 'cursor-agent': 'Cursor' };
 
 // Format a token count for the bottom-bar `ctx` pill: 32768 → "32K", 977000 → "977K".
 function fmtCtxPill(n) {
@@ -8039,9 +8057,66 @@ function _mpRow(o, cur) {
   const more = agent && !o.disabled
     ? `<span class="mp-more" data-more="${esc(agent)}" title="Pick a model" role="button" tabindex="-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>` : '';
   const right = (cur ? `<span class="mp-badge">${STATE.brain && STATE.brain.kind === 'cloud' ? 'In use' : 'Loaded'}</span>`
-              : o.disabled && o.dataset.site ? `<a class="mp-get" href="${esc(o.dataset.site)}" target="_blank" rel="noopener">Get it</a>` : '') + more;
+              : o.disabled && agent ? `<span class="mp-get" role="button" data-setup="${esc(agent)}">Set up</span>` : '') + more;
   return `<button type="button" class="mp-row${cur ? ' cur' : ''}" role="option" data-v="${esc(o.value)}"${o.disabled ? ' aria-disabled="true"' : ''}>
     ${ico}<span class="mp-txt"><span class="mp-t">${esc(t)}</span>${sub ? `<span class="mp-s">${esc(sub)}</span>` : ''}</span>${right}</button>`;
+}
+// Getting an agent onto this PC and signed in, from one dialog: its maker's
+// own installer, then its own sign-in window, then it becomes the brain.
+async function agentSetup(id, done) {
+  const label = AGENT_BRAINS[id] || id, plan = AGENT_PLANS[id] || label;
+  let st = { installed: false, signed_in: null }, busy = '', note = '', timer = 0;
+  const read = async (fresh) => {
+    try { st = ((await api('/api/agents/setup' + (fresh ? '?fresh=1' : ''))).agents || []).find(x => x.id === id) || st; } catch {}
+  };
+  const row = (n, state, title, sub, btn) => `<div class="as-step ${state}"><i>${state === 'done' ? '✓' : n}</i>
+    <div><b>${esc(title)}</b><small>${esc(sub)}</small></div>${btn && state === 'now' ? `<button type="button" data-do="${btn[0]}"${busy ? ' disabled' : ''}>${esc(busy === btn[0] ? btn[2] : btn[1])}</button>` : ''}</div>`;
+  const paint = () => {
+    const s1 = st.installed ? 'done' : 'now', s2 = !st.installed ? 'todo' : st.signed_in ? 'done' : 'now',
+          s3 = st.installed && st.signed_in ? 'now' : 'todo';
+    $('modal-body').innerHTML = `<div class="as-steps">
+      ${row(1, s1, st.installed ? `${label} is on this PC` : `Install ${label}`,
+            st.installed ? '' : `Uses ${AGENT_MAKERS[id] || 'its maker'}'s own installer. Takes a minute or two.`, ['install', 'Install', 'Installing…'])}
+      ${row(2, s2, st.signed_in ? 'Signed in' : 'Sign in',
+            st.signed_in ? '' : `A window opens with ${label}'s own sign-in and your browser. Hearth never sees your password.`, ['signin', 'Sign in', 'Waiting for you…'])}
+      ${row(3, s3, `Use it as the brain`, `Runs on your ${plan} plan. My tools, memory and voice stay the same.`, ['use', `Use ${label}`, 'Switching…'])}
+      ${note ? `<p class="as-note">${esc(note)}</p>` : ''}</div>`;
+  };
+  const stop = () => { clearInterval(timer); timer = 0; };
+  showModal(`Set up ${label}`, '<div class="as-steps"></div>', [{ label: 'Close', onclick: () => { stop(); } , closes: true }]);
+  $('modal-body').onclick = async (e) => {
+    const b = e.target.closest('button[data-do]');
+    if (!b || busy) return;
+    busy = b.dataset.do; note = ''; paint();
+    try {
+      if (busy === 'install') {
+        await api('/api/agents/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        await read(true);
+      } else if (busy === 'signin') {
+        await api('/api/agents/signin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        // The sign-in happens in its own window; look again until it is done.
+        await new Promise(res => {
+          let tries = 0;
+          timer = setInterval(async () => {
+            await read(true);
+            if (st.signed_in || ++tries > 100 || !$('modal').classList.contains('open')) { stop(); res(); }
+          }, 3000);
+        });
+        if (!st.signed_in) note = "Still not signed in. Finish in the window that opened, or press Sign in again.";
+      } else if (busy === 'use') {
+        await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: id }) });
+        agentBrainOn(id);
+        $('modal').classList.remove('open');
+        if (done) done();
+        return;
+      }
+    } catch (err) { note = String(err.message || err).replace(/^\d+\s*/, ''); }
+    busy = ''; paint();
+    if (done) done();
+  };
+  paint();
+  await read(false);
+  paint();
 }
 function _fmtCtx(n) { return n ? (n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M' : Math.round(n / 1000) + 'K') + ' context' : ''; }
 function _agentSub(id) {
@@ -8096,7 +8171,8 @@ function mpOpen() {
     menu.id = 'mp-menu'; menu.className = 'mp-menu'; menu.setAttribute('role', 'listbox'); menu.hidden = true;
     document.body.appendChild(menu);
     menu.addEventListener('click', (e) => {
-      if (e.target.closest('.mp-get')) { mpClose(); return; }
+      const get = e.target.closest('.mp-get');
+      if (get) { e.stopPropagation(); mpClose(); if (get.dataset.setup) agentSetup(get.dataset.setup); return; }
       const chev = e.target.closest('.mp-more');
       if (chev) { e.stopPropagation(); _mpToggleModels(chev); return; }
       const r = e.target.closest('.mp-row');
@@ -8214,6 +8290,10 @@ $('model-select').addEventListener('change', async (e) => {
       await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                       body: JSON.stringify(body) });
       agentBrainOn(aid);
+      api('/api/agents/setup').then(r => {
+        const st = (r.agents || []).find(x => x.id === aid);
+        if (st && st.signed_in === false) agentSetup(aid);
+      }).catch(() => {});
     } catch (err) {
       toast(`Couldn't switch to ${AGENT_BRAINS[aid] || aid}`, err.message, 'err', 8000);
       applyBrainState();
@@ -17037,9 +17117,7 @@ async function obLoadBrains() {
     : 'I look in LM Studio, Ollama, HuggingFace cache, and Downloads automatically. Here\'s what I found:';
   const tip = $('ob-brain-tip');
   if (tip) {
-    const missing = brains.filter(b => !b.installed).map(b => b.label);
     tip.innerHTML = (others.length ? `Also on this PC: <b>${esc(others.join(', '))}</b>. I can hand tasks to ${others.length === 1 ? 'it' : 'them'} from the Team tab.<br>` : '')
-      + (missing.length ? `I can also run on ${esc(missing.join(', '))}: install it, sign in, and pick it from the model menu.<br>` : '')
       + `No model yet? The <b>Models</b> tab lets you search and download one. You can skip this step.`;
   }
 
@@ -17053,6 +17131,14 @@ async function obLoadBrains() {
       sub: `Runs on your ${b.plan} plan. Nothing to download, and my tools, memory and voice stay the same.`,
       badge: 'agent',
       data: { kind: 'agent', id: b.id },
+    });
+  }
+  for (const b of brains.filter(x => !x.installed)) {
+    slots.push({
+      title: b.label,
+      sub: `Not on this PC yet. I can install it and open its sign-in for you. Runs on your ${b.plan} plan.`,
+      badge: 'set up',
+      data: { kind: 'setup', id: b.id },
     });
   }
   for (const m of disk) {
@@ -17078,6 +17164,10 @@ async function obLoadBrains() {
   choices.innerHTML = html;
   choices.querySelectorAll('.ob-choice').forEach(b => {
     b.addEventListener('click', () => {
+      let pick = {};
+      try { pick = JSON.parse(b.dataset.pick); } catch {}
+      // One that isn't installed opens the setup dialog; the list is read again after.
+      if (pick.kind === 'setup') { agentSetup(pick.id, () => obLoadBrains()); return; }
       choices.querySelectorAll('.ob-choice').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       obState.brain = b.dataset.pick;

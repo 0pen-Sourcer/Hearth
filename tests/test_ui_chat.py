@@ -265,9 +265,48 @@ with sync_playwright() as pw:
     for pat in ("**/api/llmserver/status", "**/api/models", "**/api/team/choices"):
         pg.unroute(pat)
     check(f"setup offers an agent that is installed as the brain, and picking it is remembered {setup['titles']}",
-          setup["titles"] == ["Claude Code"] and setup["picked"] == {"kind": "agent", "id": "claude-code"})
-    check("it names the other agents found as helpers, leaves out one its account refused, and says which could be added",
-          "OpenCode" in setup["tip"] and "Gemini CLI" not in setup["tip"] and "Codex" in setup["tip"])
+          setup["titles"] == ["Claude Code", "Codex"] and setup["picked"] == {"kind": "agent", "id": "claude-code"})
+    check("it names the other agents found as helpers and leaves out one its account refused",
+          "OpenCode" in setup["tip"] and "Gemini CLI" not in setup["tip"])
+    # One that isn't installed is set up from a dialog: install, sign in, use.
+    state = {"installed": False, "signed_in": None}
+    asked: list = []
+
+    def setup_api(route):
+        path = route.request.url.split("/api/agents/")[1].split("?")[0]
+        if route.request.method == "POST":
+            asked.append(path)
+            if path == "install":
+                state["installed"], state["signed_in"] = True, False
+            if path == "signin":
+                state["signed_in"] = True
+            return route.fulfill(status=200, content_type="application/json", body='{"ok": true}')
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"agents": [dict(state, id="codex", label="Codex")]}))
+
+    pg.route("**/api/agents/**", setup_api)
+    pg.route("**/api/brain/agent", lambda r: (asked.append("use"), r.fulfill(
+        status=200, content_type="application/json", body='{"ok": true, "provider": "codex"}'))[1])
+    dialog = pg.evaluate("""async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms));
+      const steps = () => [...document.querySelectorAll('#modal-body .as-step')].map(e => e.className.replace('as-step ', ''));
+      const press = async () => { document.querySelector('#modal-body .as-step.now button').click(); };
+      agentSetup('codex');
+      await wait(500);
+      const out = { first: steps(), button: document.querySelector('#modal-body .as-step.now button').textContent };
+      await press(); await wait(700);
+      out.afterInstall = steps();
+      await press(); await wait(4200);
+      out.afterSignIn = steps();
+      await press(); await wait(500);
+      out.closed = !document.getElementById('modal').classList.contains('open');
+      return out;
+    }""")
+    pg.unroute("**/api/agents/**"); pg.unroute("**/api/brain/agent")
+    check(f"an agent that isn't here is set up from one dialog: install, then sign in, then use {dialog}",
+          dialog["first"] == ["now", "todo", "todo"] and dialog["button"] == "Install"
+          and dialog["afterInstall"] == ["done", "now", "todo"] and dialog["afterSignIn"] == ["done", "done", "now"]
+          and dialog["closed"] and asked == ["install", "signin", "use"])
     check("on Lite it points at the agent instead of a dead end", "Pick an agent below" in setup["banner"])
 
     # An agent brain runs tools side by side: both start, then both finish.

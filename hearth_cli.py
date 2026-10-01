@@ -3064,9 +3064,30 @@ class JarvisCLI:
             return True
         if low == "/agents" or low.startswith("/agents "):
             # /agents: the agent CLIs installed here and whether a newer one is
-            # out. /agents update <id> updates one.
+            # out. /agents update <id> updates one. /agents setup <id> installs
+            # one and opens its sign-in.
             from hearth import external_agents as _xa
             words = cmd.split()
+            if len(words) >= 3 and words[1].lower() == "setup":
+                aid = {"claude": "claude-code", "cursor": "cursor-agent"}.get(words[2].lower(), words[2].lower())
+                if aid not in _xa.SETUP:
+                    print(f"{C_ERR}I can set up: {', '.join(_xa.SETUP)}{C_RESET}")
+                    return True
+                label = _xa.AGENTS[aid]["label"]
+                if not _xa.find(aid):
+                    print(f"{C_DIM}installing {label} with its own installer… (a minute or two){C_RESET}")
+                    r = _xa.install(aid)
+                    if not r.get("ok"):
+                        print(f"{C_ERR}{r.get('error')}{C_RESET}")
+                        return True
+                    print(f"{C_OK}{label} is installed.{C_RESET}")
+                if _xa.signed_in(aid, fresh=True):
+                    print(f"{C_OK}{label} is signed in. Use it with /brain {aid}{C_RESET}")
+                    return True
+                r = _xa.sign_in(aid)
+                print(f"{C_DIM}A window opened with {label}'s own sign-in. Finish there, then: /brain {aid}{C_RESET}"
+                      if r.get("ok") else f"{C_ERR}{r.get('error')}{C_RESET}")
+                return True
             if len(words) >= 3 and words[1].lower() == "update":
                 print(f"{C_DIM}updating {words[2]}…{C_RESET}")
                 r = _xa.update(words[2].lower())
@@ -3082,6 +3103,10 @@ class JarvisCLI:
                 print(f"  {C_TOOL}{a['id']:<14}{C_RESET}{a['label']}"
                       + (f"  {C_OK}{u['latest']} is out (you have {u['installed']}): /agents update {a['id']}{C_RESET}"
                          if u else ""))
+            missing = [aid for aid in _xa.SETUP if not _xa.find(aid)]
+            if missing:
+                print(f"  {C_DIM}Not here yet, and I can set them up: " + ", ".join(
+                    f"/agents setup {m}" for m in missing) + f"{C_RESET}")
             return True
         if low.startswith("/think"):
             parts = cmd.split()
