@@ -152,6 +152,143 @@ def set_brain(provider: str, model: Optional[str] = None) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------- models
+# Claude Code lists the models this install and account can use when a
+# headless session starts (its `initialize` answer), with what each is for and
+# the effort levels it takes. Hearth asks once per installed version. The
+# context window isn't in that list; it comes back with every reply and is
+# remembered per model.
+CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+_SEEN = os.path.join(_HOME, "agent_models.json")
+_LIST_CACHE = os.path.join(_HOME, "claude_models.json")
+
+
+def _claude_list() -> List[Dict[str, Any]]:
+    exe = claude_exe()
+    if not exe:
+        return []
+    try:
+        stamp = f"{exe[-1]}|{os.path.getmtime(exe[-1])}"
+    except OSError:
+        stamp = exe[-1]
+    try:
+        with open(_LIST_CACHE, encoding="utf-8") as f:
+            cached = json.load(f)
+        if cached.get("stamp") == stamp and cached.get("models"):
+            return cached["models"]
+    except (OSError, ValueError):
+        pass
+    import subprocess
+    ask = json.dumps({"type": "control_request", "request_id": "models",
+                      "request": {"subtype": "initialize"}}) + "\n"
+    try:
+        r = subprocess.run(exe + ["-p", "--input-format", "stream-json", "--output-format", "stream-json",
+                                  "--verbose"], input=ask.encode("utf-8"), capture_output=True, timeout=60,
+                           cwd=os.path.expanduser("~"), creationflags=0x08000000 if sys.platform == "win32" else 0)
+    except Exception:
+        return []
+    models: List[Dict[str, Any]] = []
+    for line in r.stdout.decode("utf-8", "replace").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "control_response":
+            models = ((ev.get("response") or {}).get("response") or {}).get("models") or []
+            break
+    if models:
+        try:
+            os.makedirs(_HOME, exist_ok=True)
+            with open(_LIST_CACHE, "w", encoding="utf-8") as f:
+                json.dump({"stamp": stamp, "models": models}, f)
+        except OSError:
+            pass
+    return models
+
+
+def _seen() -> Dict[str, Any]:
+    try:
+        with open(_SEEN, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember(provider: str, model: str, ctx: Optional[int]) -> None:
+    """The context window a model reported, by its full name."""
+    if not model or not ctx:
+        return
+    data = _seen()
+    data.setdefault(provider, {})[model] = ctx
+    try:
+        os.makedirs(_HOME, exist_ok=True)
+        with open(_SEEN, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
+def _model_key(provider: str) -> str:
+    return "claude_model" if provider == PROVIDER else provider + "_model"
+
+
+def chosen_model(provider: str) -> str:
+    try:
+        from .web import _load_settings
+        return str(_load_settings().get(_model_key(provider)) or "").strip()
+    except Exception:
+        return ""
+
+
+def chosen_effort() -> str:
+    """The think button's level, when it's on. Empty: the agent's own default."""
+    try:
+        from .web import _load_settings
+        s = _load_settings()
+    except Exception:
+        return ""
+    if not s.get("think_default"):
+        return ""
+    return str(s.get("think_level") or "").strip().lower()
+
+
+def agent_models(provider: str) -> Dict[str, Any]:
+    """The models an agent offers, for the model menu and the think button."""
+    seen = _seen().get(provider, {})
+    if provider == PROVIDER:
+        models = []
+        for m in _claude_list():
+            value = str(m.get("value") or "")
+            full = str(m.get("resolvedModel") or "")
+            # "Opus 5.5 · Best for everyday, complex tasks": the version is the name.
+            name, _, rest = str(m.get("description") or "").partition(" · ")
+            default = value == "default"
+            models.append({"id": "" if default else value,
+                           "label": "Default" if default else (name or m.get("displayName") or value),
+                           "about": str(m.get("description") or "") if default else rest,
+                           "model": full, "ctx": seen.get(full),
+                           "efforts": list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else []})
+    elif provider == "codex":
+        from . import codex_brain
+        models = codex_brain.models()
+    else:
+        models = []
+    return {"provider": provider, "label": BRAINS.get(provider, provider), "models": models,
+            "model": chosen_model(provider), "effort": chosen_effort()}
+
+
+def context_window(provider: Optional[str] = None) -> Optional[int]:
+    """The context window of the model the agent brain will use, when known."""
+    provider = provider or current()
+    if not provider:
+        return None
+    want = chosen_model(provider)
+    for m in agent_models(provider)["models"]:
+        if m["id"] == want:
+            return m.get("ctx")
+    return None
+
+
 # ---------------------------------------------------------------- tool names
 # Claude Code's own tools shown as the Hearth tools they amount to, so a shell
 # command gets the command card, an edit gets the diff, a fetch the site icon.
@@ -372,13 +509,13 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
         args += ["--allowedTools", ",".join(safe)]
     if session:
         args += ["--resume", session]
-    try:
-        from .web import _load_settings
-        model = (_load_settings().get("claude_model") or "").strip() or None
-    except Exception:
-        model = None
-    if model:
-        args += ["--model", model]
+    alias = chosen_model(PROVIDER)
+    if alias:
+        args += ["--model", alias]
+    effort = chosen_effort()
+    if effort and effort in next((m["efforts"] for m in agent_models(PROVIDER)["models"] if m["id"] == alias),
+                                 CLAUDE_EFFORTS):
+        args += ["--effort", effort]
     cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
     os.makedirs(cwd, exist_ok=True)
 
@@ -466,6 +603,12 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
 
     if sid:
         _save_session(key, sid)
+    # The model that did the work: Claude Code also runs a small one on the
+    # side, so it's the one with the most output.
+    usage = (result or {}).get("modelUsage") or {}
+    if usage:
+        name, u = max(usage.items(), key=lambda kv: (kv[1] or {}).get("outputTokens") or 0)
+        _remember(PROVIDER, name, (u or {}).get("contextWindow"))
     reply = "".join(text_parts).strip() or str(final_text).strip()
     if result and result.get("is_error"):
         emit("error", message=("Claude Code stopped: " + str(result.get("result") or result.get("subtype") or "error"))[:600])
@@ -476,7 +619,8 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
         emit("assistant", content=reply)
     emit("done", duration_ms=int((time.time() - t0) * 1000),
          iterations=int((result or {}).get("num_turns") or 1),
-         stats={"brain": "Claude Code",
+         stats={"brain": "Claude Code", "model": (max(usage, key=lambda k: (usage[k] or {}).get("outputTokens") or 0)
+                                                 if usage else ""),
                 "cost_usd": (result or {}).get("total_cost_usd")} if result else None,
          reason="finished")
     return 0

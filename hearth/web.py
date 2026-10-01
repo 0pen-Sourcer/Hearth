@@ -745,25 +745,8 @@ def _models_probe_endpoint() -> str:
 
 
 def _port_reachable(base_url: str, timeout: float = 0.6) -> bool:
-    """Fast TCP pre-check for a model-server endpoint. Returns False quickly when
-    nothing accepts on host:port. On some Windows boxes a REFUSED loopback
-    connection is delayed ~2s (security software / a proxy on the network stack),
-    and _list_models otherwise probes 2-3x sequentially → ~6s of "Getting Hearth
-    ready" on every boot/poll when no server is up. A short connect timeout gives
-    up before that delayed refuse, so a dead endpoint costs ~0.5s, not ~6s."""
-    try:
-        from urllib.parse import urlparse
-        u = urlparse(base_url)
-        host = u.hostname or "127.0.0.1"
-        port = u.port or (443 if u.scheme == "https" else 80)
-    except Exception:
-        return True   # unparseable — don't block; let the real probe decide
-    import socket as _sock
-    try:
-        with _sock.create_connection((host, port), timeout=timeout):
-            return True
-    except Exception:
-        return False
+    from . import headless as _hl
+    return _hl.port_reachable(base_url, timeout)
 
 
 def _list_models() -> List[Dict]:
@@ -1681,11 +1664,28 @@ class HearthHandler(BaseHTTPRequestHandler):
             # the heavier state build — surfacing on a second launch has to feel
             # instant, not wait out the 12s state poll.
             return self._send_json(200, {"focus": _take_pending_focus()})
+        if path == "/api/brain/agent/models":
+            from . import claude_brain
+            aid = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("id", [""])[0]
+            if aid not in claude_brain.BRAINS:
+                return self._send_json(404, {"error": "unknown agent"})
+            return self._send_json(200, claude_brain.agent_models(aid))
         if path == "/api/context-budget":
             # Live read of the current brain's context window so the GUI
             # ring + bottom bar update instantly on provider swap (don't
             # have to wait for the next chat turn to fire context_budget
             # SSE events). Same helper the chat path uses, so they agree.
+            try:
+                from . import claude_brain as _cb
+                if _cb.active():
+                    # An agent runs its own context; Hearth only knows the
+                    # model's window (after its first reply, for Claude Code).
+                    return self._send_json(200, {"agent": _cb.current(), "total": _cb.context_window() or 0,
+                                                 "tools": 0, "effective": _cb.context_window() or 0,
+                                                 "source": _cb.label(), "model": _cb.chosen_model(_cb.current()),
+                                                 "base": 0})
+            except Exception:
+                pass
             try:
                 from . import headless as _hl
                 # Sync helper's view of base/model to whatever GUI has set.
@@ -3628,8 +3628,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 # Setting persists in ~/Jarvis/settings.json as preferred_model.
                 try:
                     saved = _load_settings()
-                    if saved.get("preferred_model") != model_path:
+                    if saved.get("preferred_model") != model_path or saved.get("last_local_model") != model_path:
                         saved["preferred_model"] = model_path
+                        # Kept through an eject: what to start when voice or
+                        # chat needs a model and none is set to autoboot.
+                        saved["last_local_model"] = model_path
                         os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
                         _atomic_write_json(SETTINGS_PATH, saved, indent=2)
                 except Exception:

@@ -2473,10 +2473,29 @@ class JarvisCLI:
             if provider in ("claude-code", "claude", "codex"):
                 from hearth import claude_brain as _cb
                 provider = "claude-code" if provider == "claude" else provider
-                err = _cb.set_brain(provider)
+                # /brain claude-code opus: one of the agent's own models, by
+                # its name or id. Without one, the saved choice stays.
+                want = parts[2].strip().lower() if len(parts) > 2 else None
+                model = None
+                if want is not None:
+                    offered = _cb.agent_models(provider)["models"]
+                    hit = next((m for m in offered if want in (m["id"].lower(), m["label"].lower(), m["label"].lower().split()[0])), None)
+                    if not hit:
+                        print(f"{C_ERR}{_cb.BRAINS[provider]} doesn't list '{want}'. It has: "
+                              f"{', '.join(m['label'] for m in offered)}{C_RESET}")
+                        return True
+                    model = hit["id"]
+                err = _cb.set_brain(provider, model)
                 if err:
                     print(f"{C_ERR}{err}{C_RESET}")
                     return True
+                _info = _cb.agent_models(provider)
+                _cur = next((m for m in _info["models"] if m["id"] == _info["model"]), None)
+                if _cur:
+                    print(f"{C_DIM}model: {_cur['label']}"
+                          + (f" ({_cur['about']})" if _cur.get('about') else "")
+                          + f". Others: {', '.join(m['label'] for m in _info['models'] if m is not _cur)}. "
+                          f"Pick with /brain {provider} <name>; effort with /think <level>.{C_RESET}")
                 plan = ("on your ChatGPT plan (it counts toward your Codex limit)" if provider == "codex"
                         else "on your Claude plan (Agent SDK credit)")
                 print(f"{C_OK}JARVIS now thinks with {_cb.BRAINS[provider]}{C_RESET} {C_DIM}{plan}. "
@@ -2993,6 +3012,26 @@ class JarvisCLI:
             return True
         if low.startswith("/think"):
             parts = cmd.split()
+            # An agent brain always reasons; /think sets how hard, from the
+            # levels its current model takes.
+            try:
+                from hearth import claude_brain as _cb
+                _agent = _cb.current()
+            except ImportError:
+                _agent = None
+            if _agent:
+                info = _cb.agent_models(_agent)
+                levels = next((m["efforts"] for m in info["models"] if m["id"] == info["model"]), [])
+                arg = parts[1].lower() if len(parts) >= 2 else ""
+                if arg in levels or arg == "default":
+                    _save_setting("think_default", True)
+                    _save_setting("think_level", "" if arg == "default" else arg)
+                    print(f"{C_OK}effort: {arg}{C_RESET}")
+                elif not levels:
+                    print(f"{C_DIM}This {_cb.label()} model has no effort levels.{C_RESET}")
+                else:
+                    print(f"{C_DIM}effort is {info['effort'] or 'default'}. /think default | {' | '.join(levels)}{C_RESET}")
+                return True
             if len(parts) >= 2 and parts[1].lower() in ("on", "1", "true", "yes"):
                 self.think_on = True
             elif len(parts) >= 2 and parts[1].lower() in ("off", "0", "false", "no"):

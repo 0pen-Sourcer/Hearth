@@ -30,6 +30,43 @@ SERVER = "hearth_brain"
 _MAX_INLINE = 22000
 
 
+def _codex_home() -> str:
+    return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+
+
+def _user_config() -> Dict[str, Any]:
+    try:
+        import tomllib
+        with open(os.path.join(_codex_home(), "config.toml"), "rb") as f:
+            return tomllib.load(f)
+    except Exception:
+        return {}
+
+
+def models() -> List[Dict[str, Any]]:
+    """The models this account can pick, as Codex itself lists them."""
+    try:
+        with open(os.path.join(_codex_home(), "models_cache.json"), encoding="utf-8") as f:
+            cache = json.load(f) or {}
+    except (OSError, ValueError):
+        cache = {}
+    default = str(_user_config().get("model") or "")
+    out = [{"id": "", "label": "Default", "about": f"Codex's own choice ({default})" if default else "Codex's own choice",
+            "model": default, "ctx": None, "efforts": []}]
+    for m in cache.get("models") or []:
+        if m.get("visibility") != "list" or not m.get("slug"):
+            continue
+        out.append({"id": m["slug"], "label": m.get("display_name") or m["slug"],
+                    "about": m.get("description") or "", "model": m["slug"],
+                    "ctx": m.get("context_window"),
+                    "efforts": [x.get("effort") for x in m.get("supported_reasoning_levels") or [] if x.get("effort")]})
+    # "Default" means whatever the config names, with that model's numbers.
+    for m in out[1:]:
+        if m["id"] == default:
+            out[0]["ctx"], out[0]["efforts"] = m["ctx"], m["efforts"]
+    return out
+
+
 def _toml(v: Any) -> str:
     """A value for `-c key=value`. JSON strings and arrays are valid TOML."""
     if isinstance(v, dict):
@@ -70,7 +107,8 @@ def _sandbox() -> List[str]:
     return out
 
 
-def build_args(exe: List[str], *, session: Optional[str], persona: str, model: str = "") -> List[str]:
+def build_args(exe: List[str], *, session: Optional[str], persona: str, model: str = "",
+               effort: str = "") -> List[str]:
     launch = _base._mcp_launch(gate=True)
     args = list(exe) + ["exec"]
     if session:
@@ -90,6 +128,8 @@ def build_args(exe: List[str], *, session: Optional[str], persona: str, model: s
         args += ["-c", f"developer_instructions={_toml(persona)}"]
     if model:
         args += ["-m", model]
+    if effort:
+        args += ["-c", f"model_reasoning_effort={_toml(effort)}"]
     return args + ["-"]
 
 
@@ -126,12 +166,11 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     if len(persona) > _MAX_INLINE:
         text_in = persona + "\n\n---\n\n" + text_in
         persona = ""
-    try:
-        from .web import _load_settings
-        model = (_load_settings().get("codex_model") or "").strip()
-    except Exception:
-        model = ""
-    args = build_args(exe, session=session, persona=persona, model=model)
+    model = _base.chosen_model(PROVIDER)
+    effort = _base.chosen_effort()
+    offered = next((m["efforts"] for m in models() if m["id"] == model), [])
+    args = build_args(exe, session=session, persona=persona, model=model,
+                      effort=effort if effort in offered else "")
     cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
     os.makedirs(cwd, exist_ok=True)
 
@@ -241,7 +280,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     if reply:
         emit("assistant", content=reply)
     emit("done", duration_ms=int((time.time() - t0) * 1000), iterations=1,
-         stats={"brain": "Codex", "tokens_in": (usage or {}).get("input_tokens"),
+         stats={"brain": "Codex", "model": model or str(_user_config().get("model") or ""), "tokens_in": (usage or {}).get("input_tokens"),
                 "tokens_out": (usage or {}).get("output_tokens")} if usage is not None else {"brain": "Codex"},
          reason="finished")
     return 0

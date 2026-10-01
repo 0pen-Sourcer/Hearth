@@ -36,13 +36,27 @@ from hearth import claude_brain as cb                                # noqa: E40
 
 cb._HOME = work
 cb._SESSIONS = os.path.join(work, "claude_sessions.json")
+cb._SEEN = os.path.join(work, "agent_models.json")
+cb._LIST_CACHE = os.path.join(work, "claude_models.json")
 cb.set_bridge_url("http://127.0.0.1:9")
 argv_log = os.path.join(work, "argv.jsonl")
 fake = os.path.join(work, "fake_claude.py")
 with open(fake, "w", encoding="utf-8") as f:
     f.write(f"""import json, sys
-open({argv_log!r}, "a").write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read()}}) + "\\n")
+said = sys.stdin.read()
 out = lambda o: print(json.dumps(o), flush=True)
+if '"initialize"' in said:
+    out({{"type": "control_response", "response": {{"subtype": "success", "request_id": "models", "response": {{"models": [
+        {{"value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Default (recommended)",
+          "description": "Opus 5.5 \\u00b7 Best for everyday, complex tasks", "supportsEffort": True,
+          "supportedEffortLevels": ["low", "medium", "high"]}},
+        {{"value": "opus", "resolvedModel": "claude-opus-5-5", "displayName": "Opus",
+          "description": "Opus 5.5 \\u00b7 Best for everyday, complex tasks", "supportsEffort": True,
+          "supportedEffortLevels": ["low", "medium", "high"]}},
+        {{"value": "haiku", "resolvedModel": "claude-haiku-4-5", "displayName": "Haiku",
+          "description": "Haiku 4.5 \\u00b7 Fastest for quick answers"}}]}}}}}})
+    sys.exit(0)
+open({argv_log!r}, "a").write(json.dumps({{"argv": sys.argv[1:], "stdin": said}}) + "\\n")
 out({{"type": "system", "subtype": "init", "session_id": "sess-123"}})
 for w in ["I'm ", "JARVIS."]:
     out({{"type": "stream_event", "event": {{"type": "content_block_delta", "delta": {{"type": "text_delta", "text": w}}}}}})
@@ -52,9 +66,19 @@ out({{"type": "assistant", "message": {{"content": [{{"type": "tool_use", "id": 
 out({{"type": "user", "message": {{"content": [{{"type": "tool_result", "tool_use_id": "t1", "content": [{{"type": "text", "text": "Wednesday"}}]}},
      {{"type": "tool_result", "tool_use_id": "t2", "content": "edited"}}, {{"type": "tool_result", "tool_use_id": "t3", "content": "ok"}}]}}}})
 out({{"type": "stream_event", "event": {{"type": "content_block_delta", "delta": {{"type": "text_delta", "text": "Done."}}}}}})
-out({{"type": "result", "subtype": "success", "is_error": False, "session_id": "sess-123", "num_turns": 3, "total_cost_usd": 0.01, "result": "I'm JARVIS.Done."}})
+out({{"type": "result", "subtype": "success", "is_error": False, "session_id": "sess-123", "num_turns": 3, "total_cost_usd": 0.01, "result": "I'm JARVIS.Done.",
+     "modelUsage": {{"claude-haiku-4-5": {{"outputTokens": 12, "contextWindow": 200000}},
+                    "claude-opus-5-5": {{"outputTokens": 480, "contextWindow": 1000000}}}}}})
 """)
 cb.claude_exe = lambda: [sys.executable, fake]
+
+
+listed = cb.agent_models("claude-code")["models"]
+check("the models are the ones Claude Code itself lists, named by version",
+      [(m["id"], m["label"]) for m in listed] == [("", "Default"), ("opus", "Opus 5.5"), ("haiku", "Haiku 4.5")])
+check("each with the effort levels it takes, or none",
+      listed[1]["efforts"] == ["low", "medium", "high"] and listed[2]["efforts"] == [])
+check("the context window isn't known before a reply", listed[0]["ctx"] is None and cb.context_window("claude-code") is None)
 
 
 def turn(prompt, history):
@@ -92,6 +116,21 @@ turn("what did we say?", [{"role": "user", "content": "a chat from another brain
                           {"role": "assistant", "content": "an answer about otters"}])
 third = json.loads(open(argv_log).read().splitlines()[2])
 check("a chat begun on another brain is passed as context", "otters" in third["stdin"])
+
+check("the model that answered and its context window are remembered",
+      cb.context_window("claude-code") == 1000000
+      and cb.agent_models("claude-code")["models"][1]["ctx"] == 1000000)
+real_model, real_effort = cb.chosen_model, cb.chosen_effort
+cb.chosen_model, cb.chosen_effort = (lambda p: "opus"), (lambda: "high")
+turn("think hard", [])
+argv = json.loads(open(argv_log).read().splitlines()[-1])["argv"]
+check("the picked model and the think button's effort are passed",
+      argv[argv.index("--model") + 1] == "opus" and argv[argv.index("--effort") + 1] == "high")
+cb.chosen_model = lambda p: "haiku"
+turn("quick one", [])
+argv = json.loads(open(argv_log).read().splitlines()[-1])["argv"]
+check("a model that takes no effort level isn't given one", "--effort" not in argv and "haiku" in argv)
+cb.chosen_model, cb.chosen_effort = real_model, real_effort
 
 # Permission questions
 asked = []

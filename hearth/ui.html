@@ -39,7 +39,10 @@
       } catch (e) {}
       try { if (window.pywebview && window.pywebview.api && window.pywebview.api.set_icon) window.pywebview.api.set_icon(m); } catch (e) {}
     }
-    if (mode === 'classic') document.addEventListener('DOMContentLoaded', function () { lookIcon('classic'); });
+    // The window's own icon is picked before the page knows the look, so the
+    // page always says which one it is, once the native bridge is there.
+    document.addEventListener('DOMContentLoaded', function () { lookIcon(mode); });
+    window.addEventListener('pywebviewready', function () { lookIcon(mode); });
     function remember(body) {
       try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {}
     }
@@ -308,10 +311,46 @@
   }
   :root[data-theme="classic"] .empty-mark .hm-h { border-radius: var(--r-xl); font-size: 26px;
     box-shadow: 0 0 32px var(--accent-line); }
+  /* Classic's H in the empty chat. Getting ready: a soft churning aura behind
+     it, a light sweeping across its face, a breathing glow. Loading a model:
+     the H itself turns white, and eases back when it's ready. Nothing loaded:
+     a slow, calm breath. Ready: one settle-in pop. */
+  :root[data-theme="classic"] .empty-mark .hm-h { position: relative; overflow: visible; transition: color .5s var(--ease); }
   :root[data-theme="classic"] .empty.booting .empty-mark .hm-h { animation: classicGlow 3s ease-in-out infinite; }
   @keyframes classicGlow {
-    0%, 100% { box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 30%, transparent); }
-    50%      { box-shadow: 0 0 34px color-mix(in srgb, var(--accent-2) 55%, transparent); }
+    0%, 100% { box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 30%, transparent), 0 0 44px color-mix(in srgb, var(--accent) 12%, transparent); }
+    50%      { box-shadow: 0 0 30px color-mix(in srgb, var(--accent-2) 50%, transparent), 0 0 70px color-mix(in srgb, var(--accent) 26%, transparent); }
+  }
+  :root[data-theme="classic"] .empty.booting .empty-mark .hm-h::before {
+    content: ''; position: absolute; inset: -22px; z-index: -1; border-radius: 50%;
+    background:
+      radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--accent-2) 55%, transparent) 0%, transparent 55%),
+      radial-gradient(circle at 72% 62%, color-mix(in srgb, var(--accent) 50%, transparent) 0%, transparent 52%),
+      radial-gradient(circle at 55% 82%, color-mix(in srgb, var(--accent-2) 40%, transparent) 0%, transparent 48%);
+    filter: blur(12px);
+    animation: bootAura 6s ease-in-out infinite alternate;
+  }
+  @keyframes bootAura {
+    0%   { transform: rotate(0deg)  scale(1);    opacity: .75; }
+    50%  { opacity: 1; }
+    100% { transform: rotate(22deg) scale(1.12); opacity: .85; }
+  }
+  :root[data-theme="classic"] .empty.booting .empty-mark .hm-h::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    background: linear-gradient(115deg, transparent 34%, rgba(255,255,255,.5) 50%, transparent 66%);
+    background-size: 220% 100%;
+    animation: bootShimmer 2s cubic-bezier(.4,0,.2,1) infinite;
+    mix-blend-mode: screen;
+  }
+  @keyframes bootShimmer { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+  :root[data-theme="classic"] .empty.booting.loading .empty-mark .hm-h {
+    animation: classicGlow 3s ease-in-out infinite, hWhiten .7s var(--ease) both;
+  }
+  @keyframes hWhiten { 0% { color: var(--on-accent); } 100% { color: #fff; } }
+  :root[data-theme="classic"] .empty.idle-nomodel .empty-mark .hm-h { animation: idleBreath 5s ease-in-out infinite; }
+  @keyframes idleBreath {
+    0%, 100% { box-shadow: 0 0 18px var(--accent-line); opacity: .85; }
+    50%      { box-shadow: 0 0 28px var(--accent-line); opacity: 1; }
   }
   .brand-sub { color: var(--fg-faint); font-size: 11px; margin-left: 2px; }
 
@@ -413,6 +452,14 @@
     border: 1px solid var(--border); border-radius: 99px; }
   .mp-get:hover { border-color: var(--accent); }
   .mp-empty { padding: 14px 12px; color: var(--fg-dim); font-size: 12.5px; }
+  .mp-more { flex: none; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+    color: var(--fg-dim); transition: transform .25s var(--ease), background .15s var(--ease); }
+  .mp-more:hover { background: var(--bg-2); color: var(--fg); }
+  .mp-more.open { transform: rotate(90deg); color: var(--fg); }
+  .mp-sub { overflow: hidden; margin: 0 0 4px 36px; border-left: 1px solid var(--border); }
+  .mp-sub .mp-row { padding: 6px 10px; font-size: 12.5px; }
+  .mp-sub .mp-row .mp-s { font-size: 11px; }
+  .mp-sub .mp-row.cur { background: color-mix(in srgb, var(--accent) 9%, transparent); }
   .btn-mini {
     background: transparent; border: 1px solid var(--border);
     color: var(--fg-dim);
@@ -657,7 +704,7 @@
     100% { transform: scale(1); opacity: 1; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .empty-mark, .empty-mark .hm-flame { animation: none !important; }
+    .empty-mark, .empty-mark .hm-flame, .empty-mark .hm-h, .empty-mark .hm-h::before, .empty-mark .hm-h::after { animation: none !important; }
   }
   .empty-title { color: var(--fg); font-size: 16px; font-weight: 500; }
   .empty-sub { font-size: 13px; max-width: 480px; text-align: center; color: var(--fg-dim); }
@@ -6101,6 +6148,7 @@ const STATE = {
   view: 'chat',
   thinking: false,
   thinkLevel: '',
+  agentInfo: null,   // models + effort levels of the agent brain, when one is in use
   streaming: false,
   models: [],
   loadedModel: null,
@@ -7833,7 +7881,9 @@ function mpSync() {
   if (!sel || !name) return;
   const o = sel.selectedOptions[0];
   const raw = o ? o.textContent : '';
-  name.textContent = (o && o.value) ? (o.dataset.name || _mpClean(raw).replace(/\.gguf$/i, '')) : 'No model loaded';
+  const agent = STATE.brain && AGENT_BRAINS[STATE.brain.providerKey] ? STATE.brain.providerKey : '';
+  name.textContent = agent ? agentModelLabel(agent)
+    : (o && o.value) ? (o.dataset.name || _mpClean(raw).replace(/\.gguf$/i, '')) : 'No model loaded';
   tag.textContent = /●\s*online/i.test(raw) ? 'online' : /●\s*loaded/i.test(raw) ? 'loaded' : '';
 }
 function _mpRow(o, cur) {
@@ -7841,13 +7891,47 @@ function _mpRow(o, cur) {
   const h = agent ? (HARNESS[agent] || {}) : null;
   const ico = h ? `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>`
                : `<span class="mp-ico">${(STATE.brain && STATE.brain.kind === 'cloud' && cur) ? MP_CLOUD : MP_CHIP}</span>`;
-  const t = o.dataset.name || _mpClean(o.textContent).replace(/\.gguf$/i, '');
-  const sub = o.dataset.sub || (agent ? (agent === 'codex' ? 'Your ChatGPT plan' : 'Your Claude plan') + ' · keeps Hearth\'s tools' : '')
+  const t = agent && cur ? agentModelLabel(agent) : (o.dataset.name || _mpClean(o.textContent).replace(/\.gguf$/i, ''));
+  const sub = (agent && cur ? _agentSub(agent) : o.dataset.sub) || (agent ? (agent === 'codex' ? 'Your ChatGPT plan' : 'Your Claude plan') + ' · keeps Hearth\'s tools' : '')
     || (cur ? (STATE.brain && STATE.brain.kind === 'cloud' ? (STATE.brain.providerLabel || 'Online') : 'Running on this PC') : '');
-  const right = cur ? `<span class="mp-badge">${STATE.brain && STATE.brain.kind === 'cloud' ? 'In use' : 'Loaded'}</span>`
-              : o.disabled && o.dataset.site ? `<a class="mp-get" href="${esc(o.dataset.site)}" target="_blank" rel="noopener">Get it</a>` : '';
+  const more = agent && !o.disabled
+    ? `<span class="mp-more" data-more="${esc(agent)}" title="Pick a model" role="button" tabindex="-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>` : '';
+  const right = (cur ? `<span class="mp-badge">${STATE.brain && STATE.brain.kind === 'cloud' ? 'In use' : 'Loaded'}</span>`
+              : o.disabled && o.dataset.site ? `<a class="mp-get" href="${esc(o.dataset.site)}" target="_blank" rel="noopener">Get it</a>` : '') + more;
   return `<button type="button" class="mp-row${cur ? ' cur' : ''}" role="option" data-v="${esc(o.value)}"${o.disabled ? ' aria-disabled="true"' : ''}>
     ${ico}<span class="mp-txt"><span class="mp-t">${esc(t)}</span>${sub ? `<span class="mp-s">${esc(sub)}</span>` : ''}</span>${right}</button>`;
+}
+function _fmtCtx(n) { return n ? (n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M' : Math.round(n / 1000) + 'K') + ' context' : ''; }
+function _agentSub(id) {
+  const info = STATE.agentInfo && STATE.agentInfo.provider === id ? STATE.agentInfo : null;
+  const m = info && info.models.find(x => x.id === (info.model || ''));
+  const plan = id === 'codex' ? 'your ChatGPT plan' : 'your Claude plan';
+  return [m && m.model && m.id === '' ? m.model : '', m && _fmtCtx(m.ctx), plan].filter(Boolean).join(' · ');
+}
+async function _mpToggleModels(chev) {
+  const id = chev.dataset.more, row = chev.closest('.mp-row');
+  const open = row.nextElementSibling && row.nextElementSibling.classList.contains('mp-sub') ? row.nextElementSibling : null;
+  const anim = (el, from, to) => {
+    if (_reduceMotion()) return Promise.resolve();
+    const sp = springEasing(0.34, 0.9);
+    return el.animate([{ height: from + 'px', opacity: from ? 1 : 0 }, { height: to + 'px', opacity: to ? 1 : 0 }],
+                      { duration: sp.duration, easing: sp.easing }).finished.catch(() => {});
+  };
+  if (open) { chev.classList.remove('open'); await anim(open, open.offsetHeight, 0); open.remove(); return; }
+  chev.classList.add('open');
+  let info;
+  try { info = await api('/api/brain/agent/models?id=' + encodeURIComponent(id)); } catch { chev.classList.remove('open'); return; }
+  const inUse = (STATE.brain && STATE.brain.providerKey === id);
+  const box = document.createElement('div');
+  box.className = 'mp-sub';
+  box.innerHTML = info.models.map(m => {
+    const cur = inUse && (info.model || '') === m.id;
+    const sub = [m.id ? '' : (m.model || ''), _fmtCtx(m.ctx), m.about && m.id ? m.about : ''].filter(Boolean).join(' · ');
+    return `<button type="button" class="mp-row${cur ? ' cur' : ''}" role="option" data-v="agent::${esc(id)}::${esc(m.id)}">
+      <span class="mp-txt"><span class="mp-t">${esc(m.label)}</span>${sub ? `<span class="mp-s">${esc(sub)}</span>` : ''}</span>${cur ? '<span class="mp-badge">In use</span>' : ''}</button>`;
+  }).join('');
+  row.after(box);
+  await anim(box, 0, box.scrollHeight);
 }
 function mpOpen() {
   const sel = $('model-select'), pick = $('model-picker-tip');
@@ -7858,10 +7942,16 @@ function mpOpen() {
     document.body.appendChild(menu);
     menu.addEventListener('click', (e) => {
       if (e.target.closest('.mp-get')) { mpClose(); return; }
+      const chev = e.target.closest('.mp-more');
+      if (chev) { e.stopPropagation(); _mpToggleModels(chev); return; }
       const r = e.target.closest('.mp-row');
       if (!r || r.getAttribute('aria-disabled') === 'true') return;
       mpClose();
       if (r.classList.contains('cur')) return;
+      if (r.dataset.v.startsWith('agent::') && !sel.querySelector(`option[value="${CSS.escape(r.dataset.v)}"]`)) {
+        const o = document.createElement('option');
+        o.value = r.dataset.v; o.hidden = true; sel.appendChild(o);
+      }
       sel.value = r.dataset.v;
       sel.dispatchEvent(new Event('change'));
       mpSync();
@@ -7926,6 +8016,21 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('resize', mpClose);
 $('model-select').addEventListener('change', mpSync);
 
+// The models and effort levels the agent brain offers. The think button and
+// the model menu both read this.
+async function loadAgentInfo(id) {
+  try {
+    STATE.agentInfo = await api('/api/brain/agent/models?id=' + encodeURIComponent(id));
+  } catch { STATE.agentInfo = null; }
+  if (STATE.brain && AGENT_BRAINS[STATE.brain.providerKey]) STATE.brain.modelName = agentModelLabel(STATE.brain.providerKey);
+  renderThinkMenu(); applyThinkButton(); applyBrainState(); refreshCtxBudget();
+}
+function agentModelLabel(id) {
+  const info = STATE.agentInfo && STATE.agentInfo.provider === id ? STATE.agentInfo : null;
+  const m = info && info.models.find(x => x.id === (info.model || ''));
+  return AGENT_BRAINS[id] + (m && m.id ? ' · ' + m.label : '');
+}
+
 // Only the provider changes: the local address stays for helpers.
 function agentBrainOn(id) {
   const name = AGENT_BRAINS[id];
@@ -7933,6 +8038,7 @@ function agentBrainOn(id) {
   Object.assign(STATE.brain, deriveBrainKind(), { busy: false, loaded: true,
     modelId: name, modelName: name, ctxTotal: 0, ctxEffective: 0 });
   STATE.loadedModel = { id: name, state: 'loaded' };
+  loadAgentInfo(id);
   toast(`JARVIS now thinks with ${name}`,
         (id === 'codex' ? 'On your ChatGPT plan.' : 'On your Claude plan.') + ' Helpers keep using your local model.', 'ok', 5000);
   applyBrainState();
@@ -7941,12 +8047,17 @@ function agentBrainOn(id) {
 $('model-select').addEventListener('change', async (e) => {
   const id = e.target.value;
   if (!id) return;
-  // An agent picked from the sticker becomes the brain.
+  const _provNow = (STATE.settings && STATE.settings.llm_provider || '').toLowerCase();
+  if (AGENT_BRAINS[_provNow] && id === AGENT_BRAINS[_provNow]) return;
+  // An agent picked from the sticker becomes the brain, with a model of its
+  // own when one was picked ("agent::claude-code::opus").
   if (id.startsWith('agent::')) {
-    const aid = id.slice('agent::'.length);
+    const [aid, ...rest] = id.slice('agent::'.length).split('::');
+    const body = { provider: aid };
+    if (rest.length) body.model = rest.join('::');
     try {
       await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ provider: aid }) });
+                                      body: JSON.stringify(body) });
       agentBrainOn(aid);
     } catch (err) {
       toast(`Couldn't switch to ${AGENT_BRAINS[aid] || aid}`, err.message, 'err', 8000);
@@ -8263,7 +8374,13 @@ async function refreshState() {
       STATE.brain.providerKey = kind.providerKey;
       STATE.brain.providerLabel = kind.providerLabel;
 
-      if (kind.kind === 'cloud') {
+      if (AGENT_BRAINS[kind.providerKey]) {
+        // An agent brain has no model row on any server; it is the agent.
+        STATE.brain.modelId = AGENT_BRAINS[kind.providerKey];
+        STATE.brain.modelName = agentModelLabel(kind.providerKey);
+        STATE.brain.loaded = true;
+        if (!STATE.agentInfo || STATE.agentInfo.provider !== kind.providerKey) loadAgentInfo(kind.providerKey);
+      } else if (kind.kind === 'cloud') {
         // Cloud: the user's picked model id is authoritative (the server's
         // /api/state model row reflects whatever the provider lists first).
         let picked = (STATE.settings && STATE.settings.llm_model) || (s.model && s.model.id) || '';
@@ -8329,6 +8446,14 @@ function updateStatus() {
 async function refreshCtxBudget() {
   try {
     const b = await api('/api/context-budget');
+    if (b && b.agent) {
+      STATE.brain.ctxTotal = b.total || 0;
+      STATE.brain.ctxEffective = b.effective || 0;
+      STATE.brain.ctxTools = 0;
+      STATE.brain.ctxSource = b.source;
+      applyBrainState();
+      return;
+    }
     if (!b || !b.total) return;
     // Keep the legacy stash for the chat-event tooltip path.
     STATE._ctxBudget = {
@@ -8585,12 +8710,25 @@ const THINK_OPTIONS = [
 // control described a capability the model did not have. Same idea as any
 // harness that reads the tiers off the model rather than assuming them.
 function _thinkOptions() {
+  const agent = STATE.brain && AGENT_BRAINS[STATE.brain.providerKey] ? STATE.brain.providerKey : '';
+  if (agent) {
+    // An agent always reasons; what it offers is how hard.
+    const info = STATE.agentInfo && STATE.agentInfo.provider === agent ? STATE.agentInfo : null;
+    const m = info && info.models.find(x => x.id === (info.model || ''));
+    const levels = (m && m.efforts) || [];
+    return [{ on: true, level: '', label: 'Default', sub: AGENT_BRAINS[agent] + "'s own setting" },
+            ...levels.map(l => ({ on: true, level: l, label: l === 'xhigh' ? 'Extra high' : l[0].toUpperCase() + l.slice(1), sub: '' }))];
+  }
   const cloud = !!(STATE.brain && STATE.brain.kind === 'cloud');
   return cloud ? THINK_OPTIONS : THINK_OPTIONS.filter(o => !o.level);
 }
 
 function _thinkIndex() {
   const opts = _thinkOptions();
+  if (opts.length && opts[0].on) {
+    const i = opts.findIndex(o => o.level === (STATE.thinking ? (STATE.thinkLevel || '') : ''));
+    return i >= 0 ? i : 0;
+  }
   if (!STATE.thinking) return 0;
   const lv = (STATE.thinkLevel || '').toLowerCase();
   const i = opts.findIndex(o => o.on && o.level === lv);
@@ -11722,6 +11860,9 @@ async function refreshSettings() {
   try {
     const s = await api('/api/settings');
     STATE.settings = s;
+    // The brain is derived from settings: the first state poll can run before
+    // they arrive and call an agent or cloud brain "local" until the next one.
+    if (deriveBrainKind().providerKey !== (STATE.brain && STATE.brain.providerKey)) refreshState();
     paintModeButton();
     refreshToolPerms();
     // Sync the chat-input placeholder with the configured agent name so
@@ -13837,13 +13978,14 @@ async function warmUpBrainForVoice() {
       // the user doesn't have to leave voice mode to start it by hand.
       const prog0 = await api('/api/llmserver/progress').catch(() => ({}));
       if (!isBooting(prog0)) {
-        if (!cfg.preferred_model) {
-          setVoiceStatus('no local model set — pick one in Settings → Built-in server');
+        const want = cfg.preferred_model || cfg.last_local_model;
+        if (!want) {
+          setVoiceStatus('no model to start yet. Pick one in Models, then come back');
           return false;
         }
         api('/api/llmserver/start', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model_path: cfg.preferred_model }),
+          body: JSON.stringify({ model_path: want }),
         }).catch(() => {});
       }
       // Poll boot progress until a brain is ready (or the user exits / it fails

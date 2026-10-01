@@ -244,6 +244,27 @@ def _openrouter_catalog_context(model_id: str) -> Optional[int]:
         return None
 
 
+def port_reachable(base_url: str, timeout: float = 0.6) -> bool:
+    """Fast TCP pre-check for a model-server endpoint. Returns False quickly when
+    nothing accepts on host:port. On some Windows boxes a REFUSED loopback
+    connection is delayed ~2s (security software / a proxy on the network stack),
+    and a few sequential probes then cost seconds. A short connect timeout gives
+    up before that delayed refuse, so a dead endpoint costs ~0.5s, not ~6s."""
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(base_url)
+        host = u.hostname or "127.0.0.1"
+        port = u.port or (443 if u.scheme == "https" else 80)
+    except Exception:
+        return True   # unparseable — don't block; let the real probe decide
+    import socket as _sock
+    try:
+        with _sock.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 def autodetect_context(model_id: str) -> Optional[int]:
     """Ask LM Studio for the loaded context length of the active model. Copied
     verbatim from hearth_cli.autodetect_context so the bridge uses the SAME logic
@@ -262,6 +283,11 @@ def autodetect_context(model_id: str) -> Optional[int]:
         hit = _openrouter_catalog_context(model_id)
         if hit:
             return hit
+    # Nothing listening on a local address: three probes would each wait out
+    # the slow refuse, and there is no loaded context to find anyway.
+    _base = (LOCAL_API_BASE or "").lower()
+    if any(h in _base for h in ("localhost", "127.0.0.1", "0.0.0.0")) and not port_reachable(LOCAL_API_BASE):
+        return None
     import urllib.request
     _key = os.environ.get("LOCAL_API_KEY") or LOCAL_API_KEY or ""
     _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}

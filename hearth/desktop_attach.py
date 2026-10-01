@@ -86,10 +86,20 @@ def _set_window_icon(look: str) -> bool:
 
 
 def _saved_look(url: str) -> str:
+    """The saved look, read from the settings file: the backend can be too
+    busy to answer while the window opens (a wake word starts both at once)."""
+    try:
+        import json as _json
+        from .env import get as _get
+        ws = _get("WORKSPACE") or os.path.join(os.path.expanduser("~"), "Jarvis")
+        with open(os.path.join(ws, "settings.json"), encoding="utf-8") as f:
+            return str(_json.load(f).get("ui_theme") or "classic")
+    except Exception:
+        pass
     try:
         import json as _json
         import urllib.request
-        with urllib.request.urlopen(url.rstrip("/") + "/api/settings", timeout=2) as r:
+        with urllib.request.urlopen(url.rstrip("/") + "/api/settings", timeout=5) as r:
             return str(_json.load(r).get("ui_theme") or "classic")
     except Exception:
         return "classic"
