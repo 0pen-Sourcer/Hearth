@@ -162,6 +162,20 @@ cb.current = lambda: None
 check("with a model endpoint as the brain, nothing changes", subagents._agent_for_helpers() is None)
 cb.current = real_current
 
+# A newer version of an installed agent CLI is noticed, and only then.
+xa._UPDATES_CACHE = os.path.join(work, "agent_updates.json")
+real = (xa.find, xa._from_npm, xa.installed_version, xa.latest_version)
+xa.find = lambda aid: "x" if aid in ("claude-code", "gemini-cli", "codex") else None
+xa._from_npm = lambda aid: aid != "codex"                  # Codex here came with its app
+xa.installed_version = lambda aid: {"claude-code": "2.1.232", "gemini-cli": "0.62.0", "codex": "0.1.0"}[aid]
+xa.latest_version = lambda pkg: {"@anthropic-ai/claude-code": "2.1.286", "@google/gemini-cli": "0.62.0"}.get(pkg, "9.9.9")
+ups = xa.updates()
+check(f"an agent CLI with a newer version out is listed with both versions {ups}",
+      ups == [{"id": "claude-code", "label": "Claude Code", "installed": "2.1.232", "latest": "2.1.286"}])
+check("versions compare as numbers, not text", xa._version_tuple("2.1.100") > xa._version_tuple("v2.1.99 (Claude Code)"))
+xa.find, xa._from_npm, xa.installed_version, xa.latest_version = real
+check("an agent Hearth can't update says so", not xa.update("nope").get("ok"))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

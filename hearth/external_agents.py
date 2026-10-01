@@ -147,6 +147,99 @@ def available() -> List[Dict[str, Any]]:
     return out
 
 
+# ---------------------------------------------------------------- updates
+# The npm package behind each CLI that is installed from npm, so Hearth can
+# tell when a newer one is out and update it when asked. A CLI that came with
+# a desktop app (Codex) or updates itself (Cursor) isn't listed.
+NPM_PACKAGES = {"claude-code": "@anthropic-ai/claude-code", "codex": "@openai/codex",
+                "gemini-cli": "@google/gemini-cli", "opencode": "opencode-ai",
+                "crush": "@charmland/crush", "copilot": "@github/copilot"}
+_UPDATES_CACHE = os.path.join(os.path.expanduser("~"), ".hearth", "agent_updates.json")
+
+
+def _version_tuple(text: str) -> tuple:
+    import re as _re
+    m = _re.search(r"(\d+)\.(\d+)\.(\d+)", text or "")
+    return tuple(int(x) for x in m.groups()) if m else ()
+
+
+def installed_version(aid: str) -> str:
+    exe = find(aid)
+    if not exe:
+        return ""
+    try:
+        r = subprocess.run(_direct_argv(exe) + ["--version"], capture_output=True, text=True,
+                           timeout=30, creationflags=_NO_WINDOW)
+    except Exception:
+        return ""
+    v = _version_tuple((r.stdout or "") + (r.stderr or ""))
+    return ".".join(str(x) for x in v)
+
+
+def latest_version(package: str) -> str:
+    """The newest version on the npm registry. One small request, kept half a day."""
+    try:
+        with open(_UPDATES_CACHE, encoding="utf-8") as f:
+            cache = json.load(f) or {}
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get(package) or {}
+    if hit.get("version") and time.time() - hit.get("at", 0) < 12 * 3600:
+        return hit["version"]
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"https://registry.npmjs.org/{package}/latest", timeout=8) as r:
+            version = str(json.load(r).get("version") or "")
+    except Exception:
+        return hit.get("version", "")
+    if version:
+        cache[package] = {"version": version, "at": time.time()}
+        try:
+            os.makedirs(os.path.dirname(_UPDATES_CACHE), exist_ok=True)
+            with open(_UPDATES_CACHE, "w", encoding="utf-8") as f:
+                json.dump(cache, f)
+        except OSError:
+            pass
+    return version
+
+
+def _from_npm(aid: str) -> bool:
+    """Installed from npm (a shim in npm's folder), not carried by an app."""
+    exe = find(aid) or ""
+    return bool(_which(AGENTS[aid]["exe"])) and "npm" in exe.lower()
+
+
+def updates() -> List[Dict[str, str]]:
+    """Installed agent CLIs that have a newer version out."""
+    out = []
+    for aid, package in NPM_PACKAGES.items():
+        if aid not in AGENTS or not find(aid) or not _from_npm(aid):
+            continue
+        have, newest = installed_version(aid), latest_version(package)
+        if have and newest and _version_tuple(newest) > _version_tuple(have):
+            out.append({"id": aid, "label": AGENTS[aid]["label"], "installed": have, "latest": newest})
+    return out
+
+
+def update(aid: str) -> Dict[str, Any]:
+    """Update one agent CLI through npm. Returns {ok, version} or {ok: False, error}."""
+    package = NPM_PACKAGES.get(aid)
+    if not package or aid not in AGENTS or not find(aid):
+        return {"ok": False, "error": "that agent isn't one Hearth can update"}
+    npm = shutil.which("npm.cmd") or shutil.which("npm")
+    if not npm:
+        return {"ok": False, "error": "npm isn't on this PC, so the update can't run"}
+    try:
+        r = subprocess.run([npm, "install", "-g", package + "@latest"], capture_output=True, text=True,
+                           timeout=600, creationflags=_NO_WINDOW)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if r.returncode != 0:
+        tail = [l for l in ((r.stderr or "") + (r.stdout or "")).splitlines() if l.strip()][-2:]
+        return {"ok": False, "error": " ".join(tail)[:300] or f"npm exited with code {r.returncode}"}
+    return {"ok": True, "version": installed_version(aid)}
+
+
 def describe() -> str:
     """One line for tool descriptions: what can be delegated to here."""
     found = available()

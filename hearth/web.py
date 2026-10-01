@@ -1673,6 +1673,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             # the heavier state build — surfacing on a second launch has to feel
             # instant, not wait out the 12s state poll.
             return self._send_json(200, {"focus": _take_pending_focus()})
+        if path == "/api/agents/updates":
+            from . import external_agents as _xa
+            return self._send_json(200, {"updates": _xa.updates()})
         if path == "/api/brain/agent/models":
             from . import claude_brain
             aid = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("id", [""])[0]
@@ -3062,6 +3065,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import claude_brain
             return self._send_json(200, claude_brain.decide(
                 str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
+        if path == "/api/agents/update":
+            # Asked for from the "a newer one is out" prompt; never on its own.
+            body = self._read_json() or {}
+            from . import external_agents as _xa
+            r = _xa.update(str(body.get("id") or ""))
+            return self._send_json(200 if r.get("ok") else 400, r)
         if path == "/api/voice/realtime/mute":
             # The mic button in voice mode. Kept here, not in the page: the
             # recorder is what has to stop keeping what it hears.

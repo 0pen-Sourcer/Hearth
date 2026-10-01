@@ -3084,6 +3084,13 @@
   .toast.warn { border-left-color: var(--warn); }
   .toast.err  { border-left-color: var(--err); }
   .toast .title { color: var(--fg); font-weight: 600; }
+  .toast.ask { pointer-events: auto; }
+  .toast .ask-row { display: flex; gap: 8px; margin-top: 10px; }
+  .toast .ask-row button { font: 500 12px var(--sans); padding: 5px 14px; border-radius: var(--r); cursor: pointer;
+    background: var(--bg-3); border: 1px solid var(--border); color: var(--fg); }
+  .toast .ask-row button:hover { border-color: var(--border-strong); }
+  .toast .ask-row button.primary { background: var(--accent); border-color: transparent; color: var(--on-accent, #fff); }
+  .toast .ask-busy { font-size: 12px; color: var(--fg-dim); }
   .toast .body  { color: var(--fg-dim); margin-top: 3px; line-height: 1.45; }
 
   /* ============================================================
@@ -5473,6 +5480,52 @@ function toast(title, body = '', kind = 'ok', ms = 3500, force = false) {
   $('toasts').appendChild(t);
   setTimeout(() => { t.style.transition = 'opacity 0.3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, ms);
 }
+
+// A toast that asks: stays until answered, with a yes and a later.
+function askToast(title, body, yesLabel, onYes, onLater) {
+  const t = document.createElement('div');
+  t.className = 'toast ok ask';
+  t.innerHTML = `<div class="title">${esc(title)}</div><div class="body">${esc(body)}</div>
+    <div class="ask-row"><button class="primary" data-a="yes">${esc(yesLabel)}</button><button data-a="later">Later</button></div>`;
+  const close = () => { t.style.transition = 'opacity 0.3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 300); };
+  t.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.a === 'yes') onYes(t, close); else { if (onLater) onLater(); close(); }
+  });
+  $('toasts').appendChild(t);
+  return t;
+}
+// Agent CLIs installed from npm fall behind quietly, and a newer one is often
+// what has the newer models. Asked once per version, never done unasked.
+async function checkAgentUpdates() {
+  let r;
+  try { r = await api('/api/agents/updates'); } catch { return; }
+  let skipped = {};
+  try { skipped = JSON.parse(localStorage.getItem('hearth_agent_update_skip') || '{}'); } catch {}
+  for (const u of (r && r.updates) || []) {
+    if (skipped[u.id] === u.latest) continue;
+    askToast(`${u.label} has an update`, `You have ${u.installed}; ${u.latest} is out.`, 'Update', async (t, close) => {
+      const row = t.querySelector('.ask-row');
+      row.innerHTML = '<span class="ask-busy">Updating…</span>';
+      try {
+        const res = await api('/api/agents/update', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                     body: JSON.stringify({ id: u.id }) });
+        close();
+        toast(`${u.label} is up to date`, res.version ? 'Now on ' + res.version : '', 'ok', 5000);
+        if (STATE.agentInfo && STATE.agentInfo.provider === u.id) loadAgentInfo(u.id);
+      } catch (e) {
+        close();
+        toast(`${u.label} didn't update`, e.message.replace(/^\d+\s*/, ''), 'err', 9000);
+      }
+    }, () => {
+      skipped[u.id] = u.latest;
+      try { localStorage.setItem('hearth_agent_update_skip', JSON.stringify(skipped)); } catch {}
+    });
+  }
+}
+setTimeout(checkAgentUpdates, 30000);
+setInterval(checkAgentUpdates, 12 * 3600 * 1000);
 
 function showModal(title, body, actions = []) {
   $('modal-title').textContent = title;

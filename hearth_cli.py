@@ -1065,7 +1065,7 @@ class JarvisCLI:
                 from prompt_toolkit.completion import WordCompleter
                 _slash = ["/help", "/brain", "/endpoint", "/provider", "/models", "/model", "/load",
                           "/tools", "/clear", "/compact", "/context", "/tokens", "/chats", "/chat",
-                          "/history", "/workspace", "/log", "/mem", "/curate", "/rules", "/name", "/me", "/team",
+                          "/history", "/workspace", "/log", "/mem", "/curate", "/rules", "/name", "/me", "/team", "/agents",
                           "/learn", "/migrate", "/import-memory", "/import", "/jobs", "/mcp", "/agent", "/skill",
                           "/skills", "/voice", "/voices", "/stt", "/listen", "/sleep", "/wake", "/think",
                           "/multi", "/mode", "/perms", "/allow", "/disallow", "/allowed", "/lockdown",
@@ -2054,6 +2054,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/lockdown [on|off]{C_RESET}     keep reads inside the workspace too")
             print(f"  {C_TOOL}/me{C_RESET}                    what I call you, how I sound, headphones or speakers, what I may do")
             print(f"  {C_TOOL}/team [n]{C_RESET}              helpers working for me, and every step of one")
+            print(f"  {C_TOOL}/agents [update id]{C_RESET}    agent CLIs installed here, and updating one")
             print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
             print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
             print(f"  {C_TOOL}/repair{C_RESET}                restore deleted/corrupted files by re-applying this version")
@@ -3011,6 +3012,27 @@ class JarvisCLI:
                 asyncio.create_task(self._maybe_extract_facts())
             else:
                 print(f"{C_DIM}(nothing heard){C_RESET}")
+            return True
+        if low == "/agents" or low.startswith("/agents "):
+            # /agents: the agent CLIs installed here and whether a newer one is
+            # out. /agents update <id> updates one.
+            from hearth import external_agents as _xa
+            words = cmd.split()
+            if len(words) >= 3 and words[1].lower() == "update":
+                print(f"{C_DIM}updating {words[2]}…{C_RESET}")
+                r = _xa.update(words[2].lower())
+                print(f"{C_OK}now on {r.get('version') or 'the latest'}{C_RESET}" if r.get("ok")
+                      else f"{C_ERR}{r.get('error')}{C_RESET}")
+                return True
+            newer = {u["id"]: u for u in _xa.updates()}
+            found = _xa.available()
+            if not found:
+                print(f"{C_DIM}No agent CLIs are installed here.{C_RESET}")
+            for a in found:
+                u = newer.get(a["id"])
+                print(f"  {C_TOOL}{a['id']:<14}{C_RESET}{a['label']}"
+                      + (f"  {C_OK}{u['latest']} is out (you have {u['installed']}): /agents update {a['id']}{C_RESET}"
+                         if u else ""))
             return True
         if low.startswith("/think"):
             parts = cmd.split()
