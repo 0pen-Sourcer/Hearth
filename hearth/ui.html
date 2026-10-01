@@ -18207,7 +18207,8 @@ function roomGoal(p, a) {
   if (since < 12000 && !p.reported) return { at: byMain, pose: 'idle', report: true };
   // The job is done and reported: a while by the fire or the coffee, then home.
   if (since > ROOM_STAY) return { at: ROOM.spots.door, pose: 'idle', leave: true };
-  const [spot, pose] = roomPick(LEISURE, p.seed, 24000);
+  // Everyone who is done takes their break in the same place, so they meet.
+  const [spot, pose] = roomPick(LEISURE, 0, 40000);
   return { at: ROOM.spots[spot], pose, spread: true };
 }
 function roomSync(list) {
@@ -18277,7 +18278,7 @@ function roomSmallTalk() {
   if (now < ROOM.chatAt) return;
   ROOM.chatAt = now + 5000;
   const free = [...ROOM.people.values()].filter(p => !p.waiting && !p.walking && !p.leaving && p.agent
-    && p.agent.role !== 'main' && p.agent.status === 'done' && p.reported && !(ROOM.says.get(p.id) || {}).until > now);
+    && p.agent.role !== 'main' && p.agent.status === 'done' && p.reported && !((ROOM.says.get(p.id) || {}).until > now));
   for (const a of free) for (const b of free) {
     if (a === b || !b.agent.preview || (a.talked || (a.talked = new Set())).has(b.id)) continue;
     if (Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) > 150) continue;
