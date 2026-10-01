@@ -52,8 +52,9 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     "antigravity": {"label": "Antigravity", "maker": "Google", "exe": ["agy"],
                     "args": lambda allow: (["--dangerously-skip-permissions"] if allow == "auto" else []) + ["-p"],
                     "stream": "text", "prompt_arg": True},
+    # --skip-trust: headless, nobody is there to answer its "trust this folder?".
     "gemini-cli": {"label": "Gemini CLI", "maker": "Google", "exe": ["gemini"],
-                   "args": lambda allow: (["--yolo"] if allow == "auto" else []) + ["-p"],
+                   "args": lambda allow: ["--skip-trust", "--approval-mode=" + ("yolo" if allow == "auto" else "auto_edit"), "-p"],
                    "stream": "text", "prompt_arg": True},
     "grok": {"label": "Grok", "maker": "xAI", "exe": ["grok"],
              "args": lambda allow: ["--no-auto-update"] + (["--always-approve"] if allow == "auto" else []) + ["-p"],
@@ -135,8 +136,59 @@ def find(aid: str) -> Optional[str]:
     return None
 
 
+# An agent whose own account turned it away: which one, and what it said.
+# Kept a day, since a usage limit resets and a sign-in gets fixed.
+_REFUSED = os.path.join(os.path.expanduser("~"), ".hearth", "agents_refused.json")
+_ACCOUNT_WORDS = ("no longer supported", "not eligible", "ineligible", "usage limit", "rate limit", "quota",
+                  "not logged in", "not signed in", "log in", "login", "sign in", "unauthorized", "authenticat",
+                  "subscription", "api key")
+
+
+def why_failed(lines: List[str]) -> str:
+    """The line of an agent's output that says why it stopped, without the
+    stack trace under it."""
+    said = [l.strip() for l in lines if l.strip() and not l.lstrip().startswith(("at ", "{", "}", "[", "]"))]
+    for l in reversed(said):
+        if any(w in l.lower() for w in ("error", "failed", "denied", "refus") + _ACCOUNT_WORDS):
+            import re as _re
+            return _re.sub(r"^.*?\b\w*Error:\s*", "", l).strip()[:300]     # "…occurred:SomeError: why" -> "why"
+    return (said[-1] if said else "")[:300]
+
+
+def refused() -> Dict[str, str]:
+    """agent id -> what its account said, for agents turned away in the last day."""
+    try:
+        with open(_REFUSED, encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except (OSError, ValueError):
+        return {}
+    return {k: v.get("why", "") for k, v in data.items() if time.time() - v.get("at", 0) < 86400}
+
+
+def _note_refused(aid: str, why: str) -> None:
+    """Remember an account-level refusal, or forget one after a run that worked."""
+    try:
+        with open(_REFUSED, encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except (OSError, ValueError):
+        data = {}
+    if why and any(w in why.lower() for w in _ACCOUNT_WORDS):
+        data[aid] = {"why": why, "at": time.time()}
+    elif aid in data:
+        del data[aid]
+    else:
+        return
+    try:
+        os.makedirs(os.path.dirname(_REFUSED), exist_ok=True)
+        with open(_REFUSED, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
 def available() -> List[Dict[str, Any]]:
     """The agent CLIs installed on this machine."""
+    turned_away = refused()
     out = []
     for aid, spec in AGENTS.items():
         path = find(aid)
@@ -147,7 +199,8 @@ def available() -> List[Dict[str, Any]]:
             path = None
         if path:
             out.append({"id": aid, "label": spec["label"], "maker": spec.get("maker", ""), "path": path,
-                        "tested": aid in VERIFIED, "billing": spec.get("billing", "")})
+                        "tested": aid in VERIFIED, "billing": spec.get("billing", ""),
+                        "refused": turned_away.get(aid, "")})
     return out
 
 
@@ -278,7 +331,9 @@ def describe() -> str:
     found = available()
     if not found:
         return "No other agent CLIs are installed here."
-    return "Installed here: " + ", ".join(f"{a['label']} (agent='{a['id']}')" for a in found) + "."
+    return "Installed here: " + ", ".join(
+        f"{a['label']} (agent='{a['id']}'" + (", not usable now: its account refused it" if a["refused"] else "") + ")"
+        for a in found) + "."
 
 
 def _direct_argv(exe: str) -> List[str]:
@@ -459,7 +514,8 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
             else:
                 text = "\n".join(out_lines[-200:])
                 ok = code == 0
-                err = "" if ok else f"exited with code {code}: " + "\n".join(out_lines[-5:])
+                err = "" if ok else (why_failed(out_lines) or f"exited with code {code}")
+            _note_refused(agent, "" if ok else err)
         except Exception as e:
             ok, text, err = False, "", f"{type(e).__name__}: {e}"
         with _OPEN_LOCK:

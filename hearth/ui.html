@@ -17936,7 +17936,7 @@ $('tm-new').addEventListener('click', async () => {
   const agentBtn = a => {
     const h = HARNESS[a.id] || { c: 'var(--accent)', label: a.label };
     return `<button type="button" data-kind="agent" data-id="${esc(a.id)}">
-      <span class="hx-mini" style="--hx:${h.c}">${harnessMark(h)}</span><span>${esc(a.label)}<small>${esc(a.maker)}${a.billing ? ' · ' + esc(a.billing) : ''}</small></span></button>`;
+      <span class="hx-mini" style="--hx:${h.c}">${harnessMark(h)}</span><span>${esc(a.label)}<small>${a.refused ? esc("Didn't run: " + a.refused) : esc(a.maker) + (a.billing ? ' · ' + esc(a.billing) : '')}</small></span></button>`;
   };
   const agents = c.agents || [];
   const html = `<div class="nh-wrap">

@@ -1367,7 +1367,8 @@ def _team_choices() -> Dict[str, Any]:
         desc = str(p.get("description") or "").split(". ")[0].strip()
         roles.append({"id": p["slug"], "label": p["slug"].replace("_", " ").title(), "about": desc[:120]})
     agents = [{"id": a["id"], "label": a["label"], "maker": a.get("maker", ""),
-               "tested": a.get("tested", False), "billing": a.get("billing", "")} for a in _xa.available()]
+               "tested": a.get("tested", False), "billing": a.get("billing", ""),
+               "refused": a.get("refused", "")} for a in _xa.available()]
     # Where Hearth's own helpers run when it isn't the local model, so the
     # dialog can say so.
     helper_brain = ""

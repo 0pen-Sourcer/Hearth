@@ -32,6 +32,7 @@ def check(label, cond):
 
 
 work = tempfile.mkdtemp(prefix="hearth-xa-")
+xa._REFUSED = os.path.join(work, "agents_refused.json")
 subagents._TRANSCRIPT_DIR = __import__("pathlib").Path(work) / "subagents"
 fake = os.path.join(work, "fake_claude.py")
 with open(fake, "w", encoding="utf-8") as f:
@@ -193,6 +194,34 @@ check(f"an agent CLI with a newer version out is listed with both versions {ups}
 check("versions compare as numbers, not text", xa._version_tuple("2.1.100") > xa._version_tuple("v2.1.99 (Claude Code)"))
 xa.find, xa._from_npm, xa.installed_version, xa.latest_version = real
 check("an agent Hearth can't update says so", not xa.update("nope").get("ok"))
+
+# An agent its own account turns away: the reason is said plainly, without the
+# stack trace, and it is remembered so it isn't offered as if it worked.
+xa.AGENTS["turned-away"] = {"label": "Turned away", "exe": ["stand-in"], "stream": "text", "args": lambda allow: [
+    "-c", "import sys; print('{'); print('  tierId: 1'); print('}');"
+          "print('An unexpected critical error occurred:IneligibleTierError: This client is no longer supported "
+          "for individuals. Migrate to Antigravity.'); print('    at setup (file:///x.js:1:2)'); sys.exit(1)"]}
+xa._which = lambda names: sys.executable if names == ["stand-in"] else real_which(names)
+done, got = threading.Event(), {}
+xa.spawn("turned-away", "hello", on_done=lambda i, res: (got.update(res), done.set()))
+done.wait(30)
+check(f"a refused agent says why in its own words, not a stack trace {got.get('error')!r}",
+      got.get("error") == "This client is no longer supported for individuals. Migrate to Antigravity.")
+check("and is marked as refused where agents are offered",
+      next(a for a in xa.available() if a["id"] == "turned-away")["refused"].startswith("This client is no longer")
+      and "not usable now" in xa.describe())
+xa.AGENTS["turned-away"]["args"] = lambda allow: ["-c", "print('fine now')"]
+done.clear()
+xa.spawn("turned-away", "hello", on_done=lambda i, res: done.set())
+done.wait(30)
+check("a run that works clears the mark", "turned-away" not in xa.refused())
+check("a plain failure isn't taken for an account refusing",
+      xa.why_failed(["Traceback", "ValueError: bad path", "    at x (y.js:1:2)"]) == "bad path"
+      and not any(w in "bad path" for w in xa._ACCOUNT_WORDS))
+gem = xa.AGENTS["gemini-cli"]["args"]
+check("Gemini CLI is run trusting its folder, with the approval level the switch allows",
+      gem("auto") == ["--skip-trust", "--approval-mode=yolo", "-p"]
+      and gem("edits") == ["--skip-trust", "--approval-mode=auto_edit", "-p"])
 
 print()
 if FAILS:
