@@ -4511,7 +4511,7 @@
           <div class="ap-hint">How your assistant looks in the Team room.</div>
           <div class="ap-modes ap-two" id="ap-room">
             <button type="button" class="ap-mode ap-char" data-look="her"><i style="background-image:url(/assets/team/main.png)"></i><span><b>Orange scarf</b><small>Long hair. Sits, reads by the fire, tends it.</small></span></button>
-            <button type="button" class="ap-mode ap-char" data-look="him"><i style="background-image:url(/assets/team/main_m.png)"></i><span><b>Teal scarf</b><small>Short hair. Always on his feet.</small></span></button>
+            <button type="button" class="ap-mode ap-char" data-look="him"><i style="background-image:url(/assets/team/main_m.png)"></i><span><b>Teal scarf</b><small>Short hair. Stays on his feet, book or mug in hand.</small></span></button>
           </div>
         </div>
 <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">In the chat</h4>
@@ -18522,10 +18522,11 @@ const LEISURE = [['hearthside', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'cof
                  ['shelfR', 'read'], ['fireSide', 'coffee'], ['rug', 'stretch'], ['coffee', 'idle'], ['hearthside', 'coffee'], ['fireSide', 'idle']];
 // The third entry: 's' is seated on that piece of furniture, 'f' is turned the other way.
 const MAIN_IDLE_MORE = [['armchairSeat', 'sit', 's'], ['hearth', 'tend_fire'], ['windowSeat', 'side_coffee', 'f'],
-                        ['armchairSeat', 'sit_read', 's'], ['coffee', 'side_coffee', 'f'], ['armchairSeat', 'sit_coffee', 's']];
+                        ['shelfL', 'side_read'], ['armchairSeat', 'sit_read', 's'], ['coffee', 'side_coffee', 'f'],
+                        ['shelfR', 'side_read', 'f'], ['armchairSeat', 'sit_coffee', 's']];
 const MAIN_IDLE_WORDS = { fire: 'by the fire', windowSeat: 'at the window', coffee: 'making coffee', shelfR: 'reading', hearthside: 'by the hearth',
                          shelfL: 'reading', rug: 'stretching', windowL: 'at the window', board: 'at the board',
-                         armchairSeat: 'in the armchair', hearth: 'tending the fire', sit_read: 'reading' };
+                         armchairSeat: 'in the armchair', hearth: 'tending the fire' };
 // One entry of a list for this stretch of time. Stepping by 7 walks through a
 // whole list before repeating (none here is a multiple of 7 long); the same
 // place twice running is skipped.
@@ -18536,7 +18537,8 @@ function roomPick(list, seed, period) {
 }
 function roomMainIdle(p) {
   const skin = roomSkin(p.agent);
-  return roomPick(roomHas(skin, 'sit') ? MAIN_IDLE.concat(MAIN_IDLE_MORE) : MAIN_IDLE, p.seed, 45000);
+  // Only what this character was drawn doing.
+  return roomPick(MAIN_IDLE.concat(MAIN_IDLE_MORE.filter(([, pose]) => roomHas(skin, pose))), p.seed, 45000);
 }
 function roomMainIdleWord(p) {
   // Where it is, not where it is headed: "making coffee" is for the counter.
@@ -18580,8 +18582,10 @@ function roomMainGoal(p) {
   if (/^memory_(save|update|write)|^remember/.test(tool)) {
     return roomHas(roomSkin(p.agent), 'pin') ? { at: ROOM.spots.pin, pose: 'pin', flip: true } : { at: ROOM.spots.board, pose: 'raise' };
   }
-  if (/read|grep|find|list|search|fetch|browse|recall|pdf/.test(tool))
-    return { at: p.turn % 2 ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: 'read' };
+  if (/read|grep|find|list|search|fetch|browse|recall|pdf/.test(tool)) {
+    const right = p.turn % 2 === 1, side = roomHas(roomSkin(p.agent), 'side_read') && Math.floor(now / 4200) % 2 === 0;
+    return { at: right ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: side ? 'side_read' : 'read', flip: side && right };
+  }
   if (/write|edit|create|run_command|start_job|delegate/.test(tool)) {
     if (p.desk == null) p.desk = roomDeskFor(p.id);
     if (p.desk != null) return { at: roomSeat(p), pose: 'type', seated: true };

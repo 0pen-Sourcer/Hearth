@@ -11,7 +11,7 @@ a manifest the window reads.
 
 The art folder holds bg.png, 1-8.png (actions), 9-16.png (walks),
 old/1-8.png (poses), in role order, and optionally 17.png (more poses for the
-main character), 18.png (a second main character), 19.png (small things for
+main character), 18.png (a second main character), 20.png (his further poses), 19.png (small things for
 the room), bg_props.png, whose lower
 part is a 3x2 grid of furniture on magenta (desk, desk in use, chair,
 armchair, side table, mug) and room_empty.png, the room with no furniture.
@@ -49,6 +49,8 @@ MORE_PROPS = [("cat_sleep", 50), ("cat_sit", 38), ("book_open", 44), ("books", 4
 # The main character's poses beyond the fourteen everyone has, in sheet order.
 EXTRA_MAIN = ["sit", "sit_read", "sit_coffee", "talk", "nod", "wave",
               "side_idle", "side_coffee", "side_read", "tend_fire", "sleep", "pin"]
+# The second character was drawn in all twelve (20.png) and uses the ones on his feet.
+EXTRA_SECOND = {"talk", "nod", "wave", "side_idle", "side_coffee", "side_read", "tend_fire", "pin"}
 
 
 def key_magenta(img: Image.Image) -> np.ndarray:
@@ -196,15 +198,15 @@ def quantize(img: Image.Image) -> Image.Image:
     return rgb
 
 
-def extra_main(art: str, target: float):
-    """The main character's further poses (17.png, two rows of six), each in a
-    cell of its own, at the scale of her standing frames."""
-    path = os.path.join(art, "17.png")
+def extra_main(art: str, target: float, sheet: str = "17.png", keep=None):
+    """A main character's further poses (two rows of six), each in a cell of
+    its own, at the scale of the standing frames. `keep` names the ones to use."""
+    path = os.path.join(art, sheet)
     if not os.path.isfile(path):
         return []
     frames = [f for band in rows_of(key_magenta(Image.open(path)), 2) for f in strip_frames(band, 6)]
     scale = target / standing_height(frames, {3, 4})
-    return [place(cell, bb, scale) for cell, bb in frames[:len(EXTRA_MAIN)]]
+    return [place(cell, bb, scale) for name, (cell, bb) in zip(EXTRA_MAIN, frames) if keep is None or name in keep]
 
 
 def second_main(art: str):
@@ -282,6 +284,14 @@ def build(art: str) -> None:
         quantize(atlas).save(os.path.join(OUT, f"{role}.png"), optimize=True)
     second = second_main(art)
     if second:
+        more = extra_main(art, STAND_H * 1.06, "20.png", EXTRA_SECOND)
+        if more:
+            wide = Image.new("RGBA", (second.width + CELL_W * len(more), CELL_H), (0, 0, 0, 0))
+            wide.alpha_composite(second, (0, 0))
+            for i, im in enumerate(more):
+                wide.alpha_composite(im, (second.width + i * CELL_W, 0))
+            second = wide
+            manifest.setdefault("extra", {})["main_m"] = [n for n in EXTRA_MAIN if n in EXTRA_SECOND]
         quantize(second).save(os.path.join(OUT, "main_m.png"), optimize=True)
         manifest["roles"] = ROLES + ["main_m"]
     props_src = os.path.join(art, "bg_props.png")

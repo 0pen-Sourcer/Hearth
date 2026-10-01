@@ -44,6 +44,16 @@
    "tend_fire",
    "sleep",
    "pin"
+  ],
+  "main_m": [
+   "talk",
+   "nod",
+   "wave",
+   "side_idle",
+   "side_coffee",
+   "side_read",
+   "tend_fire",
+   "pin"
   ]
  },
  "props": {
@@ -133,5 +143,5 @@
   ]
  },
  "room_empty": true,
- "v": "a31adc2d7e"
+ "v": "aaac7455ad"
 }
