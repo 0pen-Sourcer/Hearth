@@ -533,8 +533,11 @@ _READERS = {"claude": _parse_claude_line, "codex": _parse_codex, "cursor": _pars
 
 
 def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
-          on_done: Optional[Callable[[str, Dict[str, Any]], None]] = None) -> Dict[str, Any]:
-    """Start an external agent in the background. Returns {ok, agent_id} or {ok: False, error}."""
+          on_done: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+          task: str = "", by: str = "") -> Dict[str, Any]:
+    """Start an external agent in the background. Returns {ok, agent_id} or {ok: False, error}.
+    `task` is what was asked in the asker's own words, when `prompt` wraps it
+    in a brief; `by` is who asked."""
     from . import subagents as _sa
     spec = AGENTS.get(agent)
     if not spec:
@@ -559,7 +562,7 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
     tpath = _sa._transcript_path(agent_id)
     name = _sa.helper_name(name, spec["label"], agent)
     _sa._append_transcript(tpath, {"kind": "start", "persona": spec["label"], "name": name,
-                                   "prompt": prompt, "runtime": agent, "cwd": work})
+                                   "prompt": task or prompt, "runtime": agent, "cwd": work, "by": by})
     _sa._append_transcript(tpath, {"kind": "route", "runtime": agent, "exe": exe, "allow": allow,
                                    "billing": spec.get("billing", "")})
     with _sa._BG_RESULTS_LOCK:

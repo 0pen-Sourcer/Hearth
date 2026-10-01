@@ -2143,6 +2143,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"agents": _sa.team_state()})
             except Exception as e:
                 return self._send_json(500, {"error": str(e)})
+        if path == "/api/team/story":
+            # One helper's work so far, for the panel beside the room.
+            from . import subagents as _sa
+            story = _sa.agent_story(self._query().get("id", "").strip())
+            return self._send_json(200 if story else 404, story or {"error": "no such helper"})
         if path == "/api/subagent/activity":
             # Recent subagent runs (from ~/Jarvis/subagents/*.jsonl) for
             # the Logs tab's "agents" subview. Newest first, capped.
@@ -3120,10 +3125,10 @@ class HearthHandler(BaseHTTPRequestHandler):
                     return self._send_json(400, {"error": f"folder not found: {folder}"})
             from . import subagents as _sa, external_agents as _xa
             if agent:
-                r = _xa.spawn(agent, task, cwd=folder)
+                r = _xa.spawn(agent, task, cwd=folder, by="you")
             else:
                 prompt = task + (f"\n\nWork in this folder: {folder}" if folder else "")
-                r = _sa.spawn_subagent(role, prompt, mode="background")
+                r = _sa.spawn_subagent(role, prompt, mode="background", by="you")
             if not r.get("ok"):
                 return self._send_json(400, {"error": r.get("error") or "it didn't start"})
             return self._send_json(200, {"ok": True, "agent_id": r.get("agent_id")})

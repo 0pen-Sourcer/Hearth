@@ -290,6 +290,21 @@ with sync_playwright() as pw:
       return (m.events || []).filter(e => e.kind === 'tool').map(e => [e.name, e.result]);
     }""")
     pg.unroute("**/chat")
+    panel = pg.evaluate("""async () => {
+      showView('team');
+      await new Promise(r => setTimeout(r, 2500));
+      roomPoke(ROOM.people.get('__main'));
+      await new Promise(r => setTimeout(r, 400));
+      const side = document.getElementById('tm-side');
+      const out = { shown: !side.hidden, asked: (side.querySelector('.tm-i-asked') || {}).textContent,
+                    steps: [...side.querySelectorAll('.tm-steps li span')].map(e => e.textContent),
+                    said: (side.querySelector('.tm-i-result') || {}).textContent };
+      showView('chat');
+      return out;
+    }""")
+    check(f"clicking JARVIS in the room opens a panel with what it was asked and each step it took {panel}",
+          panel["shown"] and "read both" in (panel["asked"] or "") and panel["steps"] == ["Reading a.txt", "Searching for x"]
+          and "Both done." in (panel["said"] or ""))
     check(f"with two tools running at once, each result lands on its own call {paired}",
           paired == [["read_file", "what a.txt says"], ["grep_search", "3 matches"]])
 

@@ -332,6 +332,46 @@ def _read_agent(p: Path) -> Dict[str, Any]:
     return info
 
 
+def agent_story(agent_id: str) -> Dict[str, Any]:
+    """One helper's transcript as what happened, in order: who asked and for
+    what, each step with what it was pointed at and what came back, anything
+    it was told on the way, and how it ended."""
+    if not re.fullmatch(r"sub_\d+_[0-9a-zA-Z]{1,12}", agent_id or ""):
+        return {}
+    p = _TRANSCRIPT_DIR / f"{agent_id}.jsonl"
+    out: Dict[str, Any] = {"id": agent_id, "prompt": "", "by": "", "steps": [], "final": "", "error": "", "ended": None}
+    waiting: List[Dict[str, Any]] = []
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    rec = json.loads(ln)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                k = rec.get("kind")
+                if k == "start":
+                    out["prompt"] = str(rec.get("prompt") or "").strip()[:6000]
+                    out["by"] = str(rec.get("by") or "")
+                elif k == "assistant_tool_call":
+                    for c in rec.get("calls") or []:
+                        step = {"tool": c.get("name") or "tool", "what": _pointed_at(c.get("args")), "result": None}
+                        out["steps"].append(step)
+                        waiting.append(step)
+                elif k == "tool_result" and waiting:
+                    waiting.pop(0)["result"] = str(rec.get("preview") or "")[:600]
+                elif k == "told":
+                    out["steps"].append({"told": str(rec.get("text") or "")[:600], "from": str(rec.get("from") or "")})
+                elif k == "assistant_final":
+                    out["final"] = str(rec.get("text") or "")[:4000]
+                elif k == "end":
+                    out["ended"] = "done" if rec.get("ok") else "failed"
+                    out["error"] = str(rec.get("error") or "")[:600]
+    except OSError:
+        return {}
+    out["steps"] = out["steps"][-200:]
+    return out
+
+
 def team_state(since_s: float = 6 * 3600, limit: int = 24) -> List[Dict[str, Any]]:
     """Every helper agent that is running, plus those that finished recently,
     for the Team view. Status is working, done, failed, or stopped (the app
@@ -750,7 +790,7 @@ async def _run_subagent_async(
     _append_transcript(tpath, {
         "kind": "start", "persona": persona.get("name") or persona.get("slug"),
         "name": persona.get("_label") or "",
-        "prompt": user_prompt, "max_turns": max_turns,
+        "prompt": user_prompt, "max_turns": max_turns, "by": persona.get("_by") or "",
     })
 
     try:
@@ -1099,7 +1139,7 @@ def _spawn_on_agent(agent: str, p: Dict[str, Any], persona: str, prompt: str,
         if mode == "background" and _BG_COMPLETION_CB:
             _BG_COMPLETION_CB(agent_id, result)
 
-    r = _xa.spawn(agent, brief, name=label, on_done=_finished)
+    r = _xa.spawn(agent, brief, name=label, on_done=_finished, task=prompt, by=p.get("_by") or "")
     if not r.get("ok"):
         return r
     if mode == "background":
@@ -1121,7 +1161,7 @@ def _spawn_on_agent(agent: str, p: Dict[str, Any], persona: str, prompt: str,
 def spawn_subagent(persona: str, prompt: str,
                    max_turns: Optional[int] = None,
                    mode: str = "sync",
-                   name: Optional[str] = None) -> Dict[str, Any]:
+                   name: Optional[str] = None, by: str = "") -> Dict[str, Any]:
     """Spawn a sub-agent with a scoped tool allowlist + tight prompt.
 
     mode='sync' (default): block until the child returns its final text.
@@ -1175,6 +1215,7 @@ def spawn_subagent(persona: str, prompt: str,
     label = helper_name(name or "", persona, p.get("name") or "")
     p = dict(p)
     p["_label"] = label
+    p["_by"] = by                 # who asked: "you" from the Team view, else the assistant
 
     on_agent = _agent_for_helpers()
     if on_agent:

@@ -67,6 +67,13 @@ check("a running agent mid-tool shows the tool it is on",
       st["sub_1_busy"]["status"] == "working" and st["sub_1_busy"]["activity"] == "tool"
       and st["sub_1_busy"]["tool"] == "web_fetch")
 check("and what that tool is pointed at", st["sub_1_busy"].get("what") == "example.org")
+story = subagents.agent_story("sub_1_busy")
+check("a helper's story lists each step with what it was pointed at and what came back",
+      [(x["tool"], x["what"], x["result"]) for x in story["steps"]]
+      == [("web_search", "local tts", "results"), ("web_fetch", "example.org", None)]
+      and story["prompt"] == "look into it" and story["ended"] is None)
+check("a name that isn't a helper's gets nothing", subagents.agent_story("../settings") == {}
+      and subagents.agent_story("sub_9_nobody") == {})
 check("a file is named without its folders, and a cut-off call still reads",
       subagents._pointed_at('{"path": "C:\\Users\\me\\proj\\SPEC.md", "content": "half a fi') == "SPEC.md"
       and subagents._pointed_at("{}") == "")

@@ -909,8 +909,43 @@
   .tm-card i { font-style: normal; font-size: 10.5px; }
   .tm-card i.working { color: var(--ok); } .tm-card i.done { color: var(--accent-2); }
   .tm-card i.failed, .tm-card i.needs { color: var(--err); } .tm-card i.stopped { color: var(--fg-faint); }
-  .tm-side { flex: 0 0 300px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-1);
-    padding: 14px 16px; overflow-y: auto; font-size: 12.5px; color: var(--fg-dim); }
+  .tm-side { flex: 0 0 320px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-1);
+    padding: 14px 16px; overflow-y: auto; font-size: 12.5px; color: var(--fg-dim); display: flex; flex-direction: column; min-height: 0; }
+  .tm-side[hidden] { display: none; }
+  .tm-side { position: relative; }
+  .tm-side .tm-close { position: absolute; top: 10px; right: 12px; float: none; cursor: pointer; }
+  .tm-side .tm-close:hover { color: var(--fg); }
+  .tm-who { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .tm-who .tm-face { flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--bg-2); overflow: hidden; }
+  .tm-who .tm-face canvas { image-rendering: pixelated; display: block; }
+  .tm-who .tm-side-sub { margin: 0; }
+  .tm-i-now { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px; background: var(--bg-2);
+    color: var(--fg); font-size: 12.5px; }
+  .tm-i-now i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); }
+  .tm-i-now i.working { background: var(--ok); } .tm-i-now i.done { background: var(--accent-2); }
+  .tm-i-now i.failed, .tm-i-now i.needs { background: var(--err); }
+  .tm-side b em { font-style: normal; font-weight: 500; color: var(--fg-faint); margin-left: 6px; }
+  .tm-ask { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+  .tm-ask:hover { -webkit-line-clamp: unset; }
+  .tm-i-steps { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
+  .tm-steps { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 34vh; }
+  .tm-steps li { display: grid; grid-template-columns: 16px 1fr; column-gap: 8px; align-items: start; padding: 5px 0;
+    border-top: 1px solid var(--border); color: var(--fg); }
+  .tm-steps li:first-child { border-top: none; }
+  .tm-steps li[data-n] { cursor: default; }
+  .tm-steps li svg { width: 14px; height: 14px; margin-top: 2px; color: var(--fg-faint); }
+  .tm-steps li small { grid-column: 2; color: var(--fg-faint); font-size: 11px; line-height: 1.4; white-space: pre-wrap;
+    overflow-wrap: anywhere; }
+  .tm-steps li.open small { color: var(--fg-dim); font-family: var(--mono); max-height: 180px; overflow-y: auto; }
+  .tm-steps li.live span { color: var(--ok); }
+  .tm-steps li.live svg { color: var(--ok); }
+  .tm-steps li.told { grid-template-columns: 1fr; }
+  .tm-steps li.told span { color: var(--accent); font-size: 11.5px; }
+  .tm-steps li.told small { grid-column: 1; }
+  .tm-steps li.none { display: block; color: var(--fg-faint); }
+  .tm-final { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
+  .tm-final:hover { -webkit-line-clamp: unset; }
+  .tm-open-log { margin-top: 12px; align-self: flex-start; }
   .tm-side h4 { margin: 0 0 2px; color: var(--fg); font-size: 14px; }
   .tm-side .tm-side-sub { color: var(--fg-faint); font-size: 11.5px; margin-bottom: 10px; }
   .tm-side b { display: block; color: var(--fg); font-size: 11.5px; margin: 12px 0 3px; }
@@ -18654,6 +18689,7 @@ function roomPoke(p) {
       : !roomHasBrain() ? "I can't think without a model. Load one from the top bar."
       : MAIN_HELLOS[Math.floor(Math.random() * MAIN_HELLOS.length)]);
     const inp = $('tm-input'); if (inp) inp.focus();
+    roomSelect(p.id, true);
     return;
   }
   const short = (t, n = 90) => { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
@@ -18731,22 +18767,86 @@ function roomStripRender() {
     strip.appendChild(card);
   }
 }
+// The panel beside the room: who someone is, what they were asked and by
+// whom, and each step so far. It fills in again while they work, so nobody
+// has to go to the chat or the log to see what is going on.
+function _stepWhat(args) {
+  const a = args || {};
+  let v = String(a.path || a.file_path || a.url || a.query || a.pattern || a.command || a.topic || a.name || '');
+  if (a.path || a.file_path) v = v.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+  else if (a.url) v = v.replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
+  return v.length > 42 ? v.slice(0, 41) + '…' : v;
+}
+function _stepLine(tool, what) {
+  const kind = _toolKind(tool || '');
+  return what && ROOM_VERBS[kind] ? ROOM_VERBS[kind] + ' ' + what : (ROOM_DOING[kind] || tool || 'Working');
+}
+function roomStepsHTML(steps) {
+  if (!steps.length) return '<li class="none">No steps yet.</li>';
+  const one = t => { t = String(t || '').trim().split('\n')[0]; return t.length > 150 ? t.slice(0, 149) + '…' : t; };
+  return steps.map((st, n) => st.told != null
+    ? `<li class="told"><span>${esc(st.from === 'the user' ? 'You' : (st.from || 'Someone'))} said</span><small>${esc(st.told)}</small></li>`
+    : `<li class="${st.result == null ? 'live' : ''}" data-n="${n}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${_toolIcon(st.tool)}</svg><span>${esc(_stepLine(st.tool, st.what))}</span>${st.result ? `<small>${esc(one(st.result))}</small>` : ''}</li>`).join('');
+}
+// What JARVIS itself was last asked and has done about it, from the chat.
+function roomMainStory() {
+  const c = activeConvo(), msgs = c ? (c.messages || []) : [];
+  const text = m => typeof (m && m.content) === 'string' ? m.content
+    : Array.isArray(m && m.content) ? m.content.filter(x => x && x.type === 'text').map(x => x.text || '').join(' ') : '';
+  let at = -1;
+  for (let k = msgs.length - 1; k >= 0; k--) {
+    if (msgs[k].role === 'user' && !msgs[k].silent && msgs[k].content !== '__HEARTH_NOTIFY_FLUSH__') { at = k; break; }
+  }
+  const reply = at < 0 ? null : msgs.slice(at + 1).reverse().find(m => m.role === 'assistant');
+  const busy = roomMainBusy(), tools = reply ? (reply.events || []).filter(e => e.kind === 'tool') : [];
+  return { prompt: at < 0 ? '' : text(msgs[at]), by: 'you',
+           steps: tools.map((e, n) => ({ tool: e.name, what: _stepWhat(e.args),
+                                         result: e.result || e.ms || !(busy && n === tools.length - 1) ? String(e.result || '') : null })),
+           final: reply ? text(reply) : '', error: reply && reply.error ? String(reply.error) : '', ended: busy ? null : 'done' };
+}
+async function roomInspectFill() {
+  const side = $('tm-side'), p = ROOM.people.get(ROOM.sel);
+  if (!p || side.hidden) return;
+  const a = p.agent, main = a.role === 'main';
+  let story;
+  if (main) story = roomMainStory();
+  else { try { story = await api('/api/team/story?id=' + encodeURIComponent(a.id)); } catch { return; } }
+  if (ROOM.sel !== p.id) return;                       // someone else was picked while this loaded
+  const put = (sel, html) => { const el = side.querySelector(sel); if (el && el.dataset.was !== html) { el.dataset.was = html; el.innerHTML = html; } };
+  const st = main ? 'working' : (teamNeedsYou(a) ? 'needs' : a.status);
+  const now = main ? (pendingPermId ? 'Waiting for your OK' : roomMainLine() || (roomHasBrain() ? roomMainIdleWord(p) : 'Asleep. No model is loaded.'))
+    : a.status === 'working' ? (a.blocked ? `Needs your OK to use ${a.blocked}` : roomHelperLine(a) || 'Thinking…') : teamActivity(a).split(':')[0];
+  put('.tm-i-sub', esc(main ? (a.runtime ? 'on ' + teamWhat(a).split(' · ')[0] : 'runs the house')
+    : teamWhat(a) + ' · ' + teamAgo(a.updated)));
+  put('.tm-i-now', `<i class="${st}"></i>${esc(now.charAt(0).toUpperCase() + now.slice(1))}`);
+  const who = story.by === 'you' ? 'you' : (story.by || (typeof _agentName === 'function' && _agentName()) || 'JARVIS');
+  put('.tm-i-asked', story.prompt ? `<b>Asked by ${esc(who)}</b><p class="tm-ask">${esc(story.prompt)}</p>` : '');
+  const list = side.querySelector('.tm-steps'), stuck = !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 8;
+  put('.tm-i-steps', `<b>Steps<em>${story.steps.filter(x => x.told == null).length}</em></b><ol class="tm-steps">${roomStepsHTML(story.steps)}</ol>`);
+  const fresh = side.querySelector('.tm-steps');
+  if (fresh && stuck) fresh.scrollTop = fresh.scrollHeight;
+  ROOM.story = story;
+  const tail = story.error ? `<b>${main ? 'Went wrong' : "Didn't finish"}</b><p>${esc(story.error)}</p>`
+    : story.final ? `<b>${story.ended ? (main ? 'Said' : 'Result') : 'So far'}</b><p class="tm-final">${esc(story.final.length > 900 ? story.final.slice(0, 899) + '…' : story.final)}</p>` : '';
+  put('.tm-i-result', tail);
+}
 function roomSelect(id, keep = false) {
+  const before = ROOM.sel;
   ROOM.sel = keep ? id : (ROOM.sel === id ? null : id);
   const side = $('tm-side');
   const p = ROOM.people.get(ROOM.sel);
+  clearInterval(ROOM.inspectTimer);
   if (!p) { side.hidden = true; roomStripRender(); return; }
-  const a = p.agent;
-  if (a.role === 'main') { ROOM.sel = null; side.hidden = true; roomStripRender(); return; }
+  const a = p.agent, main = a.role === 'main', wasHidden = side.hidden;
+  if (before === p.id && !wasHidden) { roomInspectFill(); roomStripRender(); return; }
   side.hidden = false;
-  side.innerHTML = `<button class="tm-close" title="Close">×</button><h4>${teamMini(a)}${esc(a.name || a.persona)}</h4>
-    <div class="tm-side-sub">${esc(teamWhat(a))} · ${a.tools_used || 0} steps · ${teamAgo(a.updated)}</div>
-    <p>${esc(teamActivity(a))}</p>
-    <b>Asked to</b><p>${esc(a.prompt || '')}</p>
-    ${a.preview ? `<b>${a.status === 'working' ? 'Latest' : 'Result'}</b><p>${esc(a.preview)}</p>` : ''}
-    ${a.can_tell ? `<form class="tm-tell" autocomplete="off"><input placeholder="Tell ${esc(a.name || 'them')} something…"><button type="submit">Tell</button></form>`
+  side.innerHTML = `<button class="tm-close" title="Close">×</button>
+    <div class="tm-who"><div class="tm-face"></div><div><h4>${teamMini(a)}${esc(a.name || a.persona)}</h4><div class="tm-side-sub tm-i-sub"></div></div></div>
+    <div class="tm-i-now"></div><div class="tm-i-asked"></div><div class="tm-i-steps"></div><div class="tm-i-result"></div>
+    ${main ? '' : a.can_tell ? `<form class="tm-tell" autocomplete="off"><input placeholder="Tell ${esc(a.name || 'them')} something…"><button type="submit">Tell</button></form>`
       : a.status === 'working' ? `<p class="tm-tell-no">${esc((HARNESS[a.runtime] || {}).label || 'This agent')} runs its task to the end, so it can't take a message part-way.</p>` : ''}
-    <button class="tm-open-log">See every step</button>`;
+    <button class="tm-open-log">${main ? 'Open the chat' : 'Open the full log'}</button>`;
+  side.querySelector('.tm-face').appendChild(roomFace(roomSkin(a), p.seed));
   const tell = side.querySelector('.tm-tell');
   if (tell) tell.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -18757,10 +18857,26 @@ function roomSelect(id, keep = false) {
                                     body: JSON.stringify({ id: a.id, text }) });
       box.value = '';
       roomSay(p.id, 'Got it.', 2400);
+      roomInspectFill();
     } catch (err) { toast("It didn't reach them", err.message.replace(/^\d+\s*/, ''), 'warn', 6000); }
   });
+  // A step opens to show everything that came back from it.
+  if (!side._wired) side.addEventListener('click', (e) => {
+    const li = e.target.closest('.tm-steps li[data-n]');
+    const st = li && ROOM.story && ROOM.story.steps[+li.dataset.n];
+    if (!st || !st.result) return;
+    const open = li.classList.toggle('open');
+    li.querySelector('small').textContent = open ? st.result : String(st.result).trim().split('\n')[0].slice(0, 150);
+  });
+  side._wired = true;
   side.querySelector('.tm-close').addEventListener('click', () => roomSelect(null));
-  side.querySelector('.tm-open-log').addEventListener('click', () => openTaskTranscript(a.id));
+  side.querySelector('.tm-open-log').addEventListener('click', () => main ? showView('chat') : openTaskTranscript(a.id));
+  // It slides in once; picking someone else swaps what is in it with a short blur.
+  const sp = springEasing(0.38, 0.9);
+  if (wasHidden) side.animate([{ opacity: 0, transform: 'translateX(14px)' }, { opacity: 1, transform: 'none' }], { duration: sp.duration, easing: sp.easing });
+  else side.animate([{ opacity: 0.4, filter: 'blur(5px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 200, easing: 'ease-out' });
+  roomInspectFill();
+  ROOM.inspectTimer = setInterval(() => { if (STATE.view === 'team' && !$('tm-side').hidden) roomInspectFill(); }, 1500);
   roomStripRender();
 }
 $('tm-canvas').addEventListener('click', (e) => {
