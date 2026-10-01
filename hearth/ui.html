@@ -12947,6 +12947,9 @@ let voiceMicLevel = 0;
 let voiceLevel = 0;
 let _ttsLevel = 0, _lastLevelAt = 0;   // live amplitude streamed from the server's TTS
 let _lastMicAt = 0;                     // last mic level from the server's recorder
+let _voiceFillPct = null;               // speech model download, 0-100, while it runs
+// Dots ordered from the centre outwards, for showing progress as a fill.
+let _voiceFillOrder = null;
 // Utterance stitching: silero endpoints on short pauses, so one spoken sentence
 // arrives as several "final" fragments. Buffer them and only send to chat once
 // the user has actually stopped (no new fragment for _UTTER_GAP ms) — instead of
@@ -13010,7 +13013,7 @@ function _voiceGridFrame(t) {
   const cx = (VOICE_GRID_COLS - 1) / 2, cy = (VOICE_GRID_ROWS - 1) / 2;
   const maxDist = Math.hypot(cx, cy);
 
-  if (_voiceState === 'warming') {
+  if (_voiceState === 'warming' && _voiceFillPct === null) {
     // STT model still loading: keep the grid dark so it doesn't look ready.
     voiceDots.forEach(d => d.classList.remove('on', 'hot'));
     voiceGridAnim = requestAnimationFrame(_voiceGridFrame);
@@ -13019,6 +13022,23 @@ function _voiceGridFrame(t) {
 
   if (_voiceState === 'working') {
     _voiceGridWorking(s, cx, cy, maxDist);
+    voiceGridAnim = requestAnimationFrame(_voiceGridFrame);
+    return;
+  }
+
+  if (_voiceFillPct !== null && !_voiceReady) {
+    if (!_voiceFillOrder) {
+      _voiceFillOrder = voiceDots.map((d, i) => {
+        const x = i % VOICE_GRID_COLS, y = Math.floor(i / VOICE_GRID_COLS);
+        return { d, k: Math.hypot(x - cx, y - cy) + (Math.atan2(y - cy, x - cx) + Math.PI) / (Math.PI * 2) * 0.9 };
+      }).sort((a, b) => a.k - b.k).map(o => o.d);
+    }
+    const lit = Math.round(_voiceFillOrder.length * _voiceFillPct / 100);
+    const edge = 0.5 + 0.5 * Math.sin(s * 5);
+    _voiceFillOrder.forEach((d, i) => {
+      d.classList.toggle('on', i < lit);
+      d.classList.toggle('hot', i >= lit && i < lit + 3 && edge > 0.5);
+    });
     voiceGridAnim = requestAnimationFrame(_voiceGridFrame);
     return;
   }
@@ -13045,7 +13065,9 @@ function _voiceGridFrame(t) {
   } else if (_voiceState === 'listening' && (recorder.recording || t - _lastMicAt < 300)) {
     // Only YOUR mic drives it while listening. Idle listening gets no animation
     // at all: nothing is being said, so nothing should move.
-    target = Math.min(1, voiceMicLevel * 1.7);
+    // The browser mic reports a peak, the server's recorder a loudness that
+    // is already scaled, so only the first needs the extra gain.
+    target = Math.min(1, voiceMicLevel * (recorder.recording ? 1.7 : 0.85));
   }
   // Asymmetric smoothing: gentle attack, slower release — raw amplitude is spiky.
   voiceLevel += (target - voiceLevel) * (target > voiceLevel ? 0.22 : 0.08);
@@ -13681,11 +13703,14 @@ function handleRealtimeEvent(ev) {
     };
     _utterTimer = setTimeout(fire, _UTTER_GAP);
   } else if (ev.type === 'warming') {
-    // The speech model is still loading; the first run downloads it.
+    // The speech model is still loading; the first run downloads it, and the
+    // grid fills from the centre as the download comes in.
     _voiceReady = false;
+    _voiceFillPct = typeof ev.pct === 'number' ? ev.pct : null;
     setVoiceStatus(ev.detail || 'getting the microphone ready…');
   } else if (ev.type === 'ready') {
     _voiceReady = true;
+    _voiceFillPct = null;
     setVoiceStatus('listening');
     // The chosen mic wouldn't open (common on Bluetooth) and Hearth fell back to
     // the system default — say so, otherwise the grid reads "listening" while

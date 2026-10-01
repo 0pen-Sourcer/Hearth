@@ -4382,6 +4382,21 @@ class HearthHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             emit({"type": "warming", "detail": _detail} if _detail else {"type": "warming"})
+            if _detail:
+                # A first run downloads the speech model; say how far along it is.
+                def _dl_progress():
+                    last, t_end = -1, time.time() + 1200
+                    while not _ready_fired.is_set() and time.time() < t_end:
+                        pct = _rt_voice.download_progress()
+                        if pct is not None and pct != last:
+                            last = pct
+                            put({"type": "warming", "pct": pct,
+                                 "detail": f"downloading the speech model, first time only · {pct}%"})
+                        if pct is not None and pct >= 99:
+                            put({"type": "warming", "detail": "loading the speech model…"})
+                            return
+                        time.sleep(0.5)
+                threading.Thread(target=_dl_progress, daemon=True).start()
             lease = _rt_voice.start_continuous(
                 lambda t: put({"type": "final", "text": t}),
                 on_caption=lambda t: put({"type": "partial", "text": t}),

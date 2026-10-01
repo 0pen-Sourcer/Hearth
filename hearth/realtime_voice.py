@@ -208,6 +208,41 @@ def _stt_device() -> tuple:
     return "cpu", "int8"
 
 
+_model_bytes: dict = {}
+
+
+def download_progress(size: str = "") -> Optional[int]:
+    """How much of the speech model is on disk, 0-100, while it downloads.
+
+    Reads the download's own files in the Hugging Face cache against the
+    model's real size, asked of Hugging Face once. None when unknown."""
+    size = size or _model_size()
+    try:
+        from faster_whisper.utils import _MODELS  # type: ignore
+        repo = _MODELS.get(size, size)
+    except Exception:
+        repo = f"Systran/faster-whisper-{size}"
+    try:
+        from huggingface_hub import constants, HfApi  # type: ignore
+        if repo not in _model_bytes:
+            info = HfApi().model_info(repo, files_metadata=True)
+            _model_bytes[repo] = sum(int(s.size or 0) for s in info.siblings or [])
+        total = _model_bytes[repo]
+        # Partial files sit in blobs; finished ones are in blobs or, where
+        # Windows has no symlinks, straight in snapshots. Links aren't counted.
+        folder = os.path.join(constants.HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
+        have = 0
+        for sub in ("blobs", "snapshots"):
+            for root, _dirs, files in os.walk(os.path.join(folder, sub)):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    if not os.path.islink(fp):
+                        have += os.path.getsize(fp)
+        return max(0, min(100, int(have * 100 / total))) if total else None
+    except Exception:
+        return None
+
+
 def model_downloaded(size: str = "") -> bool:
     """Whether the speech model is already on disk, so starting voice can say
     it is downloading instead of looking stuck on the first run."""
