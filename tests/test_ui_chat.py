@@ -194,6 +194,15 @@ with sync_playwright() as pw:
     check("it answers where it stands, and the card says where it is, not where it is headed",
           room["holds"] and room["word"] == "right here" and room["walkingWord"] == "on the way")
 
+    stats = pg.evaluate("""() => {
+      const l = makeStatsLine({ model: 'F:\\\\Models\\\\Ornith-1.5-9B-Q4_K_M.gguf', decode_tps: 26, duration_ms: 4200 });
+      const c = makeStatsLine({ model: 'claude-opus-5-5', duration_ms: 9000, cost_usd: 0.027 });
+      return [l.textContent, c.textContent];
+    }""")
+    check(f"a reply's footer names the model that wrote it {stats}",
+          stats[0].startswith("Ornith-1.5-9B-Q4_K_M") and "26 tok/s gen" in stats[0]
+          and stats[1].startswith("claude-opus-5-5") and stats[1].endswith("$0.027"))
+
     check(f"the page raised no errors {errors[:2]}", not errors)
     browser.close()
 srv.shutdown()

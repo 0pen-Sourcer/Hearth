@@ -729,35 +729,18 @@
     background: var(--bg-3); transform: translateY(-1px);
   }
 
-  /* Flat message rendering - no bubbles, no avatars */
+  /* Flat message rendering: no bubbles, no avatars, no lettered tiles. The
+     name over each turn says who is speaking, and the words get the width. */
   .msg {
     padding: 14px 0;
     border-top: 1px solid var(--border);
     animation: msgIn 0.2s var(--ease);
     display: flex;
-    gap: 14px;
   }
   .chat-body .msg:first-of-type { border-top: none; }
   @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
 
-  .msg .role-mark {
-    width: 22px; height: 22px;
-    flex-shrink: 0;
-    border-radius: 6px;
-    display: grid; place-items: center;
-    font-size: 11px;
-    font-weight: 700;
-    margin-top: 1px;
-  }
-  .msg.user .role-mark {
-    background: var(--info-bg);
-    color: var(--info);
-    border: 1px solid color-mix(in srgb, var(--info) 25%, transparent);
-  }
-  .msg.assistant .role-mark {
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    color: var(--on-accent);
-  }
+  .msg .role-mark { display: none; }
   .msg .body { flex: 1; min-width: 0; }
   .msg .role-name {
     font-size: 11px; font-weight: 600;
@@ -766,7 +749,7 @@
     text-transform: lowercase;
     letter-spacing: 0.3px;
   }
-  .msg.user .role-name { color: var(--info); }
+  .msg.user .role-name { color: var(--fg-dim); }
   .msg.assistant .role-name { color: var(--accent-2); }
   /* Chat-bubble mode — OPT-IN via Settings, default OFF (Hearth's own look:
      user turns left-aligned like everything else, no tint). When on, user turns
@@ -1787,7 +1770,10 @@
      and find the one that fits their GPU without reading each label. */
   .model-expand .ex-file[data-tier="good"]     { border-left: 2px solid var(--accent-2); }
   .model-expand .ex-file[data-tier="partial"]  { border-left: 2px solid var(--warn); }
-  .model-expand .ex-file[data-tier="overflow"] { border-left: 2px solid var(--err); opacity: 0.6; }
+  /* Mostly on the CPU still runs, slowly: a caution, not a stop. Red is for a
+     file that can't load here at all. */
+  .model-expand .ex-file[data-tier="overflow"] { border-left: 2px solid var(--fg-faint); }
+  .model-expand .ex-file[data-tier="toobig"]   { border-left: 2px solid var(--err); opacity: 0.6; }
 
   /* HF "fetching files" spinner - small, accent-colored, matches the
      existing thinking-pulse keyframes so we have one visual language. */
@@ -7763,6 +7749,9 @@ function makeMeta(text, kind = '') {
 function makeStatsLine(stats) {
   if (!stats || typeof stats !== 'object') return null;
   const parts = [];
+  // Which model wrote this reply, kept with the message so it can still be
+  // told apart after the brain has been switched.
+  if (stats.model) parts.push(esc(String(stats.model).split(/[\\/]/).pop().replace(/\.gguf$/i, '')));
   if (stats.prompt_tps != null)
     parts.push(`${stats.prompt_tps} tok/s prompt`);
   if (stats.decode_tps != null)
@@ -7771,6 +7760,7 @@ function makeStatsLine(stats) {
     parts.push(`${stats.ttft_s}s to first token`);
   if (stats.duration_ms != null)
     parts.push(`${(stats.duration_ms / 1000).toFixed(1)}s total`);
+  if (stats.cost_usd != null) parts.push('$' + Number(stats.cost_usd).toFixed(stats.cost_usd < 0.1 ? 3 : 2));
   if (!parts.length) return null;
   const d = document.createElement('div');
   d.className = 'gen-stats';
@@ -9940,9 +9930,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // assistant's prose - making the chat look engineering-y. Keep the
       // numbers in the message events for the activity log + debugging.
       // Fold total turn time into the stats so the footer can show "Ns total".
+      const _model = (ev.stats && ev.stats.model) || (STATE.brain && (STATE.brain.modelName || STATE.brain.modelId)) || '';
       const _doneStats = ev.stats
-        ? { ...ev.stats, duration_ms: ev.duration_ms }
-        : (ev.duration_ms != null ? { duration_ms: ev.duration_ms } : null);
+        ? { ...ev.stats, duration_ms: ev.duration_ms, model: _model }
+        : (ev.duration_ms != null ? { duration_ms: ev.duration_ms, model: _model } : null);
       assistantMsg.events.push({
         kind: 'done',
         iterations: ev.iterations,
