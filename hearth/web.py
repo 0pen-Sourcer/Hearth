@@ -1739,14 +1739,15 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/models":
             try:
                 from . import claude_brain as _cb
+                _agents = _cb.installed()
                 if _cb.active():
-                    return self._send_json(200, {"models": [{"id": "Claude Code", "state": "loaded",
-                                                             "type": "llm", "provider": "claude-code"}],
-                                                 "notice": ""})
+                    return self._send_json(200, {"models": [{"id": _cb.label(), "state": "loaded",
+                                                             "type": "llm", "provider": _cb.current()}],
+                                                 "notice": "", "agent_brains": _agents})
             except Exception:
-                pass
+                _agents = []
             _ms = _list_models()
-            return self._send_json(200, {"models": _ms, "notice": _models_notice})
+            return self._send_json(200, {"models": _ms, "notice": _models_notice, "agent_brains": _agents})
         if path == "/api/mcp/config":
             # Outbound MCP config — pasted from a standard mcp.json. Stored
             # at ~/Jarvis/mcp.json. Empty file → empty config (valid).
@@ -3042,13 +3043,23 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/upload":
             return self._upload()
         if path == "/api/brain/permission":
-            # Claude Code, run as the brain, asking through Hearth's MCP server
-            # whether it may do something. Answered by the running turn's own
+            # Claude Code or Codex, run as the brain, asking through Hearth's MCP
+            # server whether it may do something. Answered by the running turn's own
             # permission check, so the approval strip and voice question appear.
             body = self._read_json() or {}
             from . import claude_brain
             return self._send_json(200, claude_brain.decide(
                 str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
+        if path == "/api/brain/agent":
+            # Pick an agent program as the brain from the model sticker, or
+            # with no provider go back to the model endpoint in Settings.
+            body = self._read_json() or {}
+            from . import claude_brain
+            err = claude_brain.set_brain(str(body.get("provider") or "").strip().lower(),
+                                         str(body["model"]).strip() if "model" in body else None)
+            if err:
+                return self._send_json(400, {"ok": False, "error": err})
+            return self._send_json(200, {"ok": True, "provider": claude_brain.current() or ""})
         if path == "/api/team/start":
             # Starting a helper by hand from the Team view: one of Hearth's
             # roles, or a task handed to an installed agent CLI. The person
@@ -3346,20 +3357,15 @@ class HearthHandler(BaseHTTPRequestHandler):
             key = (body.get("key") or "").strip()
             model = (body.get("model") or "").strip()
             provider = (body.get("provider") or "").strip()
-            if provider.lower() == "claude-code":
-                # Claude Code as the brain is a separate program, not an
-                # endpoint. The local address stays as it is, because helpers
-                # and background memory keep using the local model, and so does
-                # whatever is loaded there.
-                from . import claude_brain
-                if not claude_brain.claude_exe():
-                    return self._send_json(400, {"ok": False, "error":
-                        "Claude Code isn't installed on this PC. Install it from claude.com/claude-code and sign in first."})
-                _s = _load_settings()
-                _s["llm_provider"] = "claude-code"
-                _s["claude_model"] = model
-                _save_settings(_s)
-                return self._send_json(200, {"ok": True, "provider": "claude-code"})
+            from . import claude_brain
+            if provider.lower() in claude_brain.BRAINS:
+                # An agent program as the brain is not an endpoint. The local
+                # address stays as it is, because helpers and background memory
+                # keep using the local model, and so does whatever is loaded there.
+                err = claude_brain.set_brain(provider.lower(), model)
+                if err:
+                    return self._send_json(400, {"ok": False, "error": err})
+                return self._send_json(200, {"ok": True, "provider": provider.lower()})
             if not url:
                 return self._send_json(400, {"ok": False, "error": "url required"})
             # Reconcile provider with the URL. A cloud URL must carry its cloud

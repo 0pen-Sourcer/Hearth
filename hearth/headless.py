@@ -656,7 +656,7 @@ async def run_once(
     after the system prompt, then the new `prompt` is appended as a user msg.
     Without it, behavior is the same as before: single-shot prompt.
     """
-    # Claude Code as the brain runs the whole turn itself.
+    # An agent program as the brain (Claude Code, Codex) runs the whole turn itself.
     try:
         from . import claude_brain as _cb
         if _cb.active():

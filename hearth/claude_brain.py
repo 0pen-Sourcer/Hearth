@@ -15,6 +15,9 @@ switch deciding what goes through on its own.
 Helpers keep running on whatever local model is loaded; only the main
 assistant is Claude. `claude -p` is billed to the Agent SDK credit that comes
 with a Claude plan.
+
+Codex is the other brain (codex_brain.py). It shares the permission bridge,
+the sessions file and the persona here.
 """
 from __future__ import annotations
 
@@ -31,6 +34,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from . import env as _env
 
 PROVIDER = "claude-code"
+# Agent programs that can be the brain: settings value -> name shown.
+BRAINS = {"claude-code": "Claude Code", "codex": "Codex"}
 _HOME = os.path.join(os.path.expanduser("~"), ".hearth")
 _SESSIONS = os.path.join(_HOME, "claude_sessions.json")
 _SESSIONS_LOCK = threading.Lock()
@@ -79,19 +84,62 @@ def ensure_bridge() -> None:
     set_bridge_url(f"http://127.0.0.1:{srv.server_address[1]}")
 
 
-def active() -> bool:
-    """Whether the brain picked in Settings is Claude Code."""
+def current() -> Optional[str]:
+    """The agent program picked as the brain in Settings, if one is."""
     try:
         from .web import _load_settings
-        return str(_load_settings().get("llm_provider") or "").strip().lower() == PROVIDER
+        p = str(_load_settings().get("llm_provider") or "").strip().lower()
     except Exception:
-        return False
+        return None
+    return p if p in BRAINS else None
+
+
+def active() -> bool:
+    return current() is not None
+
+
+def label() -> str:
+    return BRAINS.get(current() or "", "")
+
+
+def exe_for(provider: str) -> Optional[List[str]]:
+    from . import external_agents as _xa
+    exe = _xa.find(provider)
+    return _xa._direct_argv(exe) if exe else None
 
 
 def claude_exe() -> Optional[List[str]]:
-    from . import external_agents as _xa
-    exe = _xa._which(["claude"])
-    return _xa._direct_argv(exe) if exe else None
+    return exe_for(PROVIDER)
+
+
+def installed() -> List[Dict[str, str]]:
+    """The brains that can be picked on this PC."""
+    return [{"id": k, "label": v} for k, v in BRAINS.items() if exe_for(k)]
+
+
+def set_brain(provider: str, model: Optional[str] = None) -> Optional[str]:
+    """Make an agent program the brain, or with "" go back to the endpoint in
+    Settings. The local address is left alone either way: helpers and
+    background memory keep using it. A model is saved only when one is
+    given, so switching from the model sticker keeps the one set in Settings.
+    Returns an error to show, or None."""
+    from .web import _load_settings, _save_settings
+    s = _load_settings()
+    if provider:
+        if provider not in BRAINS:
+            return f"Unknown brain '{provider}'."
+        if not exe_for(provider):
+            return (f"{BRAINS[provider]} isn't installed on this PC. "
+                    + ("Install it from claude.com/claude-code and sign in first." if provider == PROVIDER
+                       else "Install the Codex app or CLI and sign in first."))
+        s["llm_provider"] = provider
+        if model is not None:
+            s["claude_model" if provider == PROVIDER else provider + "_model"] = model
+    elif current():
+        url = str(s.get("llm_url") or os.environ.get("LOCAL_API_BASE") or "").lower()
+        s["llm_provider"] = "local" if (not url or "127.0.0.1" in url or "localhost" in url) else ""
+    _save_settings(s)
+    return None
 
 
 # ---------------------------------------------------------------- tool names
@@ -203,9 +251,10 @@ def _transcript(history: List[Dict[str, Any]], limit: int = 14, each: int = 1200
 
 
 # ---------------------------------------------------------------- setup files
-def _mcp_config() -> str:
-    """The MCP config naming Hearth's server, with what it needs to ask this
-    process for permissions."""
+def _mcp_launch(gate: bool = False) -> Dict[str, Any]:
+    """How to start Hearth's MCP server, with what it needs to ask this
+    process for permissions. With `gate` the server asks before every risky
+    tool itself, for a brain that has no permission hook."""
     if getattr(sys, "frozen", False):
         launch = {"command": sys.executable, "args": ["--hearth-run-python", "-m", "hearth.mcp_server"]}
     else:
@@ -215,7 +264,14 @@ def _mcp_config() -> str:
     ws = _env.get("WORKSPACE")
     if ws:
         env["HEARTH_WORKSPACE"] = ws
+    if gate:
+        env["HEARTH_BRAIN_GATE"] = "1"
     launch["env"] = env
+    return launch
+
+
+def _mcp_config() -> str:
+    launch = _mcp_launch()
     path = os.path.join(_HOME, "claude_mcp.json")
     os.makedirs(_HOME, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -223,19 +279,23 @@ def _mcp_config() -> str:
     return path
 
 
-def _persona_file(voice: bool) -> str:
+def persona_text(voice: bool, host: str = "Claude Code", tools: str = "mcp__hearth__<name>",
+                 own_tools: str = "Your own file and shell tools are fine for files and commands.") -> str:
     from . import system_prompt
     preface = (
-        "You are running inside Claude Code as the brain of Hearth, the user's local "
-        "assistant, under the name and persona below. Hearth's own tools are available "
-        "as mcp__hearth__<name>: use them for the desktop, apps, windows, screenshots, "
-        "memory, reminders, the phone and anything outside a code folder. Your own file "
-        "and shell tools are fine for files and commands. Answer as the persona, never as "
-        "Claude Code.\n\n")
+        f"You are running inside {host} as the brain of Hearth, the user's local "
+        f"assistant, under the name and persona below. Hearth's own tools are available "
+        f"as {tools}: use them for the desktop, apps, windows, screenshots, "
+        f"memory, reminders, the phone and anything outside a code folder. {own_tools} "
+        f"Answer as the persona, never as {host}.\n\n")
+    return preface + system_prompt(voice=voice)
+
+
+def _persona_file(voice: bool) -> str:
     path = os.path.join(_HOME, "claude_persona.md")
     os.makedirs(_HOME, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(preface + system_prompt(voice=voice))
+        f.write(persona_text(voice))
     return path
 
 
@@ -264,6 +324,18 @@ def _permission_mode() -> str:
 async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
                    permission_check=None, should_cancel=None, voice: bool = False,
                    model: Optional[str] = None) -> int:
+    """One turn on whichever agent program is the brain."""
+    if current() == "codex":
+        from . import codex_brain
+        return await codex_brain.run_turn(prompt, emit=emit, history=history,
+                                          permission_check=permission_check,
+                                          should_cancel=should_cancel, voice=voice)
+    return await _run_claude(prompt, emit=emit, history=history, permission_check=permission_check,
+                             should_cancel=should_cancel, voice=voice)
+
+
+async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
+                      permission_check=None, should_cancel=None, voice: bool = False) -> int:
     exe = claude_exe()
     if not exe:
         emit("error", message=("Claude Code isn't installed on this PC. Install it from "

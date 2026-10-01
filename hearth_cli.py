@@ -2434,8 +2434,17 @@ class JarvisCLI:
             if len(parts) == 1:
                 # Just /brain - show current + how to switch + which keys are saved
                 provider_label = "cloud" if not _is_local_endpoint(LOCAL_API_BASE) else "local"
-                print(f"\n{C_BOT}Current brain:{C_RESET} {C_TOOL}{provider_label}{C_RESET}  "
-                      f"{C_DIM}({self.current_model} via {LOCAL_API_BASE}){C_RESET}\n")
+                try:
+                    from hearth import claude_brain as _cb
+                    _agent = _cb.label()
+                except ImportError:
+                    _agent = ""
+                if _agent:
+                    print(f"\n{C_BOT}Current brain:{C_RESET} {C_TOOL}{_agent}{C_RESET}  "
+                          f"{C_DIM}(helpers use {self.current_model} via {LOCAL_API_BASE}){C_RESET}\n")
+                else:
+                    print(f"\n{C_BOT}Current brain:{C_RESET} {C_TOOL}{provider_label}{C_RESET}  "
+                          f"{C_DIM}({self.current_model} via {LOCAL_API_BASE}){C_RESET}\n")
                 saved_keys = _load_keys()
                 if saved_keys:
                     have = sorted(k for k in saved_keys if saved_keys[k].get("key"))
@@ -2449,31 +2458,28 @@ class JarvisCLI:
                 print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")
                 print(f"  {C_TOOL}/brain openrouter [api-key]{C_RESET}      OpenRouter     (key optional if saved)")
                 print(f"  {C_TOOL}/brain custom <url> <api-key>{C_RESET}    any OpenAI-compatible server")
+                print(f"  {C_TOOL}/brain claude-code{C_RESET}               Claude Code on this PC, your Claude plan")
+                print(f"  {C_TOOL}/brain codex{C_RESET}                     Codex on this PC, your ChatGPT plan")
                 print(f"  {C_TOOL}/brain forget <provider>{C_RESET}         delete a saved key")
                 print(f"\n{C_DIM}Keys saved to ~/Jarvis/brain_keys.json (gitignored, 0600 on POSIX).{C_RESET}\n")
                 return True
 
             provider = parts[1].strip().lower()
 
-            # /brain claude-code: Claude Code installed here thinks for JARVIS.
-            # The local address stays, since helpers keep using the local model.
-            if provider in ("claude-code", "claude"):
+            # /brain claude-code or /brain codex: an agent program installed
+            # here thinks for JARVIS. The local address stays, since helpers
+            # keep using the local model.
+            if provider in ("claude-code", "claude", "codex"):
                 from hearth import claude_brain as _cb
-                if not _cb.claude_exe():
-                    print(f"{C_ERR}Claude Code isn't installed. Get it from claude.com/claude-code and sign in.{C_RESET}")
+                provider = "claude-code" if provider == "claude" else provider
+                err = _cb.set_brain(provider)
+                if err:
+                    print(f"{C_ERR}{err}{C_RESET}")
                     return True
-                saved = {}
-                try:
-                    with open(settings_path, "r", encoding="utf-8") as f:
-                        saved = _json.load(f) or {}
-                except Exception:
-                    pass
-                saved["llm_provider"] = "claude-code"
-                os.makedirs(WORKSPACE, exist_ok=True)
-                with open(settings_path, "w", encoding="utf-8") as f:
-                    _json.dump(saved, f, indent=2)
-                print(f"{C_OK}JARVIS now thinks with Claude Code{C_RESET} {C_DIM}on your Claude plan "
-                      f"(Agent SDK credit). Helpers keep using the local model. /brain local to switch back.{C_RESET}")
+                plan = ("on your ChatGPT plan (it counts toward your Codex limit)" if provider == "codex"
+                        else "on your Claude plan (Agent SDK credit)")
+                print(f"{C_OK}JARVIS now thinks with {_cb.BRAINS[provider]}{C_RESET} {C_DIM}{plan}. "
+                      f"Helpers keep using the local model. /brain local to switch back.{C_RESET}")
                 return True
 
             # /brain forget <provider>
@@ -3682,7 +3688,7 @@ class JarvisCLI:
         try:
             from hearth import claude_brain as _cb
             if _cb.active():
-                return "Claude Code"
+                return _cb.label()
         except ImportError:
             pass
         m = self.current_model or ""
@@ -5042,7 +5048,7 @@ class JarvisCLI:
                 raise
 
     async def _respond_claude(self) -> None:
-        """One turn with Claude Code as the brain: its text streams here, its
+        """One turn with an agent program as the brain: its text streams here, its
         tool calls print like Hearth's own, and anything it needs permission
         for is asked at this prompt."""
         from hearth import claude_brain as _cb
@@ -5111,7 +5117,9 @@ class JarvisCLI:
                     state["open"] = False
                 st = f.get("stats") or {}
                 if st.get("cost_usd") is not None:
-                    print(f"{C_DIM}  Claude Code · ${st['cost_usd']:.3f}{C_RESET}")
+                    print(f"{C_DIM}  {st.get('brain') or 'Claude Code'} · ${st['cost_usd']:.3f}{C_RESET}")
+                elif st.get("tokens_in"):
+                    print(f"{C_DIM}  {st.get('brain')} · {st['tokens_in']:,} in, {st.get('tokens_out') or 0:,} out{C_RESET}")
 
         await _cb.run_turn(prompt, emit=emit, history=history, permission_check=ask,
                            should_cancel=self._respond_cancel.is_set)

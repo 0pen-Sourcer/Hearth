@@ -354,6 +354,9 @@
   }
   .model-state.loaded { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
   .model-state.loading { background: var(--warn); animation: pulse 1.1s infinite; }
+  .model-agent { display: inline-flex; width: 14px; height: 14px; color: var(--hx); font-size: 10px; font-weight: 700;
+    align-items: center; justify-content: center; }
+  .model-agent svg { width: 14px; height: 14px; fill: currentColor; }
   @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
   /* Unified download indicator: a small dot that turns violet + pulses while a
      background download runs, then does one "breathe" when it completes. One
@@ -3427,6 +3430,7 @@
 
     <div class="model-picker" id="model-picker-tip" title="Active model">
       <span class="model-state" id="model-state"></span>
+      <span class="model-agent" id="model-agent" hidden></span>
       <select id="model-select"><option value="">(no model loaded)</option></select>
       <button class="btn-mini danger" id="btn-eject" title="Unload model" hidden>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3l8 9H4z"/><path d="M4 21h16"/></svg>
@@ -3894,6 +3898,7 @@
           <select id="setting-brain-mode">
             <option value="local">Local-first - on this PC (recommended)</option>
             <option value="claude-code">Claude Code - your Claude plan, no key</option>
+            <option value="codex">Codex - your ChatGPT plan, no key</option>
             <option value="anthropic">Anthropic - Claude (up to 1M ctx)</option>
             <option value="gemini">Google - Gemini</option>
             <option value="openai">OpenAI - GPT</option>
@@ -6088,6 +6093,8 @@ const STATE = {
 
 // One short cloud-provider set, used everywhere (was re-declared 3×).
 const CLOUD_PROVIDERS = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','custom']);
+// Agent programs on this PC that can be the brain instead of a model endpoint.
+const AGENT_BRAINS = { 'claude-code': 'Claude Code', 'codex': 'Codex' };
 
 // Format a token count for the bottom-bar `ctx` pill: 32768 → "32K", 977000 → "977K".
 function fmtCtxPill(n) {
@@ -6101,9 +6108,9 @@ function fmtCtxPill(n) {
 // model or the eject button, and vice-versa.
 function deriveBrainKind() {
   const provSetting = ((STATE.settings && STATE.settings.llm_provider) || '').toLowerCase();
-  // Claude Code is a program on this PC, not an endpoint; the local address
+  // An agent brain is a program on this PC, not an endpoint; the local address
   // stays set for helpers, so the URL can't say which brain is active.
-  if (provSetting === 'claude-code') return { kind: 'cloud', providerKey: 'claude-code', providerLabel: 'Claude Code' };
+  if (AGENT_BRAINS[provSetting]) return { kind: 'cloud', providerKey: provSetting, providerLabel: AGENT_BRAINS[provSetting] };
   const liveProv = providerFromEndpoint(STATE.endpoint || (STATE.settings && STATE.settings.llm_url) || '');
   const isCloud = CLOUD_PROVIDERS.has(provSetting) || liveProv.key !== 'local';
   return {
@@ -6133,9 +6140,22 @@ function applyBrainState() {
 
   // Sticker: online dot + dropdown value.
   const dot = $$id('model-state');
+  const agent = AGENT_BRAINS[b.providerKey] ? b.providerKey : '';
   if (dot) {
     dot.classList.toggle('loaded', b.loaded && !b.busy);
     dot.classList.toggle('loading', !!b.busy);
+    dot.hidden = !!agent && !b.busy;
+  }
+  const mark = $$id('model-agent');
+  if (mark) {
+    mark.hidden = !agent || !!b.busy;
+    if (agent && mark.dataset.id !== agent) {
+      const h = HARNESS[agent] || {};
+      mark.dataset.id = agent;
+      mark.style.setProperty('--hx', h.c || 'var(--accent)');
+      mark.innerHTML = harnessMark(h);
+      mark.title = (h.label || agent) + ' is thinking for JARVIS';
+    }
   }
   const sel = $$id('model-select');
   if (sel && !b.busy) {
@@ -7588,6 +7608,7 @@ async function refreshModels() {
   try {
     const resp = await api('/api/models');
     const models = resp.models;
+    const _agentBrains = resp.agent_brains || [];
     // Explain a sparse cloud picker (e.g. xAI 403s the model list) — toast once
     // per distinct notice so the 9s poll doesn't spam it.
     const notice = resp.notice || '';
@@ -7669,18 +7690,31 @@ async function refreshModels() {
       if (disk.length) {
         const remaining = disk.filter(dm => !anyKeyMatch(dm.path, dm.filename));
         if (remaining.length) {
-          const sep = document.createElement('option');
-          sep.disabled = true;
-          sep.textContent = '──── swap to another model ────';
-          sel.appendChild(sep);
+          const grp = document.createElement('optgroup');
+          grp.label = 'Models on this PC';
           for (const dm of remaining) {
             const opt = document.createElement('option');
             opt.value = 'disk::' + dm.path;
-            opt.textContent = dm.filename + '  (' + dm.size_gb + ' GB · ' + dm.source + ')';
-            sel.appendChild(opt);
+            opt.textContent = dm.filename + '  (' + dm.size_gb + ' GB)';
+            grp.appendChild(opt);
           }
+          sel.appendChild(grp);
         }
       }
+    }
+    // Agent programs installed here, one line each; which of their models
+    // they use is set in Settings.
+    const _agents = (_agentBrains || []).filter(a => a.id !== deriveBrainKind().providerKey);
+    if (_agents.length) {
+      const grp = document.createElement('optgroup');
+      grp.label = 'Agents';
+      for (const a of _agents) {
+        const opt = document.createElement('option');
+        opt.value = 'agent::' + a.id;
+        opt.textContent = a.label + (a.id === 'codex' ? '  (ChatGPT plan)' : '  (Claude plan)');
+        grp.appendChild(opt);
+      }
+      sel.appendChild(grp);
     }
     // Rebuilding the list above wiped the selection, so the browser is sitting
     // on the first entry. Restore it BEFORE the mid-swap return below: that
@@ -7740,9 +7774,48 @@ async function refreshModels() {
   } catch (e) { console.error('refreshModels', e); }
 }
 
+// Only the provider changes: the local address stays for helpers.
+function agentBrainOn(id) {
+  const name = AGENT_BRAINS[id];
+  STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: id });
+  Object.assign(STATE.brain, deriveBrainKind(), { busy: false, loaded: true,
+    modelId: name, modelName: name, ctxTotal: 0, ctxEffective: 0 });
+  STATE.loadedModel = { id: name, state: 'loaded' };
+  toast(`JARVIS now thinks with ${name}`,
+        (id === 'codex' ? 'On your ChatGPT plan.' : 'On your Claude plan.') + ' Helpers keep using your local model.', 'ok', 5000);
+  applyBrainState();
+  refreshModels();
+}
 $('model-select').addEventListener('change', async (e) => {
   const id = e.target.value;
   if (!id) return;
+  // An agent picked from the sticker becomes the brain.
+  if (id.startsWith('agent::')) {
+    const aid = id.slice('agent::'.length);
+    try {
+      await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ provider: aid }) });
+      agentBrainOn(aid);
+    } catch (err) {
+      toast(`Couldn't switch to ${AGENT_BRAINS[aid] || aid}`, err.message, 'err', 8000);
+      applyBrainState();
+    }
+    return;
+  }
+  // Leaving an agent for a local model: hand the brain back to the endpoint first.
+  if (AGENT_BRAINS[(STATE.settings && STATE.settings.llm_provider || '').toLowerCase()]) {
+    try {
+      const r = await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ provider: '' }) });
+      STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: (r && r.provider) || 'local' });
+      if (!STATE.settings.llm_provider) STATE.settings.llm_provider = 'local';
+      Object.assign(STATE.brain, deriveBrainKind(), { loaded: false, modelId: '', modelName: '' });
+      STATE.loadedModel = null;
+    } catch (err) {
+      toast("Couldn't switch back", err.message, 'err', 8000);
+      return;
+    }
+  }
   const loaded = STATE.loadedModel;
   if (loaded && loaded.id === id) return;
   // Honest staged progress: starting → loading → ready, with each step
@@ -11888,6 +11961,7 @@ async function refreshSettings() {
     if (brainMode && llmUrl && llmKey && llmMdl && llmApply) {
       const PRESETS = {
         'claude-code': { url: 'claude-code://local', hint: 'JARVIS thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Hearth\'s tools through it. It is billed to the Agent SDK credit that comes with the plan. Helpers keep using your local model.', modelHint: '', sample: '' },
+        'codex':       { url: 'codex://local', hint: 'JARVIS thinks with Codex on this PC, signed in to your ChatGPT plan, and uses Hearth\'s tools through it. The Codex app is enough; it carries the command-line part. Its usage counts toward your plan\'s Codex limit. Helpers keep using your local model.', modelHint: '', sample: '' },
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },
         gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: 'Try <code>gemini-3-flash</code> or <code>gemini-3-pro</code>.', sample: 'gemini-3-flash' },
         anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint. Sonnet supports up to 1M context.', modelHint: 'Try <code>claude-sonnet-5</code>, <code>claude-opus-4-8</code>, or <code>claude-haiku-4-5</code>.', sample: 'claude-sonnet-5' },
@@ -11916,7 +11990,7 @@ async function refreshSettings() {
       llmMdl.value = s.llm_model || '';
       function applyMode(v) {
         const isLocal = (v === 'local');
-        cloudFields.hidden = isLocal || v === 'claude-code';      // no key for Claude Code
+        cloudFields.hidden = isLocal || !!AGENT_BRAINS[v];        // an agent brain needs no key
         customUrl.hidden   = (v !== 'custom');
         // applyRow stays hidden until the user actually changes something
         // (provider/key/url) — see _dirtyBrain(). No permanent eyesore.
@@ -11966,7 +12040,7 @@ async function refreshSettings() {
           model: llmMdl.value.trim(),
         };
         if (!body.url) { toast('Add the server address', 'Something like http://localhost:1234/v1', 'warn'); return; }
-        if (body.provider !== 'local' && body.provider !== 'claude-code' && !body.key) {
+        if (body.provider !== 'local' && !AGENT_BRAINS[body.provider] && !body.key) {
           toast('API key needed', body.provider + ' requires a key', 'warn');
           return;
         }
@@ -11988,15 +12062,8 @@ async function refreshSettings() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
           });
-          if (r.ok && body.provider === 'claude-code') {
-            // Only the provider changes: the local address stays for helpers.
-            STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: 'claude-code' });
-            Object.assign(STATE.brain, deriveBrainKind(), { busy: false, loaded: true,
-              modelId: 'Claude Code', modelName: 'Claude Code', ctxTotal: 0, ctxEffective: 0 });
-            STATE.loadedModel = { id: 'Claude Code', state: 'loaded' };
-            toast('JARVIS now thinks with Claude Code', 'On your Claude plan. Helpers keep using your local model.', 'ok', 5000);
-            applyBrainState();
-            refreshModels();
+          if (r.ok && AGENT_BRAINS[body.provider]) {
+            agentBrainOn(body.provider);
           } else if (r.ok) {
             await saveSetting('llm_provider', body.provider);
             await saveSetting('llm_url', body.url);
@@ -12017,7 +12084,7 @@ async function refreshSettings() {
               }
             } else {
               toast('Switched brain', 'Next message uses ' + (body.provider === 'local' ? 'your local server'
-                    : body.provider === 'claude-code' ? 'Claude Code' : body.provider), 'ok');
+                    : AGENT_BRAINS[body.provider] || body.provider), 'ok');
             }
             // Confirm any phone bridge that was respawned onto the new brain, so
             // it's clear the Telegram/Discord bot won't keep hitting the old one.

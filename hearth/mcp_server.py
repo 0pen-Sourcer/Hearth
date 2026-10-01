@@ -154,15 +154,36 @@ _BRAIN_TOKEN = os.environ.get("HEARTH_BRAIN_TOKEN", "")
 # (tool name, when): an approval is used by the next call of that tool, within
 # a minute. Matching the arguments exactly failed on how they arrive here.
 _APPROVED: List[tuple] = []
+# A brain with no permission hook of its own (Codex): the server asks Hearth
+# itself before running anything risky.
+_BRAIN_GATE = os.environ.get("HEARTH_BRAIN_GATE", "") == "1"
+
+
+def _ask_hearth(tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
+    import urllib.request
+    req = urllib.request.Request(
+        _BRAIN_URL + "/api/brain/permission",
+        data=json.dumps({"token": _BRAIN_TOKEN, "tool": tool, "input": inp}).encode("utf-8"),
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=240) as r:
+            return json.load(r)
+    except Exception as e:
+        return {"behavior": "deny", "message": f"Couldn't reach Hearth to ask: {e}"}
 
 
 def _run(name: str, args: Dict[str, Any]):
     import time as _t
+    from hearth.tools import APPROVAL_TOKEN, _RISKY_TOOLS
     now = _t.time()
     hit = next((a for a in _APPROVED if a[0] == name and now - a[1] < 60), None)
     if hit:
         _APPROVED.remove(hit)
-        from hearth.tools import APPROVAL_TOKEN
+        args = dict(args, _approved=APPROVAL_TOKEN)
+    elif _BRAIN_GATE and _BRAIN_URL and name in _RISKY_TOOLS:
+        verdict = _ask_hearth("mcp__hearth__" + name, args)
+        if verdict.get("behavior") != "allow":
+            return "Not done. " + str(verdict.get("message") or "The user declined this.")
         args = dict(args, _approved=APPROVAL_TOKEN)
     return execute_tool(name, args)
 
@@ -260,20 +281,11 @@ for td in TOOL_DEFINITIONS:
     _mcp_exposed += 1
 
 
-if _BRAIN_URL and _BRAIN_TOKEN:
+if _BRAIN_URL and _BRAIN_TOKEN and not _BRAIN_GATE:
     @mcp.tool(name="approve", description="Hearth's permission check. Not for direct use.",
               structured_output=False)
     def approve(tool_name: str, input: dict, tool_use_id: str = "") -> str:
-        import urllib.request
-        req = urllib.request.Request(
-            _BRAIN_URL + "/api/brain/permission",
-            data=json.dumps({"token": _BRAIN_TOKEN, "tool": tool_name, "input": input}).encode("utf-8"),
-            headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=240) as r:
-                verdict = json.load(r)
-        except Exception as e:
-            verdict = {"behavior": "deny", "message": f"Couldn't reach Hearth to ask: {e}"}
+        verdict = _ask_hearth(tool_name, input)
         if verdict.get("behavior") == "allow" and tool_name.startswith("mcp__hearth__"):
             import time as _t
             _APPROVED.append((tool_name[len("mcp__hearth__"):], _t.time()))
