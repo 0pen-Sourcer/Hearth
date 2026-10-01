@@ -1632,7 +1632,6 @@
     flex-wrap: wrap;
   }
   .model-row:hover { border-color: var(--accent-line); background: var(--bg-2); }
-  .model-row.is-recommended { border-color: color-mix(in srgb, var(--accent-2) 55%, transparent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
   .model-row.is-loaded { border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 4%, transparent); }
   .model-row.is-open { background: var(--bg-2); border-color: var(--accent-line); }
 
@@ -1890,7 +1889,6 @@
   .progress-bar > div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .3s var(--ease); }
   .progress-row .detail { font-size: 11px; color: var(--fg-faint); margin-top: 4px; }
   /* Built-in-server model picker: one row per curated pick. */
-  .picks { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
   .pick {
     display: flex; align-items: center; gap: 12px;
     padding: 10px 14px;
@@ -15650,12 +15648,6 @@ function modelsWireRowClicks(pane) {
       } catch (err) { toast('Stop failed', err.message, 'err'); }
     });
   });
-  pane.querySelectorAll('button[data-pick]').forEach(b => {
-    b.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      modelsDownloadPick(b.dataset.pick);
-    });
-  });
   pane.querySelectorAll('button[data-cancel]').forEach(b => {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -15695,15 +15687,6 @@ function modelsWireRowClicks(pane) {
       } finally {
         modelsSetStartingLock(false);
       }
-    });
-  });
-  // Apply & download (quick pick with custom config)
-  pane.querySelectorAll('button[data-apply-pick]').forEach(b => {
-    b.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const expand = b.closest('.model-expand');
-      const cfg = modelsReadLoadConfig(expand);
-      modelsDownloadPick(b.dataset.applyPick, cfg);
     });
   });
   // HF row interactions - both the "Pick file" button AND clicking the row
@@ -15909,7 +15892,7 @@ async function modelsLoadHFFilesInline(row) {
         ? `<span class="ex-quant" title="quant level">${esc(f.quant_tier)}</span>`
         : '';
       const recChip = f.recommended
-        ? `<span class="ex-rec" title="balanced default - same quality as Q5 in practice, ~20% smaller">Recommended</span>`
+        ? `<span class="ex-rec" title="the usual middle size: close to Q5 in quality, about 20% smaller">Balanced</span>`
         : '';
       return `
         <div class="ex-file" data-fn="${esc(f.filename)}" data-tier="${tier}" title="${esc(f.fit_label || '')}">
@@ -16198,25 +16181,6 @@ async function modelsLoadHFFiles(repo, idx) {
   } catch (e) {
     box.innerHTML = '<div style="padding:6px;color:var(--err)">' + esc(e.message) + '</div>';
   }
-}
-
-async function modelsDownloadPick(pickId, loadCfg) {
-  const dl = $('models-dl');
-  dlToggle(true);  // progress shows in the downloads overlay, not the model list
-  const bar = $('models-dl-bar'), label = $('models-dl-label'), detail = $('models-dl-detail');
-  bar.style.width = '0%';
-  label.textContent = 'Connecting to Hugging Face...';
-  detail.textContent = '';
-  let modelPath = null;
-  try {
-    const res = await fetch('/api/llmserver/download', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pick_id: pickId }),
-    });
-    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
-    modelPath = await streamDownload(res, bar, label, detail);
-  } catch (e) { label.textContent = 'Error'; detail.textContent = e.message; return; }
-  if (modelPath) await startWithModel(modelPath, label, detail, loadCfg);
 }
 
 async function modelsDownloadHF(repo, filename, loadCfg) {
@@ -16971,8 +16935,6 @@ async function obLoadBrains() {
   catch { status.innerHTML = '<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>Could not reach Hearth backend</span></div>'; return; }
 
   const disk = s.disk_models || [];
-  const picks = s.picks || [];
-  const recId = s.recommended_pick_id || '';
   const builtin = s.builtin_running;
   const external = s.external_running;
 
@@ -16987,7 +16949,7 @@ async function obLoadBrains() {
   } else if (disk.length) {
     banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>Found ${disk.length} model file${disk.length === 1 ? '' : 's'} on your disk. Pick one to boot Hearth's built-in server.</span></div>`;
   } else {
-    banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>No models found yet. Pick a recommended one and Hearth will download it for you.</span></div>`;
+    banner = `<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>No models found yet. You can get one from the Models tab after setup, or use a cloud model or an agent you already pay for.</span></div>`;
   }
   // Second row: the bundled engine has no kernels for this GPU. Only fires on
   // a card newer than the wheel builds for (see llmserver.runtime_advice) —
@@ -17306,13 +17268,6 @@ async function obFinish(skipped) {
             method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ model_path: pick.path }),
           }).catch(() => {});
-        } else if (pick.kind === 'pick' && pick.id) {
-          // Kick off the download in the background - Models tab tracks progress
-          api('/api/llmserver/download', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ id: pick.id }),
-          }).catch(() => {});
-          toast('Downloading brain', 'Models tab shows the progress - chat works the moment it\'s done.', 'info', 7000);
         }
       } catch {}
     }

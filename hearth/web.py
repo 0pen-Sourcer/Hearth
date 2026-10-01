@@ -3784,18 +3784,6 @@ class HearthHandler(BaseHTTPRequestHandler):
             body = self._read_json()
             return self._send_json(200, llmserver.set_engine_preference(
                 (body.get("preference") or "").strip()))
-        if path == "/api/llmserver/download":
-            # Download a curated pick from HF, streaming progress as NDJSON so
-            # the GUI can render a real progress bar. {type:"progress", done, total}
-            # events while downloading, then a final {type:"done", ok, path|error}.
-            from . import llmserver
-            body = self._read_json()
-            pick_id = (body.get("pick_id") or "").strip()
-            pick = next((p for p in llmserver.TOP_PICKS if p["id"] == pick_id), None)
-            if not pick:
-                return self._stream_model_download("", "", error=f"unknown pick id: {pick_id!r}")
-            found = llmserver.existing_pick_copy(pick)
-            return self._stream_model_download(pick["hf_repo"], pick["hf_file"], found=found)
         return self._not_found()
 
     def _not_found(self):

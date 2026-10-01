@@ -15,7 +15,7 @@ inert. To enable:
 Workflow from a brand-new install:
     1. Hearth starts, sees no external server, sees llama-cpp-python installed.
     2. The GUI welcome card offers "use built-in server". User picks a model.
-    3. download_model() pulls the GGUF from Hugging Face into ~/Jarvis/models/.
+    3. download_from_hf_repo() pulls the GGUF from Hugging Face into ~/Jarvis/models/.
     4. start_builtin(path) spawns the server on 1234. Hearth talks to it normally.
     5. stop_builtin() shuts it down at exit (and on /api/llmserver/stop).
 """
@@ -311,90 +311,6 @@ def _assign_to_job(proc: subprocess.Popen) -> None:
     except Exception:
         pass
 
-# Curated picks - we test these and pin the exact HF paths. Tuned for the
-# common case (one consumer GPU). The fields match what the GUI needs to render
-# a clean "pick a model" panel.
-TOP_PICKS: List[Dict[str, Any]] = [
-    {
-        "id": "qwen2.5-3b-instruct-q4_k_m",
-        "name": "Qwen 2.5 3B Instruct (Q4_K_M)",
-        "size_gb": 1.9,
-        "vram_min_gb": 3,
-        "context": 32768,
-        "hf_repo": "Qwen/Qwen2.5-3B-Instruct-GGUF",
-        "hf_file": "qwen2.5-3b-instruct-q4_k_m.gguf",
-        "description": "Tiny daily-driver. Fits 4 GB GPUs and CPU-only rigs without breaking a sweat.",
-        "tags": ["tiny", "tools", "low-vram"],
-    },
-    {
-        "id": "qwen2.5-7b-instruct-q4_k_m",
-        "name": "Qwen 2.5 7B Instruct (Q4_K_M)",
-        "size_gb": 4.7,
-        "vram_min_gb": 6,
-        "context": 32768,
-        "hf_repo": "Qwen/Qwen2.5-7B-Instruct-GGUF",
-        "hf_file": "qwen2.5-7b-instruct-q4_k_m.gguf",
-        "description": "Best balance of speed + tool use. Solid daily-driver default on 6-8 GB cards.",
-        "tags": ["recommended", "tools"],
-    },
-    {
-        "id": "qwythos-9b-claude-mythos-q4_k_m",
-        "name": "Qwythos 9B Claude-Mythos (Q4_K_M)",
-        "size_gb": 5.3,
-        "vram_min_gb": 8,
-        "context": 32768,
-        "hf_repo": "empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF",
-        "hf_file": "Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf",
-        "description": "Qwen3.5-9B base with a 1M context. Sharp reasoning and decisive tool-use on multi-step tasks. The default pick on 8 GB.",
-        "tags": ["recommended", "reasoning", "tools"],
-    },
-    {
-        "id": "harmonic-hermes-9b-q4_k_m",
-        "name": "Harmonic Hermes 9B (Q4_K_M)",
-        "size_gb": 5.3,
-        "vram_min_gb": 8,
-        "context": 32768,
-        "hf_repo": "DJLougen/Harmonic-Hermes-9B-GGUF",
-        "hf_file": "Qwen3.5-9B-Harmonic.Q4_K_M.gguf",
-        "description": "Qwen3.5 base + Hermes finetune. Also strong on reasoning + tool-use. A solid alternative at this tier.",
-        "tags": ["reasoning", "tools"],
-    },
-    {
-        "id": "gemma-4-e4b-it-q4_k_m",
-        "name": "Gemma 4 E4B Instruct (Q4_K_M)",
-        "size_gb": 5.3,
-        "vram_min_gb": 8,
-        "context": 8192,
-        "hf_repo": "lmstudio-community/gemma-4-E4B-it-GGUF",
-        "hf_file": "gemma-4-E4B-it-Q4_K_M.gguf",
-        "description": "Google Gemma 4 — multimodal vision-capable, sharp reasoning. Comfortable on 8 GB.",
-        "tags": ["smart", "vision"],
-    },
-    {
-        "id": "qwen2.5-14b-instruct-q4_k_m",
-        "name": "Qwen 2.5 14B Instruct (Q4_K_M)",
-        "size_gb": 8.5,
-        "vram_min_gb": 12,
-        "context": 32768,
-        "hf_repo": "Qwen/Qwen2.5-14B-Instruct-GGUF",
-        "hf_file": "qwen2.5-14b-instruct-q4_k_m.gguf",
-        "description": "Step up in reasoning quality. Lands cleanly on 12-16 GB cards.",
-        "tags": ["smart", "tools", "mid-vram"],
-    },
-    {
-        "id": "qwen2.5-32b-instruct-q4_k_m",
-        "name": "Qwen 2.5 32B Instruct (Q4_K_M)",
-        "size_gb": 18.5,
-        "vram_min_gb": 24,
-        "context": 32768,
-        "hf_repo": "Qwen/Qwen2.5-32B-Instruct-GGUF",
-        "hf_file": "qwen2.5-32b-instruct-q4_k_m.gguf",
-        "description": "Top-tier local reasoning. For 24 GB+ cards (RTX 3090 / 4090 / 5090 / pro).",
-        "tags": ["heavy", "reasoning", "high-vram"],
-    },
-]
-
-
 def detect_gpu_vram_gb() -> Optional[float]:
     """Total memory in GB on the main graphics card, any vendor, or None when
     there is none. Used to pick the right model size for this rig (4-6 GB ->
@@ -508,52 +424,6 @@ def detect_ram_gb() -> Optional[float]:
         return round(psutil.virtual_memory().total / (1024 ** 3), 1)
     except Exception:
         return None
-
-
-def recommend_pick_for_this_pc() -> Dict[str, Any]:
-    """Return the pick that's the best fit for this machine's VRAM/RAM.
-    Returns the pick dict with an extra 'reason' string explaining the choice.
-
-    Logic (curated suggestion; a user's own downloaded model always wins):
-    - 8 GB+ (the common case): Qwythos 9B — Qwen3.5-9B base with a 1M context.
-      Modern architecture, strong reasoning + decisive tool-use. (Qwen 2.5 is
-      deliberately NOT recommended at this tier — it's weak at tool-calling in a
-      tool-heavy agent loop.)
-    - 12 GB+ / 24 GB+: larger Qwen picks (more headroom, more context).
-    - <8 GB / CPU-only: the smaller picks, which still tool-call acceptably.
-    """
-    vram = detect_gpu_vram_gb()
-    ram = detect_ram_gb()
-
-    if vram is not None and vram >= 24:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-32b-instruct-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 2.5 32B Q4 fits with room for context."
-    elif vram is not None and vram >= 12:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-14b-instruct-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 2.5 14B is the sweet spot at this tier."
-    elif vram is not None and vram >= 8:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwythos-9b-claude-mythos-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwythos 9B (Qwen3.5 base, 1M context) is the sweet spot for reasoning + tool use at this tier."
-    elif vram is not None and vram >= 6:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-7b-instruct-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 7B Q4 fits and gives the best tool-use at this tier."
-    elif vram is not None and vram >= 3.5:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-3b-instruct-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM detected — Qwen 2.5 3B fits cleanly without spillover."
-    elif vram is not None:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-3b-instruct-q4_k_m")
-        reason = f"NVIDIA GPU with {vram:g} GB VRAM — Qwen 2.5 3B will partial-offload to CPU but still runs."
-    elif ram is not None and ram >= 8:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-7b-instruct-q4_k_m")
-        reason = f"No NVIDIA GPU; {ram:g} GB RAM — Qwen 2.5 7B can run on CPU (slow but works)."
-    else:
-        pick = next(p for p in TOP_PICKS if p["id"] == "qwen2.5-3b-instruct-q4_k_m")
-        reason = "Couldn't probe GPU/RAM — defaulting to Qwen 2.5 3B (fits anywhere)."
-
-    out = dict(pick)
-    out["recommended_for_this_pc"] = True
-    out["recommendation_reason"] = reason
-    return out
 
 
 def llama_cpp_available() -> bool:
@@ -908,98 +778,6 @@ def _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded) -> in
                 raise
             time.sleep(0.5)
     return done
-
-
-def existing_pick_copy(pick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """A curated pick already on disk (LM Studio, Ollama, HF cache or ours),
-    so a click on Download uses that copy instead of pulling it again."""
-    target_name = pick["hf_file"].lower()
-    try:
-        for existing in scan_disk_for_models():
-            fn = (existing.get("filename") or "").lower()
-            if fn == target_name:
-                return {"ok": True, "path": existing["path"], "already": True,
-                        "source": existing.get("source", "disk")}
-    except Exception:
-        pass
-    return None
-
-
-def download_model(pick_id: str,
-                   on_progress: Optional[Callable[[int, int], None]] = None,
-                   cancel: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
-    """Download a curated pick from Hugging Face into ~/Jarvis/models/.
-    `on_progress(done_bytes, total_bytes)` is called every ~256KB. Returns
-    {ok, path} on success or {ok: False, error: ...}. Uses a .part file so
-    interrupted downloads never look complete.
-
-    Disk-first: before downloading, scan every known location (LM Studio's
-    cache, Ollama, HF cache, ~/Jarvis/models) for a file matching the pick's
-    hf_file. If found, return that path with `already: True` and source so
-    the caller can tell the user "using your LM Studio copy" instead of
-    silently burning 5+ GB of disk and bandwidth on a duplicate."""
-    pick = next((p for p in TOP_PICKS if p["id"] == pick_id), None)
-    if not pick:
-        return {"ok": False, "error": f"unknown pick id: {pick_id!r}"}
-
-    # Disk-first short-circuit: does this exact filename already live on disk
-    # somewhere Hearth knows how to find it? LM Studio users routinely have
-    # the same GGUF cached under .lmstudio/models/<author>/<repo>/ and there's
-    # no reason to redownload it into ~/Jarvis/models/.
-    found = existing_pick_copy(pick)
-    if found:
-        return found
-
-    url = _hf_resolve_url(pick["hf_repo"], pick["hf_file"])
-    dest = MODELS_DIR / pick["hf_file"]
-    if dest.exists():
-        record_model_source(str(dest), pick["hf_repo"])
-        return {"ok": True, "path": str(dest), "already": True, "source": "Hearth"}
-
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    try:
-        done = _download_with_resume(url, dest, tmp, on_progress, cancel=cancel)
-        record_model_source(str(dest), pick["hf_repo"])
-        _status_cache.pop("disk_models_cache", None)
-        _status_cache.pop("disk_scan_ts", None)
-        return {"ok": True, "path": str(dest), "bytes": done}
-    except DownloadCancelled:
-        return {"ok": False, "cancelled": True,
-                "error": "download paused (progress kept, it will resume)"}
-    except Exception as e:
-        # Keep the .part so the next attempt RESUMES instead of restarting.
-        return {"ok": False, "error": f"download failed: {type(e).__name__}: {e}"}
-
-
-_proc: Optional[subprocess.Popen] = None
-_proc_info: Dict[str, Any] = {}
-# Kept so the log can be truncated in place while the child still holds it
-# open (Windows won't let another handle rename/delete a locked file).
-_log_fh = None
-
-# Live load-progress snapshot. Written by start_builtin while a model loads,
-# read by /api/llmserver/progress every ~500ms so the GUI can show a real
-# bar instead of an indeterminate spinner. Reset to "idle" once ready.
-#   phase   : starting | loading_weights | initializing_backend | reserving_kv |
-#             starting_http | ready | error | idle
-#   percent : 0..100 (rough but monotonically increasing within a load)
-#   marker  : last interesting llama.cpp log line we noticed
-#   started_at, finished_at : epoch seconds
-_load_progress: Dict[str, Any] = {
-    "phase": "idle",
-    "percent": 0,
-    "marker": "",
-    "started_at": None,
-    "finished_at": None,
-    "error": None,
-}
-
-
-# The stretch of the bar the measured weight read owns. Below it the process
-# has barely started; above it the engine is doing work that is not file reading
-# and has its own log markers.
-_WEIGHT_BAND_BOTTOM = 8
-_WEIGHT_BAND_TOP = 88
 
 
 def _phase_for_line(line: str) -> Optional[Tuple[str, int]]:
@@ -2692,8 +2470,8 @@ def invalidate_status_cache() -> None:
 
 
 def search_huggingface(query: str, limit: int = 12) -> List[Dict[str, Any]]:
-    """Search HF for GGUF models matching the query - lets users browse beyond
-    the 3 curated picks without leaving Hearth. Filters to GGUF repos so the
+    """Search HF for GGUF models matching the query, without leaving Hearth.
+    Hearth names no model of its own to download. Filters to GGUF repos so the
     list is restricted to things llama.cpp can actually load. Public API,
     no auth needed."""
     if not query or not query.strip():
@@ -3136,8 +2914,8 @@ def download_from_hf_repo(repo: str, filename: str,
                           on_progress: Optional[Callable[[int, int], None]] = None,
                           cancel: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
     """Download an arbitrary GGUF picked from search_huggingface() results.
-    Same .part-file handling as the curated picks so interrupted downloads
-    never look complete."""
+    A .part file holds it until it is whole, so an interrupted download
+    never looks complete."""
     if not repo or not filename:
         return {"ok": False, "error": "repo and filename required"}
     if not filename.lower().endswith(".gguf"):
@@ -3375,8 +3153,7 @@ def list_partial_downloads() -> List[Dict[str, Any]]:
                 out.append({"filename": fn,
                             "gb": round(p.stat().st_size / (1024 ** 3), 2),
                             "path": str(p),
-                            "repo": (pend.get(fn) or {}).get("repo", "")
-                                    or next((t["hf_repo"] for t in TOP_PICKS if t["hf_file"] == fn), ""),
+                            "repo": (pend.get(fn) or {}).get("repo", ""),
                             "paused": bool((pend.get(fn) or {}).get("paused")),
                             "active": bool(job and job["status"] == "downloading")})
             except OSError:
@@ -3529,7 +3306,6 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
                     ext_id = items[0].get("id")
             except Exception:
                 pass
-    rec = recommend_pick_for_this_pc()
     # Cloud-aware disk scan: do a full scan when on local endpoints OR
     # when the cache is cold. On subsequent cloud polls, reuse the cached
     # result so the Models tab keeps showing what's on disk without
@@ -3575,9 +3351,6 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
         "local_models": _local,
         "remote_endpoint": not _is_local,
         "scanning": _is_scanning,
-        "picks": TOP_PICKS,
-        "recommended_pick_id": rec.get("id"),
-        "recommendation_reason": rec.get("recommendation_reason"),
         "vram_gb": detect_gpu_vram_gb(),
         "ram_gb": detect_ram_gb(),
         "models_dir": str(MODELS_DIR),

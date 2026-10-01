@@ -1550,7 +1550,7 @@ class JarvisCLI:
             disk = _ls.scan_disk_for_models()
             if not disk:
                 print(f"  {C_DIM}No local models on disk yet. After setup, run {C_RESET}{C_TOOL}/models{C_RESET}"
-                      f"{C_DIM} — I'll recommend one that fits your GPU and download it.{C_RESET}\n")
+                      f"{C_DIM} to search Hugging Face and download one.{C_RESET}\n")
                 return
             print(f"  {C_TOOL}Pick a model to run locally{C_RESET}{C_DIM}:{C_RESET}")
             for i, m in enumerate(disk[:6], 1):
@@ -1675,11 +1675,10 @@ class JarvisCLI:
         """Full model picker/downloader - matches the GUI Models tab.
 
         Subcommands:
-          /models                - overview: server, on-disk GGUFs, recommended picks
+          /models                - overview: server and on-disk GGUFs
           /models disk           - list every .gguf found on disk + LM Studio / HF cache
-          /models picks          - show recommended downloads (PC-aware)
           /models hf <query>     - search Hugging Face for GGUF repos
-          /models get <pick-id>  - download a recommended pick + boot built-in server
+          /models get <repo|n> [file|n] - list a Hugging Face repo's files, or download one + boot it
           /models use <path|n>   - boot built-in server with a disk model (n = number from /models disk)
           /models engine         - show the inference engine; `engine install` / `engine update` to fetch llama.cpp
           /models stop           - stop the built-in server
@@ -1793,7 +1792,7 @@ class JarvisCLI:
         if sub == "disk":
             disk = llmserver.scan_disk_for_models()
             if not disk:
-                print(f"{C_DIM}No .gguf files found. Try '/models picks' to download one.{C_RESET}")
+                print(f"{C_DIM}No .gguf files found. Find one to download with /models hf <search>.{C_RESET}")
                 return
             print(f"\n{C_BRAND}{len(disk)} model{'s' if len(disk)!=1 else ''} on disk:{C_RESET}")
             for i, m in enumerate(disk, 1):
@@ -1802,20 +1801,6 @@ class JarvisCLI:
                 print(f"      {C_DIM}{m.get('path')}{C_RESET}")
             print(f"\n{C_DIM}Boot one with: /models use <n>{C_RESET}\n")
             self._cli_disk_cache = disk
-            return
-
-        if sub == "picks":
-            s = llmserver.status(LOCAL_API_BASE)
-            picks = s.get("picks") or []
-            rec_id = s.get("recommended_pick_id") or ""
-            why = s.get("recommendation_reason") or ""
-            print(f"\n{C_BRAND}Recommended downloads:{C_RESET} {C_DIM}{why}{C_RESET}")
-            for p in picks:
-                star = " (recommended)" if p.get("id") == rec_id else ""
-                print(f"  {C_TOOL}{p.get('id')}{C_RESET}{C_OK}{star}{C_RESET}")
-                print(f"      {p.get('name')} · {p.get('size_gb')} GB · {p.get('context'):,} ctx")
-                print(f"      {C_DIM}{p.get('description')}{C_RESET}")
-            print(f"\n{C_DIM}Download + boot: /models get <id>{C_RESET}\n")
             return
 
         if sub == "hf":
@@ -1833,14 +1818,48 @@ class JarvisCLI:
             for i, r in enumerate(results[:12], 1):
                 repo = r.get("hf_repo") or r.get("name") or "(unknown)"
                 print(f"  [{i}] {C_TOOL}{repo}{C_RESET}  {C_DIM}{r.get('downloads') or 0:,} dl{C_RESET}")
-            print(f"\n{C_DIM}Download + boot one with: /models get <repo>{C_RESET}\n")
+            self._cli_hf_results = [r.get("hf_repo") or r.get("name") or "" for r in results[:12]]
+            print(f"\n{C_DIM}See a repo's files with: /models get <n>{C_RESET}\n")
             return
 
         if sub == "get":
-            if not arg:
-                print(f"{C_ERR}Usage: /models get <pick-id>  (see /models picks){C_RESET}")
+            # /models get <repo|n>           the repo's GGUF files, with size and fit
+            # /models get <repo|n> <file|n>  download that file and boot it
+            words = arg.split()
+            if not words:
+                print(f"{C_ERR}Usage: /models get <repo>  (find one with /models hf <search>){C_RESET}")
                 return
-            print(f"{C_DIM}Downloading + booting {arg} - this can take a while…{C_RESET}")
+            repo = words[0]
+            if repo.isdigit():
+                found = getattr(self, "_cli_hf_results", None) or []
+                if not (1 <= int(repo) <= len(found)):
+                    print(f"{C_ERR}No search result {repo}. Run /models hf <search> first.{C_RESET}")
+                    return
+                repo = found[int(repo) - 1]
+            files = llmserver.list_hf_files(repo)
+            if files and files[0].get("error"):
+                print(f"{C_ERR}{files[0]['error']}{C_RESET}")
+                return
+            if not files:
+                print(f"{C_DIM}No .gguf files in {repo}.{C_RESET}")
+                return
+            if len(words) < 2:
+                print(f"\n{C_BRAND}{repo}{C_RESET}")
+                for i, f in enumerate(files, 1):
+                    size = f"{f.get('size_gb')} GB" if f.get("size_gb") is not None else "size unknown"
+                    print(f"  [{i}] {C_TOOL}{f.get('filename')}{C_RESET}  {C_DIM}{size}"
+                          f"{' · ' + f['fit_label'] if f.get('fit_label') else ''}{C_RESET}")
+                print(f"\n{C_DIM}Download + boot one with: /models get {words[0]} <n>{C_RESET}\n")
+                return
+            want = words[1]
+            if want.isdigit():
+                if not (1 <= int(want) <= len(files)):
+                    print(f"{C_ERR}No file {want} in that list.{C_RESET}")
+                    return
+                filename = files[int(want) - 1].get("filename")
+            else:
+                filename = want
+            print(f"{C_DIM}Downloading {filename} - this can take a while…{C_RESET}")
             def _cb(done: int, total: int) -> None:
                 if total > 0:
                     pct = int(100 * done / total)
@@ -1848,7 +1867,7 @@ class JarvisCLI:
                     mb_total = total / (1024**2)
                     print(f"\r  {pct:3d}%  {mb_done:7.1f} / {mb_total:7.1f} MB", end="", flush=True)
             try:
-                r = llmserver.download_model(arg, on_progress=_cb)
+                r = llmserver.download_from_hf_repo(repo, filename, on_progress=_cb)
                 print()
                 if not r.get("ok"):
                     print(f"{C_ERR}{r.get('error') or 'download failed'}{C_RESET}")
@@ -1898,31 +1917,9 @@ class JarvisCLI:
                     path = match.get("path")
                     print(f"{C_DIM}↳ matched on-disk: {match.get('filename')}{C_RESET}")
                 else:
-                    # 3) No disk match either → try the recommended-pick
-                    # download path. This was the missing arm that caused
-                    # /models use harmonic-hermes-9b-q4_k_m to dead-end.
-                    try:
-                        st = llmserver.status(LOCAL_API_BASE)
-                        picks = st.get("picks") or []
-                        pick = next((p for p in picks if p.get("id") == arg), None)
-                    except Exception:
-                        pick = None
-                    if pick:
-                        print(f"{C_DIM}'{arg}' isn't on disk - kicking download then boot…{C_RESET}")
-                        try:
-                            dl = llmserver.download_model(arg)
-                            if not dl.get("ok"):
-                                print(f"{C_ERR}{dl.get('error') or 'download failed'}{C_RESET}")
-                                return
-                            path = dl.get("path")
-                        except Exception as e:
-                            print(f"{C_ERR}download failed: {type(e).__name__}: {e}{C_RESET}")
-                            return
-                    else:
-                        print(f"{C_ERR}'{arg}' isn't a file path, an on-disk filename, "
-                              f"or a known pick id. Run /models disk for paths, "
-                              f"or /models picks for downloadable ids.{C_RESET}")
-                        return
+                    print(f"{C_ERR}'{arg}' isn't a file path or an on-disk filename. Run /models disk "
+                          f"for what is here, or /models hf <search> to find one to download.{C_RESET}")
+                    return
             print(f"{C_DIM}Booting llama.cpp built-in server with {path}…{C_RESET}")
             try:
                 r = llmserver.start_builtin(path, **(llmserver.get_model_config(path) or {}))
@@ -1981,15 +1978,8 @@ class JarvisCLI:
                 print(f"  {C_DIM}…and {len(disk)-6} more - /models disk{C_RESET}")
             self._cli_disk_cache = disk
 
-        rec_id = s.get("recommended_pick_id")
-        rec = next((p for p in (s.get("picks") or []) if p.get("id") == rec_id), None)
-        if rec and not s.get("builtin_running"):
-            print(f"\n{C_BRAND}Recommended for your PC{C_RESET}  {C_DIM}{s.get('recommendation_reason') or ''}{C_RESET}")
-            print(f"  {C_TOOL}{rec.get('id')}{C_RESET}  {rec.get('size_gb')} GB · {rec.get('context'):,} ctx")
-            print(f"  {C_DIM}{rec.get('description')}{C_RESET}")
-
         print()
-        print(f"{C_DIM}Subcommands:  /models <search>  ·  free  ·  disk  ·  picks  ·  hf <q>  ·  get <id>  ·  use <path|n>  ·  stop{C_RESET}\n")
+        print(f"{C_DIM}Subcommands:  /models <search>  ·  free  ·  disk  ·  hf <q>  ·  get <repo|n> [file|n]  ·  use <path|n>  ·  stop{C_RESET}\n")
 
     async def handle_command(self, text: str) -> bool:
         # `global` MUST sit at the very top of this function, BEFORE any
