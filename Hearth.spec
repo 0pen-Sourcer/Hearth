@@ -560,6 +560,17 @@ if LITE:
     for _a in (a_tray, a_cli, a_window):
         _a.binaries = _strip_nvidia(_a.binaries)
         _a.datas = _strip_nvidia(_a.datas)
+else:
+    # cuDNN is about 1 GB, only speech recognition on the graphics card would
+    # use it, and with it the installer passes Inno Setup's 2.1 GB limit. A
+    # venv that has it installed puts it in through ctranslate2's hook; without
+    # it, listening runs on the processor (realtime_voice._cudnn_present).
+    def _strip_cudnn(toc):
+        return [e for e in toc if "cudnn" not in e[0].lower().replace("\\", "/").split("/")
+                and not e[0].lower().replace("\\", "/").split("/")[-1].startswith("cudnn_")]
+    for _a in (a_tray, a_cli, a_window):
+        _a.binaries = _strip_cudnn(_a.binaries)
+        _a.datas = _strip_cudnn(_a.datas)
 
 # Collect all three into one folder so the user gets one drop-in dist/
 coll = COLLECT(

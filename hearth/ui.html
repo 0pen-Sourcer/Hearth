@@ -870,6 +870,20 @@
   #tm-canvas { cursor: pointer; }
   .tm-name .hx-mini { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 4px;
     background: var(--hx); color: #fff; font: 700 9px var(--sans); margin-right: 6px; vertical-align: 1px; }
+  .tm-new { background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--r);
+    padding: 5px 12px; font: 600 12px var(--sans); cursor: pointer; margin-right: 10px; }
+  .nh-wrap { white-space: normal; font-family: var(--sans); }
+  .nh-picks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin: 4px 0 14px; max-height: 260px; overflow: auto; }
+  .nh-pick { text-align: left; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r);
+    padding: 8px 10px; color: var(--fg); cursor: pointer; font: 600 12.5px var(--sans); display: flex; gap: 8px; align-items: flex-start; }
+  .nh-pick small { display: block; font-weight: 400; color: var(--fg-dim); font-size: 11.5px; margin-top: 2px; line-height: 1.35; }
+  .nh-pick.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-2)); }
+  .nh-pick .hx-mini { margin: 1px 0 0; flex-shrink: 0; }
+  .nh-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--fg-dim); margin: 0 0 6px; font-weight: 600; }
+  .nh-task, .nh-folder { width: 100%; box-sizing: border-box; background: var(--bg-0); border: 1px solid var(--border);
+    border-radius: var(--r); color: var(--fg); padding: 9px 11px; font: 13px var(--sans); outline: none; margin-bottom: 12px; }
+  .nh-task { min-height: 84px; resize: vertical; }
+  .nh-task:focus, .nh-folder:focus { border-color: var(--accent); }
   .tm-open-log { margin-top: 8px; background: none; border: 1px solid var(--border); color: var(--fg-dim);
     border-radius: var(--r); padding: 4px 10px; font-size: 12px; cursor: pointer; }
   .tm-open-log:hover { color: var(--fg); border-color: var(--border-strong); }
@@ -3644,6 +3658,7 @@
         <h2>Team</h2>
         <span class="sub" id="team-sub">helpers JARVIS starts for bigger jobs</span>
         <div class="grow"></div>
+        <button class="tm-new" id="tm-new" title="Start a helper on a task yourself">+ New helper</button>
         <div class="logs-tabs" id="tm-tabs" hidden>
           <button class="tm-tab active" data-tm="list">List</button>
           <button class="tm-tab" data-tm="room">Room</button>
@@ -17338,6 +17353,53 @@ document.querySelectorAll('.tm-tab').forEach(b => b.addEventListener('click', ()
   if (TEAM.tab === 'room') roomStart(); else roomStop();
   teamRender();
 }));
+// Start a helper by hand: one of Hearth's roles, or a task for an agent CLI.
+$('tm-new').addEventListener('click', async () => {
+  let c;
+  try { c = await api('/api/team/choices'); } catch (e) { toast("Couldn't list helpers", e.message, 'err'); return; }
+  const ROLE_ABOUT = { coder: 'Writes and runs code in a folder', researcher: 'Searches the web, reads, and answers',
+                       archivist: 'Long searches through your drives and files', summarizer: 'Reads one file and sums it up' };
+  const roleBtn = r => `<button type="button" class="nh-pick" data-kind="persona" data-id="${esc(r.id)}">
+      <span class="hx-mini" style="--hx:var(--fg-dim)">${esc(r.label[0])}</span><span>${esc(r.label)}<small>${esc(ROLE_ABOUT[r.id] || r.about)}</small></span></button>`;
+  const agentBtn = a => {
+    const h = HARNESS[a.id] || { c: 'var(--accent)' };
+    return `<button type="button" class="nh-pick" data-kind="agent" data-id="${esc(a.id)}">
+      <span class="hx-mini" style="--hx:${h.c}">${esc(a.label[0])}</span><span>${esc(a.label)}<small>${esc(a.maker)}${a.billing ? ' · ' + esc(a.billing) : ''}${a.tested ? '' : ' · new in Hearth'}</small></span></button>`;
+  };
+  const html = `<div class="nh-wrap">
+    <div class="nh-label">Who</div>
+    <div class="nh-picks" id="nh-picks">${(c.roles || []).map(roleBtn).join('')}${(c.agents || []).map(agentBtn).join('')}</div>
+    <div class="nh-label">What should they do</div>
+    <textarea class="nh-task" id="nh-task" placeholder="Everything they need to know; they don't see your chat."></textarea>
+    <div class="nh-label">Where</div>
+    <input class="nh-folder" id="nh-folder" placeholder="${esc(c.workspace || 'the workspace')}"></div>`;
+  let pick = null;
+  showModal('New helper', html, [
+    { label: 'Cancel' },
+    { label: 'Start', kind: 'primary', busyLabel: 'Starting…', onclick: async () => {
+      const task = $('nh-task').value.trim();
+      if (!pick) { toast('Pick who should do it', '', 'warn'); return false; }
+      if (!task) { toast('Say what they should do', '', 'warn'); $('nh-task').focus(); return false; }
+      const body = { task, folder: $('nh-folder').value.trim() };
+      body[pick.kind] = pick.id;
+      try {
+        await api('/api/team/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      } catch (e) { toast("It didn't start", e.message.replace(/^\d+\s*/, ''), 'err', 8000); return false; }
+      toast('Helper started', 'Watch it here as it works.', 'ok', 3000);
+      setTimeout(teamPoll, 400);
+    } },
+  ]);
+  const box = $('nh-picks');
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('.nh-pick');
+    if (!b) return;
+    box.querySelectorAll('.nh-pick').forEach(x => x.classList.toggle('on', x === b));
+    pick = { kind: b.dataset.kind, id: b.dataset.id };
+  });
+  const first = box.querySelector('.nh-pick');
+  if (first) first.click();
+  setTimeout(() => $('nh-task').focus(), 60);
+});
 $('tm-clear').addEventListener('click', () => {
   for (const a of TEAM.agents) if (a.status !== 'working') TEAM.cleared.add(a.id);
   try { localStorage.setItem('hearth_team_cleared', JSON.stringify([...TEAM.cleared].slice(-300))); } catch {}

@@ -1344,6 +1344,21 @@ def _icon_mime(data: bytes) -> str:
     return "application/octet-stream"
 
 
+def _team_choices() -> Dict[str, Any]:
+    """Who can be started from the Team view: Hearth's own helper roles and
+    the agent CLIs installed on this PC."""
+    from . import subagents as _sa, external_agents as _xa
+    roles = []
+    for p in _sa.list_personas():
+        if "error" in p or p.get("slug") in ("pdf_coordinator", "librarian"):
+            continue                     # internal plumbing, not something to hand a task to
+        desc = str(p.get("description") or "").split(". ")[0].strip()
+        roles.append({"id": p["slug"], "label": p["slug"].replace("_", " ").title(), "about": desc[:120]})
+    agents = [{"id": a["id"], "label": a["label"], "maker": a.get("maker", ""),
+               "tested": a.get("tested", False), "billing": a.get("billing", "")} for a in _xa.available()]
+    return {"roles": roles, "agents": agents, "workspace": WORKSPACE}
+
+
 def _saved_look() -> str:
     """The saved theme, accent and Simple/Advanced as a JS object literal, for
     the page to apply before its first paint."""
@@ -2065,6 +2080,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if path == "/api/team/choices":
+            return self._send_json(200, _team_choices())
         if path == "/api/team":
             # Live state of helper agents for the Team view.
             try:
@@ -2987,6 +3004,32 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(500, {"error": str(e)})
         if path == "/api/upload":
             return self._upload()
+        if path == "/api/team/start":
+            # Starting a helper by hand from the Team view: one of Hearth's
+            # roles, or a task handed to an installed agent CLI. The person
+            # chose this themselves, so there is no permission prompt.
+            body = self._read_json() or {}
+            task = str(body.get("task") or "").strip()
+            agent = str(body.get("agent") or "").strip().lower()
+            role = str(body.get("persona") or "").strip().lower()
+            folder = str(body.get("folder") or "").strip()
+            if not task:
+                return self._send_json(400, {"error": "say what the helper should do"})
+            if not agent and not role:
+                return self._send_json(400, {"error": "pick a helper"})
+            if folder:
+                folder = os.path.abspath(os.path.expanduser(folder))
+                if not os.path.isdir(folder):
+                    return self._send_json(400, {"error": f"folder not found: {folder}"})
+            from . import subagents as _sa, external_agents as _xa
+            if agent:
+                r = _xa.spawn(agent, task, cwd=folder)
+            else:
+                prompt = task + (f"\n\nWork in this folder: {folder}" if folder else "")
+                r = _sa.spawn_subagent(role, prompt, mode="background")
+            if not r.get("ok"):
+                return self._send_json(400, {"error": r.get("error") or "it didn't start"})
+            return self._send_json(200, {"ok": True, "agent_id": r.get("agent_id")})
         if path == "/api/onboarding":
             # The same apply the terminal's first-run setup uses.
             from . import onboarding

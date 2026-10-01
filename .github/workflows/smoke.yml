@@ -265,6 +265,10 @@ jobs:
         run: |
           python tests/test_onboarding.py
 
+      - name: Starting a helper from the Team view
+        run: |
+          python tests/test_team_start.py
+
       - name: Pinned chats stay pinned
         run: |
           python tests/test_convo_pins.py

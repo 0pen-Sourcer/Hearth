@@ -51,8 +51,10 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     "grok": {"label": "Grok", "maker": "xAI", "exe": ["grok"],
              "args": lambda allow: ["--no-auto-update"] + (["--always-approve"] if allow == "auto" else []) + ["-p"],
              "stream": "text", "prompt_arg": True},
+    # Headless Kimi approves every tool call by design, so it only runs when
+    # the user has already chosen Auto.
     "kimi": {"label": "Kimi Code", "maker": "Moonshot AI", "exe": ["kimi"],
-             "args": lambda allow: ["--print", "-p"], "stream": "text", "prompt_arg": True},
+             "args": lambda allow: ["-p"], "stream": "text", "prompt_arg": True, "auto_only": True},
     "opencode": {"label": "OpenCode", "maker": "SST", "exe": ["opencode"], "args": lambda allow: ["run"],
                  "stream": "text", "prompt_arg": True},
     "qwen-code": {"label": "Qwen Code", "maker": "Alibaba", "exe": ["qwen"],
@@ -217,6 +219,9 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
     if not os.path.isdir(work):
         return {"ok": False, "error": f"folder not found: {work}"}
     allow = _allow_level()
+    if spec.get("auto_only") and allow != "auto":
+        return {"ok": False, "error": f"{spec['label']} approves everything it does when run this way, so "
+                                      "it only runs with the approval switch on Auto"}
     args = spec["args"](allow)
     head = _direct_argv(exe)
     if spec.get("prompt_arg") and head[0].lower().endswith((".cmd", ".bat")):

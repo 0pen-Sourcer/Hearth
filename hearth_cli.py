@@ -2037,7 +2037,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/voice device <n>{C_RESET}      pick a mic (or 'default')")
             print(f"  {C_TOOL}/voice mic-test [s]{C_RESET}    record a moment and show the level")
             print(f"  {C_TOOL}/voice duplex on|off{C_RESET}   hold the mic closed while Hearth speaks")
-            print(f"  {C_TOOL}/stt [model]{C_RESET}           show/switch STT model (tiny.en/base.en/small.en/...)")
+            print(f"  {C_TOOL}/stt [model]{C_RESET}           the listening model: tiny.en, base.en, small.en and up")
             print(f"  {C_TOOL}/listen{C_RESET}                one-shot voice input (record → transcribe)")
             print(f"  {C_TOOL}/listen on|off{C_RESET}         continuous voice-in with TTS interrupt")
             print(f"  {C_TOOL}/sleep{C_RESET} / {C_TOOL}/wake{C_RESET}          go quiet until the wake word (or /wake)")
@@ -2904,7 +2904,7 @@ class JarvisCLI:
                 # (~150MB). Tell the user so the silence doesn't look frozen.
                 st = stt.status()
                 if not st.get("model_loaded"):
-                    print(f"{C_DIM}warming up STT (whisper {st.get('model_size', 'base.en')}; first run downloads ~150MB){C_RESET}")
+                    print(f"{C_DIM}getting ready to listen ({st.get('model_size', 'base.en')}; the first time downloads it){C_RESET}")
                 status_msg = stt.start_continuous(_on_utterance)
                 if status_msg.startswith("Error"):
                     print(f"{C_ERR}{status_msg}{C_RESET}")
@@ -2938,7 +2938,7 @@ class JarvisCLI:
             # No arg → one-shot record
             if not stt.is_available():
                 st = stt.status()
-                print(f"{C_ERR}STT not ready.{C_RESET}")
+                print(f"{C_ERR}Listening isn't ready.{C_RESET}")
                 if st.get("last_load_error"):
                     print(f"{C_DIM}  {st['last_load_error']}{C_RESET}")
                 else:
