@@ -157,7 +157,27 @@ with sync_playwright() as pw:
       out.stripInRoom = !strip.hidden && strip.nextElementSibling === document.getElementById('tm-compose');
       out.mark = !!document.querySelector('#tm-labels .tm-label .hx-mini svg');
       hideInlinePermission();
+      // Thinking: paces along one line, turning round, instead of standing.
+      const me = ROOM.people.get('__main');
+      setState('thinking…');
+      const g1 = roomMainGoal(me);
+      await wait(3600);
+      const g2 = roomMainGoal(me);
+      out.pace = [g1.pose, g1.at[1] === g2.at[1], Math.abs(g1.at[0] - g2.at[0]) >= 150];
+      setState('calling memory_save…');
+      out.saving = [roomMainLine(), JSON.stringify(roomMainGoal(me).at) === JSON.stringify(ROOM.spots.board)];
+      roomMemoryHint('memory_recall', '## operating-system-windows  (user, score=22)\\nAll commands run in PowerShell.');
+      out.recalled = (ROOM.says.get('__main') || {}).text;
+      // Done: answers where it stands, and the card says where it is.
+      const here = [me.pos[0], me.pos[1]];
       setState('idle');
+      const held = roomMainGoal(me);
+      out.holds = JSON.stringify(held.at) === JSON.stringify(here);
+      me.path = [];
+      out.word = roomMainIdleWord(me);
+      me.holdUntil = 0; me.path = [[1, 1]];
+      out.walkingWord = roomMainIdleWord(me);
+      me.path = [];
       showView('chat');
       out.stripBack = !document.getElementById('view-team').contains(strip);
       return out;
@@ -167,6 +187,12 @@ with sync_playwright() as pw:
     check("a permission question is asked in the room, with the approval strip right there",
           room["asking"] == "I need to run a command for this. Okay?" and room["stripInRoom"] and room["stripBack"])
     check("JARVIS's tag carries the mark of the brain it is running on", room["mark"])
+    check(f"it paces while it thinks instead of standing in one spot {room['pace']}", room["pace"] == ["think", True, True])
+    check(f"saving a memory takes it to the board, and it says so {room['saving']}",
+          room["saving"] == ["Noting that down…", True])
+    check("what it recalls comes to mind out loud", room["recalled"] == "Ah… operating system windows.")
+    check("it answers where it stands, and the card says where it is, not where it is headed",
+          room["holds"] and room["word"] == "right here" and room["walkingWord"] == "on the way")
 
     check(f"the page raised no errors {errors[:2]}", not errors)
     browser.close()

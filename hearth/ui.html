@@ -9745,6 +9745,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'tool_result') {
+      roomMemoryHint(ev.name, ev.result != null ? ev.result : ev.content);
       // Tool done, back to thinking until the next call or the reply starts.
       setState('thinking…');   // clear the stuck "calling X…" the moment X returns
       if (voiceModeOn) setVoiceStatus('thinking…');
@@ -18142,38 +18143,58 @@ function roomSeat(p) {
   const d = ROOM.desks[p.desk];
   return [d[0], d[1] + SEAT_DY];
 }
-// Where JARVIS thinks changes from turn to turn, and what it is doing picks
-// the place: reading at a shelf, writing at a free desk, pacing by the board.
-const MAIN_THINK = [['fireSide', 'think'], ['hearthside', 'think'], ['windowSeat', 'think'], ['board', 'think'], ['rug', 'think']];
+// What JARVIS is doing picks the place: reading at a shelf, writing at a free
+// desk, pinning a note to the board, pacing while it thinks.
 const MAIN_IDLE = [['fire', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfR', 'read'], ['hearthside', 'gaze']];
 const MAIN_IDLE_WORDS = { fire: 'by the fire', windowSeat: 'at the window', coffee: 'making coffee', shelfR: 'reading', hearthside: 'by the hearth',
                          shelfL: 'reading', rug: 'stretching' };
 function roomMainIdleWord(p) {
+  // Where it is, not where it is headed: "making coffee" is for the counter.
+  if (p.path && p.path.length) return 'on the way';
+  if (p.holdUntil > Date.now()) return 'right here';
   if (ROOM.intent && ROOM.intent.until > Date.now()) return MAIN_IDLE_WORDS[ROOM.intent.spot] || 'around';
   return MAIN_IDLE_WORDS[MAIN_IDLE[Math.floor(Date.now() / 45000 + p.seed) % MAIN_IDLE.length][0]];
 }
 function roomMainGoal(p) {
   const ms = String(window._mainState || 'idle');
   const busy = !/idle/.test(ms);
-  if (busy && !p.wasBusy) { p.turn = (p.turn || 0) + 1; p.desk = null; }
-  p.wasBusy = busy;
   const now = Date.now();
+  if (busy && !p.wasBusy) { p.turn = (p.turn || 0) + 1; p.desk = null; p.pace = null; }
+  // The answer is given where it was worked out. It doesn't walk back to a
+  // usual spot to speak; it stays put a while, then drifts off as before.
+  if (!busy && p.wasBusy) { p.holdUntil = now + 9000; p.holdAt = [p.pos[0], p.pos[1]]; }
+  p.wasBusy = busy;
   if (p.pokeUntil > now) return { at: p.pos, pose: p.pokePose || 'raise' };
   if ($('perm-strip') && !$('perm-strip').hidden) return { at: ROOM.spots.rug, pose: 'raise' };
   if (ROOM.intent && ROOM.intent.until > now) return { at: ROOM.spots[ROOM.intent.spot], pose: ROOM.intent.pose };
   if (!busy) {
+    if (p.holdUntil > now) return { at: p.holdAt || p.pos, pose: 'idle' };
     const [spot, pose] = MAIN_IDLE[Math.floor(now / 45000 + p.seed) % MAIN_IDLE.length];
     return { at: ROOM.spots[spot], pose };
   }
   const tool = (ms.match(/calling ([a-z_]+)/) || [])[1] || '';
+  // Something worth remembering gets pinned to the board.
+  if (/^memory_(save|update|write)|^remember/.test(tool)) return { at: ROOM.spots.board, pose: 'raise' };
   if (/read|grep|find|list|search|fetch|browse|recall|pdf/.test(tool))
     return { at: p.turn % 2 ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: 'read' };
   if (/write|edit|create|run_command|start_job|delegate/.test(tool)) {
     if (p.desk == null) p.desk = roomDeskFor(p.id);
     if (p.desk != null) return { at: roomSeat(p), pose: 'type', seated: true };
   }
-  const [spot, pose] = MAIN_THINK[(p.turn + p.seed) % MAIN_THINK.length];
-  return { at: ROOM.spots[spot], pose };
+  // Thinking is done on its feet: back and forth along the nearest clear
+  // line from where it already was, a few steps each way, turning at the ends.
+  if (!p.pace) {
+    const y = Math.abs(p.pos[1] - ROOM.aisleTop) < Math.abs(p.pos[1] - ROOM.aisleY) ? ROOM.aisleTop : ROOM.aisleY;
+    p.pace = { x: Math.max(340, Math.min(1180, p.pos[0])), y, t: now, span: 90 + (p.turn * 37 + p.seed) % 60 };
+  }
+  const leg = Math.floor((now - p.pace.t) / 3400) % 2;
+  return { at: [p.pace.x + (leg ? p.pace.span : -p.pace.span), p.pace.y], pose: 'think' };
+}
+// What a memory lookup brought back, said the way it would come to mind.
+function roomMemoryHint(name, result) {
+  if (STATE.view !== 'team' || !/^memory_(recall|search|read)|^recall/.test(name || '')) return;
+  const m = /^##\s+([^\s(]+)/m.exec(String(result || ''));
+  if (m) roomSay('__main', 'Ah… ' + m[1].replace(/[-_]+/g, ' ') + '.', 3400);
 }
 function roomGoal(p, a) {
   // Where the person should be and what they are doing, from real state.
@@ -18243,6 +18264,7 @@ function roomMainLine() {
   const ms = String(window._mainState || 'idle');
   if (/idle/.test(ms)) return '';
   const m = /^(?:calling|writing)\s+(\w+)/.exec(ms);
+  if (m && /^memory_(save|update|write)|^remember/.test(m[1])) return 'Noting that down…';
   return (m ? (ROOM_DOING[_toolKind(m[1])] || 'Working') : 'Thinking') + '…';
 }
 function roomTick(t) {
