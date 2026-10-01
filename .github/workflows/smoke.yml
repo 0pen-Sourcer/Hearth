@@ -285,6 +285,10 @@ jobs:
         run: |
           python tests/test_cursor_brain.py
 
+      - name: A working helper can be told something
+        run: |
+          python tests/test_tell_subagent.py
+
       - name: What a cloud provider's refusal turns into
         run: |
           python tests/test_api_errors.py

@@ -338,7 +338,8 @@ def team_state(since_s: float = 6 * 3600, limit: int = 24) -> List[Dict[str, Any
         _TEAM_CACHE[p.stem] = (key, info)
         status = info["ended"] or ("working" if live else "stopped")
         out.append({**{k: v for k, v in info.items() if k != "ended"},
-                    "status": status, "updated": st.st_mtime})
+                    "status": status, "updated": st.st_mtime,
+                    "can_tell": status == "working" and can_tell(p.stem)})
     for gone in set(_TEAM_CACHE) - seen:
         _TEAM_CACHE.pop(gone, None)
     order = {"working": 0, "failed": 1, "stopped": 2, "done": 3}
@@ -616,7 +617,7 @@ def _filter_tools(allowed: List[str]) -> List[Dict[str, Any]]:
     allowlist is honored verbatim — list a dangerous tool by name to grant it."""
     import os
     from . import TOOL_DEFINITIONS
-    block = {"spawn_subagent", "get_subagent_result", "list_subagent_personas"}
+    block = {"spawn_subagent", "get_subagent_result", "list_subagent_personas", "tell_subagent"}
     if allowed and ("*" in allowed):
         allow = {t["name"] for t in TOOL_DEFINITIONS} - block
         # Wildcard doesn't mean "hand a child the keys to run_command + mouse".
@@ -762,7 +763,21 @@ async def _run_subagent_async(
 
     from . import execute_tool
 
+    with _INBOX_LOCK:
+        _INBOX[agent_id] = []
+    try:
+        return await _subagent_turns(client, model, messages, tools, max_turns, agent_id, tpath,
+                                     used, should_cancel, execute_tool)
+    finally:
+        with _INBOX_LOCK:
+            _INBOX.pop(agent_id, None)
+
+
+async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, tpath, used,
+                          should_cancel, execute_tool) -> Dict[str, Any]:
     for turn in range(max_turns):
+        for said in _take_told(agent_id):
+            messages.append({"role": "user", "content": said})
         # Abort propagation — sync subagents inherit the parent's cancel
         # signal. Background agents intentionally do NOT inherit it (the
         # whole point of background is that they survive the parent turn).
@@ -958,6 +973,44 @@ def get_subagent_result(agent_id: str) -> Dict[str, Any]:
         return {"ok": True, "status": "running",
                 "transcript_path": str(tpath)}
     return {"ok": False, "error": f"no subagent with id {agent_id}"}
+
+
+# Messages for a helper that is working, handed over between its steps.
+_INBOX: Dict[str, List[str]] = {}
+_INBOX_LOCK = threading.Lock()
+
+
+def can_tell(agent_id: str) -> bool:
+    """Whether a helper is one of Hearth's own and still working, so a message
+    can reach it."""
+    with _INBOX_LOCK:
+        return agent_id in _INBOX
+
+
+def tell_subagent(agent_id: str, message: str, sender: str = "the user") -> Dict[str, Any]:
+    """Give a working helper a message. It reads it before its next step."""
+    text = str(message or "").strip()
+    if not text:
+        return {"ok": False, "error": "there is nothing to tell it"}
+    with _INBOX_LOCK:
+        if agent_id in _INBOX:
+            _INBOX[agent_id].append(f"A message from {sender} while you work: {text}")
+            _append_transcript(_transcript_path(agent_id), {"kind": "told", "from": sender, "text": text})
+            return {"ok": True, "note": "It will read this before its next step."}
+    with _BG_RESULTS_LOCK:
+        running = agent_id in _BG_RUNNING
+    if running:
+        return {"ok": False, "error": "This helper is another agent's own program, which runs its task to the "
+                                      "end and can't take a message part-way."}
+    return {"ok": False, "error": "that helper has already finished"}
+
+
+def _take_told(agent_id: str) -> List[str]:
+    with _INBOX_LOCK:
+        got = _INBOX.get(agent_id) or []
+        if agent_id in _INBOX:
+            _INBOX[agent_id] = []
+    return got
 
 
 def _agent_for_helpers() -> Optional[str]:

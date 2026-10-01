@@ -740,6 +740,23 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {}},
     },
     {
+        "name": "tell_subagent",
+        "description":
+            "Give a helper that is still working a message: a correction, an "
+            "extra detail, a change of direction. It reads it before its next "
+            "step. Pass the 'sub_...' agent_id from spawn_subagent. Works for "
+            "Hearth's own helpers; a task handed to another agent's program "
+            "runs to the end and can't take one.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string", "description": "The 'sub_...' id from spawn_subagent."},
+                "message": {"type": "string", "description": "What to tell it."},
+            },
+            "required": ["agent_id", "message"],
+        },
+    },
+    {
         "name": "get_subagent_result",
         "description":
             "Poll a background subagent for its result. Normally you don't "
@@ -6334,6 +6351,8 @@ _HANDLERS = {
         name=p.get("name", "")),
     "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
     "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id") or p.get("job_id") or p.get("id") or ""),
+    "tell_subagent": lambda p: __import__("hearth.subagents", fromlist=["tell_subagent"]).tell_subagent(
+        p.get("agent_id") or p.get("id") or "", p.get("message") or "", sender="the assistant"),
     "list_directory": _list_directory,
     "create_directory": _create_directory,
     "delete_path": _delete_path,
@@ -8372,6 +8391,7 @@ _DEFERRED_TOOLS = {
     "list_processes",      # system_info + run_command tasklist cover it
     "list_browsers",       # browse auto-detects the installed browser
     "list_subagent_personas", "get_subagent_result",  # spawn_subagent lists roles; bg results auto-arrive
+    "tell_subagent",       # only matters once a helper is running
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # ntfy push is opt-in / rare
     "focus_window",        # niche window management
@@ -8840,6 +8860,7 @@ _TOOL_CATEGORY = {
     # Sub-agents
     "spawn_subagent": "Sub-agents", "list_subagent_personas": "Sub-agents",
     "get_subagent_result": "Sub-agents", "launch_team": "Sub-agents", "delegate": "Sub-agents",
+    "tell_subagent": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",

@@ -16,7 +16,11 @@ Setup asks a few things and acts on them. Your name, what you do and how you lik
 
 When JARVIS splits a job across helpers, the Team view shows each one: what it is doing right now, when it finishes, why it didn't, and when it needs your OK for something. Every helper gets a first name, and each one's full log, step by step, is one click away. The terminal has the same list under /team.
 
-The room view shows it as a house by the fire. Helpers work at desks, read at the shelves or raise a hand when they need you, and JARVIS moves with the work, to a shelf while it reads and to a free desk while it writes. Click anyone and they turn and tell you where they are with their task. You can talk to JARVIS from a box under the room and read its answer over its head without going back to the chat, and if you ask it to brew itself a coffee, it walks over to the counter.
+The room view shows it as a house by the fire. Helpers work at desks, read at the shelves or raise a hand when they need you, and JARVIS moves with the work, to a shelf while it reads and to a free desk while it writes. Click anyone and they turn and tell you where they are with their task. You can talk to JARVIS from a box under the room and read its answer over its head without going back to the chat, and if you ask it to brew itself a coffee, it walks over to the counter. While it thinks it paces, when it saves a memory it pins a note to the board, and it answers where it stands. Its bubble says what it is doing in plain words, and a command waiting for your yes can be approved right there in the room.
+
+You can tell a working helper something part-way through. Click it, type in its panel, and it reads your message before its next step. JARVIS can do the same on its own. A task handed to another agent's program runs to the end and can't take one, and the panel says so.
+
+Starting a helper yourself asks what it should do first, then who does it: one of Hearth's own, named for the job (search the web, work on code, search my files, sum up a file), or an agent you have installed.
 
 ## Claude Code, Codex or Cursor as JARVIS's brain
 

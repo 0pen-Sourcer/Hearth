@@ -13,6 +13,7 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - Cursor as the brain (`hearth/cursor_brain.py`): `cursor-agent -p --output-format stream-json`, the persona in front of a chat's first message, Hearth's MCP server allowed through the project's `.cursor/cli.json` (merged, not overwritten) while Cursor's own shell stays refused.
 - Agents list their own models: Claude Code's from its `initialize` answer, Codex's from its model cache, Cursor's from `--list-models`. The Think button offers the chosen model's effort levels and passes them (`--effort`, `model_reasoning_effort`). `/brain <agent> <model>` and `/think <level>` in the terminal.
 - With an agent as the brain and no local model serving, Hearth's own helpers run on that agent.
+- `tell_subagent` and a message box in a helper's panel: a working helper reads what it is told before its next step.
 - `delegate`: hand one task to another agent CLI and relay its answer. Twenty-three agent CLIs including Claude Code, Codex, Antigravity, Gemini CLI, Cline and OpenHands, run headless on the user's install; npm shims are started without cmd.exe.
 - Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar menu, Shift+Tab), the terminal (/mode), helpers and external agents.
 - Appearance: Classic (default), Light, Dark and System, six accents, a hearth mark; tray and window icons follow the choice. Simple and Advanced apply app-wide.

@@ -948,6 +948,13 @@
   .tm-label .hx-mini { display: inline-grid; place-items: center; width: 12px; height: 12px; border-radius: 3px;
     background: var(--hx); color: #fff; font: 700 8px var(--sans); margin-right: 5px; vertical-align: -1px; }
   /* What someone says when clicked, or JARVIS's reply, over their head. */
+  .tm-tell { display: flex; gap: 6px; margin: 10px 0 12px; }
+  .tm-tell input { flex: 1; min-width: 0; background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r);
+    color: var(--fg); padding: 7px 9px; font: 12.5px var(--sans); outline: none; }
+  .tm-tell input:focus { border-color: var(--accent); }
+  .tm-tell button { background: var(--accent); color: var(--on-accent, #fff); border: none; border-radius: var(--r);
+    padding: 0 12px; font: 600 12px var(--sans); cursor: pointer; }
+  .tm-tell-no { color: var(--fg-faint); font-size: 12px; }
   .tm-say { position: absolute; transform: translate(-50%, calc(-100% - 26px)); max-width: 260px; pointer-events: none;
     background: var(--bg-1); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 12px;
     padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
@@ -18555,7 +18562,21 @@ function roomSelect(id, keep = false) {
     <p>${esc(teamActivity(a))}</p>
     <b>Asked to</b><p>${esc(a.prompt || '')}</p>
     ${a.preview ? `<b>${a.status === 'working' ? 'Latest' : 'Result'}</b><p>${esc(a.preview)}</p>` : ''}
+    ${a.can_tell ? `<form class="tm-tell" autocomplete="off"><input placeholder="Tell ${esc(a.name || 'them')} something…"><button type="submit">Tell</button></form>`
+      : a.status === 'working' ? `<p class="tm-tell-no">${esc((HARNESS[a.runtime] || {}).label || 'This agent')} runs its task to the end, so it can't take a message part-way.</p>` : ''}
     <button class="tm-open-log">See every step</button>`;
+  const tell = side.querySelector('.tm-tell');
+  if (tell) tell.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const box = tell.querySelector('input'), text = box.value.trim();
+    if (!text) return;
+    try {
+      await api('/api/team/tell', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ id: a.id, text }) });
+      box.value = '';
+      roomSay(p.id, 'Got it.', 2400);
+    } catch (err) { toast("It didn't reach them", err.message.replace(/^\d+\s*/, ''), 'warn', 6000); }
+  });
   side.querySelector('.tm-close').addEventListener('click', () => roomSelect(null));
   side.querySelector('.tm-open-log').addEventListener('click', () => openTaskTranscript(a.id));
   roomStripRender();
