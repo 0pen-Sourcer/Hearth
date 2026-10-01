@@ -656,6 +656,15 @@ async def run_once(
     after the system prompt, then the new `prompt` is appended as a user msg.
     Without it, behavior is the same as before: single-shot prompt.
     """
+    # Claude Code as the brain runs the whole turn itself.
+    try:
+        from . import claude_brain as _cb
+        if _cb.active():
+            return await _cb.run_turn(prompt, emit=emit, history=history,
+                                      permission_check=permission_check if supervised else None,
+                                      should_cancel=should_cancel, voice=voice, model=model)
+    except ImportError:
+        pass
     try:
         from openai import AsyncOpenAI
     except ImportError:

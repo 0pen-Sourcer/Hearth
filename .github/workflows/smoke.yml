@@ -273,6 +273,10 @@ jobs:
         run: |
           python tests/test_convo_pins.py
 
+      - name: Claude Code as the assistant's brain
+        run: |
+          python tests/test_claude_brain.py
+
       - name: Other agent CLIs run as Team members
         run: |
           python tests/test_external_agents.py

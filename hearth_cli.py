@@ -2455,6 +2455,27 @@ class JarvisCLI:
 
             provider = parts[1].strip().lower()
 
+            # /brain claude-code: Claude Code installed here thinks for JARVIS.
+            # The local address stays, since helpers keep using the local model.
+            if provider in ("claude-code", "claude"):
+                from hearth import claude_brain as _cb
+                if not _cb.claude_exe():
+                    print(f"{C_ERR}Claude Code isn't installed. Get it from claude.com/claude-code and sign in.{C_RESET}")
+                    return True
+                saved = {}
+                try:
+                    with open(settings_path, "r", encoding="utf-8") as f:
+                        saved = _json.load(f) or {}
+                except Exception:
+                    pass
+                saved["llm_provider"] = "claude-code"
+                os.makedirs(WORKSPACE, exist_ok=True)
+                with open(settings_path, "w", encoding="utf-8") as f:
+                    _json.dump(saved, f, indent=2)
+                print(f"{C_OK}JARVIS now thinks with Claude Code{C_RESET} {C_DIM}on your Claude plan "
+                      f"(Agent SDK credit). Helpers keep using the local model. /brain local to switch back.{C_RESET}")
+                return True
+
             # /brain forget <provider>
             if provider == "forget":
                 if len(parts) < 3 or not parts[2].strip():
@@ -3658,6 +3679,12 @@ class JarvisCLI:
         """Short name for display. When Hearth boots a local GGUF the "model id"
         is its full path, which swallows the whole prompt line and the banner
         box. Show the filename; the full path is still in /about."""
+        try:
+            from hearth import claude_brain as _cb
+            if _cb.active():
+                return "Claude Code"
+        except ImportError:
+            pass
         m = self.current_model or ""
         if not m or m == "local-model":
             return f"{C_ERR}no model{C_RESET}"   # red + explicit — nothing's loaded, don't imply it is
@@ -5014,6 +5041,84 @@ class JarvisCLI:
                     continue
                 raise
 
+    async def _respond_claude(self) -> None:
+        """One turn with Claude Code as the brain: its text streams here, its
+        tool calls print like Hearth's own, and anything it needs permission
+        for is asked at this prompt."""
+        from hearth import claude_brain as _cb
+        from hearth.tools import mode_allows
+        loop = asyncio.get_running_loop()
+        convo = [m for m in self.messages if m.get("role") in ("user", "assistant")]
+        prompt = str(convo[-1].get("content") or "") if convo else ""
+        history = convo[:-1]
+        state = {"open": False}
+
+        def ask(name, args):
+            if mode_allows(name, args) or self.tool_perms.get(name) == "always":
+                return "allow"
+            if self.tool_perms.get(name) == "never":
+                return "deny"
+            async def _q():
+                shown = args.get("command") or args.get("path") or json.dumps(args)[:120]
+                print(f"\n  {C_WARN}{name}{C_RESET} {C_DIM}{str(shown)[:160]}{C_RESET}")
+                print(f"    {C_WARN}allow this call?{C_RESET} "
+                      f"{C_DIM}[y]es / [n]o / [a]lways / [N]ever / or type what to do instead{C_RESET}")
+                return await self._read_choice(f"    {C_TOOL}>{C_RESET} ")
+            raw = asyncio.run_coroutine_threadsafe(_q(), loop).result(timeout=240)
+            c = raw.strip().lower()
+            if c in ("", "y", "yes"):
+                return "allow"
+            if c in ("a", "always"):
+                self.tool_perms[name] = "always"
+                _save_persisted_perms(self.tool_perms)
+                return "allow"
+            if c in ("never", "n!"):
+                self.tool_perms[name] = "never"
+                _save_persisted_perms(self.tool_perms)
+                return "deny"
+            if c in ("n", "no"):
+                return "deny"
+            return {"decision": "deny", "reason": raw.strip()}
+
+        reply = []
+
+        def emit(t, **f):
+            if t == "assistant_chunk":
+                chunk = f.get("content", "")
+                if not state["open"]:
+                    sys.stdout.write(f"\n{C_BOT}")
+                    state["open"] = True
+                    chunk = chunk.lstrip("\n")         # the line break is already there
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
+                reply.append(f.get("content", ""))
+            elif t == "tool_call":
+                if state["open"]:
+                    sys.stdout.write(C_RESET + "\n")
+                    state["open"] = False
+                args = f.get("args") or {}
+                shown = args.get("command") or args.get("path") or args.get("query") or args.get("url") or ""
+                print(f"  {C_BRAND}{_tool_glyph(f.get('name', ''))}{C_RESET} {f.get('name')}"
+                      + (f"  {C_DIM}{str(shown)[:120]}{C_RESET}" if shown else ""))
+            elif t == "tool_result":
+                first = " ".join(str(f.get("content") or "").split())[:110]
+                print(f"    {C_DIM}↳ {first}{C_RESET}")
+            elif t == "error":
+                print(f"\n{C_ERR}{f.get('message')}{C_RESET}")
+            elif t == "done":
+                if state["open"]:
+                    sys.stdout.write(C_RESET + "\n")
+                    state["open"] = False
+                st = f.get("stats") or {}
+                if st.get("cost_usd") is not None:
+                    print(f"{C_DIM}  Claude Code · ${st['cost_usd']:.3f}{C_RESET}")
+
+        await _cb.run_turn(prompt, emit=emit, history=history, permission_check=ask,
+                           should_cancel=self._respond_cancel.is_set)
+        text = "".join(reply).strip()
+        if text:
+            self.messages.append({"role": "assistant", "content": text})
+
     async def respond(self, depth: int = 0):  # noqa: C901
         if depth > MAX_TURNS:
             # Generous safety ceiling (the loop guard handles real spirals long
@@ -5027,6 +5132,12 @@ class JarvisCLI:
         # crashed, and one interrupt was never cleared, so every later reply
         # stopped at its first word.
         if depth == 0:
+            try:
+                from hearth import claude_brain as _cb
+                if _cb.active():
+                    return await self._respond_claude()
+            except ImportError:
+                pass
             # Tool-loop guard: outcome-hash based, tiered (skip dup / warn /
             # stop). Fresh per user turn. See hearth/loop_guard.py for the full
             # rationale.

@@ -1737,6 +1737,14 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(404, {"error": "not found"})
             return self._send_json(200, data)
         if path == "/api/models":
+            try:
+                from . import claude_brain as _cb
+                if _cb.active():
+                    return self._send_json(200, {"models": [{"id": "Claude Code", "state": "loaded",
+                                                             "type": "llm", "provider": "claude-code"}],
+                                                 "notice": ""})
+            except Exception:
+                pass
             _ms = _list_models()
             return self._send_json(200, {"models": _ms, "notice": _models_notice})
         if path == "/api/mcp/config":
@@ -3033,6 +3041,14 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(500, {"error": str(e)})
         if path == "/api/upload":
             return self._upload()
+        if path == "/api/brain/permission":
+            # Claude Code, run as the brain, asking through Hearth's MCP server
+            # whether it may do something. Answered by the running turn's own
+            # permission check, so the approval strip and voice question appear.
+            body = self._read_json() or {}
+            from . import claude_brain
+            return self._send_json(200, claude_brain.decide(
+                str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
         if path == "/api/team/start":
             # Starting a helper by hand from the Team view: one of Hearth's
             # roles, or a task handed to an installed agent CLI. The person
@@ -3330,6 +3346,20 @@ class HearthHandler(BaseHTTPRequestHandler):
             key = (body.get("key") or "").strip()
             model = (body.get("model") or "").strip()
             provider = (body.get("provider") or "").strip()
+            if provider.lower() == "claude-code":
+                # Claude Code as the brain is a separate program, not an
+                # endpoint. The local address stays as it is, because helpers
+                # and background memory keep using the local model, and so does
+                # whatever is loaded there.
+                from . import claude_brain
+                if not claude_brain.claude_exe():
+                    return self._send_json(400, {"ok": False, "error":
+                        "Claude Code isn't installed on this PC. Install it from claude.com/claude-code and sign in first."})
+                _s = _load_settings()
+                _s["llm_provider"] = "claude-code"
+                _s["claude_model"] = model
+                _save_settings(_s)
+                return self._send_json(200, {"ok": True, "provider": "claude-code"})
             if not url:
                 return self._send_json(400, {"ok": False, "error": "url required"})
             # Reconcile provider with the URL. A cloud URL must carry its cloud
@@ -4343,7 +4373,12 @@ class HearthHandler(BaseHTTPRequestHandler):
         # (reusing the launch-time autoboot so the builtin-vs-LM-Studio matching
         # lives in one place) and stream a "warming" cue so the HUD shows the
         # model coming up instead of going quiet.
-        if _is_local_endpoint and not _detect_loaded():
+        try:
+            from . import claude_brain as _cb
+            _claude = _cb.active()
+        except Exception:
+            _claude = False
+        if _is_local_endpoint and not _claude and not _detect_loaded():
             _bs = _load_settings()
             _pref = (_bs.get("preferred_model") or "").strip()
             if _pref and _bs.get("server_autoboot", True):
@@ -5175,6 +5210,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     Used by hearth.desktop to embed the same backend in a PyWebView window."""
     server = _QuietHTTPServer((host, port), HearthHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        from . import claude_brain
+        claude_brain.set_bridge_url(f"http://127.0.0.1:{server.server_address[1]}")
+    except Exception:
+        pass
     # Clear write temporaries a killed save left behind, before anything lists
     # the folder and reports one as a conversation.
     for _d in (CONVOS_DIR, os.path.dirname(SETTINGS_PATH) or "."):
