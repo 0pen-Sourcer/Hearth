@@ -7,11 +7,20 @@ Notable changes to Hearth. Format loosely follows [Keep a Changelog](https://kee
 Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 
 ### Added
-- Team view: live state of every helper from its own transcript, with a room view drawn in layers.
-- Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Crush, Cursor Agent and Copilot CLI as team members, run headless on the user's install.
-- Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar, Shift+Tab), the terminal (/mode), helpers and external agents.
-- Appearance: Light, Dark, System and Classic, six accents, a hearth mark; the tray icon follows the choice. Simple and Advanced interface; runs of tool calls fold into one line in Simple.
+- Team view: live state of every helper from its own transcript, with a room view drawn in layers. People react when clicked, JARVIS moves with the work and can be talked to from the room, helpers get first names, and each one's full log opens from the list. `/team` in the terminal.
+- `delegate`: hand one task to another agent CLI and relay its answer. Claude Code, Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Qwen Code, Crush, Cursor Agent, Copilot CLI, Goose, Aider, Droid, Amp and Pi, run headless on the user's install; npm shims are started without cmd.exe.
+- Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar menu, Shift+Tab), the terminal (/mode), helpers and external agents.
+- Appearance: Classic (default), Light, Dark and System, six accents, a hearth mark; tray and window icons follow the choice. Simple and Advanced apply app-wide.
+- First-run setup writes its answers to profile.md, asks headphones or speakers, approval mode and look, and animates on springs; `/me` in the terminal.
+- `hearth/gpu.py`: load and memory for any vendor's card from DXGI and the GPU performance counters. AMD and Intel cards get llama.cpp's Vulkan build.
+- Tool runs show the agents, skills and sites they reached; a running tool counts up on its card.
 - Pinned chats.
+
+### Fixed
+- Engine install and repair took llama.cpp's "latest" release, which now points at a tag with no Windows files; the newest numbered build is used.
+- Repair checks real files, restores skills, art and the engine, and frees the patch backup. The update patch now carries `hearth/**` and `assets/**`.
+- The window's private mode forgot the chosen look on every launch; the server writes the saved look into the page.
+- The send wrapper dropped its options, so a notification flush ran as an ordinary turn.
 
 ### Security
 - The local API refuses requests from other sites; a page in any browser tab could read stored keys and call tools.

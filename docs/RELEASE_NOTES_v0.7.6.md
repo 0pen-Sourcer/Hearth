@@ -1,16 +1,28 @@
-v0.7.6 brings a new look, a Team view where you can watch helpers work, other coding agents like Claude Code as teammates, and one switch for how much Hearth does without asking. Underneath, it is a large fix release: most of it is about Hearth doing what it says it did, and telling you plainly when it can't, across security, voice, memory, commands, the phone bridges, desktop control, models and the terminal.
+v0.7.6 brings a new look, a Team room where you can watch helpers work and talk to JARVIS, sixteen other coding agents like Claude Code and Codex that JARVIS can hand work to, a new first-run setup, support for AMD and Intel graphics cards, and one switch for how much Hearth does without asking. Underneath, it is a large fix release: most of it is about Hearth doing what it says it did, and telling you plainly when it can't, across security, voice, memory, commands, the phone bridges, desktop control, models and the terminal.
 
 If you are on v0.7.2 or newer, Hearth patches itself, no reinstall. On v0.7.0 or v0.7.1 you need the installer one more time, then you are on the small updates for good. Updating never touches your chats, memory, or models.
 
 ## New look
 
-Hearth has a warmer palette with one accent colour, a light theme, and a mark that is an actual hearth. Settings has an Appearance page with Light, Dark, System and Classic (the original violet look, H logo included) and six accent colours, and the tray icon follows whichever you pick. Simple mode, the default, folds a run of tool calls into one line such as "Read 3 files, ran 2 commands" that you can open, and keeps the status bar quiet. Advanced shows every card and every counter. Chats can be pinned to the top of the sidebar, and a pin survives a reinstall.
+Settings has an Appearance page with Classic, the violet look with the H logo and still the default, alongside new Light, Dark and System themes in a warmer palette with six accent colours and a mark that is an actual hearth. The tray icon and the window's own icon follow whichever you pick, and picking one repaints the window from where you clicked. Everything about how the chat looks lives on that page now, from generation stats to pop-ups, so Behavior is about what JARVIS does.
+
+Simple, the default, keeps the machinery out of the way. A run of tool calls folds into one line such as "Read 3 files, searched the web" that you can open, the status bar stays quiet, and engine settings, MCP servers and the per-tool permission table stay out of sight. Advanced shows all of it. Chats can be pinned to the top of the sidebar, and a pin survives a reinstall.
+
+## A first run that sets Hearth up for you
+
+Setup asks a few things and acts on them. Your name, what you do and how you like to be spoken to now reach JARVIS on every message. Before, the window saved them to settings nothing read, so JARVIS never knew them. It asks whether you will hear it on headphones or speakers, which decides whether you can talk over it, how much it may do on its own, and which look and how much detail you want, applied as you pick them. It ends on things worth trying instead of an empty box. The terminal asks the same questions, and /me asks them again whenever you like.
 
 ## Team
 
-When JARVIS splits a job across helpers, the Team view shows each one: what it is doing right now, when it finishes, why it didn't, and when it needs your OK for something. The room view shows the same thing as people in a house by the fire, working at desks, reading at the shelves, or raising a hand when they need you.
+When JARVIS splits a job across helpers, the Team view shows each one: what it is doing right now, when it finishes, why it didn't, and when it needs your OK for something. Every helper gets a first name, and each one's full log, step by step, is one click away. The terminal has the same list under /team.
 
-A helper can also be another coding agent you already use. Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Crush, Cursor Agent and GitHub Copilot CLI run headless on your own install and account, in a folder you choose, and show up in the Team view like any other helper. Claude Code is tested end to end; the others follow their documented one-shot modes. Claude Code's headless mode is billed to the Agent SDK credit that comes with a Claude plan.
+The room view shows it as a house by the fire. Helpers work at desks, read at the shelves or raise a hand when they need you, and JARVIS moves with the work, to a shelf while it reads and to a free desk while it writes. Click anyone and they turn and tell you where they are with their task. You can talk to JARVIS from a box under the room and read its answer over its head without going back to the chat, and if you ask it to brew itself a coffee, it walks over to the counter.
+
+## Other coding agents
+
+JARVIS can hand a task to another coding agent you already have installed and bring back its answer. Say "have Claude Code read the README and summarize it" and it does, in the folder you name, on your own install and account. Claude Code, Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Qwen Code, Crush, Cursor Agent, Copilot CLI, Goose, Aider, Droid, Amp and Pi are supported. Claude Code is tested end to end; the others follow their own documented one-shot modes. Claude Code's headless mode is billed to the Agent SDK credit that comes with a Claude plan.
+
+They follow the same approval switch as Hearth's own tools, and an agent working longer than a few minutes carries on in the background and reports when it is done. In the chat and the Team room each agent carries a small badge in its maker's colour, so you can see at a glance who did what.
 
 ## Approval modes
 
@@ -41,6 +53,10 @@ The wake word hears whole phrases. It used to drop the quiet parts of speech and
 When speech fails, Hearth says so. Synthesis and playback run behind a queue, which meant a failure after the request had been accepted was silent in every direction, with nothing written anywhere to explain it. Now it names what went wrong, and the preview button tells you rather than just going quiet. A transcription that fails is no longer indistinguishable from not having said anything. Saving a setting no longer unloads the voice, so the next reply is not held up reloading it.
 
 Voice starts on an updated install. The update now carries the maths library the speech stack loads at startup, along with the rest of its dependencies, so a patched install behaves the same as a fresh one. The microphone test runs in its own process, so a headset you plug in after opening Hearth is picked up without a restart.
+
+## AMD and Intel graphics cards
+
+Hearth used to read your graphics card through NVIDIA's own tool, so on an AMD or Intel card the status bar showed nothing in use and model suggestions knew nothing about your card. It now reads every vendor's card the way Task Manager does, load and memory included. The built-in engine follows your card too. NVIDIA gets the CUDA build as before, and AMD and Intel cards get the Vulkan build, which runs the model on the card instead of the processor.
 
 ## Faster on local models
 
@@ -102,6 +118,8 @@ On an RTX 50-series card Hearth no longer starts its bundled runtime, which has 
 
 ## Reading a run
 
+A run shows what it reached outside Hearth. The sites a search or a page read touched appear as their own icons, fetched from each site, another agent appears as its badge, and while it works the line says what it is doing right now, "Reading reddit.com" rather than a tool name. A command that runs for a while counts up on its own card instead of popping up a warning, and the context ring always reads as room left before the chat gets summarised.
+
 File edits render as a diff with line numbers and a change count, in tight rows. Tool cards show a one line summary of what was passed rather than raw escaped JSON, and the terminal does the same with a glyph per kind of action and a short peek at long output. Steering Hearth mid answer separates the redirected part from what came before. Announcements from the developer stay as a card until you dismiss them.
 
 The window is responsive, so a narrow or half snapped window moves the sidebar into a drawer. Chat titles come from the first real exchange, so a chat that opens with a greeting still gets a title about the actual subject. Optional sound cues mark a finished turn, an error, or a permission request, all off by default, and user messages can sit in chat bubbles if you prefer, also off by default.
@@ -114,7 +132,7 @@ The terminal no longer crashes on the first tool call of a session, and Ctrl+Z e
 
 Searching past chats finds what you asked about. Most questions used to report no match even when there was one. The window opens fast with a long chat history, because it reads a chat only when you open it instead of loading every one in full to draw the sidebar.
 
-Updating is safe to interrupt. If the power goes or you kill Hearth while it is replacing files, the next start puts it back the way it was rather than leaving you with an install that will not open. Your chats survive being killed mid-save too, and a save that got cut off no longer leaves a ghost copy of the chat sitting in the sidebar.
+Repair checks every part of the install and puts back whatever is missing, Hearth's code, its skills and art, the voice files and the model engine, and says plainly which parts need a full reinstall. Installing or repairing the engine had started failing for everyone because the engine's project marked an unrelated release as its latest, and Hearth now picks the newest real build. Updating is safe to interrupt. If the power goes or you kill Hearth while it is replacing files, the next start puts it back the way it was rather than leaving you with an install that will not open. Your chats survive being killed mid-save too, and a save that got cut off no longer leaves a ghost copy of the chat sitting in the sidebar.
 
 Asking Hearth for a capability it does not have gets a straight answer instead of a handful of unrelated tools. And it can tell you your charge level, whether you are plugged in and roughly how long you have left.
 
