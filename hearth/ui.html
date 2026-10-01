@@ -5843,8 +5843,32 @@ function showInlinePermission(reqId, toolName, args) {
   if (voiceModeOn) {
     setVoiceStatus('needs permission');
     setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?  Say "yes", "no", or "always".');
+    // And ask out loud: in voice mode nobody is reading the screen. Plain
+    // words only, never a path or a command read character by character.
+    speakText(_spokenPermQuestion(toolName, args), true);
   }
   setTimeout(() => document.getElementById('input').focus(), 0);
+}
+
+function _spokenPermQuestion(tool, args) {
+  args = args || {};
+  const base = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || 'that';
+  const agent = args.agent && typeof HARNESS !== 'undefined' && HARNESS[String(args.agent).toLowerCase()];
+  const ask = {
+    run_command: 'I need to run a command for this.',
+    start_job: 'I need to start a command in the background.',
+    delete_path: `I'd like to delete ${base(args.path)}.`,
+    move_path: `I'd like to move ${base(args.src || args.path)}.`,
+    write_file: `I'd like to write ${base(args.path)}.`,
+    edit_file: `I'd like to change ${base(args.path)}.`,
+    create_directory: `I'd like to make a folder called ${base(args.path)}.`,
+    open_app: `I'd like to open ${args.name || args.app || 'an app'}.`,
+    send_email: 'I have an email ready to send.',
+    send_to_phone: 'I want to send this to your phone.',
+    delegate: `I'd like to hand this to ${agent ? agent.label : 'another agent'}.`,
+    __extend_workspace__: 'I need to write outside my folder.',
+  }[tool] || `I need your okay to use ${String(tool || 'a tool').replace(/_/g, ' ')}.`;
+  return `${ask} Should I? Say yes, no, or always.`;
 }
 
 function hideInlinePermission() {
