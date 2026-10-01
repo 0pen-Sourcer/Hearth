@@ -137,6 +137,37 @@ with sync_playwright() as pw:
     check(f"a file's text is read out of a call that is still arriving {partial}",
           partial == ['line one\nline "two" so f', None, "C:\\a\\b.txt"])
 
+    room = pg.evaluate("""async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms));
+      STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: 'claude-code' });
+      Object.assign(STATE.brain, deriveBrainKind());
+      showView('team');
+      await wait(2500);
+      const out = { tab: TEAM.tab };
+      setState('calling read_file…');
+      await wait(400);
+      out.doing = (ROOM.says.get('__main') || {}).text;
+      setState('thinking…');
+      await wait(400);
+      out.thinking = (ROOM.says.get('__main') || {}).text;
+      showInlinePermission('req-1', 'run_command', { command: 'dir' });
+      await wait(400);
+      out.asking = (ROOM.says.get('__main') || {}).text;
+      const strip = document.getElementById('perm-strip');
+      out.stripInRoom = !strip.hidden && strip.nextElementSibling === document.getElementById('tm-compose');
+      out.mark = !!document.querySelector('#tm-labels .tm-label .hx-mini svg');
+      hideInlinePermission();
+      setState('idle');
+      showView('chat');
+      out.stripBack = !document.getElementById('view-team').contains(strip);
+      return out;
+    }""")
+    check(f"in the room JARVIS says what it is doing, not dots {room}",
+          room["doing"] == "Reading a file…" and room["thinking"] == "Thinking…")
+    check("a permission question is asked in the room, with the approval strip right there",
+          room["asking"] == "I need to run a command for this. Okay?" and room["stripInRoom"] and room["stripBack"])
+    check("JARVIS's tag carries the mark of the brain it is running on", room["mark"])
+
     check(f"the page raised no errors {errors[:2]}", not errors)
     browser.close()
 srv.shutdown()

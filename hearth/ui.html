@@ -948,7 +948,6 @@
     padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
   .tm-say::after { content: ''; position: absolute; left: calc(50% + var(--tail, 0px)); bottom: -6px; width: 10px; height: 10px; margin-left: -5px;
     background: var(--bg-1); border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); transform: rotate(45deg); }
-  .tm-say.dots { font-weight: 700; letter-spacing: 2px; padding: 4px 11px; }
   .tm-compose { display: flex; gap: 8px; margin: 10px 24px 16px; }
   .tm-compose input { flex: 1; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-lg);
     color: var(--fg); padding: 10px 14px; font: 14px var(--sans); outline: none; }
@@ -5907,11 +5906,24 @@ document.addEventListener('keydown', e => {
 // ============================================================
 let pendingPermId = null;
 let pendingPermTool = null;
+let pendingPermArgs = null;
+// One approval strip, above whichever message box is on screen: the chat's,
+// or the Team room's.
+function placePermStrip() {
+  const strip = $('perm-strip');
+  if (!strip) return;
+  if (!placePermStrip.home) placePermStrip.home = { parent: strip.parentNode, next: strip.nextSibling };
+  const room = $('tm-compose');
+  if (STATE.view === 'team' && room) room.parentNode.insertBefore(strip, room);
+  else if (strip.parentNode !== placePermStrip.home.parent) placePermStrip.home.parent.insertBefore(strip, placePermStrip.home.next);
+}
 let pendingFollowup = null;  // text the user typed during a perm prompt; sent after current turn ends
 
 function showInlinePermission(reqId, toolName, args) {
   pendingPermId = reqId;
   pendingPermTool = toolName;
+  pendingPermArgs = args;
+  placePermStrip();
   _playSound('permission');  // gentle double-knock so you notice it needs your OK (settings-gated)
   // Special case: extend-workspace request from tools._resolve_write.
   // Show the actual path being requested instead of dumping {"path":...} JSON.
@@ -5995,6 +6007,7 @@ function _spokenPermQuestion(tool, args) {
 function hideInlinePermission() {
   pendingPermId = null;
   pendingPermTool = null;
+  pendingPermArgs = null;
   $('perm-strip').hidden = true;
   if (voiceModeOn) setVoiceTranscript('');
   document.getElementById('input').placeholder = `Message ${_agentName()}…`;
@@ -8538,6 +8551,7 @@ function showView(name) {
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
   if (name === 'team') teamOpen(); else teamClose();
+  placePermStrip();
   if (name === 'memory') refreshMemory();
   if (name === 'reminders') refreshReminders();
   if (name === 'skills') refreshSkills();
@@ -17721,12 +17735,29 @@ function teamRole(persona) {
 const READING_TOOLS = /^(web_search|web_fetch|read_file|grep_search|find_file|list_dir|summarize_file|search_chats|browse|memory_recall|read_pdf)/;
 function teamNeedsYou(a) { return !!a.blocked && a.status === 'working'; }
 // A helper run by another agent CLI carries that CLI's monogram before its name.
+// What JARVIS itself is running on, marked the way a helper's agent is: the
+// agent when one is the brain, the maker for a cloud model, nothing for a
+// model on this PC.
+const BRAIN_MARKS = {
+  anthropic:  { label: 'Claude',     maker: 'Anthropic',  c: '#d97757', icon: 'claude' },
+  openai:     { label: 'GPT',        maker: 'OpenAI',     c: '#10a37f', icon: 'openai' },
+  gemini:     { label: 'Gemini',     maker: 'Google',     c: '#8e75ff', icon: 'gemini' },
+  google:     { label: 'Gemini',     maker: 'Google',     c: '#8e75ff', icon: 'gemini' },
+  grok:       { label: 'Grok',       maker: 'xAI',        c: '#6b7280' },
+  xai:        { label: 'Grok',       maker: 'xAI',        c: '#6b7280' },
+  openrouter: { label: 'OpenRouter', maker: 'OpenRouter', c: '#6467f2' },
+  groq:       { label: 'Groq',       maker: 'Groq',       c: '#f55036' },
+};
+function mainBrainMark() {
+  const k = (STATE.brain && STATE.brain.providerKey) || '';
+  return HARNESS[k] || BRAIN_MARKS[k] ? k : '';
+}
 function teamMini(a) {
-  const h = a && a.runtime && HARNESS[a.runtime];
+  const h = a && a.runtime && (HARNESS[a.runtime] || BRAIN_MARKS[a.runtime]);
   return h ? `<span class="hx-mini" style="--hx:${h.c}" title="${esc(h.label + ' by ' + h.maker)}">${harnessMark(h)}</span>` : '';
 }
 function teamWhat(a) {
-  const h = a && a.runtime && HARNESS[a.runtime];
+  const h = a && a.runtime && (HARNESS[a.runtime] || BRAIN_MARKS[a.runtime]);
   return h ? h.label + ' · ' + h.maker : (a.persona || '');
 }
 function teamActivity(a) {
@@ -18067,7 +18098,8 @@ function roomGoal(p, a) {
 }
 function roomSync(list) {
   const want = list.filter(a => ['working', 'done', 'failed', 'stopped'].includes(a.status)).slice(0, 8);
-  want.push({ id: '__main', role: 'main', persona: 'main', name: (typeof _agentName === 'function' && _agentName()) || 'JARVIS', status: 'working' });
+  want.push({ id: '__main', role: 'main', persona: 'main', name: (typeof _agentName === 'function' && _agentName()) || 'JARVIS',
+              status: 'working', runtime: mainBrainMark() });
   const ids = new Set(want.map(a => a.id));
   for (const [id, p] of ROOM.people) if (!ids.has(id) && !p.leaving) { p.leaving = true; p.path = roomRoute(p.pos, ROOM.spots.door); }
   for (const a0 of want) {
@@ -18093,13 +18125,28 @@ function roomSync(list) {
   }
   roomStripRender();
 }
+// What JARVIS is doing right now, as it would say it: the question it is
+// waiting on, the kind of tool in its hands, or that it is thinking.
+const ROOM_DOING = { folder: 'Looking in a folder', search: 'Searching', file: 'Reading a file', edit: 'Changing a file',
+  term: 'Running a command', globe: 'Checking the web', web: 'Searching the web', image: 'Looking at an image',
+  video: 'Working on a video', brain: 'Checking my memory', bell: 'Setting a reminder', rocket: 'Opening an app',
+  monitor: 'Using the desktop', users: 'Asking a helper', handoff: 'Handing off a task', plugin: 'Using a plugin' };
+function roomMainLine() {
+  if (pendingPermId) return _spokenPermQuestion(pendingPermTool, pendingPermArgs).replace(/\s*Should I\?.*$/, '') + ' Okay?';
+  const ms = String(window._mainState || 'idle');
+  if (/idle/.test(ms)) return '';
+  const m = /^(?:calling|writing)\s+(\w+)/.exec(ms);
+  return (m ? (ROOM_DOING[_toolKind(m[1])] || 'Working') : 'Thinking') + '…';
+}
 function roomTick(t) {
   const dt = Math.min(0.1, (t - (ROOM.last || t)) / 1000);
   ROOM.last = t;
-  const busyNow = !/idle/.test(String(window._mainState || 'idle'));
-  const mainSay = ROOM.says.get('__main');
-  if (busyNow && (!mainSay || mainSay.until < Date.now() || mainSay.text === '•••')) {
-    if (!mainSay || mainSay.text !== '•••' || mainSay.until < Date.now() + 500) roomSay('__main', '•••', 1500);
+  // The live line replaces only itself: an answer JARVIS just gave stays up
+  // for its time. Unchanged text is kept up, not posted again.
+  const line = roomMainLine(), mainSay = ROOM.says.get('__main');
+  if (line && (!mainSay || mainSay.live || mainSay.until < Date.now())) {
+    if (mainSay && mainSay.live && mainSay.text === line) mainSay.until = Date.now() + 1500;
+    else roomSay('__main', line, 1500, true);
   }
   for (const [id, p] of ROOM.people) {
     if (p.enterAt && t < p.enterAt) { p.waiting = true; continue; }
@@ -18229,7 +18276,7 @@ function roomDraw(t) {
   const now = Date.now();
   const sig = labels.map(({ p, x, y }) => {
     const say = ROOM.says.get(p.id);
-    return [p.id, Math.round(x), Math.round(y), p.agent.status, p.agent.blocked, ROOM.sel === p.id,
+    return [p.id, Math.round(x), Math.round(y), p.agent.status, p.agent.blocked, p.agent.runtime, ROOM.sel === p.id,
             say && say.until > now ? say.text : ''].join('|');
   }).join('~');
   if (sig === ROOM.labelSig) return;
@@ -18249,7 +18296,7 @@ function roomDraw(t) {
     const say = ROOM.says.get(p.id);
     if (say && say.until > now) {
       const b = document.createElement('div');
-      b.className = 'tm-say' + (say.text === '•••' ? ' dots' : '');
+      b.className = 'tm-say';
       b.style.left = x + 'px'; b.style.top = y + 'px';
       b.textContent = say.text;
       box.appendChild(b);
@@ -18276,8 +18323,8 @@ function roomDraw(t) {
   }
 }
 // Something said over someone's head for a while.
-function roomSay(id, text, ms = 3600) {
-  ROOM.says.set(id, { text: String(text || '').slice(0, 220), until: Date.now() + ms });
+function roomSay(id, text, ms = 3600, live = false) {
+  ROOM.says.set(id, { text: String(text || '').slice(0, 220), until: Date.now() + ms, live });
   ROOM.labelSig = '';
 }
 // Clicking someone: they turn, wave and say where they are with the work.
@@ -18354,13 +18401,13 @@ function roomStripRender() {
     const a = p.agent;
     const st = a.role === 'main' ? 'working' : (teamNeedsYou(a) ? 'needs' : a.status);
     const word = a.role === 'main'
-      ? (/idle/.test(String(window._mainState || 'idle')) ? roomMainIdleWord(p) : String(window._mainState))
+      ? (/idle/.test(String(window._mainState || 'idle')) ? roomMainIdleWord(p) : (pendingPermId ? 'waiting for your OK' : roomMainLine().replace(/…$/, '').toLowerCase()))
       : { working: a.activity === 'tool' ? a.tool : 'thinking', needs: 'needs you', done: 'done', failed: "didn't finish", stopped: 'stopped' }[st];
     const card = document.createElement('div');
     card.className = 'tm-card' + (ROOM.sel === p.id ? ' sel' : '');
     const face = document.createElement('div'); face.className = 'tm-face'; face.appendChild(roomFace(a.role, p.seed));
     const txt = document.createElement('div');
-    txt.innerHTML = `<b>${teamMini(a)}${esc(a.name || a.persona)}</b><small>${esc(a.role === 'main' ? 'runs the house' : teamWhat(a))}</small><i class="${st}">${esc(word || '')}</i>`;
+    txt.innerHTML = `<b>${teamMini(a)}${esc(a.name || a.persona)}</b><small>${esc(a.role === 'main' ? (a.runtime ? 'on ' + teamWhat(a).split(' · ')[0] : 'runs the house') : teamWhat(a))}</small><i class="${st}">${esc(word || '')}</i>`;
     card.append(face, txt);
     card.addEventListener('click', () => roomPoke(p));
     strip.appendChild(card);
