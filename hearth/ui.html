@@ -12610,15 +12610,17 @@ async function refreshSettings() {
     const llmApply = $('btn-llm-apply');
     const brainHint = $('brain-where-hint');
     if (brainMode && llmUrl && llmKey && llmMdl && llmApply) {
+      // Which models a provider has is read from the provider, not written down here.
+      const PICK_HINT = 'Once the key is saved, every model this key can use is in the model menu at the top.';
       const PRESETS = {
         'claude-code': { url: 'claude-code://local', hint: 'JARVIS thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Hearth\'s tools through it. It is billed to the Agent SDK credit that comes with the plan. Helpers keep using your local model.', modelHint: '', sample: '' },
         'cursor-agent': { url: 'cursor://local', hint: 'JARVIS thinks with Cursor\'s agent on this PC, signed in to your Cursor plan, and uses Hearth\'s tools through it. It needs Cursor\'s command-line agent (cursor.com/cli), not just the editor. Its own shell is turned off, so commands go through Hearth and ask you first.', modelHint: '', sample: '' },
         'codex':       { url: 'codex://local', hint: 'JARVIS thinks with Codex on this PC, signed in to your ChatGPT plan, and uses Hearth\'s tools through it. The Codex app is enough; it carries the command-line part. Its usage counts toward your plan\'s Codex limit. Helpers keep using your local model.', modelHint: '', sample: '' },
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },
-        gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: 'Try <code>gemini-3-flash</code> or <code>gemini-3-pro</code>.', sample: 'gemini-3-flash' },
-        anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint. Sonnet supports up to 1M context.', modelHint: 'Try <code>claude-sonnet-5</code>, <code>claude-opus-4-8</code>, or <code>claude-haiku-4-5</code>.', sample: 'claude-sonnet-5' },
-        openai:     { url: 'https://api.openai.com/v1', hint: 'OpenAI GPT models.', modelHint: 'Try <code>gpt-5.1</code> or <code>gpt-5-mini</code>.', sample: 'gpt-5.1' },
-        grok:       { url: 'https://api.x.ai/v1', hint: 'xAI Grok models.', modelHint: 'Try <code>grok-4.5</code>.', sample: 'grok-4.5' },
+        gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: PICK_HINT, sample: 'gemini-3-flash' },
+        anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint.', modelHint: PICK_HINT, sample: 'claude-sonnet-5-5' },
+        openai:     { url: 'https://api.openai.com/v1', hint: 'OpenAI GPT models.', modelHint: PICK_HINT, sample: 'gpt-5.1' },
+        grok:       { url: 'https://api.x.ai/v1', hint: 'xAI Grok models.', modelHint: PICK_HINT, sample: 'grok-4.5' },
         groq:       { url: 'https://api.groq.com/openai/v1', hint: 'Groq runs open models very fast. Its free tier allows fewer tokens a minute than one Hearth request, so it needs a paid tier. Keys are at console.groq.com.', modelHint: 'Use a Groq model id. <code>openai/gpt-oss-120b</code> handles tools well.', sample: 'openai/gpt-oss-120b' },
         openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator - gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-4.6-sonnet</code>.', sample: 'anthropic/claude-4.6-sonnet' },
         custom:     { url: '', hint: 'Any OpenAI-compatible server. You set the URL.', modelHint: 'Use whatever model id your server exposes.', sample: '' },
@@ -12704,6 +12706,8 @@ async function refreshSettings() {
         // Disable the button + state pill spinner + brand-sub status carry
         // the truth while it's happening.
         const provLabel = body.provider === 'local' ? 'local' : body.provider;
+        // The name Hearth filled in is a suggestion: the provider's own list decides.
+        body.settle = !body.model || body.model === ((PRESETS[body.provider] || {}).sample || null);
         llmApply.disabled = true;
         llmApply.textContent = 'Switching…';
         setState(`switching to ${provLabel}…`);
@@ -12721,6 +12725,7 @@ async function refreshSettings() {
             await saveSetting('llm_provider', body.provider);
             await saveSetting('llm_url', body.url);
             await saveSetting('llm_key', body.key);
+            if (r.model && r.model !== body.model) { body.model = r.model; llmMdl.value = r.model; }
             await saveSetting('llm_model', body.model);
             // Honest toast - tell the user what's ACTUALLY serving, not
             // just "Switched brain". For local: probe shows LM Studio vs
@@ -17557,7 +17562,7 @@ async function obFinish(skipped) {
       obState.cloud.model = (modelEl && modelEl.value || '').trim();
       if (obState.cloud.provider && obState.cloud.provider !== 'local' && obState.cloud.key) {
         const PRESETS = {
-          anthropic:  { url: 'https://api.anthropic.com/v1/', sample: 'claude-sonnet-5' },
+          anthropic:  { url: 'https://api.anthropic.com/v1/', sample: 'claude-sonnet-5-5' },
           gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', sample: 'gemini-3-flash' },
           openai:     { url: 'https://api.openai.com/v1', sample: 'gpt-5.1' },
           grok:       { url: 'https://api.x.ai/v1', sample: 'grok-4.5' },
@@ -17574,6 +17579,7 @@ async function obFinish(skipped) {
           url: _customUrl || p.url || '',
           key: obState.cloud.key,
           model: obState.cloud.model || p.sample || '',
+          settle: !obState.cloud.model,          // a name they didn't type is checked against the provider's list
         };
         if (obState.cloud.provider === 'custom' && !_customUrl) {
           toast('Custom brain', 'Add the endpoint URL (e.g. https://api.groq.com/openai/v1) — skipping for now.', 'warn', 5000);
@@ -17592,7 +17598,7 @@ async function obFinish(skipped) {
               toast('Key works', _chk.count + ' models available', 'ok', 3500);
             }
           } catch {}
-          await api('/api/llm-endpoint', {
+          const _sw = await api('/api/llm-endpoint', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
           });
@@ -17600,7 +17606,7 @@ async function obFinish(skipped) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               llm_provider: body.provider, llm_url: body.url,
-              llm_key: body.key, llm_model: body.model,
+              llm_key: body.key, llm_model: (_sw && _sw.model) || body.model,
             }),
           });
           toast('Cloud brain wired', obState.cloud.provider + ' ready', 'ok', 4000);
@@ -18410,7 +18416,7 @@ const TOUR_STOPS = [
   { sel: '.nav-btn[data-view="memory"]', title: 'What I remember', text: 'What I have learned about you and your work. Read it, change it, or delete it.' },
   { sel: '.nav-btn[data-view="reminders"]', title: 'Reminders', text: 'Ask me to remind you of something, or to do something at a set time. They are all listed here.' },
   { sel: '.nav-btn[data-view="skills"]', title: 'Skills', text: 'Things I know how to do well, like making a PDF or a slide deck. You can add more.' },
-  { sel: '.nav-btn[data-view="files"]', title: 'Files', text: 'My workspace folder: what I make and save lands here. Click a picture or a video to see it.' },
+  { sel: '.nav-btn[data-view="files"]', title: 'Files', text: 'My workspace folder: what I make and save lands here.' },
   { sel: '.nav-btn[data-view="logs"]', title: 'Logs', text: 'Everything I did, step by step: on this PC, by helpers, and from your phone. Nothing is hidden.' },
   { sel: '.nav-btn[data-view="models"]', title: 'Models', text: 'Find a model, see whether it fits this PC, and download it. Nothing is downloaded unless you ask.' },
   { sel: '.nav-btn[data-view="settings"]', title: 'Settings', text: 'You can change anything you want: my name and voice, the look, Simple or Advanced, what I may do without asking, your phone. This tour is under About.' },

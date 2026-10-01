@@ -888,21 +888,16 @@ def _list_models() -> List[Dict]:
         except Exception:
             api_key = None
     api_key = api_key or "hearth-builtin"
-    _raw_models = _http_get_json(f"{probe_base}/models",
-                                 headers={"Authorization": f"Bearer {api_key}"})
+    from .headless import model_list_request
+    _list_url, _list_hdr = model_list_request(probe_base, api_key)
+    _raw_models = _http_get_json(_list_url, headers=_list_hdr, timeout=6)
     data = _raw_models or {"data": []}
     # Skip non-chat models — xAI lists grok-imagine-image / grok-imagine-video
     # alongside chat models, but they 400 on /v1/chat/completions because
     # they use /v1/images/generations and /v1/videos/generations instead.
     # Hide them from the chat-model picker; they're still callable via the
     # generate_image / generate_video TOOLS once a chat model is selected.
-    # Providers list image/video/music/speech/embedding models next to chat
-    # models, but they 400 on /v1/chat/completions. Hide them from the chat
-    # picker (they're reachable via the generate_image/_video tools). Covers
-    # xAI (imagine-*) AND Gemini (imagen/veo/lyria/native-audio/tts/aqa/robotics).
-    NON_CHAT_PATTERNS = ("imagine-image", "imagine-video", "imagine-audio",
-                         "embedding", "embed-", "imagen", "veo-", "lyria",
-                         "native-audio", "-tts", "tts-", "aqa", "robotics")
+    from .headless import NOT_CHAT as NON_CHAT_PATTERNS
     # Collect the chat-capable rows first, then flag the one the user actually
     # picked (settings.llm_model) as "loaded" — NOT just index 0. The old
     # "loaded if i==0" hardcode meant the topbar sticker reverted to the
@@ -941,7 +936,7 @@ def _list_models() -> List[Dict]:
     _is_cloud = not any(x in _h for x in ("localhost", "127.0.0.1", "0.0.0.0", "::1"))
     if not rows and _is_cloud:
         _prov = ("xAI Grok" if "api.x.ai" in _h else "OpenAI" if "api.openai.com" in _h
-                 else "Gemini" if "googleapis" in _h else "the provider")
+                 else "Gemini" if "googleapis" in _h else "Anthropic" if "anthropic" in _h else "the provider")
         _reason = "returned no response" if _raw_models is None else "returned an empty list"
         _models_notice = (f"{_prov} {_reason} for the model list — usually out of credits or an API "
                           f"key without model-list access. Your active model still works; type a "
@@ -3353,7 +3348,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             _hdr = {"Authorization": f"Bearer {_k}"} if _k else {}
             _ids = []
             try:
-                _rq = _ur.Request(_u + "/models", headers=_hdr)
+                from .headless import model_list_req
+                _rq = model_list_req(_u, _k)
                 with _ur.urlopen(_rq, timeout=12) as _r:
                     _d = json.loads(_r.read().decode("utf-8", "replace"))
                 _ids = [m.get("id") for m in (_d.get("data") or []) if m.get("id")]
@@ -3465,6 +3461,12 @@ class HearthHandler(BaseHTTPRequestHandler):
                 # key from env so polls don't keep authenticating against an
                 # unrelated server.
                 os.environ.pop("LOCAL_API_KEY", None)
+            # A cloud model name is checked against what that provider lists:
+            # a default that has since been retired would fail on every message.
+            # Only a name Hearth suggested (or none at all): one the person
+            # typed is theirs, listed or not.
+            if (body.get("settle") or not model) and provider not in ("", "local", "lmstudio", "builtin"):
+                model = _hl.settle_model(url, key, model) or model
             if model:
                 os.environ["LOCAL_MODEL"] = model
             else:
@@ -3600,6 +3602,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "stopped_builtin": stopped_builtin,
                 "local_probe": local_probe,
                 "restarted_bridges": restarted_bridges,
+                "model": model,              # what is in use, which may not be the name sent
             })
         if path == "/api/llmserver/start":
             # Boot the optional built-in llama-cpp-python server with the user's
@@ -4779,12 +4782,11 @@ class HearthHandler(BaseHTTPRequestHandler):
         if not model_id and not is_cloud:
             return self._send_json(200, {"title": _fallback(first)})
         if not model_id and is_cloud:
-            # Cloud provider with no model_id saved — pick a sensible default
-            model_id = {
-                "grok": "grok-4.3",
-                "gemini": "gemini-2.5-flash",
-                "openai": "gpt-4o-mini",
-            }.get(provider, "gpt-4o-mini")
+            # Cloud provider with no model saved: the first chat model it lists.
+            from .headless import settle_model
+            model_id = settle_model(LOCAL_API_BASE, os.environ.get("LOCAL_API_KEY") or settings.get("llm_key") or "", "")
+            if not model_id:
+                return self._send_json(200, {"title": _fallback(first)})
         payload = {
             "model": model_id,
             "messages": [{"role": "user", "content": prompt}],

@@ -244,6 +244,60 @@ def _openrouter_catalog_context(model_id: str) -> Optional[int]:
         return None
 
 
+def model_list_request(base: str, key: str = ""):
+    """Where a server lists its models, and the headers that list needs.
+
+    Most take the key as a Bearer token. Anthropic's list wants its own two
+    headers and gives twenty at a time unless asked for more; with only a
+    Bearer token it answers 400, which read as "this provider has one model"."""
+    base = (base or "").rstrip("/")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    if "api.anthropic.com" in base.lower():
+        if key:
+            headers["x-api-key"] = key
+        headers["anthropic-version"] = "2023-06-01"
+        return base + "/models?limit=100", headers
+    return base + "/models", headers
+
+
+def model_list_req(base: str, key: str = ""):
+    """The request for a server's model list, ready to open."""
+    import urllib.request as _ur
+    url, headers = model_list_request(base, key)
+    return _ur.Request(url, headers=headers)
+
+
+# Providers list image, video, music, speech and embedding models next to
+# their chat models; those answer 400 to a chat request, so they are left out
+# of anything that picks a chat model. Covers xAI (imagine-*) and Gemini
+# (imagen, veo, lyria, native-audio, tts, aqa, robotics).
+NOT_CHAT = ("imagine-image", "imagine-video", "imagine-audio", "embedding", "embed-", "imagen", "veo-",
+            "lyria", "native-audio", "-tts", "tts-", "aqa", "robotics")
+
+
+def provider_models(base: str, key: str = "", timeout: float = 6):
+    """The chat models a server lists, in its own order. None when it can't be asked."""
+    import urllib.request as _ur
+    try:
+        url, headers = model_list_request(base, key)
+        with _ur.urlopen(_ur.Request(url, headers=headers), timeout=timeout) as r:
+            rows = json.loads(r.read().decode("utf-8", "replace")).get("data") or []
+    except Exception:
+        return None
+    return [m["id"] for m in rows if m.get("id") and not any(p in m["id"].lower() for p in NOT_CHAT)]
+
+
+def settle_model(base: str, key: str, wanted: str) -> str:
+    """The model to use on a provider: the one asked for when the provider
+    lists it (or can't be asked), else the first it does list. A name written
+    into Hearth is a guess that goes stale; the provider's own list doesn't."""
+    listed = provider_models(base, key)
+    if not listed or not wanted:
+        return wanted or (listed[0] if listed else "")
+    low = {m.lower(): m for m in listed}
+    return low.get(wanted.lower()) or listed[0]
+
+
 # What the window sends, when idle, for a turn that has no user message: only
 # to let the model report a due reminder or a finished helper. Must match ui.html.
 NOTIFY_FLUSH = "__HEARTH_NOTIFY_FLUSH__"

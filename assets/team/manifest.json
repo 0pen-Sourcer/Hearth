@@ -52,7 +52,6 @@
    "side_idle",
    "side_coffee",
    "side_read",
-   "tend_fire",
    "pin"
   ]
  },
@@ -143,5 +142,5 @@
   ]
  },
  "room_empty": true,
- "v": "aaac7455ad"
+ "v": "a4978118db"
 }

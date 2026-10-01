@@ -50,7 +50,7 @@ MORE_PROPS = [("cat_sleep", 50), ("cat_sit", 38), ("book_open", 44), ("books", 4
 EXTRA_MAIN = ["sit", "sit_read", "sit_coffee", "talk", "nod", "wave",
               "side_idle", "side_coffee", "side_read", "tend_fire", "sleep", "pin"]
 # The second character was drawn in all twelve (20.png) and uses the ones on his feet.
-EXTRA_SECOND = {"talk", "nod", "wave", "side_idle", "side_coffee", "side_read", "tend_fire", "pin"}
+EXTRA_SECOND = {"talk", "nod", "wave", "side_idle", "side_coffee", "side_read", "pin"}
 
 
 def key_magenta(img: Image.Image) -> np.ndarray:
@@ -205,8 +205,13 @@ def extra_main(art: str, target: float, sheet: str = "17.png", keep=None):
     if not os.path.isfile(path):
         return []
     frames = [f for band in rows_of(key_magenta(Image.open(path)), 2) for f in strip_frames(band, 6)]
-    scale = target / standing_height(frames, {3, 4})
-    return [place(cell, bb, scale) for name, (cell, bb) in zip(EXTRA_MAIN, frames) if keep is None or name in keep]
+    # The side-on figures were drawn a little larger than the front-on ones.
+    # Each group is brought to the same standing height, or the character
+    # seems to grow when it turns.
+    front = target / standing_height(frames, {3, 4})
+    side = target / standing_height(frames, {6, 7, 8})
+    return [place(cell, bb, side if name.startswith("side_") else front)
+            for name, (cell, bb) in zip(EXTRA_MAIN, frames) if keep is None or name in keep]
 
 
 def second_main(art: str):

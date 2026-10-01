@@ -232,6 +232,10 @@ jobs:
         run: |
           python tests/test_cli_paste.py
 
+      - name: A cloud provider's models are read from the provider
+        run: |
+          python tests/test_provider_models.py
+
       - name: A search pattern cannot become a ripgrep option
         # --pre=PROGRAM runs a program on every file searched.
         run: |

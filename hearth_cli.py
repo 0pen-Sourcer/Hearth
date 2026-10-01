@@ -265,9 +265,8 @@ def _probe_live_model(url: str, key: str = "") -> Optional[str]:
     if not url:
         return None
     try:
-        rq = urllib.request.Request(
-            url.rstrip("/") + "/models",
-            headers={"Authorization": f"Bearer {key or 'hearth-builtin'}"})
+        from hearth.headless import model_list_req
+        rq = model_list_req(url, key or "hearth-builtin")
         with urllib.request.urlopen(rq, timeout=2) as r:
             ids = [m.get("id") for m in (json.load(r).get("data") or [])]
         return next((i for i in ids if i), None)
@@ -903,9 +902,8 @@ def autodetect_model() -> str:
     """Query the local server's /v1/models and pick the first non-embedding
     chat model. Falls back to LOCAL_MODEL if anything fails."""
     try:
-        _req = urllib.request.Request(
-            f"{LOCAL_API_BASE}/models",
-            headers={"Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
+        from hearth.headless import model_list_req
+        _req = model_list_req(LOCAL_API_BASE, LOCAL_API_KEY or "hearth-builtin")
         with urllib.request.urlopen(_req, timeout=2) as r:
             data = json.loads(r.read().decode())
         for m in data.get("data", []):
@@ -1475,9 +1473,8 @@ class JarvisCLI:
         """Return (chat_model_ids, reachable) for the local /v1/models endpoint.
         Used at boot to distinguish 'server down' from 'no model loaded'."""
         try:
-            _req = urllib.request.Request(
-                f"{LOCAL_API_BASE}/models",
-                headers={"Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
+            from hearth.headless import model_list_req
+            _req = model_list_req(LOCAL_API_BASE, LOCAL_API_KEY or "hearth-builtin")
             with urllib.request.urlopen(_req, timeout=2) as r:
                 data = json.loads(r.read().decode())
             ids = [m.get("id", "") for m in data.get("data", [])]
@@ -1489,9 +1486,8 @@ class JarvisCLI:
     # -- Slash commands -----------------------------------------------------
     async def fetch_models(self, filter_q: str = "", free_only: bool = False):
         try:
-            req = urllib.request.Request(
-                f"{LOCAL_API_BASE}/models",
-                headers={"Authorization": f"Bearer {LOCAL_API_KEY or 'hearth-builtin'}"})
+            from hearth.headless import model_list_req
+            req = model_list_req(LOCAL_API_BASE, LOCAL_API_KEY or "hearth-builtin")
             with urllib.request.urlopen(req, timeout=5) as r:
                 data = json.loads(r.read().decode())
             # Hide non-chat models - xAI lists grok-imagine-image/-video etc.
@@ -2629,6 +2625,15 @@ class JarvisCLI:
                 # Allow saved entry to override the default model hint
                 if provider in saved_keys and saved_keys[provider].get("model"):
                     model_hint = saved_keys[provider]["model"]
+                # A name from the table above is a starting guess, and what the
+                # provider lists decides. One the person chose is left alone.
+                elif provider not in _LOCAL and model_hint:
+                    from hearth.headless import settle_model
+                    settled = settle_model(url, key, model_hint)
+                    if settled and settled != model_hint:
+                        print(f"{C_DIM}{provider} doesn't list {model_hint}; using {settled}. "
+                              f"/model shows the rest.{C_RESET}")
+                        model_hint = settled
             else:
                 print(f"{C_ERR}Unknown provider {provider!r}. Try: local, lmstudio, builtin, "
                       f"grok, gemini, openai, openrouter, custom, forget.{C_RESET}")
