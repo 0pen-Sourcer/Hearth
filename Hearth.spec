@@ -103,7 +103,13 @@ if os.path.isdir(os.path.join(REPO_ROOT, "assets")):
 # on machines without Windows Terminal installed.
 _wt_dir = os.path.join(REPO_ROOT, "Windows Terminal")
 if os.path.isdir(_wt_dir):
-    DATAS.append((_wt_dir, "Windows Terminal"))
+    # File by file: anything the terminal wrote at runtime (saves/, state) stays out.
+    for _root, _dirs, _files in os.walk(_wt_dir):
+        _dirs[:] = [d for d in _dirs if d.lower() != "saves"]
+        _rel = os.path.relpath(_root, _wt_dir)
+        _dest = "Windows Terminal" if _rel == "." else os.path.join("Windows Terminal", _rel)
+        for _f in _files:
+            DATAS.append((os.path.join(_root, _f), _dest))
 
 # Ship the voice deps LOOSE (their .py + data) so the update patch can deliver
 # them — _unfreeze_hearth drops them from the PYZ, this puts the files beside the

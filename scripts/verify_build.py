@@ -183,6 +183,9 @@ def main() -> int:
     need((facts.get("skills") or 0) > 0, f"skills are bundled ({facts.get('skills')})")
     need((facts.get("personas") or 0) > 0, f"sub-agent personas are bundled ({facts.get('personas')})")
 
+    wt_saves = os.path.join(dist, "_internal", "Windows Terminal", "saves")
+    need(not os.path.exists(wt_saves), "no runtime save files ride along with the bundled terminal")
+
     eng, build = engine_build(dist)
     if a.edition == "full":
         need(eng is not None, "Full bundles the llama.cpp engine")
