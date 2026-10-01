@@ -1,0 +1,256 @@
+"""The model menu in the real page.
+
+Every provider a key is saved for has one row that opens into its models, so a
+provider with a long list doesn't fill the menu and another provider's models
+are one click away. The box at the top looks through every agent and provider
+at once, and each result says where it comes from, since the same model can be
+had through an agent's plan and through an API key. Picking a model from a
+provider that isn't in use switches to it with the key already saved.
+
+The page runs in Edge; the providers and agents are stand-ins.
+
+    .\\.venv\\Scripts\\python.exe tests\\test_ui_model_menu.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+import tempfile
+import threading
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+FAILS: list = []
+
+
+def check(label, cond):
+    print(("ok    " if cond else "FAIL  ") + label)
+    if not cond:
+        FAILS.append(label)
+
+
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    print("skipped: playwright is not installed")
+    sys.exit(0)
+
+work = tempfile.mkdtemp(prefix="hearth-menu-")
+os.environ["JARVIS_WORKSPACE"] = work
+os.environ["HEARTH_WORKSPACE"] = work
+from hearth import web                                               # noqa: E402
+
+web._save_settings(dict(web._load_settings(), onboarded=True))
+s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+srv = web._QuietHTTPServer(("127.0.0.1", port), web.HearthHandler)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+ANTHROPIC = ["claude-haiku-4-5", "claude-opus-5", "claude-sonnet-5"]
+LISTS = {"anthropic": ANTHROPIC, "gemini": ["models/gemini-3-flash", "models/gemini-3-pro"]}
+AGENTS = {
+    "claude-code": {"provider": "claude-code", "model": "", "efforts": [], "models": [
+        {"id": "", "label": "Default", "model": "Sonnet 5"}, {"id": "opus", "label": "Opus 5", "ctx": 1000000},
+        {"id": "haiku", "label": "Haiku 4.5"}]},
+    "cursor-agent": {"provider": "cursor-agent", "model": "", "efforts": [], "models": [
+        {"id": "opus-5", "label": "Opus 5"}, {"id": "gpt-5", "label": "GPT-5"}]
+        + [{"id": f"opus-5-v{i}", "label": f"Opus 5 v{i}"} for i in range(1, 9)]},
+}
+now = {"provider": "local", "model": ""}       # what the stand-in app is switched to
+asked: list = []                                # provider lists that were fetched
+switched: list = []                             # bodies sent to switch the endpoint
+saved: dict = {}                                # settings the page wrote
+
+
+def models(route):
+    cloud = now["provider"] == "anthropic"
+    ms = ([{"id": m, "state": "loaded" if m == now["model"] else "", "type": "llm"} for m in ANTHROPIC] if cloud
+          else [{"id": "qwen-9b", "state": "loaded", "type": "llm"}])
+    route.fulfill(json={"models": ms, "notice": "", "agent_brains": [
+        {"id": "claude-code", "label": "Claude Code", "installed": True},
+        {"id": "cursor-agent", "label": "Cursor", "installed": True},
+        {"id": "codex", "label": "Codex", "installed": False, "site": "https://openai.com/codex"}],
+        "providers": [
+            {"id": "anthropic", "label": "Anthropic", "url": "https://api.anthropic.com/v1/", "active": cloud,
+             "model": now["model"] if cloud else ""},
+            {"id": "gemini", "label": "Google Gemini", "url": "https://example.invalid/gemini/", "active": False, "model": ""}]})
+
+
+def provider_models(route):
+    pid = json.loads(route.request.post_data or "{}").get("id")
+    asked.append(pid)
+    route.fulfill(json={"models": LISTS[pid]})
+
+
+def agent_models(route):
+    route.fulfill(json=AGENTS[route.request.url.split("id=")[1]])
+
+
+def endpoint(route):
+    body = json.loads(route.request.post_data or "{}")
+    switched.append(body)
+    now.update(provider=body["provider"], model=body["model"])
+    route.fulfill(json={"ok": True, "model": body["model"]})
+
+
+def settings(route):
+    if route.request.method == "POST":
+        saved.update(json.loads(route.request.post_data or "{}"))
+        if "llm_model" in saved:
+            now["model"] = saved["llm_model"]
+        return route.fulfill(json={"ok": True})
+    try:
+        real = route.fetch().json()
+    except Exception:                           # the page closed with a poll in flight
+        return
+    real.update(saved)
+    route.fulfill(json=real)
+
+
+OPEN = """async () => {
+  await refreshSettings(); await refreshState(); await refreshModels();
+  mpClose(); mpOpen();
+  const menu = document.getElementById('mp-menu');
+  return { secs: [...menu.querySelectorAll('.mp-body .mp-sec')].map(e => e.textContent),
+           rows: [...menu.querySelectorAll('.mp-body > .mp-row')].map(e => [e.dataset.v, e.querySelector('.mp-t').textContent,
+                    (e.querySelector('.mp-more') || { dataset: {} }).dataset.more || '']),
+           find: !!menu.querySelector('.mp-all'), name: document.getElementById('mp-name').textContent };
+}"""
+SEARCH = """async (q) => {
+  const menu = document.getElementById('mp-menu'), box = menu.querySelector('.mp-all');
+  box.value = q; box.dispatchEvent(new Event('input'));
+  await new Promise(r => setTimeout(r, 500));
+  let from = '';
+  const hits = [];
+  for (const e of menu.querySelector('.mp-hits').children) {
+    if (e.classList.contains('mp-sec')) from = e.textContent;
+    else if (e.classList.contains('mp-row')) hits.push([e.dataset.v, e.querySelector('.mp-t').textContent, from]);
+  }
+  return { bodyHidden: menu.querySelector('.mp-body').hidden, hits,
+           notes: [...menu.querySelectorAll('.mp-hits .mp-note')].map(e => e.textContent) };
+}"""
+UNDER = """async (key) => {
+  const menu = document.getElementById('mp-menu');
+  menu.querySelector(key.startsWith('row:') ? `.mp-row[data-v="${key.slice(4)}"]` : `.mp-more[data-more="${key}"]`).click();
+  await new Promise(r => setTimeout(r, 900));
+  const sub = menu.querySelector('.mp-sub');
+  return { open: !menu.hidden, rows: sub ? [...sub.querySelectorAll('.mp-row')].map(e => [e.dataset.v, !!e.querySelector('.mp-badge')]) : null };
+}"""
+
+with sync_playwright() as pw:
+    try:
+        browser = pw.chromium.launch(channel="msedge")
+    except Exception as e:
+        print(f"skipped: no browser to run the page in ({type(e).__name__})")
+        srv.shutdown()
+        sys.exit(0)
+    pg = browser.new_page(viewport={"width": 1280, "height": 800})
+    pg.route("**/api/llmserver/download*", lambda r: r.abort())
+    pg.route("**/api/models", models)
+    pg.route("**/api/providers/models", provider_models)
+    pg.route("**/api/brain/agent/models*", agent_models)
+    pg.route("**/api/llm-endpoint", endpoint)
+    pg.route("**/api/settings", settings)
+    errors: list = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    for _ in range(4):
+        try:
+            pg.goto(f"http://127.0.0.1:{port}/", wait_until="domcontentloaded", timeout=30000)
+            break
+        except Exception:
+            pass
+    time.sleep(3)
+
+    first = pg.evaluate(OPEN)
+    provs = [r for r in first["rows"] if r[0].startswith("prov::")]
+    check(f"each saved provider is one row that opens, under its own heading {first['secs']} {provs}",
+          "Your providers" in first["secs"] and first["find"]
+          and provs == [["prov::anthropic", "Anthropic", "prov::anthropic"], ["prov::gemini", "Google Gemini", "prov::gemini"]])
+    check("none of a provider's models are in the menu until it is opened",
+          not any("claude" in r[1] or "gemini-3" in r[1] for r in first["rows"]) and asked == [])
+
+    opened = pg.evaluate(UNDER, "row:prov::anthropic")
+    check(f"clicking the provider opens its models and keeps the menu up {opened}",
+          opened["open"] and opened["rows"] == [[f"prov::anthropic::{m}", False] for m in ANTHROPIC] and asked == ["anthropic"])
+
+    hits = pg.evaluate(SEARCH, "opus")
+    cursor = [h for h in hits["hits"] if h[2] == "Cursor · your Cursor plan"]
+    check(f"one search looks through every agent and provider, under a heading for each {hits['hits']}",
+          hits["bodyHidden"] and hits["hits"][0] == ["agent::claude-code::opus", "Opus 5", "Claude Code · your Claude plan"]
+          and cursor[0] == ["agent::cursor-agent::opus-5", "Opus 5", "Cursor · your Cursor plan"]
+          and hits["hits"][-1] == ["prov::anthropic::claude-opus-5", "claude-opus-5", "Anthropic · your API key"])
+    check(f"a source with many matches shows a few, so the others stay in sight {len(cursor)} {hits['notes']}",
+          len(cursor) == 6 and len(hits["hits"]) == 8 and hits["notes"] == ["3 more here. Add a word to narrow it down."])
+    narrowed = pg.evaluate(SEARCH, "cursor opus")
+    check(f"naming the source narrows it to that one, in full {len(narrowed['hits'])}",
+          len(narrowed["hits"]) == 9 and all(h[0].startswith("agent::cursor-agent::opus") for h in narrowed["hits"])
+          and narrowed["notes"] == [])
+    local = pg.evaluate(SEARCH, "qwen")
+    check(f"what is on this PC is found too {local['hits']}", local["hits"] == [["qwen-9b", "qwen-9b", "On this PC"]])
+    named = pg.evaluate(SEARCH, "flash")
+    check(f"a provider's own prefix is left off the name but kept in what is picked {named['hits']}",
+          named["hits"] == [["prov::gemini::models/gemini-3-flash", "gemini-3-flash", "Google Gemini · your API key"]])
+    check("a provider is asked once however much is typed", asked == ["anthropic", "gemini"])
+    cleared = pg.evaluate(SEARCH, "")
+    check("an empty box brings the menu back", not cleared["bodyHidden"] and cleared["hits"] == [])
+
+    pg.evaluate(SEARCH, "sonnet")
+    picked = pg.evaluate("""async () => {
+      const menu = document.getElementById('mp-menu');
+      menu.querySelector('.mp-hits .mp-row[data-v="prov::anthropic::claude-sonnet-5"]').click();
+      await new Promise(r => setTimeout(r, 1500));
+      return { closed: menu.hidden, provider: STATE.settings.llm_provider, kind: STATE.brain.kind,
+               name: document.getElementById('mp-name').textContent };
+    }""")
+    check(f"picking another provider's model switches to it with the saved key {switched} {picked}",
+          switched == [{"provider": "anthropic", "url": "https://api.anthropic.com/v1/", "key": "", "model": "claude-sonnet-5"}]
+          and picked["closed"] and picked["provider"] == "anthropic" and picked["kind"] == "cloud"
+          and picked["name"] == "claude-sonnet-5" and "llm_key" not in saved)
+
+    again = pg.evaluate(OPEN)
+    flat = [r for r in again["rows"] if r[0].startswith("claude")]
+    check(f"the provider in use shows the one model in use, and that row opens the rest {again['secs']} {flat}",
+          "From this provider" not in again["secs"] and flat == [["claude-sonnet-5", "claude-sonnet-5", "prov::anthropic"]]
+          and again["name"] == "claude-sonnet-5")
+    before = list(asked)
+    rest = pg.evaluate(UNDER, "prov::anthropic")
+    check(f"its list is the one already in hand, with the model in use marked {rest}",
+          rest["rows"] == [["prov::anthropic::claude-sonnet-5", True], ["prov::anthropic::claude-haiku-4-5", False],
+                           ["prov::anthropic::claude-opus-5", False]] and asked == before)
+    other = pg.evaluate("""async () => {
+      const menu = document.getElementById('mp-menu');
+      menu.querySelector('.mp-sub .mp-row[data-v="prov::anthropic::claude-haiku-4-5"]').click();
+      await new Promise(r => setTimeout(r, 1200));
+      return { closed: menu.hidden, name: document.getElementById('mp-name').textContent };
+    }""")
+    check(f"another model of the provider in use is a change of model, not a new switch {other}",
+          len(switched) == 1 and saved.get("llm_model") == "claude-haiku-4-5" and other["closed"]
+          and other["name"] == "claude-haiku-4-5")
+    # Settings switches through the same code, with the key typed there.
+    applied = pg.evaluate("""async () => {
+      showView('settings'); await refreshSettings();
+      const mode = document.getElementById('setting-brain-mode');
+      mode.value = 'gemini'; mode.dispatchEvent(new Event('change'));
+      document.getElementById('setting-llm-key').value = 'typed-key';
+      document.getElementById('btn-llm-apply').click();
+      await new Promise(r => setTimeout(r, 1500));
+      return { provider: STATE.settings.llm_provider, name: document.getElementById('mp-name').textContent };
+    }""")
+    last = switched[-1]
+    check(f"Settings still switches, and saves the key that was typed {last} {applied}",
+          len(switched) == 2 and last["provider"] == "gemini" and last["key"] == "typed-key" and last["model"]
+          and saved.get("llm_key") == "typed-key" and applied["provider"] == "gemini" and applied["name"] == last["model"])
+    check(f"the page ran without a script error {errors}", not errors)
+
+    browser.close()
+srv.shutdown()
+
+print()
+if FAILS:
+    print(f"{len(FAILS)} check(s) failed")
+    sys.exit(1)
+print("all model menu checks passed")

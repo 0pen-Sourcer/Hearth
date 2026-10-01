@@ -726,6 +726,42 @@ def _active_base() -> str:
             or "http://localhost:1234/v1")
 
 
+def _provider_key(provider: str) -> str:
+    """The key saved for a cloud provider, wherever it was saved: the one in
+    use, the ones kept from earlier switches, or the terminal's own file."""
+    provider = (provider or "").strip().lower()
+    if not provider:
+        return ""
+    s = _load_settings()
+    if (s.get("llm_provider") or "").strip().lower() == provider and (s.get("llm_key") or "").strip():
+        return s["llm_key"].strip()
+    banked = (s.get("provider_keys") or {}).get(provider)
+    if banked:
+        return str(banked).strip()
+    try:
+        with open(os.path.join(WORKSPACE, "brain_keys.json"), encoding="utf-8") as f:
+            return str(((json.load(f) or {}).get(provider) or {}).get("key") or "").strip()
+    except (OSError, ValueError):
+        return ""
+
+
+def _saved_providers() -> List[Dict[str, Any]]:
+    """The cloud providers a key is saved for, the one in use first. Never the keys."""
+    from .headless import PROVIDERS
+    s = _load_settings()
+    active = (s.get("llm_provider") or "").strip().lower()
+    out = []
+    for pid, (label, url) in PROVIDERS.items():
+        if _provider_key(pid):
+            out.append({"id": pid, "label": label, "url": url, "active": pid == active,
+                        "model": (s.get("llm_model") or "") if pid == active else ""})
+    if active == "custom" and (s.get("llm_url") or "").strip():
+        out.append({"id": "custom", "label": "Custom endpoint", "url": s["llm_url"].strip(), "active": True,
+                    "model": s.get("llm_model") or ""})
+    out.sort(key=lambda p: not p["active"])
+    return out
+
+
 def _models_probe_endpoint() -> str:
     """Where should the chat-model dropdown look?
 
@@ -1759,11 +1795,13 @@ class HearthHandler(BaseHTTPRequestHandler):
                 if _cb.active():
                     return self._send_json(200, {"models": [{"id": _cb.label(), "state": "loaded",
                                                              "type": "llm", "provider": _cb.current()}],
-                                                 "notice": "", "agent_brains": _agents})
+                                                 "notice": "", "agent_brains": _agents,
+                                                 "providers": _saved_providers()})
             except Exception:
                 _agents = []
             _ms = _list_models()
-            return self._send_json(200, {"models": _ms, "notice": _models_notice, "agent_brains": _agents})
+            return self._send_json(200, {"models": _ms, "notice": _models_notice, "agent_brains": _agents,
+                                         "providers": _saved_providers()})
         if path == "/api/mcp/config":
             # Outbound MCP config — pasted from a standard mcp.json. Stored
             # at ~/Jarvis/mcp.json. Empty file → empty config (valid).
@@ -3080,6 +3118,21 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import claude_brain
             return self._send_json(200, claude_brain.run_tool(
                 str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
+        if path == "/api/providers/models":
+            # What one saved provider offers, asked with its saved key, so the
+            # menu can list it without switching to it.
+            body = self._read_json() or {}
+            pid = str(body.get("id") or "").strip().lower()
+            from .headless import PROVIDERS, provider_models
+            url = PROVIDERS[pid][1] if pid in PROVIDERS else next(
+                (p["url"] for p in _saved_providers() if p["id"] == pid), "")
+            key = _provider_key(pid)
+            if not url or not key:
+                return self._send_json(404, {"error": "no key is saved for that provider"})
+            models = provider_models(url, key, timeout=10)
+            if models is None:
+                return self._send_json(502, {"error": "the provider didn't answer with a model list"})
+            return self._send_json(200, {"models": models})
         if path in ("/api/agents/install", "/api/agents/signin"):
             # The setup dialog's two buttons: get the agent, then sign in to it.
             body = self._read_json() or {}
@@ -3466,7 +3519,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             # Only a name Hearth suggested (or none at all): one the person
             # typed is theirs, listed or not.
             if (body.get("settle") or not model) and provider not in ("", "local", "lmstudio", "builtin"):
-                model = _hl.settle_model(url, key, model) or model
+                model = _hl.settle_model(url, key or _provider_key(provider), model) or model
             if model:
                 os.environ["LOCAL_MODEL"] = model
             else:
@@ -3488,7 +3541,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                     _vault[_old_provider] = _old_key  # bank the outgoing key
                 _new_provider = (provider or _saved.get("llm_provider", "")).strip().lower()
                 # Use the supplied key, else recover this provider's banked key.
-                _eff_key = key or _vault.get(_new_provider, "")
+                _eff_key = key or _vault.get(_new_provider, "") or _provider_key(_new_provider)
                 if _new_provider and _eff_key:
                     _vault[_new_provider] = _eff_key
                 _saved["provider_keys"] = _vault

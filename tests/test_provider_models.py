@@ -81,6 +81,65 @@ check("a name the provider lists is kept, whatever its case", hl.settle_model(ba
 check("a name it no longer lists gives way to one it does", hl.settle_model(base, "good", "retired-model") == "newest-chat")
 check("no name at all gets the first it lists", hl.settle_model(base, "good", "") == "newest-chat")
 check("when the list can't be had, the name asked for stands", hl.settle_model(base, "bad", "retired-model") == "retired-model")
+
+# The model menu lists every provider a key is saved for and reads each one's
+# models with that saved key, so nothing has to be pasted again to look or switch.
+import socket                                                        # noqa: E402
+import urllib.request                                                # noqa: E402
+
+from hearth import web                                               # noqa: E402
+
+# Hearth takes 127.0.0.1 for a local server, so the stand-in answers on another
+# loopback address to be treated as the cloud provider it plays. macOS has
+# only the one, so the switch itself is checked on Windows and Linux.
+try:
+    far = http.server.ThreadingHTTPServer(("127.0.0.2", 0), _Provider)
+    threading.Thread(target=far.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.2:{far.server_address[1]}/v1"
+except OSError:
+    far = None
+hl.PROVIDERS["openai"] = ("OpenAI", base)
+with open(os.path.join(web.WORKSPACE, "brain_keys.json"), "w", encoding="utf-8") as f:
+    json.dump({"grok": {"url": "https://api.x.ai/v1", "key": "from-the-terminal"}}, f)
+web._save_settings(dict(web._load_settings(), onboarded=True, llm_provider="gemini", llm_key="in-use",
+                        llm_url=hl.PROVIDERS["gemini"][1], llm_model="some-gemini", provider_keys={"openai": "good"}))
+check("a provider's key is found wherever it was saved",
+      [web._provider_key(p) for p in ("gemini", "openai", "grok", "anthropic", "")]
+      == ["in-use", "good", "from-the-terminal", "", ""])
+saved = web._saved_providers()
+check("the saved providers are listed with the one in use first, and no keys",
+      [(p["id"], p["active"]) for p in saved] == [("gemini", True), ("openai", False), ("grok", False)]
+      and saved[0]["model"] == "some-gemini" and saved[1]["label"] == "OpenAI"
+      and not any(k in json.dumps(saved) for k in ("in-use", "good", "from-the-terminal")))
+
+s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+app = web._QuietHTTPServer(("127.0.0.1", port), web.HearthHandler)
+threading.Thread(target=app.serve_forever, daemon=True).start()
+
+
+def post(path, body):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, json.load(e)
+
+
+SEEN.clear()
+code, got = post("/api/providers/models", {"id": "openai"})
+check("a saved provider's models are read with its saved key",
+      code == 200 and got == {"models": ["newest-chat", "older-chat"]} and SEEN[-1].get("Authorization") == "Bearer good")
+check("a provider with no key saved is not asked", post("/api/providers/models", {"id": "anthropic"})[0] == 404)
+if far:
+    code, got = post("/api/llm-endpoint", {"provider": "openai", "url": base, "key": "", "model": "", "settle": True})
+    after = web._load_settings()
+    check("switching with no key given uses the saved one, and settles on a model the provider lists",
+          code == 200 and got.get("model") == "newest-chat" and after["llm_key"] == "good"
+          and after["llm_model"] == "newest-chat" and after["provider_keys"].get("gemini") == "in-use")
+    far.shutdown()
+app.shutdown()
 srv.shutdown()
 
 print()

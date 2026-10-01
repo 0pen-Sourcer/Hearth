@@ -141,6 +141,19 @@ check("/brain lmstudio switches without asking for a key",
       "brain → lmstudio" in out and "no saved key" not in out)
 _srv.shutdown()
 
+# A key saved in the window is kept in settings.json. The terminal only looked
+# in its own file, so the same provider asked for the key a second time.
+_ws = tempfile.mkdtemp(prefix="hearth-cli-keys-")
+with open(os.path.join(_ws, "settings.json"), "w", encoding="utf-8") as f:
+    _json.dump({"llm_provider": "local", "provider_keys": {"anthropic": "saved-in-the-window"}}, f)
+code, out, _ = run([], stdin=b"/brain anthropic\n", timeout=150, home=home, extra_env={"JARVIS_WORKSPACE": _ws})
+check("/brain uses a key that was saved in the window", "brain → anthropic" in out and "no saved key" not in out)
+with open(os.path.join(_ws, "settings.json"), encoding="utf-8") as f:
+    _after = _json.load(f)
+check("and switches to that provider with it",
+      _after.get("llm_provider") == "anthropic" and _after.get("llm_key") == "saved-in-the-window"
+      and "api.anthropic.com" in _after.get("llm_url", ""))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

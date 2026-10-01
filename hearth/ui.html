@@ -428,7 +428,8 @@
   .mp-trigger .mp-tag { font-size: 10.5px; color: var(--fg-dim); white-space: nowrap; }
   .mp-trigger svg.mp-chev { flex: none; color: var(--fg-dim); transition: transform .2s var(--ease); }
   .model-picker.open .mp-trigger svg.mp-chev { transform: rotate(180deg); }
-  .mp-menu { position: fixed; z-index: 400; width: 380px; max-height: min(70vh, 560px); overflow: auto;
+  .mp-menu { position: fixed; z-index: 400; width: 380px; max-height: min(76vh, 640px); overflow: auto;
+    display: flex; flex-direction: column;
     background: var(--bg-1, var(--bg-2)); border: 1px solid var(--border); border-radius: var(--r-lg, 12px);
     box-shadow: 0 18px 50px rgba(0,0,0,.45); padding: 6px; transform-origin: top left; }
   .mp-menu[hidden] { display: none !important; }
@@ -481,6 +482,11 @@
     border: 1px solid var(--border); border-radius: var(--r); color: var(--fg); padding: 6px 9px; font: 12.5px var(--sans); outline: none;
     position: sticky; top: 0; z-index: 1; }
   .mp-find:focus { border-color: var(--accent); }
+  .mp-find.mp-all { flex: none; position: static; width: 100%; margin: 0 0 4px; padding: 8px 10px; font-size: 13px; }
+  .mp-menu:has(.mp-all) { overflow: hidden; }
+  .mp-body, .mp-hits { flex: 1; min-height: 0; overflow-y: auto; }
+  .mp-body[hidden], .mp-hits[hidden] { display: none; }
+  .mp-note { padding: 2px 10px 8px 46px; font-size: 11.5px; color: var(--fg-faint); }
   .mp-sub .mp-row { padding: 6px 10px; font-size: 12.5px; }
   .mp-sub .mp-row .mp-s { font-size: 11px; }
   .mp-sub .mp-row.cur { background: color-mix(in srgb, var(--accent) 9%, transparent); }
@@ -7936,6 +7942,7 @@ async function refreshModels() {
     const resp = await api('/api/models');
     const models = resp.models;
     const _agentBrains = resp.agent_brains || [];
+    STATE.providers = resp.providers || [];
     // Explain a sparse cloud picker (e.g. xAI 403s the model list) — toast once
     // per distinct notice so the 9s poll doesn't spam it.
     const notice = resp.notice || '';
@@ -8122,7 +8129,31 @@ function mpSync() {
     : (o && o.value) ? (o.dataset.name || _mpClean(raw).replace(/\.gguf$/i, '')) : 'No model loaded';
   tag.textContent = /●\s*online/i.test(raw) ? 'online' : /●\s*loaded/i.test(raw) ? 'loaded' : '';
 }
-function _mpRow(o, cur) {
+const MP_BADGE = '<span class="mp-badge">In use</span>';
+function _mpItem(it) {
+  return `<button type="button" class="mp-row${it.cur ? ' cur' : ''}" role="option" data-v="${esc(it.v)}"${it.off ? ' aria-disabled="true"' : ''}>
+    ${it.ico || ''}<span class="mp-txt"><span class="mp-t">${esc(it.t)}</span>${it.s ? `<span class="mp-s">${esc(it.s)}</span>` : ''}</span>${it.right || ''}</button>`;
+}
+// The arrow that opens what an agent ("agent::codex") or a saved provider
+// ("prov::anthropic") offers.
+function _mpChev(key) {
+  return `<span class="mp-more" data-more="${esc(key)}" title="Pick a model" role="button" tabindex="-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>`;
+}
+// What the menu is built from: the select's own entries, and which agent or
+// saved provider is the brain right now.
+function _mpParts() {
+  const sel = $('model-select'), loose = [], groups = [];
+  for (const node of sel.children) {
+    if (node.tagName === 'OPTGROUP') groups.push(node);
+    else if (node.value && !node.disabled && !node.hidden) loose.push(node);
+  }
+  const key = (STATE.brain || {}).providerKey || '';
+  const agent = AGENT_BRAINS[key] ? key : '';
+  const cloud = !agent && !!STATE.brain && STATE.brain.kind === 'cloud';
+  const prov = cloud ? (STATE.providers || []).find(p => p.id === key) || null : null;
+  return { sel, loose, groups, agent, cloud, prov };
+}
+function _mpRow(o, cur, prov) {
   const agent = o.dataset.agent || (AGENT_BRAINS[(STATE.brain || {}).providerKey] && cur ? STATE.brain.providerKey : '');
   const h = agent ? (HARNESS[agent] || {}) : null;
   const ico = h ? `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>`
@@ -8130,12 +8161,11 @@ function _mpRow(o, cur) {
   const t = agent && cur ? agentModelLabel(agent) : (o.dataset.name || _mpClean(o.textContent).replace(/\.gguf$/i, ''));
   const sub = (agent && cur ? _agentSub(agent) : o.dataset.sub) || (agent ? `Your ${AGENT_PLANS[agent] || ''} plan · keeps Hearth's tools` : '')
     || (cur ? (STATE.brain && STATE.brain.kind === 'cloud' ? (STATE.brain.providerLabel || 'Online') : 'Running on this PC') : '');
-  const more = agent && !o.disabled
-    ? `<span class="mp-more" data-more="${esc(agent)}" title="Pick a model" role="button" tabindex="-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>` : '';
-  const right = (cur ? `<span class="mp-badge">${STATE.brain && STATE.brain.kind === 'cloud' ? 'In use' : 'Loaded'}</span>`
+  // The model in use opens the rest of what its agent or provider has.
+  const more = agent && !o.disabled ? _mpChev('agent::' + agent) : cur && prov ? _mpChev('prov::' + prov.id) : '';
+  const right = (cur ? (STATE.brain && STATE.brain.kind === 'cloud' ? MP_BADGE : '<span class="mp-badge">Loaded</span>')
               : o.disabled && agent ? `<span class="mp-get" role="button" data-setup="${esc(agent)}">Set up</span>` : '') + more;
-  return `<button type="button" class="mp-row${cur ? ' cur' : ''}" role="option" data-v="${esc(o.value)}"${o.disabled ? ' aria-disabled="true"' : ''}>
-    ${ico}<span class="mp-txt"><span class="mp-t">${esc(t)}</span>${sub ? `<span class="mp-s">${esc(sub)}</span>` : ''}</span>${right}</button>`;
+  return _mpItem({ v: o.value, t, s: sub, cur, off: o.disabled, ico, right });
 }
 // Getting an agent onto this PC and signed in, from one dialog: its maker's
 // own installer, then its own sign-in window, then it becomes the brain.
@@ -8201,8 +8231,42 @@ function _agentSub(id) {
   const plan = `your ${AGENT_PLANS[id] || AGENT_BRAINS[id]} plan`;
   return [m && m.model && m.id === '' ? m.model : '', m && _fmtCtx(m.ctx), plan].filter(Boolean).join(' · ');
 }
+// What an agent or a saved provider offers. Kept a few minutes so the search
+// box and the dropdowns don't ask twice; switching brains clears it.
+const MP_LISTS = new Map();
+function _mpModels(key) {
+  const hit = MP_LISTS.get(key);
+  if (hit && Date.now() - hit.at < 300000) return hit.got;
+  const [kind, id] = key.split('::');
+  const got = kind === 'agent' ? api('/api/brain/agent/models?id=' + encodeURIComponent(id))
+    : api('/api/providers/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  MP_LISTS.set(key, { at: Date.now(), got });
+  got.catch(() => MP_LISTS.delete(key));
+  return got;
+}
+// The rows one of them offers. Each row says where it comes from, so the same
+// model reached through an agent's plan and through an API key can be told apart.
+async function _mpRowsOf(key) {
+  const [kind, id] = key.split('::');
+  if (kind === 'agent') {
+    const info = await _mpModels(key), h = HARNESS[id] || {};
+    const inUse = !!STATE.brain && STATE.brain.providerKey === id;
+    const chosen = (STATE.agentInfo && STATE.agentInfo.provider === id ? STATE.agentInfo.model : info.model) || '';
+    return info.models.map(m => ({
+      v: `agent::${id}::${m.id}`, t: m.label, cur: inUse && chosen === m.id,
+      s: [m.id ? '' : (m.model || ''), _fmtCtx(m.ctx), m.about && m.id ? m.about : ''].filter(Boolean).join(' · '),
+      from: `${AGENT_BRAINS[id]} · your ${AGENT_PLANS[id] || AGENT_BRAINS[id]} plan`,
+      ico: `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>` }));
+  }
+  const here = _mpParts(), p = (STATE.providers || []).find(x => x.id === id) || { label: id };
+  // The provider in use already has its list in the select.
+  const mine = !!here.prov && here.prov.id === id;
+  const ids = mine ? here.loose.map(o => o.value) : (await _mpModels(key)).models;
+  return ids.map(m => ({ v: `prov::${id}::${m}`, t: m.replace(/^models\//, ''), s: '', cur: mine && m === here.sel.value,
+                         from: `${p.label} · your API key`, ico: `<span class="mp-ico">${MP_CLOUD}</span>` }));
+}
 async function _mpToggleModels(chev) {
-  const id = chev.dataset.more, row = chev.closest('.mp-row');
+  const key = chev.dataset.more, row = chev.closest('.mp-row');
   const open = row.nextElementSibling && row.nextElementSibling.classList.contains('mp-sub') ? row.nextElementSibling : null;
   const anim = (el, from, to) => {
     if (_reduceMotion()) return Promise.resolve();
@@ -8211,33 +8275,101 @@ async function _mpToggleModels(chev) {
                       { duration: sp.duration, easing: sp.easing }).finished.catch(() => {});
   };
   if (open) { chev.classList.remove('open'); await anim(open, open.offsetHeight, 0); open.remove(); return; }
+  if (chev.dataset.busy) return;
+  chev.dataset.busy = '1';
   chev.classList.add('open');
-  let info;
-  try { info = await api('/api/brain/agent/models?id=' + encodeURIComponent(id)); } catch { chev.classList.remove('open'); return; }
-  const inUse = (STATE.brain && STATE.brain.providerKey === id);
   const box = document.createElement('div');
   box.className = 'mp-sub';
-  box.innerHTML = info.models.map(m => {
-    const cur = inUse && (info.model || '') === m.id;
-    const sub = [m.id ? '' : (m.model || ''), _fmtCtx(m.ctx), m.about && m.id ? m.about : ''].filter(Boolean).join(' · ');
-    return `<button type="button" class="mp-row${cur ? ' cur' : ''}" role="option" data-v="agent::${esc(id)}::${esc(m.id)}">
-      <span class="mp-txt"><span class="mp-t">${esc(m.label)}</span>${sub ? `<span class="mp-s">${esc(sub)}</span>` : ''}</span>${cur ? '<span class="mp-badge">In use</span>' : ''}</button>`;
-  }).join('');
-  // A long list (Cursor offers hundreds) gets a box to type in, and a height.
-  if (info.models.length > 10) {
-    const find = document.createElement('input');
-    find.className = 'mp-find'; find.placeholder = `Find one of ${info.models.length} models`;
-    find.addEventListener('click', (e) => e.stopPropagation());
-    find.addEventListener('input', () => {
-      const q = find.value.trim().toLowerCase();
-      box.querySelectorAll('.mp-row').forEach(r => { r.hidden = !!q && !r.textContent.toLowerCase().includes(q); });
-    });
-    box.prepend(find);
-    box.classList.add('long');
+  try {
+    const rows = await _mpRowsOf(key);
+    box.innerHTML = rows.map(it => _mpItem({ v: it.v, t: it.t, s: it.s, cur: it.cur, right: it.cur ? MP_BADGE : '' })).join('')
+      || '<div class="mp-empty">It lists no models.</div>';
+    // A long list (Cursor offers hundreds) gets a box to type in, and a height.
+    if (rows.length > 10) {
+      const find = document.createElement('input');
+      find.className = 'mp-find'; find.placeholder = `Find one of ${rows.length} models`;
+      find.addEventListener('input', () => {
+        const q = find.value.trim().toLowerCase();
+        box.querySelectorAll('.mp-row').forEach(r => { r.hidden = !!q && !r.textContent.toLowerCase().includes(q); });
+      });
+      box.prepend(find);
+      box.classList.add('long');
+    }
+  } catch (err) {
+    // Some providers (xAI) keep their list to themselves.
+    box.innerHTML = `<div class="mp-empty">${key.startsWith('prov::')
+      ? "It didn't give a list of its models. Choose it in Settings to type a model's name."
+      : "Couldn't get its models. " + esc(String(err.message || err).replace(/^\d+\s*/, ''))}</div>`;
   }
+  delete chev.dataset.busy;
+  if (!row.isConnected) return;
   row.after(box);
   await anim(box, 0, Math.min(box.scrollHeight, 300));
+  box.scrollIntoView({ block: 'nearest', behavior: _reduceMotion() ? 'auto' : 'smooth' });
   const f = box.querySelector('.mp-find'); if (f) f.focus({ preventScroll: true });
+}
+// The box at the top looks through everything at once: what is on this PC,
+// every installed agent's models and every saved provider's.
+let _mpAsk = 0;
+function _mpSearch(q) {
+  const menu = document.getElementById('mp-menu');
+  const body = menu.querySelector('.mp-body'), hits = menu.querySelector('.mp-hits');
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const ask = ++_mpAsk;
+  body.hidden = !!words.length; hits.hidden = !words.length;
+  if (!words.length) { hits.innerHTML = ''; return; }
+  const here = _mpParts(), local = [];
+  for (const o of here.sel.options) {
+    if (!o.value || o.disabled || o.hidden || o.dataset.agent) continue;
+    const disk = o.value.startsWith('disk::');
+    // A cloud brain's own list comes with its provider, an agent's with the agent.
+    if (!disk && (here.prov || here.agent)) continue;
+    const text = o.textContent;
+    const here_ = !disk && here.cloud;
+    local.push({ v: o.value, t: o.dataset.name || _mpClean(text).replace(/\.gguf$/i, ''),
+                 cur: !disk && o.value === here.sel.value, ico: `<span class="mp-ico">${here_ ? MP_CLOUD : MP_CHIP}</span>`,
+                 from: here_ ? (STATE.brain.providerLabel || 'Online') : 'On this PC',
+                 s: disk ? (o.dataset.sub || '').split(' · ')[0] : /●\s*loaded/i.test(text) ? 'Loaded' : '' });
+  }
+  const agents = [here.agent, ...[...here.sel.querySelectorAll('option[data-agent]')].filter(o => !o.disabled).map(o => o.dataset.agent)];
+  const keys = [...agents.filter(Boolean).map(a => 'agent::' + a), ...(STATE.providers || []).map(p => 'prov::' + p.id)];
+  const got = [local, ...keys.map(() => null)], waiting = new Set(keys);
+  const name = k => { const id = k.split('::')[1]; return AGENT_BRAINS[id] || ((STATE.providers || []).find(p => p.id === id) || {}).label || id; };
+  const paint = () => {
+    if (ask !== _mpAsk || menu.hidden) return;
+    // One heading per source. With several sources answering, each shows its
+    // first few so a long list (Cursor's) can't push the others out of sight.
+    const found = got.map(rows => (rows || []).filter(it => words.every(w => (it.t + ' ' + it.from).toLowerCase().includes(w))))
+                     .filter(rows => rows.length);
+    const cap = found.length > 1 ? 6 : 80;
+    hits.innerHTML = found.map(rows => `<div class="mp-sec">${esc(rows[0].from)}</div>`
+        + rows.slice(0, cap).map(it => _mpItem({ v: it.v, t: it.t, s: it.s, cur: it.cur, ico: it.ico, right: it.cur ? MP_BADGE : '' })).join('')
+        + (rows.length > cap ? `<div class="mp-note">${rows.length - cap} more here. Add a word to narrow it down.</div>` : '')).join('')
+      + (waiting.size ? `<div class="mp-empty">Asking ${esc([...waiting].map(name).join(', '))}…</div>`
+         : found.length ? '' : '<div class="mp-empty">No model matches that.</div>');
+  };
+  keys.forEach((k, i) => _mpRowsOf(k).then(rows => { got[i + 1] = rows; }, () => {}).then(() => { waiting.delete(k); paint(); }));
+  paint();
+}
+// A model picked from a saved provider. The one in use just changes its
+// model; another one becomes the brain, with the key saved for it.
+async function mpUseProvider(id, model) {
+  const here = _mpParts(), p = (STATE.providers || []).find(x => x.id === id);
+  if (!p) return;
+  if (here.prov && here.prov.id === id) {
+    if (!here.loose.some(o => o.value === model)) return;
+    here.sel.value = model;
+    here.sel.dispatchEvent(new Event('change'));
+    return;
+  }
+  setState(`switching to ${p.label}…`);
+  try {
+    await switchEndpoint({ provider: id, url: p.url, key: '', model });
+  } catch (err) {
+    toast(`Couldn't switch to ${p.label}`, String(err.message || err).replace(/^\d+\s*/, ''), 'err', 8000);
+    applyBrainState();
+  }
+  setState('idle');
 }
 function mpOpen() {
   const sel = $('model-select'), pick = $('model-picker-tip');
@@ -8253,8 +8385,12 @@ function mpOpen() {
       if (chev) { e.stopPropagation(); _mpToggleModels(chev); return; }
       const r = e.target.closest('.mp-row');
       if (!r || r.getAttribute('aria-disabled') === 'true') return;
+      const [kind, pid, ...rest] = r.dataset.v.split('::');
+      // A provider's own row only opens its list.
+      if (kind === 'prov' && !rest.length) { _mpToggleModels(r.querySelector('.mp-more')); return; }
       mpClose();
       if (r.classList.contains('cur')) return;
+      if (kind === 'prov') { mpUseProvider(pid, rest.join('::')); return; }
       if (r.dataset.v.startsWith('agent::') && !sel.querySelector(`option[value="${CSS.escape(r.dataset.v)}"]`)) {
         const o = document.createElement('option');
         o.value = r.dataset.v; o.hidden = true; sel.appendChild(o);
@@ -8264,19 +8400,36 @@ function mpOpen() {
       mpSync();
     });
   }
-  const curV = sel.value;
-  let html = '', loose = [];
-  for (const node of sel.children) {
-    if (node.tagName === 'OPTGROUP') {
-      const rows = [...node.children].map(o => _mpRow(o, false)).join('');
-      if (rows) html += `<div class="mp-sec">${esc(node.label)}</div>${rows}`;
-    } else if (node.value && !node.disabled) loose.push(node);
+  const here = _mpParts(), curV = sel.value;
+  let html = '';
+  for (const node of here.groups) {
+    const rows = [...node.children].map(o => _mpRow(o, false)).join('');
+    if (rows) html += `<div class="mp-sec">${esc(node.label)}</div>${rows}`;
   }
-  const current = loose.filter(o => o.value === curV);
-  const others = loose.filter(o => o.value !== curV);
-  let top = current.length ? `<div class="mp-sec">In use</div>${current.map(o => _mpRow(o, true)).join('')}` : '';
-  if (others.length) top += `<div class="mp-sec">${STATE.brain && STATE.brain.kind === 'cloud' ? 'From this provider' : 'Loaded'}</div>${others.map(o => _mpRow(o, false)).join('')}`;
-  menu.innerHTML = (top + html) || '<div class="mp-empty">No models yet. Open the Models tab to get one.</div>';
+  const current = here.loose.filter(o => o.value === curV);
+  const others = here.loose.filter(o => o.value !== curV);
+  let top = current.length ? `<div class="mp-sec">In use</div>${current.map(o => _mpRow(o, true, here.prov)).join('')}` : '';
+  // A saved provider keeps its other models folded under its own row.
+  if (others.length && !here.prov) top += `<div class="mp-sec">${here.cloud ? 'From this provider' : 'Loaded'}</div>${others.map(o => _mpRow(o, false)).join('')}`;
+  const provs = STATE.providers || [];
+  if (provs.length) {
+    html += '<div class="mp-sec">Your providers</div>' + provs.map(p => _mpItem({
+      v: 'prov::' + p.id, t: p.label, s: p === here.prov ? 'Your API key · in use' : 'Your API key',
+      ico: `<span class="mp-ico">${MP_CLOUD}</span>`, right: _mpChev('prov::' + p.id) })).join('');
+  }
+  menu.innerHTML = (top + html)
+    ? `<input class="mp-find mp-all" type="search" placeholder="Search every model" aria-label="Search every model" autocomplete="off" spellcheck="false">
+       <div class="mp-body">${top + html}</div><div class="mp-hits" hidden></div>`
+    : '<div class="mp-empty">No models yet. Open the Models tab to get one.</div>';
+  const all = menu.querySelector('.mp-all');
+  if (all) {
+    all.addEventListener('input', () => _mpSearch(all.value));
+    all.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const hit = menu.querySelector('.mp-hits .mp-row:not(.cur)');
+      if (hit) hit.click();
+    });
+  }
   const r = pick.getBoundingClientRect();
   menu.style.left = Math.max(8, Math.min(r.left, innerWidth - 388)) + 'px';
   menu.style.top = (r.bottom + 6) + 'px';
@@ -8289,7 +8442,7 @@ function mpOpen() {
     menu.animate([{ opacity: 0, transform: 'translateY(-4px) scale(.985)' }, { opacity: 1, transform: 'none' }],
                  { duration: sp.duration, easing: sp.easing });
   }
-  const first = menu.querySelector('.mp-row.cur') || menu.querySelector('.mp-row:not([aria-disabled="true"])');
+  const first = all || menu.querySelector('.mp-row.cur') || menu.querySelector('.mp-row:not([aria-disabled="true"])');
   if (first) first.focus({ preventScroll: true });
 }
 function mpClose() {
@@ -8313,9 +8466,10 @@ document.addEventListener('keydown', (e) => {
   if (!menu || menu.hidden) return;
   if (e.key === 'Escape') { mpClose(); $('mp-trigger').focus(); e.preventDefault(); return; }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    const rows = [...menu.querySelectorAll('.mp-row:not([aria-disabled="true"])')];
+    const rows = [...menu.querySelectorAll('.mp-row:not([aria-disabled="true"])')].filter(r => r.offsetParent);
     const i = rows.indexOf(document.activeElement);
-    const n = rows[(i + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length];
+    const n = i < 0 ? rows[e.key === 'ArrowDown' ? 0 : rows.length - 1]
+      : rows[(i + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length];
     if (n) n.focus();
     e.preventDefault();
   }
@@ -8340,6 +8494,7 @@ function agentModelLabel(id) {
 
 // Only the provider changes: the local address stays for helpers.
 function agentBrainOn(id) {
+  MP_LISTS.clear();
   const name = AGENT_BRAINS[id];
   STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: id });
   Object.assign(STATE.brain, deriveBrainKind(), { busy: false, loaded: true,
@@ -8350,6 +8505,82 @@ function agentBrainOn(id) {
         `On your ${AGENT_PLANS[id] || name} plan. Helpers use your local model when one is loaded.`, 'ok', 5000);
   applyBrainState();
   refreshModels();
+}
+// Point JARVIS at another endpoint and bring every view in step. Settings and
+// the model menu both switch through here.
+async function switchEndpoint(body) {
+  const r = await api('/api/llm-endpoint', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(r.error || 'unknown error');
+  if (AGENT_BRAINS[body.provider]) { agentBrainOn(body.provider); return r; }
+  MP_LISTS.clear();
+  await saveSetting('llm_provider', body.provider);
+  await saveSetting('llm_url', body.url);
+  // With no key given, the one saved for this provider was used and stays.
+  if (body.key || body.provider === 'local') await saveSetting('llm_key', body.key);
+  if (r.model) body.model = r.model;
+  await saveSetting('llm_model', body.model);
+  // Honest toast - tell the user what's ACTUALLY serving, not
+  // just "Switched brain". For local: probe shows LM Studio vs
+  // built-in vs nothing. Saves them from chatting into the void.
+  if (body.provider === 'local' && r.local_probe) {
+    if (r.local_probe.kind === 'lmstudio') {
+      toast('Switched to local · LM Studio', 'Detected LM Studio on ' + body.url + ' - preferred over built-in', 'ok', 5000);
+    } else if (r.local_probe.kind === 'builtin') {
+      toast('Switched to local · built-in', 'Connected to Hearth\'s built-in server', 'ok', 4000);
+    } else if (r.local_probe.kind === 'remote') {
+      toast('That URL is not local', body.url + ' is a remote/cloud endpoint, not a local server. Pick the matching cloud provider above, or set a localhost URL.', 'warn', 9000);
+    } else {
+      toast('Switched to local · nothing serving', 'Nothing on ' + body.url + '. Start LM Studio or boot a model in the Models tab.', 'warn', 8000);
+    }
+  } else {
+    const _p = (STATE.providers || []).find(x => x.id === body.provider);
+    toast('Switched brain', 'Next message uses ' + (body.provider === 'local' ? 'your local server'
+          : [(_p && _p.label) || body.provider, body.model].filter(Boolean).join(' · ')), 'ok');
+  }
+  // Confirm any phone bridge that was respawned onto the new brain, so
+  // it's clear the Telegram/Discord bot won't keep hitting the old one.
+  if (Array.isArray(r.restarted_bridges) && r.restarted_bridges.length) {
+    const _names = r.restarted_bridges.map(c => c[0].toUpperCase() + c.slice(1)).join(', ');
+    toast('Reconnected on new brain', _names + ' restarted so it uses ' + (body.provider || 'this brain'), 'ok', 5000);
+  }
+  // Optimistically sync STATE.settings so the very next refreshModels
+  // sees the new provider (and gates the eject button) without waiting
+  // for a poll. Switching to local also clears the sticker so a cloud
+  // model (e.g. grok-4.3) doesn't linger as the "active model" - it
+  // repopulates with the real local model, or stays empty if none.
+  STATE.settings = Object.assign({}, STATE.settings || {},
+    { llm_provider: body.provider, llm_url: body.url, llm_model: body.model });
+  // Endpoint just changed — keep STATE.endpoint in step so deriveBrainKind
+  // reads the new provider immediately (don't wait for the refreshState poll).
+  STATE.endpoint = body.url || STATE.endpoint;
+  // Reset the brain to a clean slate for the new provider so a stale
+  // model (e.g. cloud grok-4.3) can never linger after switching.
+  // refreshState/refreshModels below repopulate the real active model.
+  STATE.brain.busy = false;
+  STATE.brain.loaded = false;
+  STATE.brain.modelId = body.model || '';
+  STATE.brain.modelName = body.model ? body.model.split(/[\/\\]/).pop() : '-';
+  STATE.brain.ctxTotal = 0;
+  STATE.brain.ctxEffective = 0;
+  STATE.loadedModel = null;
+  const _k = deriveBrainKind();
+  STATE.brain.kind = _k.kind;
+  STATE.brain.providerKey = _k.providerKey;
+  STATE.brain.providerLabel = _k.providerLabel;
+  // For cloud, the picked model IS the active one.
+  if (_k.kind === 'cloud' && body.model) { STATE.brain.loaded = true; STATE.loadedModel = { id: body.model, state: 'loaded' }; }
+  // Reset the ring so the previous brain's % doesn't carry over.
+  const _rw = document.getElementById('ctx-ring-wrap');
+  if (_rw) { _rw.hidden = true; _rw.classList.remove('hot','warn','compacting'); }
+  applyBrainState();
+  refreshModels(); refreshState(); refreshCtxBudget().catch(() => {});
+  // Refresh brand-sub label so the "Hearth · local" / "· Grok"
+  // header updates immediately without waiting for next settings poll.
+  refreshSettings().catch(() => {});
+  return r;
 }
 $('model-select').addEventListener('change', async (e) => {
   const id = e.target.value;
@@ -8419,7 +8650,7 @@ $('model-select').addEventListener('change', async (e) => {
       // doesn't overwrite the user's pick with the provider's default.
       STATE.settings = Object.assign({}, STATE.settings || {}, { llm_model: displayId });
       await api('/api/settings', {
-        method: 'POST', headers: {'Content-Type':'antml/json'.replace('antml','application')},
+        method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ llm_model: displayId }),
       });
     } catch {}
@@ -12715,81 +12946,8 @@ async function refreshSettings() {
         const prevBrand = brandSub ? brandSub.textContent : '';
         if (brandSub) brandSub.textContent = `· switching to ${provLabel}…`;
         try {
-          const r = await api('/api/llm-endpoint', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          if (r.ok && AGENT_BRAINS[body.provider]) {
-            agentBrainOn(body.provider);
-          } else if (r.ok) {
-            await saveSetting('llm_provider', body.provider);
-            await saveSetting('llm_url', body.url);
-            await saveSetting('llm_key', body.key);
-            if (r.model && r.model !== body.model) { body.model = r.model; llmMdl.value = r.model; }
-            await saveSetting('llm_model', body.model);
-            // Honest toast - tell the user what's ACTUALLY serving, not
-            // just "Switched brain". For local: probe shows LM Studio vs
-            // built-in vs nothing. Saves them from chatting into the void.
-            if (body.provider === 'local' && r.local_probe) {
-              if (r.local_probe.kind === 'lmstudio') {
-                toast('Switched to local · LM Studio', 'Detected LM Studio on ' + body.url + ' - preferred over built-in', 'ok', 5000);
-              } else if (r.local_probe.kind === 'builtin') {
-                toast('Switched to local · built-in', 'Connected to Hearth\'s built-in server', 'ok', 4000);
-              } else if (r.local_probe.kind === 'remote') {
-                toast('That URL is not local', body.url + ' is a remote/cloud endpoint, not a local server. Pick the matching cloud provider above, or set a localhost URL.', 'warn', 9000);
-              } else {
-                toast('Switched to local · nothing serving', 'Nothing on ' + body.url + '. Start LM Studio or boot a model in the Models tab.', 'warn', 8000);
-              }
-            } else {
-              toast('Switched brain', 'Next message uses ' + (body.provider === 'local' ? 'your local server'
-                    : AGENT_BRAINS[body.provider] || body.provider), 'ok');
-            }
-            // Confirm any phone bridge that was respawned onto the new brain, so
-            // it's clear the Telegram/Discord bot won't keep hitting the old one.
-            if (Array.isArray(r.restarted_bridges) && r.restarted_bridges.length) {
-              const _names = r.restarted_bridges.map(c => c[0].toUpperCase() + c.slice(1)).join(', ');
-              toast('Reconnected on new brain', _names + ' restarted so it uses ' + (body.provider || 'this brain'), 'ok', 5000);
-            }
-            // Optimistically sync STATE.settings so the very next refreshModels
-            // sees the new provider (and gates the eject button) without waiting
-            // for a poll. Switching to local also clears the sticker so a cloud
-            // model (e.g. grok-4.3) doesn't linger as the "active model" - it
-            // repopulates with the real local model, or stays empty if none.
-            STATE.settings = Object.assign({}, STATE.settings || {},
-              { llm_provider: body.provider, llm_url: body.url, llm_model: body.model });
-            // Endpoint just changed — keep STATE.endpoint in step so deriveBrainKind
-            // reads the new provider immediately (don't wait for the refreshState poll).
-            STATE.endpoint = body.url || STATE.endpoint;
-            // Reset the brain to a clean slate for the new provider so a stale
-            // model (e.g. cloud grok-4.3) can never linger after switching.
-            // refreshState/refreshModels below repopulate the real active model.
-            STATE.brain.busy = false;
-            STATE.brain.loaded = false;
-            STATE.brain.modelId = body.model || '';
-            STATE.brain.modelName = body.model ? body.model.split(/[\/\\]/).pop() : '-';
-            STATE.brain.ctxTotal = 0;
-            STATE.brain.ctxEffective = 0;
-            STATE.loadedModel = null;
-            const _k = deriveBrainKind();
-            STATE.brain.kind = _k.kind;
-            STATE.brain.providerKey = _k.providerKey;
-            STATE.brain.providerLabel = _k.providerLabel;
-            // For cloud, the picked model IS the active one.
-            if (_k.kind === 'cloud' && body.model) { STATE.brain.loaded = true; STATE.loadedModel = { id: body.model, state: 'loaded' }; }
-            // Reset the ring so the previous brain's % doesn't carry over.
-            const _rw = document.getElementById('ctx-ring-wrap');
-            if (_rw) { _rw.hidden = true; _rw.classList.remove('hot','warn','compacting'); }
-            applyBrainState();
-            refreshModels(); refreshState(); refreshCtxBudget().catch(() => {});
-            // Refresh brand-sub label so the "Hearth · local" / "· Grok"
-            // header updates immediately without waiting for next settings poll.
-            refreshSettings().catch(() => {});
-            // Auto-populate the model dropdown now that the brain is live.
-            try { await loadModelDropdownForBrain(); } catch {}
-          } else {
-            toast('Apply failed', r.error || 'unknown error', 'err');
-            if (brandSub) brandSub.textContent = prevBrand;
-          }
+          await switchEndpoint(body);
+          llmMdl.value = body.model;
         } catch (e) {
           toast('Apply failed', e.message, 'err');
           if (brandSub) brandSub.textContent = prevBrand;

@@ -275,21 +275,27 @@ def _probe_live_model(url: str, key: str = "") -> Optional[str]:
 
 
 def _read_brain_key(provider: str) -> str:
-    """Look up a saved cloud key from ~/Jarvis/brain_keys.json.
-    File shape: {"<provider>": {"url": ..., "key": "<api-key>", "model": ...}}
-    Returns '' if no key for that provider. Mirrors what /brain reads/writes."""
+    """Look up a saved cloud key: ~/Jarvis/brain_keys.json first (what /brain
+    writes, shaped {"<provider>": {"url": ..., "key": "<api-key>", "model": ...}}),
+    then the keys the window keeps in settings.json, so a key entered in either
+    place works in both. Returns '' if there is none for that provider."""
     if not provider or provider in ("local", "lmstudio", "builtin"):
         return ""
-    try:
-        import json as _json
-        p = os.path.join(WORKSPACE, "brain_keys.json")
-        if not os.path.isfile(p):
-            return ""
-        with open(p, "r", encoding="utf-8") as f:
-            data = _json.load(f) or {}
-        return (data.get(provider) or {}).get("key", "") or ""
-    except Exception:
-        return ""
+    import json as _json
+
+    def _file(name: str) -> dict:
+        try:
+            with open(os.path.join(WORKSPACE, name), "r", encoding="utf-8") as f:
+                return _json.load(f) or {}
+        except Exception:
+            return {}
+    key = (_file("brain_keys.json").get(provider) or {}).get("key", "")
+    if not key:
+        s = _file("settings.json")
+        if (s.get("llm_provider") or "").strip().lower() == provider:
+            key = s.get("llm_key") or ""
+        key = key or (s.get("provider_keys") or {}).get(provider, "")
+    return str(key or "").strip()
 
 
 _S_URL, _S_KEY, _S_MODEL, _S_PROV = _read_settings_endpoint()
@@ -2491,10 +2497,10 @@ class JarvisCLI:
                 else:
                     print(f"\n{C_BOT}Current brain:{C_RESET} {C_TOOL}{provider_label}{C_RESET}  "
                           f"{C_DIM}({self.current_model} via {LOCAL_API_BASE}){C_RESET}\n")
-                saved_keys = _load_keys()
-                if saved_keys:
-                    have = sorted(k for k in saved_keys if saved_keys[k].get("key"))
-                    print(f"{C_DIM}Saved keys: {', '.join(have) if have else '(none)'}{C_RESET}")
+                from hearth.headless import PROVIDERS as _known
+                have = sorted(p for p in {*_known, *_load_keys()} if _read_brain_key(p))
+                if have:
+                    print(f"{C_DIM}Saved keys: {', '.join(have)}{C_RESET}")
                 print(f"\n{C_BOT}Switch with:{C_RESET}")
                 print(f"  {C_TOOL}/brain local{C_RESET}                     auto: whatever's at localhost:1234")
                 print(f"  {C_TOOL}/brain lmstudio{C_RESET}                  use LM Studio (download.lmstudio.ai)")
@@ -2502,6 +2508,7 @@ class JarvisCLI:
                 print(f"  {C_TOOL}/brain grok [api-key]{C_RESET}            xAI Grok       (key optional if saved)")
                 print(f"  {C_TOOL}/brain gemini [api-key]{C_RESET}          Google Gemini  (key optional if saved)")
                 print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")
+                print(f"  {C_TOOL}/brain anthropic [api-key]{C_RESET}       Anthropic      (key optional if saved)")
                 print(f"  {C_TOOL}/brain openrouter [api-key]{C_RESET}      OpenRouter     (key optional if saved)")
                 print(f"  {C_TOOL}/brain groq [api-key]{C_RESET}            Groq           (very fast, paid tier)")
                 print(f"  {C_TOOL}/brain custom <url> <api-key>{C_RESET}    any OpenAI-compatible server")
@@ -2509,7 +2516,8 @@ class JarvisCLI:
                 print(f"  {C_TOOL}/brain codex{C_RESET}                     Codex on this PC, your ChatGPT plan")
                 print(f"  {C_TOOL}/brain cursor{C_RESET}                    Cursor's agent on this PC, your Cursor plan")
                 print(f"  {C_TOOL}/brain forget <provider>{C_RESET}         delete a saved key")
-                print(f"\n{C_DIM}Keys saved to ~/Jarvis/brain_keys.json (gitignored, 0600 on POSIX).{C_RESET}\n")
+                print(f"\n{C_DIM}Keys saved to ~/Jarvis/brain_keys.json (gitignored, 0600 on POSIX). "
+                      f"A key saved in the window works here too.{C_RESET}\n")
                 return True
 
             provider = parts[1].strip().lower()
@@ -2583,15 +2591,17 @@ class JarvisCLI:
             except Exception:
                 _bport = 1234
             _LOCAL = ("local", "lmstudio", "builtin")
+            # Where each cloud provider answers is written down once, in
+            # headless. The model beside it is only a first guess.
+            from hearth.headless import PROVIDERS as _known
+            _first_guess = {"grok": "grok-4.3", "gemini": "gemini-2.5-flash", "openai": "gpt-4o-mini",
+                            "anthropic": "claude-sonnet-5-5", "openrouter": "anthropic/claude-3.5-sonnet",
+                            "groq": "openai/gpt-oss-120b"}
             presets_url_model = {
                 "local":      ("http://localhost:1234/v1", ""),
                 "lmstudio":   ("http://localhost:1234/v1", ""),
                 "builtin":    (f"http://localhost:{_bport}/v1", ""),
-                "grok":       ("https://api.x.ai/v1",       "grok-4.3"),
-                "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash"),
-                "openai":     ("https://api.openai.com/v1", "gpt-4o-mini"),
-                "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-3.5-sonnet"),
-                "groq":       ("https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
+                **{p: (u, _first_guess.get(p, "")) for p, (_label, u) in _known.items()},
             }
 
             if provider == "custom":
@@ -2616,8 +2626,7 @@ class JarvisCLI:
                 if arg:
                     key = arg  # user provided new key; this also UPDATES the saved one
                 else:
-                    saved_entry = saved_keys.get(provider) or {}
-                    key = saved_entry.get("key", "")
+                    key = _read_brain_key(provider)
                     if not key and provider not in _LOCAL:
                         print(f"{C_ERR}no saved key for {provider}. Use: /brain {provider} <api-key>{C_RESET}")
                         print(f"{C_DIM}(saved next time; type just /brain {provider} after that){C_RESET}")
@@ -2636,7 +2645,7 @@ class JarvisCLI:
                         model_hint = settled
             else:
                 print(f"{C_ERR}Unknown provider {provider!r}. Try: local, lmstudio, builtin, "
-                      f"grok, gemini, openai, openrouter, custom, forget.{C_RESET}")
+                      f"{', '.join(_known)}, custom, forget.{C_RESET}")
                 return True
 
             # Mutate the runtime + env so the next chat call picks up the new

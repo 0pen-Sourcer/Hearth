@@ -244,6 +244,18 @@ def _openrouter_catalog_context(model_id: str) -> Optional[int]:
         return None
 
 
+# The cloud providers Hearth knows by name: where each one answers, and what
+# to call it.
+PROVIDERS = {
+    "anthropic": ("Anthropic", "https://api.anthropic.com/v1/"),
+    "openai": ("OpenAI", "https://api.openai.com/v1"),
+    "gemini": ("Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/"),
+    "grok": ("xAI Grok", "https://api.x.ai/v1"),
+    "openrouter": ("OpenRouter", "https://openrouter.ai/api/v1"),
+    "groq": ("Groq", "https://api.groq.com/openai/v1"),
+}
+
+
 def model_list_request(base: str, key: str = ""):
     """Where a server lists its models, and the headers that list needs.
 
