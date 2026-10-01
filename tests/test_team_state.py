@@ -43,7 +43,8 @@ def write(aid, *recs):
 start = lambda persona, name="": {"kind": "start", "persona": persona, "name": name,
                                   "prompt": "look into it", "ts": "2026-09-30T10:00:00"}
 write("sub_1_busy", start("researcher", "Ada"),
-      {"kind": "assistant_tool_call", "content": "", "calls": [{"name": "web_search"}, {"name": "web_fetch"}]},
+      {"kind": "assistant_tool_call", "content": "", "calls": [{"name": "web_search", "args": '{"query": "local tts"}'},
+                                                                 {"name": "web_fetch", "args": '{"url": "https://www.example.org/a/b"}'}]},
       {"kind": "tool_result", "name": "web_search", "chars": 10, "preview": "results"})
 write("sub_2_think", start("coder"),
       {"kind": "assistant_tool_call", "content": "", "calls": [{"name": "read_file"}]},
@@ -65,6 +66,10 @@ st = {a["id"]: a for a in subagents.team_state()}
 check("a running agent mid-tool shows the tool it is on",
       st["sub_1_busy"]["status"] == "working" and st["sub_1_busy"]["activity"] == "tool"
       and st["sub_1_busy"]["tool"] == "web_fetch")
+check("and what that tool is pointed at", st["sub_1_busy"].get("what") == "example.org")
+check("a file is named without its folders, and a cut-off call still reads",
+      subagents._pointed_at('{"path": "C:\\Users\\me\\proj\\SPEC.md", "content": "half a fi') == "SPEC.md"
+      and subagents._pointed_at("{}") == "")
 check("its name and role come through", st["sub_1_busy"]["name"] == "Ada" and st["sub_1_busy"]["persona"] == "researcher")
 check("a running agent between tools is thinking",
       st["sub_2_think"]["status"] == "working" and st["sub_2_think"]["activity"] == "thinking")

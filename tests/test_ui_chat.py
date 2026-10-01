@@ -178,6 +178,22 @@ with sync_playwright() as pw:
       me.holdUntil = 0; me.path = [[1, 1]];
       out.walkingWord = roomMainIdleWord(me);
       me.path = [];
+      // Speaking, it faces the room even where it would be looking out of a window.
+      ROOM.intent = { spot: 'windowSeat', pose: 'gaze', until: Date.now() + 9000 };
+      me.pos = [...ROOM.spots.windowSeat]; me.holdUntil = 0;
+      ROOM.says.delete('__main');
+      await wait(300);
+      out.gazing = me.goal.pose;
+      roomSay('__main', 'Here is what I found.', 3000);
+      await wait(300);
+      out.speaking = me.goal.pose;
+      ROOM.intent = null;
+      // The app loading or ejecting a model is not JARVIS thinking.
+      ROOM.says.delete('__main');
+      out.lines = ['loading model…', 'ejecting…', 'ready', 'thinking…'].map(st => { setState(st); return roomMainLine(); });
+      setState('idle');
+      out.helperLine = typeof roomHelperLine === 'function'
+        && roomHelperLine({ status: 'working', activity: 'tool', tool: 'read_file', what: 'SPEC.md' });
       showView('chat');
       out.stripBack = !document.getElementById('view-team').contains(strip);
       return out;
@@ -193,6 +209,12 @@ with sync_playwright() as pw:
     check("what it recalls comes to mind out loud", room["recalled"] == "Ah… operating system windows.")
     check("it answers where it stands, and the card says where it is, not where it is headed",
           room["holds"] and room["word"] == "right here" and room["walkingWord"] == "on the way")
+
+    check(f"it looks out of the window with its back turned, and turns to the room to speak {room['gazing'], room['speaking']}",
+          room["gazing"] == "gaze" and room["speaking"] == "idle")
+    check("a working helper's tag says what it has in its hands", room["helperLine"] == "Reading SPEC.md")
+    check(f"loading or ejecting a model doesn't show as thinking {room['lines']}",
+          room["lines"] == ["Waking up…", "", "", "Thinking…"])
 
     stats = pg.evaluate("""() => {
       const l = makeStatsLine({ model: 'F:\\\\Models\\\\Ornith-1.5-9B-Q4_K_M.gguf', decode_tps: 26, duration_ms: 4200 });

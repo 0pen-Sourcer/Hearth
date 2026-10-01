@@ -266,13 +266,31 @@ def list_subagent_activity(limit: int = 50) -> List[Dict[str, Any]]:
 _TEAM_CACHE: Dict[str, Tuple[Tuple[float, int], Dict[str, Any]]] = {}
 
 
+_POINTED = re.compile(r'"(file_path|path|url|query|pattern|command|topic|name)"\s*:\s*"((?:[^"\\]|\\.)*)')
+
+
+def _pointed_at(args: Any) -> str:
+    """The file, page, search or command a tool call is about, short enough
+    for a label. `args` is the call's JSON, which may be cut off."""
+    m = _POINTED.search(args if isinstance(args, str) else json.dumps(args or {}))
+    if not m:
+        return ""
+    key, val = m.group(1), m.group(2).replace("\\\\", "/").replace('\\"', '"').replace("\\", "/").strip()
+    if key in ("file_path", "path"):
+        val = val.rstrip("/").rsplit("/", 1)[-1]
+    elif key == "url":
+        val = re.sub(r"^https?://(www\.)?", "", val).split("/", 1)[0]
+    return val if len(val) <= 42 else val[:41] + "…"
+
+
 def _read_agent(p: Path) -> Dict[str, Any]:
     """What one transcript says about its agent: who it is, what it is doing
     right now, and how it ended if it has."""
     info: Dict[str, Any] = {"id": p.stem, "persona": "", "name": "", "runtime": "", "prompt": "",
                             "ended": None, "tools_used": 0, "activity": "thinking",
-                            "tool": "", "blocked": "", "preview": "", "started": ""}
+                            "tool": "", "what": "", "blocked": "", "preview": "", "started": ""}
     pending: List[str] = []
+    whats: List[str] = []
     try:
         with p.open("r", encoding="utf-8") as f:
             for ln in f:
@@ -289,12 +307,14 @@ def _read_agent(p: Path) -> Dict[str, Any]:
                     info["started"] = rec.get("ts") or ""
                 elif k == "assistant_tool_call":
                     pending = [c.get("name") or "" for c in rec.get("calls") or []]
+                    whats = [_pointed_at(c.get("args")) for c in rec.get("calls") or []]
                     if rec.get("content"):
                         info["preview"] = str(rec["content"])[:240]
                 elif k == "tool_result":
                     info["tools_used"] += 1
                     if pending:
                         pending.pop(0)
+                        whats[:1] = []
                     prev = rec.get("preview") or ""
                     if (prev.startswith("(not run:") and "permission" in prev) or                             "requested permissions" in prev:
                         info["blocked"] = rec.get("name") or ""
@@ -308,6 +328,7 @@ def _read_agent(p: Path) -> Dict[str, Any]:
         pass
     if pending:
         info["activity"], info["tool"] = "tool", pending[0]
+        info["what"] = whats[0] if whats else ""
     return info
 
 

@@ -941,6 +941,10 @@
   .tm-say { position: absolute; transform: translate(-50%, calc(-100% - 26px)); max-width: 260px; pointer-events: none;
     background: var(--bg-1); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 12px;
     padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
+  .tm-say.doing { transform: translate(-50%, calc(-100% - 22px)); max-width: 210px; padding: 3px 8px; border-radius: 8px;
+    font: 11px/1.4 var(--mono); color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    box-shadow: 0 4px 12px -8px rgba(0,0,0,.5); }
+  .tm-say.doing::after { display: none; }
   .tm-say::after { content: ''; position: absolute; left: calc(50% + var(--tail, 0px)); bottom: -6px; width: 10px; height: 10px; margin-left: -5px;
     background: var(--bg-1); border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); transform: rotate(45deg); }
   .tm-compose { display: flex; gap: 8px; margin: 10px 24px 16px; }
@@ -18008,8 +18012,9 @@ const ROOM = {
   desks: [[330, 648], [610, 648], [900, 648], [1190, 648], [330, 886], [610, 886], [900, 886], [1190, 886]],
   spots: {
     door: [96, 905], fire: [760, 470], fireSide: [868, 478], hearthside: [640, 492], shelfL: [410, 398], shelfR: [1122, 398],
-    board: [178, 525], windowSeat: [1392, 442], coffee: [1362, 650], windowL: [182, 372], rug: [700, 478],
+    board: [228, 480], windowSeat: [1316, 488], coffee: [1350, 650], windowL: [296, 430], rug: [700, 478],
   },
+  fire: [770, 330], gone: new Set(), chatAt: 0,
   aisleY: 722, aisleTop: 492, aisleX: [186, 470, 755, 1045, 1352],
 };
 // SEAT_DY sets where a seated worker sorts (just in front of the desk);
@@ -18107,19 +18112,37 @@ function roomSeat(p) {
 }
 // What JARVIS is doing picks the place: reading at a shelf, writing at a free
 // desk, pinning a note to the board, pacing while it thinks.
-const MAIN_IDLE = [['fire', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfR', 'read'], ['hearthside', 'gaze']];
+const MAIN_IDLE = [['fire', 'gaze'], ['fire', 'think'], ['windowSeat', 'gaze'], ['windowSeat', 'coffee'], ['coffee', 'coffee'],
+                   ['shelfR', 'read'], ['shelfL', 'read'], ['hearthside', 'gaze'], ['hearthside', 'coffee'], ['rug', 'stretch'],
+                   ['windowL', 'gaze'], ['board', 'think']];
+const LEISURE = [['hearthside', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfL', 'read'], ['windowL', 'gaze'],
+                 ['shelfR', 'read'], ['fireSide', 'coffee'], ['rug', 'stretch'], ['coffee', 'idle'], ['hearthside', 'coffee'], ['fireSide', 'idle']];
 const MAIN_IDLE_WORDS = { fire: 'by the fire', windowSeat: 'at the window', coffee: 'making coffee', shelfR: 'reading', hearthside: 'by the hearth',
-                         shelfL: 'reading', rug: 'stretching' };
+                         shelfL: 'reading', rug: 'stretching', windowL: 'at the window', board: 'at the board' };
+// One entry of a list for this stretch of time. Stepping by 5 walks through
+// both lists (12 and 11 long) whole before repeating, and no two entries five
+// apart share a place.
+function roomPick(list, seed, period) {
+  return list[(Math.floor(Date.now() / period) * 5 + seed) % list.length];
+}
 function roomMainIdleWord(p) {
   // Where it is, not where it is headed: "making coffee" is for the counter.
   if (p.path && p.path.length) return 'on the way';
   if (p.holdUntil > Date.now()) return 'right here';
   if (ROOM.intent && ROOM.intent.until > Date.now()) return MAIN_IDLE_WORDS[ROOM.intent.spot] || 'around';
-  return MAIN_IDLE_WORDS[MAIN_IDLE[Math.floor(Date.now() / 45000 + p.seed) % MAIN_IDLE.length][0]];
+  return MAIN_IDLE_WORDS[roomPick(MAIN_IDLE, p.seed, 45000)[0]];
+}
+// Working on a turn. Loading or ejecting a model, "ready" and the like are
+// the app's business, not JARVIS thinking.
+function roomMainBusy() {
+  return /^(thinking|calling|writing|processing|compacting|transcribing)/.test(String(window._mainState || ''));
+}
+function roomHasBrain() {
+  return !!(STATE.loadedModel && STATE.loadedModel.id) || !!(STATE.brain && STATE.brain.kind && STATE.brain.kind !== 'local');
 }
 function roomMainGoal(p) {
   const ms = String(window._mainState || 'idle');
-  const busy = !/idle/.test(ms);
+  const busy = roomMainBusy();
   const now = Date.now();
   if (busy && !p.wasBusy) { p.turn = (p.turn || 0) + 1; p.desk = null; p.pace = null; }
   // The answer is given where it was worked out. It doesn't walk back to a
@@ -18131,7 +18154,7 @@ function roomMainGoal(p) {
   if (ROOM.intent && ROOM.intent.until > now) return { at: ROOM.spots[ROOM.intent.spot], pose: ROOM.intent.pose };
   if (!busy) {
     if (p.holdUntil > now) return { at: p.holdAt || p.pos, pose: 'idle' };
-    const [spot, pose] = MAIN_IDLE[Math.floor(now / 45000 + p.seed) % MAIN_IDLE.length];
+    const [spot, pose] = roomPick(MAIN_IDLE, p.seed, 45000);
     return { at: ROOM.spots[spot], pose };
   }
   const tool = (ms.match(/calling ([a-z_]+)/) || [])[1] || '';
@@ -18158,6 +18181,7 @@ function roomMemoryHint(name, result) {
   const m = /^##\s+([^\s(]+)/m.exec(String(result || ''));
   if (m) roomSay('__main', 'Ah… ' + m[1].replace(/[-_]+/g, ' ') + '.', 3400);
 }
+const ROOM_STAY = 150000;
 function roomGoal(p, a) {
   // Where the person should be and what they are doing, from real state.
   if (a.role === 'main') return roomMainGoal(p);
@@ -18176,18 +18200,22 @@ function roomGoal(p, a) {
     return { at: seat, pose: 'type', seated: true };
   }
   if (a.status === 'failed') return { at: beside, pose: 'raise' };
-  if (a.status === 'stopped') return { at: beside, pose: 'idle' };
   const since = Date.now() - (p.doneAt || Date.now());
+  if (a.status === 'stopped') return since > 20000 ? { at: ROOM.spots.door, pose: 'idle', leave: true } : { at: beside, pose: 'idle' };
   if (since < 2600) return { at: p.pos, pose: 'stretch' };
   // A finished helper reports to JARVIS before it does anything else.
   if (since < 12000 && !p.reported) return { at: byMain, pose: 'idle', report: true };
-  const leisure = [['hearthside', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'coffee'], ['shelfL', 'read'], ['windowL', 'gaze'], ['shelfR', 'read']];
-  const slot = Math.floor((Date.now() + p.seed * 7000) / 18000);
-  const [spot, pose] = leisure[(slot + p.seed) % leisure.length];
+  // The job is done and reported: a while by the fire or the coffee, then home.
+  if (since > ROOM_STAY) return { at: ROOM.spots.door, pose: 'idle', leave: true };
+  const [spot, pose] = roomPick(LEISURE, p.seed, 24000);
   return { at: ROOM.spots[spot], pose, spread: true };
 }
 function roomSync(list) {
-  const want = list.filter(a => ['working', 'done', 'failed', 'stopped'].includes(a.status)).slice(0, 8);
+  // Someone who finished a while ago has gone home; they are still in the list.
+  const old = a => a.status !== 'working' && a.status !== 'failed' && !ROOM.people.has(a.id)
+    && Date.now() / 1000 - (a.updated || 0) > ROOM_STAY / 1000;
+  const want = list.filter(a => ['working', 'done', 'failed', 'stopped'].includes(a.status)
+    && !ROOM.gone.has(a.id) && !old(a)).slice(0, 8);
   want.push({ id: '__main', role: 'main', persona: 'main', name: (typeof _agentName === 'function' && _agentName()) || 'JARVIS',
               status: 'working', runtime: mainBrainMark() });
   const ids = new Set(want.map(a => a.id));
@@ -18205,8 +18233,9 @@ function roomSync(list) {
       }
       ROOM.people.set(a.id, p);
     }
-    if (a.status === 'done' && p.agent && p.agent.status !== 'done') p.doneAt = Date.now();
-    if (a.status === 'done' && !p.doneAt) {
+    if (a.status !== 'working' && p.agent && p.agent.status === 'working') p.doneAt = Date.now();
+    if (a.status === 'working') ROOM.gone.delete(a.id);
+    if (a.status !== 'working' && !p.doneAt) {
       p.doneAt = Date.now() - 5000;
       // Finished before the room was open: nothing new to report.
       p.reported = Date.now() / 1000 - (a.updated || 0) > 60;
@@ -18224,10 +18253,41 @@ const ROOM_DOING = { folder: 'Looking in a folder', search: 'Searching', file: '
 function roomMainLine() {
   if (pendingPermId) return _spokenPermQuestion(pendingPermTool, pendingPermArgs).replace(/\s*Should I\?.*$/, '') + ' Okay?';
   const ms = String(window._mainState || 'idle');
-  if (/idle/.test(ms)) return '';
+  if (/^loading/.test(ms)) return 'Waking up…';
+  if (!roomMainBusy()) return '';
   const m = /^(?:calling|writing)\s+(\w+)/.exec(ms);
   if (m && /^memory_(save|update|write)|^remember/.test(m[1])) return 'Noting that down…';
   return (m ? (ROOM_DOING[_toolKind(m[1])] || 'Working') : 'Thinking') + '…';
+}
+// What a working helper has in its hands, in a few words: the tool and what it
+// is pointed at.
+const ROOM_VERBS = { folder: 'Looking in', search: 'Searching for', file: 'Reading', edit: 'Changing', term: 'Running',
+  globe: 'Opening', web: 'Looking up', brain: 'Recalling' };
+function roomHelperLine(a) {
+  if (a.status !== 'working' || a.blocked) return '';
+  if (a.activity !== 'tool') return 'Thinking…';
+  const kind = _toolKind(a.tool || '');
+  if (a.what && ROOM_VERBS[kind]) return ROOM_VERBS[kind] + ' ' + a.what;
+  return (ROOM_DOING[kind] || 'Working') + '…';
+}
+// Two who have finished and ended up at the same place: one asks how it went,
+// the other says what it found. Their own results, once per pair.
+function roomSmallTalk() {
+  const now = Date.now();
+  if (now < ROOM.chatAt) return;
+  ROOM.chatAt = now + 5000;
+  const free = [...ROOM.people.values()].filter(p => !p.waiting && !p.walking && !p.leaving && p.agent
+    && p.agent.role !== 'main' && p.agent.status === 'done' && p.reported && !(ROOM.says.get(p.id) || {}).until > now);
+  for (const a of free) for (const b of free) {
+    if (a === b || !b.agent.preview || (a.talked || (a.talked = new Set())).has(b.id)) continue;
+    if (Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) > 150) continue;
+    a.talked.add(b.id); (b.talked || (b.talked = new Set())).add(a.id);
+    const prev = String(b.agent.preview).replace(/\s+/g, ' ').trim();
+    roomSay(a.id, `How did yours go, ${b.agent.name || 'you'}?`, 3200);
+    setTimeout(() => { if (ROOM.people.has(b.id)) roomSay(b.id, prev.length > 90 ? prev.slice(0, 89) + '…' : prev, 5200); }, 2200);
+    ROOM.chatAt = now + 16000;
+    return;
+  }
 }
 function roomTick(t) {
   const dt = Math.min(0.1, (t - (ROOM.last || t)) / 1000);
@@ -18239,15 +18299,40 @@ function roomTick(t) {
     if (mainSay && mainSay.live && mainSay.text === line) mainSay.until = Date.now() + 1500;
     else roomSay('__main', line, 1500, true);
   }
-  for (const [id, p] of ROOM.people) {
+  roomSmallTalk();
+  const claimed = [];
+  // JARVIS first, so it keeps its place and the helpers stand around it.
+  const everyone = [...ROOM.people].sort((a, b) => (b[0] === '__main') - (a[0] === '__main'));
+  for (const [id, p] of everyone) {
     if (p.enterAt && t < p.enterAt) { p.waiting = true; continue; }
     p.waiting = false;
     if (!p.leaving) {
       const g = roomGoal(p, p.agent);
-      const target = g.spread ? [g.at[0] + (p.seed % 5 - 2) * 24, g.at[1] + (p.seed % 3 - 1) * 10] : g.at;
+      let target = g.at;
+      if (g.spread) {
+        // Several people at one place stand apart, and away from the wall it is on.
+        let dx = (p.seed % 5 - 2) * 26;
+        if (g.at[0] > 1200) dx = -Math.abs(dx) - 14; else if (g.at[0] < 320) dx = Math.abs(dx) + 14;
+        target = [g.at[0] + dx, g.at[1] + (p.seed % 3 - 1) * 10];
+      }
+      // Nobody stands in someone else's place: the later one steps aside.
+      if (!g.seated && !g.leave && g.pose !== 'think') {
+        const side = target[0] > 1200 ? -1 : 1;
+        for (let n = 0; n < 5 && claimed.some(c => Math.abs(c[0] - target[0]) < 52 && Math.abs(c[1] - target[1]) < 28); n++)
+          target = [target[0] + side * 56, target[1]];
+        claimed.push(target);
+      }
       const endPt = p.path.length ? p.path[p.path.length - 1] : p.pos;
       if (Math.hypot(endPt[0] - target[0], endPt[1] - target[1]) > 4) p.path = roomRoute(p.pos, target);
+      // Whoever is speaking faces the room, not the wall.
+      const say = ROOM.says.get(id);
+      if (g.pose === 'gaze' && say && !say.live && say.until > Date.now()) g.pose = 'idle';
       p.goal = g;
+      const doing = p.agent.role === 'main' ? '' : roomHelperLine(p.agent);
+      if (doing && !p.path.length && (!say || say.live || say.until < Date.now())) {
+        if (say && say.live && say.text === doing) say.until = Date.now() + 1500;
+        else roomSay(id, doing, 1500, true);
+      }
     }
     // Arrived beside JARVIS with a finished job: say so, once.
     if (!p.path.length && p.goal && p.goal.report && !p.reported) {
@@ -18266,6 +18351,7 @@ function roomTick(t) {
       p.walking = true;
     } else {
       p.walking = false;
+      if (p.goal && p.goal.leave && !p.leaving) { p.leaving = true; ROOM.gone.add(id); }
       if (p.leaving) { ROOM.people.delete(id); roomStripRender(); }
     }
   }
@@ -18292,27 +18378,42 @@ function roomDraw(t) {
   if (ROOM.props) {
     ROOM.desks.forEach((d, i) => {
       const worker = seated.get(i);
-      items.push({ kind: 'prop', name: worker ? 'desk_on' : 'desk', x: d[0], y: d[1], shadow: [104, 10] });
-      items.push({ kind: 'prop', name: 'chair', x: d[0], y: d[1] + CHAIR_DY, shadow: [26, 6], cover: !!worker });
+      items.push({ kind: 'prop', name: worker ? 'desk_on' : 'desk', x: d[0], y: d[1], shadow: [108, 12, 26] });
+      items.push({ kind: 'prop', name: 'chair', x: d[0], y: d[1] + CHAIR_DY, shadow: [28, 7, 14], cover: !!worker });
     });
     if (ROOM.man.room_empty) {
-      items.push({ kind: 'prop', name: 'armchair', x: 540, y: 440, shadow: [62, 9] });
-      items.push({ kind: 'prop', name: 'side_table', x: 650, y: 428, shadow: [24, 6] });
+      items.push({ kind: 'prop', name: 'armchair', x: 540, y: 440, shadow: [66, 15, 30], sy: -11 });
+      items.push({ kind: 'prop', name: 'side_table', x: 650, y: 428, shadow: [22, 6, 16], sy: -3 });
     }
   }
   for (const p of ROOM.people.values()) {
     if (p.waiting) continue;
-    items.push({ kind: 'person', p, x: p.pos[0], y: p.pos[1], shadow: [22, 6] });
+    items.push({ kind: 'person', p, x: p.pos[0], y: p.pos[1], shadow: [19, 6, 34] });
   }
   items.sort((a, b) => a.y - b.y);
 
-  // Contact shadows first, so no shadow lands on top of anything.
-  ctx.fillStyle = 'rgba(12, 8, 5, 0.34)';
+  // Shadows first, so none lands on top of anything. The fire is the light:
+  // each thing throws a long faint shadow away from it, longer and fainter the
+  // further off it stands, and sits on a darker soft patch where it touches.
+  const blob = (cx, cy, rx, ry, rot, alpha) => {
+    ctx.save();
+    ctx.translate(cx * kx, cy * ky);
+    ctx.rotate(rot);
+    ctx.scale(rx * kx, ry * ky);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, `rgba(10,6,4,${alpha})`); g.addColorStop(0.55, `rgba(10,6,4,${alpha * 0.72})`); g.addColorStop(1, 'rgba(10,6,4,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, 1, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  };
   for (const it of items) {
     if (!it.shadow || (it.kind === 'person' && it.p.goal && it.p.goal.seated && !it.p.walking)) continue;
-    ctx.beginPath();
-    ctx.ellipse(it.x * kx, (it.y - 2) * ky, it.shadow[0] * kx, it.shadow[1] * ky, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const [rx, ry, tall] = it.shadow, y = it.y - 2 + (it.sy || 0);
+    const dx = it.x - ROOM.fire[0], dy = (y - ROOM.fire[1]) * 1.6, d = Math.hypot(dx, dy) || 1;
+    const far = Math.min(1, d / 760), len = tall * (0.5 + 1.1 * far);
+    blob(it.x + dx / d * len * 0.8, y + dy / d * len * 0.34, rx + len * 0.45, ry * 1.05, Math.atan2(dy * 0.34, dx),
+         0.30 - 0.14 * far);
+    blob(it.x, y, rx * 0.94, ry, 0, 0.5);
   }
   const [cw, ch] = ROOM.man.cell;
   const labels = [], hits = [];
@@ -18387,7 +18488,7 @@ function roomDraw(t) {
     const say = ROOM.says.get(p.id);
     if (say && say.until > now) {
       const b = document.createElement('div');
-      b.className = 'tm-say';
+      b.className = 'tm-say' + (say.live && a.role !== 'main' ? ' doing' : '');
       b.style.left = x + 'px'; b.style.top = y + 'px';
       b.textContent = say.text;
       box.appendChild(b);
@@ -18407,8 +18508,9 @@ function roomDraw(t) {
       if (!say.shown) {
         say.shown = true;
         const sp = springEasing(0.4, 0.8);
-        b.animate([{ opacity: 0, transform: 'translate(-50%, calc(-100% - 18px)) scale(.9)' },
-                   { opacity: 1, transform: 'translate(-50%, calc(-100% - 26px)) scale(1)' }], { duration: sp.duration, easing: sp.easing });
+        if (!b.classList.contains('doing'))
+          b.animate([{ opacity: 0, transform: 'translate(-50%, calc(-100% - 18px)) scale(.9)' },
+                     { opacity: 1, transform: 'translate(-50%, calc(-100% - 26px)) scale(1)' }], { duration: sp.duration, easing: sp.easing });
       }
     }
   }
@@ -18423,10 +18525,11 @@ const MAIN_HELLOS = ['Hey. What do you need?', 'Right here.', "Mm? I'm listening
 function roomPoke(p) {
   const a = p.agent, now = Date.now();
   p.pokeUntil = now + 1400;
-  p.pokePose = ['raise', 'stretch', 'raise', 'gaze'][Math.floor(Math.random() * 4)];
+  p.pokePose = ['raise', 'stretch', 'raise', 'idle'][Math.floor(Math.random() * 4)];
   if (a.role === 'main') {
-    const busy = !/idle/.test(String(window._mainState || 'idle'));
-    roomSay(p.id, busy ? 'Still on it. Give me a moment.' : MAIN_HELLOS[Math.floor(Math.random() * MAIN_HELLOS.length)]);
+    roomSay(p.id, roomMainBusy() ? 'Still on it. Give me a moment.'
+      : !roomHasBrain() ? "I can't think without a model. Load one from the top bar."
+      : MAIN_HELLOS[Math.floor(Math.random() * MAIN_HELLOS.length)]);
     const inp = $('tm-input'); if (inp) inp.focus();
     return;
   }
@@ -18492,7 +18595,8 @@ function roomStripRender() {
     const a = p.agent;
     const st = a.role === 'main' ? 'working' : (teamNeedsYou(a) ? 'needs' : a.status);
     const word = a.role === 'main'
-      ? (/idle/.test(String(window._mainState || 'idle')) ? roomMainIdleWord(p) : (pendingPermId ? 'waiting for your OK' : roomMainLine().replace(/…$/, '').toLowerCase()))
+      ? (pendingPermId ? 'waiting for your OK' : roomMainLine() ? roomMainLine().replace(/…$/, '').toLowerCase()
+         : roomHasBrain() ? roomMainIdleWord(p) : 'no model loaded')
       : { working: a.activity === 'tool' ? a.tool : 'thinking', needs: 'needs you', done: 'done', failed: "didn't finish", stopped: 'stopped' }[st];
     const card = document.createElement('div');
     card.className = 'tm-card' + (ROOM.sel === p.id ? ' sel' : '');
