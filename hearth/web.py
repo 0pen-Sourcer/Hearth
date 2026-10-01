@@ -1739,7 +1739,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/models":
             try:
                 from . import claude_brain as _cb
-                _agents = _cb.installed()
+                _agents = _cb.choices()
                 if _cb.active():
                     return self._send_json(200, {"models": [{"id": _cb.label(), "state": "loaded",
                                                              "type": "llm", "provider": _cb.current()}],

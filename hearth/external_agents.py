@@ -67,7 +67,8 @@ AGENTS: Dict[str, Dict[str, Any]] = {
               "stream": "text", "prompt_arg": True},
     "cursor-agent": {"label": "Cursor Agent", "maker": "Cursor", "exe": ["cursor-agent"],
                      "args": lambda allow: ["-p"] + (["--force"] if allow == "auto" else []),
-                     "stream": "text", "prompt_arg": True},
+                     "stream": "text", "prompt_arg": True,
+                     "also": [os.path.join("%LOCALAPPDATA%", "cursor-agent", "cursor-agent.cmd")]},
     "copilot": {"label": "Copilot CLI", "maker": "GitHub", "exe": ["copilot"],
                 "args": lambda allow: (["--allow-all-tools"] if allow == "auto" else []) + ["-p"],
                 "stream": "text", "prompt_arg": True},
@@ -171,6 +172,14 @@ def _direct_argv(exe: str) -> List[str]:
     import re as _re
     found = [t for t in _re.findall(r'"%(?:~?dp0%?)\\?([^"]+?\.(?:(?:c|m)?js|exe))"', text, _re.I)
              if os.path.basename(t).lower() != "node.exe"]
+    if not found and ".ps1" in text.lower():
+        # A launcher that hands over to PowerShell, which starts the newest
+        # bundled version on its own node (Cursor's CLI).
+        builds = [d for d in glob.glob(os.path.join(os.path.dirname(exe), "versions", "*"))
+                  if os.path.isfile(os.path.join(d, "node.exe")) and os.path.isfile(os.path.join(d, "index.js"))]
+        if builds:
+            d = max(builds, key=os.path.getmtime)
+            return [os.path.join(d, "node.exe"), os.path.join(d, "index.js")]
     if not found:
         return [exe]
     script = os.path.join(os.path.dirname(exe), found[0].lstrip("\\"))

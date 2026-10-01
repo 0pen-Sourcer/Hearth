@@ -112,9 +112,19 @@ def claude_exe() -> Optional[List[str]]:
     return exe_for(PROVIDER)
 
 
+# Where to get each one when it isn't installed.
+SITES = {"claude-code": "https://claude.com/claude-code", "codex": "https://chatgpt.com/codex"}
+
+
 def installed() -> List[Dict[str, str]]:
     """The brains that can be picked on this PC."""
     return [{"id": k, "label": v} for k, v in BRAINS.items() if exe_for(k)]
+
+
+def choices() -> List[Dict[str, Any]]:
+    """Every agent brain, installed or not, for the model menu."""
+    return [{"id": k, "label": v, "installed": bool(exe_for(k)), "site": SITES.get(k, "")}
+            for k, v in BRAINS.items()]
 
 
 def set_brain(provider: str, model: Optional[str] = None) -> Optional[str]:
