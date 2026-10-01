@@ -7023,26 +7023,22 @@ function appendPart(node, msgDiv) {
   const body = (msgDiv && msgDiv.querySelector) ? msgDiv.querySelector('.body') : null;
   if (!body) { $('chat-body').appendChild(node); return; }
   const actions = body.querySelector(':scope > .actions');
-  const last = actions ? actions.previousElementSibling : body.lastElementChild;
+  let last = actions ? actions.previousElementSibling : body.lastElementChild;
   const _simple = document.documentElement.dataset.ui !== 'advanced';
-  // Reasoning between tool calls belongs to the run it sits in, so a run stays
-  // one line instead of breaking at every thought.
-  if (_simple && node.classList && node.classList.contains('think') && last) {
-    if (last.classList.contains('tool-run')) { last._cards.appendChild(node); return; }
-    if (_foldsIntoRun(last)) {
-      const run = makeToolRun();
-      body.insertBefore(run, last);
-      run._cards.appendChild(last);
-      run._cards.appendChild(node);
-      return;
-    }
-  }
-  if (_foldsIntoRun(node) && _simple) {
+  if (_simple && node.classList && (node.classList.contains('think') || _foldsIntoRun(node))) {
+    // A text block the model left empty between two tool calls shows nothing,
+    // so it doesn't end a run either.
+    while (last && last.classList.contains('content') && !last.textContent.trim()
+           && !last.querySelector('img, video, audio, table, pre, svg')) last = last.previousElementSibling;
+    // Tools, and the reasoning between them, are one line per run.
     if (last && last.classList.contains('tool-run')) { last._cards.appendChild(node); return; }
-    if (last && _foldsIntoRun(last)) {
+    if (_foldsIntoRun(node) || (last && _foldsIntoRun(last))) {
+      // Every tool gets the folded row, a lone one too, so a chat doesn't mix
+      // folded rows with raw cards.
       const run = makeToolRun();
-      body.insertBefore(run, last);
-      run._cards.appendChild(last);
+      if (last && _foldsIntoRun(last)) { body.insertBefore(run, last); run._cards.appendChild(last); }
+      else if (last) last.after(run);
+      else body.insertBefore(run, actions || null);
       run._cards.appendChild(node);
       return;
     }
@@ -7320,6 +7316,29 @@ function makeDiffView(oldStr, newStr) {
 // Fill an edit_file / write_file card body with a diff instead of raw JSON args.
 // edit_file → one diff per edit (old_text → new_text). write_file → the content
 // as an all-green add, truncated so a huge file doesn't blow up the card.
+// A string value out of JSON that is still being written: everything of
+// `key`'s value that has arrived, with its escapes read. null until the key
+// shows up. Used to show a file while the model is still writing the call.
+function _partialJsonString(txt, key) {
+  const m = new RegExp('"' + key + '"\\s*:\\s*"').exec(txt);
+  if (!m) return null;
+  let i = m.index + m[0].length, out = '';
+  while (i < txt.length) {
+    const c = txt[i];
+    if (c === '"') break;
+    if (c !== '\\') { out += c; i++; continue; }
+    const n = txt[i + 1];
+    if (n === undefined) break;
+    if (n === 'u') {
+      const h = txt.slice(i + 2, i + 6);
+      if (h.length < 4) break;
+      out += String.fromCharCode(parseInt(h, 16)); i += 6; continue;
+    }
+    out += n === 'n' ? '\n' : n === 't' ? '\t' : n === 'r' ? '' : n;
+    i += 2;
+  }
+  return out;
+}
 function fillEditCard(name, args, body) {
   body.innerHTML = '';
   const MAXL = 60;
@@ -8813,24 +8832,16 @@ function regenerateFromMessage(assistantMsg) {
   while (userIdx >= 0 && c.messages[userIdx].role !== 'user') userIdx--;
   if (userIdx < 0) return;
   const lastUser = c.messages[userIdx];
-  // Back up the WHOLE history before truncating. send() can early-return at a
-  // guard (no model loaded, etc.) without re-pushing the user message — and the
-  // truncation would then have wiped the chat for good, dumping the user on the
-  // empty "ready" screen. Drop the rejected assistant + everything after AND the
-  // user msg (send() re-pushes it); keep messages up to userIdx-1.
-  const backup = c.messages.slice();
+  // send() re-adds the user message and the new reply, so the old pair is cut
+  // first. Its own guards are checked here before cutting: if it would turn
+  // the message away (nothing to answer with, a permission waiting), cutting
+  // would have wiped the turn for nothing.
+  if (!STATE.loadedModel) { toast('No model loaded', 'Pick one from the top bar', 'warn'); return; }
+  if (pendingPermId || !String(lastUser.content || '').trim()) return;
   c.messages = c.messages.slice(0, userIdx);
   touch(c);
   renderChat();
-  const p = send(lastUser.content, lastUser.displayContent || null);
-  // send() runs synchronously up to its first await; if it bailed at a guard it
-  // never appended the user message, so the tail is still empty — restore.
-  if (c.messages.length <= userIdx) {
-    c.messages = backup;
-    touch(c);
-    renderChat();
-  }
-  return p;
+  return send(lastUser.content, lastUser.displayContent || null);
 }
 
 // Tracks an in-progress message edit: { convoId, idx, original }. While set, the
@@ -8966,6 +8977,17 @@ async function send(forced = null, displayAs = null, opts = {}) {
     input.value = ''; input.style.height = '42px';
     sendPermDecision('deny', prompt);
     return;
+  }
+  if (STATE.streaming && !forced && prompt.startsWith('/')) {
+    // A command is for the app, never for the model, so it isn't steering.
+    // The ones that leave the running reply alone go through now.
+    const name = prompt.split(/\s+/)[0].toLowerCase();
+    if (SLASH_COMMANDS.some(x => x.cmd.split(/\s+/)[0] === name)) {
+      input.value = ''; input.style.height = '42px';
+      if (['/help', '/mode', '/team'].includes(name)) await handleSlash(prompt);
+      else toast(`${name} has to wait`, 'It runs once this reply is finished. Stop the reply to run it now.', 'warn', 5000);
+      return;
+    }
   }
   if (STATE.streaming) {
     // Mid-generation: don't drop the input — steer the running turn. The
@@ -9501,16 +9523,34 @@ async function send(forced = null, displayAs = null, opts = {}) {
         const t = makeToolCard(ev.name, {});
         t.div.classList.add('tc-generating');
         t._name = ev.name;
+        // Nothing has been written yet, so there is no diff to show: an empty
+        // one reads as a file with a single blank line.
+        t.body.innerHTML = '';
         appendPart(t.div, live);
         _partialTool = t;
       }
       const argsEl = _partialTool.div.querySelector('.t-args');
       if (argsEl) {
-        // For file writes the raw partial JSON (old_text/new_text) is ugly and
-        // becomes a diff the moment it finalizes, so show a clean "preparing…"
-        // instead of streaming the blob. Other tools stream their real args.
-        if (ev.name === 'edit_file' || ev.name === 'write_file') {
-          argsEl.textContent = 'preparing changes…';
+        // A file being written shows as it arrives: its name, how far along,
+        // and the lines so far in the card. An edit's raw JSON (old and new
+        // text interleaved) only makes sense once whole, so it waits.
+        const raw = String(ev.args_text || '');
+        const path = _partialJsonString(raw, 'path') || _partialJsonString(raw, 'file_path') || '';
+        const file = path.split(/[\\/]/).pop();
+        if (ev.name === 'write_file') {
+          const content = _partialJsonString(raw, 'content');
+          if (content == null) argsEl.textContent = file ? `writing ${file}…` : 'preparing changes…';
+          else {
+            const n = content.split('\n').length;
+            argsEl.textContent = `writing ${file || 'a file'} · ${n} line${n === 1 ? '' : 's'}…`;
+            const now = performance.now();
+            if (!_partialTool._drawn || now - _partialTool._drawn > 120) {
+              _partialTool._drawn = now;
+              fillEditCard('write_file', { path, content }, _partialTool.body);
+            }
+          }
+        } else if (ev.name === 'edit_file') {
+          argsEl.textContent = file ? `preparing changes to ${file}…` : 'preparing changes…';
         } else {
           const txt = String(ev.args_text || '');
           argsEl.textContent = txt.length > 120 ? txt.slice(0, 120) + '…' : txt;

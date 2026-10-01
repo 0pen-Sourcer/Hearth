@@ -526,6 +526,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
     final_text, result, sid = "", None, None
     streamed = False
     gap = False                                   # a tool call came between two stretches of text
+    writing: Optional[Dict[str, Any]] = None      # the tool call being generated right now
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -555,7 +556,20 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
             if t == "system" and ev.get("subtype") == "init":
                 sid = ev.get("session_id") or sid
             elif t == "stream_event":
-                d = (ev.get("event") or {}).get("delta") or {}
+                inner = ev.get("event") or {}
+                d = inner.get("delta") or {}
+                # A tool call being written: its input arrives in pieces, and
+                # is passed on so a file shows while it is being written.
+                if inner.get("type") == "content_block_start":
+                    block = inner.get("content_block") or {}
+                    writing = None
+                    if block.get("type") == "tool_use" and block.get("name") not in _QUIET_TOOLS:
+                        writing = {"name": hearth_view(block.get("name", ""), {})[0], "text": "", "sent": 0}
+                elif d.get("type") == "input_json_delta" and writing is not None:
+                    writing["text"] += d.get("partial_json") or ""
+                    if len(writing["text"]) - writing["sent"] >= 60:
+                        writing["sent"] = len(writing["text"])
+                        emit("tool_call_partial", name=writing["name"], args_text=writing["text"])
                 if d.get("type") == "text_delta" and d.get("text"):
                     streamed = True
                     chunk = ("\n\n" + d["text"]) if (gap and text_parts) else d["text"]

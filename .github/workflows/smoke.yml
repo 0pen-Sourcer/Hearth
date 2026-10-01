@@ -316,6 +316,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           python tests/test_ui_boot.py
+          python tests/test_ui_chat.py
 
       - name: The public tool reference matches the code
         # docs/TOOLS.md is generated; it said 93 tools long after there were more.

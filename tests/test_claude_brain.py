@@ -60,6 +60,9 @@ open({argv_log!r}, "a").write(json.dumps({{"argv": sys.argv[1:], "stdin": said}}
 out({{"type": "system", "subtype": "init", "session_id": "sess-123"}})
 for w in ["I'm ", "JARVIS."]:
     out({{"type": "stream_event", "event": {{"type": "content_block_delta", "delta": {{"type": "text_delta", "text": w}}}}}})
+out({{"type": "stream_event", "event": {{"type": "content_block_start", "content_block": {{"type": "tool_use", "name": "Write", "id": "t0"}}}}}})
+for piece in ['{{"file_path": "notes.txt", "content": "line one\\nline two is long enough', ' to be passed on as it is written"}}']:
+    out({{"type": "stream_event", "event": {{"type": "content_block_delta", "delta": {{"type": "input_json_delta", "partial_json": piece}}}}}})
 out({{"type": "assistant", "message": {{"content": [{{"type": "tool_use", "id": "t1", "name": "PowerShell", "input": {{"command": "Get-Date"}}}},
      {{"type": "tool_use", "id": "t2", "name": "Edit", "input": {{"file_path": "a.txt", "old_string": "x", "new_string": "y"}}}},
      {{"type": "tool_use", "id": "t3", "name": "ToolSearch", "input": {{"query": "x"}}}}]}}}})
@@ -97,6 +100,9 @@ check("text after a tool call starts on a new paragraph", "\n\nDone." in chunks)
 check("a shell command shows as run_command", ("run_command", {"command": "Get-Date", "shell": "powershell"}) in calls)
 check("an edit shows as edit_file with its diff",
       any(n == "edit_file" and a["edits"][0] == {"old_text": "x", "new_text": "y"} for n, a in calls))
+partial = [f for t, f in ev if t == "tool_call_partial"]
+check("a file being written is passed on while Claude Code is still writing it",
+      bool(partial) and partial[0]["name"] == "write_file" and "line one" in partial[0]["args_text"])
 check("Claude Code's bookkeeping is left out", all(n != "ToolSearch" for n, _ in calls))
 check("each tool gets its result", results == ["run_command", "edit_file"])
 check("the full reply is reported for the bridges", any(t == "assistant" and f["content"].endswith("Done.") for t, f in ev))
