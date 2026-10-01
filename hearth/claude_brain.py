@@ -35,7 +35,9 @@ from . import env as _env
 
 PROVIDER = "claude-code"
 # Agent programs that can be the brain: settings value -> name shown.
-BRAINS = {"claude-code": "Claude Code", "codex": "Codex"}
+BRAINS = {"claude-code": "Claude Code", "codex": "Codex", "cursor-agent": "Cursor"}
+# Whose plan each one runs on, for the lines that say so.
+PLANS = {"claude-code": "Claude", "codex": "ChatGPT", "cursor-agent": "Cursor"}
 _HOME = os.path.join(os.path.expanduser("~"), ".hearth")
 _SESSIONS = os.path.join(_HOME, "claude_sessions.json")
 _SESSIONS_LOCK = threading.Lock()
@@ -113,7 +115,8 @@ def claude_exe() -> Optional[List[str]]:
 
 
 # Where to get each one when it isn't installed.
-SITES = {"claude-code": "https://claude.com/claude-code", "codex": "https://chatgpt.com/codex"}
+SITES = {"claude-code": "https://claude.com/claude-code", "codex": "https://chatgpt.com/codex",
+         "cursor-agent": "https://cursor.com/cli"}
 
 
 def installed() -> List[Dict[str, str]]:
@@ -123,7 +126,8 @@ def installed() -> List[Dict[str, str]]:
 
 def choices() -> List[Dict[str, Any]]:
     """Every agent brain, installed or not, for the model menu."""
-    return [{"id": k, "label": v, "installed": bool(exe_for(k)), "site": SITES.get(k, "")}
+    return [{"id": k, "label": v, "installed": bool(exe_for(k)), "site": SITES.get(k, ""),
+             "plan": PLANS.get(k, "")}
             for k, v in BRAINS.items()]
 
 
@@ -139,9 +143,8 @@ def set_brain(provider: str, model: Optional[str] = None) -> Optional[str]:
         if provider not in BRAINS:
             return f"Unknown brain '{provider}'."
         if not exe_for(provider):
-            return (f"{BRAINS[provider]} isn't installed on this PC. "
-                    + ("Install it from claude.com/claude-code and sign in first." if provider == PROVIDER
-                       else "Install the Codex app or CLI and sign in first."))
+            return (f"{BRAINS[provider]} isn't installed on this PC. Get it from "
+                    f"{SITES[provider].split('//')[1]} and sign in first.")
         s["llm_provider"] = provider
         if model is not None:
             s["claude_model" if provider == PROVIDER else provider + "_model"] = model
@@ -271,6 +274,9 @@ def agent_models(provider: str) -> Dict[str, Any]:
     elif provider == "codex":
         from . import codex_brain
         models = codex_brain.models()
+    elif provider == "cursor-agent":
+        from . import cursor_brain
+        models = cursor_brain.models()
     else:
         models = []
     return {"provider": provider, "label": BRAINS.get(provider, provider), "models": models,
@@ -472,11 +478,12 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                    permission_check=None, should_cancel=None, voice: bool = False,
                    model: Optional[str] = None) -> int:
     """One turn on whichever agent program is the brain."""
-    if current() == "codex":
-        from . import codex_brain
-        return await codex_brain.run_turn(prompt, emit=emit, history=history,
-                                          permission_check=permission_check,
-                                          should_cancel=should_cancel, voice=voice)
+    other = {"codex": "codex_brain", "cursor-agent": "cursor_brain"}.get(current() or "")
+    if other:
+        import importlib
+        mod = importlib.import_module("." + other, __package__)
+        return await mod.run_turn(prompt, emit=emit, history=history, permission_check=permission_check,
+                                  should_cancel=should_cancel, voice=voice)
     return await _run_claude(prompt, emit=emit, history=history, permission_check=permission_check,
                              should_cancel=should_cancel, voice=voice)
 

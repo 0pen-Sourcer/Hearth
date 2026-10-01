@@ -9,7 +9,7 @@ Key facts:
 - Surfaces: desktop app, terminal CLI, a headless bridge, Telegram, Discord and WhatsApp bridges, and an MCP server.
 - Tools: 107 built in, 43 loaded by default and the rest pulled in by name when needed. It can write new tools for itself (plugins) and install shareable skills.
 - Voice: speaks and listens in eight languages (English, Hindi, Spanish, French, Italian, Portuguese, Japanese, Mandarin), with a wake word.
-- Agent brains: JARVIS can think with Claude Code or Codex installed on the user's PC, on their own Claude or ChatGPT plan, while keeping Hearth's tools, memory, voice and permission prompts.
+- Agent brains: JARVIS can think with Claude Code, Codex or Cursor's agent installed on the user's PC, on their own Claude, ChatGPT or Cursor plan, with a choice of that agent's models and no local model needed, while keeping Hearth's tools, memory, voice and permission prompts.
 - Other agents: JARVIS can hand a task to coding agent CLIs the user has installed, such as Claude Code, Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Aider and Goose, and relay the answer. A Team view shows every helper at work, as a list or as a room by a fire.
 - Safety: writes are confined to a workspace folder; an approval switch (Ask, Auto-edit, Auto) decides what runs without asking, and destructive commands always ask.
 - Memory: remembers facts about the user across sessions, in plain Markdown files on their own disk.

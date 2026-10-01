@@ -1,4 +1,4 @@
-v0.7.6 brings a new look, a Team room where you can watch helpers work and talk to JARVIS, Claude Code or Codex as JARVIS's brain if you already pay for Claude or ChatGPT, twenty-three coding agents JARVIS can hand work to, a new first-run setup, support for AMD and Intel graphics cards, and one switch for how much Hearth does without asking. Underneath, it is a large fix release: most of it is about Hearth doing what it says it did, and telling you plainly when it can't, across security, voice, memory, commands, the phone bridges, desktop control, models and the terminal.
+v0.7.6 brings a new look, a Team room where you can watch helpers work and talk to JARVIS, Claude Code, Codex or Cursor as JARVIS's brain if you already pay for one, twenty-three coding agents JARVIS can hand work to, a new first-run setup, support for AMD and Intel graphics cards, and one switch for how much Hearth does without asking. Underneath, it is a large fix release: most of it is about Hearth doing what it says it did, and telling you plainly when it can't, across security, voice, memory, commands, the phone bridges, desktop control, models and the terminal.
 
 If you are on v0.7.2 or newer, Hearth patches itself, no reinstall. On v0.7.0 or v0.7.1 you need the installer one more time, then you are on the small updates for good. Updating never touches your chats, memory, or models.
 
@@ -18,11 +18,15 @@ When JARVIS splits a job across helpers, the Team view shows each one: what it i
 
 The room view shows it as a house by the fire. Helpers work at desks, read at the shelves or raise a hand when they need you, and JARVIS moves with the work, to a shelf while it reads and to a free desk while it writes. Click anyone and they turn and tell you where they are with their task. You can talk to JARVIS from a box under the room and read its answer over its head without going back to the chat, and if you ask it to brew itself a coffee, it walks over to the counter.
 
-## Claude Code or Codex as JARVIS's brain
+## Claude Code, Codex or Cursor as JARVIS's brain
 
 If you already pay for Claude, JARVIS can think with it. Pick Claude Code from the model menu at the top of the window or in Settings, Chat brain, or type /brain claude-code in the terminal, and every message runs through Claude Code on your own install and plan, with no API key. It keeps all of Hearth: its tools reach your desktop, apps, memory and voice through Hearth, it stays JARVIS with your name and preferences, and each chat is one continuing Claude session, so it remembers what you said earlier. When it wants to do something risky, the same approval switch and prompt you already use ask you first, out loud too in voice mode. Helpers keep running on your local model. Claude Code's headless mode is billed to the Agent SDK credit that comes with a Claude plan.
 
 Codex works the same way on a ChatGPT plan. Pick it from the same menu, or type /brain codex. The Codex desktop app is enough, since it carries the command-line part Hearth runs. Codex has no way to ask before a tool runs, so Hearth asks itself: anything risky through Hearth's tools waits for your yes, and Codex's own shell runs in its sandbox, read-only while the switch is on Ask. Its usage counts toward your plan's Codex limit, and when that runs out Hearth tells you when it resets.
+
+Cursor works too, on a Cursor plan, through its command-line agent (the editor alone is not enough). Cursor's own shell is turned off for these runs and, while the switch is on Ask, so are its direct file writes, so commands and changes go through Hearth's tools and wait for your yes.
+
+The model menu opens each agent into its own models, read from the agent itself, so they are the ones your install and plan really have: Opus, Sonnet and Haiku for Claude Code, the GPT models on your ChatGPT plan for Codex, and Cursor's list with a search box. The Think button sets how hard that model reasons, with the levels that model takes. The context shown is the agent model's own. With an agent as the brain no local model is needed, and helpers JARVIS starts run on the same agent.
 
 ## Other coding agents
 

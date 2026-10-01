@@ -281,6 +281,10 @@ jobs:
         run: |
           python tests/test_codex_brain.py
 
+      - name: Cursor as the assistant's brain
+        run: |
+          python tests/test_cursor_brain.py
+
       - name: What a cloud provider's refusal turns into
         run: |
           python tests/test_api_errors.py

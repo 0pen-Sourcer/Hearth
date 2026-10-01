@@ -457,6 +457,11 @@
   .mp-more:hover { background: var(--bg-2); color: var(--fg); }
   .mp-more.open { transform: rotate(90deg); color: var(--fg); }
   .mp-sub { overflow: hidden; margin: 0 0 4px 36px; border-left: 1px solid var(--border); }
+  .mp-sub.long { max-height: 300px; overflow-y: auto; }
+  .mp-find { display: block; width: calc(100% - 16px); margin: 4px 8px 6px; box-sizing: border-box; background: var(--bg-0);
+    border: 1px solid var(--border); border-radius: var(--r); color: var(--fg); padding: 6px 9px; font: 12.5px var(--sans); outline: none;
+    position: sticky; top: 0; z-index: 1; }
+  .mp-find:focus { border-color: var(--accent); }
   .mp-sub .mp-row { padding: 6px 10px; font-size: 12.5px; }
   .mp-sub .mp-row .mp-s { font-size: 11px; }
   .mp-sub .mp-row.cur { background: color-mix(in srgb, var(--accent) 9%, transparent); }
@@ -3987,6 +3992,7 @@
             <option value="local">Local-first - on this PC (recommended)</option>
             <option value="claude-code">Claude Code - your Claude plan, no key</option>
             <option value="codex">Codex - your ChatGPT plan, no key</option>
+            <option value="cursor-agent">Cursor - your Cursor plan, no key</option>
             <option value="anthropic">Anthropic - Claude (up to 1M ctx)</option>
             <option value="gemini">Google - Gemini</option>
             <option value="openai">OpenAI - GPT</option>
@@ -6199,7 +6205,9 @@ const STATE = {
 // One short cloud-provider set, used everywhere (was re-declared 3×).
 const CLOUD_PROVIDERS = new Set(['grok','xai','gemini','google','openai','anthropic','openrouter','groq','custom']);
 // Agent programs on this PC that can be the brain instead of a model endpoint.
-const AGENT_BRAINS = { 'claude-code': 'Claude Code', 'codex': 'Codex' };
+const AGENT_BRAINS = { 'claude-code': 'Claude Code', 'codex': 'Codex', 'cursor-agent': 'Cursor' };
+// Whose plan each runs on.
+const AGENT_PLANS = { 'claude-code': 'Claude', 'codex': 'ChatGPT', 'cursor-agent': 'Cursor' };
 
 // Format a token count for the bottom-bar `ctx` pill: 32768 → "32K", 977000 → "977K".
 function fmtCtxPill(n) {
@@ -7841,7 +7849,7 @@ async function refreshModels() {
         opt.value = 'agent::' + a.id;
         opt.textContent = a.label;
         opt.dataset.agent = a.id;
-        opt.dataset.sub = (a.id === 'codex' ? 'Your ChatGPT plan' : 'Your Claude plan') + ' · keeps Hearth\'s tools';
+        opt.dataset.sub = `Your ${AGENT_PLANS[a.id] || a.label} plan · keeps Hearth's tools`;
         if (!a.installed) { opt.disabled = true; opt.dataset.site = a.site || ''; opt.dataset.sub = 'Not installed on this PC'; }
         grp.appendChild(opt);
       }
@@ -7927,7 +7935,7 @@ function _mpRow(o, cur) {
   const ico = h ? `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>`
                : `<span class="mp-ico">${(STATE.brain && STATE.brain.kind === 'cloud' && cur) ? MP_CLOUD : MP_CHIP}</span>`;
   const t = agent && cur ? agentModelLabel(agent) : (o.dataset.name || _mpClean(o.textContent).replace(/\.gguf$/i, ''));
-  const sub = (agent && cur ? _agentSub(agent) : o.dataset.sub) || (agent ? (agent === 'codex' ? 'Your ChatGPT plan' : 'Your Claude plan') + ' · keeps Hearth\'s tools' : '')
+  const sub = (agent && cur ? _agentSub(agent) : o.dataset.sub) || (agent ? `Your ${AGENT_PLANS[agent] || ''} plan · keeps Hearth's tools` : '')
     || (cur ? (STATE.brain && STATE.brain.kind === 'cloud' ? (STATE.brain.providerLabel || 'Online') : 'Running on this PC') : '');
   const more = agent && !o.disabled
     ? `<span class="mp-more" data-more="${esc(agent)}" title="Pick a model" role="button" tabindex="-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>` : '';
@@ -7940,7 +7948,7 @@ function _fmtCtx(n) { return n ? (n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) 
 function _agentSub(id) {
   const info = STATE.agentInfo && STATE.agentInfo.provider === id ? STATE.agentInfo : null;
   const m = info && info.models.find(x => x.id === (info.model || ''));
-  const plan = id === 'codex' ? 'your ChatGPT plan' : 'your Claude plan';
+  const plan = `your ${AGENT_PLANS[id] || AGENT_BRAINS[id]} plan`;
   return [m && m.model && m.id === '' ? m.model : '', m && _fmtCtx(m.ctx), plan].filter(Boolean).join(' · ');
 }
 async function _mpToggleModels(chev) {
@@ -7965,8 +7973,21 @@ async function _mpToggleModels(chev) {
     return `<button type="button" class="mp-row${cur ? ' cur' : ''}" role="option" data-v="agent::${esc(id)}::${esc(m.id)}">
       <span class="mp-txt"><span class="mp-t">${esc(m.label)}</span>${sub ? `<span class="mp-s">${esc(sub)}</span>` : ''}</span>${cur ? '<span class="mp-badge">In use</span>' : ''}</button>`;
   }).join('');
+  // A long list (Cursor offers hundreds) gets a box to type in, and a height.
+  if (info.models.length > 10) {
+    const find = document.createElement('input');
+    find.className = 'mp-find'; find.placeholder = `Find one of ${info.models.length} models`;
+    find.addEventListener('click', (e) => e.stopPropagation());
+    find.addEventListener('input', () => {
+      const q = find.value.trim().toLowerCase();
+      box.querySelectorAll('.mp-row').forEach(r => { r.hidden = !!q && !r.textContent.toLowerCase().includes(q); });
+    });
+    box.prepend(find);
+    box.classList.add('long');
+  }
   row.after(box);
-  await anim(box, 0, box.scrollHeight);
+  await anim(box, 0, Math.min(box.scrollHeight, 300));
+  const f = box.querySelector('.mp-find'); if (f) f.focus({ preventScroll: true });
 }
 function mpOpen() {
   const sel = $('model-select'), pick = $('model-picker-tip');
@@ -8075,7 +8096,7 @@ function agentBrainOn(id) {
   STATE.loadedModel = { id: name, state: 'loaded' };
   loadAgentInfo(id);
   toast(`JARVIS now thinks with ${name}`,
-        (id === 'codex' ? 'On your ChatGPT plan.' : 'On your Claude plan.') + ' Helpers keep using your local model.', 'ok', 5000);
+        `On your ${AGENT_PLANS[id] || name} plan. Helpers use your local model when one is loaded.`, 'ok', 5000);
   applyBrainState();
   refreshModels();
 }
@@ -12312,6 +12333,7 @@ async function refreshSettings() {
     if (brainMode && llmUrl && llmKey && llmMdl && llmApply) {
       const PRESETS = {
         'claude-code': { url: 'claude-code://local', hint: 'JARVIS thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Hearth\'s tools through it. It is billed to the Agent SDK credit that comes with the plan. Helpers keep using your local model.', modelHint: '', sample: '' },
+        'cursor-agent': { url: 'cursor://local', hint: 'JARVIS thinks with Cursor\'s agent on this PC, signed in to your Cursor plan, and uses Hearth\'s tools through it. It needs Cursor\'s command-line agent (cursor.com/cli), not just the editor. Its own shell is turned off, so commands go through Hearth and ask you first.', modelHint: '', sample: '' },
         'codex':       { url: 'codex://local', hint: 'JARVIS thinks with Codex on this PC, signed in to your ChatGPT plan, and uses Hearth\'s tools through it. The Codex app is enough; it carries the command-line part. Its usage counts toward your plan\'s Codex limit. Helpers keep using your local model.', modelHint: '', sample: '' },
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },
         gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: 'Try <code>gemini-3-flash</code> or <code>gemini-3-pro</code>.', sample: 'gemini-3-flash' },

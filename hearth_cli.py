@@ -2461,6 +2461,7 @@ class JarvisCLI:
                 print(f"  {C_TOOL}/brain custom <url> <api-key>{C_RESET}    any OpenAI-compatible server")
                 print(f"  {C_TOOL}/brain claude-code{C_RESET}               Claude Code on this PC, your Claude plan")
                 print(f"  {C_TOOL}/brain codex{C_RESET}                     Codex on this PC, your ChatGPT plan")
+                print(f"  {C_TOOL}/brain cursor{C_RESET}                    Cursor's agent on this PC, your Cursor plan")
                 print(f"  {C_TOOL}/brain forget <provider>{C_RESET}         delete a saved key")
                 print(f"\n{C_DIM}Keys saved to ~/Jarvis/brain_keys.json (gitignored, 0600 on POSIX).{C_RESET}\n")
                 return True
@@ -2470,9 +2471,9 @@ class JarvisCLI:
             # /brain claude-code or /brain codex: an agent program installed
             # here thinks for JARVIS. The local address stays, since helpers
             # keep using the local model.
-            if provider in ("claude-code", "claude", "codex"):
+            if provider in ("claude-code", "claude", "codex", "cursor", "cursor-agent"):
                 from hearth import claude_brain as _cb
-                provider = "claude-code" if provider == "claude" else provider
+                provider = {"claude": "claude-code", "cursor": "cursor-agent"}.get(provider, provider)
                 # /brain claude-code opus: one of the agent's own models, by
                 # its name or id. Without one, the saved choice stays.
                 want = parts[2].strip().lower() if len(parts) > 2 else None
@@ -2496,8 +2497,9 @@ class JarvisCLI:
                           + (f" ({_cur['about']})" if _cur.get('about') else "")
                           + f". Others: {', '.join(m['label'] for m in _info['models'] if m is not _cur)}. "
                           f"Pick with /brain {provider} <name>; effort with /think <level>.{C_RESET}")
-                plan = ("on your ChatGPT plan (it counts toward your Codex limit)" if provider == "codex"
-                        else "on your Claude plan (Agent SDK credit)")
+                plan = {"codex": "on your ChatGPT plan (it counts toward your Codex limit)",
+                        "claude-code": "on your Claude plan (Agent SDK credit)"}.get(
+                            provider, f"on your {_cb.PLANS.get(provider, '')} plan")
                 print(f"{C_OK}JARVIS now thinks with {_cb.BRAINS[provider]}{C_RESET} {C_DIM}{plan}. "
                       f"Helpers keep using the local model. /brain local to switch back.{C_RESET}")
                 return True
