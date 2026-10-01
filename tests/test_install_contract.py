@@ -71,6 +71,36 @@ check("the two unpatchable lists agree", plan_unpatchable == patch_unpatchable)
 check("nothing is called both repairable and unpatchable",
       not (promised & plan_unpatchable))
 
+# ------------------------------------------------ which engine build to fetch
+# The repository's "latest" release once pointed at a v0.5.0 tag with no
+# Windows files, so every engine install failed. And only CUDA builds were
+# ever fetched, which on an AMD or Intel card run on the processor.
+import io as _io                                                    # noqa: E402
+import json as _json                                                # noqa: E402
+import urllib.request as _ur                                        # noqa: E402
+from hearth import llmserver as _ls, gpu as _gpu                    # noqa: E402
+
+_rels = [{"tag_name": "v0.5.0", "assets": [{"name": "something.tar.gz"}]},
+         {"tag_name": "b11307", "assets": [{"name": "llama-b11307-bin-win-vulkan-x64.zip"},
+                                            {"name": "llama-b11307-bin-win-cuda-12.4-x64.zip"}]},
+         {"tag_name": "b11306", "assets": [{"name": "llama-b11306-bin-win-cpu-x64.zip"}]}]
+_real_open = _ur.urlopen
+_ur.urlopen = lambda req, timeout=0: _io.BytesIO(_json.dumps(_rels).encode())
+try:
+    rel = _ls._latest_build_release()
+finally:
+    _ur.urlopen = _real_open
+check("a release that isn't a numbered build is passed over", rel and rel["tag_name"] == "b11307")
+
+_real_primary = _gpu.primary
+for vendor, mb, want in (("NVIDIA", 8192, "cuda"), ("AMD", 16384, "vulkan"), ("Intel", 12288, "vulkan"),
+                         ("Intel", 128, "cpu")):
+    _gpu.primary = lambda v=vendor, m=mb: {"vendor": v, "mem_total_mb": m, "name": v}
+    check(f"{vendor} with {mb} MB gets the {want} build", _ls.engine_backend() == want)
+_gpu.primary = lambda: None
+check("no graphics card gets the CPU build", _ls.engine_backend() == "cpu")
+_gpu.primary = _real_primary
+
 # ------------------------------------------- the patch carries Hearth's own files
 # It used to pack only hearth/*.py and ui.html, so the skills, the helper
 # agents' instructions and every icon and piece of art never updated and never

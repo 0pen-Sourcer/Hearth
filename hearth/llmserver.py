@@ -1499,22 +1499,54 @@ def discard_llama_download() -> Dict[str, Any]:
 _LLAMA_LATEST_CACHE = Path(os.path.expanduser("~/.hearth/llamacpp_latest.json"))
 
 
+def _latest_build_release(timeout: float = 12) -> Optional[Dict[str, Any]]:
+    """The newest numbered build (bNNNNN) that ships Windows files.
+
+    The repository's "latest" release is not always a build: it has pointed at
+    a v0.5.0 tag carrying one file and nothing for Windows, which made every
+    engine install fail with "no cuda Windows assets"."""
+    import urllib.request
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases?per_page=15",
+        headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        rels = json.load(r)
+    for rel in rels if isinstance(rels, list) else []:
+        tag = (rel.get("tag_name") or "").strip()
+        if re.match(r"^b\d+$", tag) and any("bin-win-" in (a.get("name") or "") for a in rel.get("assets") or []):
+            return rel
+    return None
+
+
+def engine_backend() -> str:
+    """Which llama.cpp build fits this machine's graphics card: CUDA for
+    NVIDIA, Vulkan for AMD and Intel cards with their own memory (it runs on
+    any vendor's driver), and the plain CPU build otherwise."""
+    try:
+        from . import gpu as _gpu
+        p = _gpu.primary()
+    except Exception:
+        p = None
+    if not p:
+        return "cpu"
+    if p.get("vendor") == "NVIDIA":
+        return "cuda"
+    return "vulkan" if (p.get("mem_total_mb") or 0) >= 1024 else "cpu"
+
+
 def latest_llama_tag(max_age: int = 21600, force: bool = False) -> Optional[str]:
     """Newest llama.cpp release tag, cached 6h. None if GitHub is unreachable."""
     if not force:
         try:
             rec = json.loads(_LLAMA_LATEST_CACHE.read_text(encoding="utf-8"))
-            if time.time() - rec.get("at", 0) < max_age and rec.get("tag"):
+            if (time.time() - rec.get("at", 0) < max_age
+                    and re.match(r"^b\d+$", str(rec.get("tag") or ""))):
                 return rec["tag"]
         except Exception:
             pass
-    import urllib.request
     try:
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases/latest",
-            headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=8) as r:
-            tag = (json.load(r).get("tag_name") or "").strip()
+        rel = _latest_build_release(timeout=8)
+        tag = ((rel or {}).get("tag_name") or "").strip()
     except Exception:
         return None
     if tag:
@@ -1707,7 +1739,7 @@ def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
 
 def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                            on_progress: Optional[Callable[[int, int], None]] = None,
-                           force: bool = False) -> Dict[str, Any]:
+                           force: bool = False, backend: Optional[str] = None) -> Dict[str, Any]:
     """Download the official ggml-org llama.cpp Windows CUDA build (llama-server
     .exe + ggml DLLs) and its CUDA runtime into ~/.hearth/llamacpp/<tag>/. This
     is what lets Hearth's builtin run on any GPU without bundling a giant wheel
@@ -1720,13 +1752,18 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     # A previous cancel must not kill this run — the flag is sticky otherwise
     # and every later install aborts instantly.
     _llama_dl_cancel.clear()
+    backend = (backend or engine_backend()).lower()
     try:
-        api = (f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases/"
-               + (f"tags/{tag}" if tag else "latest"))
-        req = urllib.request.Request(api, headers={"User-Agent": "Hearth",
-                                                   "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=20) as r:
-            rel = json.load(r)
+        if tag:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases/tags/{tag}",
+                headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                rel = json.load(r)
+        else:
+            rel = _latest_build_release(timeout=20)
+            if not rel:
+                return {"ok": False, "error": "no llama.cpp build with Windows files among the recent releases"}
     except Exception as e:
         return {"ok": False, "error": f"couldn't reach GitHub releases: {e}"}
     tagname = rel.get("tag_name") or tag or "latest"
@@ -1743,17 +1780,25 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     # "cudart-llama-bin-win-cuda-X-x64.zip" (the CUDA runtime) contain the
     # substring "bin-win-cuda-X-x64.zip" — so the binaries matcher must exclude
     # "cudart" or it grabs the runtime zip twice and misses llama-server.exe.
-    _tail = f"bin-win-cuda-{cuda}-x64.zip"
-    bins = next((a for a in assets
-                 if _tail in a.get("name", "") and "cudart" not in a.get("name", "")), None)
-    runtime = next((a for a in assets
-                    if f"cudart-llama-{_tail}" in a.get("name", "")), None)
-    if not bins or not runtime:
-        return {"ok": False, "error": f"no cuda-{cuda} Windows assets in release {tagname}"}
+    if backend == "cuda":
+        _tail = f"bin-win-cuda-{cuda}-x64.zip"
+        bins = next((a for a in assets
+                     if _tail in a.get("name", "") and "cudart" not in a.get("name", "")), None)
+        runtime = next((a for a in assets
+                        if f"cudart-llama-{_tail}" in a.get("name", "")), None)
+        if not bins or not runtime:
+            return {"ok": False, "error": f"no cuda-{cuda} Windows assets in release {tagname}"}
+    else:
+        # Vulkan and CPU builds are one archive each, with no separate runtime.
+        _tail = f"bin-win-{backend}-x64.zip"
+        bins = next((a for a in assets if a.get("name", "").endswith(_tail)), None)
+        runtime = None
+        if not bins:
+            return {"ok": False, "error": f"no {backend} Windows build in release {tagname}"}
 
     dest = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tagname}"))
     dest.mkdir(parents=True, exist_ok=True)
-    total = int(bins.get("size", 0)) + int(runtime.get("size", 0))
+    total = int(bins.get("size", 0)) + int((runtime or {}).get("size", 0))
     done = [0]
 
     # Zips stage here (not tempfile) so an interrupted pull leaves a .part that
@@ -1762,7 +1807,7 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     cache.mkdir(parents=True, exist_ok=True)
     # A cancelled pull of an OLDER build would keep its .part forever once the
     # tag moves on, so drop anything not part of this fetch (hundreds of MB).
-    _wanted = {bins.get("name", ""), runtime.get("name", "")}
+    _wanted = {bins.get("name", ""), (runtime or {}).get("name", "")}
     for _f in cache.iterdir():
         _base = _f.name[:-5] if _f.name.endswith(".part") else _f.name
         if _base not in _wanted:
@@ -1808,7 +1853,8 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
 
     try:
         _fetch(bins)
-        _fetch(runtime)
+        if runtime:
+            _fetch(runtime)
     except DownloadCancelled:
         # .part files stay on purpose — starting again resumes.
         return {"ok": False, "cancelled": True, "tag": tagname,
@@ -1843,7 +1889,7 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                           f"bytes, no llama-server-impl.dll beside it). Antivirus "
                           f"quarantine is the usual cause - allow {dest.parent} "
                           f"and install again.")}
-    return {"ok": True, "dir": str(dest), "tag": tagname}
+    return {"ok": True, "dir": str(dest), "tag": tagname, "backend": backend}
 
 
 _MANAGED_SERVER_FLAGS = {
