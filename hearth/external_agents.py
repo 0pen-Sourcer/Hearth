@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional
 from . import env as _env
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+_ANSI = __import__("re").compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
 def _claude_cmd(allow: str) -> List[str]:
@@ -71,8 +72,11 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     # the user has already chosen Auto.
     "kimi": {"label": "Kimi Code", "maker": "Moonshot AI", "exe": ["kimi"],
              "args": lambda allow: ["-p"], "stream": "text", "prompt_arg": True, "auto_only": True},
+    # `app`: where its desktop app lives. The app has no command line of its
+    # own, so it can't be handed a task; its CLI can, and shares its sign-in.
     "opencode": {"label": "OpenCode", "maker": "SST", "exe": ["opencode"], "args": lambda allow: ["run"],
-                 "stream": "text", "prompt_arg": True},
+                 "stream": "text", "prompt_arg": True,
+                 "app": [r"%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe"]},
     "qwen-code": {"label": "Qwen Code", "maker": "Alibaba", "exe": ["qwen"],
                   "args": lambda allow: (["--yolo"] if allow == "auto" else []) + ["-p"],
                   "stream": "text", "prompt_arg": True},
@@ -379,8 +383,12 @@ def how_to_get(aid: str) -> str:
 def missing() -> List[Dict[str, Any]]:
     """The agent programs Hearth can run that aren't on this PC, each with how to get it."""
     here = {a["id"] for a in available()}
+    def has_app(spec) -> bool:
+        return any(glob.glob(os.path.expandvars(os.path.expanduser(pat))) for pat in spec.get("app") or [])
+
     return [{"id": aid, "label": spec["label"], "maker": spec.get("maker", ""), "site": SITES.get(aid, ""),
-             "get": how_to_get(aid)} for aid, spec in AGENTS.items() if aid not in here and aid in SITES]
+             "get": how_to_get(aid), "has_app": has_app(spec)}
+            for aid, spec in AGENTS.items() if aid not in here and aid in SITES]
 
 
 def install(aid: str) -> Dict[str, Any]:
@@ -739,8 +747,11 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
                                 proc.stdin.close()
                             except OSError:
                                 pass
-                elif line.strip():
-                    out_lines.append(line)
+                else:
+                    # Colour codes are for a terminal; here they would land in the result as noise.
+                    line = _ANSI.sub("", line)
+                    if line.strip():
+                        out_lines.append(line)
             code = proc.wait()
             if "ok" in state:
                 ok = bool(state.get("ok")) and code == 0

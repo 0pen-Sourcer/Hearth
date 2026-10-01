@@ -306,8 +306,18 @@ check("the real three use their makers' installers and their own status commands
       and xa.SETUP["claude-code"]["signed"]('{\n  "loggedin": true,\n') and not xa.SETUP["claude-code"]["signed"]('{"loggedin": false}')
       and xa.SETUP["codex"]["signed"]("logged in using chatgpt") and not xa.SETUP["codex"]["signed"]("not logged in"))
 
+# Terminal colour codes in an agent's output don't reach its result.
+xa.AGENTS["turned-away"]["args"] = lambda allow: ["-c", "import sys; print(chr(27) + '[91m' + chr(27) + '[1mError: ' + chr(27) + '[0mNo endpoints found that support tool use.'); sys.exit(1)"]
+done.clear(); got.clear()
+xa.spawn("turned-away", "hello", on_done=lambda i, res: (got.update(res), done.set()))
+done.wait(30)
+check(f"an error printed in colour reads as plain words {got.get('error')!r}",
+      got.get("error") == "No endpoints found that support tool use.")
+
 # Every agent Hearth can run that isn't here comes with a way to get it.
 check("every agent has a page to get it from", not [aid for aid in REAL_AGENTS if aid not in xa.SITES])
+check("an agent whose desktop app is here but whose command line isn't is told apart",
+      "app" in xa.AGENTS["opencode"] and all("has_app" in a for a in xa.missing()))
 check("the three with a full setup say so, and the rest point at an installer or their page",
       xa.how_to_get("claude-code") == "setup" and xa.how_to_get("aider") == "site"
       and xa.how_to_get("opencode") in ("install", "site"))

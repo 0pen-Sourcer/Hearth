@@ -51,7 +51,7 @@ def accent_rgb(settings: dict) -> tuple:
     """The dot colour for the saved look."""
     if (settings.get("ui_theme") or "classic") == "classic":
         return _CLASSIC
-    return _ACCENTS.get(settings.get("ui_accent") or "ember", _ACCENTS["ember"])
+    return _ACCENTS.get(settings.get("ui_accent") or "rose", _ACCENTS["rose"])
 
 
 def _saved_accent() -> tuple:

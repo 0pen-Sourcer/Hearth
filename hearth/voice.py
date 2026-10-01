@@ -227,43 +227,32 @@ class DownloadCancelled(Exception):
 def _download(url: str, dest: str,
               progress: "Optional[Callable[[int, int], None]]" = None,
               should_cancel: "Optional[Callable[[], bool]]" = None) -> None:
-    """Fetch url -> dest atomically via a .part temp, with a progress line.
+    """Fetch url -> dest through a .part file. A download that was cut off,
+    cancelled or left when the app closed is picked up from where it stopped,
+    the same way model and engine downloads are.
 
     `progress(done_bytes, total_bytes)` also receives each update so a caller can
     show real size, speed and ETA rather than a bare percent. `should_cancel`
     is polled during the transfer so a download can be stopped from the UI."""
-    import urllib.request
-    tmp = dest + ".part"
+    from pathlib import Path
+    from . import llmserver as _ls
     _last = [-1]
 
-    def _hook(blocks, bs, total):
-        if should_cancel and should_cancel():
-            raise DownloadCancelled()
-        done = blocks * bs
+    def _on(done: int, total: int) -> None:
         if total > 0:
-            done = min(done, total)
             pct = min(100, done * 100 // total)
             if pct != _last[0]:
                 _last[0] = pct
                 print(f"\r   {os.path.basename(dest)}: {pct}%", end="", flush=True)
         if progress:
-            try:
-                progress(done, total)
-            except DownloadCancelled:
-                raise
-            except Exception:
-                pass
+            progress(done, total)
 
     try:
-        urllib.request.urlretrieve(url, tmp, _hook)
+        _ls._download_with_resume(url, Path(dest), Path(dest + ".part"), on_progress=_on,
+                                  ua="Hearth (voice files)", cancel=should_cancel)
         print()
-        os.replace(tmp, dest)
-    finally:
-        if os.path.exists(tmp):
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+    except _ls.DownloadCancelled:
+        raise DownloadCancelled()
 
 
 def models_present() -> bool:

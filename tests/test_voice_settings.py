@@ -162,6 +162,51 @@ check("whole files are left alone when the failure isn't about them",
       _v.drop_damaged_models("CUDAExecutionProvider is not available") == [] and _v.models_present())
 check("and removed when the failure is about the file",
       len(_v.drop_damaged_models("InvalidProtobuf: [ONNXRuntimeError] Protobuf parsing failed")) == 2)
+# A voice download that was cut off carries on from where it stopped.
+import http.server, threading                                        # noqa: E402,E401
+_BODY = bytes(range(256)) * 400                                       # 102,400 bytes
+_asked = []
+
+
+class _Files(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        rng = self.headers.get("Range")
+        _asked.append(rng)
+        start = int(rng.split("=")[1].rstrip("-")) if rng else 0
+        body = _BODY[start:]
+        self.send_response(206 if rng else 200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+_srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Files)
+threading.Thread(target=_srv.serve_forever, daemon=True).start()
+_dest = os.path.join(_v.VOICES_DIR, "voices-v1.0.bin")
+open(_dest + ".part", "wb").write(_BODY[:40000])
+_v._download(f"http://127.0.0.1:{_srv.server_address[1]}/voices-v1.0.bin", _dest)
+check(f"it asks only for what is missing and ends with the whole file {_asked}",
+      _asked == ["bytes=40000-"] and open(_dest, "rb").read() == _BODY and not os.path.exists(_dest + ".part"))
+_stop = [False]
+
+
+def _cancel_after_some(done, total):
+    _stop[0] = done > 20000
+
+
+os.remove(_dest)
+try:
+    _v._download(f"http://127.0.0.1:{_srv.server_address[1]}/voices-v1.0.bin", _dest,
+                 progress=_cancel_after_some, should_cancel=lambda: _stop[0])
+    _cancelled = False
+except _v.DownloadCancelled:
+    _cancelled = True
+check("a cancelled download keeps what it had, to carry on from",
+      _cancelled and os.path.getsize(_dest + ".part") > 0 and not os.path.exists(_dest))
+_srv.shutdown()
 _v.VOICES_DIR = _real_dir
 _real_ldir, _real_size = _l.VOICES_DIR, _l.MODEL_SIZE
 _l.VOICES_DIR, _l.MODEL_SIZE = _tf.mkdtemp(prefix="hearth-whisper-"), "base.en"
