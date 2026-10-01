@@ -22,7 +22,7 @@ GET  /api/file?path=...&op=read → read file or summarize via tools
 GET  /api/logs?lines=N          → tail activity.jsonl
 GET  /api/settings              → load ~/Jarvis/settings.json
 POST /api/settings              → save settings
-GET  /api/gpu                   → quick nvidia-smi snapshot (cached 2s)
+GET  /api/gpu                   → load and memory per graphics card, any vendor (cached 2s)
 GET  /api/tools                 → tool definitions (for docs / debug)
 GET  /api/persona               → current system prompt (for settings preview)
 """
@@ -1148,64 +1148,16 @@ def _find_lms_cli() -> Optional[str]:
 
 
 def _gpu_snapshot() -> Dict:
+    """Load, memory and temperature for every graphics card, any vendor."""
     now = time.time()
     if _gpu_cache["data"] is not None and now - _gpu_cache["ts"] < 2:
         return _gpu_cache["data"]
     try:
-        r = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=3, creationflags=_NO_WINDOW,
-        )
-        if r.returncode != 0:
-            raise FileNotFoundError("nvidia-smi failed")
-        gpus = []
-        for line in r.stdout.strip().splitlines():
-            bits = [p.strip() for p in line.split(",")]
-            if len(bits) >= 5:
-                gpus.append({
-                    "name": bits[0],
-                    "util_pct": int(bits[1]),
-                    "mem_used_mb": int(bits[2]),
-                    "mem_total_mb": int(bits[3]),
-                    "temp_c": int(bits[4]),
-                })
-        data = {"available": True, "gpus": gpus}
-    except Exception:
-        # No NVIDIA — try AMD/Intel via WMI (shared memory, no VRAM metrics)
-        try:
-            ps = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,"
-                 "Utilization,Temperature | ConvertTo-Json -Compress"],
-                capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW,
-            )
-            if ps.returncode == 0 and ps.stdout.strip():
-                import json as _j
-                raw = _j.loads(ps.stdout.strip())
-                items = raw if isinstance(raw, list) else [raw]
-                gpus = []
-                for g in items:
-                    name = g.get("Name") or "Unknown GPU"
-                    # AdapterRAM is in bytes for CIM; 0 means shared memory (iGPU)
-                    vram_bytes = int(g.get("AdapterRAM") or 0)
-                    vram_mb = vram_bytes // (1024 * 1024) if vram_bytes > 0 else 0
-                    util = g.get("Utilization")
-                    util_pct = int(util.get("Percentage", 0)) if isinstance(util, dict) else 0
-                    temp = g.get("Temperature")
-                    temp_c = int(temp.get("CurrentTemperature", 0)) if isinstance(temp, dict) else 0
-                    gpus.append({
-                        "name": name,
-                        "util_pct": util_pct,
-                        "mem_used_mb": 0,   # iGPU shares system RAM
-                        "mem_total_mb": vram_mb,
-                        "temp_c": temp_c,
-                    })
-                data = {"available": bool(gpus), "gpus": gpus}
-            else:
-                data = {"available": False, "error": "no GPU detected"}
-        except Exception:
-            data = {"available": False, "error": "no GPU detected"}
+        from . import gpu as _gpu
+        gpus = _gpu.snapshot()
+        data = {"available": bool(gpus), "gpus": gpus} if gpus else {"available": False, "error": "no GPU detected"}
+    except Exception as e:
+        data = {"available": False, "error": f"{type(e).__name__}: {e}"}
     _gpu_cache["ts"] = now
     _gpu_cache["data"] = data
     return data

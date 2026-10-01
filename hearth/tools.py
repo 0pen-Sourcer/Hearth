@@ -3749,6 +3749,23 @@ def _detect_gpus() -> List[Dict[str, Any]]:
     no_window = 0x08000000 if os.name == "nt" else 0
     gpus: List[Dict[str, Any]] = []
     try:
+        from . import gpu as _gpu
+        for g in _gpu.snapshot():
+            row: Dict[str, Any] = {"name": g["name"], "vendor": g["vendor"],
+                                   "vram_total_gb": round(g["mem_total_mb"] / 1024, 1)}
+            if g["mem_used_mb"] is not None:
+                row["vram_used_gb"] = round(g["mem_used_mb"] / 1024, 1)
+                row["vram_free_gb"] = round(max(0, g["mem_total_mb"] - g["mem_used_mb"]) / 1024, 1)
+            if g["util_pct"] is not None:
+                row["load_pct"] = f"{g['util_pct']}%"
+            if g["temp_c"] is not None:
+                row["temp_c"] = g["temp_c"]
+            gpus.append(row)
+    except Exception:
+        gpus = []
+    if gpus:
+        return gpus
+    try:
         out = subprocess.run(
             ["nvidia-smi",
              "--query-gpu=name,memory.total,memory.used,memory.free,"

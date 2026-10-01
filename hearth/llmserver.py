@@ -396,10 +396,16 @@ TOP_PICKS: List[Dict[str, Any]] = [
 
 
 def detect_gpu_vram_gb() -> Optional[float]:
-    """Best-effort: return total VRAM in GB on the primary NVIDIA GPU, or None
-    if nvidia-smi isn't available / there's no GPU. Used to pick the right
-    model size for this rig (4-6 GB -> small, 6-8 GB -> default, 8+ -> can run
-    the smart-but-heavy options)."""
+    """Total memory in GB on the main graphics card, any vendor, or None when
+    there is none. Used to pick the right model size for this rig (4-6 GB ->
+    small, 6-8 GB -> default, 8+ -> can run the smart-but-heavy options)."""
+    try:
+        from . import gpu as _gpu
+        v = _gpu.vram_total_gb()
+        if v:
+            return v
+    except Exception:
+        pass
     try:
         import subprocess
         no_window = 0x08000000 if os.name == "nt" else 0
@@ -430,11 +436,8 @@ def _gpu_is_blackwell() -> bool:
         return bool(_blackwell_cache[0])
     ok = False
     try:
-        no_window = 0x08000000 if os.name == "nt" else 0
-        out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=6,
-            creationflags=no_window).stdout.lower()
+        from . import gpu as _gpu
+        out = " ".join(a["name"] for a in _gpu.adapters()).lower()
         # RTX 50-series consumer parts, plus the Blackwell workstation cards.
         ok = bool(re.search(r"rtx\s*50\d0", out)) or "blackwell" in out
     except Exception:
@@ -448,6 +451,13 @@ def detect_gpu_vram_free_gb() -> Optional[float]:
     (which returns total). Used by start_builtin pre-flight to catch the
     'LM Studio is already using 5 GB of your 8 GB' scenario before we boot
     another 5+ GB model on top and freeze the whole PC."""
+    try:
+        from . import gpu as _gpu
+        v = _gpu.vram_free_gb()
+        if v is not None:
+            return v
+    except Exception:
+        pass
     try:
         import subprocess
         no_window = 0x08000000 if os.name == "nt" else 0

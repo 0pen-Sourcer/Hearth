@@ -30,6 +30,13 @@ _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 def detect_gpu() -> Dict[str, object]:
     """Return {name, vram_gb} for the primary GPU, or {} if none/undetectable."""
+    try:
+        from . import gpu as _gpu
+        p = _gpu.primary()
+        if p:
+            return {"name": p["name"], "vram_gb": _gpu.vram_total_gb()}
+    except Exception:
+        pass
     # NVIDIA: one fast query.
     try:
         out = subprocess.run(

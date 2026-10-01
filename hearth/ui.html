@@ -7883,15 +7883,26 @@ async function refreshGpu() {
       return;
     }
     const gpu = g.gpus[0];
-    // Stash free VRAM so the load-config memory estimate can flag a spill.
-    STATE.gpuFreeGb = Math.max(0, (gpu.mem_total_mb - gpu.mem_used_mb) / 1024);
+    // Readings differ by card: temperature only comes from NVIDIA's tool, so
+    // what a card can't report is left out rather than shown as 0.
+    const has = v => v !== null && v !== undefined;
+    if (has(gpu.mem_used_mb) && gpu.mem_total_mb) {
+      // Stash free VRAM so the load-config memory estimate can flag a spill.
+      STATE.gpuFreeGb = Math.max(0, (gpu.mem_total_mb - gpu.mem_used_mb) / 1024);
+    }
     STATE.gpuTotalGb = gpu.mem_total_mb / 1024;
-    const mem = `${(gpu.mem_used_mb/1024).toFixed(1)}/${(gpu.mem_total_mb/1024).toFixed(0)}GB`;
-    const tcls = gpu.temp_c > 80 ? 'danger' : gpu.temp_c > 65 ? 'warn' : '';
-    $('gpu-chip').innerHTML =
-      `<span><span class="k">gpu</span><span class="v">${gpu.util_pct}%</span></span>` +
-      `<span><span class="k">vram</span><span class="v">${mem}</span></span>` +
-      `<span><span class="k">temp</span><span class="v ${tcls}">${gpu.temp_c}°C</span></span>`;
+    const parts = [];
+    if (has(gpu.util_pct)) parts.push(`<span><span class="k">gpu</span><span class="v">${gpu.util_pct}%</span></span>`);
+    if (gpu.mem_total_mb) {
+      const used = has(gpu.mem_used_mb) ? (gpu.mem_used_mb / 1024).toFixed(1) + '/' : '';
+      parts.push(`<span><span class="k">vram</span><span class="v">${used}${Math.round(gpu.mem_total_mb / 1024)}GB</span></span>`);
+    }
+    if (has(gpu.temp_c)) {
+      const tcls = gpu.temp_c > 80 ? 'danger' : gpu.temp_c > 65 ? 'warn' : '';
+      parts.push(`<span><span class="k">temp</span><span class="v ${tcls}">${gpu.temp_c}°C</span></span>`);
+    }
+    $('gpu-chip').innerHTML = parts.join('') || `<span class="k">gpu</span><span class="v">${esc(gpu.name || '-')}</span>`;
+    $('gpu-chip').title = `${gpu.name || ''}${gpu.vendor ? ' · ' + gpu.vendor : ''}`;
   } catch {}
 }
 
