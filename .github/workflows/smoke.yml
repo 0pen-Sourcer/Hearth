@@ -54,6 +54,10 @@ jobs:
         run: |
           python tests/test_tool_contract.py
 
+      - name: A click lands on the control under the point
+        run: |
+          python tests/test_click_snap.py
+
       - name: Batched desktop steps
         # A batch drives the real mouse and keyboard, so check that it refuses a
         # tool outside the desktop set and stops at the first failing step

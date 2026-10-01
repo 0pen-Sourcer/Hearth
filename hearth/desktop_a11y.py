@@ -210,7 +210,7 @@ def _walk_win(root, max_elements: int) -> list:
             out.append({"idx": len(out), "type": tname.replace("Control", ""),
                         "name": name[:70], "x": cx, "y": cy})
             _last.append({"ctrl": ctrl, "x": cx, "y": cy, "name": name,
-                          "backend": "uia"})
+                          "rect": (l, t, r, b), "backend": "uia"})
         if depth < 14:
             try:
                 kids = ctrl.GetChildren()
@@ -495,8 +495,22 @@ def _snapshot_mac(max_elements: int) -> dict:
 
 # ------------------------------------------------------------------- actions
 def element_near(sx: int, sy: int, tol: int = 90):
-    """Nearest cached element to screen point (sx, sy) within `tol` px, or None.
-    Call snapshot() first to populate `_last`."""
+    """The control at screen point (sx, sy), or the nearest one within `tol`
+    px, or None. Call snapshot() first to populate `_last`.
+
+    A point inside a control means that control, the smallest one when they
+    nest, however close another control's centre is: snapping by centre alone
+    moved a precise click on a wide field onto the small button beside it."""
+    inside = []
+    for e in _last:
+        r = e.get("rect")
+        if r and r[0] <= sx < r[2] and r[1] <= sy < r[3]:
+            inside.append(((r[2] - r[0]) * (r[3] - r[1]), e))
+    if inside:
+        e = min(inside, key=lambda pair: pair[0])[1]
+        d = ((e["x"] - sx) ** 2 + (e["y"] - sy) ** 2) ** 0.5
+        return {"idx": _last.index(e), "name": e.get("name", ""),
+                "x": e["x"], "y": e["y"], "dist": round(d, 1), "inside": True}
     best = None
     best_d = float(tol) + 1.0
     for e in _last:
