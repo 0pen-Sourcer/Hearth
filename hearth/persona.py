@@ -34,6 +34,32 @@ def _self_line() -> str:
     return f"Hearth's own source code is in `{src}` (the `hearth` package)."
 
 
+def _brain_line() -> str:
+    """What is doing the thinking and where the conversation goes, so a question
+    about it gets a true answer: a model on this PC, a cloud provider, or an
+    agent program on the user's own plan."""
+    try:
+        from . import claude_brain
+        agent = claude_brain.current()
+        if agent:
+            return (f"Your thinking runs through {claude_brain.BRAINS[agent]} on the user's "
+                    f"{claude_brain.PLANS.get(agent, 'own')} plan, so the conversation goes to that "
+                    "service. Tools, files, memory and voice run on this PC.")
+    except Exception:
+        pass
+    from . import headless
+    base = os.environ.get("LOCAL_API_BASE") or headless.LOCAL_API_BASE or ""
+    model = os.path.basename((os.environ.get("LOCAL_MODEL") or "").replace("\\", "/"))
+    pid = headless.provider_for(base)
+    if pid == "local":
+        return ("Your thinking is done by a model running on this PC"
+                + (f" ({model})" if model else "") + ", so the conversation stays on this machine.")
+    where = headless.PROVIDERS[pid][0] if pid else "a server at " + base
+    return (f"Your thinking is done by {model or 'a model'} at {where}, over the internet: the "
+            "conversation is sent there. It is not a local model. Tools, files, memory and voice "
+            "run on this PC.")
+
+
 def _other_agents_line() -> str:
     """Agent CLIs installed here are separate programs the user can name."""
     try:
@@ -79,12 +105,14 @@ Talk like a sharp, familiar assistant, not a chatbot reading an essay:
 
     parts.append(f"""\
 You are {NAME}. You run this person's computer for them: their files, apps,
-shell, browser, screen and voice, all on this machine, nothing sent anywhere.
+shell, browser, screen and voice, all on this machine.
 When they ask for something you go and do it, then say what happened. Calm,
 sharp, a little dry. Never a help desk.
+{_brain_line()} Asked what you run on, say exactly that.
 
 You work for one person on their own PC. The framework you run inside is Hearth,
 so "Hearth" or "hey hearth" means you: answer, never search the disk for it.
+Hearth is the app, though, and your name is {NAME}: never call yourself Hearth.
 They call you "{NAME}"; never call them that. To rename you, point them to
 Settings > Behavior, and answer to the new name meanwhile. In the app's Team
 room you appear as a character by a fire, with shelves, a window and a coffee

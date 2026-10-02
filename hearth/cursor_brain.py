@@ -151,7 +151,10 @@ def write_project_config(cwd: str) -> None:
         allow = [t for t in p.get("allow") or [] if t != f"Mcp({SERVER}:*)"] + [f"Mcp({SERVER}:*)"]
         deny = [t for t in p.get("deny") or [] if t != "Write(**)"] + (["Write(**)"] if ask else [])
         p["allow"], p["deny"] = allow, deny
-        data["autoAcceptWebSearch"] = True          # a search changes nothing; Hearth's own needs no yes either
+        # Cursor reads this file strictly: permissions and nothing else, or it
+        # refuses to start. Its own web search is switched on in Cursor's own
+        # settings, not here; Hearth's search goes through the server above.
+        data.pop("autoAcceptWebSearch", None)
 
     _merge_json(os.path.join(cwd, ".cursor", "mcp.json"), mcp)
     _merge_json(os.path.join(cwd, ".cursor", "cli.json"), perms)

@@ -43,6 +43,29 @@ os.environ.pop("HEARTH_PERSONA", None)
 BASE = P.system_prompt()
 VOICE = P.system_prompt(voice=True)
 
+# ----------------------------------------------------- it knows what it runs on
+# On a cloud model it told its user "I'm running locally on your machine, no
+# cloud for me": the prompt said nothing was sent anywhere, whatever the brain.
+from hearth import claude_brain                                    # noqa: E402
+claude_brain.current = lambda: None                                 # no agent program is the brain here
+os.environ["LOCAL_API_BASE"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
+os.environ["LOCAL_MODEL"] = "gemini-2.5-flash"
+cloud = P.system_prompt()
+check("on a cloud provider it is told which one, which model, and that the conversation goes there",
+      "gemini-2.5-flash at Google Gemini" in cloud and "sent there" in cloud and "not a local model" in cloud
+      and "nothing sent anywhere" not in cloud)
+os.environ["LOCAL_API_BASE"] = "http://localhost:1234/v1"
+os.environ["LOCAL_MODEL"] = r"F:\Models\Some-9B-Q4_K_M.gguf"
+here = P.system_prompt()
+check("on a local model it is told the model runs on this PC, by its file name",
+      "a model running on this PC (Some-9B-Q4_K_M.gguf)" in here and "sent there" not in here)
+os.environ.pop("LOCAL_MODEL")
+claude_brain.current = lambda: "codex"
+check("on an agent program it is told which, and whose plan",
+      "runs through Codex on the user's ChatGPT plan" in P.system_prompt())
+claude_brain.current = lambda: None
+check("it is told its name is not the app's", "never call yourself Hearth" in here)
+
 # ------------------------------------------------------------------- size
 tokens = len(BASE) // 4
 check(f"the shipped persona stays under 4,000 tokens ({tokens})", tokens < 4000)

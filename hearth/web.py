@@ -3499,18 +3499,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             # provider=local + url=api.x.ai, which makes Hearth treat a cloud
             # endpoint as a local server (chats silently hit the cloud, the
             # eject button shows for a "loaded" cloud model, etc.).
-            def _provider_from_url(u: str) -> str:
-                u = (u or "").lower()
-                if not u or "localhost" in u or "127.0.0.1" in u or "0.0.0.0" in u:
-                    return "local"
-                if "api.x.ai" in u: return "grok"
-                if "generativelanguage.googleapis" in u: return "gemini"
-                if "api.anthropic.com" in u: return "anthropic"
-                if "api.openai.com" in u: return "openai"
-                if "openrouter.ai" in u: return "openrouter"
-                if "api.groq.com" in u: return "groq"
-                return ""  # unknown host: leave provider as the caller set it
-            _detected = _provider_from_url(url)
+            _detected = _hl.provider_for(url)   # "" for an unknown host: the caller's label stands
             if _detected == "local" and provider and provider != "local":
                 # a local URL with a cloud provider label is also inconsistent
                 provider = "local"

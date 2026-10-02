@@ -256,6 +256,19 @@ PROVIDERS = {
 }
 
 
+def provider_for(base: str) -> str:
+    """Which provider an address belongs to: its id, "local" for a server on
+    this PC (or no address at all), "" for one Hearth has no name for."""
+    from urllib.parse import urlparse
+    host = (urlparse(base or "").hostname or "").lower()
+    if not host or host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        return "local"
+    for pid, (_label, url) in PROVIDERS.items():
+        if (urlparse(url).hostname or "") == host:
+            return pid
+    return ""
+
+
 def model_list_request(base: str, key: str = ""):
     """Where a server lists its models, and the headers that list needs.
 

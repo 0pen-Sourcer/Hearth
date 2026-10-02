@@ -90,7 +90,7 @@ def turn(prompt, history):
 
 os.makedirs(os.path.join(work, ".cursor"))
 with open(os.path.join(work, ".cursor", "cli.json"), "w") as f:
-    json.dump({"permissions": {"allow": ["Shell(ls)"], "deny": ["Read(secrets/**)"]}, "theme": "mine"}, f)
+    json.dump({"permissions": {"allow": ["Shell(ls)"], "deny": ["Read(secrets/**)"]}, "autoAcceptWebSearch": True}, f)
 tools.approval_mode = lambda: "ask"
 ev = turn("what's on my list?", [])
 chunks = "".join(f["content"] for t, f in ev if t == "assistant_chunk")
@@ -123,10 +123,11 @@ cli = json.load(open(os.path.join(work, ".cursor", "cli.json")))
 mcp = json.load(open(os.path.join(work, ".cursor", "mcp.json")))
 check("the folder allows Hearth's server, and on Ask turns Cursor's direct writes away",
       "Mcp(hearth_brain:*)" in cli["permissions"]["allow"] and "Write(**)" in cli["permissions"]["deny"])
-check("its own web search is allowed, as Hearth's is", cli.get("autoAcceptWebSearch") is True)
 check("what was already in that file stays",
-      "Shell(ls)" in cli["permissions"]["allow"] and "Read(secrets/**)" in cli["permissions"]["deny"]
-      and cli.get("theme") == "mine")
+      "Shell(ls)" in cli["permissions"]["allow"] and "Read(secrets/**)" in cli["permissions"]["deny"])
+# Cursor refuses to start on a project file with any key but permissions, and
+# an earlier Hearth wrote one there.
+check("the file holds only what Cursor accepts in it", set(cli) == {"permissions"})
 check("Hearth's server is attached, asking before risky tools itself",
       mcp["mcpServers"]["hearth_brain"]["env"].get("HEARTH_BRAIN_GATE") == "1")
 
