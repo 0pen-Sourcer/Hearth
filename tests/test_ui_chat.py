@@ -137,6 +137,9 @@ with sync_playwright() as pw:
     check(f"a file's text is read out of a call that is still arriving {partial}",
           partial == ['line one\nline "two" so f', None, "C:\\a\\b.txt"])
 
+    # The window takes which brain is in use from the app, so the app is the
+    # one that has to say an agent is the brain for this part.
+    web._save_settings({"llm_provider": "claude-code"})
     room = pg.evaluate("""async () => {
       const wait = (ms) => new Promise(r => setTimeout(r, ms));
       STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: 'claude-code' });
@@ -212,6 +215,7 @@ with sync_playwright() as pw:
       out.stripBack = !document.getElementById('view-team').contains(strip);
       return out;
     }""")
+    web._save_settings({"llm_provider": "local"})
     check(f"in the room JARVIS says what it is doing, not dots {room}",
           room["doing"] == "Reading a file…" and room["thinking"] == "Thinking…")
     check("a permission question is asked in the room, with the approval strip right there",

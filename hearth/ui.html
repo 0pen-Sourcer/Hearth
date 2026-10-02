@@ -8492,9 +8492,15 @@ function agentModelLabel(id) {
   return AGENT_BRAINS[id] + (m && m.id ? ' · ' + m.label : '');
 }
 
+// This window just changed the brain or its model. The lists the menu kept
+// are for the brain before, and so is any state reply already on its way.
+function brainMoved() {
+  MP_LISTS.clear();
+  STATE.brainSeq = (STATE.brainSeq || 0) + 1;
+}
 // Only the provider changes: the local address stays for helpers.
 function agentBrainOn(id) {
-  MP_LISTS.clear();
+  brainMoved();
   const name = AGENT_BRAINS[id];
   STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: id });
   Object.assign(STATE.brain, deriveBrainKind(), { busy: false, loaded: true,
@@ -8515,7 +8521,7 @@ async function switchEndpoint(body) {
   });
   if (!r.ok) throw new Error(r.error || 'unknown error');
   if (AGENT_BRAINS[body.provider]) { agentBrainOn(body.provider); return r; }
-  MP_LISTS.clear();
+  brainMoved();
   await saveSetting('llm_provider', body.provider);
   await saveSetting('llm_url', body.url);
   // With no key given, the one saved for this provider was used and stays.
@@ -8613,6 +8619,7 @@ $('model-select').addEventListener('change', async (e) => {
       const r = await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({ provider: '' }) });
       STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: (r && r.provider) || 'local' });
+      brainMoved();
       if (!STATE.settings.llm_provider) STATE.settings.llm_provider = 'local';
       Object.assign(STATE.brain, deriveBrainKind(), { loaded: false, modelId: '', modelName: '' });
       STATE.loadedModel = null;
@@ -8630,13 +8637,17 @@ $('model-select').addEventListener('change', async (e) => {
     ? id.slice('disk::'.length).split(/[\/\\]/).pop()
     : id;
   const prevLoaded = STATE.loadedModel;
+  const onDisk = id.startsWith('disk::');
+  const prevKind = STATE.brain.kind;
   // Cloud short-circuit: when the active brain is a cloud provider, the
   // sticker dropdown should just switch the active model id - there is
   // no local load to perform. Without this guard, the GUI fires
   // /api/models/load (which used to trigger `lms load grok-4.3` and
   // confused both the user and LM Studio). Now: zero-friction swap.
+  // A file on this PC is never a provider's model: it is loaded here, and
+  // the brain moves to it once it is up.
   const _prov  = (STATE.settings && STATE.settings.llm_provider || '').toLowerCase();
-  if (CLOUD_PROVIDERS.has(_prov) || deriveBrainKind().kind === 'cloud') {
+  if (!onDisk && (CLOUD_PROVIDERS.has(_prov) || deriveBrainKind().kind === 'cloud')) {
     // Lock so the 9s poll can't repaint a stale model while we swap.
     STATE.brain.busy = true;
     STATE.brain.kind = 'cloud';
@@ -8654,6 +8665,7 @@ $('model-select').addEventListener('change', async (e) => {
         body: JSON.stringify({ llm_model: displayId }),
       });
     } catch {}
+    brainMoved();
     STATE.brain.busy = false;
     // New model id may have a different context window (e.g. grok-4.3 = 1M
     // vs grok-4.20 = 256K). Pull the live budget so the bottom-bar ctx
@@ -8665,6 +8677,7 @@ $('model-select').addEventListener('change', async (e) => {
     return;
   }
   STATE.brain.busy = true;
+  if (onDisk) STATE.brain.kind = 'local';
   // Name the model being loaded right away. Only the Models tab did this, so a
   // pick made from this dropdown left the previous id in STATE.brain and the
   // sticker fell back to the first entry in the list while loading.
@@ -8709,6 +8722,15 @@ $('model-select').addEventListener('change', async (e) => {
     }
     if (r && r.ok) {
       setState('ready');
+      // Starting a model here makes the local server the brain. Keep this
+      // window's settings in step so every label says so at once.
+      if (onDisk) {
+        STATE.settings = Object.assign({}, STATE.settings || {},
+          { llm_provider: 'local', llm_url: r.url || (STATE.settings || {}).llm_url, llm_model: '' });
+        if (r.url) STATE.endpoint = r.url;
+        Object.assign(STATE.brain, deriveBrainKind());
+        brainMoved();
+      }
       STATE.brain.kind = 'local';
       STATE.brain.modelId = displayId;
       STATE.brain.modelName = displayId.split(/[\/\\]/).pop();
@@ -8736,6 +8758,7 @@ $('model-select').addEventListener('change', async (e) => {
       setTimeout(() => setState('idle'), 800);
     } else {
       // Restore the previous active model in the single source of truth.
+      STATE.brain.kind = prevKind;
       STATE.brain.loaded = !!prevLoaded;
       STATE.brain.modelId = prevLoaded ? prevLoaded.id : '';
       STATE.brain.modelName = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
@@ -8756,6 +8779,7 @@ $('model-select').addEventListener('change', async (e) => {
       }
     }
   } catch (err) {
+    STATE.brain.kind = prevKind;
     STATE.brain.loaded = !!prevLoaded;
     STATE.brain.modelId = prevLoaded ? prevLoaded.id : '';
     STATE.brain.modelName = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
@@ -8886,7 +8910,10 @@ function providerFromEndpoint(url) {
 }
 async function refreshState() {
   try {
+    const _seq = STATE.brainSeq || 0;
     const s = await api('/api/state');
+    // Asked before this window changed the brain: it describes the one before.
+    const _stale = _seq !== (STATE.brainSeq || 0);
     // Wake word fired while this window was already open: the tray couldn't spawn
     // a new ?voice=1 window, so it flipped a one-shot flag. Enter voice mode in
     // place — same as the ?voice=1 boot path.
@@ -8911,6 +8938,18 @@ async function refreshState() {
     }
     // Live endpoint is the source of truth for local-vs-cloud + the brand label.
     STATE.endpoint = s.endpoint || '';
+    // Which brain is in use is the server's to say. A switch made somewhere
+    // else (a model started from the Models tab, the terminal) leaves this
+    // window's copy of the settings behind, so it catches up here.
+    const _live = (s.provider || '').toLowerCase();
+    if (_live && STATE.settings && !STATE.brain.busy && !_stale
+        && _live !== (STATE.settings.llm_provider || 'local').toLowerCase()) {
+      STATE.settings.llm_provider = _live;
+      if (_live === 'local') STATE.settings.llm_model = '';
+      refreshSettings().catch(() => {});
+    }
+    if (typeof s.picked_model === 'string' && STATE.settings && !STATE.brain.busy && !_stale
+        && s.picked_model !== (STATE.settings.llm_model || '')) STATE.settings.llm_model = s.picked_model;
     // Stash the MCP launcher the backend computed for this build (source vs
     // packaged), used by the "Hearth as MCP server" snippet.
     if (s.mcp_launch) STATE.mcp_launch = s.mcp_launch;

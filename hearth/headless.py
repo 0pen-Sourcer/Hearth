@@ -307,7 +307,9 @@ def settle_model(base: str, key: str, wanted: str) -> str:
     if not listed or not wanted:
         return wanted or (listed[0] if listed else "")
     low = {m.lower(): m for m in listed}
-    return low.get(wanted.lower()) or listed[0]
+    # Gemini lists "models/gemini-..." and answers to the short name too.
+    short = {m.lower().rsplit("/", 1)[-1]: m for m in reversed(listed)}
+    return low.get(wanted.lower()) or short.get(wanted.lower()) or listed[0]
 
 
 # What the window sends, when idle, for a turn that has no user message: only

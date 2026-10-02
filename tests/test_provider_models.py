@@ -58,12 +58,13 @@ class _Provider(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         SEEN.append(dict(self.headers))
-        if self.headers.get("Authorization") != "Bearer good":
+        # Only the one list a provider has; LM Studio's own address is not here.
+        if self.headers.get("Authorization") != "Bearer good" or not self.path.split("?")[0].endswith("/v1/models"):
             self.send_response(401)
             self.end_headers()
             return
         body = json.dumps({"data": [{"id": "big-embedding-3"}, {"id": "newest-chat"}, {"id": "older-chat"},
-                                    {"id": "imagen-4"}]}).encode()
+                                    {"id": "imagen-4"}, {"id": "vendor/slashed-chat"}]}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -75,12 +76,13 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 base = f"http://127.0.0.1:{srv.server_address[1]}/v1"
 
 check("the chat models a provider lists, in its order, without the ones that can't chat",
-      hl.provider_models(base, "good") == ["newest-chat", "older-chat"])
+      hl.provider_models(base, "good") == ["newest-chat", "older-chat", "vendor/slashed-chat"])
 check("a provider that refuses the key has no list", hl.provider_models(base, "bad") is None)
 check("a name the provider lists is kept, whatever its case", hl.settle_model(base, "good", "Older-Chat") == "older-chat")
 check("a name it no longer lists gives way to one it does", hl.settle_model(base, "good", "retired-model") == "newest-chat")
 check("no name at all gets the first it lists", hl.settle_model(base, "good", "") == "newest-chat")
 check("when the list can't be had, the name asked for stands", hl.settle_model(base, "bad", "retired-model") == "retired-model")
+check("a name given without its prefix is the listed one", hl.settle_model(base, "good", "slashed-chat") == "vendor/slashed-chat")
 
 # The model menu lists every provider a key is saved for and reads each one's
 # models with that saved key, so nothing has to be pasted again to look or switch.
@@ -130,7 +132,8 @@ def post(path, body):
 SEEN.clear()
 code, got = post("/api/providers/models", {"id": "openai"})
 check("a saved provider's models are read with its saved key",
-      code == 200 and got == {"models": ["newest-chat", "older-chat"]} and SEEN[-1].get("Authorization") == "Bearer good")
+      code == 200 and got == {"models": ["newest-chat", "older-chat", "vendor/slashed-chat"]}
+      and SEEN[-1].get("Authorization") == "Bearer good")
 check("a provider with no key saved is not asked", post("/api/providers/models", {"id": "anthropic"})[0] == 404)
 if far:
     code, got = post("/api/llm-endpoint", {"provider": "openai", "url": base, "key": "", "model": "", "settle": True})
@@ -138,6 +141,31 @@ if far:
     check("switching with no key given uses the saved one, and settles on a model the provider lists",
           code == 200 and got.get("model") == "newest-chat" and after["llm_key"] == "good"
           and after["llm_model"] == "newest-chat" and after["provider_keys"].get("gemini") == "in-use")
+
+    # Picking a model on this PC while a provider was the brain saved the file's
+    # name as that provider's model: nothing loaded, and every message would
+    # have asked the provider for a .gguf.
+    web._save_settings({"llm_model": "Local-9B-Q4_K_M.gguf"})
+    check("a local file's name is not saved as a provider's model", web._load_settings()["llm_model"] == "")
+    left = dict(web._load_settings(), llm_model="Local-9B-Q4_K_M.gguf")      # what that left on disk
+    web._atomic_write_json(web.SETTINGS_PATH, left, indent=2)
+    web._models_cache["ts"] = 0
+    listed = web._list_models()
+    check("a provider left with one takes the first model it lists, and shows that one in use",
+          web._load_settings()["llm_model"] == "newest-chat"
+          and [m["id"] for m in listed if m["state"] == "loaded"] == ["newest-chat"])
+    check("a provider's model ids are kept whole", "vendor/slashed-chat" in [m["id"] for m in listed])
+    web._save_settings({"llm_model": "slashed-chat"})
+    web._models_cache["ts"] = 0
+    check("a model saved by its short name is still the one marked in use",
+          [m["id"] for m in web._list_models() if m["state"] == "loaded"] == ["vendor/slashed-chat"])
+    # A list worked out while the brain was being switched finished after the
+    # switch and was served as the new brain's for a few seconds.
+    import time                                                      # noqa: E402
+    web._models_cache.update(ts=time.time(), base="https://the-brain-before.invalid/v1",
+                             data=[{"id": "the-brain-before", "state": "loaded"}])
+    check("a model list read from another endpoint is not served as this one's",
+          "the-brain-before" not in [m["id"] for m in web._list_models()])
     far.shutdown()
 app.shutdown()
 srv.shutdown()

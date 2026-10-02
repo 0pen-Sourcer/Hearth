@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -61,9 +62,31 @@ AGENTS = {
         + [{"id": f"opus-5-v{i}", "label": f"Opus 5 v{i}"} for i in range(1, 9)]},
 }
 now = {"provider": "local", "model": ""}       # what the stand-in app is switched to
+DISK = "C:\\models\\Standin-9B-Q4_K_M.gguf"
+started: list = []                              # local models asked to load
+REAL: dict = {}                                 # the app's own answers, by path
 asked: list = []                                # provider lists that were fetched
 switched: list = []                             # bodies sent to switch the endpoint
 saved: dict = {}                                # settings the page wrote
+
+
+def the_real(route) -> dict:
+    """What the app itself answers, asked for outside the browser so a stand-in
+    can change one field of it. A burst of polls can get a connection dropped
+    on Windows, so it asks again; an answer that never comes fails the request
+    in the page instead of leaving it waiting."""
+    path = route.request.url.split("?")[0]
+    if path in REAL:                            # asked once: the stand-ins only change what the test is about
+        return dict(REAL[path])
+    for _ in range(4):
+        try:
+            with urllib.request.urlopen(route.request.url, timeout=60) as r:
+                REAL[path] = json.load(r)
+                return dict(REAL[path])
+        except OSError:
+            time.sleep(0.2)
+    route.abort()
+    return None
 
 
 def models(route):
@@ -103,14 +126,44 @@ def settings(route):
         if "llm_model" in saved:
             now["model"] = saved["llm_model"]
         return route.fulfill(json={"ok": True})
-    try:
-        real = route.fetch().json()
-    except Exception:                           # the page closed with a poll in flight
+    real = the_real(route)
+    if real is None:
         return
     real.update(saved)
     route.fulfill(json=real)
 
 
+def state(route):
+    real = the_real(route)
+    if real is None:
+        return
+    real.update(picked_model=saved.get("llm_model", real.get("picked_model", "")))
+    real.update(provider=now["provider"], endpoint={"anthropic": "https://api.anthropic.com/v1/",
+                                                     "gemini": "https://example.invalid/gemini/"}.get(now["provider"], real["endpoint"]))
+    route.fulfill(json=real)
+
+
+def status(route):
+    real = the_real(route)
+    if real is None:
+        return
+    real["disk_models"] = [{"path": DISK, "filename": "Standin-9B-Q4_K_M.gguf", "size_gb": 5.4}]
+    route.fulfill(json=real)
+
+
+def start(route):
+    started.append(json.loads(route.request.post_data or "{}").get("model_path"))
+    now.update(provider="local", model="")
+    saved.update(llm_provider="local", llm_model="")        # the server does this itself on a start
+    route.fulfill(json={"ok": True, "url": "http://localhost:1234/v1", "info": {"ctx": 32768}})
+
+
+# Wait for the page to get there instead of guessing how long it takes.
+UNTIL = """window.until = async (ok, ms = 15000) => {
+  const t = Date.now();
+  while (Date.now() - t < ms) { try { if (ok()) return true; } catch {} await new Promise(r => setTimeout(r, 100)); }
+  return false;
+}"""
 OPEN = """async () => {
   await refreshSettings(); await refreshState(); await refreshModels();
   mpClose(); mpOpen();
@@ -123,7 +176,8 @@ OPEN = """async () => {
 SEARCH = """async (q) => {
   const menu = document.getElementById('mp-menu'), box = menu.querySelector('.mp-all');
   box.value = q; box.dispatchEvent(new Event('input'));
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 150));
+  await until(() => ![...menu.querySelectorAll('.mp-hits .mp-empty')].some(e => e.textContent.startsWith('Asking')));
   let from = '';
   const hits = [];
   for (const e of menu.querySelector('.mp-hits').children) {
@@ -155,6 +209,9 @@ with sync_playwright() as pw:
     pg.route("**/api/brain/agent/models*", agent_models)
     pg.route("**/api/llm-endpoint", endpoint)
     pg.route("**/api/settings", settings)
+    pg.route("**/api/state", state)
+    pg.route("**/api/llmserver/status", status)
+    pg.route("**/api/llmserver/start", start)
     errors: list = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
     for _ in range(4):
@@ -164,6 +221,7 @@ with sync_playwright() as pw:
         except Exception:
             pass
     time.sleep(3)
+    pg.evaluate(UNTIL)
 
     first = pg.evaluate(OPEN)
     provs = [r for r in first["rows"] if r[0].startswith("prov::")]
@@ -202,7 +260,7 @@ with sync_playwright() as pw:
     picked = pg.evaluate("""async () => {
       const menu = document.getElementById('mp-menu');
       menu.querySelector('.mp-hits .mp-row[data-v="prov::anthropic::claude-sonnet-5"]').click();
-      await new Promise(r => setTimeout(r, 1500));
+      await until(() => document.getElementById('mp-name').textContent === 'claude-sonnet-5');
       return { closed: menu.hidden, provider: STATE.settings.llm_provider, kind: STATE.brain.kind,
                name: document.getElementById('mp-name').textContent };
     }""")
@@ -224,12 +282,31 @@ with sync_playwright() as pw:
     other = pg.evaluate("""async () => {
       const menu = document.getElementById('mp-menu');
       menu.querySelector('.mp-sub .mp-row[data-v="prov::anthropic::claude-haiku-4-5"]').click();
-      await new Promise(r => setTimeout(r, 1200));
+      await until(() => document.getElementById('mp-name').textContent === 'claude-haiku-4-5');
       return { closed: menu.hidden, name: document.getElementById('mp-name').textContent };
     }""")
+    for _ in range(50):                          # the save is sent after the name changes
+        if saved.get("llm_model") == "claude-haiku-4-5":
+            break
+        pg.wait_for_timeout(100)
     check(f"another model of the provider in use is a change of model, not a new switch {other}",
           len(switched) == 1 and saved.get("llm_model") == "claude-haiku-4-5" and other["closed"]
           and other["name"] == "claude-haiku-4-5")
+    # A model on this PC, picked while a provider is the brain.
+    wrote = []
+    pg.on("request", lambda r: wrote.append(r.post_data or "") if r.method == "POST" and r.url.endswith("/api/settings") else None)
+    pg.evaluate(OPEN)
+    local = pg.evaluate("""async (v) => {
+      document.querySelector(`#mp-menu .mp-row[data-v="${CSS.escape(v)}"]`).click();
+      await until(() => !STATE.brain.busy && document.getElementById('brand-sub').textContent === '· local');
+      return { provider: STATE.settings.llm_provider, kind: STATE.brain.kind,
+               head: document.getElementById('brand-sub').textContent };
+    }""", "disk::" + DISK)
+    check(f"a model on this PC picked while a provider is the brain is loaded here {started} {local}",
+          started == [DISK] and len(switched) == 1 and not any(".gguf" in w for w in wrote))
+    check("and the window says local everywhere at once",
+          local["provider"] == "local" and local["kind"] == "local" and local["head"] == "· local")
+
     # Settings switches through the same code, with the key typed there.
     applied = pg.evaluate("""async () => {
       showView('settings'); await refreshSettings();
@@ -237,20 +314,59 @@ with sync_playwright() as pw:
       mode.value = 'gemini'; mode.dispatchEvent(new Event('change'));
       document.getElementById('setting-llm-key').value = 'typed-key';
       document.getElementById('btn-llm-apply').click();
-      await new Promise(r => setTimeout(r, 1500));
+      await until(() => STATE.settings.llm_provider === 'gemini' && document.getElementById('mp-name').textContent === 'gemini-3-flash');
       return { provider: STATE.settings.llm_provider, name: document.getElementById('mp-name').textContent };
     }""")
     last = switched[-1]
     check(f"Settings still switches, and saves the key that was typed {last} {applied}",
           len(switched) == 2 and last["provider"] == "gemini" and last["key"] == "typed-key" and last["model"]
           and saved.get("llm_key") == "typed-key" and applied["provider"] == "gemini" and applied["name"] == last["model"])
+    # A state reply already on its way when the brain is switched here describes the brain before.
+    late = pg.evaluate("""async () => {
+      const real = window.fetch;
+      let let_go;
+      const held = new Promise(r => { let_go = r; });
+      window.fetch = async (u, o) => { const r = await real(u, o); if (String(u).includes('/api/state')) await held; return r; };
+      const looking = refreshState();                 // asked while still on gemini...
+      await new Promise(r => setTimeout(r, 300));
+      window.fetch = real;
+      STATE.settings.llm_provider = 'anthropic';      // ...and the window moves on before it lands
+      brainMoved();
+      let_go(); await looking;
+      const kept = STATE.settings.llm_provider;
+      STATE.settings.llm_provider = 'gemini';
+      return kept;
+    }""")
+    check(f"a state reply asked for before a switch does not undo it ({late})", late == "anthropic")
+
+    # The saved model was put right on the server while this window held the old name.
+    saved.update(llm_model="gemini-3-pro")
+    renamed = pg.evaluate("""async () => {
+      const before = STATE.settings.llm_model;
+      await refreshState();
+      return { before, saved: STATE.settings.llm_model, shown: STATE.brain.modelId };
+    }""")
+    check(f"a model name changed on the server is the one this window shows {renamed}",
+          renamed["before"] != "gemini-3-pro" and renamed["saved"] == "gemini-3-pro" and renamed["shown"] == "gemini-3-pro")
+
+    # The brain changed without this window doing it (the Models tab, the terminal).
+    now.update(provider="local", model="")
+    saved.update(llm_provider="local", llm_model="")
+    behind = pg.evaluate("""async () => {
+      const before = STATE.settings.llm_provider;
+      await refreshState();
+      await until(() => document.getElementById('brand-sub').textContent === '· local');
+      return { before, provider: STATE.settings.llm_provider, kind: STATE.brain.kind,
+               head: document.getElementById('brand-sub').textContent };
+    }""")
+    check(f"a brain changed elsewhere is caught up with on the next look {behind}",
+          behind["before"] == "gemini" and behind["provider"] == "local" and behind["kind"] == "local"
+          and behind["head"] == "· local")
     check(f"the page ran without a script error {errors}", not errors)
 
-    browser.close()
-srv.shutdown()
-
-print()
-if FAILS:
-    print(f"{len(FAILS)} check(s) failed")
-    sys.exit(1)
-print("all model menu checks passed")
+    print()
+    print(f"{len(FAILS)} check(s) failed" if FAILS else "all model menu checks passed")
+    sys.stdout.flush()
+    # The page polls the app the whole time; closing the browser with one of
+    # those in a stand-in's hands can wait for ever, so the run just ends.
+    os._exit(1 if FAILS else 0)

@@ -796,7 +796,10 @@ def _list_models() -> List[Dict]:
     """
     global _models_notice
     now = time.time()
-    if _models_cache["data"] is not None and now - _models_cache["ts"] < 4:
+    # A list is only good for the endpoint it was read from: one worked out
+    # while the brain was being switched belongs to the brain before.
+    if (_models_cache["data"] is not None and now - _models_cache["ts"] < 4
+            and _models_cache.get("base") == _models_probe_endpoint().rstrip("/")):
         return _models_cache["data"]
 
     _models_notice = ""  # cleared each fresh compute; set only if a cloud list fails
@@ -817,8 +820,7 @@ def _list_models() -> List[Dict]:
     _is_local_probe = any(h in _pb for h in
                           ("localhost", "127.0.0.1", "0.0.0.0", "::1"))
     if _is_local_probe and not _port_reachable(probe_base, timeout=0.6):
-        _models_cache["ts"] = now
-        _models_cache["data"] = []
+        _models_cache.update(ts=now, data=[], base=probe_base)
         return []
 
     # 1) Built-in llama-cpp server is the active endpoint?
@@ -855,8 +857,7 @@ def _list_models() -> List[Dict]:
                 "quantization": "",
                 "capabilities": [],
             })
-            _models_cache["ts"] = now
-            _models_cache["data"] = out
+            _models_cache.update(ts=now, data=out, base=probe_base)
             return out
     except Exception:
         pass
@@ -906,8 +907,7 @@ def _list_models() -> List[Dict]:
                 "capabilities": m.get("capabilities", []),
                 "path": m.get("path") or m.get("modelPath") or "",
             })
-        _models_cache["ts"] = now
-        _models_cache["data"] = out
+        _models_cache.update(ts=now, data=out, base=probe_base)
         return out
 
     # 3) Generic OpenAI-compatible /v1/models — assume the first one is loaded.
@@ -940,9 +940,13 @@ def _list_models() -> List[Dict]:
     # provider's first model on every poll, so a swap to grok-4.3 wouldn't
     # stick. Fall back to the first row only if the saved pick isn't listed.
     try:
-        _picked = (_load_settings().get("llm_model") or "").strip().lower()
+        _saved_now = _load_settings()
+        _picked = (_saved_now.get("llm_model") or "").strip().lower()
     except Exception:
-        _picked = ""
+        _saved_now, _picked = {}, ""
+    _picked_whole = _picked
+    _h = probe_base.lower()
+    _is_cloud = not any(x in _h for x in ("localhost", "127.0.0.1", "0.0.0.0", "::1"))
     # Compare like-for-like. Ids below are basenamed (llama.cpp reports the full
     # --model path), but llm_model is often stored AS a full path, so the raw
     # comparison never matched and _loaded_idx silently kept its 0 default —
@@ -964,12 +968,21 @@ def _list_models() -> List[Dict]:
             continue
         # llama_cpp.server identifies models by the FULL --model path. Strip
         # to basename here so the topbar shows "model.gguf" not "C:\Users\...".
-        clean_id = os.path.basename(raw_id.replace("\\", "/")) or raw_id
+        # A provider's id is kept whole: "vendor/model" is the name it answers to.
+        clean_id = raw_id if _is_cloud else (os.path.basename(raw_id.replace("\\", "/")) or raw_id)
         rows.append((clean_id, m))
+    # A known provider with no usable model saved (none, or a local file's
+    # name) takes the first one it lists, so the name shown is the one used.
+    _prov_now = (_saved_now.get("llm_provider") or "").strip().lower()
+    from .headless import PROVIDERS as _known
+    if rows and _is_cloud and _prov_now in _known and (not _picked_whole or _picked_whole.endswith(".gguf")):
+        try:
+            _save_settings({"llm_model": rows[0][0]})
+            _picked = _picked_whole = rows[0][0].lower()
+        except Exception:
+            pass
     # Honest surface: if a CLOUD provider gave us nothing (403/no response), tell
     # the user WHY the picker is sparse instead of showing a misleading catalog.
-    _h = probe_base.lower()
-    _is_cloud = not any(x in _h for x in ("localhost", "127.0.0.1", "0.0.0.0", "::1"))
     if not rows and _is_cloud:
         _prov = ("xAI Grok" if "api.x.ai" in _h else "OpenAI" if "api.openai.com" in _h
                  else "Gemini" if "googleapis" in _h else "Anthropic" if "anthropic" in _h else "the provider")
@@ -981,7 +994,7 @@ def _list_models() -> List[Dict]:
         _models_notice = ""
     _loaded_idx = 0
     for idx, (cid, _m) in enumerate(rows):
-        if _picked and cid.lower() == _picked:
+        if _picked and (cid.lower() in (_picked, _picked_whole) or cid.lower().rsplit("/", 1)[-1] == _picked):
             _loaded_idx = idx
             break
     for idx, (clean_id, m) in enumerate(rows):
@@ -996,8 +1009,7 @@ def _list_models() -> List[Dict]:
             "quantization": "",
             "capabilities": [],
         })
-    _models_cache["ts"] = now
-    _models_cache["data"] = out
+    _models_cache.update(ts=now, data=out, base=probe_base)
     return out
 
 
@@ -1446,6 +1458,11 @@ def _save_settings_locked(d: Dict) -> Dict:
     _is_cloud_now = _new_provider in _CLOUD
     _prev_tts_device = cur.get("tts_device", "cpu")
     cur.update({k: v for k, v in d.items() if v is not None})
+    # A model file on this PC is never a cloud provider's model. Saved as one,
+    # every message would ask the provider for a name it has never heard of.
+    from .headless import PROVIDERS as _known
+    if _new_provider in _known and str(cur.get("llm_model") or "").lower().endswith(".gguf"):
+        cur["llm_model"] = ""
     os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
     # Atomic: a truncated settings.json (power cut, AV lock mid-write) would
     # lose the brain, workspace pointer and voice prefs in one go.
@@ -3919,6 +3936,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             "model": loaded,
             "endpoint": endpoint,
             "provider": provider,
+            # The model name saved for the brain, so a window holding an older
+            # copy of the settings shows the one that is really used.
+            "picked_model": (settings.get("llm_model") or ""),
             # Active context window so the GUI ring is accurate the instant a
             # brain/model swap lands — no waiting for the next chat turn's SSE.
             "context": context_window,
