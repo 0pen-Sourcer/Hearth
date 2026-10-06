@@ -762,6 +762,65 @@ def _saved_providers() -> List[Dict[str, Any]]:
     return out
 
 
+def status_snapshot() -> Dict[str, Any]:
+    """What /status shows, the same for the window and the terminal: what is
+    thinking and on what, the approval switch, each plan's usage windows as the
+    agent reports them, the local engine, and the helpers."""
+    from . import claude_brain as cb, headless as hl
+    from .tools import approval_mode
+    from .updater import HEARTH_VERSION
+    s = _load_settings()
+    agent = cb.current()
+    if agent:
+        info = cb.agent_models(agent)
+        m = next((x for x in info["models"] if x["id"] == (info.get("model") or "")), None)
+        brain = {"kind": "agent", "id": agent, "label": cb.BRAINS[agent],
+                 "model": (m["label"] if m and m["id"] else "its default model"),
+                 "where": f"your {cb.PLANS.get(agent, '')} plan, through {cb.BRAINS[agent]} on this PC"}
+    else:
+        pid = hl.provider_for(LOCAL_API_BASE)
+        if pid == "local":
+            loaded = _detect_loaded() or {}
+            brain = {"kind": "local", "id": "local", "label": "This PC", "model": loaded.get("id") or "",
+                     "where": LOCAL_API_BASE}
+        else:
+            brain = {"kind": "cloud", "id": pid or "custom",
+                     "label": hl.PROVIDERS[pid][0] if pid in hl.PROVIDERS else "A server",
+                     "model": s.get("llm_model") or "", "where": "your API key"}
+    limits = []
+    for aid, label in cb.BRAINS.items():
+        got = cb.plan_limits(aid)
+        if got:
+            limits.append({"id": aid, "label": label, "plan": cb.PLANS.get(aid, ""), "at": got.get("at"),
+                           "windows": got.get("windows") or {}})
+    try:
+        from . import subagents as _sa
+        team = _sa.team_state()
+    except Exception:
+        team = []
+    try:
+        from . import llmserver as _ls
+        st = _ls.status(LOCAL_API_BASE)
+        hs = _ls.helper_status()
+        local = {"running": bool(st.get("builtin_running") or st.get("external_running")),
+                 "model": os.path.basename(str(st.get("builtin_model") or "")),
+                 "ctx": (getattr(_ls, "_proc_info", {}) or {}).get("ctx"),
+                 "helper": os.path.basename(str(hs.get("model") or "")) if hs.get("running") else ""}
+    except Exception:
+        local = {"running": False, "model": "", "ctx": None, "helper": ""}
+    try:
+        ctx, ctx_src = hl.resolve_context_tokens(brain.get("model") or "")
+    except Exception:
+        ctx, ctx_src = None, ""
+    if agent:
+        ctx = cb.context_window(agent) or ctx
+    return {"version": HEARTH_VERSION, "brain": brain, "context": ctx, "context_source": ctx_src,
+            "mode": approval_mode(), "limits": limits, "local": local,
+            "helpers": {"working": sum(1 for a in team if a.get("status") == "working"),
+                        "done": sum(1 for a in team if a.get("status") == "done")},
+            "memories": len(_memory_index()), "workspace": WORKSPACE}
+
+
 def _models_probe_endpoint() -> str:
     """Where should the chat-model dropdown look?
 
@@ -2194,6 +2253,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/team/choices":
             return self._send_json(200, _team_choices())
+        if path == "/api/status":
+            return self._send_json(200, status_snapshot())
         if path == "/api/team":
             # Live state of helper agents for the Team view.
             try:

@@ -178,6 +178,21 @@ check("a mistyped provider and a mistyped command get a suggestion",
       "Did you mean /brain cursor?" in hearth_strip(out) and "Did you mean /brain?" in hearth_strip(out))
 check("Gemini's context is Gemini's, not Anthropic's", "context auto-set to 1,000,000" in out)
 
+# /status: what is thinking, this chat, plan limits, the PC. Agent limits come
+# from what the agent reported, so a stand-in file is written for one.
+_ws3 = tempfile.mkdtemp(prefix="hearth-cli-status-")
+_home3 = tempfile.mkdtemp(prefix="hearth-cli-status-home-")
+os.makedirs(os.path.join(_home3, ".hearth"), exist_ok=True)
+with open(os.path.join(_home3, ".hearth", "plan_limits.json"), "w", encoding="utf-8") as f:
+    _json.dump({"claude-code": {"at": time.time() - 120, "windows": {"5 hours": {"used": 89, "resets_at": time.time() + 3600}}}}, f)
+code, out, _ = run([], stdin=b"/status\n", timeout=150, home=_home3, extra_env={"JARVIS_WORKSPACE": _ws3})
+plain = hearth_strip(out)
+check("/status says what is thinking, how full the chat is and each plan's limits",
+      "Thinking with" in plain and "This chat" in plain and "Claude Code" in plain and "89% used" in plain
+      and "resets in" in plain)
+check("/stauts is caught and the right one suggested", "Did you mean /status?" in hearth_strip(
+      run([], stdin=b"/stauts\n", timeout=150, home=_home3, extra_env={"JARVIS_WORKSPACE": _ws3})[1]))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

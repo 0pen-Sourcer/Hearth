@@ -2071,7 +2071,32 @@
   .slash-item.active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .slash-item:hover { background: var(--bg-2); }
   .slash-cmd { color: var(--accent-2); font-family: var(--mono); font-weight: 600; font-size: 13px; }
+  .slash-cmd b { color: var(--fg); }
   .slash-desc { color: var(--fg-faint); font-size: 11px; margin-left: 16px; text-align: right; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slash-group { padding: 8px 14px 3px; font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--fg-faint); font-weight: 600; }
+  .slash-none { padding: 10px 14px; font-size: 12.5px; color: var(--fg-dim); }
+  .slash-none b { color: var(--fg); font-family: var(--mono); }
+  .slash-none .slash-cmd { cursor: pointer; }
+  #modal-body:has(.st-panel) { background: none; border: none; padding: 0; white-space: normal; font-family: var(--sans); max-height: 70vh; }
+  .st-panel { display: flex; flex-direction: column; gap: 10px; min-width: 420px; }
+  .st-card { border: 1px solid var(--border); border-radius: var(--r-lg, 12px); background: var(--bg-1); padding: 12px 14px; }
+  .st-card h5 { margin: 0 0 8px; font-size: 10.5px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--fg-faint); font-weight: 600; }
+  .st-brain { display: flex; align-items: center; gap: 12px; }
+  .st-brain .mp-ico { width: 34px; height: 34px; }
+  .st-brain b { display: block; color: var(--fg); font-size: 14px; }
+  .st-brain small, .st-note { display: block; color: var(--fg-faint); font-size: 12px; margin-top: 2px; }
+  .st-bar { margin-top: 8px; }
+  .st-bar-top { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--fg-dim); }
+  .st-bar-top b { color: var(--fg); font-weight: 600; }
+  .st-track { height: 6px; border-radius: 99px; background: var(--bg-3); margin-top: 5px; overflow: hidden; }
+  .st-track i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+  .st-track i.warn { background: var(--warn); } .st-track i.hot { background: var(--err); }
+  .st-plan + .st-plan { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .st-plan > b { color: var(--fg); font-size: 13px; }
+  .st-rows { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 12.5px; }
+  .st-rows span { color: var(--fg-faint); }
+  .st-rows em { font-style: normal; color: var(--fg); overflow-wrap: anywhere; }
+  .st-foot { text-align: right; font-size: 11px; color: var(--fg-faint); }
 
   /* ============================================================
      MEMORY view
@@ -6872,6 +6897,7 @@ async function _updateCtxRingFromHistory() {
 // share used while the live one showed the share left, so the same chat read
 // 71% at rest and 31% a second later.
 function _paintCtxRing(used, budget, at, measured) {
+  STATE._ctxNow = { used, budget, at: at || 0.75, chat: (activeConvo() || {}).id };
   const wrap = document.getElementById('ctx-ring-wrap');
   const ring = document.getElementById('ctx-ring');
   const pct  = document.getElementById('ctx-ring-pct');
@@ -9604,6 +9630,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // ----- Slash commands (parity with CLI) -----
   if (prompt.startsWith('/')) {
     const handled = await handleSlash(prompt);
+    if (handled === 'unknown') return;
     if (handled) {
       input.value = ''; input.style.height = '42px';
       return;
@@ -10623,6 +10650,65 @@ async function send(forced = null, displayAs = null, opts = {}) {
 }
 
 // Slash command parser - returns true if handled, false to fall through to normal chat.
+// What is thinking, how full this chat is, how much of each plan's usage
+// windows is used, and what the PC is running: one look, from /status.
+function _stAgo(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 90) return sec + 's';
+  const m = Math.round(sec / 60);
+  if (m < 90) return m + 'm';
+  const h = Math.floor(m / 60), d = Math.floor(h / 24);
+  return d >= 2 ? d + 'd ' + (h % 24) + 'h' : h + 'h ' + (m % 60) + 'm';
+}
+function _stBar(label, pct, right) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  return `<div class="st-bar"><div class="st-bar-top"><span>${esc(label)}</span><b>${esc(right)}</b></div>
+    <div class="st-track"><i class="${p >= 90 ? 'hot' : p >= 70 ? 'warn' : ''}" style="width:${p}%"></i></div></div>`;
+}
+async function showStatus() {
+  showModal('Status', '<div class="st-panel"><div class="st-card"><span class="st-note">Looking…</span></div></div>', [{ label: 'Close' }]);
+  let st;
+  try { st = await api('/api/status'); }
+  catch (e) { $('modal-body').innerHTML = `<div class="st-panel"><div class="st-card">${esc(e.message)}</div></div>`; return; }
+  const b = st.brain || {}, h = HARNESS[b.id] || BRAIN_MARKS[b.id];
+  const ico = h ? `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>`
+               : `<span class="mp-ico">${b.kind === 'local' ? MP_CHIP : MP_CLOUD}</span>`;
+  const brain = `<div class="st-card"><h5>Thinking with</h5><div class="st-brain">${ico}<div>
+      <b>${esc(b.label)}${b.model ? ' · ' + esc(b.model) : ''}</b>
+      <small>${b.kind === 'local' ? (b.model ? 'Runs on this PC, nothing leaves it' : 'No model is loaded') : 'Through ' + esc(b.where)}</small></div></div></div>`;
+  // This chat's context: the last measured turn, or the window alone.
+  const now = STATE._ctxNow && STATE._ctxNow.chat === (activeConvo() || {}).id ? STATE._ctxNow : null;
+  const total = st.context || (now && now.budget) || 0;
+  let ctx = `<div class="st-card"><h5>This chat</h5>`;
+  if (now && now.budget) {
+    const room = now.budget * now.at, used = Math.round(now.used / room * 100);
+    ctx += _stBar('Context used before it is summarised', used, `${Math.max(0, 100 - used)}% left`)
+         + `<span class="st-note">${Math.round(now.used / 1000)}K of ${Math.round(total / 1000)}K tokens; older turns are summarised at ${Math.round(now.at * 100)}%.</span>`;
+  } else {
+    ctx += `<span class="st-note">${total ? `A ${total >= 1e6 ? (total / 1e6) + 'M' : Math.round(total / 1000) + 'K'} token window. ` : ''}Nothing measured yet in this chat.</span>`;
+  }
+  ctx += '</div>';
+  // Each plan's windows, as the agent itself last reported them.
+  let plans = '';
+  if ((st.limits || []).length) {
+    const t = Date.now() / 1000;
+    plans = '<div class="st-card"><h5>Plan limits</h5>' + st.limits.map(l => {
+      const bars = Object.entries(l.windows).map(([w, v]) => _stBar(w, v.used,
+        `${v.used}% used${v.resets_at ? ' · resets in ' + _stAgo(v.resets_at - t) : ''}`)).join('');
+      return `<div class="st-plan"><b>${esc(l.label)}</b> <span class="st-note" style="display:inline">your ${esc(l.plan)} plan, as of ${_stAgo(t - l.at)} ago</span>${bars}</div>`;
+    }).join('') + '</div>';
+  }
+  const mode = (APPROVAL_MODES.find(m => m.id === st.mode) || {}).name || st.mode;
+  const pc = `<div class="st-card"><h5>On this PC</h5><div class="st-rows">
+      <span>Engine</span><em>${st.local.running ? esc(st.local.model || 'running') + (st.local.ctx ? ` · ${Math.round(st.local.ctx / 1024)}K context` : '') : 'not running'}</em>
+      ${st.local.helper ? `<span>Helper model</span><em>${esc(st.local.helper)}</em>` : ''}
+      <span>Approval</span><em>${esc(mode)}</em>
+      <span>Helpers</span><em>${st.helpers.working ? st.helpers.working + ' working' : 'none working'}${st.helpers.done ? ', ' + st.helpers.done + ' finished recently' : ''}</em>
+      <span>Memories</span><em>${st.memories}</em>
+      <span>Workspace</span><em>${esc(st.workspace)}</em></div></div>`;
+  $('modal-body').innerHTML = `<div class="st-panel">${brain}${ctx}${plans}${pc}<div class="st-foot">Hearth ${esc(st.version)}</div></div>`;
+}
+
 async function handleSlash(raw) {
   const [cmd, ...rest] = raw.trim().split(/\s+/);
   const arg = rest.join(' ').trim();
@@ -10654,6 +10740,17 @@ async function handleSlash(raw) {
     case '/team':
       showView('team');
       return true;
+    case '/status':
+    case '/usage':
+      showStatus();
+      return true;
+    case '/brain':
+      mpOpen();
+      return true;
+    case '/new':
+      newConversation(); renderChat(); return true;
+    case '/tour':
+      startTour(); return true;
     case '/clear':
       if (c) {
         c.messages = [];
@@ -10746,7 +10843,7 @@ async function handleSlash(raw) {
         $('model-select').value = arg;
         $('model-select').dispatchEvent(new Event('change'));
         toast('Loading', arg, 'ok', 1500);
-      }
+      } else mpOpen();
       return true;
     case '/models':
       try {
@@ -10762,9 +10859,30 @@ async function handleSlash(raw) {
     case '/settings': showView('settings'); return true;
     case '/exit':
     case '/quit':   window.close(); return true;
-    default:
-      return false;  // not a slash command we know - pass through to chat
   }
+  // Something that reads as a command but isn't one is not sent to the model.
+  // A path or a message that only starts with a slash still goes through.
+  const word = cmd.toLowerCase();
+  if (/^\/[a-z][a-z-]*$/.test(word) && !SLASH_COMMANDS.some(x => x.cmd.split(' ')[0] === word)) {
+    const near = _slashNear(word);
+    toast(`No command ${word}`, near ? `Did you mean ${near}? Type / to see them all.` : 'Type / to see them all.', 'warn', 5000);
+    return 'unknown';                                   // left in the box to be corrected
+  }
+  return false;
+}
+// The closest command by spelling, for "did you mean".
+function _slashNear(word) {
+  const names = [...new Set(SLASH_COMMANDS.map(x => x.cmd.split(' ')[0]))];
+  const dist = (a, b) => {
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[a.length][b.length];
+  };
+  let best = '', score = 3;
+  for (const n of names) { const k = dist(word, n); if (k < score) { best = n; score = k; } }
+  return best;
 }
 
 async function generateTitle(c) {
@@ -14842,43 +14960,60 @@ window.resetHints = function() {
 // select, Esc to dismiss. Filtered live as the user keeps typing.
 // ============================================================
 const SLASH_COMMANDS = [
-  { cmd: '/help',         desc: 'list all slash commands' },
-  { cmd: '/welcome',      desc: 'show the first-run welcome card' },
-  { cmd: '/clear',        desc: 'wipe this chat (keeps system prompt)' },
-  { cmd: '/compact',      desc: 'summarize older turns + extract facts to memory' },
-  { cmd: '/perms',        desc: 'show saved tool permissions (persist across restarts)' },
-  { cmd: '/perms clear',  desc: 'forget every saved tool decision' },
-  { cmd: '/tools',        desc: 'list every tool the assistant can call' },
-  { cmd: '/models',       desc: 'list models available on the server' },
-  { cmd: '/model',        desc: 'load a model by id - /model <id>' },
-  { cmd: '/voice on',     desc: 'enable TTS auto-speak in chat' },
-  { cmd: '/voice off',    desc: 'disable TTS auto-speak in chat' },
-  { cmd: '/think on',     desc: 'show model reasoning inline' },
-  { cmd: '/think off',    desc: 'hide model reasoning' },
-  { cmd: '/allow',        desc: 'extend write access to a folder - /allow <path>' },
-  { cmd: '/mode',         desc: 'what runs without asking: ask, edits or auto (Shift+Tab also cycles)' },
-  { cmd: '/team',         desc: 'open the Team view: helpers and agents at work' },
-  { cmd: '/files',        desc: 'open the Files view' },
-  { cmd: '/settings',     desc: 'open Settings' },
-  { cmd: '/mem',          desc: 'jump to the Memory view' },
-  { cmd: '/log',          desc: 'jump to the Logs view' },
-  { cmd: '/exit',         desc: 'close the app window (or /quit)' },
+  { cmd: '/status',       desc: 'what is thinking, how full this chat is, plan limits', group: 'This chat' },
+  { cmd: '/new',          desc: 'start a new chat', group: 'This chat' },
+  { cmd: '/clear',        desc: 'wipe this chat (keeps system prompt)', group: 'This chat' },
+  { cmd: '/compact',      desc: 'summarize older turns + extract facts to memory', group: 'This chat' },
+  { cmd: '/brain',        desc: 'pick what thinks: a model, a provider or an agent', group: 'Brain' },
+  { cmd: '/models',       desc: 'list models available on the server', group: 'Brain' },
+  { cmd: '/model',        desc: 'load a model by id - /model <id>', group: 'Brain' },
+  { cmd: '/think on',     desc: 'show model reasoning inline', group: 'Brain' },
+  { cmd: '/think off',    desc: 'hide model reasoning', group: 'Brain' },
+  { cmd: '/mode',         desc: 'what runs without asking: ask, edits or auto (Shift+Tab also cycles)', group: 'Permissions' },
+  { cmd: '/allow',        desc: 'extend write access to a folder - /allow <path>', group: 'Permissions' },
+  { cmd: '/perms',        desc: 'show saved tool permissions (persist across restarts)', group: 'Permissions' },
+  { cmd: '/perms clear',  desc: 'forget every saved tool decision', group: 'Permissions' },
+  { cmd: '/tools',        desc: 'list every tool the assistant can call', group: 'Permissions' },
+  { cmd: '/voice on',     desc: 'enable TTS auto-speak in chat', group: 'Voice' },
+  { cmd: '/voice off',    desc: 'disable TTS auto-speak in chat', group: 'Voice' },
+  { cmd: '/team',         desc: 'open the Team view: helpers and agents at work', group: 'Go to' },
+  { cmd: '/files',        desc: 'open the Files view', group: 'Go to' },
+  { cmd: '/mem',          desc: 'jump to the Memory view', group: 'Go to' },
+  { cmd: '/log',          desc: 'jump to the Logs view', group: 'Go to' },
+  { cmd: '/settings',     desc: 'open Settings', group: 'Go to' },
+  { cmd: '/tour',         desc: 'a quick look around the app', group: 'Help' },
+  { cmd: '/welcome',      desc: 'run the first-run setup again', group: 'Help' },
+  { cmd: '/help',         desc: 'list all slash commands', group: 'Help' },
+  { cmd: '/exit',         desc: 'close the app window (or /quit)', group: 'Help' },
 ];
 let slashIdx = -1;
 
 function updateSlashMenu() {
   const v = input.value;
-  if (!v.startsWith('/')) { hideSlashMenu(); return; }
+  if (!v.startsWith('/') || /\s/.test(v.trim()) && !SLASH_COMMANDS.some(c => c.cmd.includes(' ') && c.cmd.startsWith(v.trim().split(' ')[0] + ' '))) {
+    hideSlashMenu(); return;
+  }
   const q = v.toLowerCase();
   const matches = SLASH_COMMANDS.filter(c => c.cmd.toLowerCase().startsWith(q));
-  if (!matches.length) { hideSlashMenu(); return; }
   const menu = $('slash-menu');
-  menu.innerHTML = matches.map((c, i) =>
-    `<div class="slash-item${i === 0 ? ' active' : ''}" data-cmd="${c.cmd}">
-       <span class="slash-cmd">${c.cmd}</span>
-       <span class="slash-desc">${c.desc}</span>
-     </div>`
-  ).join('');
+  if (!matches.length) {
+    // Not a command: say so here, before Enter, with the nearest one.
+    const word = q.split(/\s/)[0];
+    if (!/^\/[a-z-]*$/.test(word)) { hideSlashMenu(); return; }
+    const near = _slashNear(word);
+    menu.innerHTML = `<div class="slash-none">No command <b>${esc(word)}</b>.${near
+      ? ` Did you mean <span class="slash-cmd" data-near="${esc(near)}">${esc(near)}</span>?` : ''}</div>`;
+    menu.hidden = false; slashIdx = -1;
+    return;
+  }
+  let group = '';
+  menu.innerHTML = matches.map((c, i) => {
+    const head = q === '/' && c.group !== group ? `<div class="slash-group">${esc(group = c.group)}</div>` : '';
+    return `${head}<div class="slash-item${i === 0 ? ' active' : ''}" data-cmd="${esc(c.cmd)}">
+       <span class="slash-cmd"><b>${esc(c.cmd.slice(0, q.length))}</b>${esc(c.cmd.slice(q.length))}</span>
+       <span class="slash-desc">${esc(c.desc)}</span>
+     </div>`;
+  }).join('');
   menu.hidden = false;
   slashIdx = 0;
 }
@@ -14914,6 +15049,7 @@ input.addEventListener('keydown', (e) => {
     slashIdx = Math.max(slashIdx - 1, 0);
     items.forEach((el, i) => el.classList.toggle('active', i === slashIdx));
   } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+    if (slashIdx < 0) { hideSlashMenu(); return; }
     e.preventDefault();
     pickSlash(slashIdx);
   } else if (e.key === 'Escape') {
@@ -14922,10 +15058,11 @@ input.addEventListener('keydown', (e) => {
 }, true);  // capture so we run before the textarea / send Enter handler
 
 $('slash-menu').addEventListener('click', (e) => {
+  const near = e.target.closest('[data-near]');
+  if (near) { input.value = near.dataset.near + ' '; updateSlashMenu(); input.focus(); return; }
   const item = e.target.closest('.slash-item');
   if (!item) return;
-  const idx = Array.from(item.parentNode.children).indexOf(item);
-  pickSlash(idx);
+  pickSlash([...$('slash-menu').querySelectorAll('.slash-item')].indexOf(item));
 });
 
 // ============================================================

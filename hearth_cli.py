@@ -277,7 +277,8 @@ def _probe_live_model(url: str, key: str = "") -> Optional[str]:
 # Every slash command with a few words on what it does: what the completer
 # offers as you type, and what "did you mean" picks from.
 SLASH_COMMANDS = {
-    "/help": "every command", "/brain": "switch what thinks: local, a provider or an agent",
+    "/help": "every command", "/status": "what is thinking, how full this chat is, plan limits",
+    "/brain": "switch what thinks: local, a provider or an agent",
     "/model": "pick a model on the current brain", "/models": "models on disk, downloads, the provider's list",
     "/tools": "the tools", "/clear": "start the conversation over", "/compact": "summarize old turns now",
     "/context": "set the context window", "/tokens": "how full the context is", "/history": "the last messages",
@@ -1663,6 +1664,53 @@ class JarvisCLI:
         threading.Thread(target=fetch, daemon=True).start()
         return []
 
+    def _print_status(self) -> None:
+        """What is thinking, how full this chat is, each plan's usage windows
+        and what the PC is running; the same facts as the window's /status."""
+        from hearth.web import status_snapshot
+        st = status_snapshot()
+        now = time.time()
+
+        def ago(sec):
+            sec = max(0, int(sec))
+            if sec < 90:
+                return f"{sec}s"
+            m = round(sec / 60)
+            if m < 90:
+                return f"{m}m"
+            h, d = m // 60, m // 1440
+            return f"{d}d {h % 24}h" if d >= 2 else f"{h}h {m % 60}m"
+
+        def bar(pct, width=24):
+            p = max(0, min(100, int(pct)))
+            fill = round(width * p / 100)
+            col = C_ERR if p >= 90 else C_WARN if p >= 70 else C_OK
+            return f"{col}{'█' * fill}{C_DIM}{'░' * (width - fill)}{C_RESET}"
+
+        b = st["brain"]
+        print(f"\n{C_BRAND}Thinking with{C_RESET}  {C_TOOL}{b['label']}{' · ' + b['model'] if b['model'] else ''}{C_RESET}"
+              f"  {C_DIM}{'on this PC' if b['kind'] == 'local' else 'through ' + b['where']}{C_RESET}")
+        used = self._ctx_used()
+        total = self.context_tokens or st.get("context") or 0
+        if total:
+            room = total * COMPACT_AT
+            pct = min(100, used / room * 100) if room else 0
+            print(f"{C_BRAND}This chat{C_RESET}      {bar(pct)}  {C_DIM}{used // 1000}K of {total // 1000}K, "
+                  f"{max(0, 100 - int(pct))}% left before older turns are summarised{C_RESET}")
+        for lim in st["limits"]:
+            print(f"{C_BRAND}{lim['label']}{C_RESET} {C_DIM}your {lim['plan']} plan, as of {ago(now - (lim['at'] or now))} ago{C_RESET}")
+            for name, w in lim["windows"].items():
+                resets = f" · resets in {ago(w['resets_at'] - now)}" if w.get("resets_at") else ""
+                print(f"  {name:<8} {bar(w['used'])}  {w['used']}% used{C_DIM}{resets}{C_RESET}")
+        loc = st["local"]
+        engine = (loc["model"] or "running") if loc["running"] else "not running"
+        print(f"{C_BRAND}This PC{C_RESET}        {C_DIM}engine{C_RESET} {engine}"
+              f"{'  · helper model ' + loc['helper'] if loc['helper'] else ''}"
+              f"  {C_DIM}· approval{C_RESET} {st['mode']}"
+              f"  {C_DIM}· helpers working{C_RESET} {st['helpers']['working']}"
+              f"  {C_DIM}· memories{C_RESET} {st['memories']}")
+        print(f"{C_DIM}Hearth {st['version']}{C_RESET}\n")
+
     def _keep_model(self, model: str) -> None:
         """The model picked here is the one chats use and the one the window
         and the next launch show."""
@@ -2504,6 +2552,9 @@ class JarvisCLI:
                     print(f"{C_ERR}{res.get('error')}{C_RESET}")
                 return True
             print(f"{C_DIM}usage: /skill [list | install <src> | new <name> | remove <name>]{C_RESET}")
+            return True
+        if low in ("/status", "/usage"):
+            self._print_status()
             return True
         if low == "/about":
             kind = "local" if _is_local_endpoint(LOCAL_API_BASE) else "cloud"

@@ -237,6 +237,84 @@ def _model_key(provider: str) -> str:
     return "claude_model" if provider == PROVIDER else provider + "_model"
 
 
+# ---------------------------------------------------------------- plan limits
+# How much of their plan's usage windows an agent has used, as the agent itself
+# reports it: Claude Code sends a rate_limit_event with each run, Codex writes
+# its limits into its own session files. Kept in one file for /status.
+_LIMITS = os.path.join(_HOME, "plan_limits.json")
+
+
+def _keep_limits(provider: str, windows: Dict[str, Any]) -> None:
+    try:
+        with open(_LIMITS, encoding="utf-8") as f:
+            all_ = json.load(f) or {}
+    except (OSError, ValueError):
+        all_ = {}
+    all_[provider] = {"at": time.time(), "windows": windows}
+    try:
+        os.makedirs(_HOME, exist_ok=True)
+        with open(_LIMITS, "w", encoding="utf-8") as f:
+            json.dump(all_, f)
+    except OSError:
+        pass
+
+
+def note_claude_limits(ev: Dict[str, Any]) -> None:
+    """Keep what a Claude Code rate_limit_event says about the plan's windows."""
+    info = ev.get("rate_limit_info") or {}
+    wins = info.get("unifiedWindows") or {}
+    out = {}
+    for name, key in (("five_hour", "5 hours"), ("seven_day", "7 days")):
+        w = wins.get(name) or {}
+        if w.get("utilization") is not None:
+            out[key] = {"used": round(float(w["utilization"]) * 100), "resets_at": w.get("resetsAt")}
+    if out:
+        _keep_limits(PROVIDER, out)
+
+
+def _codex_limits() -> Optional[Dict[str, Any]]:
+    """The newest limits Codex wrote in its session files. The windows are the
+    account's, so the newest session says the most."""
+    import glob
+    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    files = sorted(glob.glob(os.path.join(home, "sessions", "*", "*", "*", "*.jsonl")), key=os.path.getmtime, reverse=True)
+    for path in files[:6]:
+        try:
+            with open(path, "rb") as f:
+                f.seek(max(0, os.path.getsize(path) - 400_000))
+                tail = f.read().decode("utf-8", "replace")
+        except OSError:
+            continue
+        for line in reversed(tail.splitlines()):
+            if '"rate_limits"' not in line:
+                continue
+            try:
+                rl = ((json.loads(line).get("payload") or {}).get("rate_limits")) or {}
+            except ValueError:
+                continue
+            out = {}
+            for k in ("primary", "secondary"):
+                w = rl.get(k) or {}
+                if w.get("used_percent") is not None:
+                    mins = int(w.get("window_minutes") or 0)
+                    name = f"{mins // 60} hours" if mins and mins < 1440 else f"{mins // 1440} days" if mins else k
+                    out[name] = {"used": round(float(w["used_percent"])), "resets_at": w.get("resets_at")}
+            if out:
+                return {"at": os.path.getmtime(path), "windows": out}
+    return None
+
+
+def plan_limits(provider: str) -> Optional[Dict[str, Any]]:
+    """{"at": when it was read, "windows": {"5 hours": {"used": 54, "resets_at": epoch}}}, or None."""
+    if provider == "codex":
+        return _codex_limits()
+    try:
+        with open(_LIMITS, encoding="utf-8") as f:
+            return (json.load(f) or {}).get(provider)
+    except (OSError, ValueError):
+        return None
+
+
 def chosen_model(provider: str) -> str:
     try:
         from .web import _load_settings
@@ -728,7 +806,9 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
             t = ev.get("type")
             if ev.get("parent_tool_use_id"):
                 continue                          # Claude Code's own sub-agents: their work, not the reply
-            if t == "system" and ev.get("subtype") == "init":
+            if t == "rate_limit_event":
+                note_claude_limits(ev)
+            elif t == "system" and ev.get("subtype") == "init":
                 sid = ev.get("session_id") or sid
             elif t == "stream_event":
                 inner = ev.get("event") or {}
