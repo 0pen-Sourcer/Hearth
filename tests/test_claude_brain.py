@@ -54,7 +54,9 @@ if '"initialize"' in said:
           "description": "Opus 5.5 \\u00b7 Best for everyday, complex tasks", "supportsEffort": True,
           "supportedEffortLevels": ["low", "medium", "high"]}},
         {{"value": "haiku", "resolvedModel": "claude-haiku-4-5", "displayName": "Haiku",
-          "description": "Haiku 4.5 \\u00b7 Fastest for quick answers"}}]}}}}}})
+          "description": "Haiku 4.5 \\u00b7 Fastest for quick answers"}},
+        {{"value": "fable", "resolvedModel": "claude-fable-5-1", "displayName": "Fable 5.1",
+          "description": "For your toughest challenges"}}]}}}}}})
     sys.exit(0)
 said = json.loads(said)["message"]["content"][0]["text"]
 open({argv_log!r}, "a").write(json.dumps({{"argv": sys.argv[1:], "stdin": said}}) + "\\n")
@@ -84,7 +86,10 @@ cb.claude_exe = lambda: [sys.executable, fake]
 
 listed = cb.agent_models("claude-code")["models"]
 check("the models are the ones Claude Code itself lists, named by version",
-      [(m["id"], m["label"]) for m in listed] == [("", "Default"), ("opus", "Opus 5.5"), ("haiku", "Haiku 4.5")])
+      [(m["id"], m["label"]) for m in listed][:3] == [("", "Default"), ("opus", "Opus 5.5"), ("haiku", "Haiku 4.5")])
+# Newer versions name the model itself and keep the description for what it's for.
+check("a model named by its version keeps that name, with its description underneath",
+      (listed[3]["label"], listed[3]["about"]) == ("Fable 5.1", "For your toughest challenges"))
 check("each with the effort levels it takes, or none",
       listed[1]["efforts"] == ["low", "medium", "high"] and listed[2]["efforts"] == [])
 check("the context window isn't known before a reply", listed[0]["ctx"] is None and cb.context_window("claude-code") is None)

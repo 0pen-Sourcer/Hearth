@@ -265,12 +265,16 @@ def agent_models(provider: str) -> Dict[str, Any]:
         for m in _claude_list():
             value = str(m.get("value") or "")
             full = str(m.get("resolvedModel") or "")
-            # "Opus 5.5 · Best for everyday, complex tasks": the version is the name.
-            name, _, rest = str(m.get("description") or "").partition(" · ")
+            # Older versions name a model "Opus" and put "Opus 5.5 · what it's
+            # for" in its description; newer ones name it "Opus 5.5" and the
+            # description is only what it's for.
+            desc, shown = str(m.get("description") or ""), str(m.get("displayName") or value)
+            name, sep, rest = desc.partition(" · ")
             default = value == "default"
+            older = bool(sep) and name.split(" ")[0].lower() == shown.split(" ")[0].lower()
             models.append({"id": "" if default else value,
-                           "label": "Default" if default else (name or m.get("displayName") or value),
-                           "about": str(m.get("description") or "") if default else rest,
+                           "label": "Default" if default else (name if older else shown),
+                           "about": desc if default else (rest if older else desc),
                            "model": full, "ctx": seen.get(full),
                            "efforts": list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else []})
     elif provider == "codex":
