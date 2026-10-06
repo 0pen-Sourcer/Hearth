@@ -3543,12 +3543,16 @@ class HearthHandler(BaseHTTPRequestHandler):
                 _vault = dict(_saved.get("provider_keys") or {})
                 _old_provider = (_saved.get("llm_provider") or "").strip().lower()
                 _old_key = (_saved.get("llm_key") or "").strip()
-                if _old_provider and _old_key:
+                # Only a provider's own key is filed under its name: a local
+                # server or an agent program has none, and what sat in llm_key
+                # while one was in use belongs to the provider before it.
+                _keyed = set(_hl.PROVIDERS) | {"custom"}
+                if _old_provider in _keyed and _old_key:
                     _vault[_old_provider] = _old_key  # bank the outgoing key
                 _new_provider = (provider or _saved.get("llm_provider", "")).strip().lower()
                 # Use the supplied key, else recover this provider's banked key.
                 _eff_key = key or _vault.get(_new_provider, "") or _provider_key(_new_provider)
-                if _new_provider and _eff_key:
+                if _new_provider in _keyed and _eff_key:
                     _vault[_new_provider] = _eff_key
                 _saved["provider_keys"] = _vault
                 _saved["llm_provider"] = provider or _saved.get("llm_provider", "")
