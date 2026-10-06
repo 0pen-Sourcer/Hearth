@@ -13,8 +13,8 @@ in the window, a spoken question in voice mode, and the Ask / Auto-edit / Auto
 switch deciding what goes through on its own.
 
 Helpers keep running on whatever local model is loaded; only the main
-assistant is Claude. `claude -p` is billed to the Agent SDK credit that comes
-with a Claude plan.
+assistant is Claude. Signed in with a Claude plan, `claude -p` counts against
+that plan's usage limits; an API key is billed separately.
 
 Codex is the other brain (codex_brain.py). It shares the permission bridge,
 the sessions file and the persona here.

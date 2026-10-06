@@ -292,7 +292,7 @@ Plus `@<path>` to attach a file (text spliced inline, images sent to vision), ar
 
 **Is anything sent to the cloud?** Only web search (DuckDuckGo) and the pages it then reads, along with those sites' own icons, and only when the model calls them. A cloud model or another agent CLI gets what you choose to send it. No telemetry.
 
-**Will it touch my files unexpectedly?** Writes are confined to the workspace by default. A switch in the chat bar decides what runs without asking: Ask checks with you before anything acts on your machine, Auto-edit lets edits inside the workspace through, and Auto runs the rest on its own but still asks before anything that deletes, moves or stops things.
+**Will it touch my files unexpectedly?** Writes are confined to the workspace by default. A switch in the chat bar decides what runs without asking: Ask checks with you before anything acts on your machine, Auto-edit lets edits inside the workspace through, and Auto runs routine work on its own but still asks before anything that deletes, moves or stops things, sends or uploads something, pushes, publishes or installs.
 
 **Does it work offline?** Yes, except web search/fetch.
 

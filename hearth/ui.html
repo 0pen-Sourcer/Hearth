@@ -6015,7 +6015,7 @@ const APPROVAL_MODES = [
   { id: 'edits', name: 'Auto-edit', short: 'auto-edit', dot: 'var(--accent)',
     what: 'File edits in your workspace go through. Commands and everything else still ask.' },
   { id: 'auto', name: 'Auto', short: 'auto', dot: 'var(--warn)',
-    what: 'Runs without asking, except commands that delete, move or stop things, which still ask.' },
+    what: 'Runs routine work without asking. Deleting, moving or stopping things, sending or uploading anything, pushing, publishing and installing still ask.' },
 ];
 function approvalMode() {
   const st = STATE.settings || {};
@@ -12915,7 +12915,7 @@ async function refreshSettings() {
       // Which models a provider has is read from the provider, not written down here.
       const PICK_HINT = 'Once the key is saved, every model this key can use is in the model menu at the top.';
       const PRESETS = {
-        'claude-code': { url: 'claude-code://local', hint: 'JARVIS thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Hearth\'s tools through it. It is billed to the Agent SDK credit that comes with the plan. Helpers keep using your local model.', modelHint: '', sample: '' },
+        'claude-code': { url: 'claude-code://local', hint: 'JARVIS thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Hearth\'s tools through it. It counts toward the plan’s usage limits. Helpers keep using your local model.', modelHint: '', sample: '' },
         'cursor-agent': { url: 'cursor://local', hint: 'JARVIS thinks with Cursor\'s agent on this PC, signed in to your Cursor plan, and uses Hearth\'s tools through it. It needs Cursor\'s command-line agent (cursor.com/cli), not just the editor. Its own shell is turned off, so commands go through Hearth and ask you first.', modelHint: '', sample: '' },
         'codex':       { url: 'codex://local', hint: 'JARVIS thinks with Codex on this PC, signed in to your ChatGPT plan, and uses Hearth\'s tools through it. The Codex app is enough; it carries the command-line part. Its usage counts toward your plan\'s Codex limit. Helpers keep using your local model.', modelHint: '', sample: '' },
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },

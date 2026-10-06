@@ -55,7 +55,7 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     # things part-way; the others take one prompt and run to the end.
     "claude-code": {"label": "Claude Code", "maker": "Anthropic", "exe": ["claude"], "args": _claude_cmd,
                     "stream": "claude", "takes_messages": True,
-                    "billing": "Agent SDK credit on your Claude plan",
+                    "billing": "your Claude plan's usage limits",
                     # Its own installer puts it here, which a running Hearth's PATH doesn't have yet.
                     "also": [r"~\.local\bin\claude.exe", "~/.local/bin/claude"]},
     "codex": {"label": "Codex", "maker": "OpenAI", "exe": ["codex"], "args": _codex_cmd, "stream": "codex",

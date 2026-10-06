@@ -2717,7 +2717,7 @@ class JarvisCLI:
                     self.context_tokens = _ctx
                 self.current_model = _cb.BRAINS[provider] + (f" · {_cur['label']}" if _cur and _cur["id"] else "")
                 plan = {"codex": "on your ChatGPT plan (it counts toward your Codex limit)",
-                        "claude-code": "on your Claude plan (Agent SDK credit)"}.get(
+                        "claude-code": "on your Claude plan (it counts toward its usage limits)"}.get(
                             provider, f"on your {_cb.PLANS.get(provider, '')} plan")
                 print(f"{C_OK}JARVIS now thinks with {_cb.BRAINS[provider]}{C_RESET} {C_DIM}{plan}. "
                       f"Helpers keep using the local model. /brain local to switch back.{C_RESET}")
@@ -3353,7 +3353,7 @@ class JarvisCLI:
             from hearth.tools import approval_mode, APPROVAL_MODES
             words = {"ask": "Ask: asks before anything that acts on your machine",
                      "edits": "Auto-edit: file edits in the workspace go through; commands still ask",
-                     "auto": "Auto: runs without asking, except destructive commands, deletes and moves"}
+                     "auto": "Auto: routine work runs without asking; deletes, moves, sends, uploads, pushes and installs still ask"}
             arg = low[5:].strip()
             if not arg:
                 cur = approval_mode()

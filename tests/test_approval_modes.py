@@ -61,6 +61,18 @@ check("Auto lets an ordinary command and an app through", tools.mode_allows(*ls)
 check("Auto still asks about a destructive command", not tools.mode_allows(*rm))
 check("Auto still asks about deleting", not tools.mode_allows(*delete))
 check("Auto asks about a command it cannot read", not tools.mode_allows("run_command", {}))
+# Auto asked only about deletes and moves, so a push, an install or an upload
+# went out without a word. Routine work is what Auto is for.
+out = ["git push origin main", "npm publish", "winget install vlc", "pip install requests",
+       "curl -X POST https://example.org", "Invoke-RestMethod -Method Post -Uri https://example.org",
+       "Set-ExecutionPolicy Unrestricted"]
+check("Auto still asks before anything that goes out or changes the machine",
+      not any(tools.mode_allows("run_command", {"command": c}) for c in out))
+check("and before sending mail or a message to the phone",
+      not tools.mode_allows("send_email", {}) and not tools.mode_allows("send_to_phone", {}))
+check("routine commands still run, including ones that only mention those words",
+      all(tools.mode_allows("run_command", {"command": c}) for c in
+          ("git status", 'git commit -m "push the parser"', "npm run build", "curl https://example.org")))
 
 set_settings(yolo=True)
 check("the old YOLO switch reads as Auto", tools.approval_mode() == "auto")

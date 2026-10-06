@@ -8705,13 +8705,39 @@ _EDIT_TOOLS = {"write_file", "edit_file", "create_directory"}
 # Another agent CLI acts like a command: Auto-edit still asks, Auto doesn't.
 _SHELL_TOOLS = {"run_command", "start_job", "delegate"}
 # Undoable only with effort, so Auto still asks about them.
-_ALWAYS_ASK_IN_AUTO = {"delete_path", "move_path"}
+# Auto is for routine work that can be put back. These go out into the world
+# or change the machine itself, so they ask whatever the switch says.
+_ALWAYS_ASK_IN_AUTO = {"delete_path", "move_path", "send_email", "send_to_phone", "install_skill"}
+_OUTWARD_PATTERNS = [
+    re.compile(r"\bgit\b[^\n;&|]*\s(push|publish)\b", re.I),
+    re.compile(r"\b(npm|pnpm|yarn|cargo|twine|poetry|gem|dotnet\s+nuget)\b[^\n;&|]*\s(publish|push|upload)\b", re.I),
+    re.compile(r"\bgh\b\s+(release|pr|issue|repo|gist)\s+(create|delete|merge|edit|comment)", re.I),
+    re.compile(r"\b(winget|choco|scoop)\b\s+(install|uninstall|upgrade)", re.I),
+    re.compile(r"\b(pip3?|uv\s+pip|python\s+-m\s+pip)\b\s+(install|uninstall)", re.I),
+    re.compile(r"\b(npm|pnpm|yarn)\b\s+(i|install|add)\b[^\n;&|]*\s(-g|--global)\b", re.I),
+    re.compile(r"\bInvoke-(WebRequest|RestMethod)\b[^\n;&|]*-(Method\s+(Post|Put|Delete|Patch)|InFile|Body)\b", re.I),
+    re.compile(r"\bcurl(\.exe)?\b[^\n;&|]*\s(-d|--data\S*|-F|--form|-T|--upload-file|-X\s*(POST|PUT|DELETE|PATCH))\b", re.I),
+    re.compile(r"\b(Set-ExecutionPolicy|Set-MpPreference|Add-MpPreference|Disable-WindowsOptionalFeature)\b", re.I),
+    re.compile(r"\bnetsh\b|\bschtasks\b[^\n;&|]*/create|\bRegister-ScheduledTask\b|\bNew-NetFirewallRule\b", re.I),
+    re.compile(r"\bSend-MailMessage\b", re.I),
+]
+
+
+def _is_outward(cmd: str) -> Optional[str]:
+    """What in a command reaches outside this PC or changes the machine itself
+    (a push, a publish, an install, an upload), or None."""
+    for pat in _OUTWARD_PATTERNS:
+        m = pat.search(cmd or "")
+        if m:
+            return m.group(0)
+    return None
 
 
 def approval_mode() -> str:
     """How much runs without asking: 'ask' (anything that acts on the
     machine), 'edits' (file edits in the workspace go through), or 'auto'
-    (everything except destructive commands and deletes/moves). Chosen in the
+    (everything except destructive commands, deletes and moves, and anything
+    that goes outside this PC or changes the machine itself). Chosen in the
     window or with /mode in the terminal; the old YOLO switch reads as auto."""
     try:
         with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
@@ -8732,7 +8758,7 @@ def mode_allows(name: str, args=None) -> bool:
             return False
         if name in _SHELL_TOOLS:
             cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
-            return bool(cmd) and _is_destructive(cmd) is None
+            return bool(cmd) and _is_destructive(cmd) is None and _is_outward(cmd) is None
         return True
     if m == "edits":
         return name in _EDIT_TOOLS
