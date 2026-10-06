@@ -7959,6 +7959,9 @@ async function refreshModels() {
     const models = resp.models;
     const _agentBrains = resp.agent_brains || [];
     STATE.providers = resp.providers || [];
+    // The agents that take tasks as helpers, named under the menu's agents.
+    if (!STATE.helperAgents) api('/api/team/choices')
+      .then(r => { STATE.helperAgents = (r.agents || []).filter(a => !a.refused); }).catch(() => {});
     // Explain a sparse cloud picker (e.g. xAI 403s the model list) — toast once
     // per distinct notice so the 9s poll doesn't spam it.
     const notice = resp.notice || '';
@@ -8433,11 +8436,6 @@ function mpOpen() {
     const many = helpersOnly.length > 3 ? helpersOnly.slice(0, 3).join(', ') + ` and ${helpersOnly.length - 3} more`
       : helpersOnly.join(' and ');
     html += `<div class="mp-note">${esc(many)} ${helpersOnly.length === 1 ? 'takes' : 'take'} tasks as helpers from the Team tab.</div>`;
-  }
-  if (!STATE.helperAgents) {
-    STATE.helperAgents = [];
-    api('/api/team/choices').then(r => { STATE.helperAgents = (r.agents || []).filter(a => !a.refused); })
-      .catch(() => { STATE.helperAgents = null; });
   }
   const provs = STATE.providers || [];
   if (provs.length) {
