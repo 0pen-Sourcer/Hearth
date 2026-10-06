@@ -143,6 +143,12 @@ if far:
     check("switching with no key given uses the saved one, and settles on a model the provider lists",
           code == 200 and got.get("model") == "newest-chat" and after["llm_key"] == "good"
           and after["llm_model"] == "newest-chat" and after["provider_keys"].get("gemini") == "in-use")
+    # Moving to a local server banked the provider's key under "local", and the
+    # next move banked whatever llm_key held under the next name.
+    post("/api/llm-endpoint", {"provider": "local", "url": "http://localhost:1234/v1", "key": ""})
+    web._save_settings({"llm_key": "left-over-cloud-key"})          # as an older switch left it
+    post("/api/llm-endpoint", {"provider": "openai", "url": base, "key": "", "model": "newest-chat"})
+    check("a key is never filed under a local server's name", "local" not in web._load_settings()["provider_keys"])
 
     # Picking a model on this PC while a provider was the brain saved the file's
     # name as that provider's model: nothing loaded, and every message would
