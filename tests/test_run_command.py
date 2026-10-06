@@ -125,6 +125,14 @@ for _ in range(100):
     time.sleep(0.1)
 check("and a job that fails is marked failed", st.get("status") == "failed")
 
+# Every sleep was refused, so a script that starts a server and waits three
+# seconds before asking it something could not run at all.
+out = run("Start-Sleep -Milliseconds 300; Write-Output after-the-wait", shell="powershell")
+check(f"a short wait inside a command runs {out[:80]!r}", "after-the-wait" in out and "refused" not in out)
+check("a wait of more than a minute is refused, with what to do instead",
+      "refused" in run("Start-Sleep 120") and "set_reminder" in run("Start-Sleep 120"))
+check("waiting for a keypress or a typed answer is refused", "refused" in run("pause") and "refused" in run("Read-Host name"))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

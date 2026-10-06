@@ -3446,27 +3446,38 @@ def _is_destructive(cmd: str) -> Optional[str]:
     return None
 
 
-# Commands that BLOCK the agent (foreground sleep/wait) or wait for keyboard
-# input that will never come (interactive prompts). These freeze the session
-# with no useful output — the user saw `timeout /t 20` freeze the UI for 20s.
-# Always refused (even under auto-approve); a frozen agent is never wanted.
+# Commands that wait for a keypress or a typed answer that never comes.
 _BLOCKING_PATTERNS = [
-    re.compile(r"\btimeout\b\s+(/t\s+)?\d", re.I),   # cmd: timeout /t N
-    re.compile(r"\bStart-Sleep\b", re.I),            # PowerShell sleep
-    re.compile(r"(^|[;&|]\s*)sleep\s+\d", re.I),     # unix/git-bash sleep N
     re.compile(r"\bpause\b", re.I),                  # cmd: pause (waits for key)
-    re.compile(r"\bRead-Host\b", re.I),              # PS interactive prompt
     re.compile(r"\b(Get-Credential|Read-Host)\b", re.I),
 ]
+# Waiting inside a command is ordinary (start a server, give it three seconds,
+# then ask it something). A long wait holds the whole turn with nothing to show,
+# so past a minute the command is refused and a reminder or a background job
+# suggested instead.
+_SLEEP_PARTS = [
+    (re.compile(r"\bStart-Sleep\b(?:\s+-(?:Seconds|s)\b)?\s+(\d+(?:\.\d+)?)", re.I), 1.0),
+    (re.compile(r"\bStart-Sleep\b\s+-(?:Milliseconds|m)\b\s+(\d+)", re.I), 0.001),
+    (re.compile(r"\btimeout\b\s+(?:/t\s+)?(\d+)", re.I), 1.0),
+    (re.compile(r"(?:^|[;&|]\s*)sleep\s+(\d+(?:\.\d+)?)", re.I), 1.0),
+]
+_MAX_WAIT_S = 60
 
 
 def _is_blocking_command(cmd: str) -> Optional[str]:
-    """Returns the matched blocking/interactive snippet, else None."""
+    """What would hold the session: a wait for input, or waiting longer than a
+    minute in all. None when the command is fine to run."""
     for pat in _BLOCKING_PATTERNS:
         m = pat.search(cmd)
         if m:
             return m.group(0).strip()
-    return None
+    waited = 0.0
+    for pat, unit in _SLEEP_PARTS:
+        for m in pat.finditer(cmd):
+            waited += float(m.group(1)) * unit
+    if re.search(r"\bStart-Sleep\b", cmd, re.I) and not any(p.search(cmd) for p, _ in _SLEEP_PARTS[:2]):
+        return "Start-Sleep"                         # a wait with no length that can be read
+    return f"waiting {int(waited)}s" if waited > _MAX_WAIT_S else None
 
 
 # A recursive listing of a whole DRIVE ROOT (e.g. `Get-ChildItem C:\ -Recurse`,
@@ -3630,11 +3641,10 @@ def _run_command(p: Dict) -> str:
     _block = _is_blocking_command(cmd)
     if _block:
         return (
-            f"Error (run_command): refused '{_block}' — it would BLOCK the session "
-            f"with no useful output (a sleep/timeout/keypress-wait). Never run these. "
-            f"If the user wants a DELAY or to be reminded later, use set_reminder "
-            f"(it fires in the background — you do NOT wait for it). If you were "
-            f"trying to pause before another step, just do the next step directly."
+            f"Error (run_command): refused '{_block}': it would hold the session with "
+            f"nothing to show (waiting for a keypress or typed answer, or waiting more than "
+            f"{_MAX_WAIT_S}s). A short wait inside a command is fine. For a longer delay or "
+            f"to be reminded later use set_reminder, or run the command in the background."
         )
 
     if _is_whole_drive_scan(cmd):
@@ -3648,8 +3658,10 @@ def _run_command(p: Dict) -> str:
 
     try:
         args, use_shell = _shells.argv(cmd, shell)
+        # Nothing can be typed into it, so a prompt for input fails at once
+        # instead of waiting out the timeout.
         r = subprocess.run(args, cwd=cwd, shell=use_shell, capture_output=True,
-                           timeout=timeout, env=_shells.child_env(),
+                           stdin=subprocess.DEVNULL, timeout=timeout, env=_shells.child_env(),
                            creationflags=_NO_WINDOW)
     except subprocess.TimeoutExpired:
         return f"Error: '{cmd}' timed out after {timeout}s."
