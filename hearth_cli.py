@@ -274,6 +274,79 @@ def _probe_live_model(url: str, key: str = "") -> Optional[str]:
         return None
 
 
+# Every slash command with a few words on what it does: what the completer
+# offers as you type, and what "did you mean" picks from.
+SLASH_COMMANDS = {
+    "/help": "every command", "/brain": "switch what thinks: local, a provider or an agent",
+    "/model": "pick a model on the current brain", "/models": "models on disk, downloads, the provider's list",
+    "/tools": "the tools", "/clear": "start the conversation over", "/compact": "summarize old turns now",
+    "/context": "set the context window", "/tokens": "how full the context is", "/history": "the last messages",
+    "/chats": "LM Studio threads", "/chat": "load a thread", "/workspace": "the workspace folder",
+    "/log": "recent activity", "/mem": "what I remember", "/curate": "merge duplicate memories",
+    "/rules": "the house rules file", "/name": "my name", "/me": "what I know and may do",
+    "/team": "helpers working for me", "/agents": "agent programs on this PC", "/agent": "run a helper and wait",
+    "/learn": "look at this PC again", "/migrate": "bring memory over from another agent",
+    "/import-memory": "bring memory over from ChatGPT or Claude", "/jobs": "background jobs",
+    "/mcp": "Model Context Protocol", "/skill": "skills", "/voice": "speaking: on, off, speed, mic",
+    "/stt": "the listening model", "/listen": "talk instead of typing", "/sleep": "wait for the wake word",
+    "/wake": "wake up", "/think": "reasoning on or off, or how hard", "/multi": "multi-line input",
+    "/mode": "what runs without asking: ask, edits, auto", "/perms": "saved permissions",
+    "/allow": "let me write under a folder", "/disallow": "take that back", "/allowed": "folders I may write in",
+    "/lockdown": "keep reads inside the workspace", "/about": "version and stats", "/update": "get a newer version",
+    "/repair": "restore damaged files", "/phone": "reach me from your phone", "/exit": "quit",
+}
+_SUB_CHOICES = {
+    "/mode": [("ask", "ask before anything risky"), ("edits", "file edits run, commands ask"), ("auto", "everything runs")],
+    "/think": [("on", ""), ("off", ""), ("low", ""), ("medium", ""), ("high", ""), ("xhigh", ""), ("max", "")],
+    "/voice": [("on", ""), ("off", ""), ("speed", "playback rate"), ("devices", "list mics"), ("device", "pick a mic"),
+               ("mic-test", "check the level"), ("duplex", "hold the mic while I speak")],
+    "/models": [("disk", "models on this PC"), ("free", "free ones on this provider"), ("hf", "search Hugging Face"),
+                ("get", "download"), ("use", "load one on this PC"), ("stop", "stop the local server"),
+                ("helper", "a second model for helpers")],
+    "/agents": [("update", "update one"), ("setup", "install and sign in")],
+    "/lockdown": [("on", ""), ("off", "")], "/listen": [("on", ""), ("off", "")],
+    "/mem": [("tree", "by category"), ("map", "as a graph")], "/perms": [("forget", "one tool"), ("reset", "all")],
+    "/curate": [("apply", "merge them")], "/mcp": [("edit", ""), ("config", ""), ("run", "")],
+    "/skill": [("install", "from GitHub or a folder")], "/migrate": [("hermes", ""), ("openclaw", "")],
+}
+
+
+def _brain_choices():
+    from hearth.headless import PROVIDERS
+    out = [("local", "whatever serves on localhost:1234"), ("lmstudio", "LM Studio"),
+           ("builtin", "Hearth's own llama.cpp")]
+    out += [(pid, label) for pid, (label, _url) in PROVIDERS.items()]
+    out += [("custom", "any OpenAI-compatible address"), ("claude-code", "your Claude plan"),
+            ("codex", "your ChatGPT plan"), ("cursor", "your Cursor plan"), ("forget", "delete a saved key")]
+    return out
+
+
+def _agent_line() -> str:
+    """The agent program thinking for JARVIS, when one is, for the banner."""
+    try:
+        from hearth import claude_brain as _cb
+        a = _cb.current()
+        return f"{_cb.BRAINS[a]} on this PC, your {_cb.PLANS.get(a, '')} plan" if a else ""
+    except Exception:
+        return ""
+
+
+def _looks_like_key(s: str) -> bool:
+    """An API key, as opposed to a model name typed after /brain <provider>."""
+    s = (s or "").strip()
+    if not s or " " in s or "/" in s:
+        return False
+    if s.startswith(("sk-", "xai-", "AIza", "gsk_", "pplx-")):
+        return True
+    return len(s) >= 32 and not any(c in s for c in ".:")
+
+
+def _did_you_mean(word: str, choices) -> str:
+    import difflib
+    hit = difflib.get_close_matches((word or "").lower(), list(choices), n=1, cutoff=0.6)
+    return hit[0] if hit else ""
+
+
 def _read_brain_key(provider: str) -> str:
     """Look up a saved cloud key: ~/Jarvis/brain_keys.json first (what /brain
     writes, shaped {"<provider>": {"url": ..., "key": "<api-key>", "model": ...}}),
@@ -1114,19 +1187,31 @@ class JarvisCLI:
                 else:
                     buf.insert_text(PASTES.marker_for(data) or data)
 
-            # Slash-command autocomplete (type-ahead). Only fires on words that
-            # start with '/', so normal prose is untouched. Big discoverability
-            # win — the command list is long and otherwise must be memorized.
+            # Completion as you type, for a line that starts with "/": the
+            # commands with what each does, then what each one takes (/brain
+            # offers the providers and agents, then that provider's models;
+            # /model offers the last list shown). Prose is left alone.
             try:
-                from prompt_toolkit.completion import WordCompleter
-                _slash = ["/help", "/brain", "/endpoint", "/provider", "/models", "/model", "/load",
-                          "/tools", "/clear", "/compact", "/context", "/tokens", "/chats", "/chat",
-                          "/history", "/workspace", "/log", "/mem", "/curate", "/rules", "/name", "/me", "/team", "/agents",
-                          "/learn", "/migrate", "/import-memory", "/import", "/jobs", "/mcp", "/agent", "/skill",
-                          "/skills", "/voice", "/voices", "/stt", "/listen", "/sleep", "/wake", "/think",
-                          "/multi", "/mode", "/perms", "/allow", "/disallow", "/allowed", "/lockdown",
-                          "/about", "/update", "/repair", "/phone", "/exit", "/quit"]
-                _completer = WordCompleter(_slash, ignore_case=True, sentence=False)
+                from prompt_toolkit.completion import Completer, Completion
+                cli = self
+
+                class _SlashCompleter(Completer):
+                    def get_completions(self, document, complete_event):
+                        text = document.text_before_cursor
+                        if not text.startswith("/") or "\n" in text:
+                            return
+                        parts = text.split(" ")
+                        word = parts[-1]
+                        if len(parts) == 1:
+                            for c, d in SLASH_COMMANDS.items():
+                                if c.startswith(word.lower()):
+                                    yield Completion(c, -len(word), display_meta=d)
+                            return
+                        for c, d in cli._arg_choices(parts[0].lower(), parts[1:-1]):
+                            if c.lower().startswith(word.lower()):
+                                yield Completion(c, -len(word), display_meta=d)
+
+                _completer = _SlashCompleter()
             except Exception:
                 _completer = None
             self.pt_session = PromptSession(
@@ -1384,7 +1469,7 @@ class JarvisCLI:
             ("agent",     f"{_AGENT_NAME}"),
             ("model",     self._model_label() if self.current_model != "local-model"
                           else "(none detected yet - see below)"),
-            ("endpoint",  f"{LOCAL_API_BASE}"),
+            ("endpoint",  _agent_line() or f"{LOCAL_API_BASE}"),
             ("context",   f"{self.context_tokens} tokens, compact @ {int(COMPACT_AT*100)}%"),
             ("workspace", f"{WORKSPACE}"),
             ("reads",     "sandbox only" if read_locked() else "unrestricted"),
@@ -1425,8 +1510,9 @@ class JarvisCLI:
             sys.stdout.write(f"{C_FRAME}╰{'─' * (width - 2)}╯{C_RESET}\n")
         # Connectivity + model sanity. A fresh user should instantly know
         # whether to go start LM Studio, load a model, or just start chatting.
-        if not _is_local_endpoint(LOCAL_API_BASE):
-            print(f"{C_OK}● {_AGENT_NAME} online{C_RESET}{C_DIM}  ·  brain: {self.current_model} (cloud)  ·  /help for commands{C_RESET}")
+        if _agent_line() or not _is_local_endpoint(LOCAL_API_BASE):
+            print(f"{C_OK}● {_AGENT_NAME} online{C_RESET}{C_DIM}  ·  brain: {self._model_label()}"
+                  f"{'' if _agent_line() else ' (cloud)'}  ·  /help for commands{C_RESET}")
             print(f"{C_DIM}  Enter = send · Esc+Enter = newline · /multi before pasting a block{C_RESET}\n")
         else:
             chat_models, reachable = self._probe_local_models()
@@ -1514,7 +1600,7 @@ class JarvisCLI:
                       f"  {C_DIM}· {len(free_ids)} free{C_RESET}")
                 print(f"  {C_DIM}current {C_RESET}{C_TOOL}{self.current_model or '?'}{C_RESET}")
                 print(f"  {C_DIM}find    {C_RESET}{C_TOOL}/models <name>{C_RESET}{C_DIM}  ·  {C_RESET}"
-                      f"{C_TOOL}/models free{C_RESET}{C_DIM}  ·  switch with {C_RESET}{C_TOOL}/brain{C_RESET}\n")
+                      f"{C_TOOL}/models free{C_RESET}{C_DIM}  ·  pick with {C_RESET}{C_TOOL}/model <name>{C_RESET}\n")
                 return ids
 
             if free_only:
@@ -1531,6 +1617,7 @@ class JarvisCLI:
                 print(f"\n{C_DIM}No {'free ' if free_only else ''}models{extra}.{C_RESET}\n")
                 return ids
             print(f"\n{C_BRAND}{label}{C_RESET}  {C_DIM}({len(shown)}){C_RESET}")
+            self.last_model_list = shown          # what /model <n> counts in
             cap = 40
             for i, m in enumerate(shown[:cap], 1):
                 star = f" {C_TOOL}←{C_RESET}" if m == self.current_model else ""
@@ -1538,11 +1625,60 @@ class JarvisCLI:
                 print(f"  {C_DIM}[{i}]{C_RESET} {m}{free}{star}")
             if len(shown) > cap:
                 print(f"  {C_DIM}…{len(shown)-cap} more — narrow with /models <name>{C_RESET}")
-            print(f"  {C_DIM}switch with {C_RESET}{C_TOOL}/brain{C_RESET}\n")
+            print(f"  {C_DIM}pick with {C_RESET}{C_TOOL}/model <n>{C_RESET}\n")
             return ids
         except Exception as e:
             print(f"{C_ERR}Could not reach {LOCAL_API_BASE}/models: {e}{C_RESET}")
             return []
+
+    def _arg_choices(self, cmd: str, before: List[str]) -> list:
+        """What can follow `cmd` and the words already typed after it."""
+        if cmd in ("/brain", "/endpoint", "/provider"):
+            if not before:
+                return _brain_choices()
+            if len(before) == 1:
+                pid = before[0].lower()
+                if pid in ("claude-code", "codex", "cursor", "cursor-agent"):
+                    return [("models", "list or search its models")]
+                return [(m, "") for m in self._provider_list(pid)]
+            return []
+        if cmd in ("/model", "/load") and not before:
+            return [(m, "") for m in self.last_model_list[:200]]
+        return _SUB_CHOICES.get(cmd, []) if not before else []
+
+    def _provider_list(self, pid: str) -> List[str]:
+        """A saved provider's models for the completer: asked once in the
+        background, so typing never waits on the network."""
+        cache = self.__dict__.setdefault("_provider_lists", {})
+        if pid in cache:
+            return cache[pid] or []
+        cache[pid] = None
+        from hearth.headless import PROVIDERS, provider_models
+        if pid not in PROVIDERS:
+            return []
+        key = _read_brain_key(pid)
+
+        def fetch():
+            cache[pid] = (provider_models(PROVIDERS[pid][1], key) or []) if key else []
+        threading.Thread(target=fetch, daemon=True).start()
+        return []
+
+    def _keep_model(self, model: str) -> None:
+        """The model picked here is the one chats use and the one the window
+        and the next launch show."""
+        global LOCAL_MODEL
+        LOCAL_MODEL = model
+        os.environ["LOCAL_MODEL"] = model
+        try:
+            import json as _json
+            sp = os.path.join(WORKSPACE, "settings.json")
+            s = _json.load(open(sp, encoding="utf-8")) if os.path.isfile(sp) else {}
+            if not _is_local_endpoint(LOCAL_API_BASE):
+                s["llm_model"] = model
+                with open(sp, "w", encoding="utf-8") as f:
+                    _json.dump(s, f, indent=2)
+        except Exception:
+            pass
 
     def _save_preferred_model(self, model_path: str) -> None:
         """Remember the last local model booted so the CLI auto-loads it next
@@ -2020,14 +2156,20 @@ class JarvisCLI:
             return
 
         print()
-        if s.get("builtin_running"):
+        _cloud = not _is_local_endpoint(LOCAL_API_BASE)
+        if _cloud:
+            from hearth.headless import PROVIDERS as _pv, provider_for as _pf
+            _pid = _pf(LOCAL_API_BASE)
+            print(f"{C_OK}● {_pv[_pid][0] if _pid in _pv else 'Cloud provider'}{C_RESET}  {C_DIM}{LOCAL_API_BASE}{C_RESET}")
+            await self.fetch_models()
+        elif s.get("builtin_running"):
             print(f"{C_OK}● Built-in server running{C_RESET}  {C_DIM}{s.get('builtin_url') or ''}{C_RESET}")
         elif s.get("external_running"):
             print(f"{C_OK}● External server detected{C_RESET}  {C_DIM}{LOCAL_API_BASE}{C_RESET}")
         else:
             print(f"{C_DIM}○ No server reachable at {LOCAL_API_BASE}{C_RESET}")
 
-        if s.get("external_running"):
+        if s.get("external_running") and not _cloud:
             await self.fetch_models()
 
         disk = s.get("disk_models") or []
@@ -2058,7 +2200,8 @@ class JarvisCLI:
         if low == "/help":
             print(f"{C_BOT}Commands:{C_RESET}")
             print(f"  {C_DIM}── Endpoint / model ─────────────────────────{C_RESET}")
-            print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET}, {C_TOOL}/provider{C_RESET}) switch brain: local / grok / gemini / openai / openrouter / custom")
+            print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET}, {C_TOOL}/provider{C_RESET}) switch brain: local, anthropic, openai, gemini, grok, openrouter, groq, custom, claude-code, codex, cursor")
+            print(f"  {C_TOOL}/brain <provider> <model>{C_RESET}  that provider with one of its models (a key there is saved as the key)")
             print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server and models on disk")
             print(f"  {C_TOOL}/models disk|hf|get|use|stop|helper{C_RESET}  find, download and load; `helper` loads a second, smaller model for helpers")
             print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model on current server (alias: /load)")
@@ -2406,6 +2549,7 @@ class JarvisCLI:
                     await self.fetch_models()
                 if 0 <= idx < len(self.last_model_list):
                     self.current_model = self.last_model_list[idx]
+                    self._keep_model(self.current_model)
                     print(f"{C_OK}model → {self.current_model}{C_RESET}")
                 else:
                     print(f"{C_ERR}out of range - /models to see the list{C_RESET}")
@@ -2422,13 +2566,16 @@ class JarvisCLI:
                         await self.fetch_models()
                     except Exception:
                         pass
-                if self.last_model_list and arg not in self.last_model_list:
+                from hearth.headless import find_model as _fm0
+                if self.last_model_list and not _fm0(self.last_model_list, arg):
                     print(f"{C_ERR}'{arg}' is not in the server's model list.{C_RESET}")
                     print(f"{C_DIM}  Available: {', '.join(self.last_model_list[:6])}"
                           f"{'…' if len(self.last_model_list) > 6 else ''}{C_RESET}")
                     print(f"{C_DIM}  Run /models to list, or /brain to switch endpoint.{C_RESET}")
                     return True
-                self.current_model = arg
+                from hearth.headless import find_model as _fm
+                self.current_model = _fm(self.last_model_list, arg) or arg
+                self._keep_model(self.current_model)
                 print(f"{C_OK}model → {self.current_model}{C_RESET}")
             # Re-detect context for the new model (unless pinned). Uses
             # the shared per-provider helper so cloud brains land at their
@@ -2532,6 +2679,20 @@ class JarvisCLI:
                 # its name or id. Without one, the saved choice stays.
                 want = parts[2].strip().lower() if len(parts) > 2 else None
                 model = None
+                # /brain cursor models [words]: the agent's models, searchable,
+                # instead of hundreds of names in one paragraph.
+                if want is not None and (want == "models" or want.startswith("models ")):
+                    q = want[len("models"):].split()
+                    offered = _cb.agent_models(provider)["models"]
+                    hits = [m for m in offered if all(w in (m["label"] + " " + m["id"]).lower() for w in q)]
+                    print(f"{C_BRAND}{_cb.BRAINS[provider]}{C_RESET} {C_DIM}· {len(hits)} of {len(offered)} models"
+                          f"{' matching ' + ' '.join(q) if q else ''}{C_RESET}")
+                    for m in hits[:40]:
+                        print(f"  {m['label']}{C_DIM}{'  · ' + m['about'] if m.get('about') else ''}{C_RESET}")
+                    if len(hits) > 40:
+                        print(f"  {C_DIM}…{len(hits) - 40} more; add a word: /brain {provider} models opus{C_RESET}")
+                    print(f"{C_DIM}Pick one with /brain {provider} <name>.{C_RESET}")
+                    return True
                 if want is not None:
                     offered = _cb.agent_models(provider)["models"]
                     hit = next((m for m in offered if want in (m["id"].lower(), m["label"].lower(), m["label"].lower().split()[0])), None)
@@ -2549,8 +2710,12 @@ class JarvisCLI:
                 if _cur:
                     print(f"{C_DIM}model: {_cur['label']}"
                           + (f" ({_cur['about']})" if _cur.get('about') else "")
-                          + f". Others: {', '.join(m['label'] for m in _info['models'] if m is not _cur)}. "
-                          f"Pick with /brain {provider} <name>; effort with /think <level>.{C_RESET}")
+                          + f". {len(_info['models']) - 1} others: /brain {provider} models [search] lists them; "
+                          f"/brain {provider} <name> picks one; /think <level> sets effort.{C_RESET}")
+                _ctx = _cb.context_window(provider)
+                if _ctx and not self._context_pinned:
+                    self.context_tokens = _ctx
+                self.current_model = _cb.BRAINS[provider] + (f" · {_cur['label']}" if _cur and _cur["id"] else "")
                 plan = {"codex": "on your ChatGPT plan (it counts toward your Codex limit)",
                         "claude-code": "on your Claude plan (Agent SDK credit)"}.get(
                             provider, f"on your {_cb.PLANS.get(provider, '')} plan")
@@ -2622,36 +2787,53 @@ class JarvisCLI:
                     model_hint = ""
             elif provider in presets_url_model:
                 url, model_hint = presets_url_model[provider]
-                # Key resolution: explicit arg > saved > error (local doesn't need one)
-                if arg:
-                    key = arg  # user provided new key; this also UPDATES the saved one
-                else:
-                    key = _read_brain_key(provider)
-                    if not key and provider not in _LOCAL:
-                        print(f"{C_ERR}no saved key for {provider}. Use: /brain {provider} <api-key>{C_RESET}")
-                        print(f"{C_DIM}(saved next time; type just /brain {provider} after that){C_RESET}")
-                        return True
-                # Allow saved entry to override the default model hint
-                if provider in saved_keys and saved_keys[provider].get("model"):
-                    model_hint = saved_keys[provider]["model"]
-                # A name from the table above is a starting guess, and what the
-                # provider lists decides. One the person chose is left alone.
-                elif provider not in _LOCAL and model_hint:
-                    from hearth.headless import settle_model
-                    settled = settle_model(url, key, model_hint)
-                    if settled and settled != model_hint:
-                        print(f"{C_DIM}{provider} doesn't list {model_hint}; using {settled}. "
-                              f"/model shows the rest.{C_RESET}")
-                        model_hint = settled
+                # What follows the provider is a key, a model, or both, in any
+                # order ("/brain openrouter qwen/qwen3.8-27b:free", "/brain
+                # gemini AIza… gemini-3.5-flash"). Only a key is saved as one.
+                words = [w for w in arg.split() if w.lower() != "use"]
+                given_key = next((w for w in words if _looks_like_key(w)), "")
+                given_model = next((w for w in words if not _looks_like_key(w)), "")
+                key = given_key or _read_brain_key(provider)
+                if not key and provider not in _LOCAL:
+                    print(f"{C_ERR}no saved key for {provider}. Use: /brain {provider} <api-key>{C_RESET}")
+                    print(f"{C_DIM}(saved next time; type just /brain {provider} after that){C_RESET}")
+                    return True
+                if provider not in _LOCAL:
+                    from hearth.headless import find_model, provider_models, settle_model
+                    if given_model:
+                        listed = provider_models(url, key) or []
+                        model_hint = find_model(listed, given_model) or given_model
+                        if listed and not find_model(listed, given_model):
+                            print(f"{C_WARN}{provider} doesn't list {given_model}; trying it anyway. "
+                                  f"/models <name> searches what it has.{C_RESET}")
+                    elif saved_keys.get(provider, {}).get("model"):
+                        model_hint = saved_keys[provider]["model"]
+                    elif model_hint:
+                        # A name from the table above is a starting guess, and
+                        # what the provider lists decides.
+                        settled = settle_model(url, key, model_hint)
+                        if settled and settled.rsplit("/", 1)[-1] != model_hint.rsplit("/", 1)[-1]:
+                            print(f"{C_DIM}{provider} doesn't list {model_hint}; using {settled}. "
+                                  f"/models shows the rest.{C_RESET}")
+                        model_hint = settled or model_hint
             else:
-                print(f"{C_ERR}Unknown provider {provider!r}. Try: local, lmstudio, builtin, "
-                      f"{', '.join(_known)}, custom, forget.{C_RESET}")
+                _all = ["local", "lmstudio", "builtin", *_known, "custom", "claude-code", "codex", "cursor", "forget"]
+                _guess = _did_you_mean(provider, _all)
+                print(f"{C_ERR}Unknown provider {provider!r}."
+                      + (f" Did you mean {C_TOOL}/brain {_guess}{C_RESET}{C_ERR}?" if _guess else "")
+                      + f" Try: {', '.join(_all)}.{C_RESET}")
                 return True
 
             # Mutate the runtime + env so the next chat call picks up the new
-            # endpoint. (`global` already declared above.)
+            # endpoint. (`global` already declared above.) The shared runner
+            # module follows too: the context size and the persona read it.
             LOCAL_API_BASE = url
             LOCAL_API_KEY = key or "hearth-builtin"
+            try:
+                import hearth.headless as _hlm
+                _hlm.LOCAL_API_BASE, _hlm.LOCAL_API_KEY = url, LOCAL_API_KEY
+            except Exception:
+                pass
             if model_hint:
                 LOCAL_MODEL = model_hint
                 self.current_model = model_hint
@@ -2674,7 +2856,7 @@ class JarvisCLI:
 
             # Persist: save the key under its provider key so future
             # `/brain <provider>` (no arg) auto-loads it.
-            if provider not in _LOCAL and key:
+            if provider not in _LOCAL and key and (provider == "custom" or _looks_like_key(key)):
                 saved_keys[provider] = {"url": url, "key": key, "model": model_hint}
                 _save_keys(saved_keys)
                 # tighten file perms on POSIX (no-op on Windows; NTFS ACL
@@ -2695,11 +2877,13 @@ class JarvisCLI:
                             saved = _json.load(f) or {}
                     except Exception:
                         pass
+                # A local server says what it has loaded, so no name is kept
+                # for it; a cloud model name left over would be sent to it.
                 saved.update({
                     "llm_provider": provider,
                     "llm_url": url,
                     "llm_key": key,
-                    "llm_model": model_hint or saved.get("llm_model", ""),
+                    "llm_model": "" if provider in _LOCAL else (model_hint or saved.get("llm_model", "")),
                 })
                 os.makedirs(WORKSPACE, exist_ok=True)
                 with open(settings_path, "w", encoding="utf-8") as f:
@@ -2748,7 +2932,7 @@ class JarvisCLI:
                 print(f"{C_DIM}    Notes:{C_RESET}")
                 print(f"{C_DIM}      • If LM Studio is running on port 1234, stop it first.{C_RESET}")
                 print(f"{C_DIM}      • Hearth re-uses any GGUFs you have in LM Studio's cache - no double-download.{C_RESET}")
-            elif provider != "local" and arg:
+            elif provider not in _LOCAL and provider != "custom" and given_key:
                 print(f"{C_DIM}(key saved - next time just type /brain {provider}){C_RESET}")
             return True
         if low == "/tools":
@@ -3670,7 +3854,10 @@ class JarvisCLI:
                     voice.speak(f"voice set to {vname}", blocking=False)
             return True
         if cmd.startswith("/"):
-            print(f"{C_ERR}Unknown command. /help for list.{C_RESET}")
+            _w = low.split()[0] if low.split() else low
+            _guess = _did_you_mean(_w, SLASH_COMMANDS)
+            print(f"{C_ERR}Unknown command." + (f" Did you mean {C_TOOL}{_guess}{C_RESET}{C_ERR}?" if _guess else "")
+                  + f" /help for the list.{C_RESET}")
             return True
         return False
 
@@ -5789,8 +5976,11 @@ class JarvisCLI:
             # OpenAI/LM Studio accept "" just as happily.
             entry = {"role": "assistant", "content": ""}
 
+        _calls: List[Dict] = []
         if tool_calls_dict:
-            entry["tool_calls"] = list(tool_calls_dict.values())
+            from hearth.tool_call_parser import split_calls as _split_calls
+            _calls = _split_calls(list(tool_calls_dict.values()))
+            entry["tool_calls"] = [{k: v for k, v in c.items() if k != "raw_arguments"} for c in _calls]
 
         self.messages.append(entry)
 
@@ -5814,9 +6004,9 @@ class JarvisCLI:
             self.save_history()
             return
 
-        for tc in entry["tool_calls"]:
+        for tc in _calls:
             name = tc["function"]["name"]
-            args_raw = tc["function"]["arguments"] or "{}"
+            args_raw = tc.get("raw_arguments") or tc["function"]["arguments"] or "{}"
             try:
                 # Same lenient read the bridge uses, so a call the bridge
                 # recovers is not rejected here. Strict JSON first, then a
@@ -5839,7 +6029,6 @@ class JarvisCLI:
                     f"json.loads failed at col {_je.colno}: {_je.msg}. Raw: {_snippet} "
                     f"Fix: escape inner quotes and ensure valid JSON object."
                 )
-                self.messages.append({"role": "assistant", "content": "", "tool_calls": [tc]})
                 self.messages.append({"role": "tool", "tool_call_id": tc.get("id") or "call_err", "name": name, "content": err})
                 print(f"{C_WARN}→ {err[:300]}{C_RESET}")
                 continue

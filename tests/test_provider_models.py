@@ -83,6 +83,8 @@ check("a name it no longer lists gives way to one it does", hl.settle_model(base
 check("no name at all gets the first it lists", hl.settle_model(base, "good", "") == "newest-chat")
 check("when the list can't be had, the name asked for stands", hl.settle_model(base, "bad", "retired-model") == "retired-model")
 check("a name given without its prefix is the listed one", hl.settle_model(base, "good", "slashed-chat") == "vendor/slashed-chat")
+check("a stale guess gives way to its nearest relative, not the first model listed",
+      hl.settle_model(base, "good", "vendor/slashed-chat-3.5") == "vendor/slashed-chat")
 
 # The model menu lists every provider a key is saved for and reads each one's
 # models with that saved key, so nothing has to be pasted again to look or switch.

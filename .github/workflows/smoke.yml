@@ -231,6 +231,7 @@ jobs:
       - name: A long paste in the terminal shows as a marker and is sent whole
         run: |
           python tests/test_cli_paste.py
+          python tests/test_cli_commands.py
 
       - name: A cloud provider's models are read from the provider
         run: |

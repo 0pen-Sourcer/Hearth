@@ -30,6 +30,12 @@ CLI = os.path.join(ROOT, "hearth_cli.py")
 FAILS: list = []
 
 
+def hearth_strip(text: str) -> str:
+    """The output without its colour codes."""
+    import re as _re
+    return _re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 def check(label, cond):
     print(("ok    " if cond else "FAIL  ") + label)
     if not cond:
@@ -153,6 +159,24 @@ with open(os.path.join(_ws, "settings.json"), encoding="utf-8") as f:
 check("and switches to that provider with it",
       _after.get("llm_provider") == "anthropic" and _after.get("llm_key") == "saved-in-the-window"
       and "api.anthropic.com" in _after.get("llm_url", ""))
+
+# /brain <provider> <model> saved the model name as the provider's API key, and
+# the context size was always Anthropic's whatever the provider.
+_ws2 = tempfile.mkdtemp(prefix="hearth-cli-brain-")
+_or_key, _g_key = "sk-or-v1-" + "a" * 64, "AIza" + "B" * 35
+with open(os.path.join(_ws2, "brain_keys.json"), "w", encoding="utf-8") as f:
+    _json.dump({"openrouter": {"url": "https://openrouter.ai/api/v1", "key": _or_key, "model": ""},
+                "gemini": {"url": "", "key": _g_key, "model": ""}}, f)
+code, out, _ = run([], stdin=b"/brain openrouter qwen/qwen3.8-27b:free\n/brain cusror\n/brian gemini\n/brain gemini\n",
+                   timeout=200, home=home, extra_env={"JARVIS_WORKSPACE": _ws2})
+with open(os.path.join(_ws2, "brain_keys.json"), encoding="utf-8") as f:
+    _keys = _json.load(f)
+check("/brain openrouter <model> picks the model and keeps the saved key",
+      "brain → openrouter" in out and "qwen/qwen3.8-27b:free" in out and _keys["openrouter"]["key"] == _or_key
+      and "key saved" not in out)
+check("a mistyped provider and a mistyped command get a suggestion",
+      "Did you mean /brain cursor?" in hearth_strip(out) and "Did you mean /brain?" in hearth_strip(out))
+check("Gemini's context is Gemini's, not Anthropic's", "context auto-set to 1,000,000" in out)
 
 print()
 if FAILS:

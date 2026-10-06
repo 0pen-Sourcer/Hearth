@@ -312,17 +312,42 @@ def provider_models(base: str, key: str = "", timeout: float = 6):
     return [m["id"] for m in rows if m.get("id") and not any(p in m["id"].lower() for p in NOT_CHAT)]
 
 
+def find_model(listed: List[str], wanted: str) -> str:
+    """The listed name for a model, matched whatever its case and with or
+    without a prefix (Gemini lists "models/gemini-..." and answers to the short
+    name too). "" when the list doesn't have it."""
+    w = (wanted or "").strip().lower()
+    if not w:
+        return ""
+    for m in listed:
+        if m.lower() == w:
+            return m
+    for m in listed:
+        if m.lower().rsplit("/", 1)[-1] == w.rsplit("/", 1)[-1]:
+            return m
+    return ""
+
+
 def settle_model(base: str, key: str, wanted: str) -> str:
     """The model to use on a provider: the one asked for when the provider
-    lists it (or can't be asked), else the first it does list. A name written
-    into Hearth is a guess that goes stale; the provider's own list doesn't."""
+    lists it (or can't be asked), else the listed one closest to it, else the
+    first it lists. A name written into Hearth is a guess that goes stale; the
+    provider's own list doesn't."""
     listed = provider_models(base, key)
     if not listed or not wanted:
         return wanted or (listed[0] if listed else "")
-    low = {m.lower(): m for m in listed}
-    # Gemini lists "models/gemini-..." and answers to the short name too.
-    short = {m.lower().rsplit("/", 1)[-1]: m for m in reversed(listed)}
-    return low.get(wanted.lower()) or short.get(wanted.lower()) or listed[0]
+    hit = find_model(listed, wanted)
+    if hit:
+        return hit
+    # The nearest relative of the guess ("anthropic/claude-3.5-sonnet" finds the
+    # current Claude Sonnet), not whatever the provider happens to list first.
+    words = set(re.split(r"[-/._: ]+", wanted.lower())) - {""}
+    best, score = listed[0], 1
+    for m in listed:
+        n = len(words & set(re.split(r"[-/._: ]+", m.lower())))
+        if n > score:
+            best, score = m, n
+    return best
 
 
 # What the window sends, when idle, for a turn that has no user message: only
@@ -1698,14 +1723,19 @@ async def run_once(
                         "arguments": tc.function.arguments,
                     },
                 })
+            from .tool_call_parser import split_calls as _split_calls
+            tc_dicts = _split_calls(tc_dicts)
             assistant_entry: Dict[str, Any] = {
                 "role": "assistant",
                 "content": _strip_think(msg.content or ""),
-                "tool_calls": tc_dicts,
+                "tool_calls": [{k: v for k, v in d.items() if k != "raw_arguments"} for d in tc_dicts],
             }
             messages.append(assistant_entry)
 
-            for tc in msg.tool_calls:
+            from types import SimpleNamespace as _NS
+            for _d in tc_dicts:
+                tc = _NS(id=_d["id"], function=_NS(name=_d["function"]["name"],
+                                                   arguments=_d.get("raw_arguments") or _d["function"]["arguments"]))
                 name = tc.function.name
                 raw_args = tc.function.arguments or "{}"
                 # Repair pass: some local models emit bad JSON (unescaped inner

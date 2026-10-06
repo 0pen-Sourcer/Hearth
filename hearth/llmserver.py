@@ -2368,6 +2368,9 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
                 # fires exactly when the engine is genuinely the problem.
                 hint = (". This model is newer than your engine, so it can't read it. "
                         "Update the engine in Models > Engine, then load it again.")
+            elif "invalid ggml type" in tail.lower():
+                hint = (". This file uses a kind of compression your engine can't read; it was made for a "
+                        "different build of llama.cpp")
             elif "could not load model" in tail.lower():
                 hint = " — model file unreadable or wrong format"
             elif "could not find module" in tail.lower():

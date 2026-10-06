@@ -280,6 +280,43 @@ def _complete_truncated_json(s: str) -> "tuple[str, bool]":
     return out + "".join(reversed(stack)), severed
 
 
+def split_calls(calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Tool calls as they should run and be remembered. A model that packs
+    several calls' arguments back to back into one call ({...}{...}) gets one
+    call per object. Arguments still unreadable are kept as "{}" in what goes
+    back to the provider, which rejects every later request that carries them;
+    the unreadable text stays in `raw_arguments` for the error message."""
+    out: List[Dict[str, Any]] = []
+    dec = json.JSONDecoder()
+    for call in calls:
+        fn = call.get("function") or {}
+        raw = fn.get("arguments") or "{}"
+        objs: List[Any] = []
+        try:
+            json.loads(raw)
+        except Exception:
+            i, n = 0, len(raw)
+            try:
+                while i < n:
+                    while i < n and raw[i] in " \t\r\n,":
+                        i += 1
+                    if i >= n:
+                        break
+                    obj, i = dec.raw_decode(raw, i)
+                    objs.append(obj)
+            except ValueError:
+                objs = []
+        if len(objs) > 1 and all(isinstance(o, dict) for o in objs):
+            for k, obj in enumerate(objs):
+                out.append(dict(call, id=f"{call.get('id') or 'call'}{'' if k == 0 else f'_{k}'}",
+                                function=dict(fn, arguments=json.dumps(obj, ensure_ascii=False))))
+            continue
+        if loads_lenient(raw) is None:
+            call = dict(call, raw_arguments=raw, function=dict(fn, arguments="{}"))
+        out.append(call)
+    return out
+
+
 def loads_lenient(s: str) -> Optional[Dict[str, Any]]:
     """Public entry for parsing a tool call's `arguments` string. Strict JSON
     first, then the string-aware repair, then a Python-literal read. Returns
