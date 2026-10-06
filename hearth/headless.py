@@ -300,6 +300,12 @@ NOT_CHAT = ("imagine-image", "imagine-video", "imagine-audio", "embedding", "emb
             "lyria", "native-audio", "-tts", "tts-", "aqa", "robotics")
 
 
+# What each provider's own model list says about context size, by address,
+# kept a while: Anthropic reports max_input_tokens, OpenRouter context_length.
+_LIST_SIZES: Dict[str, Any] = {}
+_SIZE_FIELDS = ("max_input_tokens", "context_length", "context_window", "input_token_limit", "inputTokenLimit")
+
+
 def provider_models(base: str, key: str = "", timeout: float = 6):
     """The chat models a server lists, in its own order. None when it can't be asked."""
     import urllib.request as _ur
@@ -309,7 +315,25 @@ def provider_models(base: str, key: str = "", timeout: float = 6):
             rows = json.loads(r.read().decode("utf-8", "replace")).get("data") or []
     except Exception:
         return None
+    sizes = {}
+    for m in rows:
+        n = next((m.get(f) for f in _SIZE_FIELDS if isinstance(m.get(f), int) and m.get(f) > 1024), None)
+        if m.get("id") and n:
+            sizes[m["id"]] = n
+    _LIST_SIZES[base.rstrip("/")] = (time.time(), sizes)
     return [m["id"] for m in rows if m.get("id") and not any(p in m["id"].lower() for p in NOT_CHAT)]
+
+
+def listed_context(base: str, key: str, model_id: str) -> Optional[int]:
+    """The context size the provider's own list gives this model, if it gives one."""
+    hit = _LIST_SIZES.get((base or "").rstrip("/"))
+    if not hit or time.time() - hit[0] > 3600:
+        if provider_models(base, key, timeout=5) is None:
+            return None
+        hit = _LIST_SIZES.get((base or "").rstrip("/"))
+    sizes = hit[1] if hit else {}
+    name = find_model(list(sizes), model_id or "")
+    return sizes.get(name) if name else None
 
 
 def find_model(listed: List[str], wanted: str) -> str:
@@ -475,7 +499,12 @@ def resolve_context_tokens(model_id: str) -> tuple:
     probed = autodetect_context(model_id)
     if probed:
         return probed, "endpoint probe"
-    # Per-provider known-context table. Cloud providers almost never
+    # The provider's own model list, where it says (Anthropic, OpenRouter).
+    if provider_for(LOCAL_API_BASE) not in ("local", ""):
+        listed = listed_context(LOCAL_API_BASE, os.environ.get("LOCAL_API_KEY") or LOCAL_API_KEY, model_id)
+        if listed:
+            return listed, f"the provider's model list ({listed // 1000}K)"
+    # Per-provider known-context table, for a provider whose list says nothing. Cloud providers almost never
     # expose ctx via /v1/models (the probe above tries; comes back None
     # for nearly all of them), so this table is the fallback. Values are
     # the REAL ceiling each provider advertises. Update here whenever a

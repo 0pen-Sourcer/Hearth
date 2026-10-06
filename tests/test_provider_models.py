@@ -63,7 +63,7 @@ class _Provider(http.server.BaseHTTPRequestHandler):
             self.send_response(401)
             self.end_headers()
             return
-        body = json.dumps({"data": [{"id": "big-embedding-3"}, {"id": "newest-chat"}, {"id": "older-chat"},
+        body = json.dumps({"data": [{"id": "big-embedding-3"}, {"id": "newest-chat", "max_input_tokens": 1000000}, {"id": "older-chat", "context_length": 262144},
                                     {"id": "imagen-4"}, {"id": "vendor/slashed-chat"}]}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
@@ -83,6 +83,11 @@ check("a name it no longer lists gives way to one it does", hl.settle_model(base
 check("no name at all gets the first it lists", hl.settle_model(base, "good", "") == "newest-chat")
 check("when the list can't be had, the name asked for stands", hl.settle_model(base, "bad", "retired-model") == "retired-model")
 check("a name given without its prefix is the listed one", hl.settle_model(base, "good", "slashed-chat") == "vendor/slashed-chat")
+# The context size came from a table written into Hearth, which called every
+# Claude 200K; the provider's own list says what each model takes.
+check("a model's context size is the one its provider lists",
+      hl.listed_context(base, "good", "newest-chat") == 1000000 and hl.listed_context(base, "good", "older-chat") == 262144
+      and hl.listed_context(base, "good", "unknown-model") is None)
 check("a stale guess gives way to its nearest relative, not the first model listed",
       hl.settle_model(base, "good", "vendor/slashed-chat-3.5") == "vendor/slashed-chat")
 
