@@ -57,14 +57,17 @@ def models() -> List[Dict[str, Any]]:
     for m in cache.get("models") or []:
         if m.get("visibility") != "list" or not m.get("slug"):
             continue
+        levels = [x for x in m.get("supported_reasoning_levels") or [] if x.get("effort")]
         out.append({"id": m["slug"], "label": m.get("display_name") or m["slug"],
                     "about": m.get("description") or "", "model": m["slug"],
                     "ctx": m.get("context_window"),
-                    "efforts": [x.get("effort") for x in m.get("supported_reasoning_levels") or [] if x.get("effort")]})
+                    "efforts": [x["effort"] for x in levels],
+                    # What Codex itself says each level is for.
+                    "effort_about": {x["effort"]: x.get("description") or "" for x in levels}})
     # "Default" means whatever the config names, with that model's numbers.
     for m in out[1:]:
         if m["id"] == default:
-            out[0]["ctx"], out[0]["efforts"] = m["ctx"], m["efforts"]
+            out[0]["ctx"], out[0]["efforts"], out[0]["effort_about"] = m["ctx"], m["efforts"], m["effort_about"]
     return out
 
 

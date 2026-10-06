@@ -52,6 +52,17 @@ cb._HOME = work
 cb._SESSIONS = os.path.join(work, "claude_sessions.json")
 cb.set_bridge_url("http://127.0.0.1:9")
 cb.current = lambda: "codex"
+
+# The models and effort levels are Codex's own, with what Codex says each level is for.
+with open(os.path.join(codex_home, "models_cache.json"), "w", encoding="utf-8") as _f:
+    json.dump({"models": [{"slug": "gpt-test", "display_name": "GPT-Test", "visibility": "list", "context_window": 272000,
+                           "supported_reasoning_levels": [{"effort": "low", "description": "Fast responses with lighter reasoning"},
+                                                          {"effort": "ultra", "description": "Maximum reasoning"}]},
+                          {"slug": "hidden", "visibility": "hide"}]}, _f)
+_listed = cx.models()
+check("Codex's models are its own list, with its effort levels and what each is for",
+      [m["id"] for m in _listed] == ["", "gpt-test"] and _listed[1]["efforts"] == ["low", "ultra"]
+      and _listed[1]["effort_about"]["low"] == "Fast responses with lighter reasoning" and _listed[1]["ctx"] == 272000)
 argv_log = os.path.join(work, "argv.jsonl")
 fake = os.path.join(work, "fake_codex.py")
 with open(fake, "w", encoding="utf-8") as f:

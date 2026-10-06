@@ -9336,9 +9336,11 @@ function _thinkOptions() {
     // An agent always reasons; what it offers is how hard.
     const info = STATE.agentInfo && STATE.agentInfo.provider === agent ? STATE.agentInfo : null;
     const m = info && info.models.find(x => x.id === (info.model || ''));
-    const levels = (m && m.efforts) || [];
+    const levels = (m && m.efforts) || [], about = (m && m.effort_about) || {};
+    // Named as the agent names them: Codex calls its lowest level Light.
+    const named = l => l === 'xhigh' ? 'Extra high' : (agent === 'codex' && l === 'low') ? 'Light' : l[0].toUpperCase() + l.slice(1);
     return [{ on: true, level: '', label: 'Default', sub: AGENT_BRAINS[agent] + "'s own setting" },
-            ...levels.map(l => ({ on: true, level: l, label: l === 'xhigh' ? 'Extra high' : l[0].toUpperCase() + l.slice(1), sub: '' }))];
+            ...levels.map(l => ({ on: true, level: l, label: named(l), sub: about[l] || '' }))];
   }
   const cloud = !!(STATE.brain && STATE.brain.kind === 'cloud');
   return cloud ? THINK_OPTIONS : THINK_OPTIONS.filter(o => !o.level);
