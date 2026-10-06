@@ -246,6 +246,8 @@ out({"type": "tool_call", "subtype": "started", "call_id": "c1", "tool_call": {"
 out({"type": "tool_call", "subtype": "completed", "call_id": "c1", "tool_call": {"readToolCall": {"args": {"path": "docs/SPEC.md"}, "result": {"success": {"content": "the spec"}}}}})
 out({"type": "result", "subtype": "success", "is_error": False, "result": "The spec is short."})
 """)
+check("a Codex helper runs commands of its own only on Auto",
+      "features.shell_tool=false" in xa._codex_cmd("edits") and "features.shell_tool=false" not in xa._codex_cmd("auto"))
 xa.AGENTS["stand-in-codex"] = {"label": "Codex stand-in", "exe": ["stand-in"], "stream": "codex",
                                "args": lambda allow: [codex_out]}
 xa.AGENTS["stand-in-cursor"] = {"label": "Cursor stand-in", "exe": ["stand-in"], "stream": "cursor",

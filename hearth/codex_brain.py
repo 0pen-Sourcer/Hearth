@@ -7,9 +7,10 @@ developer instructions, and each Hearth conversation keeps one Codex thread.
 
 Codex has no hook that asks someone before a tool runs, so Hearth's server
 asks Hearth itself before anything risky (the same strip, spoken question and
-Ask / Auto-edit / Auto switch as everywhere else). Codex's own shell runs in
-its sandbox: read-only on Ask, so changes go through Hearth's tools and get
-asked about; the workspace on Auto-edit and Auto.
+Ask / Auto-edit / Auto switch as everywhere else). Its own shell runs
+commands without asking anyone, so on Ask and Auto-edit, where a command
+needs a yes, it has none: commands go through Hearth's run_command. Its file
+edits are held to the workspace on Auto-edit and refused on Ask.
 """
 from __future__ import annotations
 
@@ -93,17 +94,28 @@ def _user_hearth_servers() -> List[str]:
     return out
 
 
-def _sandbox() -> List[str]:
+def _mode() -> str:
     try:
         from .tools import approval_mode
-        mode = approval_mode()
+        return approval_mode()
     except Exception:
-        mode = "ask"
+        return "ask"
+
+
+# Codex's own command tools. Both run without asking, so they are switched off
+# whenever Hearth's switch says a command needs a yes.
+_NO_SHELL = ["-c", "features.shell_tool=false", "-c", "features.unified_exec=false"]
+
+
+def _sandbox() -> List[str]:
+    mode = _mode()
     if mode == "ask":
-        return ["-c", 'sandbox_mode="read-only"']
+        return ["-c", 'sandbox_mode="read-only"'] + _NO_SHELL
     out = ["-c", 'sandbox_mode="workspace-write"']
     if mode == "auto":
         out += ["-c", "sandbox_workspace_write.network_access=true"]
+    else:
+        out += _NO_SHELL
     return out
 
 
@@ -161,8 +173,13 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
             text_in = f"Earlier in this conversation:\n{earlier}\n\nNow the user says:\n{prompt}"
     persona = _base.persona_text(
         voice, host="Codex", tools=f"the {SERVER} MCP tools",
-        own_tools="Your own shell is fine for reading and running things; to change files outside "
-                  "the workspace or do anything the sandbox blocks, use Hearth's tools, which ask the user.")
+        own_tools=("Your own shell is fine for reading and running things; to change files outside "
+                   "the workspace or do anything the sandbox blocks, use Hearth's tools, which ask the user."
+                   if _mode() == "auto" else
+                   "You have no shell of your own here: run every command with Hearth's run_command, which "
+                   "asks the user first. Read files with Hearth's read_file."
+                   + (" Your own file edits stay in the workspace." if _mode() == "edits" else
+                      " Change files with Hearth's write_file or edit_file, which ask the user.")))
     if len(persona) > _MAX_INLINE:
         text_in = persona + "\n\n---\n\n" + text_in
         persona = ""

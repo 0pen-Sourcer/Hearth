@@ -38,9 +38,12 @@ def _claude_cmd(allow: str) -> List[str]:
 
 def _codex_cmd(allow: str) -> List[str]:
     """Headless Codex has nobody to ask, so it never stops to: it works inside
-    its folder, with the network only when the user chose Auto."""
+    its folder, with the network and its own shell only when the user chose
+    Auto. Short of that it edits files and runs no commands, as Claude Code
+    does with edits accepted."""
     return (["exec", "--json", "--skip-git-repo-check", "-c", 'approval_policy="never"', "-s", "workspace-write"]
-            + (["-c", "sandbox_workspace_write.network_access=true"] if allow == "auto" else []) + ["-"])
+            + (["-c", "sandbox_workspace_write.network_access=true"] if allow == "auto"
+               else ["-c", "features.shell_tool=false", "-c", "features.unified_exec=false"]) + ["-"])
 
 
 # id -> how to run it. `args` builds the arguments (the prompt goes on stdin

@@ -111,7 +111,10 @@ check("Codex never stops to ask on its own", 'approval_policy="never"' in argv)
 check("Hearth's tools are attached and run without Codex asking",
       "mcp_servers.hearth_brain.default_tools_approval_mode=\"approve\"" in argv
       and "HEARTH_BRAIN_GATE = \"1\"" in joined)
-check("on Ask, Codex's own shell can read but not change anything", 'sandbox_mode="read-only"' in argv)
+check("on Ask, Codex's own edits are refused", 'sandbox_mode="read-only"' in argv)
+# Its shell ran commands on Ask without anyone being asked; read-only only
+# stopped writes. On Ask it has no shell: commands go through Hearth's, which asks.
+check("on Ask, Codex has no shell of its own", "features.shell_tool=false" in argv and "features.unified_exec=false" in argv)
 check("the user's own Hearth entry is off for the run, other servers untouched",
       "mcp_servers.hearth.enabled=false" in argv and "mcp_servers.docs.enabled=false" not in argv)
 check("the persona goes in as developer instructions", any(a.startswith("developer_instructions=") for a in argv))
@@ -121,8 +124,15 @@ hist = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "
 turn("open spotify", hist)
 second = json.loads(open(argv_log).read().splitlines()[1])["argv"]
 check("the next turn of the same chat resumes the same Codex thread", second[0:3] == ["exec", "resume", "th-1"])
-check("on Auto, Codex works in the workspace with the network on",
-      'sandbox_mode="workspace-write"' in second and "sandbox_workspace_write.network_access=true" in second)
+check("on Auto, Codex works in the workspace with the network on, and its own shell",
+      'sandbox_mode="workspace-write"' in second and "sandbox_workspace_write.network_access=true" in second
+      and "features.shell_tool=false" not in second)
+from hearth import codex_brain as _cx  # noqa: E402
+tools.approval_mode = lambda: "edits"
+edits = _cx._sandbox()
+check("on Auto-edit its edits stay in the workspace and commands still need a yes",
+      'sandbox_mode="workspace-write"' in edits and "features.shell_tool=false" in edits)
+tools.approval_mode = lambda: "auto"
 
 ev = turn("FAIL please", [])
 check("a failed turn says why", any(t == "error" and "usage limit" in f["message"] for t, f in ev))
