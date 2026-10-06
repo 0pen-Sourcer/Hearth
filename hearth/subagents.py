@@ -286,7 +286,7 @@ def _pointed_at(args: Any) -> str:
 def _read_agent(p: Path) -> Dict[str, Any]:
     """What one transcript says about its agent: who it is, what it is doing
     right now, and how it ended if it has."""
-    info: Dict[str, Any] = {"id": p.stem, "persona": "", "name": "", "runtime": "", "prompt": "",
+    info: Dict[str, Any] = {"id": p.stem, "persona": "", "name": "", "runtime": "", "on": "", "model": "", "prompt": "",
                             "ended": None, "tools_used": 0, "activity": "thinking",
                             "tool": "", "what": "", "blocked": "", "preview": "", "started": ""}
     pending: List[str] = []
@@ -305,6 +305,15 @@ def _read_agent(p: Path) -> Dict[str, Any]:
                     info["runtime"] = rec.get("runtime") or ""
                     info["prompt"] = (rec.get("prompt") or "").strip()[:200]
                     info["started"] = rec.get("ts") or ""
+                elif k == "route" and not info["runtime"]:
+                    # One of Hearth's own helpers: what it thinks with, so a
+                    # cloud model is never mistaken for one on this PC.
+                    from .headless import PROVIDERS, provider_for
+                    pid = provider_for(rec.get("base_url") or "")
+                    info["model"] = os.path.basename(str(rec.get("model") or "").replace("\\", "/"))
+                    info["on"] = "this PC" if pid == "local" else (PROVIDERS[pid][0] if pid in PROVIDERS else "a server")
+                    if pid in PROVIDERS:
+                        info["runtime"] = pid
                 elif k == "assistant_tool_call":
                     pending = [c.get("name") or "" for c in rec.get("calls") or []]
                     whats = [_pointed_at(c.get("args")) for c in rec.get("calls") or []]

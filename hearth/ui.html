@@ -4005,7 +4005,7 @@
         <h2>Models</h2>
         <span class="sub" id="models-server-line">checking server…</span>
         <div class="grow"></div>
-        <input type="text" class="models-search" id="models-search" placeholder="Search Hugging Face (e.g. qwen 7b, llama 3.2)" autocomplete="off"/>
+        <input type="text" class="models-search" id="models-search" placeholder="Search Hugging Face (e.g. qwen 3.8 27B, gemma 4 12B)" autocomplete="off"/>
         <button id="btn-models-rescan" title="Rescan local model catalog (LM Studio, Ollama, HF cache, Downloads)" style="margin-left:8px;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);cursor:pointer;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         </button>
@@ -5662,6 +5662,18 @@ async function checkAgentUpdates() {
 setTimeout(checkAgentUpdates, 30000);
 setInterval(checkAgentUpdates, 12 * 3600 * 1000);
 
+// A yes/no question in the app's own dialog, never the browser's. Closing it
+// any other way is a no.
+function askConfirm(title, body, yesLabel = 'OK', danger = false) {
+  return new Promise(resolve => {
+    let done = false;
+    const end = (v) => { if (!done) { done = true; watch.disconnect(); resolve(v); } };
+    const watch = new MutationObserver(() => { if (!$('modal').classList.contains('open')) end(false); });
+    showModal(title, body, [{ label: 'Cancel', onclick: () => end(false), closes: true },
+                            { label: yesLabel, kind: danger ? 'danger' : 'primary', closes: true, onclick: () => end(true) }]);
+    watch.observe($('modal'), { attributes: true, attributeFilter: ['class'] });
+  });
+}
 function showModal(title, body, actions = []) {
   $('modal-title').textContent = title;
   // Treat body as HTML iff it contains <tags>; plain strings still go in as
@@ -7939,7 +7951,10 @@ function attachStatsLine(msgEl, stats) {
 let _lastModelNotice = '';
 async function refreshModels() {
   try {
+    const _seq = STATE.brainSeq || 0;
     const resp = await api('/api/models');
+    // Asked before this window changed the brain: the list is the old brain's.
+    if (_seq !== (STATE.brainSeq || 0)) return;
     const models = resp.models;
     const _agentBrains = resp.agent_brains || [];
     STATE.providers = resp.providers || [];
@@ -8411,6 +8426,18 @@ function mpOpen() {
   let top = current.length ? `<div class="mp-sec">In use</div>${current.map(o => _mpRow(o, true, here.prov)).join('')}` : '';
   // A saved provider keeps its other models folded under its own row.
   if (others.length && !here.prov) top += `<div class="mp-sec">${here.cloud ? 'From this provider' : 'Loaded'}</div>${others.map(o => _mpRow(o, false)).join('')}`;
+  // Agents that can't be the brain still work: say where, under the ones that can.
+  const helpersOnly = (STATE.helperAgents || []).filter(a => !AGENT_BRAINS[a.id]).map(a => a.label);
+  if (helpersOnly.length && html.includes('<div class="mp-sec">Agents</div>')) {
+    const many = helpersOnly.length > 3 ? helpersOnly.slice(0, 3).join(', ') + ` and ${helpersOnly.length - 3} more`
+      : helpersOnly.join(' and ');
+    html += `<div class="mp-note">${esc(many)} ${helpersOnly.length === 1 ? 'takes' : 'take'} tasks as helpers from the Team tab.</div>`;
+  }
+  if (!STATE.helperAgents) {
+    STATE.helperAgents = [];
+    api('/api/team/choices').then(r => { STATE.helperAgents = (r.agents || []).filter(a => !a.refused); })
+      .catch(() => { STATE.helperAgents = null; });
+  }
   const provs = STATE.providers || [];
   if (provs.length) {
     html += '<div class="mp-sec">Your providers</div>' + provs.map(p => _mpItem({
@@ -8678,6 +8705,10 @@ $('model-select').addEventListener('change', async (e) => {
   }
   STATE.brain.busy = true;
   if (onDisk) STATE.brain.kind = 'local';
+  // A provider's models are not this PC's: they leave the menu while this loads.
+  if (onDisk && prevKind === 'cloud') {
+    for (const o of [...$('model-select').children]) if (o.tagName === 'OPTION' && o.value !== id) o.remove();
+  }
   // Name the model being loaded right away. Only the Models tab did this, so a
   // pick made from this dropdown left the previous id in STATE.brain and the
   // sticker fell back to the first entry in the list while loading.
@@ -12622,7 +12653,7 @@ async function refreshSettings() {
           const isDml = opt.value === 'dml';
           const msg = (isDml ? 'DirectML is for AMD / Intel GPUs. On an Nvidia card, GPU (CUDA) is faster and DirectML replaces it.\n\n' : '')
             + 'This downloads a one-time GPU runtime (about 500MB). The download is safe to interrupt, but keep Hearth open during the final "swapping runtime" step.\n\nContinue?';
-          if (!confirm(msg)) { sel.value = prev; return; }
+          if (!(await askConfirm(isDml ? 'Use DirectML?' : 'Get the GPU runtime?', msg, 'Download'))) { sel.value = prev; return; }
           sel.value = prev; sel.disabled = true;           // hold until installed
           inst.hidden = false; inst.className = 'gpu-installer';
           gmsg.textContent = 'downloading GPU runtime… (~500MB, one-time)';
@@ -15873,7 +15904,7 @@ async function modelsRenderEngine() {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const tag = btn.dataset.engineDel;
-      if (!confirm(`Delete engine build ${tag}? This removes it from ~/.hearth/llamacpp. You can re-download it anytime.`)) return;
+      if (!(await askConfirm(`Delete engine build ${tag}?`, 'It is removed from this PC. You can download it again any time.', 'Delete', true))) return;
       btn.disabled = true; btn.textContent = 'Deleting…';
       try {
         const r = await api('/api/runtime/remove', { method: 'POST',
@@ -17386,7 +17417,8 @@ async function obLoadBrains() {
   // What was found, all of it: the agents count as much as the model files.
   const row = (cls, html) => `<div class="ob-status-row ${cls}"><span class="ob-dot"></span><span>${html}</span></div>`;
   const n = (k, one) => `${k} ${one}${k === 1 ? '' : 's'}`;
-  const found = [here.length ? n(here.length, 'agent') + ' you already use' : '',
+  const agentsHere = here.length + others.length;
+  const found = [agentsHere ? n(agentsHere, 'agent') + ' you already use' : '',
                  disk.length ? n(disk.length, 'model file') : ''].filter(Boolean).join(' and ');
   let banner = '';
   if (s.is_lite) {
@@ -18288,9 +18320,12 @@ function teamMini(a) {
   return h ? `<span class="hx-mini" style="--hx:${h.c}" title="${esc(h.label + ' by ' + h.maker)}">${harnessMark(h)}</span>` : '';
 }
 function teamWhat(a) {
-  const h = a && a.runtime && (HARNESS[a.runtime] || BRAIN_MARKS[a.runtime]);
   const job = TEAM_JOBS[String(a && a.persona || '').toLowerCase()];
-  return h ? h.label + ' · ' + h.maker : (job ? job[0].toLowerCase() : (a.persona || ''));
+  const role = job ? job[0].toLowerCase() : (a && a.persona || '');
+  // One of Hearth's own helpers says what it thinks with: a provider or this PC.
+  if (a && a.on) return role + ' · on ' + ((BRAIN_MARKS[a.runtime] || {}).label || a.on);
+  const h = a && a.runtime && (HARNESS[a.runtime] || BRAIN_MARKS[a.runtime]);
+  return h ? h.label + ' · ' + h.maker : role;
 }
 function teamActivity(a) {
   if (a.status === 'failed') return "Didn't finish: " + (a.preview || 'no reason given');
@@ -19299,8 +19334,16 @@ function _stepWhat(args) {
   else if (a.url) v = v.replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
   return v.length > 42 ? v.slice(0, 41) + '…' : v;
 }
-function _stepLine(tool, what) {
+// A step that has come back is told in the past: "Looked in Jarvis", not "Looking".
+const ROOM_DONE_VERBS = { folder: 'Looked in', search: 'Searched for', file: 'Read', edit: 'Changed', term: 'Ran',
+  globe: 'Opened', web: 'Looked up', brain: 'Recalled' };
+function _stepLine(tool, what, done) {
   const kind = _toolKind(tool || '');
+  if (done) {
+    if (what && ROOM_DONE_VERBS[kind]) return ROOM_DONE_VERBS[kind] + ' ' + what;
+    const said = (_RUN_VERBS[kind] || [])[0];
+    return said ? said.charAt(0).toUpperCase() + said.slice(1) : (tool || 'Worked');
+  }
   return what && ROOM_VERBS[kind] ? ROOM_VERBS[kind] + ' ' + what : (ROOM_DOING[kind] || tool || 'Working');
 }
 function roomStepsHTML(steps) {
@@ -19308,7 +19351,7 @@ function roomStepsHTML(steps) {
   const one = t => { t = String(t || '').trim().split('\n')[0]; return t.length > 150 ? t.slice(0, 149) + '…' : t; };
   return steps.map((st, n) => st.told != null
     ? `<li class="told"><span>${esc(st.from === 'the user' ? 'You' : (st.from || 'Someone'))} said</span><small>${esc(st.told)}</small></li>`
-    : `<li class="${st.result == null ? 'live' : ''}" data-n="${n}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${_toolIcon(st.tool)}</svg><span>${esc(_stepLine(st.tool, st.what))}</span>${st.result ? `<small>${esc(one(st.result))}</small>` : ''}</li>`).join('');
+    : `<li class="${st.result == null ? 'live' : ''}" data-n="${n}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${_toolIcon(st.tool)}</svg><span>${esc(_stepLine(st.tool, st.what, st.result != null))}</span>${st.result ? `<small>${esc(one(st.result))}</small>` : ''}</li>`).join('');
 }
 // What JARVIS itself was last asked and has done about it, from the chat.
 function roomMainStory() {

@@ -46,6 +46,10 @@ write("sub_1_busy", start("researcher", "Ada"),
       {"kind": "assistant_tool_call", "content": "", "calls": [{"name": "web_search", "args": '{"query": "local tts"}'},
                                                                  {"name": "web_fetch", "args": '{"url": "https://www.example.org/a/b"}'}]},
       {"kind": "tool_result", "name": "web_search", "chars": 10, "preview": "results"})
+write("sub_7_cloud", start("researcher", "Rosa"),
+      {"kind": "route", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "model": "gemini-2.5-flash"})
+write("sub_8_here", start("coder", "Lin"),
+      {"kind": "route", "base_url": "http://127.0.0.1:1234/v1", "model": r"F:\Models\Some-9B.gguf"})
 write("sub_2_think", start("coder"),
       {"kind": "assistant_tool_call", "content": "", "calls": [{"name": "read_file"}]},
       {"kind": "tool_result", "name": "read_file", "chars": 5, "preview": "text"})
@@ -63,6 +67,11 @@ subagents._BG_RUNNING.clear()
 subagents._BG_RUNNING.update({"sub_1_busy", "sub_2_think", "sub_6_block"})
 st = {a["id"]: a for a in subagents.team_state()}
 
+check("one of Hearth's helpers on a cloud model says which provider and model",
+      st["sub_7_cloud"]["on"] == "Google Gemini" and st["sub_7_cloud"]["runtime"] == "gemini"
+      and st["sub_7_cloud"]["model"] == "gemini-2.5-flash")
+check("and one on a local model says this PC, with the file's name",
+      st["sub_8_here"]["on"] == "this PC" and st["sub_8_here"]["runtime"] == "" and st["sub_8_here"]["model"] == "Some-9B.gguf")
 check("a running agent mid-tool shows the tool it is on",
       st["sub_1_busy"]["status"] == "working" and st["sub_1_busy"]["activity"] == "tool"
       and st["sub_1_busy"]["tool"] == "web_fetch")

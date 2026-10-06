@@ -317,6 +317,10 @@ with sync_playwright() as pw:
     pg.route("**/api/models", reply({"models": [], "agent_brains": [
         {"id": "claude-code", "label": "Claude Code", "installed": True, "plan": "Claude"},
         {"id": "codex", "label": "Codex", "installed": True, "plan": "ChatGPT"}]}))
+    # Agents that only take tasks as helpers were left out of the count.
+    pg.route("**/api/team/choices", reply({"roles": [], "agents": [
+        {"id": "claude-code", "label": "Claude Code"}, {"id": "codex", "label": "Codex"},
+        {"id": "opencode", "label": "OpenCode"}, {"id": "gemini-cli", "label": "Gemini CLI"}]}))
     flow = pg.evaluate("""async () => {
       const wait = (ms) => new Promise(r => setTimeout(r, ms));
       obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
@@ -340,10 +344,10 @@ with sync_playwright() as pw:
       obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
       return out;
     }""")
-    for pat in ("**/api/llmserver/status", "**/api/models"):
+    for pat in ("**/api/llmserver/status", "**/api/models", "**/api/team/choices"):
         pg.unroute(pat)
-    check(f"setup says what it found, agents as well as model files {flow['banner']!r}",
-          "2 agents you already use and 2 model files" in flow["banner"])
+    check(f"setup counts every agent it found, helpers too, and the model files {flow['banner']!r}",
+          "4 agents you already use and 2 model files" in flow["banner"])
     check(f"after a brain is picked the cloud page is passed over, both ways {flow}",
           flow["noPick"] == 3 and flow["picked"] == 4 and flow["back"] == 2)
     check("Simple or Advanced set in one place shows the same in the other",
@@ -417,7 +421,7 @@ with sync_playwright() as pw:
       return out;
     }""")
     check(f"clicking JARVIS in the room opens a panel with what it was asked and each step it took {panel}",
-          panel["shown"] and "read both" in (panel["asked"] or "") and panel["steps"] == ["Reading a.txt", "Searching for x"]
+          panel["shown"] and "read both" in (panel["asked"] or "") and panel["steps"] == ["Read a.txt", "Searched for x"]
           and "Both done." in (panel["said"] or ""))
     check(f"with two tools running at once, each result lands on its own call {paired}",
           paired == [["read_file", "what a.txt says"], ["grep_search", "3 matches"]])

@@ -298,12 +298,16 @@ with sync_playwright() as pw:
     pg.evaluate(OPEN)
     local = pg.evaluate("""async (v) => {
       document.querySelector(`#mp-menu .mp-row[data-v="${CSS.escape(v)}"]`).click();
+      const during = [...document.getElementById('model-select').children]
+        .filter(o => o.tagName === 'OPTION').map(o => o.value);
       await until(() => !STATE.brain.busy && document.getElementById('brand-sub').textContent === '· local');
-      return { provider: STATE.settings.llm_provider, kind: STATE.brain.kind,
+      return { provider: STATE.settings.llm_provider, kind: STATE.brain.kind, during,
                head: document.getElementById('brand-sub').textContent };
     }""", "disk::" + DISK)
     check(f"a model on this PC picked while a provider is the brain is loaded here {started} {local}",
           started == [DISK] and len(switched) == 1 and not any(".gguf" in w for w in wrote))
+    check(f"while it loads, the provider's models are not listed as this PC's {local['during']}",
+          not any(v.startswith("claude") for v in local["during"]))
     check("and the window says local everywhere at once",
           local["provider"] == "local" and local["kind"] == "local" and local["head"] == "· local")
 
