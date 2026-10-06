@@ -898,6 +898,7 @@
     background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-lg); cursor: pointer; }
   .tm-row:hover { border-color: var(--border-strong); }
   .tm-ava { width: 44px; height: 44px; border-radius: 10px; background: var(--bg-3); overflow: hidden; position: relative; }
+  .tm-ava .tm-face-img { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
   .tm-ini { display: grid; place-items: center; font-weight: 700; font-size: 17px;
     color: hsl(var(--h) 45% 82%); background: hsl(var(--h) 30% 26%); }
   :root[data-theme="light"] .tm-ini { color: hsl(var(--h) 45% 28%); background: hsl(var(--h) 45% 88%); }
@@ -1005,7 +1006,7 @@
   .tm-tell-no { color: var(--fg-faint); font-size: 12px; }
   .tm-say { position: absolute; transform: translate(-50%, calc(-100% - 26px)); max-width: 260px; pointer-events: none;
     background: var(--bg-1); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 12px;
-    padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
+    padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; overflow-wrap: anywhere; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
   .ob-seg-faces button { display: flex; align-items: center; gap: 10px; text-align: left; }
   .ob-seg-faces i { flex: none; width: 36px; height: 50px; background-size: auto 50px; background-position: 0 0;
     background-repeat: no-repeat; image-rendering: pixelated; }
@@ -18422,8 +18423,16 @@ function teamRender() {
       if (log) { e.stopPropagation(); openTaskTranscript(log.dataset.log); return; }
       TEAM.open.has(a.id) ? TEAM.open.delete(a.id) : TEAM.open.add(a.id); teamRender();
     });
+    // The same face they have in the room, once the room's art is here.
+    if (ROOM.bg && ROOM.man) {
+      const face = roomFace(roomSkin({ ...a, role }), roomSeedOf(a.id));
+      face.className = 'tm-face-img';
+      const ava = row.querySelector('.tm-ava');
+      ava.classList.remove('tm-ini'); ava.textContent = ''; ava.appendChild(face);
+    }
     box.appendChild(row);
   }
+  if (!ROOM.bg && !TEAM.facesAsked) { TEAM.facesAsked = true; roomLoad().then(ok => { if (ok && TEAM.tab === 'list') teamRender(); }); }
 }
 document.querySelectorAll('#tm-filters .tm-f').forEach(b => b.addEventListener('click', () => { TEAM.filter = b.dataset.f; teamRender(); }));
 document.querySelectorAll('.tm-tab').forEach(b => b.addEventListener('click', (e) => {
@@ -18561,6 +18570,8 @@ const ROOM = {
     door: [96, 905], fire: [760, 470], fireSide: [868, 478], hearthside: [640, 492], shelfL: [410, 398], shelfR: [1122, 398],
     board: [228, 480], windowSeat: [1316, 488], coffee: [1350, 650], windowL: [296, 430], rug: [700, 478],
     armchairSeat: [556, 447], hearth: [770, 398], pin: [178, 460],
+    // On the floor in front of the armchair, leaning back against it.
+    armchairFloor: [552, 466],
   },
   // How far up someone is drawn when seated there, so they sit on it and not in front of it.
   sitLift: { armchairSeat: 15 },
@@ -18735,6 +18746,17 @@ function roomDeskFor(id) {
   return null;
 }
 function roomRoute(from, to) {
+  // A desk is reached and left from the open floor in front of it: walking
+  // along its row of chairs to sit down went straight through the desks.
+  const front = q => {
+    const d = ROOM.desks.find(d => Math.abs(q[0] - d[0]) < DESK_HALF && q[1] > d[1] - DESK_BACK && q[1] < d[1] + DESK_FRONT);
+    return d ? [q[0], d[1] + 70] : null;
+  };
+  const a = front(from), b = front(to);
+  if (!a && !b) return roomRouteOpen(from, to);
+  return [...(a ? [a] : []), ...roomRouteOpen(a || from, b || to), ...(b ? [to] : [])];
+}
+function roomRouteOpen(from, to) {
   // Along the aisles, so nobody walks through a desk.
   const near = x => ROOM.aisleX.reduce((b, v) => Math.abs(v - x) < Math.abs(b - x) ? v : b, ROOM.aisleX[0]);
   const top = y => y < 560;
@@ -18746,6 +18768,21 @@ function roomRoute(from, to) {
   }
   pts.push([near(to[0]), to[1]], to);
   return pts;
+}
+// Nobody stands inside a desk or its chair. A place that falls on one (beside
+// someone standing near the coffee, one step aside from another person) moves
+// out to the nearest aisle at the same depth.
+const DESK_HALF = 122, DESK_BACK = 98, DESK_FRONT = 30;
+function roomFree(pt) {
+  const deskAt = q => ROOM.desks.find(d => Math.abs(q[0] - d[0]) < DESK_HALF && q[1] > d[1] - DESK_BACK && q[1] < d[1] + DESK_FRONT);
+  const inDesk = q => !!deskAt(q);
+  const d = deskAt(pt);
+  if (!d) return pt;
+  // On the front half of a desk: just in front of it, where it was meant to be.
+  if (pt[1] > d[1] - 40 && !inDesk([pt[0], d[1] + 70])) return [pt[0], d[1] + 70];
+  const xs = [...ROOM.aisleX].sort((a, b) => Math.abs(a - pt[0]) - Math.abs(b - pt[0]));
+  for (const x of xs) if (!inDesk([x, pt[1]])) return [x, pt[1]];
+  return [pt[0], ROOM.aisleY];
 }
 function roomSeat(p) {
   const d = ROOM.desks[p.desk];
@@ -18811,7 +18848,7 @@ function roomMainGoal(p) {
     if (p.holdUntil > now) return { at: p.holdAt || p.pos, pose: 'idle' };
     // Nothing to think with: asleep in the armchair until a model is loaded.
     if (!roomHasBrain() && roomHas(roomSkin(p.agent), 'sleep'))
-      return { at: ROOM.spots.armchairSeat, pose: 'sleep', sit: true, lift: ROOM.sitLift.armchairSeat };
+      return { at: ROOM.spots.armchairFloor, pose: 'sleep', sit: true, lift: 0 };
     const [spot, pose, how] = roomMainIdle(p);
     return { at: ROOM.spots[spot], pose, sit: how === 's', flip: how === 'f', lift: how === 's' ? ROOM.sitLift[spot] || 0 : 0 };
   }
@@ -18847,12 +18884,15 @@ const ROOM_STAY = 150000;
 function roomGoal(p, a) {
   // Where the person should be and what they are doing, from real state.
   if (a.role === 'main') return roomMainGoal(p);
-  if (p.pokeUntil > Date.now()) return { at: p.pos, pose: p.pokePose || 'raise', seated: false };
+  if (p.pokeUntil > Date.now()) return { at: p.pos, pose: p.pokePose || 'raise', seated: !!p.pokeSeated };
   const seat = p.desk != null ? roomSeat(p) : ROOM.spots.rug;
   const beside = [seat[0] + 92, seat[1] + 6];
   // Beside JARVIS, where a helper goes to report or to ask.
   const main = ROOM.people.get('__main');
-  const byMain = main ? [main.pos[0] + (p.seed % 2 ? 70 : -70), main.pos[1] + 18] : ROOM.spots.rug;
+  // Beside JARVIS on the open side: next to a wall or the coffee counter only
+  // one side is floor.
+  const side = !main ? 1 : main.pos[0] > 1200 ? -1 : main.pos[0] < 320 ? 1 : (p.seed % 2 ? 1 : -1);
+  const byMain = main ? [main.pos[0] + side * 76, main.pos[1] + 18] : ROOM.spots.rug;
   if (a.status === 'working') {
     // Needing an OK is a reason to go and ask, not to wait at the desk.
     if (a.blocked) return { at: byMain, pose: 'raise' };
@@ -18866,6 +18906,7 @@ function roomGoal(p, a) {
   if (a.status === 'stopped') return since > 20000 ? { at: ROOM.spots.door, pose: 'idle', leave: true } : { at: beside, pose: 'idle' };
   if (since < 2600) return { at: p.pos, pose: 'stretch' };
   // A finished helper reports to JARVIS before it does anything else.
+  if (p.reportedAt && Date.now() - p.reportedAt < 5200) return { at: p.pos, pose: 'idle' };
   if (since < 12000 && !p.reported) return { at: byMain, pose: 'idle', report: true };
   // The job is done and reported: a while by the fire or the coffee, then home.
   if (since > ROOM_STAY) return { at: ROOM.spots.door, pose: 'idle', leave: true };
@@ -18888,7 +18929,7 @@ function roomSync(list) {
     let p = ROOM.people.get(a.id);
     if (!p) {
       p = { id: a.id, pos: a.role === 'main' ? [...ROOM.spots.fire] : [...ROOM.spots.door], path: [], pose: 'idle',
-            seed: Math.abs([...a.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 97, desk: null, dir: 1 };
+            seed: roomSeedOf(a.id), desk: null, dir: 1 };
       if (a.role !== 'main') {
         p.desk = roomDeskFor(a.id);
         const queued = [...ROOM.people.values()].filter(q => q.enterAt && q.enterAt > performance.now()).length;
@@ -18978,15 +19019,34 @@ function roomTick(t) {
         if (g.at[0] > 1200) dx = -Math.abs(dx) - 14; else if (g.at[0] < 320) dx = Math.abs(dx) + 14;
         target = [g.at[0] + dx, g.at[1] + (p.seed % 3 - 1) * 10];
       }
-      // Nobody stands in someone else's place: the later one steps aside.
+      // Nobody stands in a desk or in someone else's place: the later one
+      // steps aside, away from the wall, and never into a desk.
+      if (!g.seated) target = roomFree(target);
       if (!g.seated && !g.leave && g.pose !== 'think') {
         const side = target[0] > 1200 ? -1 : 1;
-        for (let n = 0; n < 5 && claimed.some(c => Math.abs(c[0] - target[0]) < 52 && Math.abs(c[1] - target[1]) < 28); n++)
-          target = [target[0] + side * 56, target[1]];
+        for (let n = 0; n < 6 && claimed.some(c => Math.abs(c[0] - target[0]) < 52 && Math.abs(c[1] - target[1]) < 28); n++)
+          target = roomFree([target[0] + side * 56, target[1]]);
         claimed.push(target);
       }
+      // A new place has to hold for a moment before anyone heads for it: two
+      // people settling who stands where flicked a target back and forth, and
+      // following each flick sent them turning on the spot.
+      const near = (u, v) => u && Math.hypot(u[0] - v[0], u[1] - v[1]) < 28;
+      if (!p.want || g.seated || g.leave) p.want = target;
+      else if (!near(p.want, target)) {
+        if (!near(p.cand, target)) { p.cand = target; p.candAt = t; }
+        if (t - p.candAt > 450) { p.want = target; p.cand = null; }
+      } else p.cand = null;
+      target = p.want;
+      // A new route only for a real change of place, and not every frame: a
+      // target that drifts a little (someone it stands beside moved) re-planned
+      // each tick sent people turning on the spot.
       const endPt = p.path.length ? p.path[p.path.length - 1] : p.pos;
-      if (Math.hypot(endPt[0] - target[0], endPt[1] - target[1]) > 4) p.path = roomRoute(p.pos, target);
+      const off = Math.hypot(endPt[0] - target[0], endPt[1] - target[1]);
+      if (off > (p.path.length ? 28 : 4) && (!p.path.length || !(t - (p.routedAt || 0) < 700))) {
+        p.path = roomRoute(p.pos, target);
+        p.routedAt = t;
+      }
       // Whoever is speaking faces the room, not the wall.
       const say = ROOM.says.get(id);
       if (say && !say.live && say.until > Date.now() && !g.sit && !g.seated) {
@@ -19005,6 +19065,9 @@ function roomTick(t) {
     // Arrived beside JARVIS with a finished job: say so, once.
     if (!p.path.length && p.goal && p.goal.report && !p.reported) {
       p.reported = true;
+      p.reportedAt = Date.now();                       // stays a moment, facing JARVIS
+      const m = ROOM.people.get('__main');
+      if (m) p.dir = m.pos[0] < p.pos[0] ? -1 : 1;
       const prev = String(p.agent.preview || '').replace(/\s+/g, ' ').trim();
       roomSay(p.id, prev ? 'Done. ' + (prev.length > 90 ? prev.slice(0, 89) + '…' : prev) : 'All done.', 4500);
     }
@@ -19079,9 +19142,18 @@ function roomDraw(t) {
       items.push({ kind: 'prop', name: 'stool', x: 1238, y: 418, shadow: [20, 6, 14] });
     }
   }
+  // Coming in and going out, a helper fades with the doorway instead of
+  // popping into and out of the room.
+  const doorFade = p => {
+    if (p.agent && p.agent.role === 'main') return 1;
+    const [dx, dy] = ROOM.spots.door;
+    return Math.max(0, Math.min(1, (Math.hypot(p.pos[0] - dx, p.pos[1] - dy) - 8) / 100));
+  };
   for (const p of ROOM.people.values()) {
     if (p.waiting) continue;
-    items.push({ kind: 'person', p, x: p.pos[0], y: p.pos[1], shadow: [19, 6, 34] });
+    const fade = doorFade(p);
+    if (fade <= 0.02) continue;
+    items.push({ kind: 'person', p, x: p.pos[0], y: p.pos[1], shadow: [19, 6, 34], fade });
   }
   items.sort((a, b) => a.y - b.y);
 
@@ -19104,9 +19176,10 @@ function roomDraw(t) {
     const [rx, ry, tall] = it.shadow, y = it.y - 2 + (it.sy || 0);
     const dx = it.x - ROOM.fire[0], dy = (y - ROOM.fire[1]) * 1.6, d = Math.hypot(dx, dy) || 1;
     const far = Math.min(1, d / 760), len = tall * (0.5 + 1.1 * far);
+    const f = it.fade == null ? 1 : it.fade;
     blob(it.x + dx / d * len * 0.8, y + dy / d * len * 0.34, rx + len * 0.45, ry * 1.05, Math.atan2(dy * 0.34, dx),
-         0.30 - 0.14 * far);
-    blob(it.x, y, rx * 0.94, ry, 0, 0.5);
+         (0.30 - 0.14 * far) * f);
+    blob(it.x, y, rx * 0.94, ry, 0, 0.5 * f);
   }
   const [cw, ch] = ROOM.man.cell;
   const labels = [], hits = [];
@@ -19147,10 +19220,12 @@ function roomDraw(t) {
     const low = !p.walking && p.goal && (p.goal.sit || p.goal.pose === 'tend_fire');
     const lift = typing ? SIT_LIFT : (low ? p.goal.lift || 0 : 0);
     ctx.translate(Math.round(p.pos[0] * kx), Math.round((p.pos[1] + bob - lift) * ky));
+    ctx.globalAlpha = it.fade == null ? 1 : it.fade;
     if (flip) ctx.scale(-1, 1);
     ctx.drawImage(img, frame * cw, 0, cw, ch, Math.round(-cw * kx / 2), Math.round(-ch * ky), Math.round(cw * kx), Math.round(ch * ky));
     ctx.restore();
     const headY = typing ? p.pos[1] - 112 - lift : low ? p.pos[1] - 120 - lift : p.pos[1] - 142;
+    if (it.fade != null && it.fade < 0.6) continue;     // the name shows once they are properly in
     labels.push({ p, x: p.pos[0] * kx / dpr, y: headY * ky / dpr });
     hits.push({ p, x0: (p.pos[0] - 34) * kx / dpr, x1: (p.pos[0] + 34) * kx / dpr,
                 y0: (p.pos[1] - (typing || low ? 118 : 138) - lift) * ky / dpr, y1: (p.pos[1] - lift + 4) * ky / dpr, z: p.pos[1] });
@@ -19249,6 +19324,10 @@ function roomPoke(p) {
     roomSelect(p.id, true);
     return;
   }
+  // At a desk it stays in its chair and keeps its pose: a stretch there would
+  // stand it up through the desk.
+  p.pokeSeated = !!(p.goal && p.goal.seated && !p.path.length);
+  if (p.pokeSeated) p.pokePose = p.goal.pose;
   const short = (t, n = 90) => { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
   let line;
   if (teamNeedsYou(a)) line = `I need your OK to use ${a.blocked}.`;
@@ -19285,10 +19364,19 @@ function roomAfterReply(before = 0) {
     if (!brain) roomSay('__main', "I can't think without a model. Load one from the top bar.", 5000);
     return;
   }
-  let t = String(last.content).replace(/```[\s\S]*?```/g, ' ').replace(/[#*_`>|]/g, '').replace(/\s+/g, ' ').trim();
+  // What it ended on, not how it started: a long turn opens with "I'll build
+  // this…" and closes with the outcome. Tables and code are not speech.
+  const paras = String(last.content).replace(/```[\s\S]*?```/g, ' ').split(/\n\s*\n/)
+    .map(x => x.split('\n').filter(l => !/^\s*\|/.test(l)).join(' ').replace(/[#*_`>|]/g, '').replace(/\s+/g, ' ').trim())
+    .filter(x => x.length > 2);
+  let t = paras.length ? paras[paras.length - 1] : '';
   const first = t.match(/^.{20,200}?[.!?](\s|$)/);
   t = first ? first[0].trim() : (t.length > 200 ? t.slice(0, 199) + '…' : t);
   roomSay('__main', t, Math.min(12000, 3500 + t.length * 45));
+}
+// Each person's look comes from their id, in the room and in the list alike.
+function roomSeedOf(id) {
+  return Math.abs([...String(id)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 97;
 }
 function roomFace(role, seed) {
   // The head and shoulders of the idle frame, for the portrait strip.
