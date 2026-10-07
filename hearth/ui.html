@@ -6533,6 +6533,15 @@ const AGENT_BRAINS = { 'claude-code': 'Claude Code', 'codex': 'Codex', 'cursor-a
 // Whose plan each runs on.
 const AGENT_PLANS = { 'claude-code': 'Claude', 'codex': 'ChatGPT', 'cursor-agent': 'Cursor' };
 const AGENT_MAKERS = { 'claude-code': 'Anthropic', 'codex': 'OpenAI', 'cursor-agent': 'Cursor' };
+// The server says which agents can be the brain on this PC: these three always,
+// others that speak the Agent Client Protocol once they are installed.
+function agentBrainsKnown(list) {
+  STATE.agentBrainList = list || [];
+  for (const b of STATE.agentBrainList) {
+    AGENT_BRAINS[b.id] = b.label;
+    if (b.plan) AGENT_PLANS[b.id] = b.plan;
+  }
+}
 
 // Format a token count for the bottom-bar `ctx` pill: 32768 → "32K", 977000 → "977K".
 function fmtCtxPill(n) {
@@ -8117,6 +8126,7 @@ async function refreshModels() {
     if (_seq !== (STATE.brainSeq || 0)) return;
     const models = resp.models;
     const _agentBrains = resp.agent_brains || [];
+    agentBrainsKnown(_agentBrains);
     STATE.providers = resp.providers || [];
     // The agents that take tasks as helpers, named under the menu's agents.
     if (!STATE.helperAgents) api('/api/team/choices')
@@ -9630,7 +9640,17 @@ function renderBrainCards() {
     return `<button type="button" class="brain-card${v === picked ? ' on' : ''}" data-brain="${esc(v)}">${icon(v)}`
       + `<span class="t"><b>${esc(name)}</b><small>${esc(about)}</small></span>${tag ? `<em>${tag}</em>` : ''}</button>`;
   };
-  const groups = [['On this PC', ['local']], ['Agents you already pay for', ['claude-code', 'codex', 'cursor-agent']],
+  // An installed agent that speaks the protocol gets a card beside the three, and an option to pick.
+  const agentIds = ['claude-code', 'codex', 'cursor-agent',
+    ...(STATE.agentBrainList || []).filter(b => b.installed && !['claude-code', 'codex', 'cursor-agent'].includes(b.id)).map(b => b.id)];
+  for (const id of agentIds) {
+    if (!BRAIN_CARD_ABOUT[id]) BRAIN_CARD_ABOUT[id] = [AGENT_BRAINS[id] || id, `Your ${AGENT_PLANS[id] || AGENT_BRAINS[id] || id} plan, no key`];
+    if (![...sel.options].some(o => o.value === id)) {
+      const o = document.createElement('option'); o.value = id; o.textContent = BRAIN_CARD_ABOUT[id][0];
+      sel.insertBefore(o, sel.querySelector('option[value="anthropic"]'));
+    }
+  }
+  const groups = [['On this PC', ['local']], ['Agents you already pay for', agentIds],
                   ['Cloud, with your own key', ['anthropic', 'gemini', 'openai', 'openrouter', 'grok', 'groq', 'custom']]];
   // Only three agents can be the brain; the rest still work, as helpers.
   const here = (STATE.helperAgents || []).filter(a => !AGENT_BRAINS[a.id]).map(a => a.label);
@@ -17987,7 +18007,7 @@ async function obLoadBrains() {
   // Agent programs already on this PC can be the brain on the plan the person
   // pays for, with nothing to download. Others found here take tasks as helpers.
   let brains = [], others = [];
-  try { brains = ((await api('/api/models')).agent_brains || []); } catch {}
+  try { brains = ((await api('/api/models')).agent_brains || []); agentBrainsKnown(brains); } catch {}
   try {
     const ids = new Set(brains.map(b => b.id));
     others = ((await api('/api/team/choices')).agents || []).filter(a => !ids.has(a.id) && !a.refused).map(a => a.label);

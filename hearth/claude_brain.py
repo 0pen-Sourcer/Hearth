@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -39,6 +40,27 @@ PROVIDER = "claude-code"
 BRAINS = {"claude-code": "Claude Code", "codex": "Codex", "cursor-agent": "Cursor"}
 # Whose plan each one runs on, for the lines that say so.
 PLANS = {"claude-code": "Claude", "codex": "ChatGPT", "cursor-agent": "Cursor"}
+# Agents that speak the Agent Client Protocol, run by acp_brain: how each is
+# started over ACP, and, where ACP comes as a separate adapter, its program.
+ACP = {
+    "opencode": {"label": "OpenCode", "plan": "OpenCode", "site": "https://opencode.ai", "args": ["acp"]},
+    "copilot": {"label": "Copilot CLI", "plan": "GitHub Copilot", "site": "https://github.com/github/copilot-cli",
+                "args": ["--acp"]},
+    "goose": {"label": "Goose", "plan": "own provider's", "site": "https://block.github.io/goose", "args": ["acp"]},
+    # Not "grok": that name is xAI's API in the provider list.
+    "grok-build": {"label": "Grok Build", "plan": "xAI", "site": "https://x.ai", "agent": "grok",
+                   "args": ["agent", "stdio"]},
+    "gemini-cli": {"label": "Gemini CLI", "plan": "Google", "site": "https://github.com/google-gemini/gemini-cli",
+                   "args": ["--experimental-acp"]},
+    "pi": {"label": "Pi", "plan": "own provider's", "site": "https://pi.dev", "adapter": "pi-acp", "args": []},
+    "amp": {"label": "Amp", "plan": "Amp", "site": "https://ampcode.com", "adapter": "amp-acp", "args": []},
+    "antigravity": {"label": "Antigravity", "plan": "Google", "site": "https://antigravity.google",
+                    "adapter": "agy-agent-acp", "args": []},
+}
+BRAINS.update({k: v["label"] for k, v in ACP.items()})
+PLANS.update({k: v["plan"] for k, v in ACP.items()})
+# The three with adapters of their own; the rest are listed once installed.
+CORE = ("claude-code", "codex", "cursor-agent")
 _HOME = os.path.join(os.path.expanduser("~"), ".hearth")
 _SESSIONS = os.path.join(_HOME, "claude_sessions.json")
 _SESSIONS_LOCK = threading.Lock()
@@ -108,7 +130,9 @@ def label() -> str:
 
 def exe_for(provider: str) -> Optional[List[str]]:
     from . import external_agents as _xa
-    exe = _xa.find(provider)
+    spec = ACP.get(provider) or {}
+    adapter = spec.get("adapter")
+    exe = (shutil.which(adapter + ".cmd") or shutil.which(adapter)) if adapter else _xa.find(spec.get("agent") or provider)
     return _xa._direct_argv(exe) if exe else None
 
 
@@ -118,7 +142,7 @@ def claude_exe() -> Optional[List[str]]:
 
 # Where to get each one when it isn't installed.
 SITES = {"claude-code": "https://claude.com/claude-code", "codex": "https://chatgpt.com/codex",
-         "cursor-agent": "https://cursor.com/cli"}
+         "cursor-agent": "https://cursor.com/cli", **{k: v["site"] for k, v in ACP.items()}}
 
 
 def installed() -> List[Dict[str, str]]:
@@ -127,10 +151,15 @@ def installed() -> List[Dict[str, str]]:
 
 
 def choices() -> List[Dict[str, Any]]:
-    """Every agent brain, installed or not, for the model menu."""
-    return [{"id": k, "label": v, "installed": bool(exe_for(k)), "site": SITES.get(k, ""),
-             "plan": PLANS.get(k, "")}
-            for k, v in BRAINS.items()]
+    """The agent brains for the model menu: the three with their own adapters
+    always, the protocol ones once they are on this PC."""
+    out = []
+    for k, v in BRAINS.items():
+        here = bool(exe_for(k))
+        if k in CORE or here:
+            out.append({"id": k, "label": v, "installed": here, "site": SITES.get(k, ""),
+                        "plan": PLANS.get(k, ""), "core": k in CORE})
+    return out
 
 
 def set_brain(provider: str, model: Optional[str] = None) -> Optional[str]:
@@ -371,6 +400,9 @@ def agent_models(provider: str) -> Dict[str, Any]:
     elif provider == "cursor-agent":
         from . import cursor_brain
         models = cursor_brain.models()
+    elif provider in ACP:
+        from . import acp_brain
+        models = acp_brain.models(provider)
     else:
         models = []
     return {"provider": provider, "label": BRAINS.get(provider, provider), "models": models,
@@ -644,6 +676,21 @@ def quick(prompt: str, timeout: float = 45) -> str:
 
 
 # ---------------------------------------------------------------- one turn
+async def ask_hearth(permission_check, name: str, args: Dict[str, Any]) -> bool:
+    """Whether an agent brain may do what it asks: the turn's own approval
+    check, or with none, what the approval switch allows."""
+    if permission_check is None:
+        try:
+            from .tools import mode_allows
+            return bool(mode_allows(name, args))
+        except Exception:
+            return False
+    verdict = await asyncio.to_thread(permission_check, name, args)
+    if isinstance(verdict, dict):
+        verdict = verdict.get("decision")
+    return verdict == "allow"
+
+
 def _said(drain_steer) -> List[str]:
     """What was typed while the turn ran, if anything."""
     if drain_steer is None:
@@ -678,7 +725,8 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
         prompt = "\n\n".join(news)
     elif news:
         prompt = "\n\n".join(news) + "\n\n" + prompt
-    other = {"codex": "codex_brain", "cursor-agent": "cursor_brain"}.get(current() or "")
+    other = {"codex": "codex_brain", "cursor-agent": "cursor_brain"}.get(current() or "") or (
+        "acp_brain" if current() in ACP else "")
     if not other:
         return await _run_claude(prompt, emit=emit, history=history, permission_check=permission_check,
                                  should_cancel=should_cancel, voice=voice, drain_steer=drain_steer)

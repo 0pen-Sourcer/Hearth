@@ -343,8 +343,13 @@ def _brain_choices():
            ("builtin", "Hearth's own llama.cpp")]
     out += [(pid, label) for pid, (label, _url) in PROVIDERS.items()]
     out += [("custom", "any OpenAI-compatible address"), ("claude-code", "your Claude plan"),
-            ("codex", "your ChatGPT plan"), ("cursor", "your Cursor plan"), ("forget", "delete a saved key")]
-    return out
+            ("codex", "your ChatGPT plan"), ("cursor", "your Cursor plan")]
+    try:
+        from hearth import claude_brain as _cb
+        out += [(b["id"], f"your {b['plan']} plan") for b in _cb.choices() if not b.get("core")]
+    except Exception:
+        pass
+    return out + [("forget", "delete a saved key")]
 
 
 def _agent_line() -> str:
@@ -1674,7 +1679,8 @@ class JarvisCLI:
                 return _brain_choices()
             if len(before) == 1:
                 pid = before[0].lower()
-                if pid in ("claude-code", "codex", "cursor", "cursor-agent"):
+                from hearth import claude_brain as _cb
+                if pid in ("claude", "cursor") or pid in _cb.BRAINS:
                     return [("models", "list or search its models")]
                 return [(m, "") for m in self._provider_list(pid)]
             return []
@@ -2779,8 +2785,8 @@ class JarvisCLI:
             # /brain claude-code or /brain codex: an agent program installed
             # here thinks for JARVIS. The local address stays, since helpers
             # keep using the local model.
-            if provider in ("claude-code", "claude", "codex", "cursor", "cursor-agent"):
-                from hearth import claude_brain as _cb
+            from hearth import claude_brain as _cb
+            if provider in ("claude", "cursor") or provider in _cb.BRAINS:
                 provider = {"claude": "claude-code", "cursor": "cursor-agent"}.get(provider, provider)
                 # /brain claude-code opus: one of the agent's own models, by
                 # its name or id. Without one, the saved choice stays.

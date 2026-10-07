@@ -472,9 +472,25 @@ with sync_playwright() as pw:
       showView('chat');
       return out;
     }""")
+    # Only three agents could be the brain; one that speaks the protocol now can too.
+    acp = pg.evaluate("""async () => {
+      agentBrainsKnown([{ id: 'claude-code', label: 'Claude Code', installed: true, core: true },
+                        { id: 'opencode', label: 'OpenCode', plan: 'OpenCode', installed: true }]);
+      STATE.helperAgents = [{ id: 'opencode', label: 'OpenCode' }, { id: 'aider', label: 'Aider' }];
+      showView('settings'); renderBrainCards();
+      const out = { card: !!document.querySelector('.brain-card[data-brain="opencode"]'),
+                    option: !!document.querySelector('#setting-brain-mode option[value="opencode"]'),
+                    note: (document.querySelector('#brain-cards .brain-note') || {}).textContent || '',
+                    twice: document.querySelectorAll('.brain-card[data-brain="claude-code"]').length };
+      showView('chat');
+      return out;
+    }""")
+    check(f"an installed agent that speaks the protocol gets its own brain card {acp}",
+          acp["card"] and acp["option"] and "OpenCode" not in acp["note"] and "Aider" in acp["note"] and acp["twice"] == 1)
+
     # Settings showed three agents while New helper listed twenty; nothing said why.
     note = pg.evaluate("""async () => {
-      STATE.helperAgents = [{ id: 'opencode', label: 'OpenCode' }, { id: 'codex', label: 'Codex' }]; STATE.moreAgents = 18;
+      STATE.helperAgents = [{ id: 'goose-x', label: 'Goose' }, { id: 'codex', label: 'Codex' }]; STATE.moreAgents = 18;
       showView('settings'); renderBrainCards();
       const n = document.querySelector('#brain-cards .brain-note');
       const out = { text: n ? n.textContent : '' };
@@ -487,7 +503,7 @@ with sync_playwright() as pw:
       return out;
     }""")
     check(f"Settings says the other agents work as helpers and links to them {note}",
-          "OpenCode is on this PC" in note["text"] and "18 more" in note["text"] and "Codex is" not in note["text"] and note["dialog"])
+          "Goose is on this PC" in note["text"] and "18 more" in note["text"] and "Codex is" not in note["text"] and note["dialog"])
     check(f"Settings shows every brain as a card, and picking one picks it {cards}",
           len(cards["all"]) == 11 and cards["picked"] == "gemini" and cards["on"] == "gemini" and cards["apply"])
 

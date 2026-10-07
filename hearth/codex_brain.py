@@ -383,12 +383,15 @@ def _change_call(c: Dict[str, Any]):
 class _Rpc:
     """Newline-delimited JSON requests and replies with the app server."""
 
-    def __init__(self, proc):
+    def __init__(self, proc, jsonrpc: bool = False, who: str = "the Codex app server"):
         self.proc, self.n, self.waiting = proc, 0, {}
         self.inbox: asyncio.Queue = asyncio.Queue()
+        # Agent Client Protocol peers want every message marked as JSON-RPC 2.0.
+        self.mark = {"jsonrpc": "2.0"} if jsonrpc else {}
+        self.who = who
 
     def send(self, obj: Dict[str, Any]) -> None:
-        self.proc.stdin.write((json.dumps(obj) + "\n").encode("utf-8"))
+        self.proc.stdin.write((json.dumps({**self.mark, **obj}) + "\n").encode("utf-8"))
 
     async def call(self, method: str, params: Dict[str, Any], timeout: float = 60.0) -> Dict[str, Any]:
         self.n += 1
@@ -408,7 +411,7 @@ class _Rpc:
                 # It ended: nothing it was asked will be answered.
                 for fut in self.waiting.values():
                     if not fut.done():
-                        fut.set_exception(EOFError("the Codex app server closed"))
+                        fut.set_exception(EOFError(f"{self.who} closed"))
                 await self.inbox.put(None)
                 return
             try:
@@ -502,16 +505,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
         interrupted = False
 
         async def ask(name: str, args: Dict[str, Any]) -> bool:
-            if permission_check is None:
-                try:
-                    from .tools import mode_allows
-                    return bool(mode_allows(name, args))
-                except Exception:
-                    return False
-            verdict = await asyncio.to_thread(permission_check, name, args)
-            if isinstance(verdict, dict):
-                verdict = verdict.get("decision")
-            return verdict == "allow"
+            return await _base.ask_hearth(permission_check, name, args)
 
         while True:
             if should_cancel and should_cancel() and not interrupted:
