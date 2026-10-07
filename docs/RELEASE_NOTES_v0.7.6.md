@@ -22,6 +22,8 @@ You can tell a working helper something part-way through. Click it, type in its 
 
 Starting a helper yourself asks what it should do first, then who does it: one of Hearth's own, named for the job (search the web, work on code, search my files, sum up a file), or an agent you have installed.
 
+A room holds eight desks. Past that the next room opens, a winter cabin, a library and an ocean room in turn, each in its own style, and a small wooden sign over the picture switches between them with a pixel wipe. Clicking someone's card takes you to their room. Appearance picks which room JARVIS calls home and offers the accent that suits it. A working helper can be stopped from its panel or with /team stop, a finished or failed one heads out of the door after a while, and walking side-on now has a real stride. One sentence can start a mixed team, with some helpers on this PC's model, some on a provider's model named in plain words like "haiku", and some handed to Codex, OpenCode or another agent you have installed.
+
 ## Claude Code, Codex or Cursor as JARVIS's brain
 
 If you already pay for Claude, JARVIS can think with it. Pick Claude Code from the model menu at the top of the window or in Settings, Chat brain, or type /brain claude-code in the terminal, and every message runs through Claude Code on your own install and plan, with no API key. It keeps all of Hearth: its tools reach your desktop, apps, memory and voice through Hearth, it stays JARVIS with your name and preferences, and each chat is one continuing Claude session, so it remembers what you said earlier. When it wants to do something risky, the same approval switch and prompt you already use ask you first, out loud too in voice mode. Its use counts toward your Claude plan's usage limits, the same as Claude Code itself; an API key is billed separately.
@@ -35,6 +37,8 @@ The model menu opens each agent into its own models, read from the agent itself,
 ## Other coding agents
 
 JARVIS can hand a task to another coding agent you already have installed and bring back its answer. Say "have Claude Code read the README and summarize it" and it does, in the folder you name, on your own install and account. Hearth has adapters for twenty-three of them. Claude Code is tested end to end. Codex, Cursor and OpenCode have been run from Hearth and reached their own service. Antigravity, Gemini CLI, Grok, Kimi Code, Qwen Code, Crush, Copilot CLI, Goose, Aider, Droid, Amp, Pi, Cline, Continue, Amazon Q, Kiro, Kilo Code, Augment and OpenHands follow their own documented one-shot modes and have not been run here yet, so treat them as expected rather than verified. Gemini CLI no longer signs in with a personal Google account; Google points those users to Antigravity.
+
+Installing or updating one of these agents shows in the Downloads list with the packages it has fetched, how long it has run and a Cancel button, and a finished row clears itself a few seconds later.
 
 They follow the same approval switch as Hearth's own tools, and an agent working longer than a few minutes carries on in the background and reports when it is done. In the chat and the Team room each agent carries a small badge in its maker's colour, so you can see at a glance who did what.
 
@@ -118,6 +122,8 @@ Declining an action and telling Hearth what to do instead now makes it do that t
 
 Reasoning is visible on OpenRouter and other providers that stream their thinking in a different field than local servers do. You can set how hard a model thinks, low, medium or high, on models that support it. A cloud model reports its real context window rather than a fixed guess, so a large context model shows what it actually has. Images reach cloud models that can see them. The model list is sorted and searchable instead of hundreds of unordered lines, and a cloud brain reads as online rather than loaded, since nothing is held in your VRAM.
 
+A model on this PC can stay loaded under a cloud brain, from one switch in the model menu, and then the helpers think with it for free while the cloud model talks to you; the sticker shows it beside the brain. Settings shows every brain as a card, grouped by where it runs, with its logo and whether it is in use or has a key saved, and the model menu has a way to a provider that has no key yet. Switching to a cloud brain no longer waits for the local model to leave the graphics card, every switch ends with the same message, and when a provider turns a key or a model down, Hearth repeats what the provider said.
+
 ## Models
 
 Loading a model shows real progress on the sticker instead of a blinking dot, and it names the model that is actually loading rather than the one that was there before. That progress is now measured rather than guessed at from the engine's log. The engine prints everything it knows about a model before it reads a single byte of it, so the bar used to jump most of the way up in the first second or two and then sit still for the whole real wait. It moves steadily for the length of the load instead, all the way through, and a model loading on its own when you open Hearth gets the same bar as one you picked by hand.
@@ -133,6 +139,10 @@ A run shows what it reached outside Hearth. The sites a search or a page read to
 File edits render as a diff with line numbers and a change count, in tight rows. Tool cards show a one line summary of what was passed rather than raw escaped JSON, and the terminal does the same with a glyph per kind of action and a short peek at long output. Steering Hearth mid answer separates the redirected part from what came before. Announcements from the developer stay as a card until you dismiss them.
 
 The window is responsive, so a narrow or half snapped window moves the sidebar into a drawer. Chat titles come from the first real exchange, so a chat that opens with a greeting still gets a title about the actual subject. Optional sound cues mark a finished turn, an error, or a permission request, all off by default, and user messages can sit in chat bubbles if you prefer, also off by default.
+
+## Logs
+
+The Logs page reads like the rest of the app now. Every tool JARVIS used is one row with what came back, in words, grouped by day, with the errors a click away and a search box. The model server's page sums up its recent requests, how much it read and wrote and how fast, above the raw lines, and the phone page folds a bridge's reconnects into one line.
 
 ## The terminal
 
