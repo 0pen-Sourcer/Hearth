@@ -610,6 +610,19 @@ with sync_playwright() as pw:
           home["first"] == "winter" and home["second"] == "cabin" and home["card"])
     check("a room change wipes in, or is instant when that is picked", home["wiped"] and home["instant"])
 
+    # The side walk read as skipping: the passing frames (back foot well up)
+    # were on screen as long as the steps.
+    gait = pg.evaluate("""() => {
+      const seen = [];
+      for (let t = 0; t < WALK_BEAT * 6; t += WALK_BEAT) seen.push(roomWalkStep('side', t + 1, 0));
+      return { seen, speed: WALK_SPEED, beat: WALK_BEAT };
+    }""")
+    passing = sum(1 for n in gait["seen"] if n in (3, 4))
+    check(f"side-on, each step is held twice as long as the legs passing {gait}",
+          passing == 2 and len(gait["seen"]) == 6 and gait["seen"].count(1) == 2 and gait["seen"].count(2) == 2)
+    check("the feet don't slide: a step covers about as much floor as it is drawn to",
+          30 <= gait["speed"] * gait["beat"] * 3 / 1000 <= 42)
+
     # A helper that didn't finish stood by its desk with a hand up for good,
     # and came back after every restart. A working one could not be stopped.
     gone = pg.evaluate("""() => {

@@ -19180,6 +19180,17 @@ function roomMemoryHint(name, result) {
   if (m) roomSay('__main', 'Ah… ' + m[1].replace(/[-_]+/g, ' ') + '.', 3400);
 }
 const ROOM_STAY = 150000;
+// Walking pace in room pixels a second, and the length of one beat of the
+// six-beat stride; together they keep the feet from sliding on the floor.
+const WALK_SPEED = 100, WALK_BEAT = 125;
+// Six beats a stride: each step is held twice as long as the moment the legs
+// pass, which is drawn with the back foot well up; shown as long as the steps,
+// the walk read as skipping. Facing or away, each step is held for half.
+function roomWalkStep(dir, t, seed = 0) {
+  const beat = Math.floor(t / WALK_BEAT + seed * 6) % 6;
+  const side = dir === 'side' && ROOM.man && ROOM.man.frames.includes('walk_side_3');
+  return side ? [1, 1, 3, 2, 2, 4][beat] : (beat < 3 ? 1 : 2);
+}
 function roomGoal(p, a) {
   // Where the person should be and what they are doing, from real state.
   if (a.role === 'main') return roomMainGoal(p);
@@ -19379,7 +19390,7 @@ function roomTick(t) {
     if (p.path.length) {
       const [tx, ty] = p.path[0];
       const dx = tx - p.pos[0], dy = ty - p.pos[1], dist = Math.hypot(dx, dy);
-      const step = 115 * dt;
+      const step = WALK_SPEED * dt;
       if (dist <= step) { p.pos = [tx, ty]; p.path.shift(); }
       else { p.pos = [p.pos[0] + dx / dist * step, p.pos[1] + dy / dist * step]; }
       p.walkDir = Math.abs(dx) > Math.abs(dy) ? 'side' : (dy < 0 ? 'up' : 'down');
@@ -19509,12 +19520,7 @@ function roomDraw(t) {
     const img = roomLook(skin, p.seed);
     let frame, flip = false;
     if (p.walking) {
-      // Four beats a stride: step, legs passing, the other step, passing.
-      // Side-on has its own passing frames; facing or away, the step is held.
-      const beat = Math.floor(t / 150 + p.seed * 4) % 4;
-      const side = p.walkDir === 'side' && ROOM.man && ROOM.man.frames.includes('walk_side_3');
-      const step = side ? [1, 3, 2, 4][beat] : (beat < 2 ? 1 : 2);
-      frame = roomFrame(`walk_${p.walkDir}_${step}`, skin);
+      frame = roomFrame(`walk_${p.walkDir}_${roomWalkStep(p.walkDir, t, p.seed)}`, skin);
       flip = p.walkDir === 'side' && p.dir < 0;
     } else {
       const pose = p.goal ? p.goal.pose : 'idle';
@@ -19526,8 +19532,10 @@ function roomDraw(t) {
     }
     const typing = !p.walking && p.goal && p.goal.pose === 'type';
     // Walking, the body rises a little as the legs pass under it.
-    const passingBeat = p.walking && Math.floor(t / 150 + p.seed * 4) % 2 === 1;
-    const bob = typing ? Math.round(Math.sin(t / 130 + p.seed) * 1.3) : (!p.walking ? Math.round(Math.sin(t / 700 + p.seed) * 0.8) : (passingBeat ? -1.5 : 0));
+    // Facing or away, the body rises a little between steps; side-on, the
+    // drawn steps already carry it.
+    const midStep = p.walking && p.walkDir !== 'side' && Math.floor(t / WALK_BEAT + p.seed * 6) % 3 === 1;
+    const bob = typing ? Math.round(Math.sin(t / 130 + p.seed) * 1.3) : (!p.walking ? Math.round(Math.sin(t / 700 + p.seed) * 0.8) : (midStep ? -1 : 0));
     ctx.save();
     const low = !p.walking && p.goal && (p.goal.sit || p.goal.pose === 'tend_fire');
     const lift = typing ? SIT_LIFT : (low ? p.goal.lift || 0 : 0);
