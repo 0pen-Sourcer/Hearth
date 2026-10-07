@@ -688,6 +688,17 @@ def _resolve_ask_user(req_id: str, answer: Dict[str, Any]) -> bool:
         return False
 
 
+def _local_kept() -> str:
+    try:
+        from . import llmserver as _ls
+        if not _load_settings().get("keep_local_warm") or not (_ls._proc and _ls._proc.poll() is None):
+            return ""
+        path = (_ls._proc_info or {}).get("model_path") or ""
+        return os.path.splitext(os.path.basename(path))[0]
+    except Exception:
+        return ""
+
+
 _GET_REFUSED: Dict[str, str] = {}      # url -> what the server said when it refused
 
 
@@ -4070,6 +4081,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             "memories": len(_memory_index()),
             # Facts the background pass saved lately, which the window shows.
             "facts_saved": _facts_noticed(),
+            # The model on this PC that stays loaded beside a cloud brain and
+            # runs the helpers, for the sticker.
+            "local_kept": _local_kept(),
             # A turn running in the terminal, so the room shows JARVIS at it.
             "elsewhere": __import__("hearth.activity", fromlist=["current"]).current(not_from="window"),
             "workspace": WORKSPACE,

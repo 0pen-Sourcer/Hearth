@@ -430,6 +430,22 @@ with sync_playwright() as pw:
     check("a saved provider in the menu carries its own mark, an unknown one the cloud",
           "openrouter.ai" in marks["prov"] and "<svg" in marks["unknown"] and "favicon" not in marks["unknown"])
 
+    # A local model kept beside a cloud brain for the helpers was invisible
+    # unless the menu was opened.
+    chip = pg.evaluate("""() => {
+      const was = { kind: STATE.brain.kind, kept: STATE.localKept };
+      STATE.brain.kind = 'cloud'; STATE.localKept = 'Ornith-1.5-9B-Q4_K_M';
+      mpSync();
+      const el = document.getElementById('mp-helper');
+      const on = { shown: !el.hidden, text: el.textContent };
+      STATE.brain.kind = 'local'; mpSync();
+      on.localHidden = el.hidden;
+      STATE.brain.kind = was.kind; STATE.localKept = was.kept; mpSync();
+      return on;
+    }""")
+    check(f"the sticker shows the local model kept for helpers beside a cloud brain {chip}",
+          chip["shown"] and chip["text"] == "+ Ornith-1.5-9B" and chip["localHidden"])
+
     # A provider with no key saved had no way in from the menu.
     added = pg.evaluate("""async () => {
       mpOpen();
