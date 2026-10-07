@@ -103,7 +103,7 @@ r = subagents.spawn_subagent(persona="researcher", prompt="read the note", mode=
 pane = rendered(r["transcript_path"])
 check("the agent ran", r.get("ok") is True)
 check("a tool result shows what the tool returned, not an empty arrow",
-      "↳ read_file: " in pane and "PANE-VISIBLE-CONTENT" in pane)
+      "↳ " in pane and "PANE-VISIBLE-CONTENT" in pane and "› read_file" in pane)
 check("a finished agent ends on done", pane.rstrip().endswith("■ done"))
 
 STATE["fail"] = True
@@ -145,6 +145,24 @@ res = team.launch_team([
     {"name": "B", "prompt": "b"}, {"name": "C", "prompt": "c"}, {"name": "D", "prompt": "d"},
     {"name": "E", "prompt": "e"}])
 subagents.spawn_subagent = _spawn
+# Started from the window, terminal panes opened over it although the Team room shows the team.
+opened = []
+team._open_wt = lambda s: opened.append(len(s)) or True
+subagents.spawn_subagent = lambda **kw: {"ok": True, "agent_id": kw["name"], "transcript_path": ""}
+team.PANES = False
+team.launch_team([{"name": "W", "prompt": "w"}])
+from_window = list(opened)
+team.PANES = True
+team.launch_team([{"name": "T", "prompt": "t"}])
+team.PANES = False
+subagents.spawn_subagent = _spawn
+team._open_wt = lambda _s: False
+check(f"a team opens terminal panes only when started from the terminal {from_window} {opened}",
+      from_window == [] and opened == [1])
+team._C = {k: "" for k in team._C}
+line = team._render_entry({"kind": "assistant_tool_call", "calls": [{"name": "edit_file", "args": '{"path": "C:\\\\Users\\\\x\\\\index.html"}'}]})
+check(f"a pane shows a step as what it is pointed at, not its raw arguments {line!r}",
+      "index.html" in line and "{" not in line and "\\\\" not in line)
 dropped = {d["name"]: d["reason"] for d in res.get("dropped", [])}
 check(f"members that did not start are named, with the reason: {dropped}",
       set(dropped) == {"Blank", "Ghost", "E"})

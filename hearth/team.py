@@ -24,6 +24,9 @@ import time
 from typing import Any, Dict, List, Optional
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Live panes per member, for a team started from the terminal. In the window
+# the Team room shows them, so no terminal windows open over it.
+PANES = False
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 _C = {
@@ -39,25 +42,33 @@ def _render_entry(e: Dict[str, Any]) -> Optional[str]:
     C = _C
     k = e.get("kind")
     if k == "start":
-        return (f"{C['brand']}{C['bold']}▶ {e.get('persona', 'agent')}{C['reset']}  "
-                f"{C['dim']}{(e.get('prompt') or '')[:240]}{C['reset']}")
+        # The task only: a team member's brief starts with who else is on the team.
+        task = (e.get("prompt") or "").strip()
+        if task.startswith("You are ") and "\n\n" in task:
+            task = task.split("\n\n", 1)[1]
+        who = e.get("name") or e.get("persona") or "agent"
+        return (f"{C['brand']}{C['bold']}▶ {who}{C['reset']}  {C['dim']}{e.get('persona', '')}{C['reset']}\n"
+                f"{C['dim']}{task[:240]}{C['reset']}")
     if k == "route":
-        tools = ", ".join(e.get("tools_exposed") or [])
-        return f"{C['dim']}· {e.get('model', '?')} — tools: {tools[:120]}{C['reset']}"
+        return f"{C['dim']}· on {e.get('model') or e.get('runtime') or 'its own model'}{C['reset']}" if e.get("model") or e.get("runtime") else None
     if k == "assistant_tool_call":
+        from .subagents import _pointed_at
         lines: List[str] = []
         txt = (e.get("content") or "").strip()
         if txt:
             lines.append(f"{C['lav']}{txt}{C['reset']}")
         for c in (e.get("calls") or []):
-            args = c.get("args")
-            args_s = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False, default=str)
-            lines.append(f"{C['tool']}  🔧 {c.get('name')}{C['reset']} {C['dim']}{(args_s or '')[:160]}{C['reset']}")
+            # What the call is pointed at, as the room says it, not its raw arguments.
+            what = _pointed_at(c.get("args"))
+            lines.append(f"{C['tool']}  › {c.get('name')}{C['reset']}" + (f"  {C['dim']}{what}{C['reset']}" if what else ""))
         return "\n".join(lines) if lines else None
     if k in ("tool_result", "result"):
-        r = str(e.get("preview") or e.get("result") or e.get("content") or "").replace("\n", " ")
-        name = f"{e['name']}: " if e.get("name") else ""
-        return f"{C['dim']}    ↳ {name}{r[:160]}{C['reset']}"
+        r = " ".join(str(e.get("preview") or e.get("result") or e.get("content") or "").split())
+        return f"{C['dim']}    ↳ {r[:120]}{C['reset']}" if r else None
+    if k == "sent":
+        return f"{C['lav']}  → {e.get('to', '')}: {C['reset']}{str(e.get('text') or '')[:200]}"
+    if k == "told":
+        return f"{C['lav']}  ← {e.get('from', '')}: {C['reset']}{str(e.get('text') or '')[:200]}"
     if k in ("assistant_final", "assistant", "assistant_text", "final"):
         t = (e.get("text") or e.get("content") or "").strip()
         return f"\n{C['reset']}{t}\n" if t else None
@@ -287,15 +298,12 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
             dropped.append({"name": name, "reason": str(r.get("error") or "did not start")})
     if not spawned:
         return {"ok": False, "error": "no agents started", "dropped": dropped}
-    if sys.platform == "win32":
-        opened = _open_wt(spawned) or _open_consoles(spawned)
-    else:
-        opened = _open_tmux(spawned)
-    note = (f"Spawned {len(spawned)} agents and opened a live pane for each — "
-            f"watch them work side by side." if opened else
-            f"Spawned {len(spawned)} agents. Couldn't open watch panes "
-            f"(no Windows Terminal / tmux found) — they're running in the "
-            f"background; their results will arrive as notifications.")
+    opened = False
+    if PANES:
+        opened = (_open_wt(spawned) or _open_consoles(spawned)) if sys.platform == "win32" else _open_tmux(spawned)
+    note = (f"Started {len(spawned)} helpers and opened a live pane for each." if opened else
+            f"Started {len(spawned)} helpers. They work in the background and can be watched in the Team "
+            f"room; each one's report arrives when it finishes.")
     if dropped:
         note += (" Not started: " + "; ".join(f"{d['name']} ({d['reason']})" for d in dropped)
                  + ". Their part of the task is not being worked on.")

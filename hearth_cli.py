@@ -337,6 +337,18 @@ _SUB_CHOICES = {
 }
 
 
+def _team_panes() -> None:
+    """A team started from the terminal opens a live pane per member."""
+    try:
+        from hearth import team as _team
+        _team.PANES = True
+    except Exception:
+        pass
+
+
+_team_panes()
+
+
 def _brain_choices():
     from hearth.headless import PROVIDERS
     out = [("local", "whatever serves on localhost:1234"), ("lmstudio", "LM Studio"),
