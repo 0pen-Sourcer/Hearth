@@ -13206,14 +13206,19 @@ async function refreshSettings() {
       const liveProv = providerFromEndpoint(STATE.endpoint || s.llm_url || '').key;
       const prov = (s.llm_provider && s.llm_provider !== 'local') ? s.llm_provider
                    : (liveProv !== 'local' ? liveProv : (s.llm_provider || 'local'));
-      brainMode.value = prov;
-      llmUrl.value = s.llm_url || (STATE.endpoint && !STATE.endpoint.includes('localhost') ? STATE.endpoint : '') || (PRESETS[prov] && PRESETS[prov].url) || '';
-      // Seed the map with the saved key so it isn't lost, then show this
-      // provider's remembered key.
-      if (s.llm_key && prov !== 'local') _saveBrainKey(prov, s.llm_key);
-      llmKey.value = _brainKeys()[prov] || s.llm_key || '';
-      let _prevProv = prov;
-      llmMdl.value = s.llm_model || '';
+      // A settings refresh while a change is waiting to be applied (a key
+      // just pasted) must not put the old values back over it.
+      const _editing = !applyRow.hidden;
+      if (!_editing) {
+        brainMode.value = prov;
+        llmUrl.value = s.llm_url || (STATE.endpoint && !STATE.endpoint.includes('localhost') ? STATE.endpoint : '') || (PRESETS[prov] && PRESETS[prov].url) || '';
+        // The key the app is using is the one shown; this window's own copy is
+        // only for a provider that isn't in use, and is brought up to date.
+        if (s.llm_key && prov !== 'local') _saveBrainKey(prov, s.llm_key);
+        llmKey.value = (prov === s.llm_provider && s.llm_key) || _brainKeys()[prov] || '';
+        llmMdl.value = s.llm_model || '';
+      }
+      let _prevProv = brainMode.value || prov;
       function applyMode(v) {
         const isLocal = (v === 'local');
         cloudFields.hidden = isLocal || !!AGENT_BRAINS[v];        // an agent brain needs no key

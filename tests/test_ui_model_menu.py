@@ -430,6 +430,22 @@ with sync_playwright() as pw:
     check("a saved provider in the menu carries its own mark, an unknown one the cloud",
           "openrouter.ai" in marks["prov"] and "<svg" in marks["unknown"] and "favicon" not in marks["unknown"])
 
+    # A key pasted into Settings was put back to the old one by the next
+    # settings refresh, before "Use this brain" was clicked.
+    kept = pg.evaluate("""async () => {
+      showView('settings');
+      await refreshSettings();
+      const box = document.getElementById('setting-llm-key');
+      box.value = 'AQ.pasted-new-key';
+      box.dispatchEvent(new Event('input'));
+      await refreshSettings();
+      const v = box.value;
+      document.getElementById('brain-apply-row').hidden = true;
+      showView('chat');
+      return v;
+    }""")
+    check(f"a key pasted into Settings stays there through a refresh ({kept})", kept == "AQ.pasted-new-key")
+
     # Codex's Fast tier (quicker, uses more of the plan) had no switch anywhere.
     SETTING_POSTS.clear()
     fast = pg.evaluate("""async () => {
