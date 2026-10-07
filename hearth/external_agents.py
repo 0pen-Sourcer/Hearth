@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import env as _env
 
@@ -305,6 +305,84 @@ def updates() -> List[Dict[str, str]]:
     return out
 
 
+# Installs and updates in progress, by agent id, so every window can show
+# them in its Downloads list while they run: the last thing the installer
+# said, how many packages it has fetched, and a way to stop it. npm can't
+# pick a half-done install up again, so there is no pause, only cancel.
+_JOBS: Dict[str, Dict[str, Any]] = {}
+_JOBS_LOCK = threading.Lock()
+
+
+def jobs() -> List[Dict[str, Any]]:
+    """Installs and updates running now or ended in the last few minutes."""
+    now = time.time()
+    with _JOBS_LOCK:
+        return [{k: v for k, v in j.items() if k != "proc"} for j in _JOBS.values()
+                if j["status"] == "running" or now - j.get("ended", now) < 300]
+
+
+def cancel_job(aid: str) -> bool:
+    with _JOBS_LOCK:
+        j = _JOBS.get(aid)
+        proc = j and j.get("proc")
+        if not j or j["status"] != "running" or proc is None:
+            return False
+        j["cancelled"] = True
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, creationflags=_NO_WINDOW)
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    return True
+
+
+def _run_job(aid: str, kind: str, argv: List[str], timeout: float) -> Tuple[int, List[str], bool]:
+    """Run an installer for an agent, keeping its last line and its fetch count
+    where jobs() can see them. (exit code, output lines, cancelled)."""
+    job = {"id": aid, "label": AGENTS.get(aid, {}).get("label", aid), "kind": kind, "status": "running",
+           "started": time.time(), "line": "", "fetched": 0, "cancelled": False}
+    lines: List[str] = []
+    try:
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                text=True, encoding="utf-8", errors="replace", creationflags=_NO_WINDOW)
+    except Exception as e:
+        job.update(status="error", ended=time.time(), error=f"{type(e).__name__}: {e}")
+        with _JOBS_LOCK:
+            _JOBS[aid] = job
+        return 1, [str(e)], False
+    job["proc"] = proc
+    with _JOBS_LOCK:
+        _JOBS[aid] = job
+    deadline = time.time() + timeout
+    for raw in proc.stdout:
+        line = _ANSI.sub("", raw).strip()
+        if not line:
+            continue
+        lines.append(line)
+        with _JOBS_LOCK:
+            if " fetch " in line or line.startswith("npm http") or "GET 200" in line:
+                job["fetched"] += 1
+            else:
+                job["line"] = line[:160]
+        if time.time() > deadline:
+            cancel_job(aid)
+    code = proc.wait()
+    with _JOBS_LOCK:
+        job.pop("proc", None)
+        job["ended"] = time.time()
+        cancelled = job["cancelled"]
+    return code, lines, cancelled
+
+
+def _end_job(aid: str, ok: bool, error: str = "", version: str = "") -> None:
+    with _JOBS_LOCK:
+        j = _JOBS.get(aid)
+        if j:
+            j.update(status="cancelled" if j.get("cancelled") else ("done" if ok else "error"),
+                     error=error, version=version, ended=time.time())
+
+
 def update(aid: str) -> Dict[str, Any]:
     """Update one agent CLI through npm. Returns {ok, version} or {ok: False, error}."""
     package = NPM_PACKAGES.get(aid)
@@ -313,15 +391,18 @@ def update(aid: str) -> Dict[str, Any]:
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     if not npm:
         return {"ok": False, "error": "npm isn't on this PC, so the update can't run"}
-    try:
-        r = subprocess.run([npm, "install", "-g", package + "@latest"], capture_output=True, text=True,
-                           timeout=600, creationflags=_NO_WINDOW)
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    if r.returncode != 0:
-        tail = [l for l in ((r.stderr or "") + (r.stdout or "")).splitlines() if l.strip()][-2:]
-        return {"ok": False, "error": " ".join(tail)[:300] or f"npm exited with code {r.returncode}"}
-    return {"ok": True, "version": installed_version(aid)}
+    code, lines, cancelled = _run_job(aid, "update", [npm, "install", "-g", package + "@latest", "--loglevel", "http"], 600)
+    if cancelled:
+        _end_job(aid, False, "Stopped.")
+        return {"ok": False, "error": "Stopped before it finished."}
+    if code != 0:
+        tail = [l for l in lines if l.strip() and " fetch " not in l][-2:]
+        err = " ".join(tail)[:300] or f"npm exited with code {code}"
+        _end_job(aid, False, err)
+        return {"ok": False, "error": err}
+    version = installed_version(aid)
+    _end_job(aid, True, version=version or "")
+    return {"ok": True, "version": version}
 
 
 # ---------------------------------------------------------------- setup
@@ -411,16 +492,17 @@ def install(aid: str) -> Dict[str, Any]:
         npm = shutil.which("npm.cmd") or shutil.which("npm")
         if not npm or not how.get("npm"):
             return {"ok": False, "error": how.get("needs") or "there is no installer for it on this system"}
-        argv = [npm, "install", "-g", how["npm"]]
-    try:
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace",
-                           creationflags=_NO_WINDOW)
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        argv = [npm, "install", "-g", how["npm"], "--loglevel", "http"]
+    code, lines, cancelled = _run_job(aid, "install", argv, 900)
+    if cancelled:
+        _end_job(aid, False, "Stopped.")
+        return {"ok": False, "error": "Stopped before it finished."}
     if not find(aid):
-        said = why_failed(((r.stdout or "") + "\n" + (r.stderr or "")).splitlines())
-        return {"ok": False, "error": said or f"the installer finished (code {r.returncode}) but {AGENTS[aid]['label']} "
-                                              "isn't where it should be"}
+        said = why_failed(lines)
+        err = said or f"the installer finished (code {code}) but {AGENTS[aid]['label']} isn't where it should be"
+        _end_job(aid, False, err)
+        return {"ok": False, "error": err}
+    _end_job(aid, True)
     return {"ok": True}
 
 

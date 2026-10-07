@@ -430,6 +430,32 @@ with sync_playwright() as pw:
     check("a saved provider in the menu carries its own mark, an unknown one the cloud",
           "openrouter.ai" in marks["prov"] and "<svg" in marks["unknown"] and "favicon" not in marks["unknown"])
 
+    # An agent update was a toast reading "Updating…" with nothing else; it
+    # shows in the Downloads list now, with what it is doing and a Cancel.
+    cancels = []
+    pg.route("**/api/agents/jobs", lambda r: r.fulfill(json={"jobs": [
+        {"id": "claude-code", "label": "Claude Code", "kind": "update", "status": "running", "started": time.time() - 12,
+         "line": "changed 3 packages in 9s", "fetched": 4, "cancelled": False}]}))
+    pg.route("**/api/agents/cancel", lambda r: (cancels.append(json.loads(r.request.post_data or "{}")), r.fulfill(json={"ok": True})))
+    dl = pg.evaluate("""async () => {
+      await agentJobsPoll();
+      dlToggle(true);
+      const ov = document.getElementById('downloads-overlay');
+      const text = ov.textContent;
+      const buttons = [...ov.querySelectorAll('button[data-dlact]')].map(b => b.dataset.dlact);
+      const bar = !!ov.querySelector('.dl-indet');
+      ov.querySelector('button[data-dlact="cancel"]').click();
+      await new Promise(r => setTimeout(r, 300));
+      dlToggle(false);
+      return { text, buttons, bar };
+    }""")
+    pg.unroute("**/api/agents/jobs")
+    pg.unroute("**/api/agents/cancel")
+    check(f"an agent update shows in Downloads with what it is doing {dl['text'][:160]!r}",
+          "Updating Claude Code" in dl["text"] and "4 packages fetched" in dl["text"] and "changed 3 packages" in dl["text"] and dl["bar"])
+    check(f"it can be cancelled there, and offers no pause npm couldn't keep {dl['buttons']} {cancels}",
+          dl["buttons"] == ["cancel"] and cancels == [{"id": "claude-code"}])
+
     check(f"the page ran without a script error {errors}", not errors)
 
     print()

@@ -2258,6 +2258,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if path == "/api/agents/jobs":
+            from . import external_agents as _xa
+            return self._send_json(200, {"jobs": _xa.jobs()})
         if path == "/api/team/choices":
             return self._send_json(200, _team_choices())
         if path == "/api/voice/sample":
@@ -3234,6 +3237,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import external_agents as _xa
             r = (_xa.install if path.endswith("install") else _xa.sign_in)(str(body.get("id") or ""))
             return self._send_json(200 if r.get("ok") else 400, r)
+        if path == "/api/agents/cancel":
+            # The Cancel button on an install or update in the Downloads list.
+            body = self._read_json() or {}
+            from . import external_agents as _xa
+            ok = _xa.cancel_job(str(body.get("id") or ""))
+            return self._send_json(200 if ok else 400, {"ok": ok} if ok else {"ok": False, "error": "nothing to stop"})
         if path == "/api/agents/update":
             # Asked for from the "a newer one is out" prompt; never on its own.
             body = self._read_json() or {}

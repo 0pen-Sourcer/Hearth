@@ -491,6 +491,9 @@
   .mp-body, .mp-hits { flex: 1; min-height: 0; overflow-y: auto; }
   .mp-body[hidden], .mp-hits[hidden] { display: none; }
   .mp-note { padding: 2px 10px 8px 46px; font-size: 11.5px; color: var(--fg-faint); }
+  .dl-indet { height: 100%; width: 34%; border-radius: 4px; animation: dl-indet 1.3s ease-in-out infinite; }
+  @keyframes dl-indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+  @media (prefers-reduced-motion: reduce) { .dl-indet { animation: none; width: 100%; opacity: .5; } }
   .mp-keep { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--border); }
   .mp-keep span { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .mp-keep b { font-size: 12.5px; font-weight: 500; color: var(--fg); }
@@ -5686,16 +5689,20 @@ async function checkAgentUpdates() {
   for (const u of (r && r.updates) || []) {
     if (skipped[u.id] === u.latest) continue;
     askToast(`${u.label} has an update`, `You have ${u.installed}; ${u.latest} is out.`, 'Update', async (t, close) => {
-      const row = t.querySelector('.ask-row');
-      row.innerHTML = '<span class="ask-busy">Updating…</span>';
+      close();
+      dlUpsert('agent:' + u.id, { name: `Updating ${u.label}`, kind: 'agent', agent: u.id, status: 'downloading',
+                                  pct: null, started: Date.now() / 1000, fetched: 0, line: '' });
+      dlToggle(true);
+      agentJobsWatch();
       try {
         const res = await api('/api/agents/update', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                      body: JSON.stringify({ id: u.id }) });
-        close();
+        agentJobsPoll();
         toast(`${u.label} is up to date`, res.version ? 'Now on ' + res.version : '', 'ok', 5000);
         if (STATE.agentInfo && STATE.agentInfo.provider === u.id) loadAgentInfo(u.id);
       } catch (e) {
-        close();
+        agentJobsPoll();
+        if (/Stopped/.test(e.message || '')) return;
         toast(`${u.label} didn't update`, e.message.replace(/^\d+\s*/, ''), 'err', 9000);
       }
     }, () => {
@@ -8278,6 +8285,7 @@ async function agentSetup(id, done) {
     busy = b.dataset.do; note = ''; paint();
     try {
       if (busy === 'install') {
+        agentJobsWatch();
         await api('/api/agents/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
         await read(true);
       } else if (busy === 'signin') {
@@ -16725,6 +16733,39 @@ function dlMirrorVoice(name, s) {
   }
 }
 
+// Agent programs being installed or updated show in the same list: the
+// installer's last line, packages fetched, how long it has run, and Cancel
+// (npm can't pick a half-done install up again, so there is no pause).
+let _agentJobsTimer = 0;
+async function agentJobsPoll() {
+  let r;
+  try { r = await api('/api/agents/jobs'); } catch { return false; }
+  let running = false;
+  const seen = new Set();
+  for (const j of (r && r.jobs) || []) {
+    const id = 'agent:' + j.id;
+    seen.add(id);
+    if (j.status === 'cancelled') { if (_dls[id]) { delete _dls[id]; dlSyncBadge(); if (_dlOpen) dlRender(); } continue; }
+    if (j.status === 'running') running = true;
+    const inst = j.kind === 'install';
+    const name = j.status === 'running' ? `${inst ? 'Installing' : 'Updating'} ${j.label}`
+      : j.status === 'done' ? `${inst ? 'Installed' : 'Updated'} ${j.label}${j.version ? ' to ' + j.version : ''}`
+      : `${j.label} didn't ${inst ? 'install' : 'update'}`;
+    dlUpsert(id, { name, kind: 'agent', agent: j.id,
+                   status: j.status === 'running' ? 'downloading' : j.status === 'done' ? 'done' : 'error',
+                   pct: j.status === 'done' ? 100 : null, started: j.started, fetched: j.fetched,
+                   line: j.status === 'error' ? (j.error || j.line) : j.line });
+  }
+  for (const id of Object.keys(_dls)) {
+    if (id.startsWith('agent:') && !seen.has(id) && _dls[id].status === 'downloading') { delete _dls[id]; dlSyncBadge(); }
+  }
+  return running;
+}
+function agentJobsWatch() {
+  clearTimeout(_agentJobsTimer);
+  const tick = async () => { if (await agentJobsPoll()) _agentJobsTimer = setTimeout(tick, 700); else if (_dlOpen) dlRender(); };
+  _agentJobsTimer = setTimeout(tick, 250);
+}
 function dlUpsert(id, patch) {
   const d = _dls[id] || (_dls[id] = { name: id, status: 'downloading', pct: 0 });
   Object.assign(d, patch);
@@ -16766,7 +16807,9 @@ function dlToggle(force) {
           else if (kind === 'voice') _obFetchVoiceModels(null);
           else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {});
         } else if (ds.dlact === 'cancel') {
-          if (kind === 'engine') api('/api/runtime/discard', { method: 'POST' }).catch(() => {});
+          if (kind === 'agent') api('/api/agents/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                           body: JSON.stringify({ id: d.agent }) }).catch(() => {});
+          else if (kind === 'engine') api('/api/runtime/discard', { method: 'POST' }).catch(() => {});
           else if (kind === 'update') api('/api/update/cancel', { method: 'POST' }).catch(() => {});
           else if (kind === 'voice') api('/api/voice/install-cancel', { method: 'POST' }).catch(() => {});
           else {
@@ -16801,9 +16844,12 @@ function dlRender() {
   const ov = $('downloads-overlay'); if (!ov) return;
   const list = Object.entries(_dls);
   const rows = list.length ? list.map(([id, d]) => {
-    const pctTxt = d.status === 'done' ? '✓ done' : d.status === 'error' ? 'failed' : d.pct + '%';
+    const isAgent = d.kind === 'agent';
+    const pctTxt = d.status === 'done' ? '✓ done' : d.status === 'error' ? 'failed'
+      : d.pct == null ? (isAgent ? _fmtETA((Date.now() / 1000) - (d.started || Date.now() / 1000)) : '…') : d.pct + '%';
     const barCol = d.status === 'error' ? 'var(--err)' : 'linear-gradient(90deg, var(--accent), var(--accent-2))';
-    const meta = d.total ? (_fmtGB(d.done) + ' / ' + _fmtGB(d.total) + (d.status === 'downloading' ? '  ·  ' + _fmtSpeed(d.speed) + '  ·  ETA ' + _fmtETA(d.eta) : '')) : '';
+    const meta = d.total ? (_fmtGB(d.done) + ' / ' + _fmtGB(d.total) + (d.status === 'downloading' ? '  ·  ' + _fmtSpeed(d.speed) + '  ·  ETA ' + _fmtETA(d.eta) : ''))
+      : isAgent ? (d.fetched ? `${d.fetched} package${d.fetched === 1 ? '' : 's'} fetched` : (d.status === 'downloading' ? 'starting…' : '')) : '';
     const _btnCss = 'background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);font-size:11px;padding:3px 9px;cursor:pointer;flex-shrink:0';
     const isEngine = d.kind === 'engine';
     const isUpdate = d.kind === 'update';
@@ -16813,7 +16859,9 @@ function dlRender() {
     const kind = d.kind || 'model';
     const _da = `data-dlid="${esc(id)}" data-dlkind="${kind}"`;
     let ctrlBtn = '';
-    if (d.status === 'downloading') {
+    if (d.status === 'downloading' && isAgent) {
+      ctrlBtn = `<button data-dlact="cancel" ${_da} style="${_btnCss}">✕ Cancel</button>`;
+    } else if (d.status === 'downloading') {
       ctrlBtn = `<button data-dlact="pause" ${_da} style="${_btnCss}">❚❚ Pause</button>`
               + `<button data-dlact="cancel" ${_da} style="${_btnCss}">✕ Cancel</button>`;
     } else if (d.status === 'paused') {
@@ -16822,7 +16870,9 @@ function dlRender() {
     }
     // Engine reads as infrastructure, models as content — different glyphs so
     // the row is identifiable at a glance.
-    const icon = isUpdate
+    const icon = isAgent && (HARNESS[d.agent])
+      ? `<span class="hx-mini" style="--hx:${HARNESS[d.agent].c};margin-right:6px">${harnessMark(HARNESS[d.agent])}</span>`
+      : isUpdate
       ? '<span title="Hearth update" style="opacity:.85;margin-right:6px">⬆</span>'
       : isEngine
       ? '<span title="inference engine" style="opacity:.85;margin-right:6px">⚙</span>'
@@ -16832,22 +16882,24 @@ function dlRender() {
         <span style="color:var(--fg);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${icon}${esc(d.name)}</span>
         <span style="color:${d.status === 'done' ? 'var(--ok)' : d.status === 'paused' ? 'var(--accent-2)' : 'var(--fg-dim)'};flex-shrink:0">${d.status === 'paused' ? 'paused' : pctTxt}</span>
       </div>
-      <div style="height:7px;background:var(--bg-0);border-radius:4px;overflow:hidden;border:1px solid var(--border)"><div style="height:100%;width:${d.pct}%;background:${barCol};border-radius:4px"></div></div>
+      <div style="height:7px;background:var(--bg-0);border-radius:4px;overflow:hidden;border:1px solid var(--border)">${d.pct == null && d.status === 'downloading'
+        ? `<div class="dl-indet" style="background:${barCol}"></div>`
+        : `<div style="height:100%;width:${d.pct == null ? 0 : d.pct}%;background:${barCol};border-radius:4px"></div>`}</div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">
         <span style="font-size:11.5px;color:var(--fg-faint);font-family:var(--mono)">${meta}</span>
         ${ctrlBtn}
-      </div>
+      </div>${isAgent && d.line ? `<div style="font-size:11px;color:var(--fg-faint);font-family:var(--mono);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.line)}">${esc(d.line)}</div>` : ''}
     </div>`;
   }).join('') : '<div style="color:var(--fg-dim);font-size:13px;padding:6px 0 14px">No downloads yet.</div>';
   // Only offer the model catalogue when this panel is actually about models.
   // During an app update or an engine install it's an unrelated detour, and a
   // stray button is what makes an update screen feel bolted together.
-  const _modelish = list.some(([id, d]) => d.kind !== 'update' && d.kind !== 'engine');
+  const _modelish = list.some(([id, d]) => d.kind !== 'update' && d.kind !== 'engine' && d.kind !== 'agent');
   const _browse = (!list.length || _modelish)
     ? `<button data-act="discover" style="width:100%;padding:9px 0;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer">Browse Hugging Face &rarr;</button>`
     : '';
   const _repairing = list.some(([id]) => id === REPAIR_DL_ID);
-  const _title = (list.length && !_modelish)
+  const _title = (list.length && !_modelish && !list.some(([, d]) => d.kind === 'agent'))
     ? (_repairing ? 'Repairing Hearth' : 'Updating Hearth') : 'Downloads';
   ov.innerHTML = `<div style="font-weight:700;font-size:15px;color:var(--fg);margin-bottom:12px">${_title}</div>${rows}${_browse}`;
 }
@@ -18768,6 +18820,7 @@ $('tm-new').addEventListener('click', async () => {
     if (!b) return;
     if (b.dataset.get === 'setup') { $('modal').classList.remove('open'); agentSetup(b.dataset.agent); return; }
     b.disabled = true; b.textContent = 'Installing…';
+    agentJobsWatch();
     try {
       await api('/api/agents/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.agent }) });
       $('modal').classList.remove('open');

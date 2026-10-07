@@ -154,6 +154,47 @@ with subagents._BG_RESULTS_LOCK:
 check("one of Hearth's own is stopped before its next step",
       subagents.stop_subagent("sub_own_helper").get("ok") and subagents._stop_asked("sub_own_helper"))
 
+# An agent update was a toast saying "Updating…" and nothing else: no sign of
+# progress, no way to stop it. It runs as a job the Downloads list can show.
+fake_npm_py = os.path.join(work, "fake_npm.py")
+with open(fake_npm_py, "w", encoding="utf-8") as f:
+    f.write("""import sys, time
+slow = any('slow' in a for a in sys.argv)
+for n in range(3 if not slow else 40):
+    print(f'npm http fetch GET 200 https://registry.npmjs.org/pkg{n} 12ms', flush=True)
+    time.sleep(0.3)
+print('added 3 packages in 1s', flush=True)
+""")
+fake_npm = os.path.join(work, "npm.cmd")
+with open(fake_npm, "w", encoding="utf-8") as f:
+    f.write(f'@echo off\r\n"{sys.executable}" "{fake_npm_py}" %*\r\n')
+real_shutil_which = xa.shutil.which
+xa.shutil.which = lambda n: fake_npm if n in ("npm.cmd", "npm") else real_shutil_which(n)
+xa.NPM_PACKAGES["stand-in"] = "stand-in-pkg"
+seen = []
+watch = threading.Thread(target=lambda: [seen.append(xa.jobs()) or time.sleep(0.2) for _ in range(12)], daemon=True)
+watch.start()
+res = xa.update("stand-in")
+watch.join()
+mid = [j for snap in seen for j in snap if j["status"] == "running"]
+check(f"an update runs as a job others can see, with what it is fetching ({mid[-1] if mid else None})",
+      res.get("ok") and mid and mid[-1]["fetched"] >= 1 and mid[-1]["label"] == "Stand-in")
+check("and says when it is done", any(j["id"] == "stand-in" and j["status"] == "done" for j in xa.jobs()))
+xa.NPM_PACKAGES["stand-in"] = "slow-pkg"
+got = {}
+runner = threading.Thread(target=lambda: got.update(xa.update("stand-in")), daemon=True)
+runner.start()
+t0 = time.time()
+while time.time() - t0 < 10 and not any(j["status"] == "running" and j["fetched"] for j in xa.jobs()):
+    time.sleep(0.1)
+stopped = xa.cancel_job("stand-in")
+runner.join(10)
+check(f"an install or update can be stopped part-way ({got.get('error')})",
+      stopped and got.get("ok") is False and "Stopped" in got.get("error", "") and time.time() - t0 < 10
+      and any(j["id"] == "stand-in" and j["status"] == "cancelled" for j in xa.jobs()))
+xa.shutil.which = real_shutil_which
+del xa.NPM_PACKAGES["stand-in"]
+
 # npm installs CLIs as .cmd shims; the prompt must never go through cmd.exe.
 shim_dir = tempfile.mkdtemp(prefix="hearth-shim-")
 os.makedirs(os.path.join(shim_dir, "node_modules", "g", "dist"))
