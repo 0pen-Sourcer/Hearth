@@ -429,16 +429,21 @@ def set_extend_workspace_callback(cb: Optional[Callable[[str], bool]]) -> None:
     _extend_workspace_callback = cb
 
 
+def _write_path(p: str) -> str:
+    """Where a write-style op's path lands: ~ expanded, relative to the workspace."""
+    p = os.path.expanduser(p)
+    if not os.path.isabs(p):
+        p = os.path.join(WORKSPACE, p)
+    return os.path.abspath(p)
+
+
 def _resolve_write(p: str) -> str:
     """Return absolute path for a write-style op. Stays inside WORKSPACE or
     EXTRA_WORKSPACES. If outside both, asks the host via the registered
     extend-workspace callback; on approval, the parent directory joins
     EXTRA_WORKSPACES so subsequent writes under the same root don't prompt
     again. Raises PermissionError when no callback is set or user denies."""
-    p = os.path.expanduser(p)
-    if not os.path.isabs(p):
-        p = os.path.join(WORKSPACE, p)
-    p = os.path.abspath(p)
+    p = _write_path(p)
 
     # Judged on where the write lands: folder by folder, case-folded as
     # Windows compares, with links followed. A text prefix refused the

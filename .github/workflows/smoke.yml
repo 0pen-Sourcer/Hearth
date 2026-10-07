@@ -188,6 +188,7 @@ jobs:
         run: |
           python tests/test_team.py
           python tests/test_helper_loop_guard.py
+          python tests/test_helper_changes.py
 
       - name: Voice sessions end cleanly and stay apart
         # Every session leaked its mic reader and a Whisper process, and a

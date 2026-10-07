@@ -362,6 +362,7 @@ def agent_story(agent_id: str) -> Dict[str, Any]:
                 if k == "start":
                     out["prompt"] = str(rec.get("prompt") or "").strip()[:6000]
                     out["by"] = str(rec.get("by") or "")
+                    out["name"] = str(rec.get("name") or rec.get("persona") or "")
                 elif k == "assistant_tool_call":
                     for c in rec.get("calls") or []:
                         step = {"tool": c.get("name") or "tool", "what": _pointed_at(c.get("args")), "result": None}
@@ -381,6 +382,8 @@ def agent_story(agent_id: str) -> Dict[str, Any]:
     except OSError:
         return {}
     out["steps"] = out["steps"][-200:]
+    from . import helper_changes as _changes
+    out["changes"] = _changes.summary(agent_id)
     return out
 
 
@@ -918,6 +921,7 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
     # The same watch the main loop keeps: a helper repeating a call that fails
     # or returns nothing new is told so, then made to answer with what it has.
     from .loop_guard import ToolLoopGuard
+    from . import helper_changes as _changes
     guard, wrap_up = ToolLoopGuard(patience=2), False
     for turn in range(max_turns):
         for said in _take_told(agent_id):
@@ -1024,7 +1028,10 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
                     else f"(not run: {name} needs the user's permission and a sub-agent "
                          f"cannot ask. Finish with what you have and say what is left to "
                          f"do with {name}; the main assistant can ask the user.)")
+            elif (held := _changes.claim(agent_id, name, args)):
+                content = held
             else:
+                _changes.keep_before(agent_id, name, args)
                 try:
                     # Flag the thread for the duration of the call so tools can
                     # tell an autonomous sub-agent from the user-facing loop.
@@ -1085,6 +1092,8 @@ def _run_one_sync(p: Dict[str, Any], prompt: str, turns_cap: int,
                                     should_cancel=should_cancel))
     except Exception as e:
         result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    from . import helper_changes as _changes
+    _changes.release(agent_id)
     result["elapsed_s"] = round(time.time() - started, 2)
     result["agent_id"] = agent_id
     return result
