@@ -768,6 +768,15 @@ def _tool_family(name: str) -> str:
     return ""
 
 
+def _note_activity(state: str, tool: str = "") -> None:
+    """Tell the desktop window what JARVIS is doing here, for its room."""
+    try:
+        from hearth import activity
+        activity.note("terminal", state, tool)
+    except Exception:
+        pass
+
+
 def _tool_glyph(name: str) -> str:
     return _TOOL_GLYPH.get(_tool_family(name), "●")
 
@@ -5496,6 +5505,16 @@ class JarvisCLI:
                     continue
                 raise
 
+    # A turn running here shows in the desktop window's room too.
+    @property
+    def _responding(self) -> bool:
+        return getattr(self, "_responding_now", False)
+
+    @_responding.setter
+    def _responding(self, on: bool) -> None:
+        self._responding_now = on
+        _note_activity("thinking" if on else "idle")
+
     async def _respond_claude(self) -> None:
         """One turn with an agent program as the brain: its text streams here, its
         tool calls print like Hearth's own, and anything it needs permission
@@ -5551,6 +5570,7 @@ class JarvisCLI:
                 if state["open"]:
                     sys.stdout.write(C_RESET + "\n")
                     state["open"] = False
+                _note_activity("calling " + str(f.get("name") or ""), str(f.get("name") or ""))
                 args = f.get("args") or {}
                 shown = args.get("command") or args.get("path") or args.get("query") or args.get("url") or ""
                 print(f"  {C_BRAND}{_tool_glyph(f.get('name', ''))}{C_RESET} {f.get('name')}"
@@ -6157,6 +6177,7 @@ class JarvisCLI:
             # pretty-printed args only unfurl when we're about to prompt.
             _unfurl = _will_prompt and len(preview_full) > 100
             _argstr = _tool_arg_summary(args)
+            _note_activity("calling " + name, name)
             print(f"\n  {C_BRAND}{_tool_glyph(name)}{C_RESET} {_BOLD}{name}{C_RESET}"
                   + (f"  {_argstr}" if _argstr else ""))
             # File writes → green/red diff (parity with the GUI), gated by the same

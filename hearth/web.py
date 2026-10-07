@@ -4046,6 +4046,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             "memories": len(_memory_index()),
             # Facts the background pass saved lately, which the window shows.
             "facts_saved": _facts_noticed(),
+            # A turn running in the terminal, so the room shows JARVIS at it.
+            "elsewhere": __import__("hearth.activity", fromlist=["current"]).current(not_from="window"),
             "workspace": WORKSPACE,
             "models_dir": _models_dir,
             "lms_cli": bool(_find_lms_cli()),

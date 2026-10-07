@@ -430,6 +430,28 @@ with sync_playwright() as pw:
     check("a saved provider in the menu carries its own mark, an unknown one the cloud",
           "openrouter.ai" in marks["prov"] and "<svg" in marks["unknown"] and "favicon" not in marks["unknown"])
 
+    # Codex's Fast tier (quicker, uses more of the plan) had no switch anywhere.
+    SETTING_POSTS.clear()
+    fast = pg.evaluate("""async () => {
+      const keep = { brain: { ...STATE.brain }, info: STATE.agentInfo };
+      STATE.brain.providerKey = 'codex';
+      STATE.agentInfo = { provider: 'codex', model: 'gpt-x', fast_on: false,
+                          models: [{ id: 'gpt-x', label: 'GPT X', efforts: ['low'], fast: '2x speed, increased usage' },
+                                   { id: 'gpt-slow', label: 'GPT S', efforts: ['low'], fast: '' }] };
+      renderThinkMenu();
+      const row = document.querySelector('#think-menu .think-fast');
+      const out = { row: !!row, text: row ? row.textContent : '' };
+      if (row) { row.click(); await new Promise(r => setTimeout(r, 200)); out.on = row.classList.contains('on'); out.tick = row.querySelector('.tick').textContent; }
+      STATE.agentInfo.model = 'gpt-slow';
+      renderThinkMenu();
+      out.slowRow = !!document.querySelector('#think-menu .think-fast');
+      Object.assign(STATE.brain, keep.brain); STATE.agentInfo = keep.info; renderThinkMenu();
+      return out;
+    }""")
+    check(f"a Codex model with a Fast tier gets a Fast switch in the think menu, in Codex's words {fast}",
+          fast["row"] and "2x speed" in fast["text"] and fast.get("on") and fast.get("tick") == "✓"
+          and {"fast_codex": True} in SETTING_POSTS and fast["slowRow"] is False)
+
     # An agent update was a toast reading "Updating…" with nothing else; it
     # shows in the Downloads list now, with what it is doing and a Cancel.
     cancels = []

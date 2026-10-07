@@ -1234,6 +1234,7 @@
   .t-body .diffbox .dl-del { background: color-mix(in srgb, var(--err) 14%, transparent); }
   .t-body .diffbox .dl-del .code { color: var(--err); }
   .t-body .diffbox .dl-ctx .code { color: var(--fg-dim); }
+  .t-body .diffbox .dl-hunk .code { color: var(--fg-faint); background: var(--bg-2); }
   .t-body .diffbox .dl-hdr { padding: 3px 10px; background: var(--bg-2); color: var(--fg-dim); font-size: 11px; border-bottom: 1px solid var(--border); }
   .t-body .diffbox .dl-hdr .add { color: var(--ok); }
   .t-body .diffbox .dl-hdr .del { color: var(--err); }
@@ -3264,6 +3265,7 @@
     color: var(--fg); font-size: 13px; text-align: left; cursor: pointer;
   }
   .think-menu-item:hover { background: var(--bg-2); }
+  .think-menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
   .think-menu-item.sel { color: var(--accent-2); }
   .think-menu-item .sub { color: var(--fg-faint); font-size: 11px; }
   .think-menu-item .tick { width: 12px; flex-shrink: 0; color: var(--accent-2); }
@@ -7659,6 +7661,29 @@ function fillEditCard(name, args, body) {
     }
     return true;
   }
+  // A change an agent program made arrives as a unified diff: its hunks,
+  // with + and - lines and the line numbers from each @@ header.
+  if (typeof args.diff === 'string' && args.diff.trim()) {
+    const box = document.createElement('div'); box.className = 'diffbox';
+    let oldN = 0, newN = 0, adds = 0, dels = 0;
+    const rows = [];
+    for (const l of args.diff.replace(/\n$/, '').split('\n')) {
+      const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(l);
+      if (h) { oldN = +h[1]; newN = +h[2]; rows.push(`<div class="dl dl-hunk"><span class="ln"></span><span class="code">${esc(l)}</span></div>`); continue; }
+      if (/^(---|\+\+\+) /.test(l)) continue;
+      if (l.startsWith('+')) { adds++; rows.push(`<div class="dl dl-add"><span class="ln">${newN++}</span><span class="code">${esc(l)}</span></div>`); }
+      else if (l.startsWith('-')) { dels++; rows.push(`<div class="dl dl-del"><span class="ln">${oldN++}</span><span class="code">${esc(l)}</span></div>`); }
+      else { rows.push(`<div class="dl dl-ctx"><span class="ln">${newN++}</span><span class="code">${esc(l)}</span></div>`); oldN++; }
+    }
+    box.innerHTML = `<div class="dl-hdr"><span class="add">+${adds}</span>  <span class="del">−${dels}</span></div>` + rows.slice(0, MAXL).join('');
+    body.appendChild(box);
+    if (rows.length > MAXL) {
+      const m = document.createElement('div'); m.className = 'diff-more';
+      m.textContent = `… +${rows.length - MAXL} more lines`;
+      body.appendChild(m);
+    }
+    return true;
+  }
   const edits = Array.isArray(args.edits) ? args.edits : [];
   if (!edits.length) return false;
   edits.forEach((ed, i) => {
@@ -9056,6 +9081,7 @@ async function refreshState() {
     }
     // Live endpoint is the source of truth for local-vs-cloud + the brand label.
     STATE.endpoint = s.endpoint || '';
+    STATE.elsewhere = s.elsewhere || null;
     // Facts the background pass remembered after a reply had finished.
     for (const f of (s.facts_saved || [])) {
       if (STATE._factsSeen == null) { STATE._factsSeen = f.at; continue; }      // nothing old on opening
@@ -9482,16 +9508,24 @@ function applyThinkButton() {
   const menu = document.getElementById('think-menu');
   if (menu) {
     const cur = _thinkIndex();
-    menu.querySelectorAll('.think-menu-item').forEach((el, i) => {
+    menu.querySelectorAll('.think-menu-item:not([data-fast])').forEach((el, i) => {
       el.classList.toggle('sel', i === cur);
       const t = el.querySelector('.tick');
       if (t) t.textContent = i === cur ? '✓' : '';
     });
+    const f = menu.querySelector('.think-fast');
+    if (f) f.querySelector('.tick').textContent = f.classList.contains('on') ? '✓' : '';
   }
 }
 
 // Rebuilt whenever the brain changes, so switching from a cloud model to a
 // local one takes the effort tiers away instead of leaving a stale menu.
+function _agentFast() {
+  const info = STATE.agentInfo;
+  if (!info || !STATE.brain || info.provider !== STATE.brain.providerKey) return '';
+  const m = (info.models || []).find(x => x.id === (info.model || ''));
+  return (m && m.fast) || '';
+}
 function renderThinkMenu() {
   const menu = document.getElementById('think-menu');
   if (!menu) return;
@@ -9500,6 +9534,12 @@ function renderThinkMenu() {
     `<button class="think-menu-item" data-think="${i}">`
     + `<span class="tick"></span>`
     + `<span>${o.label} <span class="sub">${o.sub}</span></span></button>`).join('');
+  // An agent model with a Fast tier (Codex's: quicker, uses more of the plan)
+  // gets a switch for it under the levels.
+  const fast = _agentFast();
+  if (fast) menu.insertAdjacentHTML('beforeend', `<div class="think-menu-sep"></div>`
+    + `<button class="think-menu-item think-fast${STATE.agentInfo.fast_on ? ' on' : ''}" data-fast="1" role="switch" aria-checked="${!!STATE.agentInfo.fast_on}">`
+    + `<span class="tick"></span><span>Fast <span class="sub">${esc(fast)}</span></span></button>`);
   // A level carried over from a cloud brain would keep showing in the button
   // against a local one, which is the wrong label rather than a stale menu.
   if (opts.length && !opts.some(o => o.level === (STATE.thinkLevel || ''))) {
@@ -9520,6 +9560,16 @@ function renderThinkMenu() {
   menu.addEventListener('click', (e) => {
     const it = e.target.closest('.think-menu-item');
     if (!it) return;
+    if (it.dataset.fast) {
+      const on = !it.classList.contains('on');
+      it.classList.toggle('on', on);
+      it.setAttribute('aria-checked', String(on));
+      STATE.agentInfo.fast_on = on;
+      it.querySelector('.tick').textContent = on ? '✓' : '';
+      saveSetting('fast_' + STATE.agentInfo.provider, on).catch(() => {});
+      toast(on ? 'Fast is on' : 'Fast is off', on ? _agentFast() : 'Back to the usual speed.', 'ok', 3000);
+      return;
+    }
     const o = _thinkOptions()[Number(it.dataset.think) || 0];
     if (!o) return;
     STATE.thinking = o.on;
@@ -19212,14 +19262,22 @@ function roomMainIdleSpot(p) {
 }
 // Working on a turn. Loading or ejecting a model, "ready" and the like are
 // the app's business, not JARVIS thinking.
+// What JARVIS is doing: here, or else in the terminal when a turn runs there.
+const _BUSY = /^(thinking|calling|writing|processing|compacting|transcribing)/;
+function roomMainState() {
+  const here = String(window._mainState || 'idle');
+  if (_BUSY.test(here) || !STATE.elsewhere) return here;
+  return String(STATE.elsewhere.state || 'idle');
+}
+function roomMainElsewhere() { return !_BUSY.test(String(window._mainState || '')) && !!STATE.elsewhere; }
 function roomMainBusy() {
-  return /^(thinking|calling|writing|processing|compacting|transcribing)/.test(String(window._mainState || ''));
+  return _BUSY.test(roomMainState());
 }
 function roomHasBrain() {
   return !!(STATE.loadedModel && STATE.loadedModel.id) || !!(STATE.brain && STATE.brain.kind && STATE.brain.kind !== 'local');
 }
 function roomMainGoal(p) {
-  const ms = String(window._mainState || 'idle');
+  const ms = roomMainState();
   const busy = roomMainBusy();
   const now = Date.now();
   if (busy && !p.wasBusy) { p.turn = (p.turn || 0) + 1; p.desk = null; p.pace = null; p.deskUntil = 0; }
@@ -19365,12 +19423,13 @@ const ROOM_DOING = { folder: 'Looking in a folder', search: 'Searching', file: '
   monitor: 'Using the desktop', users: 'Asking a helper', handoff: 'Handing off a task', plugin: 'Using a plugin' };
 function roomMainLine() {
   if (pendingPermId) return _spokenPermQuestion(pendingPermTool, pendingPermArgs).replace(/\s*Should I\?.*$/, '') + ' Okay?';
-  const ms = String(window._mainState || 'idle');
+  const ms = roomMainState();
   if (/^loading/.test(ms)) return 'Waking up…';
   if (!roomMainBusy()) return '';
   const m = /^(?:calling|writing)\s+(\w+)/.exec(ms);
   if (m && /^memory_(save|update|write)|^remember/.test(m[1])) return 'Noting that down…';
-  return (m ? (ROOM_DOING[_toolKind(m[1])] || 'Working') : 'Thinking') + '…';
+  const line = (m ? (ROOM_DOING[_toolKind(m[1])] || 'Working') : 'Thinking') + '…';
+  return roomMainElsewhere() ? line + ' (in the terminal)' : line;
 }
 // What a working helper has in its hands, in a few words: the tool and what it
 // is pointed at.

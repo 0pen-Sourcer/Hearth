@@ -323,6 +323,16 @@ def chosen_model(provider: str) -> str:
         return ""
 
 
+def fast_on(provider: str) -> bool:
+    """Whether the agent's Fast tier was switched on for it (quicker answers
+    that use more of the plan)."""
+    try:
+        from .web import _load_settings
+        return bool(_load_settings().get("fast_" + provider))
+    except Exception:
+        return False
+
+
 def chosen_effort() -> str:
     """The think button's level, when it's on. Empty: the agent's own default."""
     try:
@@ -364,7 +374,7 @@ def agent_models(provider: str) -> Dict[str, Any]:
     else:
         models = []
     return {"provider": provider, "label": BRAINS.get(provider, provider), "models": models,
-            "model": chosen_model(provider), "effort": chosen_effort()}
+            "model": chosen_model(provider), "effort": chosen_effort(), "fast_on": fast_on(provider)}
 
 
 def context_window(provider: Optional[str] = None) -> Optional[int]:
@@ -689,8 +699,11 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
 
     hist = list(history or [])
     while True:
+        # Codex takes what is said part-way into the running turn; Cursor gets
+        # it as the next step, below.
+        extra = {"drain_steer": drain_steer} if other == "codex_brain" else {}
         rc = await mod.run_turn(prompt, emit=relay, history=hist, permission_check=permission_check,
-                                should_cancel=should_cancel, voice=voice)
+                                should_cancel=should_cancel, voice=voice, **extra)
         said, news = [], []
         while rc == 0 and not (should_cancel and should_cancel()):
             said, news = _said(drain_steer), helper_news(emit)

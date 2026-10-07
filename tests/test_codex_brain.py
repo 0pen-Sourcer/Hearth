@@ -57,12 +57,15 @@ cb.current = lambda: "codex"
 with open(os.path.join(codex_home, "models_cache.json"), "w", encoding="utf-8") as _f:
     json.dump({"models": [{"slug": "gpt-test", "display_name": "GPT-Test", "visibility": "list", "context_window": 272000,
                            "supported_reasoning_levels": [{"effort": "low", "description": "Fast responses with lighter reasoning"},
-                                                          {"effort": "ultra", "description": "Maximum reasoning"}]},
+                                                          {"effort": "ultra", "description": "Maximum reasoning"}],
+                           "service_tiers": [{"id": "priority", "name": "Fast", "description": "2x speed, increased usage"}]},
                           {"slug": "hidden", "visibility": "hide"}]}, _f)
 _listed = cx.models()
 check("Codex's models are its own list, with its effort levels and what each is for",
       [m["id"] for m in _listed] == ["", "gpt-test"] and _listed[1]["efforts"] == ["low", "ultra"]
       and _listed[1]["effort_about"]["low"] == "Fast responses with lighter reasoning" and _listed[1]["ctx"] == 272000)
+check("and which have a Fast tier, in Codex's words, with the tier to ask for",
+      _listed[1]["fast"] == "2x speed, increased usage" and cx.fast_tier("gpt-test") == "priority")
 argv_log = os.path.join(work, "argv.jsonl")
 fake = os.path.join(work, "fake_codex.py")
 with open(fake, "w", encoding="utf-8") as f:
@@ -97,6 +100,8 @@ def turn(prompt, history):
     return events
 
 
+# The stand-in above speaks `codex exec`; the app server comes further down.
+os.environ["HEARTH_CODEX_EXEC"] = "1"
 tools.approval_mode = lambda: "ask"
 ev = turn("hello", [])
 chunks = "".join(f["content"] for t, f in ev if t == "assistant_chunk")
@@ -152,6 +157,123 @@ cb.exe_for = lambda p: None
 ev = turn("hi", [])
 check("without Codex installed it says how to get it",
       any(t == "error" and "isn't installed" in f["message"] for t, f in ev))
+
+# The app server: text streams as it is written, Codex asks Hearth before each
+# command and file change, and something said part-way reaches the running turn.
+os.environ.pop("HEARTH_CODEX_EXEC", None)
+app_log = os.path.join(work, "app.jsonl")
+fake_app = os.path.join(work, "fake_app.py")
+with open(fake_app, "w", encoding="utf-8") as f:
+    f.write(f"""import json, sys
+log = open({app_log!r}, "a")
+out = lambda o: print(json.dumps(o), flush=True)
+def read():
+    line = sys.stdin.readline()
+    if not line.strip():
+        return None
+    m = json.loads(line)
+    log.write(json.dumps(m) + "\\n"); log.flush()
+    return m
+log.write(json.dumps({{"argv": sys.argv[1:]}}) + "\\n"); log.flush()
+while True:
+    m = read()
+    if m is None:
+        break
+    meth = m.get("method")
+    if meth == "initialize":
+        out({{"id": m["id"], "result": {{}}}})
+    elif meth in ("thread/start", "thread/resume"):
+        out({{"id": m["id"], "result": {{"thread": {{"id": m["params"].get("threadId") or "th-app"}}}}}})
+    elif meth == "turn/start":
+        text = m["params"]["input"][0]["text"]
+        out({{"id": m["id"], "result": {{"turn": {{"id": "tu-1", "status": "inProgress"}}}}}})
+        T = {{"threadId": "th-app", "turnId": "tu-1"}}
+        if "steer me" in text:
+            s = read()
+            out({{"id": s["id"], "result": {{}}}})
+            heard = s["params"]["input"][0]["text"]
+            out({{"method": "item/completed", "params": {{**T, "item": {{"type": "agentMessage", "id": "m9", "text": "Heard: " + heard}}}}}})
+            out({{"method": "turn/completed", "params": {{"threadId": "th-app", "turn": {{"id": "tu-1", "status": "completed"}}}}}})
+            continue
+        out({{"method": "item/started", "params": {{**T, "item": {{"type": "agentMessage", "id": "m1", "text": ""}}}}}})
+        for d in ("Hel", "lo."):
+            out({{"method": "item/agentMessage/delta", "params": {{**T, "itemId": "m1", "delta": d}}}})
+        out({{"method": "item/completed", "params": {{**T, "item": {{"type": "agentMessage", "id": "m1", "text": "Hello."}}}}}})
+        out({{"method": "item/started", "params": {{**T, "item": {{"type": "commandExecution", "id": "c0", "command": "dir", "commandActions": [], "status": "inProgress"}}}}}})
+        cmd = {{"type": "commandExecution", "id": "c1", "command": "powershell.exe -Command 'echo hi'",
+               "commandActions": [{{"type": "unknown", "command": "echo hi"}}], "status": "inProgress"}}
+        out({{"method": "item/started", "params": {{**T, "item": cmd}}}})
+        out({{"id": 900, "method": "item/commandExecution/requestApproval", "params": {{**T, "itemId": "c1", "command": cmd["command"], "commandActions": cmd["commandActions"]}}}})
+        first = read()
+        out({{"id": 901, "method": "item/commandExecution/requestApproval", "params": {{**T, "itemId": "c1", "command": cmd["command"], "commandActions": cmd["commandActions"], "reason": "outside the sandbox"}}}})
+        second = read()
+        ok = first["result"]["decision"] == "accept" and second["result"]["decision"] == "accept"
+        out({{"method": "item/completed", "params": {{**T, "item": {{**cmd, "status": "completed" if ok else "declined", "aggregatedOutput": "hi" if ok else None, "exitCode": 0 if ok else None}}}}}})
+        fc = {{"type": "fileChange", "id": "f1", "status": "inProgress",
+              "changes": [{{"path": "notes.txt", "kind": {{"type": "update"}}, "diff": "@@ -1 +1 @@\\n-old\\n+new\\n"}}]}}
+        out({{"method": "item/started", "params": {{**T, "item": fc}}}})
+        out({{"id": 902, "method": "item/fileChange/requestApproval", "params": {{**T, "itemId": "f1"}}}})
+        third = read()
+        out({{"method": "item/completed", "params": {{**T, "item": {{**fc, "status": "completed" if third["result"]["decision"] == "accept" else "declined"}}}}}})
+        out({{"method": "thread/tokenUsage/updated", "params": {{**T, "tokenUsage": {{"last": {{"inputTokens": 900, "outputTokens": 12}}}}}}}})
+        out({{"method": "turn/completed", "params": {{"threadId": "th-app", "turn": {{"id": "tu-1", "status": "completed"}}}}}})
+""")
+cb.exe_for = lambda p: [sys.executable, fake_app] if p == "codex" else _real_exe_for(p)
+asked = []
+
+
+def app_turn(prompt, history=None, steer=None, edits_ok=True):
+    events = []
+    said = list(steer or [])
+
+    def check_(name, args):
+        asked.append((name, args))
+        return "allow" if name == "run_command" or edits_ok else "deny"
+    asyncio.run(cb.run_turn(prompt, emit=lambda t, **f: events.append((t, f)), history=history or [],
+                            permission_check=check_, drain_steer=lambda: [said.pop(0)] if said else []))
+    return events
+
+
+tools.approval_mode = lambda: "ask"
+asked.clear()
+ev = app_turn("hello there", edits_ok=False)
+chunks = [f["content"] for t, f in ev if t == "assistant_chunk"]
+check(f"Codex's reply streams as it is written {chunks}", chunks[:2] == ["Hel", "lo."])
+check(f"Hearth is asked once for a command Codex asks about twice {asked}",
+      [a for a in asked if a[0] == "run_command"] == [("run_command", {"command": "echo hi"})])
+check("a file change is asked about with its diff",
+      ("edit_file", {"path": "notes.txt", "diff": "@@ -1 +1 @@\n-old\n+new\n"}) in asked)
+check("and shows as a diff card", any(t == "tool_call" and f["name"] == "edit_file" and "+new" in f["args"].get("diff", "")
+                                      for t, f in ev))
+check("a change the user turned down is not made, and says so",
+      any(t == "tool_result" and f["name"] == "edit_file" and "not changed" in f["content"] for t, f in ev))
+check("the command's output comes back", any(t == "tool_result" and f["name"] == "run_command" and f["content"] == "hi" for t, f in ev))
+check("a command Codex started and dropped leaves no card behind",
+      not any(f.get("id") == "c0" for t, f in ev if t in ("tool_call", "tool_result")))
+app = [json.loads(l) for l in open(app_log, encoding="utf-8")]
+start = next(m for m in app if m.get("method") == "thread/start")["params"]
+check(f"Codex runs as an app server, asking Hearth before it does anything {app[0]}",
+      app[0]["argv"][0] == "app-server" and start["approvalPolicy"] == "untrusted" and start.get("developerInstructions"))
+check("the turn ends with done and its token counts",
+      ev[-1][0] == "done" and ev[-1][1]["stats"]["tokens_in"] == 900)
+ev = app_turn("steer me please", steer=["use tabs"])
+check("something said part-way reaches the running turn",
+      any(t == "steered" for t, f in ev) and any(t == "assistant" and "Heard: use tabs" in f["content"] for t, f in ev)
+      and any(m.get("method") == "turn/steer" and m["params"]["expectedTurnId"] == "tu-1" for m in
+              (json.loads(l) for l in open(app_log, encoding="utf-8"))))
+cb.fast_on = lambda p: True
+_cx.fast_tier = lambda m: "priority"
+app_turn("hello again")
+last_turn = [json.loads(l) for l in open(app_log, encoding="utf-8") if '"turn/start"' in l][-1]
+check("Fast asks Codex for its priority tier", last_turn["params"].get("serviceTier") == "priority")
+dead = os.path.join(work, "dead_app.py")
+open(dead, "w").write("import sys; sys.exit(0)")
+cb.exe_for = lambda p: [sys.executable, dead] if p == "codex" else _real_exe_for(p)
+import time as _time                                                  # noqa: E402
+t0 = _time.time()
+ev = app_turn("hi")
+check(f"a Codex without the app server falls back at once ({_time.time() - t0:.1f}s)", _time.time() - t0 < 10)
+cb.exe_for = lambda p: None
 
 # Hearth's MCP server as Codex starts it: risky tools ask Hearth first.
 answers = []

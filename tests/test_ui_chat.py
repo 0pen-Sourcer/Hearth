@@ -610,6 +610,33 @@ with sync_playwright() as pw:
           home["first"] == "winter" and home["second"] == "cabin" and home["card"])
     check("a room change wipes in, or is instant when that is picked", home["wiped"] and home["instant"])
 
+    # A turn running in the terminal left the window's room asleep at the fire.
+    away = pg.evaluate("""() => {
+      const was = window._mainState;
+      window._mainState = 'idle';
+      STATE.elsewhere = { surface: 'terminal', state: 'calling web_search', tool: 'web_search' };
+      const busy = roomMainBusy(), line = roomMainLine();
+      STATE.elsewhere = null;
+      const after = roomMainLine();
+      window._mainState = was;
+      return { busy, line, after };
+    }""")
+    check(f"a turn running in the terminal shows in the window's room {away}",
+          away["busy"] and away["line"].endswith("(in the terminal)") and away["after"] == "")
+
+    # A file Codex changed showed as a path and nothing else; its patch is a
+    # unified diff, and the card draws it like any other edit.
+    card = pg.evaluate("""() => {
+      const body = document.createElement('div');
+      const ok = fillEditCard('edit_file', { path: 'notes.txt', diff: '@@ -3,2 +3,2 @@\\n keep\\n-old line\\n+new line\\n' }, body);
+      return { ok, head: (body.querySelector('.dl-hdr') || {}).textContent,
+               add: [...body.querySelectorAll('.dl-add')].map(r => r.textContent),
+               del: [...body.querySelectorAll('.dl-del')].map(r => r.textContent) };
+    }""")
+    check(f"a change an agent program made shows as a diff {card}",
+          card["ok"] and "+1" in card["head"] and "1" in card["head"]
+          and card["add"] == ["4+new line"] and card["del"] == ["4-old line"])
+
     # The side walk read as skipping: the passing frames (back foot well up)
     # were on screen as long as the steps.
     gait = pg.evaluate("""() => {
