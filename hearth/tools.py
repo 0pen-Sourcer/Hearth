@@ -795,9 +795,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "message_helper",
         "description":
             "For a helper: ask or tell another helper that is working at the same "
-            "time, by name. Use it when their part of the job touches yours: a file "
-            "they hold, a fact they are looking up, a change that affects them. Set "
-            "wait_for_reply to wait for their answer (up to 5 minutes).",
+            "time, by name, or the assistant that sent you (to: 'JARVIS'). Use it when "
+            "their part of the job touches yours, or to send word part-way: something "
+            "found that changes the plan, or a question only they can answer. Set "
+            "wait_for_reply to wait for a helper's answer (up to 5 minutes).",
         "parameters": {
             "type": "object",
             "properties": {

@@ -100,6 +100,16 @@ check("Rosa's steps show the question", any(s.get("from") == "Noah" for s in ros
 talk = {a["id"]: a for a in subagents.team_state()}[noah]["talk"]
 check(f"the room hears who talked to whom {talk}", talk and talk["to_id"] == rosa and "API X" in talk["text"])
 
+# Word for JARVIS part-way, not only a report at the end.
+subagents.drain_pending_notifications()
+r = asyncio.run(subagents.message_helper(noah, "Noah", {"to": "JARVIS", "text": "The parser has a second bug in dates; fixing it too."}))
+news = [n for n in subagents.drain_pending_notifications() if n.get("agent_id") == noah]
+check(f"a helper can send word to JARVIS while it works {r}", r["ok"] and news and news[0]["status"] == "update")
+check("JARVIS reads it as an update from a helper still working, not as its result",
+      news and "still working" in subagents.format_notification_as_user_message(news[0]))
+check("the room sees Noah go and tell JARVIS",
+      {a["id"]: a for a in subagents.team_state()}[noah]["talk"]["to_id"] == "__main")
+
 # No one by that name, and no talking in circles.
 r = asyncio.run(subagents.message_helper(noah, "Noah", {"to": "Zed", "text": "hi"}))
 check(f"a name that isn't working says who is {r}", not r["ok"] and "Rosa" in r["error"])

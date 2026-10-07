@@ -107,7 +107,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `helper_changes` † | See or act on what a finished helper changed on disk |
 | `launch_team` † | Spawn a TEAM of sub-agents that work in parallel and open a live terminal pane for each so the user can WATCH them build side by side (Windows Terminal panes /… |
 | `list_subagent_personas` † | List the personas available for spawn_subagent |
-| `message_helper` † | For a helper: ask or tell another helper that is working at the same time, by name |
+| `message_helper` † | For a helper: ask or tell another helper that is working at the same time, by name, or the assistant that sent you (to: 'JARVIS') |
 | `race_helpers` † | Give one coding task to two or more agent programs at once (say codex and claude-code), each on its own copy of a git repository, to compare their work |
 | `spawn_subagent` | Start a scoped sub-agent (see list_subagent_personas for personas) |
 | `tell_subagent` † | Give a helper that is still working a message: a correction, an extra detail, a change of direction |

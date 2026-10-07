@@ -465,6 +465,10 @@ def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
     elif src == "command":
         lead = ("A command you ran earlier outlived its wait, carried on in the background "
                 "and has now ended; its output is below. Continue with it")
+    elif src == "update":
+        lead = ("A helper you dispatched is still working and sent you word part-way; it is "
+                "below. Use it, answer with tell_subagent if it asks something, and keep "
+                "waiting for its final report")
     elif src in ("schedule", "cron", "timer"):
         lead = ("A scheduled background event you set up has fired; its details "
                 "are below. Act on it for the user")
@@ -1214,6 +1218,16 @@ def tell_subagent(agent_id: str, message: str, sender: str = "the user", reply_t
 # How many messages one helper may send in a task, so two can't talk in circles.
 MESSAGES_PER_HELPER = 12
 _SENT: Dict[str, int] = {}
+# What a helper calls whoever sent it.
+_PARENT_NAMES = {"jarvis", "parent", "main", "the assistant", "assistant", "boss"}
+
+
+def _main_name() -> str:
+    try:
+        from .persona import NAME
+        return NAME
+    except Exception:
+        return "JARVIS"
 
 
 def _working_helper(target: str, sender_id: str) -> Optional[Dict[str, Any]]:
@@ -1233,14 +1247,24 @@ async def message_helper(sender_id: str, sender_name: str, args: Dict[str, Any])
     to, text = str(args.get("to") or "").strip(), str(args.get("text") or args.get("message") or "").strip()
     if not to or not text:
         return {"ok": False, "error": "say who it is for (to) and what to tell them (text)"}
+    if _SENT.get(sender_id, 0) >= MESSAGES_PER_HELPER:
+        return {"ok": False, "error": "you have sent enough messages for this task; finish with what you have"}
+    if to.lower() in _PARENT_NAMES or to.lower() == _main_name().lower():
+        # Word for whoever sent it, part-way: it reaches JARVIS the way a report does.
+        _SENT[sender_id] = _SENT.get(sender_id, 0) + 1
+        with _NOTIF_LOCK:
+            _PENDING_NOTIFICATIONS.append({
+                "agent_id": sender_id, "source": "update", "persona": "", "name": sender_name, "status": "update",
+                "summary": text[:200], "result_text": text, "transcript_path": str(_transcript_path(sender_id)),
+                "elapsed_s": None, "turns": None, "used_tools": []})
+        _append_transcript(_transcript_path(sender_id), {"kind": "sent", "to": _main_name(), "to_id": "__main", "text": text[:600]})
+        return {"ok": True, "note": "Sent. Keep working; if they answer, it reaches you before your next step."}
     peer = _working_helper(to, sender_id)
     if not peer:
         here = [a.get("name") or a.get("persona") for a in team_state()
                 if a["status"] == "working" and a["id"] != sender_id]
         return {"ok": False, "error": f"no helper called '{to}' is working now"
                 + (f"; working now: {', '.join(here)}" if here else "; no one else is working")}
-    if _SENT.get(sender_id, 0) >= MESSAGES_PER_HELPER:
-        return {"ok": False, "error": "you have sent enough messages for this task; finish with what you have"}
     peer_name = peer.get("name") or peer.get("persona") or "them"
     got = tell_subagent(peer["id"], text, sender=sender_name, reply_to=sender_name)
     if not got.get("ok"):
