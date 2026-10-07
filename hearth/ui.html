@@ -1299,29 +1299,6 @@
   .gen-stats.gen-stats-live { opacity: 0.7; max-height: 2em; pointer-events: none; animation: liveStatPulse 1.4s ease-in-out infinite; }
   @keyframes liveStatPulse { 0%,100% { opacity: 0.45; } 50% { opacity: 0.8; } }
 
-  /* "You steered mid-turn" — renders as a labeled divider (———— ↩ steering ————)
-     INSIDE the same reply bubble, so the redirected continuation is clearly
-     separated from the text before it without spawning a whole new JARVIS bubble
-     + avatar. Muted + italic so it reads as an aside, not a user turn. */
-  .meta.steer-chip {
-    font-style: italic;
-    opacity: 0.7;
-    width: 92%;
-    margin: 10px auto;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .meta.steer-chip::before,
-  .meta.steer-chip::after {
-    content: "";
-    flex: 1;
-    height: 1px;
-    background: var(--border);
-  }
-
   /* Input row */
   .input-row {
     border-top: 1px solid var(--border);
@@ -6999,6 +6976,8 @@ function renderChat() {
           appendPart(makeMediaBlock(ev.mediaKind, ev.path), msgDiv);
         } else if (ev.kind === 'subagent_done') {
           appendPart(makeSubagentCard(ev), msgDiv);
+        } else if (ev.kind === 'steer') {
+          appendPart(makeSteerNote(ev.text || '', false), msgDiv);
         } else if (ev.kind === 'error') {
           appendPart(makeMeta(ev.text || 'error', 'err'), msgDiv);
         }
@@ -9336,12 +9315,21 @@ document.addEventListener('click', (e) => {
 // arrives (the backend drains the queue in order, so oldest chip = first
 // delivered). Cleared at turn end so stale refs never pile up.
 let _steerChips = [];
+// Something said part-way through a reply: shown where it went in, as the
+// person's own words inside the reply, and kept with the chat.
+function makeSteerNote(text, waiting) {
+  const d = document.createElement('div');
+  d.className = 'steer-note' + (waiting ? ' waiting' : '');
+  d.innerHTML = `<span class="steer-who">You, part-way${waiting ? '<em> · waiting for its next step</em>' : ''}</span>`;
+  const q = document.createElement('div'); q.className = 'steer-text'; q.textContent = text;
+  d.appendChild(q);
+  return d;
+}
 async function steerMessage(text) {
   text = (text || '').trim();
   if (!text) return;
   const chatBody = $('chat-body');
-  const chip = makeMeta('↩ steering · ' + text, 'ok');
-  chip.classList.add('steer-chip');
+  const chip = makeSteerNote(text, true);
   if (chatBody) { chatBody.appendChild(chip); chatBody.scrollTop = chatBody.scrollHeight; }
   _steerChips.push(chip);
   try {
@@ -9352,14 +9340,17 @@ async function steerMessage(text) {
     if (!r.ok) throw new Error('steer ' + r.status);
   } catch (e) {
     _steerChips = _steerChips.filter(c => c !== chip);
-    chip.classList.remove('ok'); chip.classList.add('warn');
-    chip.textContent = '↩ steer failed — send again when it finishes';
+    chip.classList.add('failed');
+    chip.querySelector('.steer-who').textContent = "Didn't reach it. Send it again when it finishes.";
   }
 }
-// Flush the oldest pending steer chip — its message reached the model.
-function _flushSteerChip() {
+// The oldest waiting note reached the model: it moves into the reply at this
+// point and stays there.
+function _flushSteerChip(live, text) {
   const chip = _steerChips.shift();
   if (chip && chip.parentNode) chip.remove();
+  const note = makeSteerNote(text || (chip && chip.querySelector('.steer-text').textContent) || '', false);
+  if (live) appendPart(note, live); else $('chat-body').appendChild(note);
 }
 
 // Reasoning effort was a dropdown buried in Settings while the chat had a plain
@@ -10473,7 +10464,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // Backend confirmed the queued steer reached the model — flush its chip so
       // it doesn't sit pinned at the bottom of the chat forever. The model's
       // response now carries the redirect.
-      _flushSteerChip();
+      _flushSteerChip(live, ev.text);
+      assistantMsg.events.push({ kind: 'steer', text: ev.text || '', pos: assistantMsg.content.length });
       // Seal the current text block so the redirected continuation opens a FRESH
       // block below the chip, instead of running straight into the previous
       // sentence ("...let me know.Got it, I will see through...").

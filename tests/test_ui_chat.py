@@ -457,6 +457,33 @@ with sync_playwright() as pw:
     check(f"with two tools running at once, each result lands on its own call {paired}",
           paired == [["read_file", "what a.txt says"], ["grep_search", "3 matches"]])
 
+    # Something said part-way showed as green text until the model took it,
+    # then vanished; later there was no way to see what had changed course.
+    steer_stream = "\n".join(json.dumps(e) for e in [
+        {"type": "assistant_chunk", "content": "Writing it with spaces. "},
+        {"type": "steered", "text": "use tabs instead"},
+        {"type": "assistant_chunk", "content": "Switched to tabs."},
+        {"type": "assistant", "content": "Writing it with spaces. Switched to tabs."},
+        {"type": "done", "duration_ms": 10, "iterations": 1, "reason": "finished"}]) + "\n"
+    pg.route("**/chat", lambda r: r.fulfill(status=200, content_type="application/x-ndjson", body=steer_stream))
+    steer = pg.evaluate("""async () => {
+      const c = newConversation();
+      STATE.loadedModel = { id: 'x', state: 'loaded' };
+      document.getElementById('input').value = 'write the file';
+      await send();
+      await new Promise(r => setTimeout(r, 400));
+      const live = [...document.querySelectorAll('#chat-body .steer-note .steer-text')].map(e => e.textContent);
+      const saved = (c.messages[c.messages.length - 1].events || []).filter(e => e.kind === 'steer').map(e => e.text);
+      renderChat();
+      await new Promise(r => setTimeout(r, 200));
+      const again = [...document.querySelectorAll('#chat-body .steer-note .steer-text')].map(e => e.textContent);
+      return { live, saved, again };
+    }""")
+    pg.unroute("**/chat")
+    check(f"something said part-way stays in the reply, saved with the chat {steer}",
+          steer["live"] == ["use tabs instead"] and steer["saved"] == ["use tabs instead"]
+          and steer["again"] == ["use tabs instead"])
+
     # Facts the background pass saved after a reply had finished never reached
     # the window: the reply's stream was already closed. The state poll carries them.
     from hearth import memory_extract as _mx
