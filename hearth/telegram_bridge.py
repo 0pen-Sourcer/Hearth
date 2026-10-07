@@ -287,4 +287,6 @@ def run() -> None:
 
 
 if __name__ == "__main__":
+    from .bridge_status import follow_parent
+    follow_parent()
     run()

@@ -11,7 +11,8 @@ Discord (`rich=True`) tool names are wrapped in `code` and the header bolded so
 they stay visually distinct; Telegram gets the same content in plain text.
 
 `files_in` finds the local files a reply names, which every bridge sends back
-as attachments.
+as attachments. `follow_parent` ends a bridge when the Hearth that started it
+is gone.
 """
 from __future__ import annotations
 
@@ -113,3 +114,42 @@ def files_in(text: str, max_bytes: int, limit: int = 4) -> list:
             seen.add(key)
             out.append(p)
     return out[:limit]
+
+
+def _alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)     # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(h)
+        return bool(ok) and code.value == 259                            # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def follow_parent(every: float = 5.0) -> None:
+    """End this bridge when the Hearth that started it has gone. Otherwise it
+    keeps answering on its own, and the next Hearth starts a second one on the
+    same bot, so every message gets two replies."""
+    try:
+        pid = int(os.environ.get("HEARTH_PARENT_PID") or 0)
+    except ValueError:
+        pid = 0
+    if not pid:
+        return
+    import threading
+    import time
+
+    def watch():
+        while True:
+            time.sleep(every)
+            if not _alive(pid):
+                os._exit(0)
+
+    threading.Thread(target=watch, daemon=True, name="follow-parent").start()

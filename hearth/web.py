@@ -271,6 +271,8 @@ def _spawn_bridge(ch: str) -> Tuple[bool, Optional[str]]:
     # what explains a bridge that died on start.
     log_path = _bridge_log_path(ch)
     env["PYTHONUNBUFFERED"] = "1"
+    # It ends when this process does (bridge_status.follow_parent).
+    env["HEARTH_PARENT_PID"] = str(os.getpid())
     # The log is read as UTF-8; Windows would otherwise write its own code page.
     env["PYTHONIOENCODING"] = "utf-8"
     with open(log_path, "a", encoding="utf-8", errors="replace") as log:
