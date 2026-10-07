@@ -170,6 +170,20 @@ if far:
           and [m["id"] for m in listed if m["state"] == "loaded"] == ["newest-chat"])
     check("a provider's model ids are kept whole", "vendor/slashed-chat" in [m["id"] for m in listed])
 
+    # A one-word ask ("haiku", "opus") matched nothing and fell to the first
+    # model listed, so "haiku" ran on Sonnet.
+    from hearth import headless as _hl
+    real_list = _hl.provider_models
+    _hl.provider_models = lambda b, k: ["claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5",
+                                        "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"]
+    try:
+        asked = {w: _hl.settle_model("https://api.anthropic.com/v1/", "k", w) for w in ("haiku", "opus", "sonnet 4.5", "gpt")}
+    finally:
+        _hl.provider_models = real_list
+    check(f"a one-word model name finds that model, the newest of its kind {asked}",
+          asked == {"haiku": "claude-haiku-4-5-20251001", "opus": "claude-opus-5-5",
+                    "sonnet 4.5": "claude-sonnet-4-5-20250929", "gpt": "claude-sonnet-5-5"})
+
     # The brain could not say where a helper should think: "three on GPT, two
     # on Claude" all ran on the main brain.
     from hearth import subagents as _sa

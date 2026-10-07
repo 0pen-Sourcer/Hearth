@@ -365,13 +365,18 @@ def settle_model(base: str, key: str, wanted: str) -> str:
     if hit:
         return hit
     # The nearest relative of the guess ("anthropic/claude-3.5-sonnet" finds the
-    # current Claude Sonnet), not whatever the provider happens to list first.
-    words = set(re.split(r"[-/._: ]+", wanted.lower())) - {""}
-    best, score = listed[0], 1
-    for m in listed:
-        n = len(words & set(re.split(r"[-/._: ]+", m.lower())))
-        if n > score:
-            best, score = m, n
+    # current Claude Sonnet, "haiku" the Haiku), not whatever the provider
+    # happens to list first. A word most of the list shares ("claude") tells
+    # nothing apart; a tie goes to the one listed first, the newest.
+    split = lambda t: set(re.split(r"[-/._: ]+", t.lower())) - {""}
+    names = [split(m) for m in listed]
+    common = {w for w in set().union(*names) if sum(w in n for n in names) > len(listed) / 2} if len(listed) > 2 else set()
+    words = split(wanted) - common
+    best, score = listed[0], 0
+    for m, n in zip(listed, names):
+        hit = len(words & n)
+        if hit > score:
+            best, score = m, hit
     return best
 
 
