@@ -5940,23 +5940,23 @@ async function showMcpJsonModal() {
                     try {
                       const rl = await api('/api/mcp/reload', { method: 'POST' });
                       if (rl && rl.ok === false) {
-                        toast('Saved, but reconnect failed', rl.error || 'restart Hearth to apply', 'warn', 8000);
+                        toast("Saved, but not in use yet", rl.error || 'Restart Hearth to use the new settings.', 'warn', 8000);
                       } else {
                         const n = (rl && rl.servers) || 0;
                         toast('MCP reloaded', n ? `${n} server${n === 1 ? '' : 's'} reconnecting` : 'no servers configured', 'ok', 5000);
                       }
                     } catch (e) {
-                      toast('Saved, but reconnect failed', 'restart Hearth to apply', 'warn', 8000);
+                      toast("Saved, but not in use yet", 'Restart Hearth to use the new settings.', 'warn', 8000);
                     }
                     try { refreshMcpStatus(); } catch {}
                   } else {
-                    toast('Save failed', sv.error || 'unknown', 'err');
+                    toast("Couldn't save", sv.error || "It didn't say why.", 'err');
                   }
-                } catch (e) { toast('Save failed', e.message, 'err'); }
+                } catch (e) { toast("Couldn't save", e.message, 'err'); }
               }
             },
           ]);
-      } catch (e) { toast('Open failed', e.message, 'err'); }
+      } catch (e) { toast("Couldn't open it", e.message, 'err'); }
 }
 
 // Adding an MCP server meant hand-writing JSON with escaped Windows paths, so
@@ -5992,14 +5992,14 @@ async function _mcpSaveAndReload(cfg) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ json: JSON.stringify(cfg, null, 2) }),
     });
-    if (!sv || sv.ok === false) { toast('Save failed', (sv && sv.error) || 'unknown', 'err'); return; }
+    if (!sv || sv.ok === false) { toast("Couldn't save", (sv && sv.error) || "It didn't say why.", 'err'); return; }
     try {
       const rl = await api('/api/mcp/reload', { method: 'POST' });
       const n = (rl && rl.servers) || 0;
       toast('Tool servers saved', n ? (n + (n === 1 ? ' server' : ' servers') + ' connecting') : 'none configured', 'ok', 5000);
-    } catch { toast('Saved, but reconnect failed', 'restart Hearth to apply', 'warn', 8000); }
+    } catch { toast("Saved, but not in use yet", 'Restart Hearth to use the new settings.', 'warn', 8000); }
     try { refreshMcpStatus(); } catch {}
-  } catch (e) { toast('Save failed', e.message, 'err'); }
+  } catch (e) { toast("Couldn't save", e.message, 'err'); }
 }
 
 async function showMcpServersModal() {
@@ -6097,7 +6097,7 @@ async function showMcpServersModal() {
 async function showPermsModal() {
   let p;
   try { p = await api('/api/permissions'); }
-  catch (e) { toast('Perms error', e.message, 'err'); return; }
+  catch (e) { toast("Couldn't read the permissions", e.message, 'err'); return; }
   const post = (b) => api('/api/permission/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
   const row = (n) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border)">
       <span style="font-family:var(--mono);font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis">${esc(n)}</span>
@@ -6196,7 +6196,7 @@ function showPermissionModal(reqId, toolName, argsStr) {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ id: reqId, decision }),
       });
-    } catch (e) { toast('Permission send failed', e.message, 'err'); }
+    } catch (e) { toast("Your answer didn't reach JARVIS", e.message, 'err'); }
     $('modal').classList.remove('open');
   };
   $('modal-title').textContent = `Allow ${toolName}?`;
@@ -6360,7 +6360,7 @@ async function sendPermDecision(decision, reason) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reason ? { id, decision, reason } : { id, decision }),
     });
-  } catch (e) { toast('Permission send failed', e.message, 'err'); }
+  } catch (e) { toast("Your answer didn't reach JARVIS", e.message, 'err'); }
 }
 
 // ----- ask_user inline strip -----
@@ -6418,7 +6418,7 @@ async function sendAskAnswer(choice, isOther) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, choice, other: !!isOther }),
     });
-  } catch (e) { toast('Ask reply failed', e.message, 'err'); }
+  } catch (e) { toast("Your answer didn't reach JARVIS", e.message, 'err'); }
 }
 
 $('ask-close').addEventListener('click', () => {
@@ -7948,7 +7948,7 @@ function makeMediaBlock(kind, path) {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ path }),
         });
-      } catch (err) { toast('Reveal failed', err.message, 'err'); }
+      } catch (err) { toast("Couldn't show it in its folder", err.message, 'err'); }
     });
     wrap.appendChild(img);
   } else {
@@ -7971,7 +7971,7 @@ function makeMediaBlock(kind, path) {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ path }),
         });
-      } catch (err) { toast('Reveal failed', err.message, 'err'); }
+      } catch (err) { toast("Couldn't show it in its folder", err.message, 'err'); }
     });
     wrap.appendChild(vid);
   }
@@ -7993,7 +7993,7 @@ function makeMediaBlock(kind, path) {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ path }),
       });
-    } catch (err) { toast('Reveal failed', err.message, 'err'); }
+    } catch (err) { toast("Couldn't show it in its folder", err.message, 'err'); }
   });
   wrap.appendChild(bar);
   return wrap;
@@ -8775,7 +8775,7 @@ async function switchEndpoint(body) {
     ? ' ' + r.restarted_bridges.map(c => c[0].toUpperCase() + c.slice(1)).join(' and ') + ' moved over too.' : '';
   const probe = body.provider === 'local' && r.local_probe ? r.local_probe.kind : '';
   if (probe === 'remote') {
-    toast('That URL is not local', body.url + ' is a remote/cloud endpoint, not a local server. Pick the matching cloud provider above, or set a localhost URL.', 'warn', 9000);
+    toast("That address isn't on this PC", body.url + ' is a cloud service. Pick its provider above, or use an address on this PC (localhost).', 'warn', 9000);
   } else if (probe === 'none') {
     brainToast('this PC', 'Nothing is serving on ' + body.url + ' yet. Load a model in Models & engine.' + bridges, 'warn');
   } else if (body.provider === 'local') {
@@ -9016,7 +9016,7 @@ $('model-select').addEventListener('change', async (e) => {
           15000,
         );
       } else if (!(r && r.stopped)) {
-        toast('Load failed', (r && r.error) || 'unknown', 'err', 7000);
+        toast("The model didn't load", (r && r.error) || "It didn't say why.", 'err', 7000);
       }
     }
   } catch (err) {
@@ -9026,7 +9026,7 @@ $('model-select').addEventListener('change', async (e) => {
     STATE.brain.modelName = prevLoaded ? prevLoaded.id.split(/[\/\\]/).pop() : '-';
     STATE.loadedModel = prevLoaded || null;
     setState('idle');
-    toast('Load failed', err.message, 'err', 7000);
+    toast("The model didn't load", err.message, 'err', 7000);
   } finally {
     STATE.brain.busy = false;
     _refreshEmptyIfShown();  // load finished (or failed) — repaint out of the white-H loading state
@@ -9077,11 +9077,11 @@ $('btn-eject').addEventListener('click', async () => {
           STATE.brain = prevBrain;
           STATE.loadedModel = prevLoaded;
         }
-        toast(r.ok ? 'Unloaded' : 'Eject failed', r.error || '', r.ok ? 'ok' : 'err');
+        toast(r.ok ? 'Unloaded' : "Couldn't unload it", r.error || '', r.ok ? 'ok' : 'err');
       } catch (e) {
         STATE.brain = prevBrain;
         STATE.loadedModel = prevLoaded;
-        toast('Eject failed', e.message, 'err');
+        toast("Couldn't unload it", e.message, 'err');
       }
       finally {
         STATE.brain.busy = false;
@@ -11111,9 +11111,9 @@ async function handleSlash(raw) {
             touch(c); renderChat();
             toast('Compacted', `${r.compacted} older turns summarized`, 'ok', 2500);
           } else {
-            toast('Compact', (r && r.error) || 'could not compact', 'warn');
+            toast("Couldn't sum up the chat", (r && r.error) || 'Try again in a moment.', 'warn');
           }
-        } catch (e) { toast('Compact failed', e.message, 'err'); }
+        } catch (e) { toast("Couldn't sum up the chat", e.message, 'err'); }
       })();
       return true;
     case '/perms': {
@@ -11130,7 +11130,7 @@ async function handleSlash(raw) {
         const { tools } = await api('/api/tools');
         const body = tools.map(t => `  ${t.name}`).join('\n');
         showModal(`${tools.length} tools available`, body, [{ label: 'Close' }]);
-      } catch (e) { toast('Tools error', e.message, 'err'); }
+      } catch (e) { toast("Couldn't list the tools", e.message, 'err'); }
       return true;
     case '/voice':
       if (arg === 'on' || arg === 'off') {
@@ -11167,7 +11167,7 @@ async function handleSlash(raw) {
           }}),
         });
         toast('Allowed', arg, 'ok');
-      } catch (e) { toast('Allow failed', e.message, 'err'); }
+      } catch (e) { toast("Couldn't allow that folder", e.message, 'err'); }
       return true;
     case '/model':
       if (arg) {
@@ -11181,7 +11181,7 @@ async function handleSlash(raw) {
         const { models } = await api('/api/models');
         const body = models.map(m => `${m.state === 'loaded' ? '●' : '○'} ${m.id}  (${m.arch}, ${m.quantization})`).join('\n');
         showModal('Models', body, [{ label: 'Close' }]);
-      } catch (e) { toast('Models error', e.message, 'err'); }
+      } catch (e) { toast("Couldn't list the models", e.message, 'err'); }
       return true;
     case '/mem':    showView('memory'); return true;
     case '/log':
@@ -11460,7 +11460,7 @@ async function uploadFile(file) {
     _pendingAttachments.push({ name: file.name, path: r.path, isImage, preview: r.preview || '' });
     _renderAttachTray();
   } catch (e) {
-    toast('Upload failed', e.message, 'err', 5000);
+    toast("Couldn't add the file", e.message, 'err', 5000);
   } finally { setState('idle'); }
 }
 
@@ -11538,7 +11538,7 @@ async function refreshMemory() {
     if (MEM_VIEW === 'graph') renderMemGraph(q);
     else if (MEM_VIEW === 'tree') renderMemTree(q);
     else renderMem(q);
-  } catch (e) { toast('Memory error', e.message, 'err'); }
+  } catch (e) { toast("Couldn't read the memory", e.message, 'err'); }
 }
 function renderMem(filter) {
   const list = $('mem-list');
@@ -11577,13 +11577,13 @@ function renderMem(filter) {
           { label: 'Delete', kind: 'danger', onclick: async () => {
             try {
               const dr = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
-              if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || 'no reason given', 'err'); return; }
+              if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || "It didn't say why.", 'err'); return; }
               toast('Deleted', m.name, 'ok');
               refreshMemory(); refreshState();
-            } catch (e) { toast('Delete failed', e.message, 'err'); }
+            } catch (e) { toast("Couldn't delete it", e.message, 'err'); }
           } },
         ]);
-      } catch (e) { toast('Read failed', e.message, 'err'); }
+      } catch (e) { toast("Couldn't read it", e.message, 'err'); }
     });
     div.querySelector('.del').addEventListener('click', () => {
       showModal(`Delete '${m.name}'?`, 'Removes the memory file from ~/Jarvis/memory/.', [
@@ -11592,13 +11592,13 @@ function renderMem(filter) {
           try {
             const r = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
             if (r && r.ok === false) {
-              toast("Couldn't delete it", r.error || 'no reason given', 'err');
+              toast("Couldn't delete it", r.error || "It didn't say why.", 'err');
               return;
             }
             toast('Deleted', m.name, 'ok');
             refreshMemory(); refreshState();
           } catch (e) {
-            toast('Delete failed', e.message, 'err');
+            toast("Couldn't delete it", e.message, 'err');
           }
         }},
       ]);
@@ -11713,13 +11713,13 @@ function renderMemTree(filter) {
           { label: 'Delete', kind: 'danger', onclick: async () => {
             try {
               const dr = await api(`/api/memory/${encodeURIComponent(m.name)}`, { method: 'DELETE' });
-              if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || 'no reason given', 'err'); return; }
+              if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || "It didn't say why.", 'err'); return; }
               toast('Deleted', m.name, 'ok');
               refreshMemory(); refreshState();
-            } catch (e) { toast('Delete failed', e.message, 'err'); }
+            } catch (e) { toast("Couldn't delete it", e.message, 'err'); }
           } },
         ]);
-          } catch (e) { toast('Read failed', e.message, 'err'); }
+          } catch (e) { toast("Couldn't read it", e.message, 'err'); }
         });
         subBody.appendChild(leaf);
       }
@@ -11921,13 +11921,13 @@ function renderMemGraph(filter) {
         { label: 'Delete', kind: 'danger', onclick: async () => {
           try {
             const dr = await api(`/api/memory/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
-            if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || 'no reason given', 'err'); return; }
+            if (dr && dr.ok === false) { toast("Couldn't delete it", dr.error || "It didn't say why.", 'err'); return; }
             toast('Deleted', d.name, 'ok');
             refreshMemory(); refreshState();
-          } catch (e) { toast('Delete failed', e.message, 'err'); }
+          } catch (e) { toast("Couldn't delete it", e.message, 'err'); }
         } },
       ]);
-    } catch (e) { toast('Read failed', e.message, 'err'); }
+    } catch (e) { toast("Couldn't read it", e.message, 'err'); }
   });
 
   // Force simulation: keep nodes apart, pull them toward type-cluster
@@ -12392,8 +12392,8 @@ async function refreshReminders() {
           if (rr.ok) {
             toast('Snoozed 10 min', '', 'ok', 2500);
             refreshReminders();
-          } else { toast('Snooze failed', rr.error || 'unknown', 'err'); }
-        } catch (e) { toast('Snooze failed', e.message, 'err'); }
+          } else { toast("Couldn't snooze it", rr.error || "It didn't say why.", 'err'); }
+        } catch (e) { toast("Couldn't snooze it", e.message, 'err'); }
       };
     });
     box.querySelectorAll('button[data-rcancel]').forEach(b => {
@@ -12406,8 +12406,8 @@ async function refreshReminders() {
           if (rr.ok) {
             toast('Reminder cancelled', '', 'ok', 2500);
             refreshReminders();
-          } else { toast('Cancel failed', rr.error || 'unknown', 'err'); }
-        } catch (e) { toast('Cancel failed', e.message, 'err'); }
+          } else { toast("Couldn't cancel it", rr.error || "It didn't say why.", 'err'); }
+        } catch (e) { toast("Couldn't cancel it", e.message, 'err'); }
       };
     });
   } catch (e) {
@@ -12434,7 +12434,7 @@ async function refreshSkills() {
       instBtn.disabled = true; instBtn.textContent = 'Inspecting…';
       try {
         const m = await api('/api/skills/inspect', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source: src }) });
-        if (!m || !m.ok) { toast('Could not read that skill', (m && m.error) || 'unknown', 'err', 7000); return; }
+        if (!m || !m.ok) { toast("Couldn't read that skill", (m && m.error) || "It didn't say why.", 'err', 7000); return; }
         const lines = [m.description || '(no description)'];
         if (m.scripts && m.scripts.length) lines.push('\nShips scripts: ' + m.scripts.join(', '));
         if (m.risky_tools && m.risky_tools.length) lines.push('Uses: ' + m.risky_tools.join(', '));
@@ -12446,11 +12446,11 @@ async function refreshSkills() {
             try {
               const r = await api('/api/skills/install', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source: src, force: true }) });
               if (r && r.ok) { toast('Installed', m.name, 'ok', 4000); srcInput.value = ''; refreshSkills(); }
-              else { toast('Install failed', (r && r.error) || 'unknown', 'err', 7000); }
-            } catch (e) { toast('Install failed', e.message, 'err', 7000); }
+              else { toast("Couldn't install it", (r && r.error) || "It didn't say why.", 'err', 7000); }
+            } catch (e) { toast("Couldn't install it", e.message, 'err', 7000); }
           }},
         ]);
-      } catch (e) { toast('Inspect failed', e.message, 'err', 7000); }
+      } catch (e) { toast("Couldn't look inside it", e.message, 'err', 7000); }
       finally { instBtn.disabled = false; instBtn.textContent = 'Install'; }
     };
     instBtn.onclick = doInstall;
@@ -12488,8 +12488,8 @@ async function refreshSkills() {
             try {
               const r = await api('/api/skills/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
               if (r && r.ok) { toast('Removed', name + ' → trash', 'ok', 3000); refreshSkills(); }
-              else { toast('Remove failed', (r && r.error) || 'unknown', 'err'); }
-            } catch (e) { toast('Remove failed', e.message, 'err'); }
+              else { toast("Couldn't remove it", (r && r.error) || "It didn't say why.", 'err'); }
+            } catch (e) { toast("Couldn't remove it", e.message, 'err'); }
           }},
         ]);
       };
@@ -12612,13 +12612,13 @@ document.getElementById('btn-server-restart')?.addEventListener('click', async (
         body: JSON.stringify({ model_path: path }),
       });
       if (rr.ok) toast('Server up', rr.url, 'ok');
-      else toast('Restart failed', rr.error || 'unknown', 'err', 7000);
+      else toast("Couldn't restart it", rr.error || "It didn't say why.", 'err', 7000);
     } else {
       toast('No model to restart', 'pick one from the Models tab first', 'info');
     }
     refreshServerCard();
     refreshState();
-  } catch (e) { toast('Restart failed', e.message, 'err'); }
+  } catch (e) { toast("Couldn't restart it", e.message, 'err'); }
 });
 
 document.getElementById('btn-server-stop')?.addEventListener('click', async () => {
@@ -12631,7 +12631,7 @@ document.getElementById('btn-server-stop')?.addEventListener('click', async () =
         refreshServerCard();
         refreshState();
         refreshModels();
-      } catch (e) { toast('Stop failed', e.message, 'err'); }
+      } catch (e) { toast("Couldn't stop it", e.message, 'err'); }
     }},
   ]);
 });
@@ -12908,7 +12908,7 @@ $('btn-log-download').addEventListener('click', async () => {
     a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
     toast('Downloaded', 'hearth-activity.jsonl', 'ok');
-  } catch (e) { toast('Download failed', e.message, 'err'); }
+  } catch (e) { toast("The download didn't finish", e.message, 'err'); }
 });
 $('btn-log-clear').addEventListener('click', () => {
   // Honor whichever log the user is currently looking at - server vs agent.
@@ -12923,7 +12923,7 @@ $('btn-log-clear').addEventListener('click', () => {
         await api('/api/logs/clear?which=' + which, { method: 'POST' });
         toast('Log cleared', `${label} emptied`, 'ok');
         refreshLogs();
-      } catch (e) { toast('Clear failed', e.message, 'err'); }
+      } catch (e) { toast("Couldn't clear it", e.message, 'err'); }
     }},
   ]);
 });
@@ -13019,7 +13019,7 @@ async function refreshEmail() {
   });
   if (saveBtn) saveBtn.addEventListener('click', async () => {
     const b = gather();
-    if (!b.address || !b.password) { toast('Missing info', 'Enter your email and an app password.', 'warn'); status.innerHTML = '<span style="color:var(--err)">Enter email + app password — for Gmail use a 16-char App Password (myaccount.google.com/apppasswords), not your login password.</span>'; return; }
+    if (!b.address || !b.password) { toast('Missing info', 'Enter your email and an app password.', 'warn'); status.innerHTML = '<span style="color:var(--err)">Enter your email and an app password. For Gmail that is a 16-character App Password from myaccount.google.com/apppasswords, not your sign-in password.</span>'; return; }
     busy(saveBtn, true, 'Saving…');
     status.textContent = '';
     try {
@@ -13162,7 +13162,7 @@ async function refreshSettings() {
             'Paste the full path to your sd-webui-forge folder (the one with webui.bat + a modules/ subfolder).',
             'warn', 7000);
         }
-      } catch (e) { toast('Detect failed', e.message, 'err'); }
+      } catch (e) { toast("Couldn't check this PC", e.message, 'err'); }
       finally {
         forgeDetectBtn.disabled = false;
         forgeDetectBtn.textContent = 'Detect';
@@ -13571,7 +13571,7 @@ async function refreshSettings() {
           await switchEndpoint(body);
           llmMdl.value = body.model;
         } catch (e) {
-          toast('Apply failed', e.message, 'err');
+          toast("Couldn't apply it", e.message, 'err');
           if (brandSub) brandSub.textContent = prevBrand;
         } finally {
           llmApply.disabled = false;
@@ -13591,8 +13591,8 @@ async function refreshSettings() {
     if (editRulesBtn) editRulesBtn.onclick = async () => {
       try {
         const r = await api('/api/open-rules', { method: 'POST' });
-        toast('Opening rules.md', r.ok ? 'Edit freely - re-read every turn.' : (r.error || 'failed'), r.ok ? 'ok' : 'err');
-      } catch (e) { toast('Open failed', e.message, 'err'); }
+        toast(r.ok ? 'Opening rules.md' : "Couldn't open rules.md", r.ok ? 'Change it freely. It is read again before every reply.' : (r.error || "It didn't say why."), r.ok ? 'ok' : 'err');
+      } catch (e) { toast("Couldn't open it", e.message, 'err'); }
     };
     // Agent rename - full workspace move. Backend stops the tray,
     // renames ~/Jarvis → ~/<NewName>, updates env, and restarts (~10s).
@@ -13632,9 +13632,9 @@ async function refreshSettings() {
               // the JS state picks up the new workspace path / avatar / etc.
               setTimeout(() => window.location.reload(), 3500);
             } else {
-              toast('Rename failed', r.error || 'unknown error', 'err', 9000);
+              toast("Couldn't rename it", r.error || "It didn't say why.", 'err', 9000);
             }
-          } catch (e) { toast('Rename failed', e.message, 'err', 9000); }
+          } catch (e) { toast("Couldn't rename it", e.message, 'err', 9000); }
         }},
       ]);
     };
@@ -13665,9 +13665,9 @@ async function refreshSettings() {
               toast('Moved', `Now at ${r.new_workspace}. Tray restarting…`, 'ok', 6000);
               setTimeout(() => window.location.reload(), 3500);
             } else {
-              toast('Move failed', r.error || 'unknown error', 'err', 9000);
+              toast("Couldn't move it", r.error || "It didn't say why.", 'err', 9000);
             }
-          } catch (e) { toast('Move failed', e.message, 'err', 9000); }
+          } catch (e) { toast("Couldn't move it", e.message, 'err', 9000); }
         }},
       ]);
     };
@@ -13689,7 +13689,7 @@ async function refreshSettings() {
       try { plan = await api('/api/update/repair-plan'); } catch {}
       if (plan && plan.can_patch === false) {
         if (st) st.textContent = '';
-        toast('Cannot repair this build', plan.error || 'reinstall to restore', 'warn', 9000);
+        toast("This copy can't be repaired", plan.error || 'Reinstall Hearth to put it right.', 'warn', 9000);
         return;
       }
       if (plan && Array.isArray(plan.items)) {
@@ -13735,12 +13735,12 @@ async function refreshSettings() {
               } else {
                 dlUpsert(REPAIR_DL_ID, { status: 'error' });
                 if (st) st.textContent = '';
-                toast('Repair failed', ev.error || 'unknown', 'err', 9000);
+                toast("The repair didn't finish", ev.error || "It didn't say why.", 'err', 9000);
               }
             }
           }
         }
-      } catch (e) { if (st) st.textContent = ''; toast('Repair failed', e.message, 'err', 9000); }
+      } catch (e) { if (st) st.textContent = ''; toast("The repair didn't finish", e.message, 'err', 9000); }
       finally { repairBtn.disabled = false; repairBtn.textContent = _rt; }
     };
 
@@ -13763,7 +13763,7 @@ async function refreshSettings() {
             try {
               const a = await api('/api/update/apply', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
               toast('Update', (a && a.result) || 'done', 'ok', 9000);
-            } catch (e) { toast('Update failed', e.message, 'err', 9000); }
+            } catch (e) { toast("The update didn't finish", e.message, 'err', 9000); }
           }},
         ]);
       } catch (e) {
@@ -13816,7 +13816,7 @@ async function refreshSettings() {
         try {
           const r = await api('/api/autostart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ enabled: want }) });
           if (r && r.ok) { paintAutostart(!!r.enabled); toast('Start at login', r.enabled ? 'Hearth will launch when you sign in.' : 'Auto-launch turned off.', 'ok', 5000); }
-          else { toast('Start at login', (r && r.error) || 'failed', 'err', 6000); }
+          else { toast("Couldn't change start at login", (r && r.error) || "It didn't say why.", 'err', 6000); }
         } catch (e) { toast('Start at login', e.message || e, 'err', 6000); }
         finally { autostartBtn.disabled = false; }
       };
@@ -14040,7 +14040,7 @@ async function refreshSettings() {
             [{ label: 'Close', primary: true }]);
           if (apply) refreshMem?.();  // memory list refresh if defined
         } catch (e) {
-          toast('Migrate failed', e.message, 'err', 8000);
+          toast("Couldn't bring the memory over", e.message, 'err', 8000);
         } finally {
           migrateDryBtn.disabled = false; migrateApplyBtn.disabled = false;
           migrateDryBtn.textContent = 'Dry-run';
@@ -14077,7 +14077,7 @@ async function refreshSettings() {
           if (!p) { toast('Enter a folder path', 'e.g. D:\\Hearth\\models', 'warn'); return; }
           const r = await api('/api/models/set-dir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
           if (r.ok) toast('Models folder set', 'Applies on the next launch: ' + r.path, 'ok', 7000);
-          else toast('Could not set folder', r.error || 'unknown', 'err', 7000);
+          else toast("Couldn't use that folder", r.error || "It didn't say why.", 'err', 7000);
         });
       }
     }
@@ -14293,7 +14293,7 @@ async function speakText(text, force = false) {
       toast("Couldn't speak that", detail || `the speech engine answered ${r.status}`, 'err', 6000);
     }
   } catch (e) {
-    toast('Speak failed', e.message || 'network', 'err', 6000);
+    toast("Couldn't read it aloud", e.message || 'network', 'err', 6000);
   }
 }
 async function stopTTS() {
@@ -14410,7 +14410,7 @@ async function startRecording() {
     recorder.processor.connect(recorder.ctx.destination);
     recorder.recording = true;
   } catch (e) {
-    toast('Mic error', e.message, 'err');
+    toast("The microphone didn't start", e.message, 'err');
     throw e;
   }
 }
@@ -14507,7 +14507,7 @@ async function micFinish() {
   // Surface a real failure instead of silently doing nothing (the "doesn't work").
   let text = '';
   try { text = await transcribe(); }
-  catch (e) { toast('Voice input failed', (e && e.message) || 'transcription error', 'err'); return; }
+  catch (e) { toast("Couldn't hear that", (e && e.message) || "What you said wasn't turned into text.", 'err'); return; }
   if (text) {
     input.value = text;
     input.dispatchEvent(new Event('input'));
@@ -15205,7 +15205,7 @@ async function startRealtimeVoice() {
       }
     }
   } catch (e) {
-    if (rtVoiceActive) toast('Realtime voice error', String(e), 'warn', 4000);
+    if (rtVoiceActive) toast('Voice mode stopped', String(e), 'warn', 4000);
   } finally {
     rtVoiceActive = false;
     rtVoiceReader = null;
@@ -16018,7 +16018,7 @@ async function runtimeInstall(tag) {
               if (links[0]) links[0].onclick = (e) => { e.preventDefault(); errEl.style.display='none'; runtimeInstall(tag); return false; };
               if (links[1]) links[1].onclick = (e) => { e.preventDefault(); navigator.clipboard.writeText(msg); return false; };
             }
-            toast('Engine download failed', msg, 'err', 8000);
+            toast("The engine didn't download", msg, 'err', 8000);
           }
           refreshRuntimeBar();
         }
@@ -16036,7 +16036,7 @@ async function runtimeInstall(tag) {
       if (links[0]) links[0].onclick = (ev) => { ev.preventDefault(); errEl.style.display='none'; runtimeInstall(tag); return false; };
       if (links[1]) links[1].onclick = (ev) => { ev.preventDefault(); navigator.clipboard.writeText(msg); return false; };
     }
-    toast('Engine download failed', msg, 'err', 8000);
+    toast("The engine didn't download", msg, 'err', 8000);
   }
   refreshRuntimeBar();
 }
@@ -16328,7 +16328,7 @@ function modelsRenderMine() {
                headers: { 'Content-Type': 'application/json' },
                body: JSON.stringify({ path: delPath }) });
              if (r.ok) { toast('Deleted', (r.freed_gb || 0) + ' GB freed', 'ok'); modelsResyncFromDisk(); }
-             else toast('Could not delete', r.error || '', 'err', 8000);
+             else toast("Couldn't delete it", r.error || '', 'err', 8000);
            } catch (err) { toast('Could not delete', err.message, 'err', 8000); }
          } }]);
     });
@@ -16483,7 +16483,7 @@ async function modelsRenderEngine() {
         const r = await api('/api/runtime/remove', { method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tag }) });
-        if (r && r.ok === false) { toast('Engine', r.error || 'could not delete', 'err', 8000); btn.disabled = false; btn.textContent = 'Delete'; return; }
+        if (r && r.ok === false) { toast("Couldn't delete the engine", r.error || "It didn't say why.", 'err', 8000); btn.disabled = false; btn.textContent = 'Delete'; return; }
         toast('Engine', `Deleted ${tag}`, 'ok', 5000);
         modelsRenderEngine(); refreshRuntimeBar();
       } catch (err) { toast('Engine', err.message, 'err', 7000); btn.disabled = false; btn.textContent = 'Delete'; }
@@ -16495,7 +16495,7 @@ async function modelsRenderEngine() {
       const r = await api('/api/runtime/preference', { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preference: value }) });
-      if (r && r.ok === false) { toast('Engine', r.error || 'could not set', 'err', 7000); return; }
+      if (r && r.ok === false) { toast("Couldn't switch the engine", r.error || "It didn't say why.", 'err', 7000); return; }
       toast('Engine', note, 'ok', 6000);
       modelsRenderEngine(); refreshRuntimeBar();
     } catch (err) { toast('Engine', err.message, 'err', 7000); }
@@ -16647,7 +16647,7 @@ function modelsWireRowClicks(pane) {
           modelsShowStartFailure(r, fname, body);
         }
       } catch (err) {
-        toast('Start failed', err.message, 'err', 8000);
+        toast("Couldn't start it", err.message, 'err', 8000);
       } finally {
         modelsSetStartingLock(false);
       }
@@ -16680,7 +16680,7 @@ function modelsWireRowClicks(pane) {
         if (_rw) { _rw.hidden = true; _rw.classList.remove('hot','warn','compacting'); }
         refreshModels(); refreshState();
         await refreshModelsView();
-      } catch (err) { toast('Stop failed', err.message, 'err'); }
+      } catch (err) { toast("Couldn't stop it", err.message, 'err'); }
     });
   });
   pane.querySelectorAll('button[data-cancel]').forEach(b => {
@@ -16718,7 +16718,7 @@ function modelsWireRowClicks(pane) {
           modelsShowStartFailure(r, fname, cfg);
         }
       } catch (err) {
-        toast('Start failed', err.message, 'err', 8000);
+        toast("Couldn't start it", err.message, 'err', 8000);
       } finally {
         modelsSetStartingLock(false);
       }
@@ -16799,7 +16799,7 @@ function modelsShowStartFailure(r, fname, origBody) {
             modelsShowStartFailure(r2, fname, origBody);
           }
         } catch (err) {
-          toast('Force load failed', err.message, 'err', 8000);
+          toast("The model didn't load", err.message, 'err', 8000);
         } finally {
           modelsSetStartingLock(false);
         }
@@ -17010,7 +17010,7 @@ document.querySelectorAll('.models-tab').forEach(t => {
           } catch {}
         }, 800);
         setTimeout(() => clearInterval(watcher), 30000);
-      } catch (e) { toast('Rescan failed', e.message, 'err'); }
+      } catch (e) { toast("Couldn't look again", e.message, 'err'); }
     });
   }
   // Download button - toggle the downloads overlay (active HF downloads with
@@ -17323,7 +17323,7 @@ function showResumableDownload(s) {
                headers: { 'Content-Type': 'application/json' },
                body: JSON.stringify({ filename: partials[0].filename }) });
              if (r.ok) { toast('Discarded', (r.freed_gb || 0) + ' GB freed', 'ok'); modelsResyncFromDisk(); }
-             else toast('Could not discard', r.error || '', 'err', 7000);
+             else toast("Couldn't discard it", r.error || '', 'err', 7000);
            } catch (e) { toast('Could not discard', e.message, 'err', 7000); }
          } }]);
     };
@@ -17341,7 +17341,7 @@ function showResumableDownload(s) {
     if (repo) { rb.hidden = true; modelsDownloadHF(repo, part.filename, {}); }
     else {
       _modelsState.tab = 'discover'; modelsRenderDiscover();
-      toast('Resume from Discover', 'Search the same model + click Download — it resumes from the ' + part.gb + ' GB already there.', 'ok', 7000);
+      toast('Pick up where it stopped', 'Search for the same model and press Download. It carries on from the ' + part.gb + ' GB already there.', 'ok', 7000);
     }
   };
   // Follow a download the backend is already running (it keeps going while
@@ -18379,11 +18379,11 @@ async function obFinish(skipped) {
           toast('Imported from ' + _obMigrateChoice,
                 'Check Memory tab for the new facts.', 'ok', 5000);
         } else {
-          toast('Migrate skipped', (mr && mr.log) ? 'see log' : 'unknown error',
+          toast('Nothing was brought over', (mr && mr.log) ? 'The log says why.' : "It didn't say why.",
                 'warn', 5000);
         }
       } catch (e) {
-        toast('Migrate failed', e.message, 'warn', 5000);
+        toast("Couldn't bring the memory over", e.message, 'warn', 5000);
       }
     }
     // Fire the brain pick if user selected one
@@ -18433,7 +18433,7 @@ async function obFinish(skipped) {
           settle: !obState.cloud.model,          // a name they didn't type is checked against the provider's list
         };
         if (obState.cloud.provider === 'custom' && !_customUrl) {
-          toast('Custom brain', 'Add the endpoint URL (e.g. https://api.groq.com/openai/v1) — skipping for now.', 'warn', 5000);
+          toast('Another server', 'Add its address (for example https://api.groq.com/openai/v1). Skipped for now.', 'warn', 5000);
         } else {
           // Check the key before saving it. A typo used to save cleanly and
           // then fail on every message with an auth error pointing nowhere.
@@ -18617,14 +18617,14 @@ async function downloadUpdate() {
             toast('Update cancelled', 'Progress kept, installing again resumes.', 'ok', 7000);
           } else {
             dlUpsert(UPDATE_DL_ID, { status: 'error' });
-            toast('Update download failed', ev.error || '', 'err', 9000);
+            toast("The update didn't download", ev.error || '', 'err', 9000);
           }
         }
       }
     }
   } catch (e) {
     dlUpsert(UPDATE_DL_ID, { status: 'error' });
-    toast('Update download failed', e.message, 'err', 9000);
+    toast("The update didn't download", e.message, 'err', 9000);
   }
 }
 
