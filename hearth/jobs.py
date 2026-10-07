@@ -131,8 +131,9 @@ def _spawn(command: str, cwd: str, shell: str) -> subprocess.Popen:
     if shell == "powershell":
         command = _normalize_ps_command(command)
     args, use_shell = shells.argv(command, shell)
+    # Nothing can be typed into a job, so a prompt for input fails at once.
     return subprocess.Popen(
-        args, cwd=cwd, shell=use_shell, stdout=subprocess.PIPE,
+        args, cwd=cwd, shell=use_shell, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
         bufsize=1, env=shells.child_env(), creationflags=_NO_WINDOW,
     )
@@ -175,6 +176,63 @@ def _drain(job_id: str, proc: subprocess.Popen) -> None:
         _write_meta(job_id, meta)
         with _procs_lock:
             _procs.pop(job_id, None)
+        if meta.get("notify"):
+            _tell_finished(job_id, meta)
+
+
+def _tell_finished(job_id: str, meta: Dict[str, Any]) -> None:
+    """A command that went on in the background reports back when it ends,
+    the same way a helper does."""
+    try:
+        from .subagents import enqueue_notification
+        tail = get_job(job_id, tail_lines=60).get("output_tail", "")
+        ended = meta.get("status")
+        took = round((meta.get("finished_at") or time.time()) - (meta.get("started_at") or time.time()))
+        enqueue_notification(source="command", name=meta.get("description") or meta.get("command", ""),
+                             status="completed" if ended == "completed" else "failed",
+                             result_text=f"$ {meta.get('command', '')}\n[exit {meta.get('exit_code')}] "
+                                         f"(job {job_id}, {took}s)\n{tail}",
+                             summary=f"{meta.get('description') or 'A command'} "
+                                     f"{'finished' if ended == 'completed' else 'failed'}",
+                             elapsed_s=took)
+    except Exception:
+        pass
+
+
+def run_or_background(command: str, cwd: str, shell: str, wait_s: float) -> Dict[str, Any]:
+    """Run a command and wait up to wait_s for it. One that ends in time comes
+    back with its output and leaves nothing behind; one still going carries on
+    as a job that reports when it ends."""
+    started = start_job(command, cwd=cwd, shell=shell)
+    if not started.get("ok"):
+        return started
+    job_id = started["job_id"]
+    with _procs_lock:
+        proc = _procs.get(job_id)
+    try:
+        if proc is not None:
+            proc.wait(timeout=wait_s)
+    except subprocess.TimeoutExpired:
+        meta = _read_meta(job_id) or {}
+        meta["notify"] = True
+        _write_meta(job_id, meta)
+        # It may have ended between the wait and the line above.
+        if (_read_meta(job_id) or {}).get("status") not in ("completed", "failed", "killed"):
+            return {"ok": True, "background": True, "job_id": job_id,
+                    "output_tail": get_job(job_id, tail_lines=20).get("output_tail", "")}
+    # Ended: let the reader finish writing, then hand the output back.
+    for _ in range(40):
+        if (_read_meta(job_id) or {}).get("status") in ("completed", "failed", "killed"):
+            break
+        time.sleep(0.05)
+    got = get_job(job_id, tail_lines=0)
+    for path in (_meta_path(job_id), _out_path(job_id)):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    return {"ok": True, "background": False, "exit_code": got.get("exit_code"),
+            "output": got.get("output_tail", "")}
 
 
 def start_python_job(label: str, fn, args: Optional[dict] = None,

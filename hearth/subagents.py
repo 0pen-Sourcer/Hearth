@@ -452,6 +452,9 @@ def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
     if src == "reminder":
         lead = ("A reminder you set earlier has come due; its details are below. "
                 "Deliver it to the user now, naturally")
+    elif src == "command":
+        lead = ("A command you ran earlier outlived its wait, carried on in the background "
+                "and has now ended; its output is below. Continue with it")
     elif src in ("schedule", "cron", "timer"):
         lead = ("A scheduled background event you set up has fired; its details "
                 "are below. Act on it for the user")

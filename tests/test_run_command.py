@@ -133,6 +133,27 @@ check("a wait of more than a minute is refused, with what to do instead",
       "refused" in run("Start-Sleep 120") and "set_reminder" in run("Start-Sleep 120"))
 check("waiting for a keypress or a typed answer is refused", "refused" in run("pause") and "refused" in run("Read-Host name"))
 
+# A command still running when its wait ran out was killed and reported as a
+# failure. It now carries on as a job, and the model is told when it ends.
+from hearth import subagents as _sa  # noqa: E402
+_sa.drain_pending_notifications()
+_t0 = time.time()
+out = run("Start-Sleep 3; Write-Output finished-later", shell="powershell", timeout=1)
+_m = re.search(r"job (j-[\w-]+)", out)
+check(f"a command that outlives its wait comes back at once with a job id {out[:120]!r}",
+      time.time() - _t0 < 2.5 and "carries on in the background" in out and _m is not None)
+for _ in range(60):
+    _got = [n for n in _sa.peek_pending_notifications() if n.get("persona") == "command"]
+    if _got:
+        break
+    time.sleep(0.1)
+check("and when it ends the model is told, with its output",
+      bool(_got) and "finished-later" in _got[0]["result_text"] and _got[0]["status"] == "completed"
+      and "carried on in the background" in _sa.format_notification_as_user_message(_got[0]))
+quick = run("Write-Output quick", shell="powershell")
+check("a command that ends in time leaves no job behind",
+      "quick" in quick and not any(j.get("command") == "Write-Output quick" for j in jobs.list_jobs()))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

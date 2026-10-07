@@ -901,7 +901,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "properties": {
                 "command": {"type": "string"},
                 "cwd": {"type": "string", "description": "Working dir. Default = workspace."},
-                "timeout": {"type": "integer", "description": "Seconds. Default 120, max 300. Ignored when detached=true."},
+                "timeout": {"type": "integer", "description": "Seconds to wait for it. Default 120, max 300. A command still running then carries on in the background as a job and you are told when it ends. Ignored when detached=true."},
                 "shell": {"type": "string", "enum": _shells.available(),
                           "description": "Which shell runs it. Default: the first one listed."},
                 "detached": {"type": "boolean", "description": "If true, spawn in a new console and return immediately with the PID. Use for daemons / UI launchers / dev servers that don't self-terminate."},
@@ -3657,32 +3657,33 @@ def _run_command(p: Dict) -> str:
             "specific folder (not a drive root), e.g. a Documents/Downloads subpath."
         )
 
+    # A command still going when its wait runs out carries on in the
+    # background as a job and reports when it ends, instead of being killed
+    # and called a failure.
     try:
-        args, use_shell = _shells.argv(cmd, shell)
-        # Nothing can be typed into it, so a prompt for input fails at once
-        # instead of waiting out the timeout.
-        r = subprocess.run(args, cwd=cwd, shell=use_shell, capture_output=True,
-                           stdin=subprocess.DEVNULL, timeout=timeout, env=_shells.child_env(),
-                           creationflags=_NO_WINDOW)
-    except subprocess.TimeoutExpired:
-        return f"Error: '{cmd}' timed out after {timeout}s."
+        from . import jobs as _jobs
+        r = _jobs.run_or_background(cmd, cwd, shell, timeout)
     except Exception as e:
         return f"Error: {e}"
-    # Decode with errors='replace' — never let a stray byte (0xDB and friends
-    # from raw file dumps or non-UTF-8 console code-page output) raise inside
-    # subprocess's reader thread. Crashes there came back as empty tool results
-    # and the model spam-retried, eating iterations.
-    stdout = (r.stdout or b"").decode("utf-8", errors="replace")
-    stderr = (r.stderr or b"").decode("utf-8", errors="replace")
-    out = stdout + (("\n[stderr]\n" + stderr) if stderr else "")
-    status_hint = _pip_status_hint(cmd, r.returncode, stdout, stderr)
+    if not r.get("ok"):
+        return f"Error: {r.get('error')}"
+    if r.get("background"):
+        so_far = (r.get("output_tail") or "").strip()
+        return (f"$ {cmd}\n[still running after {timeout}s, so it carries on in the background as job "
+                f"{r['job_id']}. You will be told when it ends; job_status shows its output so far, "
+                f"job_kill stops it. Carry on with other work meanwhile.]"
+                + (f"\nOutput so far:\n{so_far}" if so_far else ""))
+    stdout, stderr = r.get("output") or "", ""
+    out = stdout
+    returncode = r.get("exit_code")
+    status_hint = _pip_status_hint(cmd, returncode, stdout, stderr)
     body = out.strip()
     if status_hint:
         body = f"{status_hint}\n{body}" if body else status_hint
     skill_nudge = _skill_crystallization_nudge(cmd)
     if skill_nudge:
         body = f"{skill_nudge}\n{body}" if body else skill_nudge
-    return f"$ {cmd}\n[exit {r.returncode}]\n{body}"
+    return f"$ {cmd}\n[exit {returncode}]\n{body}"
 
 
 def _skill_crystallization_nudge(cmd: str) -> str:
