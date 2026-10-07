@@ -464,6 +464,32 @@ with sync_playwright() as pw:
     check(f"with two tools running at once, each result lands on its own call {paired}",
           paired == [["read_file", "what a.txt says"], ["grep_search", "3 matches"]])
 
+    # A helper's word arrived mid-sentence and cut it in two: "Team is" / card / "working."
+    stream = "\n".join(json.dumps(e) for e in [
+        {"type": "assistant_chunk", "content": "Team is"},
+        {"type": "subagent_done", "agent_id": "sub_1_aaaaaa", "persona": "coder", "name": "Haiku", "status": "update",
+         "summary": "a fact", "result_text": "a fact"},
+        {"type": "assistant_chunk", "content": " working. Next"},
+        {"type": "assistant_chunk", "content": " step."},
+        {"type": "assistant", "content": "Team is working. Next step."},
+        {"type": "done", "duration_ms": 10, "iterations": 1, "reason": "finished"}]) + "\n"
+    pg.route("**/chat", lambda r: r.fulfill(status=200, content_type="application/x-ndjson", body=stream))
+    split = pg.evaluate("""async () => {
+      const c = newConversation();
+      STATE.loadedModel = { id: 'x', state: 'loaded' };
+      document.getElementById('input').value = 'start the team';
+      await send();
+      await new Promise(r => setTimeout(r, 400));
+      const msgs = [...document.querySelectorAll('.msg')];
+      const last = msgs[msgs.length - 1];
+      const parts = [...last.querySelectorAll('.content, .subagent-card, [class*=subagent]')].map(e =>
+        e.className.includes('subagent') ? 'CARD' : e.textContent.trim()).filter(Boolean);
+      return parts;
+    }""")
+    pg.unroute("**/chat")
+    check(f"a helper's card waits for the sentence to end instead of splitting it {split}",
+          split and split[0].startswith("Team is working.") and "CARD" in split)
+
     # Something said part-way showed as green text until the model took it,
     # then vanished; later there was no way to see what had changed course.
     steer_stream = "\n".join(json.dumps(e) for e in [

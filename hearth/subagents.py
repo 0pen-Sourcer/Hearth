@@ -926,11 +926,11 @@ async def _close(client) -> None:
         pass
 
 
-def _helper_label(tpath: Path) -> str:
+def _helper_label(tpath: Path, field: str = "name") -> str:
     try:
         with open(tpath, encoding="utf-8") as f:
             first = json.loads(f.readline() or "{}")
-        return first.get("name") or first.get("persona") or "a helper"
+        return first.get(field) or first.get("persona") or "a helper"
     except Exception:
         return "a helper"
 
@@ -1254,7 +1254,8 @@ async def message_helper(sender_id: str, sender_name: str, args: Dict[str, Any])
         _SENT[sender_id] = _SENT.get(sender_id, 0) + 1
         with _NOTIF_LOCK:
             _PENDING_NOTIFICATIONS.append({
-                "agent_id": sender_id, "source": "update", "persona": "", "name": sender_name, "status": "update",
+                "agent_id": sender_id, "source": "update", "persona": _helper_label(_transcript_path(sender_id), "persona"),
+                "name": sender_name, "status": "update",
                 "summary": text[:200], "result_text": text, "transcript_path": str(_transcript_path(sender_id)),
                 "elapsed_s": None, "turns": None, "used_tools": []})
         _append_transcript(_transcript_path(sender_id), {"kind": "sent", "to": _main_name(), "to_id": "__main", "text": text[:600]})

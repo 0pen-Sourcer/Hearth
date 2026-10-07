@@ -10024,7 +10024,32 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
     _liveTextCursor = assistantMsg.content.length;
     liveContent = null;
+    _flushHeldCards();
   };
+  // A helper's card that arrives while a sentence is still being written waits
+  // for the sentence to end, so it never splits one in two.
+  let _heldCards = [];
+  const _midSentence = () => {
+    const tail = assistantMsg.content.slice(_liveTextCursor);
+    return !!tail.trim() && !/([.!?…:)\]"'`]|\n)\s*$/.test(tail);
+  };
+  const _placeHelperCard = (ev) => {
+    const card = makeSubagentCard(ev);
+    _sealLiveText();
+    appendPart(card, live);
+    // Persist on the assistant message so re-render keeps the card.
+    assistantMsg.events.push({ kind: 'subagent_done',
+      persona: ev.persona, name: ev.name, status: ev.status,
+      summary: ev.summary, result_text: ev.result_text,
+      elapsed_s: ev.elapsed_s, used_tools: ev.used_tools || [],
+      pos: assistantMsg.content.length });
+  };
+  function _flushHeldCards() {
+    if (!_heldCards.length) return;
+    const held = _heldCards;
+    _heldCards = [];
+    held.forEach(_placeHelperCard);
+  }
   // Drop the "thinking" dot-grid wave into the empty bubble. It gets overwritten
   // as soon as the first assistant_chunk arrives (liveContent.innerHTML = ...).
   if (liveContent) {
@@ -10371,15 +10396,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
     if (ev.type === 'subagent_done') {
       // Background subagent finished. Render as a tool-pill-shaped card
       // (chevron + name + meta + expandable body with the FULL result).
-      const card = makeSubagentCard(ev);
-      _sealLiveText();
-      appendPart(card, live);
-      // Persist on the assistant message so re-render keeps the card.
-      assistantMsg.events.push({ kind: 'subagent_done',
-        persona: ev.persona, name: ev.name, status: ev.status,
-        summary: ev.summary, result_text: ev.result_text,
-        elapsed_s: ev.elapsed_s, used_tools: ev.used_tools || [],
-        pos: assistantMsg.content.length });
+      if (_midSentence()) _heldCards.push(ev);
+      else _placeHelperCard(ev);
       return;
     }
 
@@ -10704,6 +10722,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         appendPart(liveContent, live);
       }
       liveContent.innerHTML = renderLive(assistantMsg.content.slice(_liveTextCursor));
+      if (_heldCards.length && !_midSentence()) _flushHeldCards();
       ttsBuffer += ev.content;
       maybeFlushTTS(false);
       chatFollow();
@@ -10764,6 +10783,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'done') {
+      _flushHeldCards();
       _playSound('done');
       // Touch the active chat so the sidebar floats it back to the top. The
       // server already records this; without it the local copy kept its old
