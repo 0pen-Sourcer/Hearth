@@ -10,6 +10,9 @@ rest of the sequence into whatever ended up in front.
 from __future__ import annotations
 
 import os
+# What these calls do is a test, not something the agent did: keep it out of
+# the real activity log.
+os.environ.setdefault("HEARTH_NO_ACTIVITY_LOG", "1")
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

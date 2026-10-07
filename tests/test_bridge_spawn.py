@@ -52,6 +52,8 @@ log = os.path.join(WS, "logs", "standin_bridge.log")
 text = open(log, encoding="utf-8", errors="replace").read() if os.path.exists(log) else ""
 check("what it printed is in its log, the file the log view reads",
       "message 04095" in text)
+check("and a dash it printed reads as a dash, not a broken character",
+      "bridge up \u2014 long-polling" in text)
 web._BRIDGE_PROCS["standin"].kill()
 web._BRIDGE_PROCS["standin"].wait()
 

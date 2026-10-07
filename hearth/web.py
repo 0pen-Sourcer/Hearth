@@ -271,6 +271,8 @@ def _spawn_bridge(ch: str) -> Tuple[bool, Optional[str]]:
     # what explains a bridge that died on start.
     log_path = _bridge_log_path(ch)
     env["PYTHONUNBUFFERED"] = "1"
+    # The log is read as UTF-8; Windows would otherwise write its own code page.
+    env["PYTHONIOENCODING"] = "utf-8"
     with open(log_path, "a", encoding="utf-8", errors="replace") as log:
         log.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} starting {ch} bridge ---\n")
         log.flush()
