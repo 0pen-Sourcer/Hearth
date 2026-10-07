@@ -1,8 +1,8 @@
 # Tools
 
-Hearth gives the model **108 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
+Hearth gives the model **109 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
-To keep the prompt small, **43** core tools load with their full description and **65** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **43** core tools load with their full description and **66** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -104,6 +104,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 |---|---|
 | `delegate` | Hand one task to another AI agent CLI installed on this PC (Claude Code, Codex, Antigravity, Gemini CLI and others) and get its answer back |
 | `get_subagent_result` † | Poll a background subagent for its result |
+| `helper_changes` † | See or act on what a finished helper changed on disk |
 | `launch_team` † | Spawn a TEAM of sub-agents that work in parallel and open a live terminal pane for each so the user can WATCH them build side by side (Windows Terminal panes /… |
 | `list_subagent_personas` † | List the personas available for spawn_subagent |
 | `spawn_subagent` | Start a scoped sub-agent (see list_subagent_personas for personas) |

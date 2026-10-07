@@ -833,10 +833,15 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
     if spec.get("prompt_arg") and head[0].lower().endswith((".cmd", ".bat")):
         return {"ok": False, "error": f"{spec['label']} is installed as a script Hearth can't start safely "
                                       "with a prompt; reinstall it from npm or its own installer"}
-    argv = head + args + ([prompt] if spec.get("prompt_arg") else [])
     agent_id = f"sub_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     tpath = _sa._transcript_path(agent_id)
     name = _sa.helper_name(name, spec["label"], agent)
+    # In a git repository it works on its own copy; elsewhere it hears who else is there.
+    from . import helper_changes as _changes
+    work, where = _changes.isolate(agent_id, work, name, task or prompt)
+    if where:
+        prompt = f"{where}\n\n{prompt}"
+    argv = head + args + ([prompt] if spec.get("prompt_arg") else [])
     _sa._append_transcript(tpath, {"kind": "start", "persona": spec["label"], "name": name,
                                    "prompt": task or prompt, "runtime": agent, "cwd": work, "by": by})
     _sa._append_transcript(tpath, {"kind": "route", "runtime": agent, "exe": exe, "allow": allow,
@@ -909,6 +914,14 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
             _STOPPED.discard(agent_id)
         if stopped:
             ok, err = False, "Stopped before it finished."
+        try:
+            kept = _changes.settle(agent_id)
+        except Exception:
+            kept = None
+        if kept and kept.get("files"):
+            text = (text + f"\n\n(Its changes, {len(kept['files'])} file(s), are on a separate copy of the "
+                    "repository and haven't reached the folder yet. They can be brought in, discarded or "
+                    "looked at with helper_changes.)").strip()
         if text:
             emit({"kind": "assistant_final", "text": text[:4000]})
         result = {"ok": ok, "text": text, "error": err, "persona": spec["label"], "name": name or spec["label"],

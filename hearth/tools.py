@@ -772,6 +772,24 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "helper_changes",
+        "description":
+            "See or act on what a finished helper changed on disk. An agent program "
+            "working in a git repository works on its own copy, so its changes wait "
+            "until they are brought in; Hearth's own helpers write directly, and what "
+            "they changed can be undone. action 'show' lists the files and the diff; "
+            "'bring_in' applies a waiting copy's changes to the folder; 'discard' "
+            "throws a waiting copy away; 'undo' takes back changes already made.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string", "description": "The 'sub_...' id of the helper."},
+                "action": {"type": "string", "enum": ["show", "bring_in", "discard", "undo"]},
+            },
+            "required": ["agent_id"],
+        },
+    },
+    {
         "name": "get_subagent_result",
         "description":
             "Poll a background subagent for its result. Normally you don't "
@@ -6385,6 +6403,8 @@ _HANDLERS = {
     "spawn_subagent": lambda p: _spawn_subagent(p),
     "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
     "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id") or p.get("job_id") or p.get("id") or ""),
+    "helper_changes": lambda p: __import__("hearth.helper_changes", fromlist=["act"]).act(
+        p.get("agent_id") or p.get("id") or "", p.get("action") or "show"),
     "tell_subagent": lambda p: __import__("hearth.subagents", fromlist=["tell_subagent"]).tell_subagent(
         p.get("agent_id") or p.get("id") or "", p.get("message") or "", sender="the assistant"),
     "list_directory": _list_directory,
@@ -8432,6 +8452,7 @@ _DEFERRED_TOOLS = {
     "list_browsers",       # browse auto-detects the installed browser
     "list_subagent_personas", "get_subagent_result",  # spawn_subagent lists roles; bg results auto-arrive
     "tell_subagent",       # only matters once a helper is running
+    "helper_changes",      # only matters once a helper has changed something
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # ntfy push is opt-in / rare
     "focus_window",        # niche window management
@@ -8704,6 +8725,8 @@ _RISKY_TOOLS: set = {
     "launch_team", "browse_click", "browse_type", "browse_key",
     "disk_usage", "forge_generate", "forge_shutdown",
     "generate_image", "generate_video",
+    # Bringing in, discarding or undoing a helper's work changes files.
+    "helper_changes",
 }
 _NEVER_PERM: set = {"ask_user", "spawn_subagent"}
 
@@ -8793,6 +8816,10 @@ def approval_mode() -> str:
 def mode_allows(name: str, args=None) -> bool:
     """True when the current approval mode lets this call run without asking."""
     m = approval_mode()
+    if name == "helper_changes":
+        act = str((args or {}).get("action") or "show")
+        # Looking changes nothing; throwing a helper's work away always asks.
+        return act == "show" or (m == "auto" and act != "discard")
     if m == "auto":
         if name in _ALWAYS_ASK_IN_AUTO:
             return False
@@ -8927,6 +8954,7 @@ _TOOL_CATEGORY = {
     "spawn_subagent": "Sub-agents", "list_subagent_personas": "Sub-agents",
     "get_subagent_result": "Sub-agents", "launch_team": "Sub-agents", "delegate": "Sub-agents",
     "tell_subagent": "Sub-agents",
+    "helper_changes": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",
