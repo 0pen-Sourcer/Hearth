@@ -38,7 +38,7 @@ That's it. Hearth is now a tray icon that launches on every boot, opens a chat w
 | **CLI** | `.\hearth.bat` | Daily driver. Voice loop, slash commands, fast iteration. |
 | **Desktop app** | `.\.venv\Scripts\python.exe -m hearth.tray --open` OR `dist\Hearth\Hearth.exe` | Visual chat, multi-conversation sidebar, file drop, voice mode takeover, GPU stats. |
 | **Browser** | `python -m hearth.web` | Same UI in your default browser. Useful if you want LAN access. |
-| **MCP** | `python -m hearth.mcp_server` | Plugs Hearth's 50+ tools into **LM Studio's native chat UI** — gets tool cards rendered there. |
+| **MCP** | `python -m hearth.mcp_server` | Plugs Hearth's tools into **LM Studio's native chat UI** — gets tool cards rendered there. |
 
 The desktop app and browser share one backend (`hearth/web.py`) and one HTML file (`hearth/ui.html`). Native window = same UI in a PyWebView wrapper.
 
@@ -46,11 +46,11 @@ The desktop app and browser share one backend (`hearth/web.py`) and one HTML fil
 
 ## The first 30 seconds in the GUI
 
-1. **Top bar** — model picker on the left (the dropdown auto-loads when you pick), GPU chip in the middle, voice-mode button on the right (mic-with-circle icon)
-2. **Sidebar** — "New chat" at top, conversation list below, then Memory / Files / Logs / Settings tabs
-3. **Status bar** — model · context · tools · memory count · live state
-4. **Type something** in the chat input, hit Enter. Multi-line with Shift+Enter.
-5. **First time?** An onboarding modal asks for your name + tone + browser. Saved to settings + memory.
+1. **Top bar.** The model menu on the left picks what JARVIS thinks with: a model on this PC, a cloud provider, or Claude Code, Codex or Cursor. The voice button sits on the right.
+2. **Sidebar.** New chat and your chats, then Team (the room where helpers work), Memory, Reminders, Skills, Files, Logs, Models and Settings.
+3. **Sticker.** The model menu button shows the brain in use, its loading progress, and a local model kept for helpers if you turned that on. The GPU chip beside it shows the graphics card.
+4. **Type something** and press Enter. Shift+Enter makes a new line.
+5. **First time?** Setup asks your name, how JARVIS should talk and which browser you use, then offers a short tour. The tour is under Settings, About.
 
 ---
 
@@ -74,39 +74,53 @@ The desktop app and browser share one backend (`hearth/web.py`) and one HTML fil
 ## Slash commands (CLI)
 
 ```
-/help                          list every command
-/clear                         wipe THIS chat (history preserved server-side)
-/compact                       ask Jarvis to summarize old turns + extract facts
-/tools                         show all tools
-/models                        list models the running server can see
-/model <id>                    load a specific model
-/voice on|off                  toggle TTS
-/voice speed <n>               TTS playback rate (0.5x - 2.5x)
-/listen [on|off]               continuous voice-in with TTS interrupt
-/think on|off                  toggle inline reasoning display
-/brain [local|grok|...]        switch chat brain mid-session
-/name [NewName]                show / set agent name (Cortana, Friday, etc.)
-/perms                         show saved tool permissions
-/perms forget <tool>           drop one saved decision
-/perms reset                   forget ALL saved decisions
-/allow <path>                  extend write access to a folder this session
-/mem                           list memories (CLI)
-/mem tree                      ASCII tree by category
-/mem map                       open the GUI memory graph in browser
-/log                           tail activity log
-/agent                         list available sub-agent personas
-/agent <slug> "<prompt>"       spawn a sub-agent synchronously
-/jobs [all|<id>|kill <id>]     background jobs (disk_usage / shell / etc.)
-/mcp                           MCP server status
-/mcp edit                      open ~/Jarvis/mcp.json in $EDITOR
-/mcp config                    print the snippet for LM Studio / Claude Desktop
-/mcp run                       run Hearth as an MCP server in this terminal
-/migrate <hermes|openclaw>     import memory from another agent (dry-run)
-/migrate <src> apply           write the import
-/phone                         phone-reach status (Telegram + ntfy) + setup pointer
-/skill [install <src>]         list / install / scaffold / remove shareable skills
-/update                        check GitHub for a newer release + install
-/exit  /quit                   close
+/help            every command
+/status          what is thinking, how full this chat is, plan limits
+/brain           switch what thinks: local, a provider or an agent
+/model           pick a model on the current brain
+/models          models on disk, downloads, the provider's list
+/tools           the tools
+/clear           start the conversation over
+/compact         summarize old turns now
+/context         set the context window
+/tokens          how full the context is
+/history         the last messages
+/chats           LM Studio threads
+/chat            load a thread
+/workspace       the workspace folder
+/log             recent activity
+/mem             what I remember
+/curate          merge duplicate memories
+/rules           the house rules file
+/name            my name
+/me              what I know and may do
+/team            helpers working for me
+/agents          agent programs on this PC
+/agent           run a helper and wait
+/learn           look at this PC again
+/migrate         bring memory over from another agent
+/import-memory   bring memory over from ChatGPT or Claude
+/jobs            background jobs
+/mcp             Model Context Protocol
+/skill           skills
+/voice           speaking: on, off, speed, mic
+/stt             the listening model
+/listen          talk instead of typing
+/sleep           wait for the wake word
+/wake            wake up
+/think           reasoning on or off, or how hard
+/multi           multi-line input
+/mode            what runs without asking: ask, edits, auto
+/perms           saved permissions
+/allow           let me write under a folder
+/disallow        take that back
+/allowed         folders I may write in
+/lockdown        keep reads inside the workspace
+/about           version and stats
+/update          get a newer version
+/repair          restore damaged files
+/phone           reach me from your phone
+/exit            quit
 ```
 
 ---
