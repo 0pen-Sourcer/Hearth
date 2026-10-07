@@ -34,6 +34,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from .chat_call import chat_create
 
 # Personas live as markdown files under hearth/subagents/<slug>.md. The
 # YAML-style frontmatter declares allowed_tools, cost_class, and a short
@@ -875,7 +876,7 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
             except Exception:
                 pass
         try:
-            resp = await client.chat.completions.create(
+            resp = await chat_create(client,
                 model=model,
                 messages=messages,
                 tools=tools if tools else None,

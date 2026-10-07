@@ -60,6 +60,7 @@ from typing import Any, Dict, List, Optional
 from . import system_prompt, execute_tool, to_openai_tools, TOOL_DEFINITIONS
 from .loop_guard import ToolLoopGuard, MAX_TURNS
 from .errors import classify_api_error
+from .chat_call import chat_create
 
 def _brain_from_settings() -> dict:
     """The brain the GUI is on, read straight from settings.json.
@@ -1234,7 +1235,7 @@ async def run_once(
                     try:
                         import openai as _openai
                         sync = _openai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-                        r = sync.chat.completions.create(
+                        r = chat_create(sync,
                             model=model,
                             messages=[
                                 {"role": "system", "content":
@@ -1455,7 +1456,7 @@ async def run_once(
             except Exception:
                 pass
             try:
-                resp = await client.chat.completions.create(**kwargs)
+                resp = await chat_create(client, **kwargs)
             except Exception as _re:
                 # Model doesn't expose reasoning_effort (plain grok-4, grok-3):
                 # strip it, remember, retry once. Other errors fall through to
@@ -1466,11 +1467,11 @@ async def run_once(
                     # OpenAI-compat shims). Drop it and retry — we just lose the
                     # real token count and fall back to the estimate.
                     kwargs.pop("stream_options", None)
-                    resp = await client.chat.completions.create(**kwargs)
+                    resp = await chat_create(client, **kwargs)
                 elif "reasoning_effort" in kwargs and _is_reasoning_param_error(_re):
                     _NO_REASONING_EFFORT.add((model or "").lower())
                     kwargs.pop("reasoning_effort", None)
-                    resp = await client.chat.completions.create(**kwargs)
+                    resp = await chat_create(client, **kwargs)
                 else:
                     raise
         except Exception as e:
@@ -1514,7 +1515,7 @@ async def run_once(
                     if _wait:
                         await asyncio.sleep(_wait)
                     try:
-                        resp = await client.chat.completions.create(**kwargs)
+                        resp = await chat_create(client, **kwargs)
                         info = None
                         break
                     except Exception as e2:
@@ -1627,7 +1628,7 @@ async def run_once(
             try:
                 ns_kwargs = dict(kwargs)
                 ns_kwargs["stream"] = False
-                r2 = await client.chat.completions.create(**ns_kwargs)
+                r2 = await chat_create(client, **ns_kwargs)
                 m2 = r2.choices[0].message
                 finish_reason = r2.choices[0].finish_reason or finish_reason
                 if getattr(m2, "content", None):

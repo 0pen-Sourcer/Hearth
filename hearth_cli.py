@@ -71,6 +71,7 @@ def _answer_flags(argv: List[str]) -> None:
 _answer_flags(sys.argv)
 
 from openai import AsyncOpenAI  # noqa: E402
+from hearth.chat_call import chat_create
 
 
 def _stream_client_timeout():
@@ -295,6 +296,10 @@ SLASH_COMMANDS = {
     "/allow": "let me write under a folder", "/disallow": "take that back", "/allowed": "folders I may write in",
     "/lockdown": "keep reads inside the workspace", "/about": "version and stats", "/update": "get a newer version",
     "/repair": "restore damaged files", "/phone": "reach me from your phone", "/exit": "quit",
+    # Other names for the same commands.
+    "/endpoint": "same as /brain", "/provider": "same as /brain", "/load": "same as /model",
+    "/usage": "same as /status", "/import": "same as /import-memory", "/skills": "same as /skill",
+    "/voices": "same as /voice", "/quit": "same as /exit",
 }
 _SUB_CHOICES = {
     "/mode": [("ask", "ask before anything risky"), ("edits", "file edits run, commands ask"), ("auto", "everything runs")],
@@ -2262,6 +2267,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}/workspace{C_RESET}             show workspace path")
             print(f"  {C_TOOL}/log [n]{C_RESET}               tail activity log")
             print(f"  {C_TOOL}/tokens{C_RESET}                context usage estimate")
+            print(f"  {C_TOOL}/status{C_RESET}                what is thinking, how full this chat is, usage (alias: /usage)")
             print(f"  {C_TOOL}/compact{C_RESET}               summarize old turns now")
             print(f"  {C_TOOL}/mem{C_RESET}                   show memory index")
             print(f"  {C_TOOL}/curate [apply]{C_RESET}        find + merge duplicate-topic memories (archive older)")
@@ -5062,7 +5068,7 @@ class JarvisCLI:
         try:
             import openai
             sync_client = openai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-            r = sync_client.chat.completions.create(
+            r = chat_create(sync_client,
                 model=self.current_model,
                 messages=[
                     {"role": "system", "content":
@@ -5226,7 +5232,7 @@ class JarvisCLI:
         try:
             import openai
             sync_client = openai.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-            r = sync_client.chat.completions.create(
+            r = chat_create(sync_client,
                 model=self.current_model,
                 messages=[
                     {"role": "system", "content":
@@ -5403,7 +5409,7 @@ class JarvisCLI:
                      or "127.0.0.1" in (LOCAL_API_BASE or ""))
         for attempt in range(3):
             try:
-                return await self.client.chat.completions.create(**create_kwargs)
+                return await chat_create(self.client, **create_kwargs)
             except Exception as e:
                 if "stream_options" in str(e).lower() and "stream_options" in create_kwargs:
                     create_kwargs.pop("stream_options", None)

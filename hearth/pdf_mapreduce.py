@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .tools import WORKSPACE
+from .chat_call import chat_create
 
 # Bound fan-out so map-reduce of a 500-page book doesn't fire 40 concurrent
 # requests at one local LLM (which would thrash VRAM and serialize anyway).
@@ -211,7 +212,7 @@ def _llm_complete(prompt: str, *, temperature: float = 0.3,
                 pass
         if not model:
             return f"[map-reduce LLM error: no model loaded at {base}]"
-        resp = client.chat.completions.create(
+        resp = chat_create(client,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,

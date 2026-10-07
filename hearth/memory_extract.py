@@ -27,6 +27,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import memory as _memory
+from .chat_call import chat_create
 
 
 # Categories the LLM is allowed to use. Anything else gets dropped silently.
@@ -379,17 +380,17 @@ def make_openai_llm_call(client, model: str, *, temperature: float = 0.0,
         # for minimal reasoning_effort too. Both are best-effort: if an endpoint
         # rejects either field, retry clean rather than losing the extraction.
         try:
-            r = client.chat.completions.create(
+            r = chat_create(client,
                 **kwargs,
                 extra_body={"chat_template_kwargs": {"enable_thinking": False},
                             "reasoning": {"enabled": False}})
         except Exception:
             try:
-                r = client.chat.completions.create(
+                r = chat_create(client,
                     **kwargs,
                     extra_body={"chat_template_kwargs": {"enable_thinking": False}})
             except Exception:
-                r = client.chat.completions.create(**kwargs)
+                r = chat_create(client, **kwargs)
         _msg = r.choices[0].message
         out = (getattr(_msg, "content", None) or "").strip()
         if not out:

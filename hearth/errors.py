@@ -31,6 +31,18 @@ def _status_code(exc: object, text: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _provider_says(exc: object) -> str:
+    """The message inside a provider's error body, in its own words."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error") if isinstance(body.get("error"), dict) else body
+        msg = err.get("message") if isinstance(err, dict) else None
+        if msg:
+            return str(msg).strip()[:300]
+    m = re.search(r"""['"]message['"]\s*:\s*['"](.+?)['"]\s*[,}]""", str(exc))
+    return m.group(1).strip()[:300] if m else ""
+
+
 def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
     """Classify an exception raised by the chat-completions call.
 
@@ -111,7 +123,9 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
     if code in (400, 422) and any(s in text for s in ("unknown name", "invalid argument",
                                                        "unsupported", "does not support",
                                                        "unexpected", "invalid_request")):
+        said = _provider_says(exc)
         return ApiErrorInfo("bad_request",
+            ("The provider refused the request: " + said) if said else
             "The endpoint rejected a request parameter, likely a model or endpoint quirk.",
             retryable=False)
 

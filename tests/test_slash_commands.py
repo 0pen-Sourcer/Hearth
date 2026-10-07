@@ -28,8 +28,8 @@ cli = open(os.path.join(ROOT, "hearth_cli.py"), encoding="utf-8").read()
 handled = set(re.findall(r'low(?:\s*==\s*|\.startswith\(\s*)"(/[a-z][\w-]*)', cli))
 for grp in re.findall(r"low\s+in\s+\(([^)]*)\)", cli):
     handled |= set(re.findall(r'"(/[a-z][\w-]*)"', grp))
-i = cli.index('_slash = ["/help"')
-auto = set(re.findall(r'"(/[a-z][\w-]*)"', cli[i:cli.index("]", i)]))
+i = cli.index("SLASH_COMMANDS = {")
+auto = set(re.findall(r'"(/[a-z][\w-]*)":', cli[i:cli.index("\n}\n", i)]))
 h = cli.index('if low == "/help":')
 help_text = cli[h:cli.index("return True", h)]
 listed_in_help = set(re.findall(r"(/[a-z][\w-]*)", help_text))
@@ -45,7 +45,7 @@ body = ui[a:ui.index("\n}\n", a)]
 cases = set(re.findall(r"case\s+'(/[a-z][\w-]*)'", body))
 j = ui.index("const SLASH_COMMANDS = [")
 menu = set(re.findall(r"cmd:\s*'(/[a-z][\w-]*)", ui[j:ui.index("];", j)]))
-aliases = {"/quit", "/logs", "/onboard"}          # named in their main command's description
+aliases = {"/quit", "/logs", "/onboard", "/usage"}          # named in their main command's description
 check(f"every / menu entry is handled in the window {sorted(menu - cases)}", not (menu - cases))
 check(f"every window command is in the / menu {sorted(cases - menu - aliases)}", not (cases - menu - aliases))
 check("the window's /help is built from the / menu", "SLASH_COMMANDS.map" in body)

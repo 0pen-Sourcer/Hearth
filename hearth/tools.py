@@ -34,6 +34,7 @@ from datetime import datetime
 from . import shells as _shells
 from html.parser import HTMLParser
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from .chat_call import chat_create
 
 # ============================================================
 # CONFIG
@@ -1972,7 +1973,7 @@ def _vlm_ocr_pdf_pages(path: str, page_numbers: List[int], p: Dict) -> str:
             from io import BytesIO
             buf = BytesIO(); pil_img.save(buf, "PNG")
             b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-            resp = client.chat.completions.create(
+            resp = chat_create(client,
                 model=model,
                 messages=[{
                     "role": "user",
