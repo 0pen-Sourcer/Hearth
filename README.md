@@ -65,7 +65,7 @@ A model on this PC through the built-in llama.cpp server, LM Studio, Ollama, vLL
 
 ### Helpers and the Team room
 
-Bigger jobs go to helpers. One sentence starts a mixed team, like "three on Codex for the frontend, two on Claude Haiku for the tests, one on this PC for the docs". Each helper walks into the Team room, sits at a desk and works, and clicking anyone shows who asked, the task and every step so far. You can tell a working helper something or stop it, and its report comes back to JARVIS. Past eight helpers the next room opens, and there is a winter cabin, a library and an ocean room besides the first. Hearth can hand work to 23 agent programs, including Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Copilot CLI, Aider and Goose, each on your own install and account. Starting a helper by hand shows the ones on your PC and how to get the rest.
+Bigger jobs go to helpers. One sentence starts a mixed team, like "three on Codex for the frontend, two on Claude Haiku for the tests, one on this PC for the docs". Each helper walks into the Team room, sits at a desk and works, and clicking anyone shows who asked, the task and every step so far. You can tell a working helper something or stop it, and its report comes back to JARVIS. Past eight helpers the next room opens, and there is a winter cabin, a library and an ocean room besides the first. Helpers can also be other agent programs, each on your own install and account. Claude Code, Codex, Cursor and OpenCode have been run from Hearth; it has adapters for 19 more, among them Gemini CLI, Copilot CLI, Aider and Goose, written from each one's documented headless mode and not yet run here. Starting a helper by hand shows the ones on your PC and how to get the rest.
 
 ### Voice
 
