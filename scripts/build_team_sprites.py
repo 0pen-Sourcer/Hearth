@@ -10,6 +10,8 @@ a manifest the window reads.
     python scripts/build_team_sprites.py <art folder>
 
 The art folder holds bg.png, 1-8.png (actions), 9-16.png (walks),
+walk_1-3.png (optional: side-on walks in four steps, three characters to an
+image, in SIDE_WALKS order),
 old/1-8.png (poses), in role order, and optionally 17.png (more poses for the
 main character), 18.png (a second main character), 20.png (his further poses), 19.png (small things for
 the room), bg_props.png, whose lower
@@ -42,6 +44,11 @@ FRAMES = [
     # each stride by drawing the legs in under the hips.
     ("walk_side_3", "walk", 3, 2, -2), ("walk_side_4", "walk", 3, 2, -5),
 ]
+# Who is on each row of walk_1-3.png, when they exist. Their four columns are
+# a stride, the legs passing, the other stride, passing again.
+SIDE_WALKS = [["main", "main_m", "coder"], ["researcher", "summarizer", "librarian"],
+              ["archivist", "coordinator", "custom"]]
+SIDE_ORDER = ["walk_side_1", "walk_side_3", "walk_side_2", "walk_side_4"]
 LEGS = 0.30            # the part of a side-on figure that is legs
 PASS_SQUEEZE = 0.5     # how far in the feet come at the passing step
 STAND_H = 132          # standing height in room pixels (the room is 1536 wide)
@@ -225,6 +232,68 @@ def passing(cell: np.ndarray, bb):
     return out, bbox(out)
 
 
+def _clean(cell: np.ndarray, speck: int = 300) -> np.ndarray:
+    """Background left in a gap the keying can't reach (between hair and coat)
+    goes, and so do loose specks away from the figure."""
+    cell = cell.copy()
+    a = cell[..., :3].astype(np.int16)
+    pink = (a[..., 0] - a[..., 1] > 45) & (a[..., 2] - a[..., 1] > 25) & (np.abs(a[..., 0] - a[..., 2]) < 120)
+    cell[pink, 3] = 0
+    mask = cell[..., 3] > 0
+    h, w = mask.shape
+    seen = np.zeros_like(mask)
+    for y0, x0 in np.argwhere(mask):
+        if seen[y0, x0]:
+            continue
+        stack, piece = [(y0, x0)], []
+        seen[y0, x0] = True
+        while stack:
+            y, x = stack.pop()
+            piece.append((y, x))
+            for ny, nx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    stack.append((ny, nx))
+        if len(piece) <= speck:
+            ys, xs = zip(*piece)
+            cell[list(ys), list(xs), 3] = 0
+    return cell
+
+
+def side_walks(art: str):
+    """Each character's drawn side-on walk, by role, in SIDE_ORDER; empty
+    when the sheets aren't there."""
+    out = {}
+    for n, roles in enumerate(SIDE_WALKS, start=1):
+        path = os.path.join(art, f"walk_{n}.png")
+        if not os.path.isfile(path):
+            return {}
+        frames = []
+        for cell, _ in sheet_frames(path, 4, 3):
+            cell = _clean(cell)
+            frames.append((cell, bbox(cell)))
+        for r, role in enumerate(roles):
+            out[role] = frames[r * 4:(r + 1) * 4]
+    return out
+
+
+def put_side_walk(atlas: Image.Image, drawn, stride_h: float) -> None:
+    """Swap the side walk in an atlas for the drawn four steps, sized so the
+    strides stand as tall as the ones they replace."""
+    scale = stride_h / standing_height(drawn, {0, 2})
+    names = [f[0] for f in FRAMES]
+    for name, (cell, bb) in zip(SIDE_ORDER, drawn):
+        i = names.index(name)
+        # Lined up on the body, not the box: a stride is wider than a passing
+        # step, and centring each box would rock the figure back and forth.
+        x0, y0, x1, y1 = bb
+        top = cell[y0:(y0 + y1) // 2, x0:x1, 3] > 0
+        body = float(np.nonzero(top)[1].mean()) if top.any() else (x1 - x0) / 2
+        dx = round(((x1 - x0) / 2 - body) * scale)
+        atlas.paste((0, 0, 0, 0), (i * CELL_W, 0, (i + 1) * CELL_W, CELL_H))
+        atlas.alpha_composite(place(cell, bb, scale), (i * CELL_W + dx, 0))
+
+
 def frame_of(frames, idx):
     """A frame by its source cell; a negative index is the passing step made
     from that stride."""
@@ -266,6 +335,7 @@ def second_main(art: str):
     frames = [walk.get(n, f) for n, f in zip(names, frames)]
     frames += [passing(*walk["walk_side_1"]), passing(*walk["walk_side_2"])]
     scale = STAND_H * 1.06 / standing_height(frames, {0, 4, 5, 6, 7})
+    drawn = side_walks(art).get("main_m")
     atlas = Image.new("RGBA", (CELL_W * len(FRAMES), CELL_H), (0, 0, 0, 0))
     for i, (cell, bb) in enumerate(frames):
         if names[i] == "type":
@@ -273,6 +343,9 @@ def second_main(art: str):
             x0, y0, x1, y1 = bb
             bb = (x0, y0, x1, y0 + round((y1 - y0) * 0.62))
         atlas.alpha_composite(place(cell, bb, scale), (i * CELL_W, 0))
+    if drawn:
+        x0, y0, x1, y1 = walk["walk_side_1"][1]
+        put_side_walk(atlas, drawn, (y1 - y0) * scale)
     return atlas
 
 
@@ -296,6 +369,7 @@ def more_props(art: str):
 def build(art: str) -> None:
     os.makedirs(OUT, exist_ok=True)
     manifest = {"cell": [CELL_W, CELL_H], "frames": [f[0] for f in FRAMES], "roles": ROLES}
+    drawn = side_walks(art)
     for n, role in enumerate(ROLES, start=1):
         sheets = {
             "pose": sheet_frames(os.path.join(art, "old", f"{n}.png"), 2, 2),
@@ -314,6 +388,9 @@ def build(art: str) -> None:
             if not bb:
                 continue
             atlas.alpha_composite(place(cell, bb, target / ref[sheet]), (i * CELL_W, 0))
+        if role in drawn:
+            x0, y0, x1, y1 = sheets["walk"][2][1]
+            put_side_walk(atlas, drawn[role], (y1 - y0) * target / ref["walk"])
         if role == "main":
             more = extra_main(art, target)
             if more:
