@@ -321,3 +321,92 @@ def _main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(_main())
+
+
+def race(task: str, agents: List[str], folder: str = "", check: str = "") -> Dict[str, Any]:
+    """Give one task to several agent programs, each on its own copy of a git
+    repository. When all have finished, run `check` in each copy and report
+    which passed and how much each changed; the winner is brought in with
+    helper_changes and the rest discarded."""
+    import threading
+    from . import external_agents, helper_changes, subagents, tools
+    task = (task or "").strip()
+    picked = [str(a).strip().lower() for a in (agents or []) if str(a).strip()]
+    if not task or len(picked) < 2:
+        return {"ok": False, "error": "give a task and at least two agents to race"}
+    folder = os.path.abspath(os.path.expanduser(folder or tools.WORKSPACE))
+    inside = shutil.which("git") and subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=folder,
+                                                     capture_output=True, text=True, creationflags=_NO_WINDOW).returncode == 0
+    if not inside:
+        return {"ok": False, "error": "a race needs a folder inside a git repository, so each agent works on its own copy"}
+    if check and tools._is_destructive(check):
+        return {"ok": False, "error": f"the check command looks destructive: {tools._is_destructive(check)}"}
+    left = {"n": 0}
+    lock = threading.Lock()
+    runs: List[Dict[str, Any]] = []
+    brief = (f"{task}\n\nOther agents are doing this same task separately, each on their own copy; "
+             "yours will be compared with theirs" + (f" by running: {check}" if check else "") + ".")
+
+    def finished(agent_id: str, result: Dict[str, Any]) -> None:
+        with lock:
+            for r in runs:
+                if r["agent_id"] == agent_id:
+                    r["result"] = result
+            left["n"] -= 1
+            last = left["n"] == 0
+        if last:
+            threading.Thread(target=judge, daemon=True, name="race-judge").start()
+
+    def judge() -> None:
+        lines = []
+        for r in runs:
+            res, wt = r.get("result") or {}, helper_changes._load(r["agent_id"]).get("worktree") or {}
+            head = f"{r['name']} ({r['agent_id']})"
+            if not res.get("ok"):
+                lines.append(f"{head}: didn't finish: {str(res.get('error') or '')[:200]}")
+                continue
+            if wt.get("state") != "waiting":
+                lines.append(f"{head}: changed nothing")
+                continue
+            verdict = ""
+            if check:
+                try:
+                    c = subprocess.run(["powershell", "-NoProfile", "-Command", check] if sys.platform == "win32"
+                                       else ["bash", "-lc", check], cwd=wt.get("work") or wt["path"],
+                                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+                                       creationflags=_NO_WINDOW)
+                    tail = " ".join((c.stdout + c.stderr).split())[-300:]
+                    verdict = ("check passed" if c.returncode == 0 else f"check failed (exit {c.returncode})") + (f": {tail}" if tail else "")
+                except subprocess.TimeoutExpired:
+                    verdict = "check ran past 15 minutes"
+            lines.append(f"{head}: {wt.get('stat') or str(len(wt.get('files', []))) + ' files'}"
+                         + (f"; {verdict}" if verdict else ""))
+        text = ("Race finished: " + task[:200] + "\n" + "\n".join("- " + l for l in lines)
+                + "\nBring in the one to keep with helper_changes (action bring_in) and discard the others.")
+        subagents.enqueue_notification(source="race", name=task[:60], status="completed", result_text=text,
+                                       summary=f"Race finished: {len(lines)} agents")
+
+    counts: Dict[str, int] = {}
+    for a in picked:
+        spec = external_agents.AGENTS.get(a)
+        label = spec["label"] if spec else a
+        counts[label] = counts.get(label, 0) + 1
+        name = label if picked.count(a) == 1 else f"{label} {counts[label]}"
+        with lock:
+            left["n"] += 1
+        r = external_agents.spawn(a, brief, name=name, cwd=folder, task=task, on_done=finished)
+        if r.get("ok"):
+            with lock:
+                runs.append({"agent_id": r["agent_id"], "name": name})
+        else:
+            with lock:
+                left["n"] -= 1
+            runs.append({"agent_id": "", "name": name, "error": r.get("error")})
+    started = [r for r in runs if r["agent_id"]]
+    if len(started) < 2:
+        return {"ok": False, "error": "fewer than two agents started: "
+                + "; ".join(f"{r['name']}: {r.get('error')}" for r in runs if not r["agent_id"])}
+    return {"ok": True, "racing": [{"name": r["name"], "agent_id": r["agent_id"]} for r in started],
+            "not_started": [{"name": r["name"], "reason": r.get("error")} for r in runs if not r["agent_id"]],
+            "note": "Each works on its own copy. When all are done you get a comparison"
+                    + (" with the check's result for each" if check else "") + "."}

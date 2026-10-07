@@ -164,7 +164,7 @@ def isolate(helper_id: str, folder: str, name: str, task: str) -> Tuple[str, str
             work = str(path / sub) if sub != "." else str(path)
             with _LOCK:
                 data = _load(helper_id)
-                data["worktree"] = {"repo": top, "path": str(path), "branch": branch, "base": base,
+                data["worktree"] = {"repo": top, "path": str(path), "work": work, "branch": branch, "base": base,
                                     "state": "working", "files": [], "stat": ""}
                 _save(helper_id, data)
             return work, ("You are working in your own copy of this repository, made for this task. "

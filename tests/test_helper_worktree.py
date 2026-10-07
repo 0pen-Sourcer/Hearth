@@ -85,6 +85,27 @@ check(f"undo takes the brought-in changes back {back}",
 left = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout.strip().splitlines()
 check(f"no copies are left behind {left}", len(left) == 1)
 
+# A race: the same task to two agents, each on its own copy, then one comparison.
+from hearth import team, subagents   # noqa: E402
+subagents.drain_pending_notifications()
+check_cmd = f'& "{sys.executable}" -c "import os,sys; sys.exit(0 if os.path.exists(\'new.py\') else 1)"'
+r = team.race("edit app.py", ["stand-in-coder", "stand-in-coder"], repo, check_cmd)
+check(f"a race starts each agent on its own copy {r}", r.get("ok") and [x["name"] for x in r["racing"]] == ["Coder 1", "Coder 2"])
+report = ""
+for _ in range(120):
+    got = [n for n in subagents.drain_pending_notifications() if n.get("persona") == "race"]
+    if got:
+        report = got[0]["result_text"]
+        break
+    import time as _time
+    _time.sleep(0.5)
+check(f"when both finish, the check runs in each copy and one comparison comes back {report!r}",
+      report.count("check passed") == 2 and "Coder 1" in report and "Coder 2" in report and "helper_changes" in report)
+check("a race outside a git repository is refused",
+      "git repository" in team.race("x", ["stand-in-coder", "stand-in-coder"], os.path.join(work, "ws")).get("error", ""))
+for x in r.get("racing", []):
+    hc.act(x["agent_id"], "discard")
+
 # Outside a repository it works in the folder, and hears who else is there.
 plain = os.path.join(work, "plain")
 os.makedirs(plain)

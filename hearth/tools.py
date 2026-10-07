@@ -772,6 +772,26 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "race_helpers",
+        "description":
+            "Give one coding task to two or more agent programs at once (say codex and "
+            "claude-code), each on its own copy of a git repository, to compare their "
+            "work. When all finish, `check` (a test command such as 'npm test') runs in "
+            "each copy and you get one comparison; bring in the best with "
+            "helper_changes and discard the rest.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "The task, given the same to each agent."},
+                "agents": {"type": "array", "items": {"type": "string"},
+                           "description": "Agent ids, at least two; the same one may appear twice."},
+                "folder": {"type": "string", "description": "A folder inside the git repository."},
+                "check": {"type": "string", "description": "A command that passes when the work is right."},
+            },
+            "required": ["task", "agents", "folder"],
+        },
+    },
+    {
         "name": "message_helper",
         "description":
             "For a helper: ask or tell another helper that is working at the same "
@@ -6420,6 +6440,8 @@ _HANDLERS = {
     "spawn_subagent": lambda p: _spawn_subagent(p),
     "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
     "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id") or p.get("job_id") or p.get("id") or ""),
+    "race_helpers": lambda p: __import__("hearth.team", fromlist=["race"]).race(
+        p.get("task") or "", p.get("agents") or [], p.get("folder") or "", p.get("check") or ""),
     # Helpers' own loop handles it, knowing who sends; the main assistant has tell_subagent.
     "message_helper": lambda p: {"ok": False, "error": "message_helper is for helpers; use tell_subagent to reach one"},
     "helper_changes": lambda p: __import__("hearth.helper_changes", fromlist=["act"]).act(
@@ -8179,6 +8201,7 @@ _DRYRUN_GUARDED = {
     "start_job",                         # a shell command, in the background
     "send_to_phone",                     # a real message to a real phone
     "helper_changes",                    # brings a helper's changes into real folders
+    "race_helpers",                      # starts agent programs and runs a command
     "forge_generate", "forge_shutdown",  # drive an external image server
 }
 
@@ -8474,6 +8497,7 @@ _DEFERRED_TOOLS = {
     "tell_subagent",       # only matters once a helper is running
     "helper_changes",      # only matters once a helper has changed something
     "message_helper",      # helpers use it among themselves
+    "race_helpers",        # comparing agents is an occasional ask
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # ntfy push is opt-in / rare
     "focus_window",        # niche window management
@@ -8748,6 +8772,8 @@ _RISKY_TOOLS: set = {
     "generate_image", "generate_video",
     # Bringing in, discarding or undoing a helper's work changes files.
     "helper_changes",
+    # Starts agent programs and runs a check command in their copies.
+    "race_helpers",
 }
 _NEVER_PERM: set = {"ask_user", "spawn_subagent"}
 
@@ -8977,6 +9003,7 @@ _TOOL_CATEGORY = {
     "tell_subagent": "Sub-agents",
     "helper_changes": "Sub-agents",
     "message_helper": "Sub-agents",
+    "race_helpers": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",
