@@ -426,6 +426,25 @@ with sync_playwright() as pw:
     check(f"with two tools running at once, each result lands on its own call {paired}",
           paired == [["read_file", "what a.txt says"], ["grep_search", "3 matches"]])
 
+    # Facts the background pass saved after a reply had finished never reached
+    # the window: the reply's stream was already closed. The state poll carries them.
+    from hearth import memory_extract as _mx
+    _mx.NOTICED.append({"at": time.time(), "titles": ["favourite editor"]})
+    remembered = pg.evaluate("""async () => {
+      STATE._factsSeen = 0;
+      await refreshState();
+      const toasts = [...document.querySelectorAll('.toast')].map(t => t.textContent);
+      const p = ROOM.people.get('__main');
+      const goal = p ? roomMainGoal(p) : null;
+      const again = (await refreshState(), [...document.querySelectorAll('.toast')].filter(t => /Remembered/.test(t.textContent)).length);
+      return { toast: toasts.some(t => /Remembered 1 fact/.test(t) && /favourite editor/.test(t)),
+               board: !!goal && (goal.pose === 'pin' || goal.at === ROOM.spots.board), once: again === 1 };
+    }""")
+    check(f"a fact remembered in the background is shown, and JARVIS pins it to the board {remembered}",
+          remembered["toast"] and remembered["board"] and remembered["once"])
+    idle = pg.evaluate("(() => { ROOM.intent = null; const m = ROOM.people.get('__main'); m.path = []; m.holdUntil = 0; return roomMainIdleWord(m); })()")
+    check(f"with nothing asked of it, JARVIS is said to be free, not reading for you {idle!r}", idle.startswith("Free"))
+
     browser.close()
 srv.shutdown()
 

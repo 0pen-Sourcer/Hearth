@@ -9001,6 +9001,18 @@ async function refreshState() {
     }
     // Live endpoint is the source of truth for local-vs-cloud + the brand label.
     STATE.endpoint = s.endpoint || '';
+    // Facts the background pass remembered after a reply had finished.
+    for (const f of (s.facts_saved || [])) {
+      if (STATE._factsSeen == null) { STATE._factsSeen = f.at; continue; }      // nothing old on opening
+      if (f.at <= STATE._factsSeen) continue;
+      STATE._factsSeen = f.at;
+      ROOM.pinUntil = Date.now() + 9000;
+      if (!(STATE.settings && STATE.settings.toast_facts_saved === false)) {
+        const t = f.titles || [];
+        toast(t.length === 1 ? 'Remembered 1 fact' : `Remembered ${t.length} facts`, t.slice(0, 3).join(', '), 'ok', 3500);
+      }
+    }
+    if (STATE._factsSeen == null) STATE._factsSeen = 0;
     // Which brain is in use is the server's to say. A switch made somewhere
     // else (a model started from the Models tab, the terminal) leaves this
     // window's copy of the settings behind, so it catches up here.
@@ -18958,8 +18970,8 @@ const LEISURE = [['hearthside', 'gaze'], ['windowSeat', 'gaze'], ['coffee', 'cof
 const MAIN_IDLE_MORE = [['armchairSeat', 'sit', 's'], ['hearth', 'tend_fire'], ['windowSeat', 'side_coffee', 'f'],
                         ['shelfL', 'side_read'], ['armchairSeat', 'sit_read', 's'], ['coffee', 'side_coffee', 'f'],
                         ['shelfR', 'side_read', 'f'], ['armchairSeat', 'sit_coffee', 's']];
-const MAIN_IDLE_WORDS = { fire: 'by the fire', windowSeat: 'at the window', coffee: 'making coffee', shelfR: 'reading', hearthside: 'by the hearth',
-                         shelfL: 'reading', rug: 'stretching', windowL: 'at the window', board: 'at the board',
+const MAIN_IDLE_WORDS = { fire: 'by the fire', windowSeat: 'at the window', coffee: 'making coffee', shelfR: 'browsing the shelves', hearthside: 'by the hearth',
+                         shelfL: 'browsing the shelves', rug: 'stretching', windowL: 'at the window', board: 'at the board',
                          armchairSeat: 'in the armchair', hearth: 'tending the fire' };
 // One entry of a list for this stretch of time. Stepping by 7 walks through a
 // whole list before repeating (none here is a multiple of 7 long); the same
@@ -18975,12 +18987,18 @@ function roomMainIdle(p) {
   return roomPick(MAIN_IDLE.concat(MAIN_IDLE_MORE.filter(([, pose]) => roomHas(skin, pose))), p.seed, 45000);
 }
 function roomMainIdleWord(p) {
+  const w = roomMainIdleSpot(p);
+  return w === 'on the way' || w === 'right here' ? w : 'Free · ' + w;
+}
+// Where it is and what it does while nothing is asked of it. Said as leisure:
+// "reading" alone read as if it were reading something for you.
+function roomMainIdleSpot(p) {
   // Where it is, not where it is headed: "making coffee" is for the counter.
   if (p.path && p.path.length) return 'on the way';
   if (p.holdUntil > Date.now()) return 'right here';
   if (ROOM.intent && ROOM.intent.until > Date.now()) return MAIN_IDLE_WORDS[ROOM.intent.spot] || 'around';
   const [spot, pose] = roomMainIdle(p);
-  if (pose === 'sit_read') return 'reading in the armchair';
+  if (pose === 'sit_read') return 'a book in the armchair';
   return MAIN_IDLE_WORDS[spot] + (/coffee/.test(pose) && spot !== 'coffee' ? ', with a coffee' : '');
 }
 // Working on a turn. Loading or ejecting a model, "ready" and the like are
@@ -19002,6 +19020,9 @@ function roomMainGoal(p) {
   p.wasBusy = busy;
   if (p.pokeUntil > now) return { at: p.pos, pose: p.pokePose || 'raise', sit: !!p.pokeSit, lift: p.pokeSit || 0 };
   if ($('perm-strip') && !$('perm-strip').hidden) return { at: ROOM.spots.rug, pose: 'raise' };
+  // A fact just remembered in the background is pinned up before anything else.
+  if (!busy && ROOM.pinUntil > now)
+    return roomHas(roomSkin(p.agent), 'pin') ? { at: ROOM.spots.pin, pose: 'pin', flip: true } : { at: ROOM.spots.board, pose: 'raise' };
   if (ROOM.intent && ROOM.intent.until > now) return { at: ROOM.spots[ROOM.intent.spot], pose: ROOM.intent.pose };
   if (!busy) {
     if (p.holdUntil > now) return { at: p.holdAt || p.pos, pose: 'idle' };

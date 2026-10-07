@@ -146,6 +146,11 @@ BAD (will NOT save — extractor must filter these):
 """
 
 
+# What the background pass saved, newest last, for the window to hear about:
+# it runs after a reply has finished streaming, so it can't be sent with it.
+NOTICED: List[Dict[str, Any]] = []
+
+
 def _already_saved_block() -> str:
     try:
         titles = _memory.fact_titles()
@@ -349,6 +354,10 @@ def extract_and_save(
     except Exception:
         pass
 
+    if saved:
+        import time as _time
+        NOTICED.append({"at": _time.time(), "titles": [f.get("title", "") for f in saved]})
+        del NOTICED[:-20]
     return saved, warnings
 
 

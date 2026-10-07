@@ -762,6 +762,14 @@ def _saved_providers() -> List[Dict[str, Any]]:
     return out
 
 
+def _facts_noticed() -> List[Dict[str, Any]]:
+    try:
+        from . import memory_extract as _mx
+        return list(_mx.NOTICED[-5:])
+    except Exception:
+        return []
+
+
 def status_snapshot() -> Dict[str, Any]:
     """What /status shows, the same for the window and the terminal: what is
     thinking and on what, the approval switch, each plan's usage windows as the
@@ -4010,6 +4018,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             # itself through its own process (voice's reliable foreground path).
             "surface": _take_pending_focus(),
             "memories": len(_memory_index()),
+            # Facts the background pass saved lately, which the window shows.
+            "facts_saved": _facts_noticed(),
             "workspace": WORKSPACE,
             "models_dir": _models_dir,
             "lms_cli": bool(_find_lms_cli()),
