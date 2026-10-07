@@ -881,14 +881,22 @@
   /* Tool call card - clean, collapsible */
   #view-team { overflow: hidden; }
   #view-team [hidden] { display: none !important; }
-  .tm-rooms { position: absolute; top: 10px; left: 10px; display: flex; gap: 4px; padding: 3px; border-radius: 999px;
-    background: color-mix(in srgb, var(--bg-0) 78%, transparent); border: 1px solid var(--border); backdrop-filter: blur(6px); z-index: 3; }
-  .tm-rooms button { background: none; border: none; color: var(--fg-dim); font: 500 12px var(--sans); padding: 4px 10px;
-    border-radius: 999px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
-  .tm-rooms button:hover { color: var(--fg); }
-  .tm-rooms button.on { background: var(--bg-2, var(--bg-1)); color: var(--fg); }
-  .tm-rooms button em { font-style: normal; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
-  .tm-rooms button i { width: 6px; height: 6px; border-radius: 50%; background: var(--err); }
+  /* The room switcher is part of the picture: a small wooden sign drawn in
+     the room's own pixels (stepped corners, no rounding, no glow). */
+  .tm-rooms { position: absolute; top: 14px; left: 14px; display: flex; padding: 4px; z-index: 3; background: #2a190e;
+    box-shadow: 0 -3px 0 0 #6e4524, 0 3px 0 0 #6e4524, -3px 0 0 0 #6e4524, 3px 0 0 0 #6e4524, 0 7px 0 0 rgba(0,0,0,.35);
+    image-rendering: pixelated; }
+  .tm-rooms button { position: relative; z-index: 1; background: none; border: none; color: #c9a77c; cursor: pointer;
+    font: 700 11px/1 ui-monospace, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase;
+    padding: 6px 10px; display: flex; align-items: center; gap: 7px; }
+  .tm-rooms button:hover { color: #f6e2bd; }
+  .tm-rooms button.on { color: #fff2d6; }
+  .tm-rooms button em { font-style: normal; color: #e7a14a; }
+  .tm-rooms button i { width: 6px; height: 6px; background: #e0533d; box-shadow: 0 0 0 1px #2a190e; }
+  .tm-rooms-ind { position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; background: #5a3519;
+    box-shadow: inset 0 2px 0 0 #7d4c25, inset 0 -2px 0 0 #3d2311; }
+  .tm-wipe-hide .tm-labels { opacity: 0; }
+  .tm-labels { transition: opacity .16s ease-out; }
   .tm-tab { background: none; border: 1px solid var(--border); color: var(--fg-dim); padding: 4px 12px; font-size: 12px; }
   .tm-tab:first-child { border-radius: var(--r) 0 0 var(--r); }
   .tm-tab:last-child { border-radius: 0 var(--r) var(--r) 0; border-left: none; }
@@ -1026,6 +1034,10 @@
     background-repeat: no-repeat; image-rendering: pixelated; }
   .ob-seg-faces span { display: flex; flex-direction: column; }
   .ap-char { display: flex; align-items: center; gap: 12px; text-align: left; }
+  .ap-room { padding: 6px; gap: 6px; }
+  .ap-room i { display: block; width: 100%; aspect-ratio: 3 / 2; background-size: cover; background-position: center;
+    border-radius: calc(var(--r-lg) - 4px); image-rendering: pixelated; }
+  .ap-room b { padding: 0 4px 2px; }
   #tour-ring { position: fixed; z-index: 9000; border-radius: 12px; pointer-events: none;
     box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(0, 0, 0, .62); }
   #tour-card { position: fixed; z-index: 9001; width: 300px; background: var(--bg-1); border: 1px solid var(--border-strong);
@@ -4546,6 +4558,16 @@
           <div class="ap-modes ap-two" id="ap-room">
             <button type="button" class="ap-mode ap-char" data-look="her"><i style="background-image:url(/assets/team/main.png)"></i><span><b>Orange scarf</b><small>Long hair. Sits, reads by the fire, tends it.</small></span></button>
             <button type="button" class="ap-mode ap-char" data-look="him"><i style="background-image:url(/assets/team/main_m.png)"></i><span><b>Teal scarf</b><small>Short hair. Stays on his feet, book or mug in hand.</small></span></button>
+          </div>
+        </div>
+        <div class="ap-block" id="ap-rooms-block" hidden>
+          <div class="ap-title">Home room</div>
+          <div class="ap-hint">Where your assistant lives. Past eight helpers the next room opens, and the one after.</div>
+          <div class="ap-modes" id="ap-home"></div>
+          <div class="ap-title" style="margin-top:14px">Moving between rooms</div>
+          <div class="ap-modes ap-two" id="ap-wipe">
+            <button type="button" class="ap-mode" data-wipe="pixel"><b>Pixel wipe</b><small>The next room opens out of where you clicked.</small></button>
+            <button type="button" class="ap-mode" data-wipe="instant"><b>Instant</b><small>Straight to it, no movement.</small></button>
           </div>
         </div>
 <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">In the chat</h4>
@@ -18419,8 +18441,17 @@ window.addEventListener('load', function initSidebarDrawer() {
     const b = e.target.closest('.ap-mode'); if (!b) return;
     hearthSetRoomLook(b.dataset.look);
   });
+  const homeBox = document.getElementById('ap-home'), wipeBox = document.getElementById('ap-wipe');
+  if (homeBox) homeBox.addEventListener('click', e => {
+    const b = e.target.closest('.ap-mode'); if (b) hearthSetRoomHome(b.dataset.home);
+  });
+  if (wipeBox) wipeBox.addEventListener('click', e => {
+    const b = e.target.closest('.ap-mode'); if (b) hearthSetRoomWipe(b.dataset.wipe);
+  });
   const mark = () => {
     if (roomBox) roomBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.look === cur('hearth_room_look', 'her')));
+    if (homeBox) homeBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.home === cur('hearth_room_home', 'cabin')));
+    if (wipeBox) wipeBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.wipe === cur('hearth_room_wipe', 'pixel')));
     if (uiBox) uiBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.ui === cur('hearth_ui', 'simple')));
     modes.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === cur('hearth_theme', 'classic')));
     accents.querySelectorAll('.ap-accent').forEach(b => b.classList.toggle('on', b.dataset.accent === cur('hearth_accent', 'rose')));
@@ -18436,6 +18467,12 @@ window.addEventListener('load', function initSidebarDrawer() {
     try { renderChat(); } catch {}
   });
   fetch('/assets/team/manifest.json', { cache: 'no-store' }).then(r => r.json()).then(m => {
+    const rooms = m.rooms || [];
+    if (homeBox && rooms.length > 1) {
+      homeBox.innerHTML = rooms.map(r => `<button type="button" class="ap-mode ap-room" data-home="${esc(r.id)}"><i style="background-image:url(/assets/team/${esc(r.file)}?v=${esc(m.v || '')})"></i><b>${esc(r.name)}</b></button>`).join('');
+      document.getElementById('ap-rooms-block').hidden = false;
+      mark();
+    }
     document.querySelectorAll('.ap-char i, .ob-seg-faces i').forEach(i => {
       i.style.backgroundImage = i.style.backgroundImage.replace(/\.png(\?v=\w+)?/, '.png?v=' + (m.v || ''));
     });
@@ -18757,7 +18794,8 @@ const ROOM = {
   people: new Map(), sel: null, says: new Map(), hits: [], labelSig: '', intent: null,
   // The rooms, each the same floor plan in its own style, and the one in view.
   // JARVIS lives in the first; the next opens when every desk before it is taken.
-  bgs: [], rooms: [], view: 0,
+  bgs: [], rooms: [], view: 0, order: [0], wipe: null,
+  ind: { l: new Spring(0, 0.34, 0.86), r: new Spring(0, 0.34, 0.86) },
   // Desk anchors: the middle of each desk's front edge, on the floor.
   desks: [[330, 648], [610, 648], [900, 648], [1190, 648], [330, 886], [610, 886], [900, 886], [1190, 886]],
   spots: {
@@ -18936,14 +18974,40 @@ async function roomLoad() {
     ROOM.man = man;
     const load = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej;
                                                     i.src = src + (man.v ? '?v=' + man.v : ''); });
-    ROOM.rooms = man.rooms && man.rooms.length ? man.rooms : [{ id: 'cabin', name: 'Cabin', file: 'room.png' }];
-    ROOM.bgs = [];
-    for (const r of ROOM.rooms) ROOM.bgs.push(await load('/assets/team/' + r.file));
-    ROOM.bg = ROOM.bgs[0];
+    // Everything is loaded before any of it is used: someone placed while the
+    // rooms were half in would land in a room that isn't there yet.
+    const rooms = man.rooms && man.rooms.length ? man.rooms : [{ id: 'cabin', name: 'Cabin', file: 'room.png' }];
+    const bgs = [];
+    for (const r of rooms) bgs.push(await load('/assets/team/' + r.file));
     if (man.props) ROOM.props = await load('/assets/team/props.png');
     for (const r of man.roles) ROOM.imgs[r] = await load(`/assets/team/${r}.png`);
+    ROOM.bgs = bgs;
+    ROOM.rooms = rooms;
+    roomOrder();
+    ROOM.bg = ROOM.bgs[ROOM.order[0]];
     return true;
   } catch { return false; }
+}
+// The first room is the one picked as home (JARVIS lives there); the others
+// follow in their usual order. A room's number is its place in that order.
+function roomHomeId() { try { return localStorage.getItem('hearth_room_home') || 'cabin'; } catch { return 'cabin'; } }
+function roomOrder() {
+  const all = ROOM.rooms.map((_, i) => i), home = ROOM.rooms.findIndex(r => r.id === roomHomeId());
+  ROOM.order = home > 0 ? [home, ...all.filter(i => i !== home)] : all;
+}
+function roomStyle(r) { return ROOM.order[r] != null ? ROOM.order[r] : 0; }
+function roomWipeOn() {
+  if (_reduceMotion()) return false;
+  try { return localStorage.getItem('hearth_room_wipe') !== 'instant'; } catch { return true; }
+}
+function hearthSetRoomHome(id) {
+  try { localStorage.setItem('hearth_room_home', id); } catch {}
+  if (ROOM.rooms.length) { roomOrder(); ROOM.labelSig = ''; const box = $('tm-rooms'); if (box) box.dataset.sig = ''; roomRoomsRender(); }
+  document.dispatchEvent(new Event('hearth:look'));
+}
+function hearthSetRoomWipe(how) {
+  try { localStorage.setItem('hearth_room_wipe', how); } catch {}
+  document.dispatchEvent(new Event('hearth:look'));
 }
 // A free desk: in the given room, or the first room that has one.
 function roomDeskFor(id, only) {
@@ -19152,6 +19216,8 @@ function roomGoal(p, a) {
   return { at: ROOM.spots[spot], pose, spread: true };
 }
 function roomSync(list) {
+  // Until the art is in there are no rooms to put anyone in; roomStart syncs once it is.
+  if (!ROOM.rooms.length) return;
   // Someone who finished a while ago has gone home; they are still in the list.
   const old = a => a.status !== 'working' && !ROOM.people.has(a.id)
     && Date.now() / 1000 - (a.updated || 0) > ROOM_STAY / 1000;
@@ -19355,7 +19421,7 @@ function roomDraw(t) {
   ctx.imageSmoothingEnabled = false;
   const kx = cv.width / ROOM.W, ky = cv.height / ROOM.H;
   const inView = p => (p.room || 0) === ROOM.view;
-  ctx.drawImage(ROOM.bgs[ROOM.view] || ROOM.bg, 0, 0, cv.width, cv.height);
+  ctx.drawImage(ROOM.bgs[roomStyle(ROOM.view)] || ROOM.bg, 0, 0, cv.width, cv.height);
   roomCarve(ctx, kx, ky);
 
   // Everything that stands on the floor, with the y where it touches it.
@@ -19485,6 +19551,7 @@ function roomDraw(t) {
 
   // The cat: woken by a click, it sits up, says its piece and goes back to sleep.
   if (ROOM.view === 0) hits.push({ cat: true, x0: (868 - 28) * kx / dpr, x1: (868 + 28) * kx / dpr, y0: (452 - 42) * ky / dpr, y1: (452 + 4) * ky / dpr, z: 452 });
+  roomWipeDraw(ctx, cv);
   if (ROOM.view === 0 && ROOM.catSay && ROOM.catSay.until > Date.now()) labels.push({ cat: ROOM.catSay.text, x: 868 * kx / dpr, y: (452 - 44) * ky / dpr });
   ROOM.hits = hits;
   // Labels and speech are redrawn only when something about them changed, so
@@ -19637,37 +19704,110 @@ function roomFace(role, seed) {
   x.drawImage(img, (cw - 60) / 2, ch - 124, 60, 60, 0, 0, 40, 40);
   return c;
 }
-// Which room is in view. Shown once a second room has someone in it.
-function roomShow(r) {
+// Which room is in view. Shown once a second room has someone in it. The
+// new room opens out of the point clicked as a circle of the room's own big
+// pixels, on a spring with no overshoot: about a third of a second, and a
+// click during it goes straight on from what is on screen.
+function roomShow(r, x, y) {
   if (r === ROOM.view) return;
+  const cv = $('tm-canvas'), stage = $('tm-stage');
+  if (cv && cv.width && roomWipeOn()) {
+    const snap = document.createElement('canvas');
+    snap.width = cv.width; snap.height = cv.height;
+    snap.getContext('2d').drawImage(cv, 0, 0);
+    const k = cv.width / (stage.clientWidth || cv.width);
+    ROOM.wipe = { snap, t0: performance.now(), x: (x != null ? x : stage.clientWidth / 2) * k, y: (y != null ? y : stage.clientHeight / 2) * k };
+    stage.classList.add('tm-wipe-hide');
+  }
   ROOM.view = r;
   ROOM.labelSig = '';
   roomRoomsRender();
+}
+const WIPE_PERIOD = 0.32;
+function roomWipeDraw(ctx, cv) {
+  const w = ROOM.wipe;
+  if (!w) return;
+  const t = (performance.now() - w.t0) / 1000, done = _springStep(t, WIPE_PERIOD, 1);
+  if (done > 0.985) { ROOM.wipe = null; $('tm-stage').classList.remove('tm-wipe-hide'); return; }
+  // Everything outside the circle is still the room before, drawn on a grid
+  // of big square cells so the edge steps like the art does.
+  const cell = Math.max(8, Math.round(cv.width / 96));
+  const R = done * Math.hypot(Math.max(w.x, cv.width - w.x), Math.max(w.y, cv.height - w.y));
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, cv.width, cv.height);
+  for (let y = Math.floor((w.y - R) / cell) * cell; y < w.y + R; y += cell) {
+    const dy = y + cell / 2 - w.y;
+    if (Math.abs(dy) >= R) continue;
+    const half = Math.sqrt(R * R - dy * dy);
+    const x0 = Math.round((w.x - half) / cell) * cell, x1 = Math.round((w.x + half) / cell) * cell;
+    if (x1 > x0) ctx.rect(x0, y, x1 - x0, cell);
+  }
+  ctx.clip('evenodd');
+  ctx.drawImage(w.snap, 0, 0);
+  ctx.restore();
 }
 function roomRoomsRender() {
   const box = $('tm-rooms'); if (!box) return;
   const people = [...ROOM.people.values()].filter(p => !p.leaving);
   const used = ROOM.rooms.map((_, r) => people.filter(p => (p.room || 0) === r));
   const open = used.map((list, r) => r === 0 || list.length || r === ROOM.view);
-  if (!open.slice(1).some(Boolean)) { box.hidden = true; box.innerHTML = ''; return; }
+  if (!open.slice(1).some(Boolean)) { box.hidden = true; box.innerHTML = ''; box.dataset.sig = ''; return; }
   box.hidden = false;
   const sig = used.map((list, r) => open[r] ? [r, list.length, list.some(p => p.agent.role !== 'main' && teamNeedsYou(p.agent)), r === ROOM.view].join(',') : '').join('|');
   if (box.dataset.sig === sig) return;
+  const fresh = !box.dataset.sig;
   box.dataset.sig = sig;
-  box.innerHTML = '';
-  ROOM.rooms.forEach((room, r) => {
+  box.innerHTML = '<span class="tm-rooms-ind"></span>';
+  ROOM.rooms.forEach((_, r) => {
     if (!open[r]) return;
+    const room = ROOM.rooms[roomStyle(r)];
     const b = document.createElement('button');
     b.className = r === ROOM.view ? 'on' : '';
+    b.dataset.r = r;
     b.title = `${room.name}: ${used[r].length} here`;
     b.innerHTML = `${esc(room.name)}<em>${used[r].length}</em>${used[r].some(p => p.agent.role !== 'main' && teamNeedsYou(p.agent)) ? '<i></i>' : ''}`;
-    b.addEventListener('click', () => roomShow(r));
+    b.addEventListener('click', e => {
+      const st = $('tm-stage').getBoundingClientRect();
+      roomShow(r, e.clientX - st.left, e.clientY - st.top);
+    });
     box.appendChild(b);
   });
+  // The highlight slides to the room in view. Its two edges ride their own
+  // springs, the leading one a little quicker, so it stretches as it goes.
+  const on = box.querySelector('button.on');
+  if (!on) return;
+  const L = on.offsetLeft, Rt = on.offsetLeft + on.offsetWidth, ind = ROOM.ind;
+  if (fresh || _reduceMotion()) { ind.l.jump(L); ind.r.jump(Rt); }
+  else {
+    const right = L > ind.l.target;
+    ind.l.period = right ? 0.42 : 0.3; ind.r.period = right ? 0.3 : 0.42;
+    ind.l.to(L); ind.r.to(Rt);
+  }
+  const paint = () => {
+    const el = box.querySelector('.tm-rooms-ind');
+    if (!el) return false;
+    const l = Math.round(ind.l.value() / 2) * 2, r = Math.round(ind.r.value() / 2) * 2;
+    el.style.left = l + 'px'; el.style.width = Math.max(0, r - l) + 'px';
+    if (ind.l.settled() && ind.r.settled()) { _springUsers.delete(paint); return false; }
+  };
+  _springUsers.add(paint);
+  paint();
+  _springTick();
 }
 function roomStripRender() {
   const strip = $('tm-strip'); if (!strip || !ROOM.man) return;
   roomRoomsRender();
+  // A mouse wheel scrolls the row of cards sideways; past the first few they
+  // were only reachable with a sideways swipe or shift.
+  if (!strip._wheel) {
+    strip._wheel = true;
+    strip.addEventListener('wheel', e => {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || strip.scrollWidth <= strip.clientWidth) return;
+      e.preventDefault();
+      strip.scrollLeft += e.deltaY;
+    }, { passive: false });
+  }
   const people = [...ROOM.people.values()].filter(p => !p.leaving)
     .sort((a, b) => (a.agent.role === 'main' ? -1 : b.agent.role === 'main' ? 1 : 0));
   strip.innerHTML = '';

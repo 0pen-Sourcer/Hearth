@@ -565,10 +565,18 @@ with sync_playwright() as pw:
       roomDraw(performance.now());
       const drawn1 = ROOM.hits.filter(h => h.p && h.p.id.startsWith('sub_many_')).map(h => ROOM.people.get(h.p.id).room);
       roomShow(0);
+      const strip = document.getElementById('tm-strip'), was = strip.style.cssText, viewWas = STATE.view;
+      const roomBox = document.getElementById('tm-room'), roomHidden = roomBox.hidden;
+      showView('team'); roomBox.hidden = false;
+      strip.style.cssText = 'width: 300px; display: flex; overflow-x: auto;';
+      strip.scrollLeft = 0;
+      strip.dispatchEvent(new WheelEvent('wheel', { deltaY: 240, bubbles: true, cancelable: true }));
+      const scrolled = strip.scrollLeft;
+      strip.style.cssText = was; roomBox.hidden = roomHidden; showView(viewWas || 'chat');
       for (const a of list) ROOM.people.delete(a.id);
       roomStripRender();
       return { first: where.filter(r => r === 0).length, second: where.filter(r => r === 1).length,
-               shown, before, drawn0, view, drawn1: [...new Set(drawn1)], after: document.getElementById('tm-rooms').hidden };
+               shown, before, drawn0, view, drawn1: [...new Set(drawn1)], after: document.getElementById('tm-rooms').hidden, scrolled };
     }""")
     check(f"twelve helpers: eight in the first room, four in the next {rooms}",
           rooms["first"] == 8 and rooms["second"] == 4)
@@ -577,6 +585,30 @@ with sync_playwright() as pw:
     check("only the room in view is drawn, and clicking someone shows their room",
           rooms["drawn0"] == 8 and rooms["view"] == 1 and rooms["drawn1"] == [1])
     check("with one room in use the switcher goes away", rooms["after"])
+    check(f"a mouse wheel scrolls the row of cards sideways ({rooms['scrolled']})", rooms["scrolled"] > 0)
+
+    # The home room is picked in Appearance: JARVIS lives there and the others
+    # follow. Moving between rooms is a pixel wipe unless Instant is picked.
+    home = pg.evaluate("""() => {
+      hearthSetRoomHome('winter');
+      const first = ROOM.rooms[roomStyle(0)].id, second = ROOM.rooms[roomStyle(1)].id;
+      const card = !!document.querySelector('#ap-home .ap-mode.on[data-home="winter"]');
+      hearthSetRoomHome('cabin');
+      hearthSetRoomWipe('pixel');
+      const cv = document.getElementById('tm-canvas');
+      if (!cv.width) { cv.width = 320; cv.height = 210; }
+      ROOM.view = 0; roomShow(1);
+      const wiped = !!ROOM.wipe;
+      ROOM.wipe = null; document.getElementById('tm-stage').classList.remove('tm-wipe-hide');
+      hearthSetRoomWipe('instant');
+      roomShow(0);
+      const instant = !ROOM.wipe && ROOM.view === 0;
+      hearthSetRoomWipe('pixel');
+      return { first, second, card, wiped, instant };
+    }""")
+    check(f"a home room picked in Appearance comes first, the cabin after it {home}",
+          home["first"] == "winter" and home["second"] == "cabin" and home["card"])
+    check("a room change wipes in, or is instant when that is picked", home["wiped"] and home["instant"])
 
     # A helper that didn't finish stood by its desk with a hand up for good,
     # and came back after every restart. A working one could not be stopped.
