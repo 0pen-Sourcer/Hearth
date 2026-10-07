@@ -138,7 +138,7 @@ Hearth runs from source on macOS and Linux. The CLI and web UI work, and most to
 
 **Sub-agents.** Fork focused workers that run with a tightened system prompt and a restricted tool allowlist. Six personas ship: researcher, coder, archivist, librarian, summarizer, and a PDF coordinator that fans out summarizer workers over a document and reduces their results. Workers run synchronously or in the background; background results arrive in your next chat turn rather than blocking. Fork depth is bounded to prevent runaway spawning.
 
-**Watch a team build.** Ask for a team, "one frontend, one backend, one architect", and Hearth spawns each as a sub-agent and opens a live terminal pane per agent (Windows Terminal split-panes, or tmux on Linux/macOS), so you watch them think, call tools, and finish side by side. Opt-in; the agents act on their own once you ask, so it only runs when you do.
+**Watch a team build.** Ask for a team, "three on Codex for the frontend, two on Claude Haiku for the tests, one on this PC for the docs", and JARVIS starts each helper on what you named. They walk into the Team room, a small pixel cabin where each one sits at a desk and works, and clicking anyone shows the task and every step so far. You can tell a working helper something or stop it, and each report comes back to JARVIS. Past eight helpers the next room opens. In the terminal the same team can open as live panes instead (Windows Terminal split-panes, or tmux on Linux/macOS).
 
 **Background jobs.** Long-running operations (whole-drive scans, big searches) return a job ID immediately and run in a background thread while you keep working. List jobs and collect results when they finish.
 
