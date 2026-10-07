@@ -20267,7 +20267,9 @@ function _stepLine(tool, what, done) {
 function roomStepsHTML(steps) {
   if (!steps.length) return '<li class="none">No steps yet.</li>';
   const one = t => { t = String(t || '').trim().split('\n')[0]; return t.length > 150 ? t.slice(0, 149) + '…' : t; };
-  return steps.map((st, n) => st.told != null
+  return steps.map((st, n) => st.guard != null
+    ? `<li class="told"><span>${st.stop ? 'Told to wrap up' : 'Going in circles'}</span><small>${esc(st.guard)}</small></li>`
+    : st.told != null
     ? `<li class="told"><span>${esc(st.from === 'the user' ? 'You' : (st.from || 'Someone'))} said</span><small>${esc(st.told)}</small></li>`
     : `<li class="${st.result == null ? 'live' : ''}" data-n="${n}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${_toolIcon(st.tool)}</svg><span>${esc(_stepLine(st.tool, st.what, st.result != null))}</span>${st.result ? `<small>${esc(one(st.result))}</small>` : ''}</li>`).join('');
 }

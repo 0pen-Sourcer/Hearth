@@ -187,6 +187,7 @@ jobs:
         # that never started were not mentioned to the model.
         run: |
           python tests/test_team.py
+          python tests/test_helper_loop_guard.py
 
       - name: Voice sessions end cleanly and stay apart
         # Every session leaked its mic reader and a Whisper process, and a

@@ -371,6 +371,8 @@ def agent_story(agent_id: str) -> Dict[str, Any]:
                     waiting.pop(0)["result"] = str(rec.get("preview") or "")[:600]
                 elif k == "told":
                     out["steps"].append({"told": str(rec.get("text") or "")[:600], "from": str(rec.get("from") or "")})
+                elif k == "guard":
+                    out["steps"].append({"guard": str(rec.get("reason") or "")[:300], "stop": rec.get("action") == "stop"})
                 elif k == "assistant_final":
                     out["final"] = str(rec.get("text") or "")[:4000]
                 elif k == "end":
@@ -913,6 +915,10 @@ async def _close(client) -> None:
 
 async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, tpath, used,
                           should_cancel, execute_tool) -> Dict[str, Any]:
+    # The same watch the main loop keeps: a helper repeating a call that fails
+    # or returns nothing new is told so, then made to answer with what it has.
+    from .loop_guard import ToolLoopGuard
+    guard, wrap_up = ToolLoopGuard(), False
     for turn in range(max_turns):
         for said in _take_told(agent_id):
             messages.append({"role": "user", "content": said})
@@ -938,8 +944,8 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
             resp = await chat_create(client,
                 model=model,
                 messages=messages,
-                tools=tools if tools else None,
-                tool_choice="auto" if tools else None,
+                tools=tools if tools and not wrap_up else None,
+                tool_choice="auto" if tools and not wrap_up else None,
                 temperature=0.4,
                 stream=False,
             )
@@ -1009,7 +1015,10 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
             # setting would have stopped to ask about.
             from .tools import standing_permission
             _perm = standing_permission(name, args)
-            if _perm != "allow":
+            skip = guard.before(name, args)
+            if skip is not None:
+                content = skip.note
+            elif _perm != "allow":
                 content = (
                     f"(not run: {name} is set to never run in Settings.)" if _perm == "deny"
                     else f"(not run: {name} needs the user's permission and a sub-agent "
@@ -1026,6 +1035,14 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
                     content = f"(tool {name} failed: {type(e).__name__}: {e})"
                 finally:
                     _set_subagent_tool_ctx(False)
+            if skip is None:
+                decision = guard.after(name, args, content)
+                if decision.action in ("warn", "stop"):
+                    content = content[:3600] + "\n\n" + decision.note
+                    _append_transcript(tpath, {"kind": "guard", "action": decision.action,
+                                               "reason": decision.reason or decision.note})
+                if decision.action == "stop":
+                    wrap_up = True
             content_capped = content[:4000]
             messages.append({
                 "role": "tool",
