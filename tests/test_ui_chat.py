@@ -159,6 +159,11 @@ with sync_playwright() as pw:
       const strip = document.getElementById('perm-strip');
       out.stripInRoom = !strip.hidden && strip.nextElementSibling === document.getElementById('tm-compose');
       out.mark = !!document.querySelector('#tm-labels .tm-label .hx-mini svg');
+      // A name tag between two pixels makes its border shimmer as people walk.
+      { const m = ROOM.people.get('__main'); m.pos = [m.pos[0] + 0.37, m.pos[1] + 0.29]; ROOM.labelSig = ''; roomDraw(performance.now()); }
+      const sb = document.getElementById('tm-labels').getBoundingClientRect();
+      out.whole = [...document.querySelectorAll('#tm-labels .tm-label')].map(e => {
+        const r = e.getBoundingClientRect(); return [r.left - sb.left, r.top - sb.top]; });
       hideInlinePermission();
       // Thinking: paces along one line, turning round, instead of standing.
       const me = ROOM.people.get('__main');
@@ -221,6 +226,8 @@ with sync_playwright() as pw:
     check("a permission question is asked in the room, with the approval strip right there",
           room["asking"] == "I need to run a command for this. Okay?" and room["stripInRoom"] and room["stripBack"])
     check("JARVIS's tag carries the mark of the brain it is running on", room["mark"])
+    check(f"name tags sit on whole pixels {room['whole']}",
+          room["whole"] and all(abs(v - round(v)) < 0.01 for xy in room["whole"] for v in xy))
     check(f"it paces while it thinks instead of standing in one spot {room['pace']}", room["pace"] == ["think", True, True])
     check(f"saving a memory takes it to the board, and it says so {room['saving']}",
           room["saving"] == ["Noting that down…", True])

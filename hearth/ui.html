@@ -19979,6 +19979,9 @@ function roomDraw(t) {
     el.innerHTML = teamMini(a) + esc(a.name || a.persona || 'helper');
     el.addEventListener('click', () => roomPoke(p));
     box.appendChild(el);
+    // Whole pixels, so the 1px border doesn't shimmer while someone walks.
+    el.style.transform = 'none';
+    el.style.left = Math.round(x - el.offsetWidth / 2) + 'px'; el.style.top = Math.round(y - el.offsetHeight) + 'px';
     const say = ROOM.says.get(p.id);
     if (say && say.until > now) {
       const b = document.createElement('div');
