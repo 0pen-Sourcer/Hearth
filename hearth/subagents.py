@@ -331,7 +331,7 @@ def _read_agent(p: Path) -> Dict[str, Any]:
                 elif k == "assistant_final":
                     info["preview"] = str(rec.get("text") or "")[:240]
                 elif k == "end":
-                    info["ended"] = "done" if rec.get("ok") else "failed"
+                    info["ended"] = "stopped" if rec.get("stopped") else "done" if rec.get("ok") else "failed"
                     if not rec.get("ok"):
                         info["preview"] = str(rec.get("error") or info["preview"])[:240]
     except OSError:
@@ -374,7 +374,7 @@ def agent_story(agent_id: str) -> Dict[str, Any]:
                 elif k == "assistant_final":
                     out["final"] = str(rec.get("text") or "")[:4000]
                 elif k == "end":
-                    out["ended"] = "done" if rec.get("ok") else "failed"
+                    out["ended"] = "stopped" if rec.get("stopped") else "done" if rec.get("ok") else "failed"
                     out["error"] = str(rec.get("error") or "")[:600]
     except OSError:
         return {}
@@ -865,6 +865,11 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
     for turn in range(max_turns):
         for said in _take_told(agent_id):
             messages.append({"role": "user", "content": said})
+        if _stop_asked(agent_id):
+            out = {"ok": False, "error": "Stopped before it finished.", "stopped": True,
+                   "turns": turn, "used_tools": used, "transcript_path": str(tpath)}
+            _append_transcript(tpath, {"kind": "end", **out})
+            return out
         # Abort propagation — sync subagents inherit the parent's cancel
         # signal. Background agents intentionally do NOT inherit it (the
         # whole point of background is that they survive the parent turn).
@@ -1099,6 +1104,29 @@ def tell_subagent(agent_id: str, message: str, sender: str = "the user") -> Dict
         return {"ok": False, "error": "This agent's program runs its task to the end and can't take a "
                                       "message part-way."}
     return {"ok": False, "error": "that helper has already finished"}
+
+
+_STOP_ASKED: set = set()
+
+
+def _stop_asked(agent_id: str) -> bool:
+    with _INBOX_LOCK:
+        return agent_id in _STOP_ASKED
+
+
+def stop_subagent(agent_id: str) -> Dict[str, Any]:
+    """Stop a working helper. An agent program is ended at once; one of
+    Hearth's own stops before its next step."""
+    from . import external_agents as _xa
+    if _xa.stop(agent_id):
+        return {"ok": True, "note": "Stopped."}
+    with _BG_RESULTS_LOCK:
+        running = agent_id in _BG_RUNNING
+    if not running:
+        return {"ok": False, "error": "that helper has already finished"}
+    with _INBOX_LOCK:
+        _STOP_ASKED.add(agent_id)
+    return {"ok": True, "note": "It stops before its next step."}
 
 
 def _take_told(agent_id: str) -> List[str]:

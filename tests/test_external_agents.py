@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+import subprocess
 import threading
 import time
 
@@ -126,6 +127,32 @@ t0 = time.time()
 while not late and time.time() - t0 < 20:
     time.sleep(0.1)
 check("its answer arrives afterwards like a background helper's", late and "late answer" in late[0].get("text", ""))
+
+# A helper can be stopped part-way, along with whatever its program started.
+xa.AGENTS["stand-in-stuck"] = {"label": "Stuck agent", "exe": ["stand-in"], "args": lambda allow: ["-c",
+                               "import subprocess, sys, time; sys.stdin.read(); "
+                               "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(90)']); "
+                               "print(c.pid, flush=True); time.sleep(90)"],
+                               "stream": "text"}
+stuck_done, stuck = threading.Event(), {}
+r = xa.spawn("stand-in-stuck", "x", cwd=work, on_done=lambda i, res: (stuck.update(res), stuck_done.set()))
+time.sleep(1.5)
+t0 = time.time()
+said = subagents.stop_subagent(r["agent_id"])
+stuck_done.wait(15)
+check(f"a working helper can be stopped {said}", said.get("ok") and stuck_done.is_set() and time.time() - t0 < 10)
+check(f"it ends as stopped, not failed {stuck.get('error')}", stuck.get("stopped") is True)
+row = next((a for a in subagents.team_state() if a["id"] == r["agent_id"]), {})
+check(f"the Team view shows it as stopped ({row.get('status')})", row.get("status") == "stopped")
+pids = [ln for ln in str(stuck.get("text") or "").split() if ln.isdigit()]
+if pids and os.name == "nt":
+    alive = pids[0] in subprocess.run(["tasklist", "/FI", f"PID eq {pids[0]}"], capture_output=True, text=True).stdout
+    check("what its program started is stopped too", not alive)
+check("stopping one that already finished says so", not subagents.stop_subagent(r["agent_id"]).get("ok"))
+with subagents._BG_RESULTS_LOCK:
+    subagents._BG_RUNNING.add("sub_own_helper")
+check("one of Hearth's own is stopped before its next step",
+      subagents.stop_subagent("sub_own_helper").get("ok") and subagents._stop_asked("sub_own_helper"))
 
 # npm installs CLIs as .cmd shims; the prompt must never go through cmd.exe.
 shim_dir = tempfile.mkdtemp(prefix="hearth-shim-")

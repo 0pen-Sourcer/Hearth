@@ -3263,6 +3263,11 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import subagents as _sa
             r = _sa.tell_subagent(str(body.get("id") or ""), str(body.get("text") or ""))
             return self._send_json(200 if r.get("ok") else 400, r)
+        if path == "/api/team/stop":
+            body = self._read_json() or {}
+            from . import subagents as _sa
+            r = _sa.stop_subagent(str(body.get("id") or ""))
+            return self._send_json(200 if r.get("ok") else 400, r)
         if path == "/api/team/start":
             # Starting a helper by hand from the Team view: one of Hearth's
             # roles, or a task handed to an installed agent CLI. The person

@@ -479,6 +479,28 @@ def signing(aid: str) -> Optional[bool]:
 # Running agents that can be told something: agent id -> its process.
 _OPEN: Dict[str, Any] = {}
 _OPEN_LOCK = threading.Lock()
+# Every agent program running a task, and the ones asked to stop.
+_PROCS: Dict[str, Any] = {}
+_STOPPED: set = set()
+
+
+def stop(agent_id: str) -> bool:
+    """End a running agent program and everything it started. False when
+    there is none by that id."""
+    with _OPEN_LOCK:
+        proc = _PROCS.get(agent_id)
+        if proc is None or proc.poll() is not None:
+            return False
+        _STOPPED.add(agent_id)
+    if os.name == "nt":
+        # The CLIs are launchers: the work runs in a child node process.
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,
+                       creationflags=_NO_WINDOW)
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    return True
 
 
 def _user_line(text: str) -> str:
@@ -750,6 +772,8 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
                                     creationflags=_NO_WINDOW,
                                     # A helper does its task; it doesn't send helpers of its own.
                                     env=dict(os.environ, HEARTH_HELPER="1"))
+            with _OPEN_LOCK:
+                _PROCS[agent_id] = proc
             listening = bool(spec.get("takes_messages"))
             try:
                 if listening:
@@ -798,10 +822,17 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
             ok, text, err = False, "", f"{type(e).__name__}: {e}"
         with _OPEN_LOCK:
             _OPEN.pop(agent_id, None)
+            _PROCS.pop(agent_id, None)
+            stopped = agent_id in _STOPPED
+            _STOPPED.discard(agent_id)
+        if stopped:
+            ok, err = False, "Stopped before it finished."
         if text:
             emit({"kind": "assistant_final", "text": text[:4000]})
         result = {"ok": ok, "text": text, "error": err, "persona": spec["label"], "name": name or spec["label"],
                   "turns": state.get("tools", 0), "used_tools": [], "transcript_path": str(tpath)}
+        if stopped:
+            result["stopped"] = True
         emit({"kind": "end", **{k: v for k, v in result.items() if k != "text"}})
         with _sa._BG_RESULTS_LOCK:
             _sa._BG_RUNNING.discard(agent_id)

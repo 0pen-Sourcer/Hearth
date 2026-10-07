@@ -2364,6 +2364,12 @@ class JarvisCLI:
                 print(f"  {C_DIM}No helpers yet. Ask for a bigger job, or hand one to another agent: "
                       f"\"have Claude Code ...\".{C_RESET}")
                 return True
+            parts = arg.split()
+            if len(parts) == 2 and parts[0] == "stop" and parts[1].isdigit() and 1 <= int(parts[1]) <= len(agents):
+                a = agents[int(parts[1]) - 1]
+                r = _sa.stop_subagent(a["id"])
+                print(f"  {C_OK if r.get('ok') else C_ERR}{r.get('note') or r.get('error')}{C_RESET}")
+                return True
             if arg.isdigit() and 1 <= int(arg) <= len(agents):
                 a = agents[int(arg) - 1]
                 path = _sa._transcript_path(a["id"])
@@ -2401,7 +2407,7 @@ class JarvisCLI:
                 doing = doing.replace("\n", " ")[:90]
                 print(f"  {C_DIM}{n:>2}{C_RESET}  {C_TOOL}{(a.get('name') or what):<8}{C_RESET} "
                       f"{C_DIM}{what:<14}{C_RESET} {colour.get(a.get('status'), C_WARN)}{st:<9}{C_RESET} {C_DIM}{doing}{C_RESET}")
-            print(f"  {C_DIM}/team <n> shows every step of one. Shell jobs are under /jobs.{C_RESET}")
+            print(f"  {C_DIM}/team <n> shows every step of one, /team stop <n> stops one. Shell jobs are under /jobs.{C_RESET}")
             return True
         if low == "/me":
             # The personal part of first-run setup, any time. Enter keeps an answer.

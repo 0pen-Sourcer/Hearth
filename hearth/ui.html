@@ -1006,6 +1006,10 @@
   .tm-tell button { background: var(--accent); color: var(--on-accent, #fff); border: none; border-radius: var(--r);
     padding: 0 12px; font: 600 12px var(--sans); cursor: pointer; }
   .tm-tell-no { color: var(--fg-faint); font-size: 12px; }
+  .tm-side-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tm-side-acts .tm-stop { background: none; border: 1px solid var(--border); color: var(--err); border-radius: var(--r);
+    margin-top: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .tm-side-acts .tm-stop:hover { border-color: var(--err); }
   .tm-say { position: absolute; transform: translate(-50%, calc(-100% - 26px)); max-width: 260px; pointer-events: none;
     background: var(--bg-1); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 12px;
     padding: 7px 11px; font: 12.5px/1.45 var(--sans); white-space: normal; overflow-wrap: anywhere; width: max-content; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5); }
@@ -19124,8 +19128,9 @@ function roomGoal(p, a) {
     }
     return { at: seat, pose: 'type', seated: true };
   }
-  if (a.status === 'failed') return { at: beside, pose: 'raise' };
   const since = Date.now() - (p.doneAt || Date.now());
+  // One that didn't finish waits by its desk with a hand up, then goes home.
+  if (a.status === 'failed') return since > ROOM_STAY ? { at: ROOM.spots.door, pose: 'idle', leave: true } : { at: beside, pose: 'raise' };
   if (a.status === 'stopped') return since > 20000 ? { at: ROOM.spots.door, pose: 'idle', leave: true } : { at: beside, pose: 'idle' };
   if (since < 2600) return { at: p.pos, pose: 'stretch' };
   // A finished helper reports to JARVIS before it does anything else.
@@ -19139,7 +19144,7 @@ function roomGoal(p, a) {
 }
 function roomSync(list) {
   // Someone who finished a while ago has gone home; they are still in the list.
-  const old = a => a.status !== 'working' && a.status !== 'failed' && !ROOM.people.has(a.id)
+  const old = a => a.status !== 'working' && !ROOM.people.has(a.id)
     && Date.now() / 1000 - (a.updated || 0) > ROOM_STAY / 1000;
   const want = list.filter(a => ['working', 'done', 'failed', 'stopped'].includes(a.status)
     && !ROOM.gone.has(a.id) && !old(a)).slice(0, 8);
@@ -19163,7 +19168,7 @@ function roomSync(list) {
     if (a.status !== 'working' && p.agent && p.agent.status === 'working') p.doneAt = Date.now();
     if (a.status === 'working') ROOM.gone.delete(a.id);
     if (a.status !== 'working' && !p.doneAt) {
-      p.doneAt = Date.now() - 5000;
+      p.doneAt = Math.min(Date.now() - 5000, (a.updated || Infinity) * 1000);
       // Finished before the room was open: nothing new to report.
       p.reported = Date.now() / 1000 - (a.updated || 0) > 60;
     }
@@ -19737,8 +19742,18 @@ function roomSelect(id, keep = false) {
     <div class="tm-i-now"></div><div class="tm-i-asked"></div><div class="tm-i-steps"></div><div class="tm-i-result"></div><div class="tm-i-usage"></div>
     ${main ? '' : a.can_tell ? `<form class="tm-tell" autocomplete="off"><input placeholder="Tell ${esc(a.name || 'them')} something…"><button type="submit">Tell</button></form>`
       : a.status === 'working' ? `<p class="tm-tell-no">${esc((HARNESS[a.runtime] || {}).label || 'This agent')} runs its task to the end, so it can't take a message part-way.</p>` : ''}
-    <button class="tm-open-log">${main ? 'Open the chat' : 'Open the full log'}</button>`;
+    <div class="tm-side-acts"><button class="tm-open-log">${main ? 'Open the chat' : 'Open the full log'}</button>${!main && a.status === 'working' ? '<button class="tm-stop">Stop</button>' : ''}</div>`;
   side.querySelector('.tm-face').appendChild(roomFace(roomSkin(a), p.seed));
+  const stop = side.querySelector('.tm-stop');
+  if (stop) stop.addEventListener('click', async () => {
+    stop.disabled = true;
+    try {
+      const r = await api('/api/team/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: a.id }) });
+      roomSay(p.id, r.note === 'Stopped.' ? 'Stopping.' : 'Stopping after this step.', 2400);
+      stop.remove();
+      teamPoll();
+    } catch (err) { stop.disabled = false; toast("Couldn't stop it", err.message.replace(/^\d+\s*/, ''), 'warn', 6000); }
+  });
   const tell = side.querySelector('.tm-tell');
   if (tell) tell.addEventListener('submit', async (e) => {
     e.preventDefault();

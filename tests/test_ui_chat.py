@@ -547,6 +547,28 @@ with sync_playwright() as pw:
     check(f"a place picked on top of furniture moves in front of it {crossings['beside']}",
           crossings["beside"][0][1] > 448 and crossings["beside"][1][1] > 430 and crossings["beside"][2][1] > 420)
 
+    # A helper that didn't finish stood by its desk with a hand up for good,
+    # and came back after every restart. A working one could not be stopped.
+    gone = pg.evaluate("""() => {
+      const now = Date.now() / 1000;
+      roomSync([{ id: 'sub_old_fail', persona: 'coder', status: 'failed', updated: now - 7200, preview: 'x' },
+                { id: 'sub_new_fail', persona: 'coder', status: 'failed', updated: now - 5, preview: 'x' },
+                { id: 'sub_busy', persona: 'coder', status: 'working', updated: now }]);
+      const oldBack = ROOM.people.has('sub_old_fail');
+      const fresh = ROOM.people.get('sub_new_fail');
+      const waits = roomGoal(fresh, fresh.agent).pose;
+      fresh.doneAt = Date.now() - ROOM_STAY - 1000;
+      const later = roomGoal(fresh, fresh.agent);
+      roomSelect('sub_busy', true);
+      const stop = !!document.querySelector('#tm-side .tm-stop');
+      roomSelect(null);
+      for (const id of ['sub_old_fail', 'sub_new_fail', 'sub_busy']) ROOM.people.delete(id);
+      return { old: oldBack, waits, leaves: !!later.leave, stop };
+    }""")
+    check(f"a helper that didn't finish waits a while, then goes home, and an old one doesn't come back {gone}",
+          gone["old"] is False and gone["waits"] == "raise" and gone["leaves"])
+    check("a working helper's panel has a Stop button", gone["stop"])
+
     # JARVIS headed for a desk only while a write was running, which is over
     # long before it could get there, so it never sat down to type.
     desk = pg.evaluate("""() => {
