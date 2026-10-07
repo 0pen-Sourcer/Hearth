@@ -736,6 +736,22 @@ with sync_playwright() as pw:
           gone["old"] is False and gone["waits"] == "raise" and gone["leaves"])
     check("a working helper's panel has a Stop button", gone["stop"])
 
+    # What a helper changed on disk had no place in its panel, and no way back.
+    changes = pg.evaluate("""() => {
+      const div = document.createElement('div');
+      div.innerHTML = roomChangesHTML({ files: ['C:\\\\proj\\\\app.py', 'new.py'], stat: '2 files changed', state: 'waiting',
+                                       separate: true, can_bring_in: true, can_discard: true });
+      const waiting = [...div.querySelectorAll('[data-change]')].map(b => b.dataset.change);
+      const files = [...div.querySelectorAll('.tm-change-files li')].map(l => l.textContent);
+      div.innerHTML = roomChangesHTML({ files: ['notes.md'], state: 'changed', separate: false, can_undo: true });
+      const direct = [...div.querySelectorAll('[data-change]')].map(b => b.dataset.change);
+      const none = roomChangesHTML({ files: [] });
+      return { waiting, files, direct, none };
+    }""")
+    check(f"a helper's panel lists what it changed, with what can be done about it {changes}",
+          changes["waiting"] == ["show", "bring_in", "discard"] and changes["files"] == ["app.py", "new.py"]
+          and changes["direct"] == ["undo"] and changes["none"] == "")
+
     # JARVIS headed for a desk only while a write was running, which is over
     # long before it could get there, so it never sat down to type.
     desk = pg.evaluate("""async () => {

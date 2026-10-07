@@ -2319,6 +2319,9 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"agents": _sa.team_state()})
             except Exception as e:
                 return self._send_json(500, {"error": str(e)})
+        if path == "/api/team/changes":
+            from . import helper_changes as _hc
+            return self._send_json(200, _hc.act(self._query().get("id", "").strip(), "show"))
         if path == "/api/team/story":
             # One helper's work so far, for the panel beside the room.
             from . import subagents as _sa
@@ -3308,6 +3311,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             body = self._read_json() or {}
             from . import subagents as _sa
             r = _sa.tell_subagent(str(body.get("id") or ""), str(body.get("text") or ""))
+            return self._send_json(200 if r.get("ok") else 400, r)
+        if path == "/api/team/changes":
+            # Bring in, discard or undo a helper's changes from its panel. The
+            # person clicked it, so there is no permission prompt.
+            body = self._read_json() or {}
+            from . import helper_changes as _hc
+            r = _hc.act(str(body.get("id") or ""), str(body.get("action") or ""))
             return self._send_json(200 if r.get("ok") else 400, r)
         if path == "/api/team/stop":
             body = self._read_json() or {}

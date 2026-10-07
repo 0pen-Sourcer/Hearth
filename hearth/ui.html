@@ -1022,6 +1022,11 @@
   .tm-steps li.open small { color: var(--fg-dim); font-family: var(--mono); max-height: 180px; overflow-y: auto; }
   .tm-steps li.live span { color: var(--ok); }
   .tm-steps li.live svg { color: var(--ok); }
+  .tm-change-state { margin: 2px 0 6px; font-size: 12px; color: var(--fg-dim); }
+  .tm-change-files { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+  .tm-change-files li { font: 11.5px var(--mono); padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--fg); }
+  .tm-change-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tm-change-diff { margin-top: 8px; }
   .tm-steps li.told { grid-template-columns: 1fr; }
   .tm-steps li.told span { color: var(--accent); font-size: 11.5px; }
   .tm-steps li.told small { grid-column: 1; }
@@ -20314,6 +20319,7 @@ async function roomInspectFill() {
   const tail = story.error ? `<b>${main ? 'Went wrong' : "Didn't finish"}</b><p>${esc(story.error)}</p>`
     : story.final ? `<b>${story.ended ? (main ? 'Said' : 'Result') : 'So far'}</b><div class="tm-final tm-more">${renderMD(story.final.length > 4000 ? story.final.slice(0, 3999) + '…' : story.final)}</div>` : '';
   put('.tm-i-result', tail);
+  put('.tm-i-changes', main ? '' : roomChangesHTML(story.changes));
   // What it runs on and how much of that is used, from the same source as /status.
   const uid = main ? (STATE.brain && STATE.brain.providerKey) : a.runtime;
   if (uid && uid !== 'local' && (!ROOM.usageAt || Date.now() - ROOM.usageAt > 20000 || ROOM.usageFor !== uid)) {
@@ -20324,6 +20330,48 @@ async function roomInspectFill() {
       put('.tm-i-usage', html);
     }).catch(() => {});
   }
+}
+// What a helper changed on disk, where those changes stand, and what can be done about them.
+const CHANGE_STATE = {
+  waiting: 'On its own copy. Nothing has reached the folder yet.',
+  brought_in: 'Brought into the folder.', discarded: 'Thrown away.', undone: 'Undone.',
+  changed: 'Written to the folder.', working: 'Still working on its own copy.',
+};
+function roomChangesHTML(ch) {
+  if (!ch || !(ch.files || []).length) return '';
+  const name = f => String(f).replace(/\\/g, '/').split('/').pop();
+  const acts = [ch.can_bring_in && ['bring_in', 'Bring in'], ch.can_discard && ['discard', 'Discard'], ch.can_undo && ['undo', 'Undo']]
+    .filter(Boolean).map(([k, t]) => `<button data-change="${k}">${t}</button>`).join('');
+  return `<b>Changed<em>${ch.files.length}</em></b><p class="tm-change-state">${esc(CHANGE_STATE[ch.state] || '')}${ch.stat ? ' ' + esc(ch.stat) + '.' : ''}</p>`
+    + `<ul class="tm-change-files">${ch.files.slice(0, 30).map(f => `<li title="${esc(f)}">${esc(name(f))}</li>`).join('')}`
+    + `${ch.files.length > 30 ? `<li>and ${ch.files.length - 30} more</li>` : ''}</ul>`
+    + `<div class="tm-change-acts">${ch.separate ? '<button data-change="show">Show the diff</button>' : ''}${acts}</div><div class="tm-change-diff" hidden></div>`;
+}
+async function roomChangeAct(id, action, btn) {
+  const box = btn.closest('.tm-i-changes');
+  if (action === 'show') {
+    const out = box.querySelector('.tm-change-diff');
+    if (!out.hidden) { out.hidden = true; btn.textContent = 'Show the diff'; return; }
+    try {
+      const r = await api('/api/team/changes?id=' + encodeURIComponent(id));
+      fillEditCard('helper_changes', { diff: r.diff || '' }, out);
+      out.hidden = false; btn.textContent = 'Hide the diff';
+    } catch (err) { toast("Couldn't show the changes", err.message.replace(/^\d+\s*/, ''), 'warn', 6000); }
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const r = await api('/api/team/changes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                 body: JSON.stringify({ id, action }) });
+    const n = (r.files || r.restored || []).length;
+    toast({ bring_in: 'Brought in', discard: 'Thrown away', undo: 'Undone' }[action],
+          `${n} file${n === 1 ? '' : 's'}.`, 'ok', 3000);
+  } catch (err) {
+    toast({ bring_in: "Couldn't bring them in", discard: "Couldn't discard them", undo: "Couldn't undo them" }[action],
+          err.message.replace(/^\d+\s*/, ''), 'warn', 9000);
+  }
+  box.dataset.was = '';
+  roomInspectFill();
 }
 function roomSelect(id, keep = false) {
   const before = ROOM.sel;
@@ -20337,7 +20385,7 @@ function roomSelect(id, keep = false) {
   side.hidden = false;
   side.innerHTML = `<button class="tm-close" title="Close">×</button>
     <div class="tm-who"><div class="tm-face"></div><div><h4>${teamMini(a)}${esc(a.name || a.persona)}</h4><div class="tm-side-sub tm-i-sub"></div></div></div>
-    <div class="tm-i-now"></div><div class="tm-i-asked"></div><div class="tm-i-steps"></div><div class="tm-i-result"></div><div class="tm-i-usage"></div>
+    <div class="tm-i-now"></div><div class="tm-i-asked"></div><div class="tm-i-steps"></div><div class="tm-i-result"></div><div class="tm-i-changes"></div><div class="tm-i-usage"></div>
     ${main ? '' : a.can_tell ? `<form class="tm-tell" autocomplete="off"><input placeholder="Tell ${esc(a.name || 'them')} something…"><button type="submit">Tell</button></form>`
       : a.status === 'working' ? `<p class="tm-tell-no">${esc((HARNESS[a.runtime] || {}).label || 'This agent')} runs its task to the end, so it can't take a message part-way.</p>` : ''}
     <div class="tm-side-acts"><button class="tm-open-log">${main ? 'Open the chat' : 'Open the full log'}</button>${!main && a.status === 'working' ? '<button class="tm-stop">Stop</button>' : ''}</div>`;
@@ -20367,6 +20415,8 @@ function roomSelect(id, keep = false) {
   });
   // A step opens to show everything that came back from it.
   if (!side._wired) side.addEventListener('click', (e) => {
+    const ch = e.target.closest('[data-change]');
+    if (ch && ROOM.sel) { roomChangeAct(ROOM.sel, ch.dataset.change, ch); return; }
     const more = e.target.closest('.tm-more');
     if (more) { more.classList.toggle('open'); return; }
     const li = e.target.closest('.tm-steps li[data-n]');
