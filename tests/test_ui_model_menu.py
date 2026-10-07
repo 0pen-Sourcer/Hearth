@@ -453,12 +453,27 @@ with sync_playwright() as pw:
       if (!row) return { row: false };
       row.click();
       await new Promise(r => setTimeout(r, 200));
-      const out = { row: true, view: STATE.view, focused: document.activeElement && document.activeElement.id };
+      const out = { row: true, view: STATE.view, focused: document.activeElement && document.activeElement.classList.contains('brain-card') ? 'brain-card' : '' };
       showView('chat');
       return out;
     }""")
     check(f"the model menu has a way to a provider with no key yet {added}",
-          added.get("row") and added.get("view") == "settings" and added.get("focused") == "setting-brain-mode")
+          added.get("row") and added.get("view") == "settings" and added.get("focused") == "brain-card")
+
+    # Picking a brain in Settings was one long dropdown.
+    cards = pg.evaluate("""async () => {
+      showView('settings'); await refreshSettings();
+      const all = [...document.querySelectorAll('#brain-cards .brain-card')].map(c => c.dataset.brain);
+      document.querySelector('.brain-card[data-brain="gemini"]').click();
+      const out = { all, picked: document.getElementById('setting-brain-mode').value,
+                    on: (document.querySelector('.brain-card.on') || {}).dataset.brain,
+                    apply: !document.getElementById('brain-apply-row').hidden };
+      document.getElementById('brain-apply-row').hidden = true;
+      showView('chat');
+      return out;
+    }""")
+    check(f"Settings shows every brain as a card, and picking one picks it {cards}",
+          len(cards["all"]) == 11 and cards["picked"] == "gemini" and cards["on"] == "gemini" and cards["apply"])
 
     # A key pasted into Settings was put back to the old one by the next
     # settings refresh, before "Use this brain" was clicked.
