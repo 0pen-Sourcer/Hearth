@@ -8558,10 +8558,14 @@ function agentBrainOn(id) {
     modelId: name, modelName: name, ctxTotal: 0, ctxEffective: 0 });
   STATE.loadedModel = { id: name, state: 'loaded' };
   loadAgentInfo(id);
-  toast(`JARVIS now thinks with ${name}`,
-        `On your ${AGENT_PLANS[id] || name} plan. Helpers use your local model when one is loaded.`, 'ok', 5000);
+  brainToast(name, `On your ${AGENT_PLANS[id] || name} plan. Helpers use your local model when one is loaded.`);
   applyBrainState();
   refreshModels();
+}
+// The one message a brain switch ends with, whatever the brain.
+function brainToast(name, detail, kind = 'ok') {
+  const who = (typeof _agentName === 'function' && _agentName()) || 'JARVIS';
+  toast(`${who} now thinks with ${name}`, detail, kind, kind === 'ok' ? 5000 : 9000);
 }
 // Point JARVIS at another endpoint and bring every view in step. Settings and
 // the model menu both switch through here.
@@ -8573,35 +8577,23 @@ async function switchEndpoint(body) {
   if (!r.ok) throw new Error(r.error || 'unknown error');
   if (AGENT_BRAINS[body.provider]) { agentBrainOn(body.provider); return r; }
   brainMoved();
-  await saveSetting('llm_provider', body.provider);
-  await saveSetting('llm_url', body.url);
-  // With no key given, the one saved for this provider was used and stays.
-  if (body.key || body.provider === 'local') await saveSetting('llm_key', body.key);
+  // The server has already saved the switch; this only says what is serving.
   if (r.model) body.model = r.model;
-  await saveSetting('llm_model', body.model);
-  // Honest toast - tell the user what's ACTUALLY serving, not
-  // just "Switched brain". For local: probe shows LM Studio vs
-  // built-in vs nothing. Saves them from chatting into the void.
-  if (body.provider === 'local' && r.local_probe) {
-    if (r.local_probe.kind === 'lmstudio') {
-      toast('Switched to local · LM Studio', 'Detected LM Studio on ' + body.url + ' - preferred over built-in', 'ok', 5000);
-    } else if (r.local_probe.kind === 'builtin') {
-      toast('Switched to local · built-in', 'Connected to Hearth\'s built-in server', 'ok', 4000);
-    } else if (r.local_probe.kind === 'remote') {
-      toast('That URL is not local', body.url + ' is a remote/cloud endpoint, not a local server. Pick the matching cloud provider above, or set a localhost URL.', 'warn', 9000);
-    } else {
-      toast('Switched to local · nothing serving', 'Nothing on ' + body.url + '. Start LM Studio or boot a model in the Models tab.', 'warn', 8000);
-    }
+  if (body.key || body.provider === 'local') STATE.settings = Object.assign({}, STATE.settings || {}, { llm_key: body.key });
+  const bridges = Array.isArray(r.restarted_bridges) && r.restarted_bridges.length
+    ? ' ' + r.restarted_bridges.map(c => c[0].toUpperCase() + c.slice(1)).join(' and ') + ' moved over too.' : '';
+  const probe = body.provider === 'local' && r.local_probe ? r.local_probe.kind : '';
+  if (probe === 'remote') {
+    toast('That URL is not local', body.url + ' is a remote/cloud endpoint, not a local server. Pick the matching cloud provider above, or set a localhost URL.', 'warn', 9000);
+  } else if (probe === 'none') {
+    brainToast('this PC', 'Nothing is serving on ' + body.url + ' yet. Load a model in Models & engine.' + bridges, 'warn');
+  } else if (body.provider === 'local') {
+    brainToast(probe === 'lmstudio' ? 'LM Studio' : 'the model on this PC',
+               (probe === 'lmstudio' ? 'Found on ' + body.url + '.' : 'Hearth\'s own engine.') + bridges);
   } else {
     const _p = (STATE.providers || []).find(x => x.id === body.provider);
-    toast('Switched brain', 'Next message uses ' + (body.provider === 'local' ? 'your local server'
-          : [(_p && _p.label) || body.provider, body.model].filter(Boolean).join(' · ')), 'ok');
-  }
-  // Confirm any phone bridge that was respawned onto the new brain, so
-  // it's clear the Telegram/Discord bot won't keep hitting the old one.
-  if (Array.isArray(r.restarted_bridges) && r.restarted_bridges.length) {
-    const _names = r.restarted_bridges.map(c => c[0].toUpperCase() + c.slice(1)).join(', ');
-    toast('Reconnected on new brain', _names + ' restarted so it uses ' + (body.provider || 'this brain'), 'ok', 5000);
+    brainToast([(_p && _p.label) || body.provider, body.model].filter(Boolean).join(' · '),
+               (r.stopped_builtin ? 'The local model is unloading to free your graphics card.' : 'From the next message.') + bridges);
   }
   // Optimistically sync STATE.settings so the very next refreshModels
   // sees the new provider (and gates the eject button) without waiting

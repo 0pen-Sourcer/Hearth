@@ -3692,7 +3692,10 @@ class HearthHandler(BaseHTTPRequestHandler):
                 try:
                     from . import llmserver
                     if llmserver._proc and llmserver._proc.poll() is None:
-                        llmserver.stop_builtin()
+                        # The model takes seconds to let go of the card; the
+                        # new brain doesn't need to wait for that.
+                        threading.Thread(target=llmserver.stop_builtin, daemon=True,
+                                         name="unload-for-switch").start()
                         stopped_builtin = True
                 except Exception:
                     pass

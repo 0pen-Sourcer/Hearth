@@ -113,15 +113,26 @@ def agent_models(route):
     route.fulfill(json=AGENTS[route.request.url.split("id=")[1]])
 
 
+ENDPOINT_EXTRA = {}
+
+
 def endpoint(route):
     body = json.loads(route.request.post_data or "{}")
     switched.append(body)
     now.update(provider=body["provider"], model=body["model"])
-    route.fulfill(json={"ok": True, "model": body["model"]})
+    # The app saves the switch itself, the key with it when one was typed.
+    saved.update(llm_provider=body["provider"], llm_url=body.get("url", ""), llm_model=body["model"])
+    if body.get("key"):
+        saved["llm_key"] = body["key"]
+    route.fulfill(json={"ok": True, "model": body["model"], **ENDPOINT_EXTRA})
+
+
+SETTING_POSTS = []
 
 
 def settings(route):
     if route.request.method == "POST":
+        SETTING_POSTS.append(json.loads(route.request.post_data or "{}"))
         saved.update(json.loads(route.request.post_data or "{}"))
         if "llm_model" in saved:
             now["model"] = saved["llm_model"]
@@ -366,6 +377,24 @@ with sync_playwright() as pw:
     check(f"a brain changed elsewhere is caught up with on the next look {behind}",
           behind["before"] == "gemini" and behind["provider"] == "local" and behind["kind"] == "local"
           and behind["head"] == "· local")
+    # Switching to a provider waited on four settings saves the server had
+    # already made, and ended with different words than an agent switch, plus
+    # a second toast about the phone bridges.
+    ENDPOINT_EXTRA.update(restarted_bridges=["telegram"], stopped_builtin=True)
+    SETTING_POSTS.clear()
+    said = pg.evaluate("""async () => {
+      const seen = [], real = window.toast;
+      window.toast = (title, body) => { seen.push([title, body || '']); };
+      try { await switchEndpoint({ provider: 'anthropic', url: 'https://api.anthropic.com/v1/', key: '', model: 'claude-x' }); }
+      finally { window.toast = real; }
+      return seen;
+    }""")
+    ENDPOINT_EXTRA.clear()
+    check(f"a switch to a provider ends with the same words as an agent switch, once {said}",
+          len(said) == 1 and said[0][0].endswith("now thinks with Anthropic · claude-x")
+          and "Telegram moved over too" in said[0][1])
+    check(f"the page doesn't save again what the server saved {SETTING_POSTS}", SETTING_POSTS == [])
+
     check(f"the page ran without a script error {errors}", not errors)
 
     print()

@@ -18,6 +18,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -168,6 +169,28 @@ if far:
           web._load_settings()["llm_model"] == "newest-chat"
           and [m["id"] for m in listed if m["state"] == "loaded"] == ["newest-chat"])
     check("a provider's model ids are kept whole", "vendor/slashed-chat" in [m["id"] for m in listed])
+
+    # Moving to a provider waited for the local model to let go of the card
+    # (seconds) before the new brain was in use.
+    from hearth import llmserver
+
+    class _Running:
+        def poll(self):
+            return None
+
+    stopped = threading.Event()
+    real_proc, real_stop = llmserver._proc, llmserver.stop_builtin
+    llmserver._proc = _Running()
+    llmserver.stop_builtin = lambda: (time.sleep(3), stopped.set())
+    try:
+        t0 = time.time()
+        code, got = post("/api/llm-endpoint", {"provider": "openai", "url": base, "key": "", "model": "newest-chat"})
+        took = time.time() - t0
+        check(f"the new brain doesn't wait for the local model to unload ({took:.1f}s)",
+              code == 200 and got.get("stopped_builtin") and took < 1.5)
+        check("the local model is still unloaded", stopped.wait(6))
+    finally:
+        llmserver._proc, llmserver.stop_builtin = real_proc, real_stop
     web._save_settings({"llm_model": "slashed-chat"})
     web._models_cache["ts"] = 0
     check("a model saved by its short name is still the one marked in use",
