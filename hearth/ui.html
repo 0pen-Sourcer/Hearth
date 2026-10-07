@@ -18956,13 +18956,25 @@ function roomRouteOpen(from, to) {
   const near = x => ROOM.aisleX.reduce((b, v) => Math.abs(v - x) < Math.abs(b - x) ? v : b, ROOM.aisleX[0]);
   const top = y => y < 560;
   if (top(from[1]) && top(to[1])) return [[from[0], ROOM.aisleTop], [to[0], ROOM.aisleTop], to];
-  const pts = [[near(from[0]), from[1]]];
+  // Up by the fire the aisles stop at the open strip in front of it: further
+  // up, the one past the armchair runs along its arm and over the books.
+  const pts = top(from[1]) ? [[from[0], ROOM.aisleTop], [near(from[0]), ROOM.aisleTop]] : [[near(from[0]), from[1]]];
   if (top(from[1]) !== top(to[1]) || Math.abs(from[1] - to[1]) > 40) {
     const y = ROOM.aisleY;
     pts.push([near(from[0]), y], [near(to[0]), y]);
   }
-  pts.push([near(to[0]), to[1]], to);
+  if (top(to[1])) pts.push([near(to[0]), ROOM.aisleTop], [to[0], ROOM.aisleTop], to);
+  else pts.push([near(to[0]), to[1]], to);
   return pts;
+}
+// The floor the furniture by the fire stands on, as boxes of where feet can't
+// go (a body is about BODY_HALF either side of its feet).
+const BODY_HALF = 14;
+function roomBlocks() {
+  if (!ROOM.man || !ROOM.man.room_empty) return [];
+  const out = [{ name: 'armchair', x0: 472, x1: 608, y0: 395, y1: 442 }, { name: 'side_table', x0: 622, x1: 678, y0: 410, y1: 430 }];
+  if (roomProp('cat_sleep')) out.push({ name: 'books', x0: 434, x1: 470, y0: 436, y1: 448 }, { name: 'stool', x0: 1217, x1: 1259, y0: 404, y1: 420 });
+  return out;
 }
 // Nobody stands inside a desk or its chair. A place that falls on one (beside
 // someone standing near the coffee, one step aside from another person) moves
@@ -18972,7 +18984,10 @@ function roomFree(pt) {
   const deskAt = q => ROOM.desks.find(d => Math.abs(q[0] - d[0]) < DESK_HALF && q[1] > d[1] - DESK_BACK && q[1] < d[1] + DESK_FRONT);
   const inDesk = q => !!deskAt(q);
   const d = deskAt(pt);
-  if (!d) return pt;
+  if (!d) {
+    const b = roomBlocks().find(b => pt[0] + BODY_HALF > b.x0 && pt[0] - BODY_HALF < b.x1 && pt[1] > b.y0 && pt[1] < b.y1);
+    return b ? [pt[0], b.y1 + 12] : pt;
+  }
   // On the front half of a desk: just in front of it, where it was meant to be.
   if (pt[1] > d[1] - 40 && !inDesk([pt[0], d[1] + 70])) return [pt[0], d[1] + 70];
   const xs = [...ROOM.aisleX].sort((a, b) => Math.abs(a - pt[0]) - Math.abs(b - pt[0]));

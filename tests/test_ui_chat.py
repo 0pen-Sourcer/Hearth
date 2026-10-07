@@ -512,6 +512,41 @@ with sync_playwright() as pw:
     }""")
     check(f"picking her swaps the stock male voice for the stock female one, and a chosen voice stays {matched}",
           matched == ["af_heart", "bf_emma"])
+    # Nobody walks through furniture: every route between two places in the
+    # room keeps a body's width clear of the floor each piece stands on.
+    crossings = pg.evaluate("""() => {
+      const fp = [];
+      ROOM.desks.forEach((d, i) => {
+        fp.push({ name: 'desk' + i, x0: d[0] - 112, x1: d[0] + 112, y0: d[1] - 95, y1: d[1] + 2 });
+        fp.push({ name: 'chair' + i, x0: d[0] - 30, x1: d[0] + 30, y0: d[1] - 8, y1: d[1] + 20 });
+      });
+      fp.push({ name: 'armchair', x0: 472, x1: 608, y0: 395, y1: 442 }, { name: 'side_table', x0: 622, x1: 678, y0: 410, y1: 430 },
+              { name: 'books', x0: 434, x1: 470, y0: 436, y1: 448 }, { name: 'stool', x0: 1217, x1: 1259, y0: 404, y1: 420 });
+      const places = Object.entries(ROOM.spots);
+      ROOM.desks.forEach((d, i) => places.push(['seat' + i, roomSeat({ desk: i })]));
+      const own = (name, at) => (at.startsWith('seat') && (name === 'chair' + at.slice(4) || name === 'desk' + at.slice(4)))
+        || (at === 'armchairSeat' && name === 'armchair');
+      const hits = new Set();
+      for (const [an, a] of places) for (const [bn, b] of places) {
+        if (an === bn) continue;
+        const path = [a, ...roomRoute(a, b)];
+        for (let i = 1; i < path.length; i++) {
+          const [x0, y0] = path[i - 1], [x1, y1] = path[i];
+          const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 4));
+          for (let k = 0; k <= n; k++) {
+            const x = x0 + (x1 - x0) * k / n, y = y0 + (y1 - y0) * k / n;
+            for (const f of fp) if (!own(f.name, an) && !own(f.name, bn) && x + 14 > f.x0 && x - 14 < f.x1 && y > f.y0 && y < f.y1)
+              hits.add(f.name + ': ' + an + ' to ' + bn);
+          }
+        }
+      }
+      const beside = [[460, 440], [650, 425], [1238, 412]].map(q => roomFree(q));
+      return { hits: [...hits].slice(0, 6), count: hits.size, beside };
+    }""")
+    check(f"nobody walks through furniture on the way anywhere {crossings['hits']}", crossings["count"] == 0)
+    check(f"a place picked on top of furniture moves in front of it {crossings['beside']}",
+          crossings["beside"][0][1] > 448 and crossings["beside"][1][1] > 430 and crossings["beside"][2][1] > 420)
+
     # JARVIS headed for a desk only while a write was running, which is over
     # long before it could get there, so it never sat down to type.
     desk = pg.evaluate("""() => {
