@@ -448,6 +448,8 @@
   .mp-ico svg { width: 14px; height: 14px; }
   .mp-ico.ag { background: color-mix(in srgb, var(--hx) 16%, var(--bg-2)); color: var(--hx); font: 700 11px var(--sans); }
   .mp-ico.ag svg { fill: currentColor; }
+  .hx-fav { width: 76%; height: 76%; object-fit: contain; display: block; border-radius: 2px; }
+  .has-fav { background: #f4f2ee !important; }
   .mp-txt { flex: 1; min-width: 0; }
   .mp-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mp-s { display: block; font-size: 11.5px; color: var(--fg-dim); margin-top: 1px; }
@@ -7345,30 +7347,40 @@ const HARNESS = {
   'codex':        { label: 'Codex',        maker: 'OpenAI',       c: '#10a37f', icon: 'openai' },
   'antigravity':  { label: 'Antigravity',  maker: 'Google',       c: '#4285f4', icon: 'google' },
   'gemini-cli':   { label: 'Gemini CLI',   maker: 'Google',       c: '#8e75ff', icon: 'gemini' },
-  'grok':         { label: 'Grok',         maker: 'xAI',          c: '#6b7280' },
+  'grok':         { label: 'Grok',         maker: 'xAI',          c: '#6b7280', site: 'x.ai' },
   'kimi':         { label: 'Kimi Code',    maker: 'Moonshot AI',  c: '#2563eb', icon: 'kimi' },
   'opencode':     { label: 'OpenCode',     maker: 'SST',          c: '#a3a3a3', icon: 'opencode' },
   'qwen-code':    { label: 'Qwen Code',    maker: 'Alibaba',      c: '#615ced', icon: 'qwen' },
-  'crush':        { label: 'Crush',        maker: 'Charm',        c: '#e0569c' },
+  'crush':        { label: 'Crush',        maker: 'Charm',        c: '#e0569c', site: 'charm.sh' },
   'cursor-agent': { label: 'Cursor Agent', maker: 'Cursor',       c: '#555b66', icon: 'cursor' },
   'copilot':      { label: 'Copilot CLI',  maker: 'GitHub',       c: '#6e40c9', icon: 'copilot' },
-  'goose':        { label: 'Goose',        maker: 'Block',        c: '#b08900' },
+  'goose':        { label: 'Goose',        maker: 'Block',        c: '#b08900', site: 'goose-docs.ai' },
   'aider':        { label: 'Aider',        maker: 'Aider',        c: '#1f9d55' },
-  'droid':        { label: 'Droid',        maker: 'Factory',      c: '#e8590c' },
+  'droid':        { label: 'Droid',        maker: 'Factory',      c: '#e8590c', site: 'factory.ai' },
   'amp':          { label: 'Amp',          maker: 'Sourcegraph',  c: '#e5484d', icon: 'sourcegraph' },
-  'pi':           { label: 'Pi',           maker: 'pi.dev',       c: '#71717a' },
+  'pi':           { label: 'Pi',           maker: 'pi.dev',       c: '#71717a', site: 'pi.dev' },
   'cline':        { label: 'Cline',        maker: 'Cline',        c: '#3b82f6', icon: 'cline' },
-  'continue':     { label: 'Continue',     maker: 'Continue',     c: '#0ea5e9' },
-  'amazon-q':     { label: 'Amazon Q',     maker: 'AWS',          c: '#8b5cf6' },
-  'kiro':         { label: 'Kiro',         maker: 'AWS',          c: '#7c3aed' },
-  'kilo':         { label: 'Kilo Code',    maker: 'Kilo',         c: '#ca8a04' },
-  'augment':      { label: 'Augment',      maker: 'Augment Code', c: '#16a34a' },
-  'openhands':    { label: 'OpenHands',    maker: 'All Hands AI', c: '#e11d48' },
+  'continue':     { label: 'Continue',     maker: 'Continue',     c: '#0ea5e9', site: 'continue.dev' },
+  'amazon-q':     { label: 'Amazon Q',     maker: 'AWS',          c: '#8b5cf6', site: 'aws.amazon.com' },
+  'kiro':         { label: 'Kiro',         maker: 'AWS',          c: '#7c3aed', site: 'kiro.dev' },
+  'kilo':         { label: 'Kilo Code',    maker: 'Kilo',         c: '#ca8a04', site: 'kilocode.ai' },
+  'augment':      { label: 'Augment',      maker: 'Augment Code', c: '#16a34a', site: 'augmentcode.com' },
+  'openhands':    { label: 'OpenHands',    maker: 'All Hands AI', c: '#e11d48', site: 'all-hands.dev' },
 };
-// The mark that sits in a badge: the maker's icon, or the first letter.
+// The mark that sits in a badge: the maker's drawn icon, else its site's own
+// icon on a light tile, else the first letter (also when the icon can't be had).
 function harnessMark(h) {
   const d = h && h.icon && HARNESS_ICONS[h.icon];
-  return d ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>` : esc((h && h.label || '?')[0]);
+  if (d) return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+  const letter = esc((h && h.label || '?')[0]);
+  if (h && h.site) return `<img class="hx-fav" src="/api/favicon?d=${encodeURIComponent(h.site)}" alt="${letter}" `
+    + `onload="this.parentNode.classList.add('has-fav')" onerror="this.replaceWith(this.alt)">`;
+  return letter;
+}
+// A saved provider's badge: its own mark where Hearth knows one, else a cloud.
+function provIco(id) {
+  const h = BRAIN_MARKS[id];
+  return h ? `<span class="mp-ico ag" style="--hx:${h.c}">${harnessMark(h)}</span>` : `<span class="mp-ico">${MP_CLOUD}</span>`;
 }
 function harnessChip(id, extraTitle = '') {
   const h = HARNESS[id] || { label: id || 'agent', maker: '', c: 'var(--accent)' };
@@ -8222,7 +8234,7 @@ function _mpRow(o, cur, prov) {
   const agent = o.dataset.agent || (AGENT_BRAINS[(STATE.brain || {}).providerKey] && cur ? STATE.brain.providerKey : '');
   const h = agent ? (HARNESS[agent] || {}) : null;
   const ico = h ? `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>`
-               : `<span class="mp-ico">${(STATE.brain && STATE.brain.kind === 'cloud' && cur) ? MP_CLOUD : MP_CHIP}</span>`;
+               : (STATE.brain && STATE.brain.kind === 'cloud' && cur) ? provIco(STATE.brain.providerKey) : `<span class="mp-ico">${MP_CHIP}</span>`;
   const t = agent && cur ? agentModelLabel(agent) : (o.dataset.name || _mpClean(o.textContent).replace(/\.gguf$/i, ''));
   const sub = (agent && cur ? _agentSub(agent) : o.dataset.sub) || (agent ? `Your ${AGENT_PLANS[agent] || ''} plan · keeps Hearth's tools` : '')
     || (cur ? (STATE.brain && STATE.brain.kind === 'cloud' ? (STATE.brain.providerLabel || 'Online') : 'Running on this PC') : '');
@@ -8337,7 +8349,7 @@ async function _mpRowsOf(key) {
   const mine = !!here.prov && here.prov.id === id;
   const ids = mine ? here.loose.map(o => o.value) : (await _mpModels(key)).models;
   return ids.map(m => ({ v: `prov::${id}::${m}`, t: m.replace(/^models\//, ''), s: '', cur: mine && m === here.sel.value,
-                         from: `${p.label} · your API key`, ico: `<span class="mp-ico">${MP_CLOUD}</span>` }));
+                         from: `${p.label} · your API key`, ico: provIco(id) }));
 }
 async function _mpToggleModels(chev) {
   const key = chev.dataset.more, row = chev.closest('.mp-row');
@@ -8401,7 +8413,7 @@ function _mpSearch(q) {
     const text = o.textContent;
     const here_ = !disk && here.cloud;
     local.push({ v: o.value, t: o.dataset.name || _mpClean(text).replace(/\.gguf$/i, ''),
-                 cur: !disk && o.value === here.sel.value, ico: `<span class="mp-ico">${here_ ? MP_CLOUD : MP_CHIP}</span>`,
+                 cur: !disk && o.value === here.sel.value, ico: here_ ? provIco((here.prov && here.prov.id) || (STATE.brain && STATE.brain.providerKey)) : `<span class="mp-ico">${MP_CHIP}</span>`,
                  from: here_ ? (STATE.brain.providerLabel || 'Online') : 'On this PC',
                  s: disk ? (o.dataset.sub || '').split(' · ')[0] : /●\s*loaded/i.test(text) ? 'Loaded' : '' });
   }
@@ -8496,7 +8508,7 @@ function mpOpen() {
   if (provs.length) {
     html += '<div class="mp-sec">Your providers</div>' + provs.map(p => _mpItem({
       v: 'prov::' + p.id, t: p.label, s: p === here.prov ? 'Your API key · in use' : 'Your API key',
-      ico: `<span class="mp-ico">${MP_CLOUD}</span>`, right: _mpChev('prov::' + p.id) })).join('');
+      ico: provIco(p.id), right: _mpChev('prov::' + p.id) })).join('');
   }
   menu.innerHTML = (top + html)
     ? `<input class="mp-find mp-all" type="search" placeholder="Search every model" aria-label="Search every model" autocomplete="off" spellcheck="false">
@@ -18513,10 +18525,10 @@ const BRAIN_MARKS = {
   openai:     { label: 'GPT',        maker: 'OpenAI',     c: '#10a37f', icon: 'openai' },
   gemini:     { label: 'Gemini',     maker: 'Google',     c: '#8e75ff', icon: 'gemini' },
   google:     { label: 'Gemini',     maker: 'Google',     c: '#8e75ff', icon: 'gemini' },
-  grok:       { label: 'Grok',       maker: 'xAI',        c: '#6b7280' },
-  xai:        { label: 'Grok',       maker: 'xAI',        c: '#6b7280' },
-  openrouter: { label: 'OpenRouter', maker: 'OpenRouter', c: '#6467f2' },
-  groq:       { label: 'Groq',       maker: 'Groq',       c: '#f55036' },
+  grok:       { label: 'Grok',       maker: 'xAI',        c: '#6b7280', site: 'x.ai' },
+  xai:        { label: 'Grok',       maker: 'xAI',        c: '#6b7280', site: 'x.ai' },
+  openrouter: { label: 'OpenRouter', maker: 'OpenRouter', c: '#6467f2', site: 'openrouter.ai' },
+  groq:       { label: 'Groq',       maker: 'Groq',       c: '#f55036', site: 'groq.com' },
 };
 function mainBrainMark() {
   const k = (STATE.brain && STATE.brain.providerKey) || '';

@@ -395,6 +395,19 @@ with sync_playwright() as pw:
           and "Telegram moved over too" in said[0][1])
     check(f"the page doesn't save again what the server saved {SETTING_POSTS}", SETTING_POSTS == [])
 
+    # OpenRouter, Groq and most agent programs had no logo, so their badge was a
+    # letter; a saved provider in the menu was a plain cloud.
+    marks = pg.evaluate("""() => ({
+      openrouter: harnessMark(BRAIN_MARKS.openrouter), goose: harnessMark(HARNESS.goose),
+      aider: harnessMark(HARNESS.aider), claude: harnessMark(HARNESS['claude-code']),
+      prov: provIco('openrouter'), unknown: provIco('custom') })""")
+    check("a badge with no drawn logo shows its site's own icon",
+          "/api/favicon?d=openrouter.ai" in marks["openrouter"] and "/api/favicon?d=goose-docs.ai" in marks["goose"])
+    check("a drawn logo stays, and a maker with no icon keeps its letter",
+          marks["claude"].startswith("<svg") and marks["aider"] == "A")
+    check("a saved provider in the menu carries its own mark, an unknown one the cloud",
+          "openrouter.ai" in marks["prov"] and "<svg" in marks["unknown"] and "favicon" not in marks["unknown"])
+
     check(f"the page ran without a script error {errors}", not errors)
 
     print()
