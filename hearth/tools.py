@@ -8083,7 +8083,9 @@ TOOL_DEFINITIONS.append({
                         "your own brain, 'local' for this PC's model, or a provider a key is saved for "
                         "(anthropic, openai, gemini, openrouter, groq, grok)."},
             "model": {"type": "string", "description": "With runs_on a provider: the model, as named "
-                      "('haiku', 'sonnet 4.5'); matched to the provider's own list."},
+                      "('haiku', 'sonnet 4.5'); matched to the provider's own list. With an agent "
+                      "(claude-code, codex, opencode, cursor-agent, gemini-cli): one of its own models, "
+                      "e.g. 'opencode/big-pickle'."},
             "folder": {"type": "string", "description": "Working folder for an external agent. Default: the workspace."},
         }, "required": ["prompt"]}},
     }, "required": ["members"]},

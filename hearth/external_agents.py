@@ -47,25 +47,28 @@ def _codex_cmd(allow: str) -> List[str]:
 
 
 # id -> how to run it. `args` builds the arguments (the prompt goes on stdin
-# unless `prompt_arg` is set). `stream` names the output parser. `allow` is
+# unless `prompt_arg` is set). `model` is its model flag and how many leading
+# arguments (a subcommand) come before it. `stream` names the output parser. `allow` is
 # how much the user lets agents do on their own: "auto" or "edits". `maker`
 # is the company behind it, shown next to its agents in the Team view.
 AGENTS: Dict[str, Dict[str, Any]] = {
     # Claude Code reads messages on stdin while it works, so it can be told
     # things part-way; the others take one prompt and run to the end.
     "claude-code": {"label": "Claude Code", "maker": "Anthropic", "exe": ["claude"], "args": _claude_cmd,
+                    "model": ("--model", 0),
                     "stream": "claude", "takes_messages": True,
                     "billing": "your Claude plan's usage limits",
                     # Its own installer puts it here, which a running Hearth's PATH doesn't have yet.
                     "also": [r"~\.local\bin\claude.exe", "~/.local/bin/claude"]},
     "codex": {"label": "Codex", "maker": "OpenAI", "exe": ["codex"], "args": _codex_cmd, "stream": "codex",
+              "model": ("-m", 1),
               # The Codex desktop app keeps its own copy of the CLI off PATH.
               "also": [r"%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe", r"~\.codex\.sandbox-bin\codex.exe"]},
     "antigravity": {"label": "Antigravity", "maker": "Google", "exe": ["agy"],
                     "args": lambda allow: (["--dangerously-skip-permissions"] if allow == "auto" else []) + ["-p"],
                     "stream": "text", "prompt_arg": True},
     # --skip-trust: headless, nobody is there to answer its "trust this folder?".
-    "gemini-cli": {"label": "Gemini CLI", "maker": "Google", "exe": ["gemini"],
+    "gemini-cli": {"label": "Gemini CLI", "maker": "Google", "exe": ["gemini"], "model": ("-m", 0),
                    "args": lambda allow: ["--skip-trust", "--approval-mode=" + ("yolo" if allow == "auto" else "auto_edit"), "-p"],
                    "stream": "text", "prompt_arg": True},
     "grok": {"label": "Grok", "maker": "xAI", "exe": ["grok"],
@@ -78,6 +81,7 @@ AGENTS: Dict[str, Dict[str, Any]] = {
     # `app`: where its desktop app lives. The app has no command line of its
     # own, so it can't be handed a task; its CLI can, and shares its sign-in.
     "opencode": {"label": "OpenCode", "maker": "SST", "exe": ["opencode"], "args": lambda allow: ["run"],
+                 "model": ("-m", 1),
                  "stream": "text", "prompt_arg": True,
                  "app": [r"%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe"]},
     "qwen-code": {"label": "Qwen Code", "maker": "Alibaba", "exe": ["qwen"],
@@ -85,7 +89,7 @@ AGENTS: Dict[str, Dict[str, Any]] = {
                   "stream": "text", "prompt_arg": True},
     "crush": {"label": "Crush", "maker": "Charm", "exe": ["crush"], "args": lambda allow: ["run"],
               "stream": "text", "prompt_arg": True},
-    "cursor-agent": {"label": "Cursor Agent", "maker": "Cursor", "exe": ["cursor-agent"],
+    "cursor-agent": {"label": "Cursor Agent", "maker": "Cursor", "exe": ["cursor-agent"], "model": ("--model", 0),
                      "args": lambda allow: ["-p", "--output-format", "stream-json", "--trust"]
                      + (["--force"] if allow == "auto" else []),
                      "stream": "cursor", "prompt_arg": True,
@@ -810,10 +814,11 @@ _READERS = {"claude": _parse_claude_line, "codex": _parse_codex, "cursor": _pars
 
 def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
           on_done: Optional[Callable[[str, Dict[str, Any]], None]] = None,
-          task: str = "", by: str = "") -> Dict[str, Any]:
+          task: str = "", by: str = "", model: str = "") -> Dict[str, Any]:
     """Start an external agent in the background. Returns {ok, agent_id} or {ok: False, error}.
     `task` is what was asked in the asker's own words, when `prompt` wraps it
-    in a brief; `by` is who asked."""
+    in a brief; `by` is who asked. `model` is one of the agent's own models;
+    without one it uses the model picked for that agent as JARVIS's brain, if any."""
     from . import subagents as _sa
     spec = AGENTS.get(agent)
     if not spec:
@@ -829,6 +834,16 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
         return {"ok": False, "error": f"{spec['label']} approves everything it does when run this way, so "
                                       "it only runs with the approval switch on Auto"}
     args = spec["args"](allow)
+    if spec.get("model"):
+        if not model:
+            try:
+                from .claude_brain import chosen_model
+                model = chosen_model(agent)
+            except Exception:
+                model = ""
+        if model:
+            flag, after = spec["model"]
+            args = args[:after] + [flag, model] + args[after:]
     head = _direct_argv(exe)
     if spec.get("prompt_arg") and head[0].lower().endswith((".cmd", ".bat")):
         return {"ok": False, "error": f"{spec['label']} is installed as a script Hearth can't start safely "
@@ -845,7 +860,7 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
     _sa._append_transcript(tpath, {"kind": "start", "persona": spec["label"], "name": name,
                                    "prompt": task or prompt, "runtime": agent, "cwd": work, "by": by})
     _sa._append_transcript(tpath, {"kind": "route", "runtime": agent, "exe": exe, "allow": allow,
-                                   "billing": spec.get("billing", "")})
+                                   "billing": spec.get("billing", ""), "model": model if spec.get("model") else ""})
     with _sa._BG_RESULTS_LOCK:
         _sa._BG_RUNNING.add(agent_id)
 

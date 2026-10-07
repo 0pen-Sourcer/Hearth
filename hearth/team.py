@@ -268,7 +268,8 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
             # local model, so it does not count against the local team limit.
             from . import external_agents
             r = external_agents.spawn(runtime, with_team(name, prompt, False), name=name,
-                                      cwd=(m.get("folder") or "").strip(), task=prompt)
+                                      cwd=(m.get("folder") or "").strip(), task=prompt,
+                                      model=str(m.get("model") or "").strip())
             if r.get("ok"):
                 spawned.append({"name": name, "persona": r.get("label", runtime), "external": True,
                                 "agent_id": r.get("agent_id"),

@@ -420,6 +420,29 @@ if sys.platform == "win32":
           xa.find("copilot") is None and not _got.get("already") and not _got.get("ok"))
 xa._which, xa._run_job, xa._end_job = _w, _rj, _ej
 
+# A helper on OpenCode used its own broken default model; it can be given one, and
+# without one it takes the model picked for that agent as JARVIS's brain.
+seen_argv = []
+_Popen = xa.subprocess.Popen
+def _NoRun(argv, *a, **kw):
+    if not (isinstance(argv, list) and argv and argv[0] == sys.executable):
+        return _Popen(argv, *a, **kw)        # git and the like run as usual
+    seen_argv.append(list(argv))
+    raise OSError("not run in this test")
+xa.subprocess.Popen = _NoRun
+xa.AGENTS["stand-in-oc"] = {**xa.AGENTS["opencode"], "exe": ["stand-in"]}
+xa._which = lambda names: sys.executable if names == ["stand-in"] else real_which(names)
+xa.spawn("stand-in-oc", "write style.css", cwd=work, model="opencode/big-pickle")
+from hearth import web as _web
+_s = _web._load_settings(); _s["stand-in-oc_model"] = "opencode/chosen-one"; _web._save_settings(_s)
+xa.spawn("stand-in-oc", "write style.css", cwd=work)
+time.sleep(1.5)
+xa.subprocess.Popen = _Popen
+del xa.AGENTS["stand-in-oc"]
+check(f"an agent helper runs on the model it was given, its flag after the subcommand {seen_argv}",
+      len(seen_argv) == 2 and seen_argv[0][1:4] == ["run", "-m", "opencode/big-pickle"]
+      and seen_argv[1][1:4] == ["run", "-m", "opencode/chosen-one"])
+
 # The sign-in window Hearth opens is watched, so a closed one is noticed.
 _find, _argv, _which = xa.find, xa._direct_argv, xa.shutil.which
 xa.find = lambda aid: "stand-in"
