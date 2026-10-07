@@ -252,13 +252,22 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 dropped.append({"name": name, "reason": str(r.get("error") or "did not start")})
             continue
-        if sum(1 for x in spawned if not x.get("external")) >= _MAX_TEAM:
-            dropped.append({"name": name, "reason": f"over the team limit of {_MAX_TEAM} here"})
+        # One of Hearth's own: on the main brain, this PC, or a provider and model.
+        route, err = subagents.route_for(str(m.get("runs_on") or ""), str(m.get("model") or ""))
+        if err:
+            dropped.append({"name": name, "reason": err})
+            continue
+        on_pc = route is None and _local or (route is not None and any(h in route[0] for h in ("localhost", "127.0.0.1")))
+        if on_pc and sum(1 for x in spawned if x.get("on_pc")) >= 4:
+            dropped.append({"name": name, "reason": "this PC's model already has 4 helpers at once"})
+            continue
+        if not on_pc and sum(1 for x in spawned if not x.get("external") and not x.get("on_pc")) >= _MAX_TEAM:
+            dropped.append({"name": name, "reason": f"over the team limit of {_MAX_TEAM}"})
             continue
         r = subagents.spawn_subagent(persona=persona, prompt=prompt,
-                                     mode="background", name=name)
+                                     mode="background", name=name, route=route)
         if r.get("ok"):
-            spawned.append({"name": name, "persona": persona,
+            spawned.append({"name": name, "persona": persona, "on_pc": on_pc,
                             "agent_id": r.get("agent_id"),
                             "transcript": r.get("transcript_path")})
         else:

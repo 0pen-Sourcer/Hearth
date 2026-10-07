@@ -8009,8 +8009,14 @@ TOOL_DEFINITIONS.append({
             "persona": {"type": "string", "enum": ["coder", "researcher", "archivist", "summarizer"],
                         "description": "Sub-agent role. Default 'coder'."},
             "prompt": {"type": "string", "description": "The scoped task for this member."},
-            "agent": {"type": "string", "description": "Leave out for a Hearth helper. Or one of: "
-                      "claude-code, codex, gemini-cli, opencode, qwen-code, crush, cursor-agent, copilot."},
+            "agent": {"type": "string", "description": "Leave out for a Hearth helper. Or an agent program "
+                      "installed here, by id: " + ", ".join(__import__("hearth.external_agents", fromlist=["AGENTS"]).AGENTS)
+                      + ". Several members can use the same one."},
+            "runs_on": {"type": "string", "description": "For a Hearth helper: where it thinks. Leave out for "
+                        "your own brain, 'local' for this PC's model, or a provider a key is saved for "
+                        "(anthropic, openai, gemini, openrouter, groq, grok)."},
+            "model": {"type": "string", "description": "With runs_on a provider: the model, as named "
+                      "('haiku', 'sonnet 4.5'); matched to the provider's own list."},
             "folder": {"type": "string", "description": "Working folder for an external agent. Default: the workspace."},
         }, "required": ["prompt"]}},
     }, "required": ["members"]},
