@@ -610,6 +610,25 @@ with sync_playwright() as pw:
           home["first"] == "winter" and home["second"] == "cabin" and home["card"])
     check("a room change wipes in, or is instant when that is picked", home["wiped"] and home["instant"])
 
+    # Picking a room didn't offer the accent that goes with it.
+    offer = pg.evaluate("""async () => {
+      for (let i = 0; i < 50 && !document.querySelector('#ap-home .ap-mode[data-home="winter"]'); i++) await new Promise(r => setTimeout(r, 100));
+      const btn = document.querySelector('#ap-home .ap-mode[data-home="winter"]');
+      if (!btn) return { btn: false };
+      const was = { theme: localStorage.getItem('hearth_theme'), accent: localStorage.getItem('hearth_accent'), home: localStorage.getItem('hearth_room_home') };
+      localStorage.setItem('hearth_theme', 'dark'); localStorage.setItem('hearth_accent', 'rose');
+      btn.click();
+      const toastEl = [...document.querySelectorAll('#toasts > *')].find(el => /Ocean goes well/.test(el.textContent));
+      const yes = toastEl && toastEl.querySelector('button[data-a="yes"]');
+      if (yes) yes.click();
+      const accent = localStorage.getItem('hearth_accent');
+      hearthSetAppearance(was.theme || 'classic', was.accent || 'rose');
+      hearthSetRoomHome(was.home || 'cabin');
+      return { btn: true, offered: !!toastEl, accent };
+    }""")
+    check(f"picking a room offers the accent that goes with it {offer}",
+          offer.get("btn") and offer.get("offered") and offer.get("accent") == "ocean")
+
     # The logs were raw rows from the first build: a call and its result as two
     # lines, tools named only by their code name, the server as raw text.
     logs = pg.evaluate("""() => {
@@ -712,7 +731,10 @@ with sync_playwright() as pw:
 
     # JARVIS headed for a desk only while a write was running, which is over
     # long before it could get there, so it never sat down to type.
-    desk = pg.evaluate("""() => {
+    desk = pg.evaluate("""async () => {
+      // The room has to be loaded and JARVIS in it before he can sit anywhere.
+      if (!ROOM.people.has('__main')) { await roomLoad(); roomSync(teamVisible()); }
+      for (let i = 0; i < 50 && !ROOM.people.has('__main'); i++) await new Promise(r => setTimeout(r, 100));
       const m = ROOM.people.get('__main'); ROOM.intent = null; ROOM.pinUntil = 0; m.wasBusy = false; m.pokeUntil = 0;
       window._mainState = 'thinking'; roomMainGoal(m);
       window._mainState = 'calling write_file'; const writing = roomMainGoal(m);
