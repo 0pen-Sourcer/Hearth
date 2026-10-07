@@ -728,6 +728,15 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "name": {"type": "string", "description":
                     "A label to tell apart several agents of the same "
                     "persona; shown in the notification."},
+                "runs_on": {"type": "string", "description":
+                    "Where it thinks: leave out for your own brain, 'local' "
+                    "for the model on this PC, or a provider a key is saved "
+                    "for (anthropic, openai, gemini, openrouter, groq, grok). "
+                    "When asked for a mix ('3 on GPT, 2 on Claude'), spawn "
+                    "each with its own runs_on and model."},
+                "model": {"type": "string", "description":
+                    "With runs_on a provider: the model, as named; it is "
+                    "matched to the nearest one the provider lists."},
             },
             "required": ["persona", "prompt"],
         },
@@ -2673,6 +2682,16 @@ def _edit_file(p: Dict) -> str:
         f"\n\nFile updated ({chars_changed:+d} chars, "
         f"{content.count(chr(10))+1} lines)."
     )
+
+
+def _spawn_subagent(p: Dict[str, Any]) -> Dict[str, Any]:
+    from . import subagents as _sa
+    route, err = _sa.route_for(str(p.get("runs_on") or ""), str(p.get("model") or ""))
+    if err:
+        return {"ok": False, "error": err}
+    return _sa.spawn_subagent(p.get("persona", ""), p.get("prompt", ""),
+                              max_turns=min(int(p.get("max_turns") or 0) or 0, 20) or None,
+                              mode=(p.get("mode") or "sync"), name=p.get("name", ""), route=route)
 
 
 def _list_directory(p: Dict) -> str:
@@ -6358,11 +6377,7 @@ _HANDLERS = {
         p.get("id", ""), int(p.get("minutes", 10))),
     "list_reminders": lambda p: __import__("hearth.reminders", fromlist=["list_reminders"]).list_reminders(bool(p.get("include_fired"))),
     "cancel_reminder": lambda p: {"ok": __import__("hearth.reminders", fromlist=["cancel_reminder"]).cancel_reminder(p.get("id", ""))},
-    "spawn_subagent": lambda p: __import__("hearth.subagents", fromlist=["spawn_subagent"]).spawn_subagent(
-        p.get("persona", ""), p.get("prompt", ""),
-        max_turns=min(int(p.get("max_turns") or 0) or 0, 20) or None,
-        mode=(p.get("mode") or "sync"),
-        name=p.get("name", "")),
+    "spawn_subagent": lambda p: _spawn_subagent(p),
     "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
     "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id") or p.get("job_id") or p.get("id") or ""),
     "tell_subagent": lambda p: __import__("hearth.subagents", fromlist=["tell_subagent"]).tell_subagent(

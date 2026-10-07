@@ -618,6 +618,43 @@ def _local_server_has_model(base: str) -> bool:
     return False
 
 
+def _keep_local() -> bool:
+    try:
+        from .web import _load_settings
+        return bool(_load_settings().get("keep_local_warm"))
+    except Exception:
+        return False
+
+
+def route_for(on: str, model: str = "") -> Tuple[Optional[Tuple[str, str, str]], str]:
+    """Where one of Hearth's own helpers thinks, from how it was asked for:
+    nothing or "main" for the main brain, "local" for the model on this PC,
+    or a provider a key is saved for, with one of its models (a loose name is
+    matched to the nearest one the provider lists). (route, error)."""
+    on = (on or "").strip().lower()
+    if on in ("", "main", "brain", "same"):
+        return None, ""
+    if on in ("local", "pc", "this pc", "here"):
+        try:
+            from . import llmserver as _ls
+            hs = _ls.helper_status()
+            if hs.get("running"):
+                return (hs["url"], "hearth-builtin", ""), ""
+        except Exception:
+            pass
+        return ("http://localhost:1234/v1", "hearth-builtin", ""), ""
+    from .headless import PROVIDERS, settle_model
+    from .web import _provider_key, _saved_providers
+    saved = [p["id"] for p in _saved_providers()]
+    if on not in PROVIDERS:
+        return None, f"'{on}' isn't a provider Hearth knows. Keys are saved for: {', '.join(saved) or 'none'}."
+    key = _provider_key(on)
+    if not key:
+        return None, f"No key is saved for {on}. Keys are saved for: {', '.join(saved) or 'none'}."
+    url = PROVIDERS[on][1]
+    return (url, key, settle_model(url, key, (model or "").strip()) or (model or "").strip()), ""
+
+
 def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
     """Return (base_url, api_key, model) the subagent should chat against.
 
@@ -642,7 +679,9 @@ def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
                 return hs["url"], "hearth-builtin", ""
         except Exception:
             pass
-    if cost_class == "cheap":
+    # A model on this PC kept loaded beside a cloud brain is the second brain:
+    # every helper short of premium work runs on it, free.
+    if cost_class == "cheap" or (cost_class != "premium" and _keep_local()):
         lower = base.lower()
         is_cloud = any(host in lower for host in
                        ("api.x.ai", "googleapis", "openai.com",

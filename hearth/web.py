@@ -3291,20 +3291,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             else:
                 # Where one of Hearth's own helpers thinks: the main brain (none
                 # given), this PC, or a saved provider with one of its models.
-                route = None
-                on = str(body.get("on") or "").strip().lower()
-                if on == "local":
-                    from . import llmserver as _ls
-                    hs = _ls.helper_status()
-                    route = (hs["url"], "hearth-builtin", "") if hs.get("running") else \
-                        ("http://localhost:1234/v1", "hearth-builtin", "")
-                elif on:
-                    from .headless import PROVIDERS, settle_model
-                    key = _provider_key(on)
-                    if on not in PROVIDERS or not key:
-                        return self._send_json(400, {"error": "no key is saved for that provider"})
-                    url = PROVIDERS[on][1]
-                    route = (url, key, str(body.get("model") or "").strip() or settle_model(url, key, ""))
+                route, err = _sa.route_for(str(body.get("on") or ""), str(body.get("model") or ""))
+                if err:
+                    return self._send_json(400, {"error": err})
                 prompt = task + (f"\n\nWork in this folder: {folder}" if folder else "")
                 r = _sa.spawn_subagent(role, prompt, mode="background", by="you", route=route)
             if not r.get("ok"):

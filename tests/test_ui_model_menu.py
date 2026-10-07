@@ -395,6 +395,28 @@ with sync_playwright() as pw:
           and "Telegram moved over too" in said[0][1])
     check(f"the page doesn't save again what the server saved {SETTING_POSTS}", SETTING_POSTS == [])
 
+    # Keeping the local model loaded beside a cloud brain was a switch deep in
+    # Settings; picking a cloud model in the menu dropped it.
+    SETTING_POSTS.clear()
+    keep = pg.evaluate("""async () => {
+      mpOpen();
+      const btn = document.querySelector('#mp-menu .mp-keep .switch');
+      if (!btn) return { found: false };
+      const before = btn.classList.contains('on');
+      btn.click();
+      await new Promise(r => setTimeout(r, 300));
+      const settingsSwitch = document.querySelector('.switch[data-key="keep_local_warm"]');
+      const out = { found: true, before, after: btn.classList.contains('on'),
+                    settings: settingsSwitch ? settingsSwitch.classList.contains('on') : null };
+      btn.click();
+      await new Promise(r => setTimeout(r, 300));
+      mpClose();
+      return out;
+    }""")
+    check(f"the model menu keeps this PC's model loaded with one switch, the same one Settings shows {keep}",
+          keep.get("found") and keep["after"] != keep["before"] and keep["settings"] == keep["after"]
+          and {"keep_local_warm": keep["after"]} in SETTING_POSTS)
+
     # OpenRouter, Groq and most agent programs had no logo, so their badge was a
     # letter; a saved provider in the menu was a plain cloud.
     marks = pg.evaluate("""() => ({

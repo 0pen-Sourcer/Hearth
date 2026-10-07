@@ -491,6 +491,11 @@
   .mp-body, .mp-hits { flex: 1; min-height: 0; overflow-y: auto; }
   .mp-body[hidden], .mp-hits[hidden] { display: none; }
   .mp-note { padding: 2px 10px 8px 46px; font-size: 11.5px; color: var(--fg-faint); }
+  .mp-keep { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--border); }
+  .mp-keep span { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .mp-keep b { font-size: 12.5px; font-weight: 500; color: var(--fg); }
+  .mp-keep small { font-size: 11.5px; color: var(--fg-faint); }
+  .mp-keep .switch { flex: none; border: none; cursor: pointer; }
   .mp-sub .mp-row { padding: 6px 10px; font-size: 12.5px; }
   .mp-sub .mp-row .mp-s { font-size: 11px; }
   .mp-sub .mp-row.cur { background: color-mix(in srgb, var(--accent) 9%, transparent); }
@@ -8510,10 +8515,24 @@ function mpOpen() {
       v: 'prov::' + p.id, t: p.label, s: p === here.prov ? 'Your API key · in use' : 'Your API key',
       ico: provIco(p.id), right: _mpChev('prov::' + p.id) })).join('');
   }
+  // The model on this PC can stay loaded under a cloud brain, as the second
+  // brain helpers think with. Same setting as in Settings, Local server.
+  const keep = !!(STATE.settings || {}).keep_local_warm;
+  const keepRow = `<div class="mp-keep"><span><b>Keep this PC's model loaded</b><small>With a cloud brain, helpers think with it for free.</small></span>`
+    + `<button type="button" class="switch${keep ? ' on' : ''}" data-key="keep_local_warm" role="switch" aria-checked="${keep}" aria-label="Keep this PC's model loaded"></button></div>`;
   menu.innerHTML = (top + html)
     ? `<input class="mp-find mp-all" type="search" placeholder="Search every model" aria-label="Search every model" autocomplete="off" spellcheck="false">
-       <div class="mp-body">${top + html}</div><div class="mp-hits" hidden></div>`
+       <div class="mp-body">${top + html}</div><div class="mp-hits" hidden></div>${keepRow}`
     : '<div class="mp-empty">No models yet. Open the Models tab to get one.</div>';
+  const keepBtn = menu.querySelector('.mp-keep .switch');
+  if (keepBtn) keepBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const on = !keepBtn.classList.contains('on');
+    keepBtn.classList.toggle('on', on);
+    keepBtn.setAttribute('aria-checked', String(on));
+    $$('.switch[data-key="keep_local_warm"]').forEach(sw => sw.classList.toggle('on', on));
+    await saveSetting('keep_local_warm', on);
+  });
   const all = menu.querySelector('.mp-all');
   if (all) {
     all.addEventListener('input', () => _mpSearch(all.value));
@@ -8634,8 +8653,10 @@ async function switchEndpoint(body) {
                (probe === 'lmstudio' ? 'Found on ' + body.url + '.' : 'Hearth\'s own engine.') + bridges);
   } else {
     const _p = (STATE.providers || []).find(x => x.id === body.provider);
+    const kept = !r.stopped_builtin && (STATE.settings || {}).keep_local_warm && STATE.brain && STATE.brain.kind === 'local' && STATE.brain.loaded;
     brainToast([(_p && _p.label) || body.provider, body.model].filter(Boolean).join(' · '),
-               (r.stopped_builtin ? 'The local model is unloading to free your graphics card.' : 'From the next message.') + bridges);
+               (r.stopped_builtin ? 'The local model is unloading to free your graphics card.'
+                : kept ? 'Your local model stays loaded, and helpers think with it.' : 'From the next message.') + bridges);
   }
   // Optimistically sync STATE.settings so the very next refreshModels
   // sees the new provider (and gates the eject button) without waiting
@@ -12709,6 +12730,12 @@ async function refreshSettings() {
   refreshMcpInbound();  // live inbound MCP clients (Claude Desktop etc.)
   try {
     const s = await api('/api/settings');
+    // A reply that left before a save landed carries the old value: what was
+    // just saved here stands for a few seconds, or a switch flicks back.
+    const now = Date.now();
+    for (const [k, v] of Object.entries(_justSaved)) {
+      if (now - v.at < 4000) s[k] = v.value; else delete _justSaved[k];
+    }
     STATE.settings = s;
     // The brain is derived from settings: the first state poll can run before
     // they arrive and call an agent or cloud brain "local" until the next one.
@@ -13838,7 +13865,9 @@ async function refreshSettings() {
     }
   } catch (e) { toast('Settings', e.message, 'err'); }
 }
+const _justSaved = {};
 async function saveSetting(key, value) {
+  _justSaved[key] = { value, at: Date.now() };
   // Snapshot the prior provider BEFORE we mutate STATE.settings - needed to
   // detect a cloud→local brain switch so we can show a "sweeping local
   // catalog" toast + refresh the Models tab.

@@ -170,6 +170,40 @@ if far:
           and [m["id"] for m in listed if m["state"] == "loaded"] == ["newest-chat"])
     check("a provider's model ids are kept whole", "vendor/slashed-chat" in [m["id"] for m in listed])
 
+    # The brain could not say where a helper should think: "three on GPT, two
+    # on Claude" all ran on the main brain.
+    from hearth import subagents as _sa
+    route, err = _sa.route_for("openai", "newest chat")
+    check(f"a helper can be sent to a saved provider, a loose model name matched {route} {err}",
+          not err and route and route[1] == "good" and route[2] == "newest-chat")
+    route, err = _sa.route_for("anthropic", "opus")
+    check(f"a provider with no key says which ones have one ({err})",
+          route is None and "No key is saved for anthropic" in err and "openai" in err)
+    check("a helper can be sent to this PC, or left on the main brain",
+          _sa.route_for("local")[0][0].startswith("http://localhost:") and _sa.route_for("")[0] is None)
+    from hearth import tools as _tools
+    said = _tools.execute_tool("spawn_subagent", {"persona": "researcher", "prompt": "x", "runs_on": "nowhere"})
+    check(f"the spawn tool passes the refusal on ({str(said)[:80]})", "isn't a provider Hearth knows" in str(said))
+
+    # A model on this PC kept loaded beside a cloud brain is the second brain:
+    # ordinary helpers run on it.
+    real_has = _sa._local_server_has_model
+    _sa._local_server_has_model = lambda base: True
+    saved_env = os.environ.get("LOCAL_API_BASE")
+    os.environ["LOCAL_API_BASE"] = "https://api.anthropic.com/v1/"
+    try:
+        web._save_settings({"keep_local_warm": False})
+        off = _sa._route_for_cost_class("standard")[0]
+        web._save_settings({"keep_local_warm": True})
+        on = _sa._route_for_cost_class("standard")[0]
+        premium = _sa._route_for_cost_class("premium")[0]
+    finally:
+        _sa._local_server_has_model = real_has
+        os.environ["LOCAL_API_BASE"] = saved_env or ""
+        web._save_settings({"keep_local_warm": False})
+    check(f"with the local model kept, helpers run on it and premium work stays on the cloud ({off} / {on} / {premium})",
+          "anthropic" in off and on.startswith("http://localhost") and "anthropic" in premium)
+
     # Moving to a provider waited for the local model to let go of the card
     # (seconds) before the new brain was in use.
     from hearth import llmserver
