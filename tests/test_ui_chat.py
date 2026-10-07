@@ -443,6 +443,18 @@ with sync_playwright() as pw:
     }""")
     check(f"a fact remembered in the background is shown, and JARVIS pins it to the board {remembered}",
           remembered["toast"] and remembered["board"] and remembered["once"])
+    matched = pg.evaluate("""async () => {
+      STATE.settings.voice_name = 'am_michael';
+      hearthSetRoomLook('her'); await new Promise(r => setTimeout(r, 300));
+      const toHer = STATE.settings.voice_name;
+      STATE.settings.voice_name = 'bf_emma';
+      hearthSetRoomLook('him'); await new Promise(r => setTimeout(r, 300));
+      const kept = STATE.settings.voice_name;
+      hearthSetRoomLook('her');
+      return [toHer, kept];
+    }""")
+    check(f"picking her swaps the stock male voice for the stock female one, and a chosen voice stays {matched}",
+          matched == ["af_heart", "bf_emma"])
     idle = pg.evaluate("(() => { ROOM.intent = null; const m = ROOM.people.get('__main'); m.path = []; m.holdUntil = 0; return roomMainIdleWord(m); })()")
     check(f"with nothing asked of it, JARVIS is said to be free, not reading for you {idle!r}", idle.startswith("Free"))
 

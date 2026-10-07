@@ -18876,6 +18876,14 @@ function startTour() {
 // Which of the two characters the assistant is drawn as. Said to every view of it.
 function hearthSetRoomLook(look) {
   try { localStorage.setItem('hearth_room_look', look); } catch {}
+  // The stock voice of the other one would talk out of the wrong character.
+  // Only the two stock voices are swapped; a voice someone picked stays.
+  const stock = { her: 'af_heart', him: 'am_michael' }, now = (STATE.settings || {}).voice_name || 'am_michael';
+  const other = look === 'him' ? stock.her : stock.him;
+  if (stock[look] && now === other) {
+    saveSetting('voice_name', stock[look]);
+    toast('Voice', `Now ${look === 'him' ? 'Michael' : 'Heart'}, to match. Any voice can be picked in Settings, Voice.`, 'ok', 4500);
+  }
   ROOM.labelSig = '';
   try { roomStripRender(); } catch {}
   document.dispatchEvent(new Event('hearth:look'));
