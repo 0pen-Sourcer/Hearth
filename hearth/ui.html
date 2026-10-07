@@ -19037,7 +19037,7 @@ function roomMainGoal(p) {
   const ms = String(window._mainState || 'idle');
   const busy = roomMainBusy();
   const now = Date.now();
-  if (busy && !p.wasBusy) { p.turn = (p.turn || 0) + 1; p.desk = null; p.pace = null; }
+  if (busy && !p.wasBusy) { p.turn = (p.turn || 0) + 1; p.desk = null; p.pace = null; p.deskUntil = 0; }
   // The answer is given where it was worked out. It doesn't walk back to a
   // usual spot to speak; it stays put a while, then drifts off as before.
   if (!busy && p.wasBusy) { p.holdUntil = now + 9000; p.holdAt = [p.pos[0], p.pos[1]]; }
@@ -19065,7 +19065,11 @@ function roomMainGoal(p) {
     const right = p.turn % 2 === 1, side = roomHas(roomSkin(p.agent), 'side_read') && Math.floor(now / 4200) % 2 === 0;
     return { at: right ? ROOM.spots.shelfR : ROOM.spots.shelfL, pose: side ? 'side_read' : 'read', flip: side && right };
   }
-  if (/write|edit|create|run_command|start_job|delegate/.test(tool)) {
+  // Writing is done at a desk. The tool itself is over in a moment, long
+  // before anyone could walk there, so the desk is kept for the rest of this
+  // stretch of work and it actually sits down and types.
+  if (/write|edit|create|run_command|start_job|delegate/.test(tool)) p.deskUntil = now + 20000;
+  if (busy && p.deskUntil > now && !/read|grep|find|list|search|fetch|browse|recall|pdf|memory_/.test(tool)) {
     if (p.desk == null) p.desk = roomDeskFor(p.id);
     if (p.desk != null) return { at: roomSeat(p), pose: 'type', seated: true };
   }

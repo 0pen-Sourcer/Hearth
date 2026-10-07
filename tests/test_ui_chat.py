@@ -512,6 +512,18 @@ with sync_playwright() as pw:
     }""")
     check(f"picking her swaps the stock male voice for the stock female one, and a chosen voice stays {matched}",
           matched == ["af_heart", "bf_emma"])
+    # JARVIS headed for a desk only while a write was running, which is over
+    # long before it could get there, so it never sat down to type.
+    desk = pg.evaluate("""() => {
+      const m = ROOM.people.get('__main'); ROOM.intent = null; ROOM.pinUntil = 0; m.wasBusy = false; m.pokeUntil = 0;
+      window._mainState = 'thinking'; roomMainGoal(m);
+      window._mainState = 'calling write_file'; const writing = roomMainGoal(m);
+      window._mainState = 'thinking'; const after = roomMainGoal(m);
+      window._mainState = 'idle'; roomMainGoal(m);
+      return [writing.pose, !!writing.seated, after.pose, !!after.seated];
+    }""")
+    check(f"after writing something JARVIS sits down at a desk and stays there while it works {desk}",
+          desk == ["type", True, "type", True])
     idle = pg.evaluate("(() => { ROOM.intent = null; const m = ROOM.people.get('__main'); m.path = []; m.holdUntil = 0; return roomMainIdleWord(m); })()")
     check(f"with nothing asked of it, JARVIS is said to be free, not reading for you {idle!r}", idle.startswith("Free"))
 
