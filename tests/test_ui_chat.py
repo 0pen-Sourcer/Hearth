@@ -610,6 +610,28 @@ with sync_playwright() as pw:
           home["first"] == "winter" and home["second"] == "cabin" and home["card"])
     check("a room change wipes in, or is instant when that is picked", home["wiped"] and home["instant"])
 
+    # The logs were raw rows from the first build: a call and its result as two
+    # lines, tools named only by their code name, the server as raw text.
+    logs = pg.evaluate("""() => {
+      const { items, starts } = _lgItems([
+        { ts: '2026-10-07T10:00:00', event: 'server_start' },
+        { ts: '2026-10-07T10:00:01', event: 'call', tool: 'run_command', args: { command: 'echo hi' } },
+        { ts: '2026-10-07T10:00:02', event: 'result', tool: 'run_command', ms: 40 },
+        { ts: '2026-10-07T10:00:03', event: 'call', tool: 'read_file', args: { path: 'C:/x/notes.txt' } },
+        { ts: '2026-10-07T10:00:04', event: 'error', tool: 'read_file', error: 'not found' }]);
+      const srv = _srvRequests('t | task 7 | prompt eval time = 1000.00 ms / 2000 tokens (0.5 ms per token, 2000.00 tokens per second)\\n'
+        + 't | task 7 |        eval time = 2000.00 ms / 60 tokens (33 ms per token, 30.00 tokens per second)\\n'
+        + 't | task 7 |       total time = 3000.00 ms / 2060 tokens');
+      return { n: items.length, starts, first: [items[0].state, items[0].ms], second: [items[1].state, items[1].error],
+               plain: _lgLine('system_info', {}, true), ran: _lgLine('run_command', { command: 'echo hi' }, true), srv };
+    }""")
+    check(f"the agent log pairs each call with what came back {logs}",
+          logs["n"] == 2 and logs["starts"] == 1 and logs["first"] == ["ok", 40] and logs["second"] == ["err", "not found"])
+    check("a tool with no verb is named plainly, one with a target says what it did",
+          logs["plain"] == "System info" and logs["ran"].startswith("Ran echo hi"))
+    check("the server log's requests are read into sizes and speeds",
+          logs["srv"] == [{"id": "7", "inTok": 2000, "inRate": 2000, "outTok": 60, "outRate": 30, "total": 3}])
+
     # A status that wrapped to two lines made the card row taller, and the
     # room above it shrank and grew as JARVIS walked about.
     heights = pg.evaluate("""() => {

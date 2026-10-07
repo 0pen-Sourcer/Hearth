@@ -2550,6 +2550,36 @@
   .btn-mini.paused {
     background: var(--warn); color: var(--bg-0);
   }
+  .lg-bar { display: flex; gap: 6px; align-items: center; padding: 10px 16px 4px; }
+  .lg-chip { background: none; border: 1px solid var(--border); color: var(--fg-dim); border-radius: 999px;
+    padding: 3px 11px; font: 500 12px var(--sans); cursor: pointer; }
+  .lg-chip.on { color: var(--fg); border-color: var(--accent-line); background: var(--accent-bg); }
+  .lg-chip b { color: var(--err); font-weight: 600; }
+  .lg-find { margin-left: auto; width: min(320px, 40%); background: var(--bg-1); border: 1px solid var(--border);
+    border-radius: var(--r); color: var(--fg); padding: 6px 10px; font: 12.5px var(--sans); outline: none; }
+  .lg-find:focus { border-color: var(--accent); }
+  .lg-day { position: sticky; top: 0; z-index: 1; background: var(--bg-0); padding: 12px 4px 6px; font: 600 11px var(--sans);
+    letter-spacing: .06em; text-transform: uppercase; color: var(--fg-faint); }
+  .lg-row { display: grid; grid-template-columns: 62px 22px 1fr auto; gap: 10px; align-items: center; padding: 7px 8px;
+    border-radius: var(--r); cursor: pointer; font-family: var(--sans); font-size: 13px; color: var(--fg); }
+  .lg-row:hover { background: var(--bg-1); }
+  .lg-row .t { color: var(--fg-faint); font: 11.5px var(--mono); }
+  .lg-row svg { width: 15px; height: 15px; color: var(--fg-dim); }
+  .lg-row .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lg-row .what small { color: var(--fg-faint); font: 11px var(--mono); margin-left: 8px; }
+  .lg-row .ms { color: var(--fg-faint); font: 11px var(--mono); }
+  .lg-row.err .what { color: var(--err); }
+  .lg-row.err svg { color: var(--err); }
+  .lg-row.run .ms::after { content: 'running'; color: var(--accent-2); }
+  .lg-more { margin: 0 8px 8px 94px; padding: 8px 10px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r);
+    font: 11.5px/1.5 var(--mono); color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
+  .lg-sys { padding: 6px 8px 6px 94px; color: var(--fg-faint); font: 12px var(--sans); }
+  .lg-empty { color: var(--fg-faint); padding: 32px; text-align: center; font: 13px var(--sans); }
+  .srv-sum { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; padding: 12px 16px 4px; }
+  .srv-req { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; font: 12px var(--sans); color: var(--fg-dim); }
+  .srv-req b { color: var(--fg); font-weight: 600; }
+  .srv-req .k { display: flex; justify-content: space-between; margin-top: 3px; }
+  .srv-req .k span:last-child { font-family: var(--mono); color: var(--fg); }
   .log-row {
     padding: 5px 10px;
     border-bottom: 1px solid var(--bg-2);
@@ -4008,7 +4038,7 @@
     <section class="view" id="view-logs">
       <div class="view-head">
         <h2>Logs</h2>
-        <span class="sub" id="logs-sub">every tool call + the builtin server</span>
+        <span class="sub" id="logs-sub">every tool JARVIS used, with what came back</span>
         <div class="grow"></div>
         <!-- Source toggle: Agent log (Hearth tool calls) or Server log
              (llama_cpp.server stdout). The Server pill turns green when the
@@ -4045,10 +4075,16 @@
           clear
         </button>
       </div>
-      <!-- Agent log: the existing event-formatted list. -->
+      <!-- Agent log: each tool call with its result, grouped by day. -->
+      <div class="lg-bar" id="lg-bar">
+        <button class="lg-chip on" data-lg="all">All</button>
+        <button class="lg-chip" data-lg="errors">Errors <b id="lg-errs"></b></button>
+        <input class="lg-find" id="lg-find" type="search" placeholder="Find a tool, file or command" autocomplete="off">
+      </div>
       <div class="log-list" id="log-list"></div>
       <!-- Server log: raw text from llama_cpp.server, monospace, line-by-line.
            Auto-scrolls to the bottom unless the user paused or scrolled up. -->
+      <div class="srv-sum" id="srv-sum" hidden></div>
       <pre class="server-log" id="server-log" hidden></pre>
       <!-- Phone log: tailed *_bridge.log lines, each tagged with its channel
            (telegram/discord/whatsapp) so incoming reach-from-phone traffic is
@@ -12497,31 +12533,106 @@ let LOGS_PAUSED = false;           // true = stop auto-refresh + auto-scroll
 let LOGS_SERVER_LAST_LEN = 0;      // for scroll-only-when-content-grew
 let LOGS_PHONE_LAST_LEN = 0;       // same, for the phone-log tab
 
+// The agent log: each tool call with what came back, said the way the room's
+// step list says it, newest first and grouped by day. Starts of Hearth's tool
+// server for an agent brain are noise there, so they are only counted.
+let LG_FILTER = 'all';
+const LG_OPEN = new Set();
+function _lgItems(events) {
+  const items = [], open = new Map();
+  let starts = 0, lastStart = '';
+  for (const ev of events) {
+    const tool = ev.tool || '';
+    if (ev.event === 'server_start') { starts++; lastStart = ev.ts || lastStart; continue; }
+    if (ev.event === 'call') {
+      const it = { ts: ev.ts || '', tool, args: ev.args || {}, state: 'run' };
+      items.push(it);
+      if (!open.has(tool)) open.set(tool, []);
+      open.get(tool).push(it);
+    } else if (ev.event === 'result' || ev.event === 'error') {
+      const q = open.get(tool) || [];
+      const it = q.shift() || (items.push({ ts: ev.ts || '', tool, args: {}, state: 'run' }), items[items.length - 1]);
+      if (ev.event === 'result') { it.state = 'ok'; it.ms = ev.ms; }
+      else { it.state = 'err'; it.error = ev.error || 'failed'; }
+    } else {
+      items.push({ ts: ev.ts || '', sys: ev.event + (ev.tool ? ' · ' + ev.tool : '') });
+    }
+  }
+  return { items, starts, lastStart };
+}
+// A step said in words when Hearth has the verb for it and the thing it was
+// pointed at; otherwise the tool's own name, said plainly.
+function _lgLine(tool, args, done) {
+  const what = _stepWhat(args), kind = _toolKind(tool || '');
+  if (what && (done ? ROOM_DONE_VERBS : ROOM_VERBS)[kind]) return _stepLine(tool, what, done);
+  const plain = String(tool || 'tool').replace(/^mcp__\w+__/, '').replace(/_/g, ' ');
+  return plain.charAt(0).toUpperCase() + plain.slice(1) + (what ? ' · ' + what : '');
+}
+function _lgDay(ts) {
+  const d = ts.slice(0, 10), today = new Date(), y = new Date(Date.now() - 864e5);
+  const iso = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  if (d === iso(today)) return 'Today';
+  if (d === iso(y)) return 'Yesterday';
+  return d ? new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+}
 async function refreshAgentLog() {
-  try {
-    const { events } = await api('/api/logs?lines=200');
-    const list = $('log-list');
-    list.innerHTML = '';
-    if (!events.length) {
-      list.innerHTML = `<div style="color:var(--fg-faint);padding:24px;text-align:center">no activity yet</div>`;
-      return;
-    }
-    for (const ev of events.reverse()) {
-      const row = document.createElement('div'); row.className = 'log-row';
-      const t = ev.ts ? ev.ts.slice(11, 19) : '-';
-      const e = ev.event || '?';
-      let det = ev.tool || ev.error || (ev.chars ? `${ev.chars}c` : '');
-      if (ev.tool && ev.event === 'call') det += ' ' + JSON.stringify(ev.args || {}).slice(0, 100);
-      const ms = ev.ms ? `${ev.ms}ms` : '';
-      row.innerHTML = `
-        <span class="t">${esc(t)}</span>
-        <span class="ev ${esc(e)}">${esc(e)}</span>
-        <span class="det">${esc(String(det))}</span>
-        <span class="ms">${esc(ms)}</span>
-      `;
-      list.appendChild(row);
-    }
-  } catch (e) { toast('Logs', e.message, 'err'); }
+  let events;
+  try { ({ events } = await api('/api/logs?lines=500')); } catch (e) { toast('Logs', e.message, 'err'); return; }
+  const list = $('log-list');
+  const { items, starts, lastStart } = _lgItems(events || []);
+  const errs = items.filter(it => it.state === 'err').length;
+  $('lg-errs').textContent = errs ? String(errs) : '';
+  const q = ($('lg-find').value || '').trim().toLowerCase();
+  const shown = items.filter(it => (LG_FILTER !== 'errors' || it.state === 'err')
+    && (!q || JSON.stringify(it).toLowerCase().includes(q))).reverse();
+  if (!shown.length) {
+    list.innerHTML = `<div class="lg-empty">${items.length ? 'Nothing matches.' : 'Nothing has run yet. Every tool JARVIS uses shows here as it happens.'}</div>`;
+    return;
+  }
+  let html = '', day = '';
+  if (starts && LG_FILTER === 'all' && !q)
+    html += `<div class="lg-sys">Hearth's tools were started for an agent brain ${starts} time${starts === 1 ? '' : 's'}, last at ${esc(lastStart.slice(11, 16))}.</div>`;
+  shown.slice(0, 250).forEach((it, n) => {
+    const d = _lgDay(it.ts);
+    if (d !== day) { day = d; html += `<div class="lg-day">${esc(d)}</div>`; }
+    if (it.sys) { html += `<div class="lg-sys">${esc(it.ts.slice(11, 16))} · ${esc(it.sys)}</div>`; return; }
+    const key = it.ts + it.tool + n;
+    const line = _lgLine(it.tool, it.args, it.state !== 'run');
+    const ms = it.ms != null ? (it.ms >= 1000 ? (it.ms / 1000).toFixed(1) + ' s' : it.ms + ' ms') : '';
+    html += `<div class="lg-row ${it.state}" data-k="${esc(key)}"><span class="t">${esc(it.ts.slice(11, 19))}</span>`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${_toolIcon(it.tool)}</svg>`
+      + `<span class="what">${esc(line)}<small>${esc(it.tool)}</small></span><span class="ms">${esc(ms)}</span></div>`;
+    if (LG_OPEN.has(key)) html += `<div class="lg-more">${esc(it.error ? it.error + '\n\n' : '')}${esc(JSON.stringify(it.args, null, 2))}</div>`;
+  });
+  list.innerHTML = html;
+}
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.lg-chip');
+  if (chip) {
+    LG_FILTER = chip.dataset.lg;
+    document.querySelectorAll('.lg-chip').forEach(c => c.classList.toggle('on', c === chip));
+    refreshAgentLog();
+    return;
+  }
+  const row = e.target.closest('.lg-row');
+  if (row) { const k = row.dataset.k; if (LG_OPEN.has(k)) LG_OPEN.delete(k); else LG_OPEN.add(k); refreshAgentLog(); }
+});
+document.addEventListener('input', e => { if (e.target.id === 'lg-find') refreshAgentLog(); });
+
+// The server log's last few requests, read from llama.cpp's own timing lines.
+function _srvRequests(text) {
+  const tasks = new Map();
+  const num = x => Number(String(x).replace(/,/g, ''));
+  for (const line of String(text || '').split('\n')) {
+    const t = /task (\d+)\s*\|\s*(prompt eval time|eval time|total time)\s*=\s*([\d.]+) ms \/\s*(\d+) tokens(?:.*?([\d.]+) tokens per second)?/.exec(line);
+    if (!t) continue;
+    const r = tasks.get(t[1]) || { id: t[1] };
+    if (t[2] === 'prompt eval time') { r.inTok = num(t[4]); r.inRate = num(t[5] || 0); }
+    else if (t[2] === 'eval time') { r.outTok = num(t[4]); r.outRate = num(t[5] || 0); }
+    else r.total = num(t[3]) / 1000;
+    tasks.set(t[1], r);
+  }
+  return [...tasks.values()].filter(r => r.total).slice(-6).reverse();
 }
 
 async function refreshServerLog() {
@@ -12537,6 +12648,11 @@ async function refreshServerLog() {
       pidEl.hidden = true;
     }
     const pre = $('server-log');
+    const sum = $('srv-sum'), reqs = _srvRequests(r.text);
+    sum.hidden = !reqs.length || LOGS_SOURCE !== 'server';
+    sum.innerHTML = reqs.map(q => `<div class="srv-req"><b>Request ${esc(q.id)}</b> · ${q.total.toFixed(1)} s`
+      + `<div class="k"><span>read</span><span>${(q.inTok || 0).toLocaleString()} tokens · ${Math.round(q.inRate || 0)}/s</span></div>`
+      + `<div class="k"><span>wrote</span><span>${(q.outTok || 0).toLocaleString()} tokens · ${Math.round(q.outRate || 0)}/s</span></div></div>`).join('');
     if (!r.exists) {
       pre.innerHTML = '<span class="dim">No server log yet - the builtin llama-cpp server hasn\'t run this session. Load a model from the Models tab to start it.</span>';
       LOGS_SERVER_LAST_LEN = 0;
@@ -12580,7 +12696,21 @@ async function refreshPhoneLog() {
       LOGS_PHONE_LAST_LEN = 0;
       return;
     }
-    const html = lines.map(ln => {
+    // A bridge's own comings and goings (starting, signing in, online, picked
+    // up again) are one line per stretch; messages and errors stay as they are.
+    const LIFE = /(--- \S+ \S+ starting \w+ bridge ---|bridge up|bridge ONLINE|starting - connecting|logging in using|connected to Gateway|RESUMED session|^\[\w+\] \S*nnected to Gateway)/i;
+    const folded = [];
+    for (const ln of lines) {
+      const ch = (/^\[(\w+)\]/.exec(ln) || [])[1] || '';
+      if (!LIFE.test(ln) || /error|fail|traceback/i.test(ln)) { folded.push({ text: ln }); continue; }
+      const when = (/(\d{4}-\d\d-\d\d[ T])?(\d\d:\d\d:\d\d)/.exec(ln) || [])[2] || '';
+      const prev = folded[folded.length - 1];
+      const run = prev && prev.ch === ch ? prev : (folded.push({ ch, starts: 0, last: '' }), folded[folded.length - 1]);
+      if (/starting \w+ bridge ---/.test(ln)) run.starts++;
+      if (when) run.last = when;
+    }
+    const html = folded.map(f => f.text != null ? f.text
+      : `[${f.ch}] connected${f.starts > 1 ? `, started ${f.starts} times` : ''}${f.last ? ', last at ' + f.last : ''}`).map(ln => {
       const safe = esc(ln);
       if (/ERROR|Traceback|failed|Unauthorized|\b401\b/i.test(ln)) return `<span class="err">${safe}</span>`;
       if (/^\[telegram\]/.test(ln)) return `<span class="info">${safe}</span>`;
@@ -12609,13 +12739,15 @@ function setLogsSource(src) {
   LOGS_SOURCE = src;
   document.querySelectorAll('.logs-tab').forEach(b => b.classList.toggle('active', b.dataset.logs === src));
   $('log-list').hidden = src !== 'agent';
+  $('lg-bar').hidden = src !== 'agent';
+  if (src !== 'server') $('srv-sum').hidden = true;
   $('server-log').hidden = src !== 'server';
   $('phone-log').hidden = src !== 'phone';
   $('logs-sub').textContent = src === 'server'
-    ? 'raw llama_cpp.server output - loading, requests, errors'
+    ? "the model server on this PC: recent requests, then everything it printed"
     : src === 'phone'
-    ? 'incoming Discord / Telegram / WhatsApp messages + what ran'
-    : 'every tool call, live';
+    ? 'Telegram, Discord and WhatsApp: messages in and what ran'
+    : 'every tool JARVIS used, with what came back';
   refreshLogs();
 }
 
@@ -12638,7 +12770,8 @@ function startLogsAutoRefresh() {
   LOGS_TIMER = setInterval(() => {
     if (LOGS_PAUSED) return;
     if (LOGS_SOURCE === 'server') refreshServerLog();
-  }, 1500);
+    else if (LOGS_SOURCE === 'agent' && !document.querySelector('.lg-find:focus')) refreshAgentLog();
+  }, 3000);
 }
 function stopLogsAutoRefresh() {
   if (LOGS_TIMER) { clearInterval(LOGS_TIMER); LOGS_TIMER = null; }
