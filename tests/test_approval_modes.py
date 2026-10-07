@@ -61,6 +61,9 @@ check("Auto lets an ordinary command and an app through", tools.mode_allows(*ls)
 check("Auto still asks about a destructive command", not tools.mode_allows(*rm))
 check("Auto still asks about deleting", not tools.mode_allows(*delete))
 check("Auto asks about a command it cannot read", not tools.mode_allows("run_command", {}))
+# Handing a task to an agent program has no command to read; on Auto it stopped to ask every time.
+check("Auto hands a task to an agent program without asking",
+      tools.mode_allows("delegate", {"agent": "codex", "task": "write index.html"}))
 # Auto asked only about deletes and moves, so a push, an install or an upload
 # went out without a word. Routine work is what Auto is for.
 out = ["git push origin main", "npm publish", "winget install vlc", "pip install requests",

@@ -218,6 +218,15 @@ tools.execute_tool = real_execute
 check("a helper call without the right token is refused",
       cb.run_tool("nope", "spawn_subagent", {})["result"].startswith("Error"))
 check("only the helper tools are run this way", cb.run_tool(cb._TOKEN, "run_command", {"command": "x"})["result"].startswith("Error"))
+# An agent brain couldn't start a team at all: launch_team wasn't among its tools.
+_ex = tools.execute_tool
+tools.execute_tool = lambda n, a: json.dumps({"ok": True, "spawned": [{"agent_id": "sub_1_aaaaaa"}, {"agent_id": "sub_2_bbbbbb"}]})
+cb._sent.clear()
+r = cb.run_tool(cb._TOKEN, "launch_team", {"members": []})
+check("a team started by an agent brain runs in Hearth, and the turn waits for every member",
+      '"ok": true' in r["result"] and set(cb._sent) == {"sub_1_aaaaaa", "sub_2_bbbbbb"})
+cb._sent.clear()
+tools.execute_tool = _ex
 
 # A report that was waiting when the user next speaks goes in ahead of what they said.
 sa._default_completion_cb("sub_1_aaaaaa", {"ok": True, "text": "the file has 40 lines", "name": "Noah"})

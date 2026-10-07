@@ -8871,6 +8871,8 @@ def mode_allows(name: str, args=None) -> bool:
     if m == "auto":
         if name in _ALWAYS_ASK_IN_AUTO:
             return False
+        if name == "delegate":
+            return True                 # an agent program, under its own rules; Auto doesn't stop it
         if name in _SHELL_TOOLS:
             cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
             return bool(cmd) and _is_destructive(cmd) is None and _is_outward(cmd) is None

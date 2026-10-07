@@ -178,28 +178,30 @@ def _ask_hearth(tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
 
 # Helpers live in the Hearth that started this server, so their tools run there.
 # A helper started by Hearth gets none of them: it does its task and reports.
-_IN_HEARTH = (("spawn_subagent", "tell_subagent", "get_subagent_result")
+_IN_HEARTH = (("spawn_subagent", "tell_subagent", "get_subagent_result", "launch_team", "helper_changes",
+               "race_helpers")
               if (_BRAIN_URL and _BRAIN_TOKEN and not os.environ.get("HEARTH_HELPER")) else ())
 
 
 def _run(name: str, args: Dict[str, Any]):
     import time as _t
-    from hearth.tools import APPROVAL_TOKEN, _RISKY_TOOLS
-    if name in _IN_HEARTH:
-        try:
-            return str(_post_hearth("/api/brain/tool", name, args).get("result") or "")
-        except Exception as e:
-            return f"Error: couldn't reach Hearth: {e}"
+    from hearth.tools import APPROVAL_TOKEN, _RISKY_TOOLS, mode_allows
     now = _t.time()
     hit = next((a for a in _APPROVED if a[0] == name and now - a[1] < 60), None)
     if hit:
         _APPROVED.remove(hit)
         args = dict(args, _approved=APPROVAL_TOKEN)
-    elif _BRAIN_GATE and _BRAIN_URL and name in _RISKY_TOOLS:
+    elif _BRAIN_GATE and _BRAIN_URL and name in _RISKY_TOOLS and not mode_allows(name, args):
         verdict = _ask_hearth("mcp__hearth__" + name, args)
         if verdict.get("behavior") != "allow":
             return "Not done. " + str(verdict.get("message") or "The user declined this.")
         args = dict(args, _approved=APPROVAL_TOKEN)
+    if name in _IN_HEARTH:
+        # Helpers live in the Hearth that started this server: their tools run there.
+        try:
+            return str(_post_hearth("/api/brain/tool", name, args).get("result") or "")
+        except Exception as e:
+            return f"Error: couldn't reach Hearth: {e}"
     return execute_tool(name, args)
 
 
