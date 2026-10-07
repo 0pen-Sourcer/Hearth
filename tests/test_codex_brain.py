@@ -182,6 +182,8 @@ while True:
     meth = m.get("method")
     if meth == "initialize":
         out({{"id": m["id"], "result": {{}}}})
+    elif meth in ("thread/archive", "thread/unarchive"):
+        out({{"id": m["id"], "result": {{}}}})
     elif meth in ("thread/start", "thread/resume"):
         out({{"id": m["id"], "result": {{"thread": {{"id": m["params"].get("threadId") or "th-app"}}}}}})
     elif meth == "turn/start":
@@ -256,6 +258,9 @@ check(f"Codex runs as an app server, asking Hearth before it does anything {app[
       app[0]["argv"][0] == "app-server" and start["approvalPolicy"] == "untrusted" and start.get("developerInstructions"))
 check("the turn ends with done and its token counts",
       ev[-1][0] == "done" and ev[-1][1]["stats"]["tokens_in"] == 900)
+methods = [m.get("method") for m in (json.loads(l) for l in open(app_log, encoding="utf-8"))]
+check("Hearth's Codex thread is archived after the turn, so it stays out of the person's Codex list",
+      "thread/archive" in methods)
 ev = app_turn("steer me please", steer=["use tabs"])
 check("something said part-way reaches the running turn",
       any(t == "steered" for t, f in ev) and any(t == "assistant" and "Heard: use tabs" in f["content"] for t, f in ev)

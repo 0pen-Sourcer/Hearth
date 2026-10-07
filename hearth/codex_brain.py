@@ -473,6 +473,12 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
                        "developerInstructions": persona, **({"model": model} if model else {}),
                        **({"serviceTier": tier} if tier else {})}
         if session:
+            # Hearth's threads are kept archived between turns, so they don't
+            # fill the person's own Codex list; brought back to go on.
+            try:
+                await rpc.call("thread/unarchive", {"threadId": session}, 15)
+            except Exception:
+                pass
             try:
                 tid = ((await rpc.call("thread/resume", {"threadId": session, **thread_opts})).get("thread") or {}).get("id")
             except Exception:
@@ -642,6 +648,11 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
         failure = failure or f"{type(e).__name__}: {e}"
     finally:
         _base._checks.pop(_base._TOKEN, None)
+        if tid:
+            try:
+                await rpc.call("thread/archive", {"threadId": tid}, 10)
+            except Exception:
+                pass
         reader.cancel()
         try:
             proc.stdin.close()
