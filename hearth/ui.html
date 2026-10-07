@@ -8512,6 +8512,14 @@ function mpOpen() {
       if (chev) { e.stopPropagation(); _mpToggleModels(chev); return; }
       const r = e.target.closest('.mp-row');
       if (!r || r.getAttribute('aria-disabled') === 'true') return;
+      if (r.dataset.v === 'add-provider') {
+        mpClose();
+        showView('settings');
+        const pick = $('setting-brain-mode');
+        if (pick) { pick.scrollIntoView({ block: 'center' }); pick.focus(); }
+        toast('Pick the provider, paste its key', 'Then click "Use this brain". The key stays on this PC.', 'ok', 6000);
+        return;
+      }
       const [kind, pid, ...rest] = r.dataset.v.split('::');
       // A provider's own row only opens its list.
       if (kind === 'prov' && !rest.length) { _mpToggleModels(r.querySelector('.mp-more')); return; }
@@ -8551,6 +8559,10 @@ function mpOpen() {
       v: 'prov::' + p.id, t: p.label, s: p === here.prov ? 'Your API key · in use' : 'Your API key',
       ico: provIco(p.id), right: _mpChev('prov::' + p.id) })).join('');
   }
+  // A provider with no key saved yet isn't listed; this is the way to one.
+  html += _mpItem({ v: 'add-provider', t: provs.length ? 'Add another provider' : 'Use a cloud provider',
+                    s: 'Gemini, OpenAI, Anthropic, OpenRouter, Groq or xAI, with your API key',
+                    ico: '<span class="mp-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>' });
   // The model on this PC can stay loaded under a cloud brain, as the second
   // brain helpers think with. Same setting as in Settings, Local server.
   const keep = !!(STATE.settings || {}).keep_local_warm;

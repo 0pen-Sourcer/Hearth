@@ -430,6 +430,20 @@ with sync_playwright() as pw:
     check("a saved provider in the menu carries its own mark, an unknown one the cloud",
           "openrouter.ai" in marks["prov"] and "<svg" in marks["unknown"] and "favicon" not in marks["unknown"])
 
+    # A provider with no key saved had no way in from the menu.
+    added = pg.evaluate("""async () => {
+      mpOpen();
+      const row = document.querySelector('#mp-menu .mp-row[data-v="add-provider"]');
+      if (!row) return { row: false };
+      row.click();
+      await new Promise(r => setTimeout(r, 200));
+      const out = { row: true, view: STATE.view, focused: document.activeElement && document.activeElement.id };
+      showView('chat');
+      return out;
+    }""")
+    check(f"the model menu has a way to a provider with no key yet {added}",
+          added.get("row") and added.get("view") == "settings" and added.get("focused") == "setting-brain-mode")
+
     # A key pasted into Settings was put back to the old one by the next
     # settings refresh, before "Use this brain" was clicked.
     kept = pg.evaluate("""async () => {
