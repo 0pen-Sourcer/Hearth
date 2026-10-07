@@ -547,6 +547,37 @@ with sync_playwright() as pw:
     check(f"a place picked on top of furniture moves in front of it {crossings['beside']}",
           crossings["beside"][0][1] > 448 and crossings["beside"][1][1] > 430 and crossings["beside"][2][1] > 420)
 
+    # Only eight helpers could be in the room; the rest were never shown.
+    # Further ones work in the next room, one picture at a time.
+    rooms = pg.evaluate("""async () => {
+      const now = Date.now() / 1000;
+      const list = [...Array(12)].map((_, i) => ({ id: 'sub_many_' + i, persona: 'coder', status: 'working', updated: now }));
+      roomSync(list);
+      const where = list.map(a => ROOM.people.get(a.id)).filter(Boolean).map(p => p.room || 0);
+      const pills = () => [...document.querySelectorAll('#tm-rooms button')].map(b => b.textContent);
+      const shown = !document.getElementById('tm-rooms').hidden;
+      const before = pills();
+      for (const a of list) { const q = ROOM.people.get(a.id); q.enterAt = 0; q.waiting = false; q.pos = [700, 760]; }
+      roomDraw(performance.now());
+      const drawn0 = ROOM.hits.filter(h => h.p && h.p.id.startsWith('sub_many_')).length;
+      ROOM.people.get('sub_many_11').agent && roomPoke(ROOM.people.get('sub_many_11'));
+      const view = ROOM.view;
+      roomDraw(performance.now());
+      const drawn1 = ROOM.hits.filter(h => h.p && h.p.id.startsWith('sub_many_')).map(h => ROOM.people.get(h.p.id).room);
+      roomShow(0);
+      for (const a of list) ROOM.people.delete(a.id);
+      roomStripRender();
+      return { first: where.filter(r => r === 0).length, second: where.filter(r => r === 1).length,
+               shown, before, drawn0, view, drawn1: [...new Set(drawn1)], after: document.getElementById('tm-rooms').hidden };
+    }""")
+    check(f"twelve helpers: eight in the first room, four in the next {rooms}",
+          rooms["first"] == 8 and rooms["second"] == 4)
+    check("a switcher shows the rooms in use, with how many are in each",
+          rooms["shown"] and len(rooms["before"]) == 2 and rooms["before"][1].endswith("4"))
+    check("only the room in view is drawn, and clicking someone shows their room",
+          rooms["drawn0"] == 8 and rooms["view"] == 1 and rooms["drawn1"] == [1])
+    check("with one room in use the switcher goes away", rooms["after"])
+
     # A helper that didn't finish stood by its desk with a hand up for good,
     # and came back after every restart. A working one could not be stopped.
     gone = pg.evaluate("""() => {

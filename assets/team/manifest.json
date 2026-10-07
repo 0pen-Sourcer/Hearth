@@ -144,5 +144,27 @@
   ]
  },
  "room_empty": true,
- "v": "1b2e84166e"
+ "rooms": [
+  {
+   "id": "cabin",
+   "name": "Cabin",
+   "file": "room.png"
+  },
+  {
+   "id": "winter",
+   "name": "Winter",
+   "file": "room_winter.png"
+  },
+  {
+   "id": "library",
+   "name": "Library",
+   "file": "room_library.png"
+  },
+  {
+   "id": "ocean",
+   "name": "Ocean",
+   "file": "room_ocean.png"
+  }
+ ],
+ "v": "df590c87a7"
 }

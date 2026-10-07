@@ -17,6 +17,8 @@ main character), 18.png (a second main character), 20.png (his further poses), 1
 the room), bg_props.png, whose lower
 part is a 3x2 grid of furniture on magenta (desk, desk in use, chair,
 armchair, side table, mug) and room_empty.png, the room with no furniture.
+The rooms in MORE_ROOMS, when present, are the same floor plan drawn in other
+styles; they open in that order once the desks before them are taken.
 """
 from __future__ import annotations
 
@@ -44,6 +46,9 @@ FRAMES = [
     # each stride by drawing the legs in under the hips.
     ("walk_side_3", "walk", 3, 2, -2), ("walk_side_4", "walk", 3, 2, -5),
 ]
+# Further rooms: the same floor plan in other styles, (id, name, source).
+MORE_ROOMS = [("winter", "Winter", "room_winter.png"), ("library", "Library", "room_library.png"),
+              ("ocean", "Ocean", "room_ocean.png")]
 # Who is on each row of walk_1-3.png, when they exist. Their four columns are
 # a stride, the legs passing, the other stride, passing again.
 SIDE_WALKS = [["main", "main_m", "coder"], ["researcher", "summarizer", "librarian"],
@@ -453,6 +458,14 @@ def build(art: str) -> None:
     room = Image.open(empty if os.path.isfile(empty) else os.path.join(art, "bg.png")).convert("RGB")
     manifest["room_empty"] = os.path.isfile(empty)
     room.quantize(128, method=Image.MEDIANCUT, dither=Image.NONE).save(os.path.join(OUT, "room.png"), optimize=True)
+    manifest["rooms"] = [{"id": "cabin", "name": "Cabin", "file": "room.png"}]
+    for rid, name, src in MORE_ROOMS:
+        path = os.path.join(art, src)
+        if not os.path.isfile(path):
+            continue
+        im = Image.open(path).convert("RGB").resize(room.size, Image.LANCZOS)
+        im.quantize(128, method=Image.MEDIANCUT, dither=Image.NONE).save(os.path.join(OUT, f"room_{rid}.png"), optimize=True)
+        manifest["rooms"].append({"id": rid, "name": name, "file": f"room_{rid}.png"})
     # What the art's addresses end in: a browser that kept an older sheet
     # would otherwise draw frames the old sheet doesn't have, as nothing.
     import hashlib
