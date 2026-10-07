@@ -918,7 +918,7 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
     # The same watch the main loop keeps: a helper repeating a call that fails
     # or returns nothing new is told so, then made to answer with what it has.
     from .loop_guard import ToolLoopGuard
-    guard, wrap_up = ToolLoopGuard(), False
+    guard, wrap_up = ToolLoopGuard(patience=2), False
     for turn in range(max_turns):
         for said in _take_told(agent_id):
             messages.append({"role": "user", "content": said})

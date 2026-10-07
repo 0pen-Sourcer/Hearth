@@ -62,6 +62,11 @@ kinds = [json.loads(l).get("kind") for l in tpath.read_text(encoding="utf-8").sp
 check(f"the helper answers instead of running out of turns {out.get('ok')} after {out.get('turns')} turns",
       out.get("ok") and out.get("turns", 99) < 30)
 check(f"it was made to answer without tools once it was stuck ({client.without_tools})", client.without_tools == 1)
+# Stopped no sooner than twice the main loop's count: a helper retrying a
+# command through a flaky network shouldn't be cut off after a handful.
+from hearth.loop_guard import FAILURE_STOP        # noqa: E402
+check(f"it was given room first ({out.get('turns')} turns, the main loop stops at {FAILURE_STOP} failures)",
+      out.get("turns", 0) > FAILURE_STOP * 2)
 check("the transcript says it was going in circles", "guard" in kinds)
 
 print()

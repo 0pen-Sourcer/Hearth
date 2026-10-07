@@ -167,7 +167,11 @@ class ToolLoopGuard:
     """Per-user-turn loop guard. Construct once, call reset() at the start of
     each new user turn, then before()/after() around each tool execution."""
 
-    def __init__(self) -> None:
+    def __init__(self, patience: int = 1) -> None:
+        # How many times the usual count of repeats it takes to stop. Warnings
+        # come at the usual count either way; a helper working alone gets more
+        # room before it is made to wrap up, since nobody is there to retry it.
+        self.patience = max(1, int(patience))
         self.reset()
 
     def reset(self) -> None:
@@ -222,7 +226,7 @@ class ToolLoopGuard:
             self._recent.pop(0)
 
         # 1) Repeated FAILURE of the exact same call.
-        if failed and st.failures >= FAILURE_STOP:
+        if failed and st.failures >= FAILURE_STOP * self.patience:
             return self._stop(
                 f"'{name}' has failed {st.failures} times with the same arguments. "
                 f"Stop retrying it. Tell the user plainly what failed and what "
@@ -238,7 +242,7 @@ class ToolLoopGuard:
         # 1b) Same TOOL failing across DIFFERENT args — fumbling blind. (The
         # tictactoe spiral: run_command erroring with 5 different commands.)
         tf = self._tool_fails.get(name, 0)
-        if failed and tf >= SAME_TOOL_FAIL_STOP:
+        if failed and tf >= SAME_TOOL_FAIL_STOP * self.patience:
             return self._stop(
                 f"'{name}' has failed {tf} times this turn (different arguments each time). "
                 f"You're guessing, not progressing. Stop — tell the user plainly what's wrong "
@@ -255,7 +259,7 @@ class ToolLoopGuard:
         # inputs => no new information, whatever the output wobble (e.g. fetching
         # the same URL repeatedly). (Identical MUTATING calls are skipped earlier
         # by before(); this catches read-only repeats.)
-        if st.same_outcome_calls >= NO_PROGRESS_STOP:
+        if st.same_outcome_calls >= NO_PROGRESS_STOP * self.patience:
             return self._stop(
                 f"'{name}' has been called {st.same_outcome_calls} times with identical arguments "
                 f"and the same result each time — "
@@ -269,7 +273,7 @@ class ToolLoopGuard:
                 f"that gives no new info. Use the result you have, or change approach.]")
 
         # 3) PING-PONG: alternating A,B,A,B,... with no progress.
-        if self._pingpong_cycles() >= PINGPONG_STOP:
+        if self._pingpong_cycles() >= PINGPONG_STOP * self.patience:
             return self._stop(
                 "You're alternating between the same two tool calls without making "
                 "progress. Break the loop: answer the user with what you have.",
