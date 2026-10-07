@@ -179,6 +179,20 @@ if far:
                              data=[{"id": "the-brain-before", "state": "loaded"}])
     check("a model list read from another endpoint is not served as this one's",
           "the-brain-before" not in [m["id"] for m in web._list_models()])
+    # One of Hearth's own helpers started by hand runs where it was told: a
+    # saved provider with its key, not whatever the main brain is.
+    from hearth import subagents as _sa
+    _seen = []
+    _real_worker = _sa._bg_worker
+    _sa._bg_worker = lambda p, *a, **k: _seen.append(p.get("_route"))
+    code, got = post("/api/team/start", {"task": "look it up", "persona": "researcher", "on": "openai",
+                                         "model": "older-chat"})
+    time.sleep(0.3)
+    _sa._bg_worker = _real_worker
+    check(f"a hand-started helper runs on the provider picked for it, with that provider's key {_seen}",
+          code == 200 and _seen == [(base, "good", "older-chat")])
+    check("one for a provider with no key is refused",
+          post("/api/team/start", {"task": "x", "persona": "researcher", "on": "anthropic"})[0] == 400)
     far.shutdown()
 app.shutdown()
 srv.shutdown()

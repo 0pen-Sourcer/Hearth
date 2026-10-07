@@ -1074,6 +1074,10 @@
   .nh-seg button .hx-mini { margin: 1px 0 0; flex-shrink: 0; }
   .nh-ico { width: 16px; height: 16px; flex: none; margin-top: 1px; color: var(--fg-dim); }
   .nh-seg button.on .nh-ico { color: var(--accent); }
+  .nh-runs { display: flex; align-items: center; gap: 8px; margin: -2px 0 14px; font-size: 12.5px; color: var(--fg-dim); }
+  .nh-runs[hidden] { display: none; }
+  .nh-runs select { background: var(--bg-0); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r);
+    padding: 5px 8px; font: 12.5px var(--sans); max-width: 220px; }
   .nh-note { float: right; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--fg-faint); }
   .nh-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--fg-dim); margin: 0 0 6px; font-weight: 600; }
   .nh-task, .nh-folder { width: 100%; box-sizing: border-box; background: var(--bg-0); border: 1px solid var(--border);
@@ -18643,6 +18647,14 @@ $('tm-new').addEventListener('click', async () => {
     <textarea class="nh-task" id="nh-task" placeholder="Everything they need to know. They don't see your chat."></textarea>
     <div class="nh-label">One of mine${c.helper_brain ? `<span class="nh-note">runs on ${esc(c.helper_brain)}</span>` : ''}</div>
     <div class="ob-seg nh-seg" id="nh-jobs">${(c.roles || []).map(jobBtn).join('')}</div>
+    <div class="nh-runs" id="nh-runs">
+      <span class="nh-runs-label">Runs on</span>
+      <select id="nh-on"><option value="">${esc(c.helper_brain ? c.helper_brain : 'The same as JARVIS')}</option>
+        <option value="local">This PC</option>
+        ${(STATE.providers || []).filter(p => p.id !== 'custom').map(p => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('')}
+      </select>
+      <select id="nh-model" hidden></select>
+    </div>
     ${agents.length ? `<div class="nh-label">Or hand it to an agent<span class="nh-note">on your own account</span></div>
     <div class="ob-seg nh-seg" id="nh-agents">${agents.map(agentBtn).join('')}</div>` : ''}
     ${(c.more_agents || []).length ? `<details class="nh-more" open><summary>${c.more_agents.length} more I can use once ${c.more_agents.length === 1 ? 'it is' : 'they are'} on this PC</summary>
@@ -18667,6 +18679,7 @@ $('tm-new').addEventListener('click', async () => {
       if (!pick) { toast('Pick who should do it', '', 'warn'); return false; }
       const body = { task, folder: $('nh-where').hidden ? '' : $('nh-folder').value.trim() };
       body[pick.kind] = pick.id;
+      if (pick.kind === 'persona') { body.on = $('nh-on').value; body.model = $('nh-model').hidden ? '' : $('nh-model').value; }
       try {
         await api('/api/team/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       } catch (e) { toast("It didn't start", e.message.replace(/^\d+\s*/, ''), 'err', 8000); return false; }
@@ -18691,6 +18704,17 @@ $('tm-new').addEventListener('click', async () => {
       toast("Couldn't install it", String(err.message || err).replace(/^\d+\s*/, ''), 'warn', 9000);
     }
   });
+  // A provider picked for one of mine offers its own models, as the model menu does.
+  $('nh-on').addEventListener('change', async () => {
+    const id = $('nh-on').value, sel = $('nh-model');
+    sel.hidden = true; sel.innerHTML = '';
+    if (!id || id === 'local') return;
+    try {
+      const r = await _mpRowsOf('prov::' + id);
+      sel.innerHTML = r.map(x => `<option value="${esc(x.v.split('::').slice(2).join('::'))}">${esc(x.t)}</option>`).join('');
+      sel.hidden = !r.length;
+    } catch {}
+  });
   const boxes = [$('nh-jobs'), $('nh-agents')].filter(Boolean);
   const where = $('nh-where');
   const choose = (b, instant) => {
@@ -18699,6 +18723,8 @@ $('tm-new').addEventListener('click', async () => {
       box.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
       _obSlideSeg(box, instant);
     });
+    // Where it runs is a choice for one of mine; an agent runs on its own plan.
+    $('nh-runs').hidden = pick.kind !== 'persona';
     // A folder only matters to someone working on code in it.
     const needs = pick.kind === 'agent' || pick.id === 'coder';
     if (needs === where.hidden) {

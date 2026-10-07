@@ -813,7 +813,7 @@ async def _run_subagent_async(
         _append_transcript(tpath, {"kind": "end", **out})
         return out
 
-    base, key, model = _route_for_cost_class(persona.get("cost_class", "standard"))
+    base, key, model = persona.get("_route") or _route_for_cost_class(persona.get("cost_class", "standard"))
     client = AsyncOpenAI(base_url=base, api_key=key, timeout=180.0)
 
     # If model is empty, probe the endpoint for whatever's loaded. Mirrors
@@ -1174,7 +1174,8 @@ def _spawn_on_agent(agent: str, p: Dict[str, Any], persona: str, prompt: str,
 def spawn_subagent(persona: str, prompt: str,
                    max_turns: Optional[int] = None,
                    mode: str = "sync",
-                   name: Optional[str] = None, by: str = "") -> Dict[str, Any]:
+                   name: Optional[str] = None, by: str = "",
+                   route: Optional[Tuple[str, str, str]] = None) -> Dict[str, Any]:
     """Spawn a sub-agent with a scoped tool allowlist + tight prompt.
 
     mode='sync' (default): block until the child returns its final text.
@@ -1229,8 +1230,10 @@ def spawn_subagent(persona: str, prompt: str,
     p = dict(p)
     p["_label"] = label
     p["_by"] = by                 # who asked: "you" from the Team view, else the assistant
+    if route:
+        p["_route"] = tuple(route)    # (base, key, model) picked by hand: a provider or this PC
 
-    on_agent = _agent_for_helpers()
+    on_agent = None if route else _agent_for_helpers()
     if on_agent:
         return _spawn_on_agent(on_agent, p, persona, prompt, label, mode)
 
