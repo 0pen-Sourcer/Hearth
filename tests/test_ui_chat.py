@@ -610,6 +610,22 @@ with sync_playwright() as pw:
           home["first"] == "winter" and home["second"] == "cabin" and home["card"])
     check("a room change wipes in, or is instant when that is picked", home["wiped"] and home["instant"])
 
+    # A status that wrapped to two lines made the card row taller, and the
+    # room above it shrank and grew as JARVIS walked about.
+    heights = pg.evaluate("""() => {
+      const viewWas = STATE.view, roomBox = document.getElementById('tm-room'), hid = roomBox.hidden;
+      showView('team'); roomBox.hidden = false;
+      const strip = document.getElementById('tm-strip'), keep = strip.innerHTML;
+      const card = word => `<div class="tm-card"><div class="tm-face"></div><div><b>JARVIS</b><small>on Claude Code</small><i class="working">${word}</i></div></div>`;
+      const hs = ['on the way', 'Free · browsing the shelves by the window seat'].map(w => {
+        strip.innerHTML = card(w);
+        return strip.offsetHeight;
+      });
+      strip.innerHTML = keep; roomBox.hidden = hid; showView(viewWas || 'chat');
+      return hs;
+    }""")
+    check(f"a card stays the same height whatever its status says {heights}", heights[0] == heights[1] and heights[0] > 0)
+
     # A turn running in the terminal left the window's room asleep at the fire.
     away = pg.evaluate("""() => {
       const was = window._mainState;

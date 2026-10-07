@@ -960,7 +960,10 @@
   .tm-card .tm-face canvas { position: absolute; left: 50%; top: 0; transform: translateX(-50%); image-rendering: pixelated; }
   .tm-card b { display: block; font-size: 12.5px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tm-card small { display: block; font-size: 11px; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tm-card i { font-style: normal; font-size: 10.5px; }
+  /* One line, always: a status that wrapped made the row of cards, and the
+     room above it, change height as JARVIS moved about. */
+  .tm-card > div:last-child { min-width: 0; }
+  .tm-card i { display: block; font-style: normal; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tm-card i.working { color: var(--ok); } .tm-card i.done { color: var(--accent-2); }
   .tm-card i.failed, .tm-card i.needs { color: var(--err); } .tm-card i.stopped { color: var(--fg-faint); }
   .tm-side { flex: 0 0 320px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-1);
