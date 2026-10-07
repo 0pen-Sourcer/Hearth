@@ -8247,16 +8247,25 @@ async function agentSetup(id, done) {
         await api('/api/agents/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
         await read(true);
       } else if (busy === 'signin') {
-        await api('/api/agents/signin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-        // The sign-in happens in its own window; look again until it is done.
+        const opened = await api('/api/agents/signin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        note = opened.paste === 'right-click'
+          ? 'In that window, if it asks for a code: copy it from the browser, then right-click in the window to paste it, and press Enter.'
+          : 'In that window, if it asks for a code: copy it from the browser, paste it with Ctrl+V, and press Enter.';
+        paint();
+        // The sign-in happens in its own window; look again until it is done,
+        // or until that window is closed without finishing.
+        let closed = false;
         await new Promise(res => {
           let tries = 0;
           timer = setInterval(async () => {
             await read(true);
-            if (st.signed_in || ++tries > 100 || !$('modal').classList.contains('open')) { stop(); res(); }
+            closed = st.signing === false && !st.signed_in;
+            if (st.signed_in || closed || ++tries > 100 || !$('modal').classList.contains('open')) { stop(); res(); }
           }, 3000);
         });
-        if (!st.signed_in) note = "Still not signed in. Finish in the window that opened, or press Sign in again.";
+        note = st.signed_in ? ''
+          : closed ? "The sign-in window closed before it finished. Press Sign in to try again."
+          : "Still not signed in. Finish in the window that opened, or press Sign in again.";
       } else if (busy === 'use') {
         await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: id }) });
         agentBrainOn(id);

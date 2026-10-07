@@ -311,6 +311,36 @@ with sync_playwright() as pw:
           dialog["first"] == ["now", "todo", "todo"] and dialog["button"] == "Install"
           and dialog["afterInstall"] == ["done", "now", "todo"] and dialog["afterSignIn"] == ["done", "done", "now"]
           and dialog["closed"] and asked == ["install", "signin", "use"])
+    # The sign-in window closed without finishing: the dialog sat on
+    # "Waiting for you…" for minutes, and the agent couldn't be used meanwhile.
+    state2 = {"installed": True, "signed_in": False, "signing": None}
+
+    def closed_api(route):
+        path = route.request.url.split("/api/agents/")[1].split("?")[0]
+        if route.request.method == "POST":
+            state2["signing"] = False             # the window is opened and closed straight away
+            return route.fulfill(status=200, content_type="application/json", body='{"ok": true, "paste": "right-click"}')
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"agents": [dict(state2, id="claude-code", label="Claude Code")]}))
+
+    pg.route("**/api/agents/**", closed_api)
+    gave_up = pg.evaluate("""async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms));
+      agentSetup('claude-code');
+      await wait(500);
+      document.querySelector('#modal-body .as-step.now button').click();
+      await wait(800);
+      const hint = (document.querySelector('#modal-body .as-note') || {}).textContent || '';
+      await wait(3600);
+      const note = (document.querySelector('#modal-body .as-note') || {}).textContent || '';
+      const button = (document.querySelector('#modal-body .as-step.now button') || {}).textContent || '';
+      document.getElementById('modal').classList.remove('open');
+      return { hint, note, button };
+    }""")
+    pg.unroute("**/api/agents/**")
+    check(f"the dialog says how to paste the code, and stops waiting once the window closes {gave_up}",
+          "right-click" in gave_up["hint"] and "closed before it finished" in gave_up["note"]
+          and gave_up["button"] == "Sign in")
     check("on Lite it points at the agent instead of a dead end", "Pick an agent below" in setup["banner"])
     pg.route("**/api/llmserver/status", reply({"disk_models": [{"filename": "a.gguf", "path": "a", "size_gb": 5, "source": "Hearth"},
                                                                 {"filename": "b.gguf", "path": "b", "size_gb": 9, "source": "Hearth"}]}))

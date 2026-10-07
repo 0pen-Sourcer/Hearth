@@ -369,7 +369,8 @@ def signed_in(aid: str, fresh: bool = False) -> Optional[bool]:
 def setup_state(fresh: bool = False) -> List[Dict[str, Any]]:
     """Each agent Hearth can set up: here or not, signed in or not."""
     return [{"id": aid, "label": AGENTS[aid]["label"], "maker": AGENTS[aid].get("maker", ""),
-             "installed": bool(find(aid)), "signed_in": signed_in(aid, fresh)} for aid in SETUP]
+             "installed": bool(find(aid)), "signed_in": signed_in(aid, fresh), "signing": signing(aid)}
+            for aid in SETUP]
 
 
 def how_to_get(aid: str) -> str:
@@ -434,7 +435,17 @@ def sign_in(aid: str) -> Dict[str, Any]:
     argv = _direct_argv(exe) + how["login"]
     try:
         if sys.platform == "win32":
-            subprocess.Popen(argv, creationflags=0x00000010, cwd=os.path.expanduser("~"))     # CREATE_NEW_CONSOLE
+            # Windows Terminal pastes with Ctrl+V; the classic console only
+            # with a right-click, which is what the dialog says when there is
+            # no Terminal. The window is kept, so the dialog knows when it closes.
+            wt = shutil.which("wt") or shutil.which("wt.exe")
+            if wt:
+                _SIGNING[aid] = subprocess.Popen([wt, "-w", "new", "--title", AGENTS[aid]["label"] + " sign-in"] + argv,
+                                                 cwd=os.path.expanduser("~"))
+                _SIGNING_WT.add(aid)
+            else:
+                _SIGNING[aid] = subprocess.Popen(argv, creationflags=0x00000010, cwd=os.path.expanduser("~"))     # CREATE_NEW_CONSOLE
+                _SIGNING_WT.discard(aid)
         else:
             import shlex
             term = next((t for t in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm") if shutil.which(t)), None)
@@ -447,7 +458,22 @@ def sign_in(aid: str) -> Dict[str, Any]:
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
     _SIGNED.pop(aid, None)
-    return {"ok": True}
+    return {"ok": True, "paste": "ctrl+v" if aid in _SIGNING_WT else "right-click"}
+
+
+# Sign-in windows Hearth opened, so the dialog can tell when one is closed.
+_SIGNING: Dict[str, Any] = {}
+_SIGNING_WT: set = set()
+
+
+def signing(aid: str) -> Optional[bool]:
+    """True while the sign-in window Hearth opened is still open, False once it
+    has closed, None when none was opened (or Windows Terminal holds it, which
+    hands the window to its own process at once)."""
+    p = _SIGNING.get(aid)
+    if p is None or aid in _SIGNING_WT:
+        return None
+    return p.poll() is None
 
 
 # Running agents that can be told something: agent id -> its process.

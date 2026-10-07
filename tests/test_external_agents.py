@@ -335,6 +335,18 @@ check("Gemini CLI is run trusting its folder, with the approval level the switch
       gem("auto") == ["--skip-trust", "--approval-mode=yolo", "-p"]
       and gem("edits") == ["--skip-trust", "--approval-mode=auto_edit", "-p"])
 
+# The sign-in window Hearth opens is watched, so a closed one is noticed.
+_find, _argv, _which = xa.find, xa._direct_argv, xa.shutil.which
+xa.find = lambda aid: "stand-in"
+xa._direct_argv = lambda exe: [sys.executable, "-c", "import time; time.sleep(1.5)"]
+xa.shutil.which = lambda name: None if name.startswith("wt") else _which(name)
+_r = xa.sign_in("claude-code")
+_open_now = xa.signing("claude-code")
+time.sleep(2.5)
+check(f"the sign-in window is known to be open, then known to be closed {_r}",
+      _r.get("ok") and _r.get("paste") == "right-click" and _open_now is True and xa.signing("claude-code") is False)
+xa.find, xa._direct_argv, xa.shutil.which = _find, _argv, _which
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
