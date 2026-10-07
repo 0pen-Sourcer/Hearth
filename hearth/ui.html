@@ -2077,8 +2077,15 @@
   .slash-none { padding: 10px 14px; font-size: 12.5px; color: var(--fg-dim); }
   .slash-none b { color: var(--fg); font-family: var(--mono); }
   .slash-none .slash-cmd { cursor: pointer; }
-  #modal-body:has(.st-panel) { background: none; border: none; padding: 0; white-space: normal; font-family: var(--sans); max-height: 70vh; }
-  .st-panel { display: flex; flex-direction: column; gap: 10px; min-width: 420px; }
+  #modal-body:has(.st-panel) { background: none; border: none; padding: 0; white-space: normal; font-family: var(--sans);
+    max-height: min(70vh, calc(100vh - 170px)); overflow-x: hidden; }
+  .modal:has(.st-panel) { width: min(560px, calc(100vw - 32px)); }
+  .st-panel { display: flex; flex-direction: column; gap: 10px; width: 100%; min-width: 0; box-sizing: border-box; }
+  .st-card { min-width: 0; }
+  .st-bar-top { gap: 10px; flex-wrap: wrap; }
+  .st-stale { color: var(--warn); }
+  .tm-usage .st-bar-top { font-size: 12px; }
+  .tm-usage .st-note { font-size: 11.5px; }
   .st-card { border: 1px solid var(--border); border-radius: var(--r-lg, 12px); background: var(--bg-1); padding: 12px 14px; }
   .st-card h5 { margin: 0 0 8px; font-size: 10.5px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--fg-faint); font-weight: 600; }
   .st-brain { display: flex; align-items: center; gap: 12px; }
@@ -10665,6 +10672,27 @@ function _stBar(label, pct, right) {
   return `<div class="st-bar"><div class="st-bar-top"><span>${esc(label)}</span><b>${esc(right)}</b></div>
     <div class="st-track"><i class="${p >= 90 ? 'hot' : p >= 70 ? 'warn' : ''}" style="width:${p}%"></i></div></div>`;
 }
+function stUsageHTML(list, compact) {
+  const t = Date.now() / 1000;
+  return (list || []).map(u => {
+    const head = compact ? '' : `<b>${esc(u.label)}</b> <span class="st-note" style="display:inline">${u.kind === 'plan'
+      ? 'your ' + esc(u.plan) + ' plan' : u.kind === 'key' ? 'your API key' : ''}${u.at && u.windows
+      ? ', as of ' + _stAgo(t - u.at) + ' ago' : ''}</span>`;
+    let body = '';
+    if (u.windows) {
+      body = u.windows.map(w => w.used == null
+        ? `<div class="st-bar"><div class="st-bar-top"><span>${esc(w.name)}</span><b>reset since ${esc(u.label)} last said</b></div></div>`
+        : _stBar(w.name, w.used, `${w.used}% used${w.resets_at ? ' · resets in ' + _stAgo(w.resets_at - t) : ''}`)).join('');
+      if (u.at && t - u.at > 1800) body += `<span class="st-note st-stale">${esc(u.label)} reports this when it runs, so it may have moved since.</span>`;
+    } else if (u.credits) {
+      const c = u.credits, money = v => v == null ? '' : '$' + Number(v).toFixed(2);
+      body = c.limit != null && c.left != null
+        ? _stBar('Credit', (1 - c.left / c.limit) * 100, `${money(c.left)} left of ${money(c.limit)}`)
+        : `<span class="st-note">${money(c.used) || '$0.00'} used${c.today ? ', ' + money(c.today) + ' today' : ''}${u.free_tier ? '. Free tier: free models only, with a daily request cap.' : '.'}</span>`;
+    } else if (u.note) body = `<span class="st-note">${esc(u.note)}</span>`;
+    return `<div class="st-plan">${head}${body}</div>`;
+  }).join('');
+}
 async function showStatus() {
   showModal('Status', '<div class="st-panel"><div class="st-card"><span class="st-note">Looking…</span></div></div>', [{ label: 'Close' }]);
   let st;
@@ -10688,16 +10716,10 @@ async function showStatus() {
     ctx += `<span class="st-note">${total ? `A ${total >= 1e6 ? (total / 1e6) + 'M' : Math.round(total / 1000) + 'K'} token window. ` : ''}Nothing measured yet in this chat.</span>`;
   }
   ctx += '</div>';
-  // Each plan's windows, as the agent itself last reported them.
-  let plans = '';
-  if ((st.limits || []).length) {
-    const t = Date.now() / 1000;
-    plans = '<div class="st-card"><h5>Plan limits</h5>' + st.limits.map(l => {
-      const bars = Object.entries(l.windows).map(([w, v]) => _stBar(w, v.used,
-        `${v.used}% used${v.resets_at ? ' · resets in ' + _stAgo(v.resets_at - t) : ''}`)).join('');
-      return `<div class="st-plan"><b>${esc(l.label)}</b> <span class="st-note" style="display:inline">your ${esc(l.plan)} plan, as of ${_stAgo(t - l.at)} ago</span>${bars}</div>`;
-    }).join('') + '</div>';
-  }
+  // Every brain on this PC, each as far as it can say: plan windows, credit,
+  // or plainly that it doesn't report. The one in use comes first.
+  const ordered = [...(st.limits || [])].sort((a, z) => (z.id === b.id) - (a.id === b.id));
+  const plans = ordered.length ? `<div class="st-card"><h5>Usage</h5>${stUsageHTML(ordered)}</div>` : '';
   const mode = (APPROVAL_MODES.find(m => m.id === st.mode) || {}).name || st.mode;
   const pc = `<div class="st-card"><h5>On this PC</h5><div class="st-rows">
       <span>Engine</span><em>${st.local.running ? esc(st.local.model || 'running') + (st.local.ctx ? ` · ${Math.round(st.local.ctx / 1024)}K context` : '') : 'not running'}</em>
@@ -19619,6 +19641,16 @@ async function roomInspectFill() {
   const tail = story.error ? `<b>${main ? 'Went wrong' : "Didn't finish"}</b><p>${esc(story.error)}</p>`
     : story.final ? `<b>${story.ended ? (main ? 'Said' : 'Result') : 'So far'}</b><div class="tm-final tm-more">${renderMD(story.final.length > 4000 ? story.final.slice(0, 3999) + '…' : story.final)}</div>` : '';
   put('.tm-i-result', tail);
+  // What it runs on and how much of that is used, from the same source as /status.
+  const uid = main ? (STATE.brain && STATE.brain.providerKey) : a.runtime;
+  if (uid && uid !== 'local' && (!ROOM.usageAt || Date.now() - ROOM.usageAt > 20000 || ROOM.usageFor !== uid)) {
+    ROOM.usageAt = Date.now(); ROOM.usageFor = uid;
+    api('/api/usage?id=' + encodeURIComponent(uid)).then(r => {
+      if (ROOM.sel !== p.id) return;
+      const html = (r.usage || []).length ? `<b>Usage</b><div class="tm-usage">${stUsageHTML(r.usage, true)}</div>` : '';
+      put('.tm-i-usage', html);
+    }).catch(() => {});
+  }
 }
 function roomSelect(id, keep = false) {
   const before = ROOM.sel;
@@ -19632,7 +19664,7 @@ function roomSelect(id, keep = false) {
   side.hidden = false;
   side.innerHTML = `<button class="tm-close" title="Close">×</button>
     <div class="tm-who"><div class="tm-face"></div><div><h4>${teamMini(a)}${esc(a.name || a.persona)}</h4><div class="tm-side-sub tm-i-sub"></div></div></div>
-    <div class="tm-i-now"></div><div class="tm-i-asked"></div><div class="tm-i-steps"></div><div class="tm-i-result"></div>
+    <div class="tm-i-now"></div><div class="tm-i-asked"></div><div class="tm-i-steps"></div><div class="tm-i-result"></div><div class="tm-i-usage"></div>
     ${main ? '' : a.can_tell ? `<form class="tm-tell" autocomplete="off"><input placeholder="Tell ${esc(a.name || 'them')} something…"><button type="submit">Tell</button></form>`
       : a.status === 'working' ? `<p class="tm-tell-no">${esc((HARNESS[a.runtime] || {}).label || 'This agent')} runs its task to the end, so it can't take a message part-way.</p>` : ''}
     <button class="tm-open-log">${main ? 'Open the chat' : 'Open the full log'}</button>`;

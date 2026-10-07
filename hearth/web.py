@@ -787,12 +787,11 @@ def status_snapshot() -> Dict[str, Any]:
             brain = {"kind": "cloud", "id": pid or "custom",
                      "label": hl.PROVIDERS[pid][0] if pid in hl.PROVIDERS else "A server",
                      "model": s.get("llm_model") or "", "where": "your API key"}
-    limits = []
-    for aid, label in cb.BRAINS.items():
-        got = cb.plan_limits(aid)
-        if got:
-            limits.append({"id": aid, "label": label, "plan": cb.PLANS.get(aid, ""), "at": got.get("at"),
-                           "windows": got.get("windows") or {}})
+    from . import usage as _usage
+    try:
+        limits = _usage.everything(_provider_key)
+    except Exception:
+        limits = []
     try:
         from . import subagents as _sa
         team = _sa.team_state()
@@ -2255,6 +2254,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _team_choices())
         if path == "/api/status":
             return self._send_json(200, status_snapshot())
+        if path == "/api/usage":
+            # One brain's usage, for a panel that shows a single agent.
+            from . import usage as _usage
+            want = self._query().get("id", "")
+            return self._send_json(200, {"usage": [u for u in _usage.everything(_provider_key)
+                                                   if not want or u["id"] == want]})
         if path == "/api/team":
             # Live state of helper agents for the Team view.
             try:

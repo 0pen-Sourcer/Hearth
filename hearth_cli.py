@@ -1702,11 +1702,24 @@ class JarvisCLI:
             pct = min(100, used / room * 100) if room else 0
             print(f"{C_BRAND}This chat{C_RESET}      {bar(pct)}  {C_DIM}{used // 1000}K of {total // 1000}K, "
                   f"{max(0, 100 - int(pct))}% left before older turns are summarised{C_RESET}")
-        for lim in st["limits"]:
-            print(f"{C_BRAND}{lim['label']}{C_RESET} {C_DIM}your {lim['plan']} plan, as of {ago(now - (lim['at'] or now))} ago{C_RESET}")
-            for name, w in lim["windows"].items():
+        if st["limits"]:
+            print(f"{C_BRAND}Usage{C_RESET}")
+        for lim in sorted(st["limits"], key=lambda u: u["id"] != b["id"]):
+            whose = f"your {lim['plan']} plan" if lim["kind"] == "plan" else "your API key"
+            when = f", as of {ago(now - lim['at'])} ago" if lim.get("at") and lim.get("windows") else ""
+            print(f"  {C_TOOL}{lim['label']}{C_RESET} {C_DIM}{whose}{when}{C_RESET}")
+            for w in lim.get("windows") or []:
+                if w.get("used") is None:
+                    print(f"    {w['name']:<8} {C_DIM}reset since {lim['label']} last said{C_RESET}")
+                    continue
                 resets = f" · resets in {ago(w['resets_at'] - now)}" if w.get("resets_at") else ""
-                print(f"  {name:<8} {bar(w['used'])}  {w['used']}% used{C_DIM}{resets}{C_RESET}")
+                print(f"    {w['name']:<8} {bar(w['used'])}  {w['used']}% used{C_DIM}{resets}{C_RESET}")
+            c = lim.get("credits")
+            if c is not None:
+                left = f", ${c['left']:.2f} left of ${c['limit']:.2f}" if c.get("left") is not None and c.get("limit") else ""
+                print(f"    {C_DIM}${(c.get('used') or 0):.2f} used{left}{C_RESET}")
+            if lim.get("note"):
+                print(f"    {C_DIM}{lim['note']}{C_RESET}")
         loc = st["local"]
         engine = (loc["model"] or "running") if loc["running"] else "not running"
         print(f"{C_BRAND}This PC{C_RESET}        {C_DIM}engine{C_RESET} {engine}"
