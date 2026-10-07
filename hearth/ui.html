@@ -8313,8 +8313,10 @@ function mpSync() {
   const o = sel.selectedOptions[0];
   const raw = o ? o.textContent : '';
   const agent = STATE.brain && AGENT_BRAINS[STATE.brain.providerKey] ? STATE.brain.providerKey : '';
+  // A cloud brain whose model list was refused still has the model it was set to.
+  const picked = STATE.brain && STATE.brain.kind === 'cloud' ? String((STATE.settings || {}).llm_model || '').replace(/^models\//, '') : '';
   name.textContent = agent ? agentModelLabel(agent)
-    : (o && o.value) ? (o.dataset.name || _mpClean(raw).replace(/\.gguf$/i, '')) : 'No model loaded';
+    : (o && o.value) ? (o.dataset.name || _mpClean(raw).replace(/\.gguf$/i, '')) : (picked || 'No model loaded');
   tag.textContent = /●\s*online/i.test(raw) ? 'online' : /●\s*loaded/i.test(raw) ? 'loaded' : '';
   // The model on this PC kept loaded beside a cloud brain runs the helpers.
   const help = document.getElementById('mp-helper');

@@ -507,6 +507,20 @@ with sync_playwright() as pw:
     check(f"Settings shows every brain as a card, and picking one picks it {cards}",
           len(cards["all"]) == 11 and cards["picked"] == "gemini" and cards["on"] == "gemini" and cards["apply"])
 
+    # A provider refusing its model list left the sticker saying no model was loaded.
+    stick = pg.evaluate("""() => {
+      const keep = { brain: STATE.brain, settings: STATE.settings };
+      const sel = document.getElementById('model-select'), html = sel.innerHTML;
+      sel.innerHTML = '';
+      STATE.brain = { ...(STATE.brain || {}), kind: 'cloud', providerKey: 'gemini' };
+      STATE.settings = { ...(STATE.settings || {}), llm_provider: 'gemini', llm_model: 'models/gemini-2.5-flash' };
+      mpSync();
+      const out = document.getElementById('mp-name').textContent;
+      sel.innerHTML = html; STATE.brain = keep.brain; STATE.settings = keep.settings; mpSync();
+      return out;
+    }""")
+    check(f"with its model list refused, a cloud brain still shows the model it is set to {stick!r}", stick == "gemini-2.5-flash")
+
     # A key pasted into Settings was put back to the old one by the next
     # settings refresh, before "Use this brain" was clicked.
     kept = pg.evaluate("""async () => {
