@@ -105,6 +105,15 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
             "Prompt overflowed the model's context. Run /compact, or load a larger context, then retry.",
             retryable=True)
 
+    # --- the account's own settings rule the model out (OpenRouter's privacy
+    # settings leave out free models that may learn from prompts) ---
+    if "guardrail" in text or "data policy" in text or "free-model-training" in text:
+        where = (" Free models that may learn from your prompts are turned off there;"
+                 " turn them on at openrouter.ai/settings/privacy," if "openrouter" in text else "")
+        return ApiErrorInfo("account_policy",
+            "Your account's settings with this provider leave that model out." + where +
+            " or pick another model.", retryable=False)
+
     # --- model not loaded / not found ---
     if code == 404 or "model not found" in text or "no model" in text or "not loaded" in text \
             or "does not exist" in text or "model_not_found" in text:

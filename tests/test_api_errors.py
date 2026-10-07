@@ -45,6 +45,16 @@ limited = Err(429, "Error code: 429 - {'error': {'code': 'rate_limit_exceeded', 
 info = classify_api_error(limited, is_local=False)
 check("an ordinary rate limit is still a rate limit, retried", info.category == "rate_limit" and info.retryable)
 
+# A model the account's own settings rule out came back as a 404 wall of JSON,
+# read as "model id not found".
+policy = Err(404, "Error code: 404 - {'error': {'message': '0 endpoints out of 1 requested are available matching "
+                  "your guardrail restrictions and data policy. We removed them for the following reasons: Free "
+                  "model training violation (account settings): 1 endpoint excluded; configurable at "
+                  "https://openrouter.ai/settings/privacy', 'code': 404}}")
+info = classify_api_error(policy, is_local=False)
+check(f"a model ruled out by the account's own settings says so, and where to change it ({info.hint})",
+      info.category == "account_policy" and "openrouter.ai/settings/privacy" in info.hint and not info.retryable)
+
 plain = Err(400, "something odd")
 check("anything else is not mistaken for a plan limit",
       classify_api_error(plain, is_local=False).category != "too_big_for_plan")

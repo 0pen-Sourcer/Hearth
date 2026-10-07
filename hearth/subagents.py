@@ -932,7 +932,16 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
                 stream=False,
             )
         except Exception as e:
-            out = {"ok": False, "error": f"{type(e).__name__}: {e}",
+            # Said the way the chat says it: what went wrong and what to do,
+            # not the provider's whole reply.
+            try:
+                from .errors import classify_api_error
+                info = classify_api_error(e, is_local="localhost" in str(getattr(client, "base_url", ""))
+                                          or "127.0.0.1" in str(getattr(client, "base_url", "")))
+                said = info.hint if info.category not in ("unknown", "other") else f"{type(e).__name__}: {e}"
+            except Exception:
+                said = f"{type(e).__name__}: {e}"
+            out = {"ok": False, "error": said,
                    "turns": turn, "used_tools": used,
                    "transcript_path": str(tpath)}
             _append_transcript(tpath, {"kind": "end", **out})
