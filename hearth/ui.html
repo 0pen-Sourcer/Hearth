@@ -19242,12 +19242,12 @@ const ROOM = {
   spots: {
     door: [96, 905], fire: [760, 470], fireSide: [868, 478], hearthside: [640, 492], shelfL: [410, 398], shelfR: [1122, 398],
     board: [228, 480], windowSeat: [1316, 488], coffee: [1350, 650], windowL: [296, 430], rug: [700, 478],
-    armchairSeat: [556, 447], hearth: [770, 398], pin: [178, 460],
+    armchairSeat: [538, 468], hearth: [770, 398], pin: [178, 460],
     // On the floor in front of the armchair, leaning back against it.
     armchairFloor: [552, 466],
   },
   // How far up someone is drawn when seated there, so they sit on it and not in front of it.
-  sitLift: { armchairSeat: 15 },
+  sitLift: { armchairSeat: 0 },
   fire: [770, 330], gone: new Set(), chatAt: 0,
   aisleY: 722, aisleTop: 492, aisleX: [186, 470, 755, 1045, 1352],
 };
@@ -19490,7 +19490,7 @@ const BODY_HALF = 14;
 function roomBlocks() {
   if (!ROOM.man || !ROOM.man.room_empty) return [];
   const out = [{ name: 'armchair', x0: 472, x1: 608, y0: 395, y1: 442 }, { name: 'side_table', x0: 622, x1: 678, y0: 410, y1: 430 }];
-  if (roomProp('cat_sleep')) out.push({ name: 'books', x0: 434, x1: 470, y0: 436, y1: 448 }, { name: 'stool', x0: 1217, x1: 1259, y0: 404, y1: 420 });
+  if (roomProp('cat_sleep')) out.push({ name: 'books', x0: 684, x1: 720, y0: 432, y1: 444 }, { name: 'stool', x0: 1217, x1: 1259, y0: 404, y1: 420 });
   return out;
 }
 // Nobody stands inside a desk or its chair. A place that falls on one (beside
@@ -19918,7 +19918,7 @@ function roomDraw(t) {
     if (roomProp('cat_sleep') && ROOM.view === 0) {
       const up = roomMainBusy() || ROOM.catUntil > Date.now();
       items.push({ kind: 'prop', name: up ? 'cat_sit' : 'cat_sleep', x: 868, y: 452, shadow: [19, 5, 5] });
-      items.push({ kind: 'prop', name: 'books', x: 452, y: 446, shadow: [20, 5, 8] });
+      items.push({ kind: 'prop', name: 'books', x: 702, y: 442, shadow: [20, 5, 8] });
       items.push({ kind: 'prop', name: 'stool', x: 1238, y: 418, shadow: [20, 6, 14] });
     }
   }
