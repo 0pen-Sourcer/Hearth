@@ -371,7 +371,8 @@ with sync_playwright() as pw:
       document.querySelector('#tour-card [data-t="skip"]').click(); await wait(100);
       out.tour.push(!!document.getElementById('tour-ring'), localStorage.getItem('hearth_tour_done'));
       // A voice test reads a different line each time.
-      out.quotes = voiceQuote().text !== voiceQuote().text;
+      out.quotes = (await voiceQuote('am_michael')).text !== (await voiceQuote('am_michael')).text
+        && /[ऀ-ॿ]/.test((await voiceQuote('hm_omega')).text);
       // While a local model is loading, the eject button stops the load.
       STATE.brain.kind = 'local'; STATE.brain.loaded = false;
       showLoadProgress('loading_weights', 12, '');
@@ -384,7 +385,7 @@ with sync_playwright() as pw:
           extras["him"] == ["him", "him"] and extras["her"] == ["her", "her"])
     check(f"the tour points at one thing at a time, moves on, and can be skipped {extras['tour']}",
           extras["tour"] == ["What I think with", True, "Talk to me", False, "1"])
-    check("a voice test reads a different line each time", extras["quotes"])
+    check("a voice test reads a different line each time, in the voice's own language", extras["quotes"])
     check(f"while a model is loading the eject button stops it {extras['stop'], extras['eject']}",
           extras["stop"] == [False, "stop"] and extras["eject"] == [True, "eject"])
 

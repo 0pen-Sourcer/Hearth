@@ -2260,6 +2260,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/team/choices":
             return self._send_json(200, _team_choices())
+        if path == "/api/voice/sample":
+            # The line a voice reads when it is tried, in its own language.
+            from . import voice as _vc
+            return self._send_json(200, _vc.sample_line(self._query().get("voice", "")))
         if path == "/api/status":
             return self._send_json(200, status_snapshot())
         if path == "/api/usage":

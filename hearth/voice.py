@@ -39,7 +39,7 @@ import threading
 import time
 import wave
 from io import BytesIO
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .tools import WORKSPACE
 
@@ -606,6 +606,39 @@ def voice_for(text: str, voice: str) -> str:
             same = [v for v in KOKORO_VOICES if v[:1] == code and v[1:2] == kind]
             return (same or [v for v in KOKORO_VOICES if v[:1] == code] or [voice])[0]
     return voice
+
+
+# What a voice says when it is tried: a line worth hearing, from that
+# language's own writers, in the voice's language so it can say it.
+SAMPLES = {
+    "e": [("Caminante, no hay camino, se hace camino al andar.", "Antonio Machado")],
+    "f": [("On ne voit bien qu'avec le cœur. L'essentiel est invisible pour les yeux.", "Saint-Exupéry")],
+    "h": [("काल करे सो आज कर, आज करे सो अब।", "Kabir")],
+    "i": [("Fatti non foste a viver come bruti, ma per seguir virtute e canoscenza.", "Dante")],
+    "j": [("千里の道も一歩から。", "a Japanese proverb")],
+    "p": [("Tudo vale a pena se a alma não é pequena.", "Fernando Pessoa")],
+    "z": [("千里之行，始于足下。", "Laozi")],
+    "": [("To strive, to seek, to find, and not to yield.", "Tennyson"),
+         ("A journey of a thousand miles begins with a single step.", "Lao Tzu"),
+         ("We know what we are, but know not what we may be.", "Shakespeare"),
+         ("Forever is composed of nows.", "Emily Dickinson"),
+         ("Keep your face always toward the sunshine, and shadows will fall behind you.", "Walt Whitman"),
+         ("You have power over your mind, not outside events. Realize this, and you will find strength.",
+          "Marcus Aurelius"),
+         ("Do not go where the path may lead. Go instead where there is no path, and leave a trail.", "Emerson"),
+         ("I am not afraid of storms, for I am learning how to sail my ship.", "Louisa May Alcott"),
+         ("It is never too late to be what you might have been.", "George Eliot"),
+         ("Luck is what happens when preparation meets opportunity.", "Seneca")],
+}
+_sample_at = [int(time.time()) % 10]
+
+
+def sample_line(voice: str = "") -> Dict[str, str]:
+    """{"text", "by"}: a different line each time for English voices."""
+    lines = SAMPLES.get((voice or "")[:1].lower()) or SAMPLES[""]
+    _sample_at[0] += 1
+    text, by = lines[_sample_at[0] % len(lines)]
+    return {"text": text, "by": by}
 
 
 def list_voices() -> List[str]:

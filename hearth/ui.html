@@ -5589,23 +5589,11 @@ async function api(path, opts = {}) {
   return r.json();
 }
 
-// What a voice test reads: a line worth hearing, a different one each time.
-const VOICE_QUOTES = [
-  ['To strive, to seek, to find, and not to yield.', 'Tennyson'],
-  ['A journey of a thousand miles begins with a single step.', 'Lao Tzu'],
-  ['We know what we are, but know not what we may be.', 'Shakespeare'],
-  ['Forever is composed of nows.', 'Emily Dickinson'],
-  ['Keep your face always toward the sunshine, and shadows will fall behind you.', 'Walt Whitman'],
-  ['You have power over your mind, not outside events. Realize this, and you will find strength.', 'Marcus Aurelius'],
-  ['Do not go where the path may lead. Go instead where there is no path, and leave a trail.', 'Emerson'],
-  ['I am not afraid of storms, for I am learning how to sail my ship.', 'Louisa May Alcott'],
-  ['It is never too late to be what you might have been.', 'George Eliot'],
-  ['Luck is what happens when preparation meets opportunity.', 'Seneca'],
-];
-let _voiceQuoteAt = Math.floor(Math.random() * VOICE_QUOTES.length);
-function voiceQuote() {
-  const [text, by] = VOICE_QUOTES[_voiceQuoteAt++ % VOICE_QUOTES.length];
-  return { text, by };
+// What a voice test reads: a line worth hearing, in the voice's own language,
+// from the same list the terminal uses.
+async function voiceQuote(voice) {
+  try { return await api('/api/voice/sample?voice=' + encodeURIComponent(voice || '')); }
+  catch { return { text: 'To strive, to seek, to find, and not to yield.', by: 'Tennyson' }; }
 }
 const _toastLast = {};
 // Audio cues (Settings → Sounds, on unless turned off): a soft rising two-note on
@@ -12924,22 +12912,8 @@ async function refreshSettings() {
     // be in that language: English words spoken through another language's
     // sounds come out as nonsense, which reads as a broken voice rather than a
     // mismatched one.
-    // The sample introduces the assistant by its own name (JARVIS, or
-    // whatever it was renamed to), not by the voice's name.
-    const _SAMPLE = {
-      e: n => `Hola, soy ${n}. Asi es como sueno.`,
-      f: n => `Bonjour, je suis ${n}. Voici ma voix.`,
-      h: n => `नमस्ते, मैं ${n} हूँ। मेरी आवाज़ ऐसी लगती है।`,
-      i: n => `Ciao, sono ${n}. Ecco come suono.`,
-      j: n => `こんにちは、${n}です。これが私の声です。`,
-      p: n => `Ola, eu sou ${n}. E assim que eu soo.`,
-      z: n => `你好，我是${n}。这就是我的声音。`,
-    };
-    function sampleLine(voice) {
-      const who = _agentName();
-      const key = String(voice || '')[0];
-      if (_SAMPLE[key]) return _SAMPLE[key](who);
-      return voiceQuote().text;
+    async function sampleLine(voice) {
+      return (await voiceQuote(voice)).text;
     }
     // Wait a short while for a failure from inside the speaking threads, and
     // return its text if one arrives. Silence here means it played.
@@ -12964,7 +12938,7 @@ async function refreshSettings() {
           if (voiceSel) await saveSetting('voice_name', voiceSel.value);  // so /api/tts uses it
           const r = await fetch('/api/tts', {
             method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ text: sampleLine(voiceSel ? voiceSel.value : '') }),
+            body: JSON.stringify({ text: await sampleLine(voiceSel ? voiceSel.value : '') }),
           });
           if (!r.ok) toast('Voice test', "Couldn't play it. Make sure speaking is turned on above.", 'warn', 5000);
           else {
@@ -17830,7 +17804,7 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
       });
       const r = await fetch('/api/tts', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ text: (window._obQuote = voiceQuote()).text }),
+        body: JSON.stringify({ text: (window._obQuote = await voiceQuote(voice)).text }),
       });
       if (r.ok) {
         if (testMsg) testMsg.textContent = `✓ ${window._obQuote.by}. Press again for another.`;

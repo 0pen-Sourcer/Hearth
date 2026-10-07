@@ -3909,7 +3909,7 @@ class JarvisCLI:
                 # Speak a sample so the user hears it immediately
                 if self.voice_on and voice.is_available():
                     voice.stop()
-                    voice.speak(f"voice set to {vname}", blocking=False)
+                    voice.speak(voice.sample_line(vname)["text"], blocking=False)
             elif len(parts) >= 2 and (parts[1].startswith(("am_", "af_", "bm_", "bf_"))
                                        or parts[1].endswith(".onnx")):
                 # bare /voice <name> shortcut
@@ -3921,7 +3921,7 @@ class JarvisCLI:
                       + (f"  {C_DIM}saved{C_RESET}" if _saved else ""))
                 if self.voice_on and voice.is_available():
                     voice.stop()
-                    voice.speak(f"voice set to {vname}", blocking=False)
+                    voice.speak(voice.sample_line(vname)["text"], blocking=False)
             return True
         if cmd.startswith("/"):
             _w = low.split()[0] if low.split() else low
