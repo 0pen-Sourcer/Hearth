@@ -19411,7 +19411,11 @@ function roomDraw(t) {
     const img = roomLook(skin, p.seed);
     let frame, flip = false;
     if (p.walking) {
-      const step = Math.floor(t / 210 + p.seed) % 2 ? 1 : 2;
+      // Four beats a stride: step, legs passing, the other step, passing.
+      // Side-on has its own passing frames; facing or away, the step is held.
+      const beat = Math.floor(t / 150 + p.seed * 4) % 4;
+      const side = p.walkDir === 'side' && ROOM.man && ROOM.man.frames.includes('walk_side_3');
+      const step = side ? [1, 3, 2, 4][beat] : (beat < 2 ? 1 : 2);
       frame = roomFrame(`walk_${p.walkDir}_${step}`, skin);
       flip = p.walkDir === 'side' && p.dir < 0;
     } else {
@@ -19423,7 +19427,9 @@ function roomDraw(t) {
       if (/^side_/.test(pose) && !roomHas(skin, pose) && FRAME_NEAREST[pose] === 'walk_side_1') flip = !flip;
     }
     const typing = !p.walking && p.goal && p.goal.pose === 'type';
-    const bob = typing ? Math.round(Math.sin(t / 130 + p.seed) * 1.3) : (!p.walking ? Math.round(Math.sin(t / 700 + p.seed) * 0.8) : 0);
+    // Walking, the body rises a little as the legs pass under it.
+    const passingBeat = p.walking && Math.floor(t / 150 + p.seed * 4) % 2 === 1;
+    const bob = typing ? Math.round(Math.sin(t / 130 + p.seed) * 1.3) : (!p.walking ? Math.round(Math.sin(t / 700 + p.seed) * 0.8) : (passingBeat ? -1.5 : 0));
     ctx.save();
     const low = !p.walking && p.goal && (p.goal.sit || p.goal.pose === 'tend_fire');
     const lift = typing ? SIT_LIFT : (low ? p.goal.lift || 0 : 0);

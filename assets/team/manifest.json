@@ -17,7 +17,9 @@
   "walk_side_1",
   "walk_down_2",
   "walk_up_2",
-  "walk_side_2"
+  "walk_side_2",
+  "walk_side_3",
+  "walk_side_4"
  ],
  "roles": [
   "coder",
@@ -142,5 +144,5 @@
   ]
  },
  "room_empty": true,
- "v": "a4978118db"
+ "v": "13fbb0f631"
 }

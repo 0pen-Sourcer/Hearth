@@ -232,6 +232,7 @@ jobs:
         run: |
           python tests/test_cli_paste.py
           python tests/test_cli_commands.py
+          python tests/test_team_sprites.py
           python tests/test_chat_call.py
 
       - name: A cloud provider's models are read from the provider

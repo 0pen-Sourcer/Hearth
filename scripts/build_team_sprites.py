@@ -37,7 +37,13 @@ FRAMES = [
     ("think", "act", 2, 2, 2), ("gaze", "act", 2, 2, 3),
     ("walk_down_1", "walk", 3, 2, 0), ("walk_up_1", "walk", 3, 2, 1), ("walk_side_1", "walk", 3, 2, 2),
     ("walk_down_2", "walk", 3, 2, 3), ("walk_up_2", "walk", 3, 2, 4), ("walk_side_2", "walk", 3, 2, 5),
+    # Both side steps were drawn mid-stride, so the legs never pass each other
+    # and the walk glides. These are the passing steps between them, made from
+    # each stride by drawing the legs in under the hips.
+    ("walk_side_3", "walk", 3, 2, -2), ("walk_side_4", "walk", 3, 2, -5),
 ]
+LEGS = 0.30            # the part of a side-on figure that is legs
+PASS_SQUEEZE = 0.5     # how far in the feet come at the passing step
 STAND_H = 132          # standing height in room pixels (the room is 1536 wide)
 CELL_W, CELL_H = 104, 144
 COLORS = 40
@@ -198,6 +204,36 @@ def quantize(img: Image.Image) -> Image.Image:
     return rgb
 
 
+def passing(cell: np.ndarray, bb):
+    """The passing step of a side-on stride: the legs drawn in towards the
+    hips, more the lower they go, so the feet come together under the body."""
+    x0, y0, x1, y1 = bb
+    fig = cell[y0:y1, x0:x1]
+    h, w = fig.shape[:2]
+    top = int(h * (1 - LEGS))
+    out = fig.copy()
+    cols = np.nonzero(fig[top - 1, :, 3] > 0)[0]
+    cx = (cols.min() + cols.max()) / 2 if len(cols) else w / 2
+    xs = np.arange(w)
+    for y in range(top, h):
+        k = 1 - (1 - PASS_SQUEEZE) * ((y - top) / max(1, h - 1 - top)) ** 0.8
+        src = np.rint(cx + (xs - cx) / k).astype(int)
+        ok = (src >= 0) & (src < w)
+        row = np.zeros_like(fig[y])
+        row[ok] = fig[y, src[ok]]
+        out[y] = row
+    return out, bbox(out)
+
+
+def frame_of(frames, idx):
+    """A frame by its source cell; a negative index is the passing step made
+    from that stride."""
+    if idx >= 0:
+        return frames[idx]
+    cell, bb = frames[-idx]
+    return passing(cell, bb) if bb else (cell, bb)
+
+
 def extra_main(art: str, target: float, sheet: str = "17.png", keep=None):
     """A main character's further poses (two rows of six), each in a cell of
     its own, at the scale of the standing frames. `keep` names the ones to use."""
@@ -221,13 +257,14 @@ def second_main(art: str):
     path = os.path.join(art, "18.png")
     if not os.path.isfile(path):
         return None
-    frames = strip_frames(key_magenta(Image.open(path)), len(FRAMES))
+    frames = strip_frames(key_magenta(Image.open(path)), len(FRAMES) - 2)
     names = [f[0] for f in FRAMES]
     # His walk was drawn direction by direction (down, down, up, up, side,
     # side); everyone else's goes step by step (down, up, side, then again).
     drawn = ["walk_down_1", "walk_down_2", "walk_up_1", "walk_up_2", "walk_side_1", "walk_side_2"]
     walk = {name: frames[8 + k] for k, name in enumerate(drawn)}
     frames = [walk.get(n, f) for n, f in zip(names, frames)]
+    frames += [passing(*walk["walk_side_1"]), passing(*walk["walk_side_2"])]
     scale = STAND_H * 1.06 / standing_height(frames, {0, 4, 5, 6, 7})
     atlas = Image.new("RGBA", (CELL_W * len(FRAMES), CELL_H), (0, 0, 0, 0))
     for i, (cell, bb) in enumerate(frames):
@@ -273,7 +310,7 @@ def build(art: str) -> None:
         target = STAND_H * (1.06 if role == "main" else 1.0)
         atlas = Image.new("RGBA", (CELL_W * len(FRAMES), CELL_H), (0, 0, 0, 0))
         for i, (_, sheet, _c, _r, idx) in enumerate(FRAMES):
-            cell, bb = sheets[sheet][idx]
+            cell, bb = frame_of(sheets[sheet], idx)
             if not bb:
                 continue
             atlas.alpha_composite(place(cell, bb, target / ref[sheet]), (i * CELL_W, 0))
