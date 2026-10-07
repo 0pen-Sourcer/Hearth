@@ -510,6 +510,18 @@ def cuda_available() -> bool:
         return False
 
 
+def model_size() -> str:
+    """The model that is actually loaded. An English-only size (base.en) holds
+    no other language, so when a language other than English is named, the
+    multilingual model of the same size is used instead; otherwise Hindi
+    speech came back as English words that sounded like it."""
+    size = (_env.get("STT_MODEL", MODEL_SIZE) or MODEL_SIZE or "").strip()
+    lang = (_env.get("STT_LANGUAGE", "") or "").strip().lower()
+    if lang and lang != "en" and size.lower().endswith(".en"):
+        return size[:-3]
+    return size
+
+
 def _try_load_model():
     global _model, _last_load_error, DEVICE, COMPUTE_TYPE
     if _model is not None:
@@ -538,7 +550,7 @@ def _try_load_model():
             _device_now = "cpu"
         _compute = "float16" if _device_now == "cuda" else COMPUTE_TYPE
         try:
-            _model = WhisperModel(MODEL_SIZE, device=_device_now,
+            _model = WhisperModel(model_size(), device=_device_now,
                                   compute_type=_compute, download_root=download_root)
             DEVICE, COMPUTE_TYPE = _device_now, _compute
             _last_load_error = None
@@ -547,7 +559,7 @@ def _try_load_model():
             # back to CPU rather than leaving voice dead.
             if _device_now == "cuda":
                 try:
-                    _model = WhisperModel(MODEL_SIZE, device="cpu",
+                    _model = WhisperModel(model_size(), device="cpu",
                                           compute_type="int8", download_root=download_root)
                     DEVICE, COMPUTE_TYPE = "cpu", "int8"
                     _last_load_error = (f"GPU whisper failed ({type(e).__name__}); "
@@ -559,7 +571,7 @@ def _try_load_model():
             # are removed and fetched again, once.
             if model_present() and _drop_model_files():
                 try:
-                    _model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8", download_root=download_root)
+                    _model = WhisperModel(model_size(), device="cpu", compute_type="int8", download_root=download_root)
                     DEVICE, COMPUTE_TYPE = "cpu", "int8"
                     _last_load_error = None
                     return _model
@@ -573,7 +585,7 @@ def _try_load_model():
 def _model_dirs() -> list:
     """The folders under the whisper cache that hold the selected size."""
     root = os.path.join(VOICES_DIR, "whisper")
-    want = (MODEL_SIZE or "").lower().replace(".", "").replace("-", "")
+    want = (model_size() or "").lower().replace(".", "").replace("-", "")
     if not want or not os.path.isdir(root):
         return []
     return [os.path.join(root, d) for d in os.listdir(root)
@@ -595,7 +607,7 @@ def model_present() -> bool:
     root = os.path.join(VOICES_DIR, "whisper")
     if not os.path.isdir(root):
         return False
-    want = (MODEL_SIZE or "").lower().replace(".", "").replace("-", "")
+    want = (model_size() or "").lower().replace(".", "").replace("-", "")
     if not want:
         return False
     # The size tag is in an ancestor directory (models--Systran--faster-whisper-
@@ -646,7 +658,7 @@ def status() -> dict:
     except ImportError:
         pass
     return {
-        "model_size": MODEL_SIZE,
+        "model_size": model_size(),
         "device": DEVICE,
         "compute_type": COMPUTE_TYPE,
         "cuda_available": cuda_available(),
@@ -728,8 +740,7 @@ def _transcribe_language() -> Optional[str]:
     applied by writing the environment and reloading the model in place.
     """
     lang = (_env.get("STT_LANGUAGE", "") or "").strip().lower()
-    size = (_env.get("STT_MODEL", MODEL_SIZE) or "").strip().lower()
-    if size.endswith(".en"):
+    if model_size().lower().endswith(".en"):
         return "en"
     return lang or None
 

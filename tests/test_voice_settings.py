@@ -108,7 +108,9 @@ for _mark, _label in (("।", "danda"), ("。", "ideographic stop"),
 from hearth import listen as _listen                               # noqa: E402
 from hearth import realtime_voice as _rt                           # noqa: E402
 
-for _mdl, _lang, _want in (("base.en", "", "en"), ("base.en", "hi", "en"),
+# Hindi named beside an English-only size used to be heard as English; the
+# same size's multilingual model listens instead.
+for _mdl, _lang, _want in (("base.en", "", "en"), ("base.en", "hi", "hi"),
                            ("large-v3", "", None), ("large-v3", "hi", "hi")):
     os.environ["JARVIS_STT_MODEL"] = _mdl
     os.environ["JARVIS_STT_LANGUAGE"] = _lang
@@ -219,6 +221,30 @@ check("damaged, it is removed, and another size is left alone",
       _l._drop_model_files() and not _l.model_present()
       and os.path.isdir(os.path.join(_l.VOICES_DIR, "whisper", "models--Systran--faster-whisper-small.en")))
 _l.VOICES_DIR, _l.MODEL_SIZE = _real_ldir, _real_size
+
+# Hindi went unheard: an English-only model was picked and the language choice
+# was hidden beside it. Naming another language listens with the same size's
+# multilingual model.
+_old = (os.environ.get("HEARTH_STT_MODEL"), os.environ.get("HEARTH_STT_LANGUAGE"))
+os.environ["HEARTH_STT_MODEL"], os.environ["HEARTH_STT_LANGUAGE"] = "small.en", "hi"
+check("Hindi named beside an English-only model listens with the multilingual one, in Hindi",
+      _l.model_size() == "small" and _l._transcribe_language() == "hi")
+os.environ["HEARTH_STT_LANGUAGE"] = "en"
+check("English stays on the English-only model", _l.model_size() == "small.en" and _l._transcribe_language() == "en")
+for _k, _v in zip(("HEARTH_STT_MODEL", "HEARTH_STT_LANGUAGE"), _old):
+    if _v is None:
+        os.environ.pop(_k, None)
+    else:
+        os.environ[_k] = _v
+
+# A reply in Hindi was read aloud by the English voice, which can't say it.
+from hearth import voice as _v  # noqa: E402
+check("a sentence in Devanagari is read by a Hindi voice of the same kind",
+      _v.voice_for("नमस्ते, मैं जार्विस हूँ", "am_michael") == "hm_omega"
+      and _v.voice_for("नमस्ते", "af_heart") == "hf_alpha")
+check("Japanese and Mandarin likewise, and English keeps the chosen voice",
+      _v.voice_for("こんにちは", "am_michael")[:1] == "j" and _v.voice_for("你好", "af_heart")[:1] == "z"
+      and _v.voice_for("Hello there", "am_michael") == "am_michael")
 
 print()
 if FAILS:

@@ -198,11 +198,25 @@ def _model_size() -> str:
     dropdown that appeared to control it changed the other path alone. An
     explicitly exported override still wins.
     """
+    size = "tiny.en"
     for _v in (os.environ.get("HEARTH_REALTIME_MODEL"),
                _env.get("STT_MODEL")):
         if (_v or "").strip():                 # a blank export is not a choice
-            return _v.strip()
-    return "tiny.en"
+            size = _v.strip()
+            break
+    # An English-only size can't hear another language; one that is named
+    # gets the same size's multilingual model, as push-to-talk does.
+    lang = _named_language()
+    if lang and lang != "en" and size.lower().endswith(".en"):
+        return size[:-3]
+    return size
+
+
+def _named_language() -> str:
+    for _v in (os.environ.get("HEARTH_REALTIME_LANG"), _env.get("STT_LANGUAGE")):
+        if (_v or "").strip():
+            return _v.strip().lower()
+    return ""
 
 
 def _language() -> str:
@@ -215,11 +229,7 @@ def _language() -> str:
     """
     if _model_size().lower().endswith(".en"):
         return "en"
-    for _v in (os.environ.get("HEARTH_REALTIME_LANG"),
-               _env.get("STT_LANGUAGE")):
-        if (_v or "").strip():
-            return _v.strip().lower()
-    return ""
+    return _named_language()
 
 
 def status() -> dict:

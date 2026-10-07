@@ -32,6 +32,7 @@ and the rest of Hearth keeps working silently.
 from __future__ import annotations
 
 import os
+import re
 from . import env as _env
 import sys
 import threading
@@ -585,6 +586,28 @@ def voice_language(voice: str) -> str:
     return _VOICE_LANG.get((voice or "")[:1].lower(), "en-us")
 
 
+# Writing systems a voice can't read from another language. A Hindi reply is
+# in Devanagari, which an English voice can only spell out as noise; such a
+# sentence goes to a voice of that language, of the same kind as the chosen one.
+_SCRIPTS = (("h", re.compile(r"[\u0900-\u097F]")),
+            ("j", re.compile(r"[\u3040-\u30FF]")),
+            ("z", re.compile(r"[\u4E00-\u9FFF]")))
+
+
+def voice_for(text: str, voice: str) -> str:
+    """The voice to read this text with: the chosen one, unless the text is
+    written in a script only another language's voices read."""
+    voice = voice or DEFAULT_KOKORO_VOICE
+    for code, pat in _SCRIPTS:
+        if pat.search(text or ""):
+            if voice[:1] == code:
+                return voice
+            kind = voice[1:2] if voice[1:2] in ("f", "m") else "f"
+            same = [v for v in KOKORO_VOICES if v[:1] == code and v[1:2] == kind]
+            return (same or [v for v in KOKORO_VOICES if v[:1] == code] or [voice])[0]
+    return voice
+
+
 def list_voices() -> List[str]:
     return list(KOKORO_VOICES)
 
@@ -895,10 +918,9 @@ def _synth_loop() -> None:
                 if _abort.is_set():
                     break
                 if kind == "kokoro":
+                    v = voice_for(chunk, voice)
                     samples, sr = obj.create(  # type: ignore[attr-defined]
-                        chunk, voice=voice or DEFAULT_KOKORO_VOICE,
-                        speed=speed,
-                        lang=voice_language(voice or DEFAULT_KOKORO_VOICE))
+                        chunk, voice=v, speed=speed, lang=voice_language(v))
                     arr = _to_int16(samples)
                 elif kind == "piper":
                     buf = BytesIO()
@@ -1057,10 +1079,9 @@ def _speak_legacy(text, blocking, voice, speed) -> str:
                         if _abort.is_set():
                             return
                         if kind == "kokoro":
+                            v = voice_for(chunk, voice)
                             samples, sr = obj.create(  # type: ignore[attr-defined]
-                                chunk, voice=voice or DEFAULT_KOKORO_VOICE,
-                                speed=speed,
-                                lang=voice_language(voice or DEFAULT_KOKORO_VOICE))
+                                chunk, voice=v, speed=speed, lang=voice_language(v))
                             _play(samples, sr)
                         elif kind == "piper":
                             buf = BytesIO()

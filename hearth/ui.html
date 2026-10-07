@@ -13002,19 +13002,26 @@ async function refreshSettings() {
         catch (err) { toast("Couldn't switch where listening runs", err.message, 'err'); }
       });
     }
-    // An .en model holds no other language, so offering a choice of language
-    // beside it would be a control that does nothing. It is hidden rather than
-    // disabled, and the size dropdown right above says which group to pick from.
+    // The language is always there to pick. An English-only model can't
+    // hear another one, so naming one uses the same size's multilingual model,
+    // and the hint says so.
     function syncLangField() {
       const f = $('field-stt-language');
       if (!f || !sttMdl) return;
-      f.hidden = String(sttMdl.value || '').endsWith('.en');
+      f.hidden = false;
+      const hint = f.querySelector('.hint'), m = String(sttMdl.value || '');
+      const lang = sttLang ? sttLang.value : '';
+      if (hint) hint.textContent = m.endsWith('.en') && lang && lang !== 'en'
+        ? `Listens with the multilingual ${m.slice(0, -3)} model for this, since ${m} only knows English. It downloads once.`
+        : m.endsWith('.en') && !lang ? `${m} only knows English. Pick a language to listen in another one.`
+        : 'Leave it on detect and Hearth works out each utterance on its own. Naming the language is a little faster and a little more accurate when you always speak the same one.';
     }
     if (sttLang) {
       sttLang.value = s.stt_language || '';
       sttLang.onchange = async (e) => {
         const v = e.target.value;
         await saveSetting('stt_language', v);
+        syncLangField();
         try {
           await api('/api/voice/reload', { method: 'POST' });
           toast('Speech', v ? 'listening for ' + (e.target.selectedOptions[0] || {}).text
