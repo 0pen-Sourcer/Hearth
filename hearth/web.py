@@ -688,12 +688,28 @@ def _resolve_ask_user(req_id: str, answer: Dict[str, Any]) -> bool:
         return False
 
 
+_GET_REFUSED: Dict[str, str] = {}      # url -> what the server said when it refused
+
+
 def _http_get_json(url: str, timeout: float = 3,
                    headers: Optional[Dict[str, str]] = None) -> Optional[Dict]:
     try:
         req = urllib.request.Request(url, headers=(headers or {}))
         with urllib.request.urlopen(req, timeout=timeout) as r:
+            _GET_REFUSED.pop(url, None)
             return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        # Kept so the page can say why ("API key not valid"), not guess.
+        try:
+            body = json.loads(e.read().decode("utf-8", "replace") or "{}")
+            err = body.get("error") if isinstance(body, dict) else None
+            if isinstance(err, list) and err:
+                err = err[0]
+            msg = (err.get("message") if isinstance(err, dict) else err) or body.get("message") or ""
+        except Exception:
+            msg = ""
+        _GET_REFUSED[url] = str(msg or f"HTTP {e.code}")[:200]
+        return None
     except Exception:
         return None
 
@@ -1052,10 +1068,18 @@ def _list_models() -> List[Dict]:
     if not rows and _is_cloud:
         _prov = ("xAI Grok" if "api.x.ai" in _h else "OpenAI" if "api.openai.com" in _h
                  else "Gemini" if "googleapis" in _h else "Anthropic" if "anthropic" in _h else "the provider")
-        _reason = "returned no response" if _raw_models is None else "returned an empty list"
-        _models_notice = (f"{_prov} {_reason} for the model list — usually out of credits or an API "
-                          f"key without model-list access. Your active model still works; type a "
-                          f"different model id in Settings → Chat brain if you need to switch.")
+        _said = _GET_REFUSED.get(_list_url, "")
+        if _said and "key" in _said.lower() and any(w in _said.lower() for w in ("invalid", "not valid", "incorrect")):
+            _hint = " A Gemini key starts with AIza." if _prov == "Gemini" else ""
+            _models_notice = (f"{_prov} says the API key isn't valid. Paste the whole key again in Settings, "
+                              f"Chat brain.{_hint}")
+        elif _said:
+            _models_notice = f"{_prov} wouldn't list its models: {_said}"
+        else:
+            _reason = "returned no response" if _raw_models is None else "returned an empty list"
+            _models_notice = (f"{_prov} {_reason} for the model list. That is usually a key that can't list "
+                              f"models, or no credit left. The model in use still works; another can be "
+                              f"typed in Settings, Chat brain.")
     else:
         _models_notice = ""
     _loaded_idx = 0

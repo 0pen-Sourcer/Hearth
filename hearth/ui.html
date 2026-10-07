@@ -10811,7 +10811,7 @@ function stUsageHTML(list, compact) {
     let body = '';
     if (u.windows) {
       body = u.windows.map(w => w.used == null
-        ? `<div class="st-bar"><div class="st-bar-top"><span>${esc(w.name)}</span><b>reset since ${esc(u.label)} last said</b></div></div>`
+        ? `<div class="st-bar"><div class="st-bar-top"><span>${esc(w.name)}</span><b>${w.resets_at ? 'reset ' + _stAgo(t - w.resets_at) + ' ago · ' : ''}fresh now</b></div></div>`
         : _stBar(w.name, w.used, `${w.used}% used${w.resets_at ? ' · resets in ' + _stAgo(w.resets_at - t) : ''}`)).join('');
       if (u.at && t - u.at > 1800) body += `<span class="st-note st-stale">${esc(u.label)} reports this when it runs, so it may have moved since.</span>`;
     } else if (u.credits) {
@@ -16795,7 +16795,9 @@ async function agentJobsPoll() {
   for (const j of (r && r.jobs) || []) {
     const id = 'agent:' + j.id;
     seen.add(id);
-    if (j.status === 'cancelled') { if (_dls[id]) { delete _dls[id]; dlSyncBadge(); if (_dlOpen) dlRender(); } continue; }
+    // Stopped, or finished a few seconds ago: the row has said what it had to.
+    const over = j.status === 'cancelled' || (j.status === 'done' && j.ended && Date.now() / 1000 - j.ended > 8);
+    if (over) { if (_dls[id]) { delete _dls[id]; dlSyncBadge(); if (_dlOpen) dlRender(); } continue; }
     if (j.status === 'running') running = true;
     const inst = j.kind === 'install';
     const name = j.status === 'running' ? `${inst ? 'Installing' : 'Updating'} ${j.label}`
@@ -16813,7 +16815,10 @@ async function agentJobsPoll() {
 }
 function agentJobsWatch() {
   clearTimeout(_agentJobsTimer);
-  const tick = async () => { if (await agentJobsPoll()) _agentJobsTimer = setTimeout(tick, 700); else if (_dlOpen) dlRender(); };
+  const tick = async () => {
+    if (await agentJobsPoll()) _agentJobsTimer = setTimeout(tick, 700);
+    else { if (_dlOpen) dlRender(); _agentJobsTimer = setTimeout(agentJobsPoll, 9000); }   // clears the finished rows
+  };
   _agentJobsTimer = setTimeout(tick, 250);
 }
 function dlUpsert(id, patch) {
@@ -16933,7 +16938,7 @@ function dlRender() {
         <span style="color:${d.status === 'done' ? 'var(--ok)' : d.status === 'paused' ? 'var(--accent-2)' : 'var(--fg-dim)'};flex-shrink:0">${d.status === 'paused' ? 'paused' : pctTxt}</span>
       </div>
       <div style="height:7px;background:var(--bg-0);border-radius:4px;overflow:hidden;border:1px solid var(--border)">${d.pct == null && d.status === 'downloading'
-        ? `<div class="dl-indet" style="background:${barCol}"></div>`
+        ? `<div class="dl-indet" style="background:${barCol};animation-delay:-${[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % 1300}ms;animation-duration:${1.15 + ([...id].length % 5) * 0.12}s"></div>`
         : `<div style="height:100%;width:${d.pct == null ? 0 : d.pct}%;background:${barCol};border-radius:4px"></div>`}</div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">
         <span style="font-size:11.5px;color:var(--fg-faint);font-family:var(--mono)">${meta}</span>

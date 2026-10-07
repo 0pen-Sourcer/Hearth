@@ -473,6 +473,14 @@ with sync_playwright() as pw:
     }""")
     pg.unroute("**/api/agents/jobs")
     pg.unroute("**/api/agents/cancel")
+    # A finished update stayed in the list until the app restarted.
+    pg.route("**/api/agents/jobs", lambda r: r.fulfill(json={"jobs": [
+        {"id": "gemini-cli", "label": "Gemini CLI", "kind": "update", "status": "done", "started": time.time() - 60,
+         "ended": time.time() - 30, "line": "changed 5 packages", "fetched": 21, "version": "0.63.0"}]}))
+    gone = pg.evaluate("""async () => { _dls['agent:gemini-cli'] = { name: 'Updated Gemini CLI', kind: 'agent', status: 'done', pct: 100 };
+                                         await agentJobsPoll(); return !('agent:gemini-cli' in _dls); }""")
+    pg.unroute("**/api/agents/jobs")
+    check("a finished update leaves the list a few seconds after it ends", gone)
     check(f"an agent update shows in Downloads with what it is doing {dl['text'][:160]!r}",
           "Updating Claude Code" in dl["text"] and "4 packages fetched" in dl["text"] and "changed 3 packages" in dl["text"] and dl["bar"])
     check(f"it can be cancelled there, and offers no pause npm couldn't keep {dl['buttons']} {cancels}",

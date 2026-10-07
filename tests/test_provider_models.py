@@ -59,6 +59,13 @@ class _Provider(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         SEEN.append(dict(self.headers))
+        if self.headers.get("Authorization") == "Bearer badkey":
+            body = json.dumps({"error": {"code": 400, "message": "API key not valid. Please pass a valid API key."}}).encode()
+            self.send_response(400)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         # Only the one list a provider has; LM Studio's own address is not here.
         if self.headers.get("Authorization") != "Bearer good" or not self.path.split("?")[0].endswith("/v1/models"):
             self.send_response(401)
@@ -136,6 +143,12 @@ def post(path, body):
     except urllib.error.HTTPError as e:
         return e.code, json.load(e)
 
+
+# A refused model list read as "out of credits or no list access" when the
+# provider had said plainly that the key was wrong.
+web._http_get_json(base + "/models", headers={"Authorization": "Bearer badkey"})
+check(f"a refused model list keeps what the provider said ({web._GET_REFUSED.get(base + '/models')})",
+      "API key not valid" in web._GET_REFUSED.get(base + "/models", ""))
 
 SEEN.clear()
 code, got = post("/api/providers/models", {"id": "openai"})
