@@ -8690,7 +8690,7 @@ async function switchEndpoint(body) {
   } else {
     const _p = (STATE.providers || []).find(x => x.id === body.provider);
     const kept = !r.stopped_builtin && (STATE.settings || {}).keep_local_warm && STATE.brain && STATE.brain.kind === 'local' && STATE.brain.loaded;
-    brainToast([(_p && _p.label) || body.provider, body.model].filter(Boolean).join(' · '),
+    brainToast([(_p && _p.label) || body.provider, String(body.model || '').replace(/^models\//, '')].filter(Boolean).join(' · '),
                (r.stopped_builtin ? 'The local model is unloading to free your graphics card.'
                 : kept ? 'Your local model stays loaded, and helpers think with it.' : 'From the next message.') + bridges);
   }
