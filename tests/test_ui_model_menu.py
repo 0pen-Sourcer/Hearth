@@ -472,6 +472,22 @@ with sync_playwright() as pw:
       showView('chat');
       return out;
     }""")
+    # Settings showed three agents while New helper listed twenty; nothing said why.
+    note = pg.evaluate("""async () => {
+      STATE.helperAgents = [{ id: 'opencode', label: 'OpenCode' }, { id: 'codex', label: 'Codex' }]; STATE.moreAgents = 18;
+      showView('settings'); renderBrainCards();
+      const n = document.querySelector('#brain-cards .brain-note');
+      const out = { text: n ? n.textContent : '' };
+      n.querySelector("a").click();
+      for (let i = 0; i < 40 && !document.getElementById("nh-task"); i++) await new Promise(r => setTimeout(r, 150));
+      out.dialog = STATE.view === 'team' && !!document.getElementById('nh-task');
+      const cancel = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Cancel' && x.offsetParent);
+      if (cancel) cancel.click();
+      showView('chat');
+      return out;
+    }""")
+    check(f"Settings says the other agents work as helpers and links to them {note}",
+          "OpenCode is on this PC" in note["text"] and "18 more" in note["text"] and "Codex is" not in note["text"] and note["dialog"])
     check(f"Settings shows every brain as a card, and picking one picks it {cards}",
           len(cards["all"]) == 11 and cards["picked"] == "gemini" and cards["on"] == "gemini" and cards["apply"])
 
