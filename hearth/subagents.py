@@ -870,6 +870,7 @@ async def _run_subagent_async(
     if not model:
         out = {"ok": False, "error": f"no model loaded at {base}"}
         _append_transcript(tpath, {"kind": "end", **out})
+        await _close(client)
         return out
 
     tools = _filter_tools(persona.get("allowed_tools", []))
@@ -897,6 +898,17 @@ async def _run_subagent_async(
     finally:
         with _INBOX_LOCK:
             _INBOX.pop(agent_id, None)
+        await _close(client)
+
+
+async def _close(client) -> None:
+    """Close a helper's connections in the loop that opened them. A sync helper
+    runs in a loop of its own that ends with it; left to be collected later,
+    the client tried to use that closed loop and printed a traceback."""
+    try:
+        await client.close()
+    except Exception:
+        pass
 
 
 async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, tpath, used,
