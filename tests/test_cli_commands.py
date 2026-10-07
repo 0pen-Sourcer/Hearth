@@ -29,6 +29,7 @@ from prompt_toolkit.output import DummyOutput  # noqa: E402
 import hearth_cli  # noqa: E402
 from hearth.tool_call_parser import split_calls  # noqa: E402
 
+
 FAILS: list = []
 
 
@@ -36,6 +37,19 @@ def check(label, cond):
     print(("ok    " if cond else "FAIL  ") + label)
     if not cond:
         FAILS.append(label)
+
+# Text copied from the terminal's own input line and pasted back came in
+# broken at every row, mid-word ("s" / "pecifically").
+row1 = "can you launch a team so I can inspect how the teams look like for testing purposes, I am using CLI for this reason s"
+row2 = "pecifically so I can tick mark that teams work properly rather than having bugs and glitches before v0.7.6 launch of He"
+copied = row1 + "\n" + row2 + "\narth."
+check("text copied from the terminal's rows is one line again",
+      hearth_cli.unwrap_terminal(copied, 120) == row1 + row2 + "arth.")
+check("a row that ended on a space gets the space back",
+      hearth_cli.unwrap_terminal("a" * 117 + "\n" + "c" * 119 + "\n" + "b" * 118 + "\nnext", 120)
+      == "a" * 117 + "c" * 119 + "b" * 118 + " next")
+poem = "roses are red\nviolets are blue"
+check("a paste with its own line breaks is left alone", hearth_cli.unwrap_terminal(poem, 120) == poem)
 
 
 # ------------------------------------------------------------- completion

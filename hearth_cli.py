@@ -120,6 +120,26 @@ class Pastes:
 
 PASTES = Pastes()
 
+
+def unwrap_terminal(text: str, cols: int) -> str:
+    """Text copied from this terminal's own input line comes back broken at
+    every row, mid-word, because each row was drawn as a line of its own.
+    When every line but the last reaches (nearly) the edge, those breaks are
+    the terminal's, and they are joined again. The copy drops a space that
+    ended a row, so a row one short of full gets it back. The first row is
+    shorter by the prompt when the prompt wasn't copied."""
+    lines = text.split("\n")
+    if len(lines) < 2 or cols < 20:
+        return text
+    if not all(cols - 5 <= len(ln) <= cols for ln in lines[:-1]):
+        return text
+    full = max(len(ln) for ln in lines[1:-1]) if len(lines) > 2 else cols - 1
+    out = lines[0]
+    for i, (prev, ln) in enumerate(zip(lines, lines[1:])):
+        target = full if i or len(prev) >= full - 1 else full - 2
+        out += ("" if len(prev) >= target else " ") + ln
+    return out
+
 # Soft dependency: prompt_toolkit gives proper arrow keys, history, ctrl-r.
 # If installed, we use it. Otherwise we fall back to plain input().
 try:
@@ -1184,6 +1204,7 @@ class JarvisCLI:
             @kb.add(Keys.BracketedPaste)
             def _paste(event):
                 data = event.data.replace("\r\n", "\n").replace("\r", "\n")
+                data = unwrap_terminal(data, shutil.get_terminal_size().columns)
                 buf = event.current_buffer
                 mark = PASTES.marker_of(buf.text, data)
                 if mark:
