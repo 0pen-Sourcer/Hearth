@@ -232,6 +232,18 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
     # model knows which part of the task has nobody working on it.
     dropped: List[Dict[str, str]] = []
     spawned: List[Dict[str, Any]] = []
+    # Each member hears who else is on the team, so they can reach each other.
+    roster = [(str(m.get("name") or m.get("persona") or "coder").strip(), " ".join(str(m.get("prompt") or "").split())[:80])
+              for m in members if str(m.get("prompt") or "").strip()]
+
+    def with_team(name: str, prompt: str, can_message: bool) -> str:
+        others = [f"{n} ({t})" for n, t in roster if n != name]
+        if not others:
+            return prompt
+        how = ("Reach them with message_helper by name when your work touches theirs." if can_message
+               else "You can't message them, so say in your result anything they need to know.")
+        return f"You are {name}, working at the same time as: {'; '.join(others)}. {how}\n\n{prompt}"
+
     for m in members:
         persona = (m.get("persona") or "coder").strip()
         name = str(m.get("name") or persona).strip()
@@ -244,7 +256,8 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
             # Another agent CLI, on the user's own install; it does not use the
             # local model, so it does not count against the local team limit.
             from . import external_agents
-            r = external_agents.spawn(runtime, prompt, name=name, cwd=(m.get("folder") or "").strip())
+            r = external_agents.spawn(runtime, with_team(name, prompt, False), name=name,
+                                      cwd=(m.get("folder") or "").strip(), task=prompt)
             if r.get("ok"):
                 spawned.append({"name": name, "persona": r.get("label", runtime), "external": True,
                                 "agent_id": r.get("agent_id"),
@@ -264,7 +277,7 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not on_pc and sum(1 for x in spawned if not x.get("external") and not x.get("on_pc")) >= _MAX_TEAM:
             dropped.append({"name": name, "reason": f"over the team limit of {_MAX_TEAM}"})
             continue
-        r = subagents.spawn_subagent(persona=persona, prompt=prompt,
+        r = subagents.spawn_subagent(persona=persona, prompt=with_team(name, prompt, True),
                                      mode="background", name=name, route=route)
         if r.get("ok"):
             spawned.append({"name": name, "persona": persona, "on_pc": on_pc,

@@ -159,12 +159,13 @@ subagents.route_for = lambda on, model="": (
     (None, "") if not on else (("http://localhost:1234/v1", "hearth-builtin", ""), "") if on == "local"
     else (("https://api.anthropic.com/v1/", "k", "claude-haiku-4-5"), "") if on == "anthropic"
     else (None, f"'{on}' isn't a provider Hearth knows."))
-subagents.spawn_subagent = lambda **kw: (routes.__setitem__(kw["name"], kw.get("route")) or
-                                         {"ok": True, "agent_id": kw["name"], "transcript_path": ""})
+briefs = {}
+subagents.spawn_subagent = lambda **kw: (routes.__setitem__(kw["name"], kw.get("route")) or briefs.__setitem__(kw["name"], kw["prompt"])
+                                         or {"ok": True, "agent_id": kw["name"], "transcript_path": ""})
 from hearth import external_agents as _xa                            # noqa: E402
 _xspawn = _xa.spawn
-_xa.spawn = lambda agent, prompt, name="", cwd="": (programs.append((agent, name)) or
-                                                    {"ok": True, "agent_id": name, "label": agent})
+_xa.spawn = lambda agent, prompt, name="", cwd="", **kw: (programs.append((agent, name)) or briefs.__setitem__(name, prompt)
+                                                          or {"ok": True, "agent_id": name, "label": agent})
 res = team.launch_team(
     [{"name": f"Local{i}", "prompt": "p", "runs_on": "local"} for i in range(4)]
     + [{"name": f"Haiku{i}", "prompt": "p", "runs_on": "anthropic", "model": "haiku"} for i in range(2)]
@@ -175,6 +176,10 @@ dropped = {d["name"]: d["reason"] for d in res.get("dropped", [])}
 check(f"a mixed team starts each member where it was asked to run {sorted(routes)} {programs} {dropped}",
       routes.get("Haiku0") and routes["Haiku0"][2] == "claude-haiku-4-5" and routes.get("Local3")
       and len(programs) == 2 and set(dropped) == {"Nowhere"} and "isn't a provider" in dropped["Nowhere"])
+# Members were told nothing about each other, so none could reach a teammate.
+check("each member hears who else is on the team, and how to reach them",
+      "Codex1" in briefs["Local0"] and "message_helper" in briefs["Local0"] and "Local0" not in briefs["Local0"].split("as:")[1].split(".")[0]
+      and "can't message" in briefs["Codex0"])
 
 from hearth import tools as T                                        # noqa: E402
 _real = {p["slug"] if "slug" in p else p["name"] for p in subagents.list_personas()}

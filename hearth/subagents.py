@@ -289,7 +289,7 @@ def _read_agent(p: Path) -> Dict[str, Any]:
     right now, and how it ended if it has."""
     info: Dict[str, Any] = {"id": p.stem, "persona": "", "name": "", "runtime": "", "on": "", "model": "", "prompt": "",
                             "ended": None, "tools_used": 0, "activity": "thinking",
-                            "tool": "", "what": "", "blocked": "", "preview": "", "started": ""}
+                            "tool": "", "what": "", "blocked": "", "preview": "", "started": "", "talk": None}
     pending: List[str] = []
     whats: List[str] = []
     try:
@@ -306,6 +306,9 @@ def _read_agent(p: Path) -> Dict[str, Any]:
                     info["runtime"] = rec.get("runtime") or ""
                     info["prompt"] = (rec.get("prompt") or "").strip()[:200]
                     info["started"] = rec.get("ts") or ""
+                elif k == "sent":
+                    info["talk"] = {"to_id": rec.get("to_id") or "", "to": rec.get("to") or "",
+                                    "text": str(rec.get("text") or "")[:200], "ts": rec.get("ts") or ""}
                 elif k == "route" and not info["runtime"]:
                     # One of Hearth's own helpers: what it thinks with, so a
                     # cloud model is never mistaken for one on this PC.
@@ -372,6 +375,8 @@ def agent_story(agent_id: str) -> Dict[str, Any]:
                     waiting.pop(0)["result"] = str(rec.get("preview") or "")[:600]
                 elif k == "told":
                     out["steps"].append({"told": str(rec.get("text") or "")[:600], "from": str(rec.get("from") or "")})
+                elif k == "sent":
+                    out["steps"].append({"sent": str(rec.get("text") or "")[:600], "to": str(rec.get("to") or "")})
                 elif k == "guard":
                     out["steps"].append({"guard": str(rec.get("reason") or "")[:300], "stop": rec.get("action") == "stop"})
                 elif k == "assistant_final":
@@ -757,6 +762,7 @@ def _filter_tools(allowed: List[str]) -> List[Dict[str, Any]]:
     else:
         # Explicit list = explicit intent; honor it (dangerous tools included).
         allow = set(allowed) - block
+    allow.add("message_helper")
     out = []
     for t in TOOL_DEFINITIONS:
         if t["name"] not in allow:
@@ -916,6 +922,15 @@ async def _close(client) -> None:
         pass
 
 
+def _helper_label(tpath: Path) -> str:
+    try:
+        with open(tpath, encoding="utf-8") as f:
+            first = json.loads(f.readline() or "{}")
+        return first.get("name") or first.get("persona") or "a helper"
+    except Exception:
+        return "a helper"
+
+
 async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, tpath, used,
                           should_cancel, execute_tool) -> Dict[str, Any]:
     # The same watch the main loop keeps: a helper repeating a call that fails
@@ -1028,6 +1043,8 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
                     else f"(not run: {name} needs the user's permission and a sub-agent "
                          f"cannot ask. Finish with what you have and say what is left to "
                          f"do with {name}; the main assistant can ask the user.)")
+            elif name == "message_helper":
+                content = json.dumps(await message_helper(agent_id, _helper_label(tpath), args), ensure_ascii=False)
             elif (held := _changes.claim(agent_id, name, args)):
                 content = held
             else:
@@ -1168,18 +1185,20 @@ def can_tell(agent_id: str) -> bool:
     return _xa.can_tell(agent_id)
 
 
-def tell_subagent(agent_id: str, message: str, sender: str = "the user") -> Dict[str, Any]:
-    """Give a working helper a message. It reads it before its next step."""
+def tell_subagent(agent_id: str, message: str, sender: str = "the user", reply_to: str = "") -> Dict[str, Any]:
+    """Give a working helper a message. It reads it before its next step.
+    `reply_to` names a helper it can answer with message_helper."""
     text = str(message or "").strip()
     if not text:
         return {"ok": False, "error": "there is nothing to tell it"}
+    hint = f" (Answer with message_helper to {reply_to} if they need one.)" if reply_to else ""
     with _INBOX_LOCK:
         if agent_id in _INBOX:
-            _INBOX[agent_id].append(f"A message from {sender} while you work: {text}")
+            _INBOX[agent_id].append(f"A message from {sender} while you work: {text}{hint}")
             _append_transcript(_transcript_path(agent_id), {"kind": "told", "from": sender, "text": text})
             return {"ok": True, "note": "It will read this before its next step."}
     from . import external_agents as _xa
-    passed = _xa.tell(agent_id, f"A message from {sender} while you work: {text}")
+    passed = _xa.tell(agent_id, f"A message from {sender} while you work: {text}{hint}")
     if passed is not None:
         if passed.get("ok"):
             _append_transcript(_transcript_path(agent_id), {"kind": "told", "from": sender, "text": text})
@@ -1190,6 +1209,68 @@ def tell_subagent(agent_id: str, message: str, sender: str = "the user") -> Dict
         return {"ok": False, "error": "This agent's program runs its task to the end and can't take a "
                                       "message part-way."}
     return {"ok": False, "error": "that helper has already finished"}
+
+
+# How many messages one helper may send in a task, so two can't talk in circles.
+MESSAGES_PER_HELPER = 12
+_SENT: Dict[str, int] = {}
+
+
+def _working_helper(target: str, sender_id: str) -> Optional[Dict[str, Any]]:
+    """A helper that is working right now, by id, name or role."""
+    want = (target or "").strip().lower()
+    for a in team_state():
+        if a["status"] != "working" or a["id"] == sender_id:
+            continue
+        if want in (a["id"].lower(), (a.get("name") or "").lower(), (a.get("persona") or "").lower()):
+            return a
+    return None
+
+
+async def message_helper(sender_id: str, sender_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """One helper asks or tells another, and can wait for the answer. Both
+    transcripts keep the exchange, so JARVIS and the person can see it."""
+    to, text = str(args.get("to") or "").strip(), str(args.get("text") or args.get("message") or "").strip()
+    if not to or not text:
+        return {"ok": False, "error": "say who it is for (to) and what to tell them (text)"}
+    peer = _working_helper(to, sender_id)
+    if not peer:
+        here = [a.get("name") or a.get("persona") for a in team_state()
+                if a["status"] == "working" and a["id"] != sender_id]
+        return {"ok": False, "error": f"no helper called '{to}' is working now"
+                + (f"; working now: {', '.join(here)}" if here else "; no one else is working")}
+    if _SENT.get(sender_id, 0) >= MESSAGES_PER_HELPER:
+        return {"ok": False, "error": "you have sent enough messages for this task; finish with what you have"}
+    peer_name = peer.get("name") or peer.get("persona") or "them"
+    got = tell_subagent(peer["id"], text, sender=sender_name, reply_to=sender_name)
+    if not got.get("ok"):
+        return got
+    _SENT[sender_id] = _SENT.get(sender_id, 0) + 1
+    _append_transcript(_transcript_path(sender_id), {"kind": "sent", "to": peer_name, "to_id": peer["id"], "text": text[:600]})
+    if not args.get("wait_for_reply"):
+        return {"ok": True, "note": f"{peer_name} will read it before their next step."}
+    # Their answer arrives in this helper's own inbox; take it from there.
+    head = f"A message from {peer_name} while you work: "
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        with _INBOX_LOCK:
+            box = _INBOX.get(sender_id) or []
+            hit = next((m for m in box if m.startswith(head)), None)
+            if hit:
+                box.remove(hit)
+        if hit:
+            reply = hit[len(head):].split(" (Answer with message_helper to ")[0]
+            _append_transcript(_transcript_path(sender_id), {"kind": "told", "from": peer_name, "text": reply[:600]})
+            return {"ok": True, "reply": reply}
+        with _BG_RESULTS_LOCK:
+            still = peer["id"] in _BG_RUNNING
+            done = _BG_RESULTS.get(peer["id"])
+        if not still and not _working_helper(peer["id"], sender_id):
+            said = ((done or {}).get("text") or "").strip()
+            return {"ok": True, "reply": None,
+                    "note": f"{peer_name} finished without answering." + (f" Their result: {said[:1500]}" if said else "")}
+        await asyncio.sleep(1)
+    return {"ok": False, "error": f"{peer_name} didn't answer within 5 minutes; carry on without it"}
 
 
 _STOP_ASKED: set = set()

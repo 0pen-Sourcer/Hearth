@@ -772,6 +772,23 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "message_helper",
+        "description":
+            "For a helper: ask or tell another helper that is working at the same "
+            "time, by name. Use it when their part of the job touches yours: a file "
+            "they hold, a fact they are looking up, a change that affects them. Set "
+            "wait_for_reply to wait for their answer (up to 5 minutes).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Their name, as shown in the Team room."},
+                "text": {"type": "string", "description": "What to ask or tell them."},
+                "wait_for_reply": {"type": "boolean"},
+            },
+            "required": ["to", "text"],
+        },
+    },
+    {
         "name": "helper_changes",
         "description":
             "See or act on what a finished helper changed on disk. An agent program "
@@ -6403,6 +6420,8 @@ _HANDLERS = {
     "spawn_subagent": lambda p: _spawn_subagent(p),
     "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
     "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id") or p.get("job_id") or p.get("id") or ""),
+    # Helpers' own loop handles it, knowing who sends; the main assistant has tell_subagent.
+    "message_helper": lambda p: {"ok": False, "error": "message_helper is for helpers; use tell_subagent to reach one"},
     "helper_changes": lambda p: __import__("hearth.helper_changes", fromlist=["act"]).act(
         p.get("agent_id") or p.get("id") or "", p.get("action") or "show"),
     "tell_subagent": lambda p: __import__("hearth.subagents", fromlist=["tell_subagent"]).tell_subagent(
@@ -8159,6 +8178,7 @@ _DRYRUN_GUARDED = {
     "extract_archive_file",              # writes files out of an archive
     "start_job",                         # a shell command, in the background
     "send_to_phone",                     # a real message to a real phone
+    "helper_changes",                    # brings a helper's changes into real folders
     "forge_generate", "forge_shutdown",  # drive an external image server
 }
 
@@ -8453,6 +8473,7 @@ _DEFERRED_TOOLS = {
     "list_subagent_personas", "get_subagent_result",  # spawn_subagent lists roles; bg results auto-arrive
     "tell_subagent",       # only matters once a helper is running
     "helper_changes",      # only matters once a helper has changed something
+    "message_helper",      # helpers use it among themselves
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # ntfy push is opt-in / rare
     "focus_window",        # niche window management
@@ -8955,6 +8976,7 @@ _TOOL_CATEGORY = {
     "get_subagent_result": "Sub-agents", "launch_team": "Sub-agents", "delegate": "Sub-agents",
     "tell_subagent": "Sub-agents",
     "helper_changes": "Sub-agents",
+    "message_helper": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",

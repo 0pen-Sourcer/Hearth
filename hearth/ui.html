@@ -19602,6 +19602,9 @@ function roomGoal(p, a) {
   // Where the person should be and what they are doing, from real state.
   if (a.role === 'main') return roomMainGoal(p);
   if (p.pokeUntil > Date.now()) return { at: p.pos, pose: p.pokePose || 'raise', seated: !!p.pokeSeated };
+  // Gone over to tell another helper something, beside whoever it is, on the near side.
+  const to = p.visit && p.visit.until > Date.now() && ROOM.people.get(p.visit.id);
+  if (to && (to.room || 0) === (p.room || 0)) return { at: [to.pos[0] + (p.pos[0] < to.pos[0] ? -70 : 70), to.pos[1] + 8], pose: 'talk' };
   const seat = p.desk != null ? roomSeat(p) : ROOM.spots.rug;
   const beside = [seat[0] + 92, seat[1] + 6];
   // Beside JARVIS, where a helper goes to report or to ask.
@@ -19665,6 +19668,16 @@ function roomSync(list) {
       p.doneAt = Math.min(Date.now() - 5000, (a.updated || Infinity) * 1000);
       // Finished before the room was open: nothing new to report.
       p.reported = Date.now() / 1000 - (a.updated || 0) > 60;
+    }
+    // A message it sent to another helper: it goes over and says it.
+    const t = a.talk;
+    if (t && t.ts && p.talkSeen !== t.ts) {
+      const fresh = p.talkSeen !== undefined || Date.now() - Date.parse(t.ts) < 15000;
+      p.talkSeen = t.ts;
+      if (fresh) {
+        p.visit = { id: t.to_id, until: Date.now() + 9000 };
+        roomSay(a.id, `${t.to}, ${t.text}`, 7000);
+      }
     }
     p.agent = a;
   }
@@ -20272,7 +20285,9 @@ function _stepLine(tool, what, done) {
 function roomStepsHTML(steps) {
   if (!steps.length) return '<li class="none">No steps yet.</li>';
   const one = t => { t = String(t || '').trim().split('\n')[0]; return t.length > 150 ? t.slice(0, 149) + '…' : t; };
-  return steps.map((st, n) => st.guard != null
+  return steps.map((st, n) => st.sent != null
+    ? `<li class="told"><span>To ${esc(st.to || 'another helper')}</span><small>${esc(st.sent)}</small></li>`
+    : st.guard != null
     ? `<li class="told"><span>${st.stop ? 'Told to wrap up' : 'Going in circles'}</span><small>${esc(st.guard)}</small></li>`
     : st.told != null
     ? `<li class="told"><span>${esc(st.from === 'the user' ? 'You' : (st.from || 'Someone'))} said</span><small>${esc(st.told)}</small></li>`

@@ -748,6 +748,26 @@ with sync_playwright() as pw:
       const none = roomChangesHTML({ files: [] });
       return { waiting, files, direct, none };
     }""")
+    # Helpers talking in the room was small talk only; a real message between two now shows as one.
+    talk = pg.evaluate("""async () => {
+      // Local time without a zone, the way transcripts write it.
+      const d = new Date(), now = d.getTime() / 1000;
+      const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+      const rosa = { id: 'sub_t_rosa', persona: 'researcher', name: 'Rosa', status: 'working', updated: now };
+      const old = { id: 'sub_t_old', persona: 'coder', name: 'Bo', status: 'working', updated: now,
+                    talk: { to_id: 'sub_t_rosa', to: 'Rosa', text: 'from an hour ago', ts: '2020-01-01T00:00:00' } };
+      const noah = { id: 'sub_t_noah', persona: 'coder', name: 'Noah', status: 'working', updated: now };
+      roomSync([rosa, noah, old]);
+      roomSync([rosa, old, { ...noah, talk: { to_id: 'sub_t_rosa', to: 'Rosa', text: 'does API X need the empty case?', ts: iso } }]);
+      const n = ROOM.people.get('sub_t_noah'), r = ROOM.people.get('sub_t_rosa');
+      const g = roomGoal(n, n.agent);
+      const out = { said: (ROOM.says.get('sub_t_noah') || {}).text, near: Math.abs(g.at[0] - r.pos[0]) <= 80 && Math.abs(g.at[1] - r.pos[1]) <= 20,
+                    oldSaid: (ROOM.says.get('sub_t_old') || {}).text || '' };
+      for (const id of ['sub_t_rosa', 'sub_t_noah', 'sub_t_old']) { ROOM.people.delete(id); ROOM.says.delete(id); }
+      return out;
+    }""")
+    check(f"a helper who messages another walks over and says it; an old message isn't replayed {talk}",
+          talk["said"] == "Rosa, does API X need the empty case?" and talk["near"] and talk["oldSaid"] == "")
     check(f"a helper's panel lists what it changed, with what can be done about it {changes}",
           changes["waiting"] == ["show", "bring_in", "discard"] and changes["files"] == ["app.py", "new.py"]
           and changes["direct"] == ["undo"] and changes["none"] == "")
