@@ -22,7 +22,7 @@ You can tell a working helper something part-way through. Click it, type in its 
 
 Helpers talk to each other. Each one on a team is told who else is on it, and one can ask another a question and wait for the answer, or send JARVIS word part-way instead of only at the end. In the room the one with something to say walks over and says it, the other answers, and JARVIS thanks a helper that reports in. A finished helper takes its break in one place and heads home after a while, instead of wandering the room.
 
-Starting a helper yourself asks what it should do first, then who does it: one of Hearth's own, named for the job (search the web, work on code, search my files, sum up a file), or an agent you have installed.
+Starting a helper yourself asks what it should do first, then who does it: one of Hearth's own, named for the job (search the web, work on code, search my files, sum up a file, or anything else, for a helper that can do all of it and picks up whatever tools it needs), or an agent you have installed.
 
 A room holds eight desks. Past that the next room opens, a winter cabin, a library and an ocean room in turn, each in its own style, and a small wooden sign over the picture switches between them with a pixel wipe. Clicking someone's card takes you to their room. Appearance picks which room JARVIS calls home and offers the accent that suits it. A working helper can be stopped from its panel or with /team stop, a finished or failed one heads out of the door after a while, and walking side-on now has a real stride. One sentence can start a mixed team, with some helpers on this PC's model, some on a provider's model named in plain words like "haiku", and some handed to Codex, OpenCode or another agent you have installed.
 
