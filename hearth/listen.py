@@ -510,13 +510,25 @@ def cuda_available() -> bool:
         return False
 
 
+# The language a voice speaks, by the letter its id starts with.
+_VOICE_SPEAKS = {"h": "hi", "e": "es", "f": "fr", "i": "it", "j": "ja", "p": "pt", "z": "zh"}
+
+
+def spoken_language() -> str:
+    """The language to listen in: the one named in Settings, else the language
+    of the voice picked to answer. Someone who picked a Hindi voice and left
+    listening on its default heard their Hindi turned into English words."""
+    lang = (_env.get("STT_LANGUAGE", "") or "").strip().lower()
+    return lang or _VOICE_SPEAKS.get((_env.get("VOICE", "") or "")[:1].lower(), "")
+
+
 def model_size() -> str:
     """The model that is actually loaded. An English-only size (base.en) holds
     no other language, so when a language other than English is named, the
     multilingual model of the same size is used instead; otherwise Hindi
     speech came back as English words that sounded like it."""
     size = (_env.get("STT_MODEL", MODEL_SIZE) or MODEL_SIZE or "").strip()
-    lang = (_env.get("STT_LANGUAGE", "") or "").strip().lower()
+    lang = spoken_language()
     if lang and lang != "en" and size.lower().endswith(".en"):
         return size[:-3]
     return size
@@ -739,7 +751,7 @@ def _transcribe_language() -> Optional[str]:
     Read on every call rather than captured at import, because the setting is
     applied by writing the environment and reloading the model in place.
     """
-    lang = (_env.get("STT_LANGUAGE", "") or "").strip().lower()
+    lang = spoken_language()
     if model_size().lower().endswith(".en"):
         return "en"
     return lang or None

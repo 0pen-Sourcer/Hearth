@@ -3437,6 +3437,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             _env.set("STT_DEVICE", stt_dev)
             _env.set("STT_MODEL", stt_mdl)
             _env.set("STT_LANGUAGE", settings.get("stt_language", ""))
+            _env.set("VOICE", settings.get("voice_name", "am_michael"))
             details = {}
             if _voice:
                 try:

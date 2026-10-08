@@ -13444,8 +13444,13 @@ async function refreshSettings() {
     if (voiceSel) {
       voiceSel.value = s.voice_name || 'am_michael';
       voiceSel.onchange = async (e) => {
+        const was = String(s.voice_name || 'am_michael')[0], now = String(e.target.value)[0];
         await saveSetting('voice_name', e.target.value);
+        s.voice_name = e.target.value;
         toast('Voice', 'set to ' + e.target.value, 'ok', 2000);
+        // A voice of another language also listens in it when no listening language is set.
+        if (was !== now && !(s.stt_language || '')) { try { await api('/api/voice/reload', { method: 'POST' }); } catch {} }
+        try { syncLangField(); } catch {}
       };
     }
     // The first letter of a voice id names its language, and the sample has to
@@ -13525,6 +13530,10 @@ async function refreshSettings() {
       f.hidden = false;
       const hint = f.querySelector('.hint'), m = String(sttMdl.value || '');
       const lang = sttLang ? sttLang.value : '';
+      // With no language named, a voice of another language listens in it.
+      const vl = { h: 'Hindi', e: 'Spanish', f: 'French', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin' }[
+        String(($('setting-voice-name') || {}).value || s.voice_name || '')[0]];
+      if (hint && !lang && vl) { hint.textContent = `Listens in ${vl}, the language of your voice. Pick a language here to change that.`; return; }
       if (hint) hint.textContent = m.endsWith('.en') && lang && lang !== 'en'
         ? `Listens with the multilingual ${m.slice(0, -3)} model for this, since ${m} only knows English. It downloads once.`
         : m.endsWith('.en') && !lang ? `${m} only knows English. Pick a language to listen in another one.`

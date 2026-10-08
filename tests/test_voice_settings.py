@@ -118,6 +118,15 @@ for _mdl, _lang, _want in (("base.en", "", "en"), ("base.en", "hi", "hi"),
           _listen._transcribe_language() == _want)
     check(f"voice mode agrees for {_mdl} asked for {_lang!r}",
           _rt._language() == (_want or ""))
+# A Hindi voice picked with listening left on its default heard Hindi as English words.
+os.environ["JARVIS_STT_MODEL"] = "base.en"
+os.environ["JARVIS_STT_LANGUAGE"] = ""
+os.environ["HEARTH_VOICE"] = "hf_alpha"
+check("with no listening language set, a Hindi voice listens for Hindi, on the multilingual model",
+      _listen._transcribe_language() == "hi" and _listen.model_size() == "base" and _rt._language() == "hi")
+os.environ["HEARTH_VOICE"] = "am_michael"
+check("an English voice keeps English", _listen._transcribe_language() == "en" and _rt._language() == "en")
+os.environ.pop("HEARTH_VOICE", None)
 os.environ.pop("JARVIS_STT_LANGUAGE", None)
 os.environ.pop("JARVIS_STT_MODEL", None)
 
