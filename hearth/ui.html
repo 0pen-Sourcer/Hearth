@@ -2606,6 +2606,19 @@
     font: 11.5px/1.5 var(--mono); color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
   .lg-sys { padding: 6px 8px 6px 94px; color: var(--fg-faint); font: 12px var(--sans); }
   .lg-empty { color: var(--fg-faint); padding: 32px; text-align: center; font: 13px var(--sans); }
+  /* Reminders: the same rows as the logs, with what happens and when in words. */
+  .rm-n { color: var(--fg-faint); font-weight: 500; margin-left: 2px; }
+  .rm-row { cursor: default; }
+  .rm-row .what { white-space: normal; }
+  .rm-row .what small { display: block; margin: 2px 0 0; font: 12px var(--sans); color: var(--fg-dim); }
+  .rm-row .rm-act { display: flex; gap: 6px; opacity: 0; transition: opacity .12s; }
+  .rm-row:hover .rm-act, .rm-row:focus-within .rm-act { opacity: 1; }
+  .rm-row.done .what { color: var(--fg-dim); }
+  .rm-ex { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
+  .rm-ex button { background: var(--bg-1); border: 1px solid var(--border); color: var(--fg-dim); border-radius: 999px;
+    padding: 6px 12px; font: 12.5px var(--sans); cursor: pointer; }
+  .rm-ex button:hover { color: var(--fg); border-color: var(--accent-line); }
+  @media (hover: none) { .rm-row .rm-act { opacity: 1; } }
   .srv-sum { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; padding: 12px 16px 4px; }
   .srv-req { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; font: 12px var(--sans); color: var(--fg-dim); }
   .srv-req b { color: var(--fg); font-weight: 600; }
@@ -4020,18 +4033,16 @@
     <section class="view" id="view-reminders">
       <div class="view-head">
         <h2>Reminders</h2>
-        <span class="sub" id="rtab-sub">one-shot &amp; recurring - set them in chat. Helpers working in the background are in Team.</span>
+        <span class="sub">what JARVIS will remind you of, or do for you, and when</span>
       </div>
-      <div id="rtab-reminders">
-        <div class="hint" style="padding:0 24px 12px;color:var(--fg-dim);font-size:12.5px;line-height:1.5;">
-          Just ask in chat - <i>"remind me to leave in 30 min"</i>, or
-          <i>"every Monday 9am, search for new GPU benchmarks"</i> (those run a tool, not just a toast).
-          Missed ones catch up next launch.
-        </div>
-        <div id="reminders-box" style="overflow-y:auto;max-height:calc(100vh - 210px);padding:2px 24px 24px;margin:0;">
-          <div class="list-empty">loading reminders…</div>
-        </div>
+      <div class="lg-bar">
+        <button class="lg-chip on" data-rm="upcoming">Upcoming <span class="rm-n" id="rm-n-up"></span></button>
+        <button class="lg-chip" data-rm="repeating">Repeating <span class="rm-n" id="rm-n-rep"></span></button>
+        <button class="lg-chip" data-rm="done">Done</button>
+        <input class="lg-find" id="rm-new" type="text" autocomplete="off"
+               placeholder="Remind me to&hellip; (press Enter, JARVIS sets it)">
       </div>
+      <div class="log-list" id="reminders-box"><div class="lg-empty">Loading&hellip;</div></div>
     </section>
 
     <!-- SKILLS -->
@@ -12445,85 +12456,99 @@ async function openTaskTranscript(agentId) {
   }
 }
 
+let RM_FILTER = 'upcoming';
+const RM_EXAMPLES = ['Remind me to stretch in 30 minutes', 'Every weekday at 9am, tell me the weather',
+                     'Tomorrow at 7pm, remind me to call home'];
+// When a reminder comes due, said the way a person would.
+function _rmIn(iso) {
+  const d = new Date(iso), s = (d - Date.now()) / 1000;
+  if (!(s > -60)) return 'due now';
+  if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))} min`;
+  if (s < 86400) { const t = Math.round(s / 60), h = Math.floor(t / 60), m = t % 60; return `in ${h} h${m ? ` ${m} min` : ''}`; }
+  return `in ${Math.round(s / 86400)} day${Math.round(s / 86400) === 1 ? '' : 's'}`;
+}
+function _rmDay(iso) {
+  const d = new Date(iso), key = x => x.toDateString(), t = new Date();
+  if (key(d) === key(t)) return 'Today';
+  if (key(d) === key(new Date(t.getTime() + 864e5))) return 'Tomorrow';
+  if (key(d) === key(new Date(t.getTime() - 864e5))) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+async function _rmAsk(text) {
+  text = String(text || '').trim();
+  if (!text) return;
+  showView('chat');
+  await send(text);
+}
+async function _rmAct(path, id, done) {
+  try {
+    const rr = await api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                 body: JSON.stringify({ id, minutes: 10 }) });
+    if (rr.ok) { toast(done, '', 'ok', 2500); refreshReminders(); }
+    else toast(path.endsWith('snooze') ? "Couldn't snooze it" : "Couldn't cancel it", rr.error || "It didn't say why.", 'err');
+  } catch (e) { toast("That didn't work", e.message, 'err'); }
+}
 async function refreshReminders() {
   const box = document.getElementById('reminders-box');
   if (!box) return;
-  try {
-    const r = await api('/api/reminders');
-    const items = (r && r.items) || [];
-    const remCount = document.getElementById('nav-rem-count');
-    const pending = items.filter(x => !x.fired).length;
-    if (remCount) remCount.textContent = pending ? String(pending) : '';
-    if (!items.length) {
-      box.innerHTML = '<div class="list-empty">No reminders set.<br>Just ask in chat: <i>"remind me to leave in 30 min"</i>.</div>';
-      return;
-    }
-    const fmtWhen = (iso) => {
-      try {
-        const d = new Date(iso);
-        const now = new Date();
-        const diff = (d - now) / 1000;
-        if (diff < 0) return 'overdue';
-        if (diff < 60) return `${Math.round(diff)}s`;
-        if (diff < 3600) return `${Math.round(diff/60)}m`;
-        if (diff < 86400) return `${Math.round(diff/3600)}h`;
-        if (diff < 86400*7) return `${Math.round(diff/86400)}d`;
-        return d.toLocaleDateString();
-      } catch { return iso; }
-    };
-    box.innerHTML = items.map(it => {
-      const isAction = !!it.action_tool;
-      const isRecurring = !!it.recurring_seconds;
-      const tag = it.tag ? `<span class="pill pill-accent">${esc(it.tag)}</span>` : '';
-      const badges = [];
-      if (isAction) badges.push(`<span class="pill pill-ok">⚡ ${esc(it.action_tool)}</span>`);
-      if (isRecurring) badges.push(`<span class="pill pill-soft">⟳ ${esc(it.recurring_text || 'recurring')}</span>`);
-      const meta = badges.length ? `<div class="lc-badges">${badges.join('')}</div>` : '';
-      return `
-        <div class="lcard">
-          <div class="lc-main">
-            <div class="lc-title">${esc(it.what)}${tag}</div>
-            <div class="lc-meta">in ${fmtWhen(it.due_iso)} · ${esc(it.when_text || it.due_iso)}</div>
-            ${meta}
-          </div>
-          <div class="lc-actions">
-            <button class="btn-mini" data-rsnooze="${esc(it.id)}" title="Snooze 10 min">snooze</button>
-            <button class="btn-mini danger" data-rcancel="${esc(it.id)}" title="Cancel reminder">×</button>
-          </div>
-        </div>`;
-    }).join('');
-    box.querySelectorAll('button[data-rsnooze]').forEach(b => {
-      b.onclick = async () => {
-        try {
-          const rr = await api('/api/reminders/snooze', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ id: b.dataset.rsnooze, minutes: 10 }),
-          });
-          if (rr.ok) {
-            toast('Snoozed 10 min', '', 'ok', 2500);
-            refreshReminders();
-          } else { toast("Couldn't snooze it", rr.error || "It didn't say why.", 'err'); }
-        } catch (e) { toast("Couldn't snooze it", e.message, 'err'); }
-      };
-    });
-    box.querySelectorAll('button[data-rcancel]').forEach(b => {
-      b.onclick = async () => {
-        try {
-          const rr = await api('/api/reminders/cancel', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ id: b.dataset.rcancel }),
-          });
-          if (rr.ok) {
-            toast('Reminder cancelled', '', 'ok', 2500);
-            refreshReminders();
-          } else { toast("Couldn't cancel it", rr.error || "It didn't say why.", 'err'); }
-        } catch (e) { toast("Couldn't cancel it", e.message, 'err'); }
-      };
-    });
-  } catch (e) {
-    box.innerHTML = '<span style="opacity:0.6">load failed: ' + esc(e.message) + '</span>';
+  let items;
+  try { items = ((await api('/api/reminders?all=1')) || {}).items || []; }
+  catch (e) { box.innerHTML = `<div class="lg-empty">Couldn't read your reminders: ${esc(e.message)}</div>`; return; }
+  const live = items.filter(x => !x.fired), rep = live.filter(x => x.recurring_seconds);
+  const remCount = document.getElementById('nav-rem-count');
+  if (remCount) remCount.textContent = live.length ? String(live.length) : '';
+  $('rm-n-up').textContent = live.length ? String(live.length) : '';
+  $('rm-n-rep').textContent = rep.length ? String(rep.length) : '';
+  const shown = RM_FILTER === 'done'
+    ? items.filter(x => x.fired).sort((a, b) => String(b.fired_at || b.due_iso).localeCompare(String(a.fired_at || a.due_iso)))
+    : (RM_FILTER === 'repeating' ? rep : live).slice().sort((a, b) => String(a.due_iso).localeCompare(String(b.due_iso)));
+  if (!shown.length) {
+    box.innerHTML = `<div class="lg-empty">${RM_FILTER === 'done' ? 'Nothing has come due yet.'
+      : RM_FILTER === 'repeating' ? 'Nothing repeats yet. Say "every" and when, like "every Monday at 9am".'
+      : 'Nothing scheduled. Ask in plain words, or try one of these.'}${RM_FILTER === 'upcoming'
+      ? `<div class="rm-ex">${RM_EXAMPLES.map(t => `<button data-rmask="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}</div>`;
+    return;
   }
+  const bell = '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>';
+  const again = '<path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>';
+  let html = '', day = '';
+  for (const it of shown) {
+    const at = RM_FILTER === 'done' ? (it.fired_at || it.due_iso) : it.due_iso;
+    const d = _rmDay(at);
+    if (d !== day) { day = d; html += `<div class="lg-day">${esc(d)}</div>`; }
+    const when = RM_FILTER === 'done' ? 'came due' : _rmIn(it.due_iso);
+    const parts = [when, it.recurring_text ? `repeats ${it.recurring_text}` : '',
+                   it.action_tool ? `then runs ${String(it.action_tool).replace(/_/g, ' ')}${_stepWhat(it.action_args || {}) ? ': ' + _stepWhat(it.action_args || {}) : ''}` : '',
+                   it.tag || ''].filter(Boolean);
+    const acts = RM_FILTER === 'done' ? '' : `<span class="rm-act">
+        <button class="btn-mini" data-rsnooze="${esc(it.id)}" title="Ten minutes later">Snooze</button>
+        <button class="btn-mini danger" data-rcancel="${esc(it.id)}" title="Cancel it">Cancel</button></span>`;
+    html += `<div class="lg-row rm-row${RM_FILTER === 'done' ? ' done' : ''}"><span class="t">${esc(new Date(at).toTimeString().slice(0, 5))}</span>`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${it.recurring_seconds ? again : bell}</svg>`
+      + `<span class="what">${esc(it.what || '')}<small>${esc(parts.join(' \u00b7 '))}</small></span>${acts}</div>`;
+  }
+  box.innerHTML = html;
 }
+document.addEventListener('click', e => {
+  const chip = e.target.closest('[data-rm]');
+  if (chip) {
+    RM_FILTER = chip.dataset.rm;
+    document.querySelectorAll('[data-rm]').forEach(c => c.classList.toggle('on', c === chip));
+    refreshReminders();
+    return;
+  }
+  const ask = e.target.closest('[data-rmask]');
+  if (ask) { _rmAsk(ask.dataset.rmask); return; }
+  const sn = e.target.closest('[data-rsnooze]');
+  if (sn) { _rmAct('/api/reminders/snooze', sn.dataset.rsnooze, 'Snoozed ten minutes'); return; }
+  const cn = e.target.closest('[data-rcancel]');
+  if (cn) _rmAct('/api/reminders/cancel', cn.dataset.rcancel, 'Reminder cancelled');
+});
+document.addEventListener('keydown', e => {
+  if (e.target.id === 'rm-new' && e.key === 'Enter' && e.target.value.trim()) {
+    const t = e.target.value; e.target.value = ''; _rmAsk(t);
+  }
+});
 
 function skillSummary(desc) {
   const d = String(desc || '');

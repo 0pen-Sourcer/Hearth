@@ -1958,7 +1958,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/reminders":
             try:
                 from . import reminders as _r
-                items = _r.list_reminders(include_fired=False)
+                items = _r.list_reminders(include_fired=self._query().get("all") == "1")
                 return self._send_json(200, {"items": items})
             except Exception as e:
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})

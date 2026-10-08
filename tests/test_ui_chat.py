@@ -702,6 +702,36 @@ with sync_playwright() as pw:
           logs["n"] == 3 and logs["starts"] == 1 and logs["first"] == ["ok", 40] and logs["second"] == ["err", "not found"])
     check(f"a tool that answered with an error counts as one, with what it said {logs.get('third')}",
           logs["third"] == ["err", "Error: not found: C:/y"])
+    # The Reminders tab was the first build's: a hint line running off the
+    # right edge, the same hint again when empty, times as "in 3h".
+    rem = pg.evaluate("""async () => {
+      const real = api, soon = new Date(Date.now() + 25 * 60e3), later = new Date(Date.now() + 26 * 3600e3);
+      const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 19);
+      let items = [
+        { id: 'r1', what: 'Stand up and stretch', due_iso: iso(soon), fired: false },
+        { id: 'r2', what: 'Weather for the walk', due_iso: iso(later), fired: false, recurring_seconds: 86400,
+          recurring_text: 'daily', action_tool: 'web_search', action_args: { query: 'weather today' } },
+        { id: 'r3', what: 'Call home', due_iso: iso(new Date(Date.now() - 3600e3)), fired: true, fired_at: iso(new Date(Date.now() - 3600e3)) }];
+      window.api = async (path) => path.startsWith('/api/reminders') ? { items } : real(path);
+      showView('reminders');
+      await refreshReminders();
+      const box = $('reminders-box'), view = $('view-reminders');
+      const up = [...box.querySelectorAll('.rm-row .what')].map(x => x.innerText.split('\\n').join(' | '));
+      const fits = view.scrollWidth <= view.clientWidth + 1;
+      document.querySelector('[data-rm="done"]').click(); await new Promise(r => setTimeout(r, 50));
+      const done = [...box.querySelectorAll('.rm-row')].length;
+      items = [];
+      document.querySelector('[data-rm="upcoming"]').click(); await new Promise(r => setTimeout(r, 50));
+      const examples = box.querySelectorAll('[data-rmask]').length;
+      window.api = real;
+      return { up, fits, done, examples, count: $('rm-n-up').textContent };
+    }""")
+    check(f"reminders say when and what happens in words, and fit the window {rem}",
+          len(rem["up"]) == 2 and "in 25 min" in rem["up"][0] and "then runs web search: weather today" in rem["up"][1]
+          and "repeats daily" in rem["up"][1] and rem["fits"])
+    check("done ones have their own list, and an empty list offers examples to try",
+          rem["done"] == 1 and rem["examples"] == 3)
+    pg.evaluate("showView('chat')")
     check("a tool with no verb is named plainly, one with a target says what it did",
           logs["plain"] == "System info" and logs["ran"].startswith("Ran echo hi"))
     check("the server log's requests are read into sizes and speeds",
