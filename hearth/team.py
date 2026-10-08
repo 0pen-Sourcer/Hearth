@@ -325,8 +325,12 @@ def launch_team(members: List[Dict[str, Any]], plan: str = "") -> Dict[str, Any]
         if not on_pc and sum(1 for x in spawned if not x.get("external") and not x.get("on_pc")) >= _MAX_TEAM:
             dropped.append({"name": name, "reason": f"over the team limit of {_MAX_TEAM}"})
             continue
+        scope, err = subagents.make_scope(str(m.get("folder") or ""), m.get("only_tools") or [])
+        if err:
+            dropped.append({"name": name, "reason": err})
+            continue
         r = subagents.spawn_subagent(persona=persona, prompt=with_team(name, prompt, True),
-                                     mode="background", name=name, route=route)
+                                     mode="background", name=name, route=route, scope=scope)
         if r.get("ok"):
             spawned.append({"name": name, "persona": persona, "on_pc": on_pc,
                             "agent_id": r.get("agent_id"),
