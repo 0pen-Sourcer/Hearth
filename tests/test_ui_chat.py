@@ -792,6 +792,29 @@ with sync_playwright() as pw:
       for (const id of ['sub_t_rosa', 'sub_t_noah', 'sub_t_old']) { ROOM.people.delete(id); ROOM.says.delete(id); }
       return out;
     }""")
+    # Finished helpers wandered from spot to spot for their whole stay, and nobody answered anybody.
+    life = pg.evaluate("""async () => {
+      const d = new Date(), now = d.getTime() / 1000;
+      const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+      roomSync([{ id: 'sub_l_rosa', persona: 'researcher', name: 'Rosa', status: 'working', updated: now }]);
+      roomSync([{ id: 'sub_l_rosa', persona: 'researcher', name: 'Rosa', status: 'working', updated: now,
+                  heard: { from: 'Noah', ts: iso } }]);
+      await new Promise(r => setTimeout(r, 2900));
+      const answered = (ROOM.says.get('sub_l_rosa') || {}).text;
+      const r = ROOM.people.get('sub_l_rosa');
+      r.agent = { ...r.agent, status: 'done' }; r.doneAt = Date.now() - 13000; r.reported = true;
+      const realNow = Date.now;
+      const spots = [];
+      for (const later of [0, 41000, 82000, 120000]) {
+        Date.now = () => realNow() + later;
+        spots.push(JSON.stringify(roomGoal(r, r.agent).at));
+      }
+      Date.now = realNow;
+      ROOM.people.delete('sub_l_rosa'); ROOM.says.delete('sub_l_rosa');
+      return { answered, spots: new Set(spots).size };
+    }""")
+    check(f"a helper that hears from another answers it, and a finished one stays put on its break {life}",
+          life["answered"] == "Got it, Noah." and life["spots"] == 1)
     check(f"a helper who messages another walks over and says it; an old message isn't replayed {talk}",
           talk["said"] == "Rosa, does API X need the empty case?" and talk["near"] and talk["oldSaid"] == "")
     check(f"a helper's panel lists what it changed, with what can be done about it {changes}",

@@ -19674,8 +19674,10 @@ function roomGoal(p, a) {
   if (since < 12000 && !p.reported) return { at: byMain, pose: 'idle', report: true };
   // The job is done and reported: a while by the fire or the coffee, then home.
   if (since > ROOM_STAY) return { at: ROOM.spots.door, pose: 'idle', leave: true };
-  // Everyone who is done takes their break in the same place, so they meet.
-  const [spot, pose] = roomPick(LEISURE, 0, 40000);
+  // Everyone who is done takes their break in the same place, so they meet,
+  // and stays there until it is time to go instead of wandering from spot to spot.
+  if (!p.rest) p.rest = roomPick(LEISURE, 0, 40000);
+  const [spot, pose] = p.rest;
   return { at: ROOM.spots[spot], pose, spread: true };
 }
 function roomSync(list) {
@@ -19710,6 +19712,13 @@ function roomSync(list) {
       p.doneAt = Math.min(Date.now() - 5000, (a.updated || Infinity) * 1000);
       // Finished before the room was open: nothing new to report.
       p.reported = Date.now() / 1000 - (a.updated || 0) > 60;
+    }
+    // A word from another helper, once it has been said: it answers.
+    const h = a.heard;
+    if (h && h.ts && p.heardSeen !== h.ts) {
+      const fresh = p.heardSeen !== undefined || Date.now() - Date.parse(h.ts) < 15000;
+      p.heardSeen = h.ts;
+      if (fresh) setTimeout(() => { if (ROOM.people.has(a.id)) roomSay(a.id, `Got it, ${h.from}.`, 2600); }, 2600);
     }
     // A message it sent to another helper: it goes over and says it.
     const t = a.talk;
@@ -19849,6 +19858,12 @@ function roomTick(t) {
       if (m) p.dir = m.pos[0] < p.pos[0] ? -1 : 1;
       const prev = String(p.agent.preview || '').replace(/\s+/g, ' ').trim();
       roomSay(p.id, prev ? 'Done. ' + (prev.length > 90 ? prev.slice(0, 89) + '…' : prev) : 'All done.', 4500);
+      const who = p.agent.name || 'you';
+      setTimeout(() => {
+        const ms = ROOM.says.get('__main');
+        if (ROOM.people.has(p.id) && !(ms && !ms.live && ms.until > Date.now()))
+          roomSay('__main', p.agent.status === 'done' ? `Thanks, ${who}.` : `Got it, ${who}.`, 2600);
+      }, 2400);
     }
     if (p.path.length) {
       const [tx, ty] = p.path[0];

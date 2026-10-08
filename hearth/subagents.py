@@ -289,7 +289,8 @@ def _read_agent(p: Path) -> Dict[str, Any]:
     right now, and how it ended if it has."""
     info: Dict[str, Any] = {"id": p.stem, "persona": "", "name": "", "runtime": "", "on": "", "model": "", "prompt": "",
                             "ended": None, "tools_used": 0, "activity": "thinking",
-                            "tool": "", "what": "", "blocked": "", "preview": "", "started": "", "talk": None}
+                            "tool": "", "what": "", "blocked": "", "preview": "", "started": "", "talk": None,
+                            "heard": None}
     pending: List[str] = []
     whats: List[str] = []
     try:
@@ -309,6 +310,9 @@ def _read_agent(p: Path) -> Dict[str, Any]:
                 elif k == "sent":
                     info["talk"] = {"to_id": rec.get("to_id") or "", "to": rec.get("to") or "",
                                     "text": str(rec.get("text") or "")[:200], "ts": rec.get("ts") or ""}
+                elif k == "told" and rec.get("from") not in ("the user", "the assistant", "you", ""):
+                    # A word from another helper; the room has it answer.
+                    info["heard"] = {"from": rec.get("from") or "", "ts": rec.get("ts") or ""}
                 elif k == "route" and not info["runtime"]:
                     # One of Hearth's own helpers: what it thinks with, so a
                     # cloud model is never mistaken for one on this PC.
