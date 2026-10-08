@@ -1,7 +1,7 @@
 # Running Hearth on macOS / Linux
 
 Hearth ships a one-click installer for Windows. On macOS and Linux you run it
-from source — the CLI and web UI are fully usable, and most tools work the same
+from source. The terminal app and web UI are fully usable, and most tools work the same
 way they do on Windows. A few Windows-specific conveniences (desktop shortcuts,
 Start-Menu app launching, the registry app list) either fall back to a POSIX
 equivalent or are skipped; nothing crashes when they're unavailable.
@@ -15,7 +15,7 @@ equivalent or are skipped; nothing crashes when they're unavailable.
 
 - Python 3.11 or newer
 - `git`
-- A local model server (LM Studio, Ollama, llama.cpp, …) **or** a cloud API key —
+- A local model server (LM Studio, Ollama, llama.cpp, …) **or** a cloud API key,
   same as on Windows.
 
 ## Install
@@ -47,10 +47,10 @@ These are only needed for specific features:
 
 | Feature | Install |
 | --- | --- |
-| Bring-a-window-to-front (`focus_window`) on Linux | `sudo apt install wmctrl` (or `xdotool`). X11 only — not Wayland. |
+| Bring-a-window-to-front (`focus_window`) on Linux | `sudo apt install wmctrl` (or `xdotool`). X11 only, not Wayland. |
 | Screenshots on Linux | `sudo apt install scrot` (or `gnome-screenshot` / `spectacle`). |
 | Native desktop window instead of the browser, on Linux | `pip install pyqtwebengine` (uncomment it in `requirements.txt`). Otherwise the UI opens in your default browser, which works fine. |
-| Discord bridge | `pip install discord.py`, then configure it in the web UI under **Settings → Reach from phone**. |
+| Discord bridge | `pip install discord.py`, then configure it in the window under **Settings, Connectors**. |
 | Browser automation | `python -m playwright install chromium` |
 
 ## The built-in model server
@@ -61,12 +61,12 @@ The bundled llama.cpp server installs via pip:
 # CPU (works everywhere)
 pip install llama-cpp-python
 
-# NVIDIA / CUDA on Linux — see the project's install matrix for the right wheel
+# NVIDIA / CUDA on Linux: see the project's install matrix for the right wheel
 # Apple Silicon (Metal) builds with Metal support automatically
 ```
 
 If you'd rather not run the built-in server, just point Hearth at LM Studio or
-Ollama in **Settings → Chat brain** — that path is identical on every OS.
+Ollama in **Settings, Chat brain**. That path is identical on every OS.
 
 ## Notes
 

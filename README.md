@@ -248,7 +248,7 @@ Hearth runs on your machine and collects nothing. There is no account, no analyt
 
 ## Support
 
-Hearth is free and built by one person. If you want to help it along, sponsorship options are in [docs/SUPPORT.md](docs/SUPPORT.md).
+Hearth is free and built by one person. Ways to help it along are in [docs/SUPPORT.md](docs/SUPPORT.md).
 
 ## License
 
