@@ -7,20 +7,22 @@ Notable changes to Hearth. Format loosely follows [Keep a Changelog](https://kee
 Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 
 ### Added
-- Team view: live state of every helper from its own transcript, with a room view drawn in layers. People react when clicked, JARVIS moves with the work and can be talked to from the room, helpers get first names, and each one's full log opens from the list. `/team` in the terminal.
-- Claude Code as the brain (`hearth/claude_brain.py`): turns run `claude -p` with Hearth's MCP server for tools, the persona appended, one session per chat, and permission questions answered by Hearth through an `approve` tool on its MCP server.
-- Codex as the brain (`hearth/codex_brain.py`): turns run `codex exec --json` (found on PATH or inside the Codex desktop app) with Hearth's MCP server attached, the persona as developer instructions, one thread per chat, Codex's sandbox matched to the approval switch, and risky Hearth tools asking Hearth from inside the server. The model menu groups local models and agents, and picking an agent there makes it the brain.
-- Cursor as the brain (`hearth/cursor_brain.py`): `cursor-agent -p --output-format stream-json`, the persona in front of a chat's first message, Hearth's MCP server allowed through the project's `.cursor/cli.json` (merged, not overwritten) while Cursor's own shell stays refused.
-- Agents list their own models: Claude Code's from its `initialize` answer, Codex's from its model cache, Cursor's from `--list-models`. The Think button offers the chosen model's effort levels and passes them (`--effort`, `model_reasoning_effort`). `/brain <agent> <model>` and `/think <level>` in the terminal.
-- With an agent as the brain and no local model serving, Hearth's own helpers run on that agent.
-- `tell_subagent` and a message box in a helper's panel: a working helper reads what it is told before its next step.
-- `delegate`: hand one task to another agent CLI and relay its answer. Twenty-three agent CLIs including Claude Code, Codex, Antigravity, Gemini CLI, Cline and OpenHands, run headless on the user's install; npm shims are started without cmd.exe.
-- Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar menu, Shift+Tab), the terminal (/mode), helpers and external agents.
-- Appearance: Classic (default), Light, Dark and System, six accents, a hearth mark; tray and window icons follow the choice. Simple and Advanced apply app-wide.
-- First-run setup writes its answers to profile.md, asks headphones or speakers, approval mode and look, and animates on springs; `/me` in the terminal.
+- Agent brains. Claude Code (`hearth/claude_brain.py`, `claude -p` with stdin kept open for steering), Codex (`hearth/codex_brain.py`, through `codex app-server`: streamed replies, each command and file change sent to Hearth's approval with its diff, `turn/steer`, Fast tier, threads archived after each turn, `codex exec` as the fallback) and Cursor (`hearth/cursor_brain.py`) think for JARVIS on the user's own plan with Hearth's MCP server for tools. Any installed agent that speaks the Agent Client Protocol can be the brain too (`hearth/acp_brain.py`): OpenCode, Copilot CLI, Goose, Grok Build and Gemini CLI, and Pi, Amp and Antigravity through their adapter programs. OpenCode is verified; the others follow their documented protocol mode.
+- Agents list their own models (Claude Code's `initialize` answer, Codex's model cache, Cursor's `--list-models`, a protocol agent's session options). The Think button offers a model's effort levels; Fast is a switch for Codex's priority tier and Claude Code's fast mode, which reports back when a plan doesn't have it.
+- Settings shows every brain as a card grouped by where it runs; the model menu adds a cloud provider from there. A model on this PC can stay loaded under a cloud brain to run helpers for free.
+- Team view: every helper from its own transcript, as a list or a pixel room with up to eight desks a room (cabin, winter cabin, library, ocean), a wooden sign and a pixel wipe between rooms, a home room in Appearance. Clicking anyone shows who asked, the task, each step, what it changed and its plan usage.
+- Helpers can run on JARVIS's brain, this PC's model, a saved provider and model (`runs_on`, `model`), or an agent program. `launch_team` starts a mixed team in one call and tells each member who else is on it. Helpers can be told something part-way (`tell_subagent`, Codex helpers through its app server), stopped, and they message each other or JARVIS with `message_helper`; the room shows each message as one walking over to say it.
+- Helpers' changes are kept apart: an agent program working in a git repository gets its own worktree, and its changes wait to be brought in, discarded or undone (`helper_changes`, panel buttons, `/team changes|bring|discard|undo`). Hearth's own helpers claim the files they write, so two can't write one at once, and their changes can be undone.
+- `race_helpers`: one task to several agent programs on their own copies, a check command run in each, and one comparison back.
+- `delegate`: hand one task to another agent CLI and relay its answer. Twenty-three adapters, run headless on the user's install; Claude Code, Codex, Cursor and OpenCode have been run from Hearth. Installs and updates show in the Downloads list with Cancel.
+- Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar menu, Shift+Tab), the terminal (`/mode`), helpers and agent programs.
+- One set of chats for the window and the terminal (`hearth/chat_sync.py`): a terminal chat is listed in the window and can be carried on there, and `/chats` and `/chat` open any chat in the terminal.
+- Logs page: each tool call with its result in words, by day, with errors and search; the model server's recent requests summed up.
+- `/status` in the window and the terminal: what is thinking, how full the chat is, and plan limits for every brain that reports them.
+- Appearance: Classic, Light, Dark and System, six accents, a hearth mark; tray and window icons follow the choice. Simple and Advanced apply app-wide.
+- First-run setup finds the agents and model files already on the PC, writes its answers to profile.md, asks headphones or speakers, approval mode and look, and offers a short tour; `/me` in the terminal.
 - `hearth/gpu.py`: load and memory for any vendor's card from DXGI and the GPU performance counters. AMD and Intel cards get llama.cpp's Vulkan build.
-- Tool runs show the agents, skills and sites they reached; a running tool counts up on its card.
-- Pinned chats.
+- Pinned chats; tool runs show the agents, skills and sites they reached; a running tool counts up on its card.
 
 ### Fixed
 - Engine install and repair took llama.cpp's "latest" release, which now points at a tag with no Windows files; the newest numbered build is used.
@@ -56,7 +58,7 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 
 ### Bridges and teams
 - Bridges log to `<workspace>/logs/<channel>_bridge.log` instead of an undrained pipe. WhatsApp sends files; all bridges send quoted paths with spaces.
-- Team panes render tool results and failures; `launch_team` reports members that did not start.
+- Team panes, opened for a team started in the terminal, show each step as what it was pointed at; `launch_team` reports members that did not start. A phone bridge ends with the Hearth that started it.
 
 ### Terminal
 - Fixed the first-tool-call crash, the Ctrl+Z spin, `--help`, `/brain lmstudio` and `/brain builtin`, model sync on cloud brains, vision detection on llama.cpp, context-overflow retries and `/history` with images.

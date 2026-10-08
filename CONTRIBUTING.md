@@ -1,6 +1,6 @@
 # Contributing to Hearth
 
-Hearth started as one person's tool and got opened up to the world because the gap between "your model can chat" and "your model can run your machine" is too big to leave unfilled. The faster Hearth generalizes beyond one developer's setup, the better it gets for everyone — so PRs are welcome and triaged seriously.
+Hearth started as one person's tool and got opened up to the world because the gap between "your model can chat" and "your model can run your machine" is too big to leave unfilled. The faster Hearth generalizes beyond one developer's setup, the better it gets for everyone, so PRs are welcome and triaged seriously.
 
 ## TL;DR
 
@@ -8,40 +8,33 @@ Hearth started as one person's tool and got opened up to the world because the g
 2. Fork, branch, code, test locally with `python -m hearth.dev_tools`.
 3. Open a PR using the [template](.github/PULL_REQUEST_TEMPLATE.md). Small + focused merges fast; sprawling rewrites stall.
 
-Discussion happens in [GitHub Discussions](https://github.com/0pen-sourcer/hearth/discussions). Real-time vibe is in the Discord (link in README once live).
+Discussion happens in [GitHub Discussions](https://github.com/0pen-sourcer/hearth/discussions).
 
 ## The shortlist of where help is most useful
 
-These are the items that genuinely change the experience for everyone — pick one of these for the fastest "yes, please merge" path.
+These are the items that genuinely change the experience for everyone. Pick one of these for the fastest "yes, please merge" path.
 
 ### 1. Mac / Linux ports
 
-Most of [`hearth/tools.py`](hearth/tools.py) is cross-platform; the Windows-specific branches are clustered around app launching, registry reads, screenshot capture, and PowerShell defaults. Search for `if platform.system() == "Windows"` and write the POSIX equivalent.
-
-Specific tools that need POSIX work:
-- `open_app` — `subprocess.Popen(["open", path])` on Mac, `xdg-open` on Linux
-- `list_installed_apps` — `osascript -e 'tell application "System Events" to get the name of every application process'` on Mac
-- `screenshot` — `screencapture -t png` on Mac, `grim` / `gnome-screenshot` on Linux
-- `run_command` — default to `zsh` on Mac, `bash` on Linux
+Most of [`hearth/tools.py`](hearth/tools.py) already runs on Linux and macOS: files, shell, screenshots, app launching, windows, the clipboard, web, reminders and notifications. What's still Windows-only is the desktop-control layer (reading a window's controls and clicking them by name), the one-click installer and the packaged build. A macOS version of the desktop layer on the Accessibility API, or a Linux one on AT-SPI, would be the biggest single contribution. Search for `sys.platform` to find the Windows branches.
 
 ### 2. More personas
 
-[`hearth/persona.py`](hearth/persona.py) is one JARVIS-flavored prompt. The framework is ready for `hearth/personas/*.py` — a folder of swappable system-prompt modules. Pick a public-domain character (Cortana, a Star-Trek-computer voice, your favorite shōnen mentor) and PR a new persona file. Bonus points if you match it with a matching default voice in [`hearth/voice.py`](hearth/voice.py).
+[`hearth/persona.py`](hearth/persona.py) is one JARVIS-flavored prompt with a few tone overlays (`HEARTH_PERSONA=bro|chill|professional|formal`). More overlays are welcome: a short block of voice and manner in the same style, ideally paired with a default voice in [`hearth/voice.py`](hearth/voice.py).
 
 ### 3. New tools
 
-The pattern is: one function in [`hearth/tools.py`](hearth/tools.py) (`_my_tool(p: Dict) -> str`) + a definition in `TOOL_DEFINITIONS`. The runtime auto-wires it everywhere (CLI, MCP, dev_tools REPL). Tool ideas that would help everyone:
-- `calendar_*` — read/write the user's iCal / Outlook / Google Calendar (oauth flow)
-- `notify` — send a desktop notification via win10toast / notify-send / osascript
-- `summarize_file` — wrap a longer file in a single LLM call
+A tool is one function in [`hearth/tools.py`](hearth/tools.py) (`_my_tool(p: Dict) -> str`) and a definition in `TOOL_DEFINITIONS`. The runtime wires it everywhere (window, terminal, phone bridges, MCP, the dev_tools REPL), and `docs/TOOLS.md` is generated from the definitions (`python scripts/gen_tools_doc.py`). Tool ideas that would help everyone:
+- `calendar_*` to read and write the user's Outlook or Google Calendar.
+- A Linux or macOS backend for `desktop_snapshot` and `desktop_click`.
 
-### 4. Voice presets & wake-words
+### 4. Agents as brains
 
-`/listen on` works but doesn't filter for a wake word. Adding `HEARTH_WAKE_WORD=hey jarvis` (and a fast keyword-spotting layer like Porcupine or [openWakeWord](https://github.com/dscripka/openWakeWord)) would make ambient mode shippable for people whose mic picks up TV.
+Any agent that speaks the Agent Client Protocol can already be JARVIS's brain through [`hearth/acp_brain.py`](hearth/acp_brain.py); only OpenCode has been run end to end. If you use Copilot CLI, Goose, Grok Build, Pi, Amp or Antigravity, running it as the brain and reporting what breaks (or fixing its entry in `claude_brain.ACP`) is very useful.
 
 ### 5. Share a skill (no code needed)
 
-The highest-leverage contribution isn't even to this repo. A skill is a folder with a `SKILL.md` that teaches Hearth a workflow — see [docs/SKILLS.md](docs/SKILLS.md). Write one that does something useful on a real PC ("archive last month's screenshots", "set up a new Python project"), push it to a repo, and add it to the community index, [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills). Anyone installs it with `/skill install <you>/<repo>`. The more good skills exist, the more reasons there are to run Hearth.
+The highest-leverage contribution isn't even to this repo. A skill is a folder with a `SKILL.md` that teaches Hearth a workflow; see [docs/SKILLS.md](docs/SKILLS.md). Write one that does something useful on a real PC ("archive last month's screenshots", "set up a new Python project"), push it to a repo, and add it to the community index, [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills). Anyone installs it with `/skill install <you>/<repo>`. The more good skills exist, the more reasons there are to run Hearth.
 
 ## What we won't merge
 
@@ -57,20 +50,26 @@ git clone https://github.com/0pen-sourcer/hearth.git
 cd hearth
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install openai prompt_toolkit psutil kokoro-onnx sounddevice numpy faster-whisper mcp
+pip install -r requirements.txt
 
 # Run the REPL to fire individual tools
 python -m hearth.dev_tools
 
-# Run the full CLI (needs LM Studio running with a model loaded)
+# Run the terminal app (a model in LM Studio or Ollama, a cloud key, or an agent like Claude Code)
 .\hearth.bat
+
+# Run the window
+python -m hearth.tray --open
 ```
 
 Smoke test that nothing's broken:
 
 ```powershell
 python -c "import hearth; print(len(hearth.TOOL_DEFINITIONS), 'tools loaded')"
-# should print: 92 tools loaded (or more if you've added one)
+# prints the tool count, over a hundred
+
+# The tests are plain scripts; each prints its checks and exits non-zero on a failure
+python -X utf8 tests/test_team.py
 ```
 
 ## Code style
@@ -98,8 +97,7 @@ We don't have a long one. Be normal. Don't be mean to people. Don't ship vibes-o
 
 ## Questions
 
-- Code question → [Discussions](https://github.com/0pen-sourcer/hearth/discussions)
-- Bug → [Issue](https://github.com/0pen-sourcer/hearth/issues/new?template=bug_report.md)
-- Idea → [Issue](https://github.com/0pen-sourcer/hearth/issues/new?template=feature_request.md)
-- Security → see [SECURITY.md](SECURITY.md)
-- Vibes / "wait does X work?" → Discord (link in README once live)
+- Code question: [Discussions](https://github.com/0pen-sourcer/hearth/discussions)
+- Bug: [Issue](https://github.com/0pen-sourcer/hearth/issues/new?template=bug_report.md)
+- Idea: [Issue](https://github.com/0pen-sourcer/hearth/issues/new?template=feature_request.md)
+- Security: see [SECURITY.md](SECURITY.md)

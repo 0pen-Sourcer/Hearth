@@ -2,22 +2,27 @@
 
 Hearth runs your Windows machine for you, including files, shell, apps, a real browser, and
 the desktop itself. You reach it from a terminal, a desktop app, your phone, an MCP
-client, or a headless script, and it runs on whatever OpenAI-compatible model you
-point it at, local or cloud, with no account and no telemetry.
+client, or a headless script. It thinks with a model on your PC, a cloud model, or an
+agent you already pay for like Claude Code or Codex, with no account and no telemetry.
 
 This is where it is and where it's going. Dates are intent, not promises. I build
 this in my spare time, so things land when they're actually good, not on a schedule.
 
 ## Where it is now (v0.7.6-preview)
 
-The core is stable and I use it every day:
+The core is stable and I use it every day.
 
 - Reading and writing files, running commands in PowerShell, cmd or bash, opening
   apps, and driving a real browser, including the Chrome you already use.
 - Memory that persists across sessions, folds the relevant facts back into context
   on its own, and records it when something about you changes.
-- Reminders, background jobs, sub-agents, teams of agents you can watch, and skills
-  you can install from a link or have it write for itself on the spot.
+- Claude Code, Codex, Cursor, OpenCode and other agents as its brain, on your own plan,
+  still using Hearth's tools and asking before anything risky.
+- Helpers and whole teams you can watch in a little pixel room. They run on your PC's
+  model, a cloud model or another agent, message each other, work on their own copy
+  of a git repository, and their changes wait for you to bring them in or undo them.
+- Reminders, background jobs, and skills you can install from a link or have it write
+  for itself on the spot.
 - Desktop control through the accessibility tree. `smart_click` takes a point from
   the vision model, snaps it to the real named control underneath, clicks that, and
   re-checks the screen to confirm it worked. A marked capture numbers every control
@@ -30,7 +35,7 @@ The core is stable and I use it every day:
 - An optional bundled llama.cpp engine. If you already run LM Studio or Ollama,
   point Hearth at that instead.
 
-There are around 100 tools, and they aren't equal. About forty are core. The rest
+There are over a hundred tools, and they aren't equal. About forty are core. The rest
 are specialized (image and video generation, local Stable Diffusion via Forge,
 email, some desktop-control cases) and depend on setup you may not have. Those stay
 held back until the model actually needs one, so you don't trip over them.
@@ -39,14 +44,11 @@ held back until the model actually needs one, so you don't trip over them.
 
 - Interrupting by voice on speakers, not only headphones, with echo cancellation on the
   microphone, and "Jarvis, stop" as the interrupt while Hearth is talking.
-- Onboarding that asks what it needs once, in a conversation. Your name, how you
-  want it to talk, headphones or speakers, and where your files live.
-- Your look, with a light theme and an accent colour in the app, and matching accents in
-  the terminal.
-- A view of your agents in the app, showing who is working, who is waiting on you, who is
-  done, and a click to see what each one did.
-- Sub-agents and teams asking permission the same way Hearth does, so your
-  permission settings hold whoever is doing the work.
+- A signed installer, so Windows stops warning about an unknown app.
+- A shared plan for a team that every helper reads, kept by JARVIS, next to the
+  messages they already send each other.
+- Running more models on this PC, including the ternary ones that need their own
+  build of the engine.
 
 ## Further out
 
