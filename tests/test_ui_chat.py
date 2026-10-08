@@ -689,15 +689,19 @@ with sync_playwright() as pw:
         { ts: '2026-10-07T10:00:01', event: 'call', tool: 'run_command', args: { command: 'echo hi' } },
         { ts: '2026-10-07T10:00:02', event: 'result', tool: 'run_command', ms: 40 },
         { ts: '2026-10-07T10:00:03', event: 'call', tool: 'read_file', args: { path: 'C:/x/notes.txt' } },
-        { ts: '2026-10-07T10:00:04', event: 'error', tool: 'read_file', error: 'not found' }]);
+        { ts: '2026-10-07T10:00:04', event: 'error', tool: 'read_file', error: 'not found' },
+        { ts: '2026-10-07T10:00:05', event: 'call', tool: 'list_directory', args: { path: 'C:/y' } },
+        { ts: '2026-10-07T10:00:06', event: 'result', tool: 'list_directory', ms: 3, ok: false, preview: 'Error: not found: C:/y' }]);
       const srv = _srvRequests('t | task 7 | prompt eval time = 1000.00 ms / 2000 tokens (0.5 ms per token, 2000.00 tokens per second)\\n'
         + 't | task 7 |        eval time = 2000.00 ms / 60 tokens (33 ms per token, 30.00 tokens per second)\\n'
         + 't | task 7 |       total time = 3000.00 ms / 2060 tokens');
-      return { n: items.length, starts, first: [items[0].state, items[0].ms], second: [items[1].state, items[1].error],
+      return { n: items.length, starts, first: [items[0].state, items[0].ms], second: [items[1].state, items[1].got], third: [items[2].state, items[2].got],
                plain: _lgLine('system_info', {}, true), ran: _lgLine('run_command', { command: 'echo hi' }, true), srv };
     }""")
     check(f"the agent log pairs each call with what came back {logs}",
-          logs["n"] == 2 and logs["starts"] == 1 and logs["first"] == ["ok", 40] and logs["second"] == ["err", "not found"])
+          logs["n"] == 3 and logs["starts"] == 1 and logs["first"] == ["ok", 40] and logs["second"] == ["err", "not found"])
+    check(f"a tool that answered with an error counts as one, with what it said {logs.get('third')}",
+          logs["third"] == ["err", "Error: not found: C:/y"])
     check("a tool with no verb is named plainly, one with a target says what it did",
           logs["plain"] == "System info" and logs["ran"].startswith("Ran echo hi"))
     check("the server log's requests are read into sizes and speeds",

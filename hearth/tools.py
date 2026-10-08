@@ -8384,8 +8384,23 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         pass
     truncated = _trunc(result, _cap)
     dt_ms = int((datetime.now() - t0).total_seconds() * 1000)
-    _log_activity("result", tool=name, chars=len(truncated), ms=dt_ms)
+    _log_activity("result", tool=name, chars=len(truncated), ms=dt_ms,
+                  ok=not _says_failed(truncated), preview=truncated[:300])
     return truncated
+
+
+def _says_failed(text: str) -> bool:
+    """A tool says it failed the way Hearth's tools do: its text starts with
+    "Error", or it answers JSON with ok false."""
+    t = (text or "").lstrip()
+    if t.startswith("Error"):
+        return True
+    if t.startswith("{") and '"ok": false' in t[:400]:
+        try:
+            return json.loads(t).get("ok") is False
+        except ValueError:
+            return False
+    return False
 
 
 # ============================================================

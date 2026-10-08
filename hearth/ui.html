@@ -12705,8 +12705,9 @@ function _lgItems(events) {
     } else if (ev.event === 'result' || ev.event === 'error') {
       const q = open.get(tool) || [];
       const it = q.shift() || (items.push({ ts: ev.ts || '', tool, args: {}, state: 'run' }), items[items.length - 1]);
-      if (ev.event === 'result') { it.state = 'ok'; it.ms = ev.ms; }
-      else { it.state = 'err'; it.error = ev.error || 'failed'; }
+      if (ev.event === 'result') {
+        it.state = ev.ok === false ? 'err' : 'ok'; it.ms = ev.ms; it.got = ev.preview || '';
+      } else { it.state = 'err'; it.got = ev.error || 'failed'; }
     } else {
       items.push({ ts: ev.ts || '', sys: ev.event + (ev.tool ? ' · ' + ev.tool : '') });
     }
@@ -12755,7 +12756,7 @@ async function refreshAgentLog() {
     html += `<div class="lg-row ${it.state}" data-k="${esc(key)}"><span class="t">${esc(it.ts.slice(11, 19))}</span>`
       + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${_toolIcon(it.tool)}</svg>`
       + `<span class="what">${esc(line)}<small>${esc(it.tool)}</small></span><span class="ms">${esc(ms)}</span></div>`;
-    if (LG_OPEN.has(key)) html += `<div class="lg-more">${esc(it.error ? it.error + '\n\n' : '')}${esc(JSON.stringify(it.args, null, 2))}</div>`;
+    if (LG_OPEN.has(key)) html += `<div class="lg-more">${it.got ? esc(it.got) + '\n\n' : ''}${esc(JSON.stringify(it.args, null, 2))}</div>`;
   });
   list.innerHTML = html;
 }

@@ -1658,20 +1658,30 @@ def _list_files(rel_path: str = "") -> Dict:
 
 
 def _tail_log(n: int = 100) -> List[Dict]:
+    """The last `n` tool events, oldest first. The lines saying the tool server
+    started for an agent brain come along but don't count toward `n`: there is
+    one per agent turn, and they pushed the tool calls out of the window."""
     log_path = os.path.join(LOGS_DIR, "activity.jsonl")
     if not os.path.isfile(log_path):
         return []
     try:
         with open(log_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()[-max(1, min(n, 1000)):]
+            lines = f.readlines()
     except OSError:
         return []
-    out = []
-    for ln in lines:
+    n = max(1, min(n, 1000))
+    out, real = [], 0
+    for ln in reversed(lines):
         try:
-            out.append(json.loads(ln))
+            ev = json.loads(ln)
         except json.JSONDecodeError:
             continue
+        out.append(ev)
+        if ev.get("event") != "server_start":
+            real += 1
+            if real >= n:
+                break
+    out.reverse()
     return out
 
 
