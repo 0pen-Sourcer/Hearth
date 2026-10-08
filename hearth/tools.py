@@ -655,10 +655,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "('2026-05-27T19:00') or a duration from now ('25m', '2h', '3d'): convert "
             "what the user said yourself from the current local time you are given. "
             "Repeat with `recurring` ('every 30 minutes', 'daily'). Missed reminders "
-            "fire at the next launch. Or, instead of a time, `watch` a file or folder: "
-            "it fires when that changes (a file appears, is saved or removed), e.g. "
-            "'when a PDF lands in Downloads, summarize it'; with any `recurring` it "
-            "fires on every change until cancelled."
+            "fire at the next launch."
         ),
         "parameters": {
             "type": "object",
@@ -669,9 +666,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "action_tool": {"type": "string", "description": "A tool to run when it fires. Read-only tools run and their result joins the notification; tools that change something wait for the user to confirm."},
                 "action_args": {"type": "object", "description": "Arguments for action_tool, matching its parameters."},
                 "tag": {"type": "string", "description": "A label for grouping, like 'work' or 'medication'."},
-                "watch": {"type": "string", "description": "A file or folder to watch instead of a time. A folder is watched for the files directly in it."},
             },
-            "required": ["what"],
+            "required": ["when", "what"],
         },
     },
     {
@@ -746,10 +742,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "model": {"type": "string", "description":
                     "With runs_on a provider: the model, as named; it is "
                     "matched to the nearest one the provider lists."},
-                "folder": {"type": "string", "description":
-                    "The folder the work belongs in: the helper changes files "
-                    "only there and runs its commands there. Leave out unless "
-                    "the task is about one folder."},
             },
             "required": ["persona", "prompt"],
         },
@@ -777,20 +769,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "message": {"type": "string", "description": "What to tell it."},
             },
             "required": ["agent_id", "message"],
-        },
-    },
-    {
-        "name": "update_team_plan",
-        "description":
-            "Change the shared plan of a team started with launch_team; every member "
-            "still working is told the new plan before its next step.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "team": {"type": "string", "description": "The team id launch_team returned."},
-                "text": {"type": "string", "description": "The whole new plan."},
-            },
-            "required": ["team", "text"],
         },
     },
     {
@@ -2772,13 +2750,9 @@ def _spawn_subagent(p: Dict[str, Any]) -> Dict[str, Any]:
     route, err = _sa.route_for(str(p.get("runs_on") or ""), str(p.get("model") or ""))
     if err:
         return {"ok": False, "error": err}
-    scope, err = _sa.make_scope(str(p.get("folder") or ""))
-    if err:
-        return {"ok": False, "error": err}
     return _sa.spawn_subagent(p.get("persona", ""), p.get("prompt", ""),
                               max_turns=min(int(p.get("max_turns") or 0) or 0, 20) or None,
-                              mode=(p.get("mode") or "sync"), name=p.get("name", ""), route=route,
-                              scope=scope)
+                              mode=(p.get("mode") or "sync"), name=p.get("name", ""), route=route)
 
 
 def _list_directory(p: Dict) -> str:
@@ -6459,7 +6433,7 @@ _HANDLERS = {
     "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(
         p.get("when", ""), p.get("what", ""), p.get("recurring", ""),
         action_tool=p.get("action_tool", ""), action_args=p.get("action_args"),
-        tag=p.get("tag", ""), watch=p.get("watch", "")),
+        tag=p.get("tag", "")),
     "snooze_reminder": lambda p: __import__("hearth.reminders", fromlist=["snooze_reminder"]).snooze_reminder(
         p.get("id", ""), int(p.get("minutes", 10))),
     "list_reminders": lambda p: __import__("hearth.reminders", fromlist=["list_reminders"]).list_reminders(bool(p.get("include_fired"))),
@@ -6467,8 +6441,6 @@ _HANDLERS = {
     "spawn_subagent": lambda p: _spawn_subagent(p),
     "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
     "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id") or p.get("job_id") or p.get("id") or ""),
-    "update_team_plan": lambda p: __import__("hearth.team", fromlist=["update_plan"]).update_plan(
-        p.get("team") or "", p.get("text") or p.get("plan") or ""),
     "race_helpers": lambda p: __import__("hearth.team", fromlist=["race"]).race(
         p.get("task") or "", p.get("agents") or [], p.get("folder") or "", p.get("check") or ""),
     # Helpers' own loop handles it, knowing who sends; the main assistant has tell_subagent.
@@ -8067,10 +8039,11 @@ def _launch_team(p: Dict) -> str:
                 "summarizer). E.g. one architect, one frontend coder, "
                 "one backend coder.")
     from . import team as _team
-    r = _team.launch_team(members, str(p.get("plan") or ""))
+    r = _team.launch_team(members)
     if not r.get("ok"):
         why = "; ".join(f"{d['name']}: {d['reason']}" for d in r.get("dropped") or [])
         return f"Error: {r.get('error', 'team launch failed')}" + (f" ({why})" if why else "")
+    # Each helper's id, so a brain whose turn waits on its helpers waits for every one.
     who = ", ".join(f"{m['name']} ({m['persona']}, {m['agent_id']})" for m in r.get("spawned", []))
     return f"{r.get('note', 'Team launched.')}\nTeam: {who}"
 
@@ -8114,11 +8087,8 @@ TOOL_DEFINITIONS.append({
                       "('haiku', 'sonnet 4.5'); matched to the provider's own list. With an agent "
                       "(claude-code, codex, opencode, cursor-agent, gemini-cli): one of its own models, "
                       "e.g. 'opencode/big-pickle'."},
-            "folder": {"type": "string", "description": "Where this member works: an agent program runs there, "
-                       "a Hearth helper changes files and runs commands only there. Default: the workspace."},
+            "folder": {"type": "string", "description": "Working folder for an external agent. Default: the workspace."},
         }, "required": ["prompt"]}},
-        "plan": {"type": "string", "description": "The team's shared plan: who does what and how the parts fit. "
-                 "Every member gets it; change it later with update_team_plan."},
     }, "required": ["members"]},
 })
 
@@ -8547,7 +8517,6 @@ _DEFERRED_TOOLS = {
     "helper_changes",      # only matters once a helper has changed something
     "message_helper",      # helpers use it among themselves
     "race_helpers",        # comparing agents is an occasional ask
-    "update_team_plan",    # only matters once a team is running
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # ntfy push is opt-in / rare
     "focus_window",        # niche window management
@@ -9056,7 +9025,6 @@ _TOOL_CATEGORY = {
     "helper_changes": "Sub-agents",
     "message_helper": "Sub-agents",
     "race_helpers": "Sub-agents",
-    "update_team_plan": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",

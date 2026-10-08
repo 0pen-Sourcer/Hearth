@@ -129,23 +129,6 @@ with open(os.path.join(WS, "permissions.json"), "w", encoding="utf-8") as f:
 STATE["calls"] = 0
 subagents.spawn_subagent(persona="coder", prompt="write the file", mode="sync")
 check("with allow-always for that tool, it runs", os.path.exists(TARGET))
-# A helper given one folder for its task still wrote anywhere the workspace allowed.
-os.remove(TARGET)
-BOX = os.path.join(WS, "box")
-os.makedirs(BOX)
-scope, _ = subagents.make_scope(BOX)
-STATE["calls"] = 0
-r = subagents.spawn_subagent(persona="coder", prompt="write the file", mode="sync", scope=scope)
-check("a helper kept to a folder can't write outside it, even on allow-always",
-      not os.path.exists(TARGET) and "outside" in rendered(r["transcript_path"]))
-STATE["call"] = {"name": "write_file", "arguments": json.dumps({"path": os.path.join(BOX, "in.txt"), "content": "x"})}
-STATE["calls"] = 0
-subagents.spawn_subagent(persona="coder", prompt="write the file", mode="sync", scope=scope)
-check("and writes inside it", os.path.exists(os.path.join(BOX, "in.txt")))
-args = {"command": "dir", "cwd": WS}
-check("a command from a helper kept to a folder runs in that folder, not refused",
-      subagents.out_of_scope(scope, "run_command", args) is None and args["cwd"] == BOX)
-check("a folder that does not exist is refused", subagents.make_scope(os.path.join(WS, "nope"))[1])
 os.remove(os.path.join(WS, "permissions.json"))
 STATE["call"] = None
 
@@ -216,24 +199,13 @@ check("each member hears who else is on the team, and how to reach them",
       "Codex1" in briefs["Local0"] and "message_helper" in briefs["Local0"] and "Local0" not in briefs["Local0"].split("as:")[1].split(".")[0]
       and "can't message" in briefs["Codex0"])
 
-# A team had no plan they all worked from, and JARVIS couldn't change course for all of them at once.
-plan_briefs, told = {}, []
-subagents.spawn_subagent = lambda **kw: (plan_briefs.__setitem__(kw["name"], kw["prompt"])
-                                         or {"ok": True, "agent_id": "sub_9_" + kw["name"].lower().ljust(6, "x")[:6], "transcript_path": ""})
-_tell = subagents.tell_subagent
-subagents.tell_subagent = lambda aid, text, sender="", reply_to="": (told.append((aid, text)) or {"ok": True})
 from hearth import tools as T                                        # noqa: E402
-out = T._launch_team({"members": [{"name": "Ana", "prompt": "write the API"}, {"name": "Ben", "prompt": "write the page"}],
-                      "plan": "Ana: /api/todo returns JSON. Ben: the page calls it."})
-import re as _re
-tid = _re.search(r"team_\d+", out).group(0)
-r = team.update_plan(tid, "Ana: /api/items instead. Ben: call /api/items.")
-subagents.spawn_subagent, subagents.tell_subagent = _spawn, _tell
-check(f"a team works from one plan, and a new plan reaches every member {r}",
-      "returns JSON" in plan_briefs["Ana"] and "returns JSON" in plan_briefs["Ben"]
-      and r.get("told") == 2 and all("/api/items" in t for _, t in told))
-check(f"launch_team's answer names each helper's id, so a turn can wait for them {out[-90:]!r}",
-      "sub_9_anaxxx" in out and "sub_9_benxxx" in out)
+# An agent brain's turn waits for the helpers it was told about by id; launch_team named none.
+subagents.spawn_subagent = lambda **kw: {"ok": True, "agent_id": "sub_9_" + kw["name"].lower(), "transcript_path": ""}
+out = T._launch_team({"members": [{"name": "Ana", "prompt": "write the API"}, {"name": "Ben", "prompt": "write the page"}]})
+subagents.spawn_subagent = _spawn
+check(f"launch_team's answer names each helper's id, so a turn can wait for them {out[-70:]!r}",
+      "sub_9_ana" in out and "sub_9_ben" in out)
 
 _real = {p["slug"] if "slug" in p else p["name"] for p in subagents.list_personas()}
 _enum = next(t for t in T.TOOL_DEFINITIONS if t["name"] == "launch_team")[

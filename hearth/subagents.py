@@ -893,7 +893,6 @@ async def _run_subagent_async(
         return out
 
     tools = _filter_tools(persona.get("allowed_tools", []))
-    scope = persona.get("_scope")
     sys_prompt = _build_system_prompt(persona, user_prompt)
     _append_transcript(tpath, {
         "kind": "route", "base_url": base, "model": model,
@@ -914,7 +913,7 @@ async def _run_subagent_async(
         _INBOX[agent_id] = []
     try:
         return await _subagent_turns(client, model, messages, tools, max_turns, agent_id, tpath,
-                                     used, should_cancel, execute_tool, scope)
+                                     used, should_cancel, execute_tool)
     finally:
         with _INBOX_LOCK:
             _INBOX.pop(agent_id, None)
@@ -941,7 +940,7 @@ def _helper_label(tpath: Path, field: str = "name") -> str:
 
 
 async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, tpath, used,
-                          should_cancel, execute_tool, scope=None) -> Dict[str, Any]:
+                          should_cancel, execute_tool) -> Dict[str, Any]:
     # The same watch the main loop keeps: a helper repeating a call that fails
     # or returns nothing new is told so, then made to answer with what it has.
     from .loop_guard import ToolLoopGuard
@@ -1046,8 +1045,6 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
             skip = guard.before(name, args)
             if skip is not None:
                 content = skip.note
-            elif (outside := out_of_scope(scope, name, args)):
-                content = outside
             elif _perm != "allow":
                 content = (
                     f"(not run: {name} is set to never run in Settings.)" if _perm == "deny"
@@ -1379,8 +1376,7 @@ def _spawn_on_agent(agent: str, p: Dict[str, Any], persona: str, prompt: str,
         if mode == "background" and _BG_COMPLETION_CB:
             _BG_COMPLETION_CB(agent_id, result)
 
-    r = _xa.spawn(agent, brief, name=label, on_done=_finished, task=prompt, by=p.get("_by") or "",
-                  cwd=(p.get("_scope") or {}).get("folder") or "")
+    r = _xa.spawn(agent, brief, name=label, on_done=_finished, task=prompt, by=p.get("_by") or "")
     if not r.get("ok"):
         return r
     if mode == "background":
@@ -1399,41 +1395,11 @@ def _spawn_on_agent(agent: str, p: Dict[str, Any], persona: str, prompt: str,
     return out
 
 
-def make_scope(folder: str = "") -> Tuple[Optional[Dict[str, Any]], str]:
-    """The folder a helper's task works in: its file changes stay there and its
-    commands run there. Returns (scope, error)."""
-    folder = (folder or "").strip().strip('"')
-    if not folder:
-        return None, ""
-    from .tools import _write_path
-    folder = _write_path(folder)
-    if not os.path.isdir(folder):
-        return None, f"folder not found: {folder}"
-    return {"folder": folder}, ""
-
-
-def out_of_scope(scope: Optional[Dict[str, Any]], name: str, args: Dict[str, Any]) -> Optional[str]:
-    """Why this call is outside the helper's folder, or None when it is inside.
-    A command is pointed at the folder rather than refused."""
-    folder = (scope or {}).get("folder")
-    if folder:
-        if name == "run_command":
-            args["cwd"] = folder
-            return None
-        from .helper_changes import targets
-        from .tools import path_within
-        for p in targets(name, args):
-            if not path_within(os.path.realpath(p), os.path.realpath(folder)):
-                return f"(not run: {p} is outside {folder}, the one folder this task may change.)"
-    return None
-
-
 def spawn_subagent(persona: str, prompt: str,
                    max_turns: Optional[int] = None,
                    mode: str = "sync",
                    name: Optional[str] = None, by: str = "",
-                   route: Optional[Tuple[str, str, str]] = None,
-                   scope: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                   route: Optional[Tuple[str, str, str]] = None) -> Dict[str, Any]:
     """Spawn a sub-agent with a scoped tool allowlist + tight prompt.
 
     mode='sync' (default): block until the child returns its final text.
@@ -1490,10 +1456,6 @@ def spawn_subagent(persona: str, prompt: str,
     p["_by"] = by                 # who asked: "you" from the Team view, else the assistant
     if route:
         p["_route"] = tuple(route)    # (base, key, model) picked by hand: a provider or this PC
-    if scope:
-        p["_scope"] = scope
-        if scope.get("folder"):
-            prompt = f"{prompt}\n\nYou may change files only in {scope['folder']}."
 
     on_agent = None if route else _agent_for_helpers()
     if on_agent:

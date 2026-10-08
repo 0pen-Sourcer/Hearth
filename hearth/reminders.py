@@ -13,7 +13,6 @@ the user said, using the local time it is given every turn.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from . import env as _env
 import os
@@ -209,35 +208,9 @@ def describe_due(target: datetime, now: Optional[datetime] = None) -> str:
     return f"{day + ', ' if day else ''}{stamp}, {gap} from now"
 
 
-# A watch never comes due by the clock; it fires when what it watches changes.
-_NEVER = "9999-12-31T00:00:00"
-
-
-def _watch_sig(path: str) -> str:
-    """What a watched file or folder looks like now: a file by its time and
-    size, a folder by the names, times and sizes of the files in it."""
-    try:
-        st = os.stat(path)
-    except OSError:
-        return "missing"
-    if not os.path.isdir(path):
-        return f"{st.st_mtime_ns}:{st.st_size}"
-    parts = []
-    try:
-        for e in os.scandir(path):
-            try:
-                es = e.stat()
-                parts.append(f"{e.name}:{es.st_mtime_ns}:{es.st_size}")
-            except OSError:
-                continue
-    except OSError:
-        return "missing"
-    return hashlib.sha1("|".join(sorted(parts)).encode("utf-8", "replace")).hexdigest()
-
-
 def set_reminder(when: str, what: str, recurring: str = "",
                  action_tool: str = "", action_args: Optional[Dict] = None,
-                 tag: str = "", watch: str = "") -> Dict:
+                 tag: str = "") -> Dict:
     """Set a reminder. Two flavors:
 
     Plain — fires a desktop toast + optional TTS at the due time.
@@ -256,15 +229,7 @@ def set_reminder(when: str, what: str, recurring: str = "",
     `tag` (optional) is a free-form label for grouping/filtering in the GUI.
     """
     now = datetime.now()
-    watch = (watch or "").strip().strip('"')
-    if watch:
-        from .tools import _write_path
-        watch = _write_path(watch)
-        if not os.path.isdir(watch) and not os.path.isdir(os.path.dirname(watch)):
-            return {"ok": False, "error": f"Not set: there is no folder {os.path.dirname(watch)} to watch in."}
-        target = datetime.fromisoformat(_NEVER)
-    else:
-        target = parse_when(when, now)
+    target = parse_when(when, now)
     if target is None:
         return {"ok": False, "error": (
             f"Not set: '{when}' is not a time I read. Work it out from the current "
@@ -283,14 +248,7 @@ def set_reminder(when: str, what: str, recurring: str = "",
         "fired": False,
         "created": datetime.now().isoformat(timespec="seconds"),
     }
-    if watch:
-        new["when_text"] = f"when {os.path.basename(watch) or watch} changes"
-        new["watch"] = watch
-        new["watch_sig"] = _watch_sig(watch)
-        if recurring:
-            new["watch_every"] = True
-            new["recurring_text"] = "every change"
-    elif recurring:
+    if recurring:
         sec = _parse_recurring(recurring)
         if sec is None:
             return {"ok": False, "error": f"Couldn't parse recurring spec: '{recurring}'. Try 'every 30 minutes', 'daily', 'every 2 hours', 'weekly'."}
@@ -316,10 +274,6 @@ def set_reminder(when: str, what: str, recurring: str = "",
         _save_all(items)
     # Stated in words with the gap from now, so a conversion slip (midnight
     # stored for "tonight at 11") is visible next to what the reply claims.
-    if watch:
-        return {"ok": True, "set_for": f"{new['when_text']} ({watch})"
-                + ("; it stays on until cancelled" if new.get("watch_every") else "; it fires once"),
-                "reminder": new}
     return {"ok": True, "set_for": describe_due(target, now), "reminder": new}
 
 
@@ -620,30 +574,13 @@ def _claim_due(missed: bool = False) -> List[Dict]:
         items = _load_all()
         pruned = _prune_old_fired(items) if missed else items
         due = []
-        changed = False
         for r in pruned:
             if r.get("fired"):
-                continue
-            if r.get("watch"):
-                # Fires once the change has held still for a pass, so a file
-                # still being written or downloaded isn't reported half done.
-                sig = _watch_sig(r["watch"])
-                if sig == r.get("watch_sig"):
-                    changed |= r.pop("watch_seen", None) is not None
-                elif sig != r.get("watch_seen"):
-                    r["watch_seen"], changed = sig, True
-                else:
-                    due.append(dict(r))
-                    r["watch_sig"] = sig
-                    r.pop("watch_seen", None)
-                    r["last_fired_at"] = now_iso
-                    if not r.get("watch_every"):
-                        r["fired"], r["fired_at"] = True, now_iso
                 continue
             if r.get("due_iso", "") <= now_iso:
                 due.append(dict(r))
                 _advance_after_fire(r, now, now_iso)
-        if due or changed or len(pruned) != len(items):
+        if due or len(pruned) != len(items):
             _save_all(pruned)
     return due
 
@@ -714,11 +651,6 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
                         f'ASK them to confirm. Only if they say yes, call {action_tool} with '
                         f'those args (the normal permission prompt will still confirm). If they '
                         f'say no, just drop it.')
-            elif r.get("watch"):
-                note = (f'Something you were asked to watch just changed: {r["watch"]}. '
-                        f'What to do about it: "{what}".'
-                        + (f' It ran {action_tool} and got:\n{full_result}\n' if full_result else ' ')
-                        + 'Look at what changed if that helps, then tell the user or do it, briefly.')
             elif action_tool and full_result:
                 note = (f'A reminder you set just came due: "{what}". '
                         f'It ran {action_tool} and got:\n{full_result}\n'

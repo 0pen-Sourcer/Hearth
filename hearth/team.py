@@ -222,37 +222,7 @@ def _open_tmux(spawned: List[Dict[str, Any]]) -> bool:
         return False
 
 
-def _plan_path(team_id: str) -> str:
-    from .subagents import _TRANSCRIPT_DIR
-    import re
-    _TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
-    return str(_TRANSCRIPT_DIR / (re.sub(r"[^A-Za-z0-9_-]", "_", team_id) + ".plan.json"))
-
-
-def update_plan(team_id: str, text: str) -> Dict[str, Any]:
-    """Change a team's plan and tell every member still working."""
-    from . import subagents
-    text = (text or "").strip()
-    try:
-        with open(_plan_path(team_id), encoding="utf-8") as f:
-            plan = json.load(f)
-    except (OSError, ValueError):
-        return {"ok": False, "error": f"no team '{team_id}'"}
-    if not text:
-        return {"ok": False, "error": "give the new plan"}
-    plan["plan"] = text
-    plan.setdefault("history", []).append({"at": time.time(), "plan": text})
-    with open(_plan_path(team_id), "w", encoding="utf-8") as f:
-        json.dump(plan, f, indent=1)
-    told = []
-    for aid in plan.get("members") or []:
-        r = subagents.tell_subagent(aid, "The team's plan changed. It is now:\n" + text, sender="JARVIS")
-        if r.get("ok"):
-            told.append(aid)
-    return {"ok": True, "told": len(told), "note": f"Plan saved; {len(told)} working member(s) told."}
-
-
-def launch_team(members: List[Dict[str, Any]], plan: str = "") -> Dict[str, Any]:
+def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Spawn a team of background subagents and open a live pane per agent.
 
     members: [{name, persona, prompt}]. persona defaults to 'coder'.
@@ -277,19 +247,13 @@ def launch_team(members: List[Dict[str, Any]], plan: str = "") -> Dict[str, Any]
     roster = [(str(m.get("name") or m.get("persona") or "coder").strip(), " ".join(str(m.get("prompt") or "").split())[:80])
               for m in members if str(m.get("prompt") or "").strip()]
 
-    # One plan for the whole team, kept by JARVIS; every member starts from it.
-    plan = (plan or "").strip()
-    team_id = f"team_{int(time.time() * 1000)}"
-
     def with_team(name: str, prompt: str, can_message: bool) -> str:
         others = [f"{n} ({t})" for n, t in roster if n != name]
-        if not others and not plan:
+        if not others:
             return prompt
         how = ("Reach them with message_helper by name when your work touches theirs." if can_message
                else "You can't message them, so say in your result anything they need to know.")
-        head = f"You are {name}, working at the same time as: {'; '.join(others)}. {how}" if others else ""
-        shared = (f"The team's plan, kept by JARVIS (you'll be told if it changes):\n{plan}" if plan else "")
-        return "\n\n".join(x for x in (head, shared, prompt) if x)
+        return f"You are {name}, working at the same time as: {'; '.join(others)}. {how}\n\n{prompt}"
 
     for m in members:
         persona = (m.get("persona") or "coder").strip()
@@ -325,12 +289,8 @@ def launch_team(members: List[Dict[str, Any]], plan: str = "") -> Dict[str, Any]
         if not on_pc and sum(1 for x in spawned if not x.get("external") and not x.get("on_pc")) >= _MAX_TEAM:
             dropped.append({"name": name, "reason": f"over the team limit of {_MAX_TEAM}"})
             continue
-        scope, err = subagents.make_scope(str(m.get("folder") or ""))
-        if err:
-            dropped.append({"name": name, "reason": err})
-            continue
         r = subagents.spawn_subagent(persona=persona, prompt=with_team(name, prompt, True),
-                                     mode="background", name=name, route=route, scope=scope)
+                                     mode="background", name=name, route=route)
         if r.get("ok"):
             spawned.append({"name": name, "persona": persona, "on_pc": on_pc,
                             "agent_id": r.get("agent_id"),
@@ -339,12 +299,6 @@ def launch_team(members: List[Dict[str, Any]], plan: str = "") -> Dict[str, Any]
             dropped.append({"name": name, "reason": str(r.get("error") or "did not start")})
     if not spawned:
         return {"ok": False, "error": "no agents started", "dropped": dropped}
-    try:
-        with open(_plan_path(team_id), "w", encoding="utf-8") as f:
-            json.dump({"team": team_id, "plan": plan, "members": [x["agent_id"] for x in spawned if x.get("agent_id")],
-                       "history": [{"at": time.time(), "plan": plan}] if plan else []}, f, indent=1)
-    except OSError:
-        pass
     opened = False
     if PANES:
         opened = (_open_wt(spawned) or _open_consoles(spawned)) if sys.platform == "win32" else _open_tmux(spawned)
@@ -354,11 +308,8 @@ def launch_team(members: List[Dict[str, Any]], plan: str = "") -> Dict[str, Any]
     if dropped:
         note += (" Not started: " + "; ".join(f"{d['name']} ({d['reason']})" for d in dropped)
                  + ". Their part of the task is not being worked on.")
-    if plan:
-        note += f" They share the plan; change it with update_team_plan (team '{team_id}')."
     return {
         "ok": True,
-        "team": team_id,
         "spawned": [{"name": s["name"], "persona": s["persona"], "agent_id": s["agent_id"]} for s in spawned],
         "dropped": dropped,
         "watching": opened,

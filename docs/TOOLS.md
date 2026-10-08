@@ -1,8 +1,8 @@
 # Tools
 
-Hearth gives the model **112 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
+Hearth gives the model **111 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
-To keep the prompt small, **43** core tools load with their full description and **69** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **43** core tools load with their full description and **68** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -111,7 +111,6 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `race_helpers` † | Give one coding task to two or more agent programs at once (say codex and claude-code), each on its own copy of a git repository, to compare their work |
 | `spawn_subagent` | Start a scoped sub-agent (see list_subagent_personas for personas) |
 | `tell_subagent` † | Give a helper that is still working a message: a correction, an extra detail, a change of direction |
-| `update_team_plan` † | Change the shared plan of a team started with launch_team; every member still working is told the new plan before its next step |
 
 ## Memory
 

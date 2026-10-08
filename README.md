@@ -57,7 +57,7 @@ Hearth is the framework. JARVIS is the assistant it comes with, and you can rena
 
 ### Your PC
 
-Hearth reads and writes files, including PDF, Word, Excel, PowerPoint, EPUB and archives, and it can work through a PDF hundreds of pages long. It runs PowerShell commands, opens any app, file, folder or link, and drives a real Chrome, Edge or Brave window you can watch while it clicks and types. Beyond the browser it reads a window's buttons and fields by name and operates the desktop itself, with the real cursor moving. It takes screenshots and, with a model that can see, tells you what is on them. It searches the web without an API key, sets reminders in plain words ("every weekday at 9am") or for when a folder changes, sends email if you set it up, and runs long jobs like a whole-drive search in the background while you keep talking.
+Hearth reads and writes files, including PDF, Word, Excel, PowerPoint, EPUB and archives, and it can work through a PDF hundreds of pages long. It runs PowerShell commands, opens any app, file, folder or link, and drives a real Chrome, Edge or Brave window you can watch while it clicks and types. Beyond the browser it reads a window's buttons and fields by name and operates the desktop itself, with the real cursor moving. It takes screenshots and, with a model that can see, tells you what is on them. It searches the web without an API key, sets reminders in plain words ("every weekday at 9am"), sends email if you set it up, and runs long jobs like a whole-drive search in the background while you keep talking.
 
 ### Brains
 

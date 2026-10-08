@@ -103,11 +103,8 @@ Say it however you like. Hearth works out the exact time and reads back the day 
 | `tomorrow at 7am` | tomorrow 07:00 |
 | `next monday at 10am` | the coming Monday, 10:00 |
 | `every weekday at 9am` | a recurring reminder |
-| `when a PDF lands in Downloads, summarize it` | fires when that folder changes |
 
 When it's time you get a Windows notification and, with voice on, it's read aloud. In the terminal it also prints into the chat. With an [ntfy](https://ntfy.sh) topic set, it reaches your phone too. All of them are listed in the Reminders tab.
-
-A reminder can watch a file or folder instead of the clock. It waits until the change holds still, so a download still in progress isn't reported half done, then tells you or does what you asked. Ask for it every time and it stays on until you cancel it.
 
 ---
 

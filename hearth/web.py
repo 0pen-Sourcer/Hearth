@@ -3385,10 +3385,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 route, err = _sa.route_for(str(body.get("on") or ""), str(body.get("model") or ""))
                 if err:
                     return self._send_json(400, {"error": err})
-                scope, err = _sa.make_scope(folder)
-                if err:
-                    return self._send_json(400, {"error": err})
-                r = _sa.spawn_subagent(role, task, mode="background", by="you", route=route, scope=scope)
+                prompt = task + (f"\n\nWork in this folder: {folder}" if folder else "")
+                r = _sa.spawn_subagent(role, prompt, mode="background", by="you", route=route)
             if not r.get("ok"):
                 return self._send_json(400, {"error": r.get("error") or "it didn't start"})
             return self._send_json(200, {"ok": True, "agent_id": r.get("agent_id")})

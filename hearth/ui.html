@@ -12483,11 +12483,11 @@ async function refreshReminders() {
         <div class="lcard">
           <div class="lc-main">
             <div class="lc-title">${esc(it.what)}${tag}</div>
-            <div class="lc-meta">${it.watch ? `${esc(it.when_text)} · ${esc(it.watch)}` : `in ${fmtWhen(it.due_iso)} · ${esc(it.when_text || it.due_iso)}`}</div>
+            <div class="lc-meta">in ${fmtWhen(it.due_iso)} · ${esc(it.when_text || it.due_iso)}</div>
             ${meta}
           </div>
           <div class="lc-actions">
-            ${it.watch ? '' : `<button class="btn-mini" data-rsnooze="${esc(it.id)}" title="Snooze 10 min">snooze</button>`}
+            <button class="btn-mini" data-rsnooze="${esc(it.id)}" title="Snooze 10 min">snooze</button>
             <button class="btn-mini danger" data-rcancel="${esc(it.id)}" title="Cancel reminder">×</button>
           </div>
         </div>`;
@@ -19749,7 +19749,7 @@ function roomMainGoal(p) {
   }
   const tool = (ms.match(/calling ([a-z_]+)/) || [])[1] || '';
   // Something worth remembering gets pinned to the board.
-  if (/^memory_(save|update|write)|^remember|^update_team_plan/.test(tool)) {
+  if (/^memory_(save|update|write)|^remember/.test(tool)) {
     return roomHas(roomSkin(p.agent), 'pin') ? { at: ROOM.spots.pin, pose: 'pin', flip: true } : { at: ROOM.spots.board, pose: 'raise' };
   }
   if (/read|grep|find|list|search|fetch|browse|recall|pdf/.test(tool)) {
