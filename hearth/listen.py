@@ -752,11 +752,12 @@ def transcribe(audio) -> str:
     if model is None:
         return ""
     try:
+        lang = _transcribe_language()
         segments, _info = model.transcribe(
             audio,
             # A model whose name ends in .en holds no other language, and
             # asking it to detect one wastes a pass to reach the same answer.
-            language=_transcribe_language(),
+            language=lang,
             beam_size=1,            # fast - boost to 5 for accuracy
             # Silero VAD (ships with faster-whisper, no extra dep) drops
             # speech-free chunks AND tightens utterance edges - much smarter
@@ -770,7 +771,13 @@ def transcribe(audio) -> str:
             },
             condition_on_previous_text=False,
         )
-        return " ".join(s.text.strip() for s in segments).strip()
+        text = " ".join(s.text.strip() for s in segments).strip()
+        # The language it was said in, so the reply is spoken in it too.
+        if text:
+            said = lang or (getattr(_info, "language", "")
+                            if getattr(_info, "language_probability", 0) >= 0.6 else "")
+            _voice.heard_language(said or "")
+        return text
     except Exception as e:
         # An empty string is what "you said nothing" looks like too, so a
         # transcription that fails outright was indistinguishable from silence

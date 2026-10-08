@@ -594,17 +594,38 @@ _SCRIPTS = (("h", re.compile(r"[\u0900-\u097F]")),
             ("z", re.compile(r"[\u4E00-\u9FFF]")))
 
 
+# The language the person last spoke in, as speech recognition heard it.
+# Spanish, French, Italian and Portuguese share the Latin alphabet with English,
+# so the text alone can't say which voice reads it; an English voice read a
+# Spanish reply with English sounds. A reply to someone who spoke one of them
+# goes to a voice of that language.
+_HEARD = {"lang": ""}
+_LATIN_VOICE = {"es": "e", "fr": "f", "it": "i", "pt": "p"}
+_LATIN_ONLY = re.compile(r"^[\s\x00-\x7F\u00A0-\u024F\u2010-\u206F]*$")
+
+
+def heard_language(code: str) -> None:
+    _HEARD["lang"] = (code or "").lower()[:2]
+
+
+def _same_kind(code: str, voice: str) -> str:
+    kind = voice[1:2] if voice[1:2] in ("f", "m") else "f"
+    same = [v for v in KOKORO_VOICES if v[:1] == code and v[1:2] == kind]
+    return (same or [v for v in KOKORO_VOICES if v[:1] == code] or [voice])[0]
+
+
 def voice_for(text: str, voice: str) -> str:
     """The voice to read this text with: the chosen one, unless the text is
-    written in a script only another language's voices read."""
+    written in a script only another language's voices read, or the person
+    spoke a language that shares English's alphabet and the chosen voice isn't
+    of that language."""
     voice = voice or DEFAULT_KOKORO_VOICE
     for code, pat in _SCRIPTS:
         if pat.search(text or ""):
-            if voice[:1] == code:
-                return voice
-            kind = voice[1:2] if voice[1:2] in ("f", "m") else "f"
-            same = [v for v in KOKORO_VOICES if v[:1] == code and v[1:2] == kind]
-            return (same or [v for v in KOKORO_VOICES if v[:1] == code] or [voice])[0]
+            return voice if voice[:1] == code else _same_kind(code, voice)
+    code = _LATIN_VOICE.get(_HEARD["lang"])
+    if code and voice[:1] != code and _LATIN_ONLY.match(text or ""):
+        return _same_kind(code, voice)
     return voice
 
 
