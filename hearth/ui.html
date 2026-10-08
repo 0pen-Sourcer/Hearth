@@ -19699,6 +19699,18 @@ function roomFree(pt) {
   for (const x of xs) if (!inDesk([x, pt[1]])) return [x, pt[1]];
   return [pt[0], ROOM.aisleY];
 }
+// The free desk closest to where JARVIS stands, in the room it is in.
+function roomNearestDesk(p) {
+  const r = p.room || 0;
+  const used = new Set([...ROOM.people.values()].filter(q => q.id !== p.id && q.desk != null && (q.room || 0) === r).map(q => q.desk));
+  let best = null, bd = Infinity;
+  ROOM.desks.forEach((d, i) => {
+    if (used.has(i)) return;
+    const dd = Math.hypot(d[0] - p.pos[0], d[1] + SEAT_DY - p.pos[1]);
+    if (dd < bd) { bd = dd; best = i; }
+  });
+  return best;
+}
 function roomSeat(p) {
   const d = ROOM.desks[p.desk];
   return [d[0], d[1] + SEAT_DY];
@@ -19771,7 +19783,12 @@ function roomMainGoal(p) {
   if (!busy && p.wasBusy) { p.holdUntil = now + 9000; p.holdAt = [p.pos[0], p.pos[1]]; }
   p.wasBusy = busy;
   if (p.pokeUntil > now) return { at: p.pos, pose: p.pokePose || 'raise', sit: !!p.pokeSit, lift: p.pokeSit || 0 };
-  if ($('perm-strip') && !$('perm-strip').hidden) return { at: ROOM.spots.rug, pose: 'raise' };
+  // Waiting on a yes: a hand up where it is. Walking to the rug and back for
+  // every command it asked about kept it crossing the room all turn.
+  if ($('perm-strip') && !$('perm-strip').hidden) {
+    if (p.desk != null && p.deskUntil > now) return { at: roomSeat(p), pose: 'type', seated: true };
+    return { at: p.pos, pose: 'raise' };
+  }
   // A fact just remembered in the background is pinned up before anything else.
   if (!busy && ROOM.pinUntil > now)
     return roomHas(roomSkin(p.agent), 'pin') ? { at: ROOM.spots.pin, pose: 'pin', flip: true } : { at: ROOM.spots.board, pose: 'raise' };
@@ -19798,7 +19815,7 @@ function roomMainGoal(p) {
   // stretch of work and it actually sits down and types.
   if (/write|edit|create|run_command|start_job|delegate/.test(tool)) p.deskUntil = now + 20000;
   if (busy && p.deskUntil > now && !/read|grep|find|list|search|fetch|browse|recall|pdf|memory_/.test(tool)) {
-    if (p.desk == null) { const at = roomDeskFor(p.id, 0); p.desk = at ? at.desk : null; }
+    if (p.desk == null) p.desk = roomNearestDesk(p);
     if (p.desk != null) return { at: roomSeat(p), pose: 'type', seated: true };
   }
   // Thinking is done on its feet: back and forth along the nearest clear

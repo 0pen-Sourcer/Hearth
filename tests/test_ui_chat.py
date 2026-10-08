@@ -216,6 +216,18 @@ with sync_playwright() as pw:
       out.sleep = [asleep.pose, !!asleep.sit, awake.pose !== 'sleep', !awake.sit];
       out.helperLine = typeof roomHelperLine === 'function'
         && roomHelperLine({ status: 'working', activity: 'tool', tool: 'read_file', what: 'SPEC.md' });
+      // Writing, it always took the first desk, and each question about a command
+      // sent it walking to the rug and back.
+      me.holdUntil = 0; me.desk = null; me.wasBusy = true; me.room = 0;
+      me.pos = [ROOM.desks[6][0], ROOM.desks[6][1] + 80];
+      setState('calling write_file…');
+      roomMainGoal(me);
+      out.nearDesk = me.desk;
+      showInlinePermission('req-2', 'run_command', { command: 'dir' });
+      const ask = roomMainGoal(me);
+      out.askHere = [ask.pose, JSON.stringify(ask.at) === JSON.stringify(roomSeat(me)), !!ask.seated];
+      hideInlinePermission();
+      setState('idle'); me.desk = null;
       showView('chat');
       out.stripBack = !document.getElementById('view-team').contains(strip);
       return out;
@@ -225,6 +237,8 @@ with sync_playwright() as pw:
           room["doing"] == "Reading a file…" and room["thinking"] == "Thinking…")
     check("a permission question is asked in the room, with the approval strip right there",
           room["asking"] == "I need to run a command for this. Okay?" and room["stripInRoom"] and room["stripBack"])
+    check(f"JARVIS works at the free desk nearest it and asks about a command from there {room.get('nearDesk')} {room.get('askHere')}",
+          room.get("nearDesk") == 6 and room.get("askHere") == ["type", True, True])
     check("JARVIS's tag carries the mark of the brain it is running on", room["mark"])
     check(f"name tags sit on whole pixels {room['whole']}",
           room["whole"] and all(abs(v - round(v)) < 0.01 for xy in room["whole"] for v in xy))
