@@ -4753,6 +4753,7 @@
           </div>
           <div id="runtime-nudge" style="display:none;margin:8px 0 2px;padding:9px 11px;background:color-mix(in srgb, var(--warn) 7%, transparent);border:1px solid color-mix(in srgb, var(--warn) 25%, transparent);border-radius:8px;font-size:12px;line-height:1.5;color:var(--fg-dim)"></div>
           <div id="runtime-err" style="display:none;margin:6px 0 2px;padding:8px 10px;background:color-mix(in srgb, var(--err) 7%, transparent);border:1px solid color-mix(in srgb, var(--err) 25%, transparent);border-radius:6px;font-size:12px;color:var(--err);line-height:1.4"></div>
+          <div id="prism-row" style="display:none;margin:6px 0 2px;font-size:12px;color:var(--fg-dim);line-height:1.5"></div>
           <div class="progress-row" id="runtime-dl" style="display:none;align-items:center;gap:8px;margin:6px 0 2px;">
             <div style="flex:1;height:6px;background:var(--bg-1);border-radius:4px;overflow:hidden;"><div id="runtime-dl-fill" style="height:100%;width:0%;background:var(--accent);transition:width .2s;"></div></div>
             <span id="runtime-dl-pct" style="color:var(--fg-dim);min-width:70px;text-align:right;font-size:11px;"></span>
@@ -15995,6 +15996,18 @@ async function refreshRuntimeBar() {
       nudgeEl.style.display = adv.nudge ? 'block' : 'none';
       if (adv.nudge) nudgeEl.textContent = adv.reason || '';
     }
+    // PrismML's engine runs only the ternary models stock llama.cpp can't read.
+    const pr = r.prism || {}, prEl = $('prism-row');
+    if (prEl) {
+      if (pr.installed) {
+        prEl.style.display = 'block';
+        prEl.innerHTML = `PrismML engine <span style="color:var(--fg-faint)">${esc(pr.installed)} · runs PrismML's ternary models</span>`;
+      } else if ((pr.needed_by || []).length) {
+        prEl.style.display = 'block';
+        prEl.innerHTML = `${esc(pr.needed_by[0])} needs PrismML's own engine. <button class="btn-mini" id="btn-prism-get" style="margin-left:6px">Get PrismML engine</button>`;
+        $('btn-prism-get').onclick = () => runtimeInstall('', 'prism');
+      } else prEl.style.display = 'none';
+    }
   } catch { statusEl.textContent = 'unknown'; }
 }
 // The engine is an asset like a model, so it shares the Downloads overlay —
@@ -16002,7 +16015,7 @@ async function refreshRuntimeBar() {
 const ENGINE_DL_ID = '__engine__';
 const _engDl = { t0: 0, b0: 0 };
 
-async function runtimeInstall(tag) {
+async function runtimeInstall(tag, engine) {
   const dl = $('runtime-dl'), fill = $('runtime-dl-fill'), pct = $('runtime-dl-pct'), btn = $('btn-runtime-update');
   if (dl) dl.style.display = 'flex';
   if (btn) { btn.disabled = true; btn.textContent = 'Downloading…'; }
@@ -16010,7 +16023,7 @@ async function runtimeInstall(tag) {
   try {
     const resp = await fetch('/api/runtime/install', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(tag ? { tag } : {}) });
+      body: JSON.stringify({ ...(tag ? { tag } : {}), ...(engine ? { engine } : {}) }) });
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
     for (;;) {
       const { done, value } = await reader.read();
@@ -16031,7 +16044,7 @@ async function runtimeInstall(tag) {
           const secs = (now - _engDl.t0) / 1000;
           const speed = secs > 1 ? (ev.done - _engDl.b0) / secs : 0;
           dlUpsert(ENGINE_DL_ID, {
-            name: 'llama.cpp engine', kind: 'engine', status: 'downloading',
+            name: engine === 'prism' ? 'PrismML engine' : 'llama.cpp engine', kind: 'engine', status: 'downloading',
             pct: Math.round(ev.done / ev.total * 100),
             done: ev.done, total: ev.total, speed,
             eta: speed > 0 ? (ev.total - ev.done) / speed : 0,
@@ -16042,7 +16055,7 @@ async function runtimeInstall(tag) {
           _engDl.t0 = 0;
           dlUpsert(ENGINE_DL_ID, { status: ev.ok ? 'done' : (ev.cancelled ? 'paused' : 'error'), pct: ev.ok ? 100 : undefined });
           const errEl = $('runtime-err');
-          if (ev.ok) { if (errEl) errEl.style.display = 'none'; toast('Engine ready', 'llama.cpp ' + (ev.tag || ''), 'ok'); }
+          if (ev.ok) { if (errEl) errEl.style.display = 'none'; toast(engine === 'prism' ? 'PrismML engine ready' : 'Engine ready', engine === 'prism' ? 'Its ternary models load now.' : 'llama.cpp ' + (ev.tag || ''), 'ok'); }
           else if (ev.cancelled) { if (errEl) errEl.style.display = 'none'; toast('Engine download cancelled', 'Progress kept, installing again resumes.', 'ok', 7000); }
           else {
             const msg = ev.error || 'unknown error';
@@ -16050,7 +16063,7 @@ async function runtimeInstall(tag) {
               errEl.style.display = 'block';
               errEl.innerHTML = `Engine download failed: ${esc(msg)} <a href="#" style="color:var(--accent-2);margin-left:8px">Retry</a> <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
               const links = errEl.querySelectorAll('a');
-              if (links[0]) links[0].onclick = (e) => { e.preventDefault(); errEl.style.display='none'; runtimeInstall(tag); return false; };
+              if (links[0]) links[0].onclick = (e) => { e.preventDefault(); errEl.style.display='none'; runtimeInstall(tag, engine); return false; };
               if (links[1]) links[1].onclick = (e) => { e.preventDefault(); navigator.clipboard.writeText(msg); return false; };
             }
             toast("The engine didn't download", msg, 'err', 8000);
@@ -16068,7 +16081,7 @@ async function runtimeInstall(tag) {
       errEl.style.display = 'block';
       errEl.innerHTML = `Engine download failed: ${esc(msg)} <a href="#" style="color:var(--accent-2);margin-left:8px">Retry</a> <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
       const links = errEl.querySelectorAll('a');
-      if (links[0]) links[0].onclick = (ev) => { ev.preventDefault(); errEl.style.display='none'; runtimeInstall(tag); return false; };
+      if (links[0]) links[0].onclick = (ev) => { ev.preventDefault(); errEl.style.display='none'; runtimeInstall(tag, engine); return false; };
       if (links[1]) links[1].onclick = (ev) => { ev.preventDefault(); navigator.clipboard.writeText(msg); return false; };
     }
     toast("The engine didn't download", msg, 'err', 8000);

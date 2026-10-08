@@ -183,6 +183,10 @@ jobs:
           python tests/test_reminder_store.py
           python tests/test_reminder_watch.py
 
+      - name: PrismML's ternary models run on PrismML's engine
+        run: |
+          python tests/test_prism_engine.py
+
       - name: A team of agents, as the panes show it
         # Tool results rendered as empty arrows, failures as done, and members
         # that never started were not mentioned to the model.

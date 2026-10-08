@@ -170,7 +170,7 @@ Repair checks every part of the install and puts back whatever is missing, Heart
 
 Asking Hearth for a capability it does not have gets a straight answer instead of a handful of unrelated tools. And it can tell you your charge level, whether you are plugged in and roughly how long you have left.
 
-Messages that read like an error log now say what happened in plain words, such as "Couldn't delete it" or "The model didn't load" with the reason. A model only PrismML's build of the engine can read, like the ternary Bonsai models, says so when it fails to load and names the file of the same model that works.
+Messages that read like an error log now say what happened in plain words, such as "Couldn't delete it" or "The model didn't load" with the reason. PrismML's ternary models, like Bonsai in its PQ2_0 file, need PrismML's own build of the engine. Hearth reads which kind a model file is before loading it, offers that engine in Models with one click, and runs those models on it while every other model stays on the usual engine.
 
 A command card shows the command that ran above its output, and the approval prompt can show the whole command before you allow it rather than cutting it off. Repairing an install reports in the same place as other downloads, with progress and a cancel. Email setup moved to Connectors where it belongs, and a voice install that fails part way can be retried instead of dead-ending. Settings now links to the project, so the source, releases and issue tracker are one click away.
 

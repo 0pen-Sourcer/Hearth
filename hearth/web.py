@@ -3980,7 +3980,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import llmserver
             # Optional {tag} pins a specific build so a regressed one can be
             # rolled back; absent means latest.
-            _want_tag = (self._read_json().get("tag") or "").strip()
+            _body = self._read_json()
+            _want_tag = (_body.get("tag") or "").strip()
+            _prism = _body.get("engine") == "prism"
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -4004,7 +4006,7 @@ class HearthHandler(BaseHTTPRequestHandler):
 
             try:
                 result = llmserver.download_llama_runtime(
-                    tag=_want_tag or None, on_progress=on_progress)
+                    tag=_want_tag or None, on_progress=on_progress, prism=_prism)
                 emit({"type": "done", **result})
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
