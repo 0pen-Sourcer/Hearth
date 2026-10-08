@@ -894,8 +894,6 @@ async def _run_subagent_async(
 
     tools = _filter_tools(persona.get("allowed_tools", []))
     scope = persona.get("_scope")
-    if scope:
-        tools = [t for t in tools if out_of_scope(scope, t["function"]["name"], {}) is None]
     sys_prompt = _build_system_prompt(persona, user_prompt)
     _append_transcript(tpath, {
         "kind": "route", "base_url": base, "model": model,
@@ -1401,37 +1399,27 @@ def _spawn_on_agent(agent: str, p: Dict[str, Any], persona: str, prompt: str,
     return out
 
 
-def make_scope(folder: str = "", tools: Optional[List[str]] = None) -> Tuple[Optional[Dict[str, Any]], str]:
-    """A helper's limits for one task: the folder its file tools may change and
-    the tools it may use, never more than its role allows. Returns (scope, error)."""
+def make_scope(folder: str = "") -> Tuple[Optional[Dict[str, Any]], str]:
+    """The folder a helper's task works in: its file changes stay there and its
+    commands run there. Returns (scope, error)."""
     folder = (folder or "").strip().strip('"')
-    names = sorted({str(t).strip() for t in (tools or []) if str(t).strip()})
-    if not folder and not names:
+    if not folder:
         return None, ""
-    if folder:
-        from .tools import _write_path
-        folder = _write_path(folder)
-        if not os.path.isdir(folder):
-            return None, f"folder not found: {folder}"
-    if names:
-        from . import TOOL_DEFINITIONS
-        known = {t["name"] for t in TOOL_DEFINITIONS}
-        bad = [n for n in names if n not in known]
-        if bad:
-            return None, f"no tool named {', '.join(bad)}"
-    return {"folder": folder, "tools": names}, ""
+    from .tools import _write_path
+    folder = _write_path(folder)
+    if not os.path.isdir(folder):
+        return None, f"folder not found: {folder}"
+    return {"folder": folder}, ""
 
 
 def out_of_scope(scope: Optional[Dict[str, Any]], name: str, args: Dict[str, Any]) -> Optional[str]:
-    """Why this call is outside the helper's limits, or None when it is inside."""
-    if not scope:
-        return None
-    if scope.get("tools") and name not in scope["tools"] and name != "message_helper":
-        return f"(not run: this task allows only {', '.join(scope['tools'])}.)"
-    folder = scope.get("folder")
+    """Why this call is outside the helper's folder, or None when it is inside.
+    A command is pointed at the folder rather than refused."""
+    folder = (scope or {}).get("folder")
     if folder:
         if name == "run_command":
-            return f"(not run: this task is kept to {folder}, and a command could change files anywhere.)"
+            args["cwd"] = folder
+            return None
         from .helper_changes import targets
         from .tools import path_within
         for p in targets(name, args):

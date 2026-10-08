@@ -142,14 +142,10 @@ STATE["call"] = {"name": "write_file", "arguments": json.dumps({"path": os.path.
 STATE["calls"] = 0
 subagents.spawn_subagent(persona="coder", prompt="write the file", mode="sync", scope=scope)
 check("and writes inside it", os.path.exists(os.path.join(BOX, "in.txt")))
-STATE["calls"] = 0
-r = subagents.spawn_subagent(persona="coder", prompt="write the file", mode="sync",
-                             scope=subagents.make_scope("", ["read_file"])[0])
-tools_seen = next(json.loads(l)["tools_exposed"] for l in open(r["transcript_path"], encoding="utf-8") if '"route"' in l)
-check(f"a helper narrowed to some tools is offered only those, and refused the rest {tools_seen}",
-      "write_file" not in tools_seen and "read_file" in tools_seen and "allows only read_file" in rendered(r["transcript_path"]))
-check("a scope naming a missing folder or tool is refused",
-      subagents.make_scope(os.path.join(WS, "nope"))[1] and subagents.make_scope("", ["fly"])[1])
+args = {"command": "dir", "cwd": WS}
+check("a command from a helper kept to a folder runs in that folder, not refused",
+      subagents.out_of_scope(scope, "run_command", args) is None and args["cwd"] == BOX)
+check("a folder that does not exist is refused", subagents.make_scope(os.path.join(WS, "nope"))[1])
 os.remove(os.path.join(WS, "permissions.json"))
 STATE["call"] = None
 

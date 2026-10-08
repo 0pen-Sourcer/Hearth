@@ -28,7 +28,7 @@ A room holds eight desks. Past that the next room opens, a winter cabin, a libra
 
 Two helpers can't trip over each other. An agent program sent to work in a git repository works on its own copy of it, started from your folder as it is, unsaved changes included, and nothing it does reaches your folder until you say so. Its panel lists what it changed with the diff, and Bring in, Discard or Undo; the terminal has the same under /team changes, bring, discard and undo. Hearth's own helpers write directly, but a file one of them is working on is theirs until they finish, and what they changed can be undone. You can also give one task to two agents, say Codex and Claude Code, each on its own copy, have a check like your tests run on both, and pick the one to keep.
 
-A team starts from one plan that says who does what, and when JARVIS changes the plan every member still working hears about it before its next step. A helper can be kept to one folder for a task, so it reads what it needs but changes files only there, or given fewer tools than its role has.
+A team starts from one plan that says who does what, and when JARVIS changes the plan every member still working hears about it before its next step. A helper given a folder for its task works in it: it reads whatever it needs, but changes files and runs commands only there.
 
 ## Claude Code, Codex or Cursor as JARVIS's brain
 

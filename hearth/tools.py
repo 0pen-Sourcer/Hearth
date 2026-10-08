@@ -747,11 +747,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "With runs_on a provider: the model, as named; it is "
                     "matched to the nearest one the provider lists."},
                 "folder": {"type": "string", "description":
-                    "Keep the helper's file changes to this folder (it can "
-                    "still read elsewhere; it gets no run_command)."},
-                "only_tools": {"type": "array", "items": {"type": "string"},
-                    "description": "Narrow the role's tools to these for this "
-                    "task. Never adds a tool the role lacks."},
+                    "The folder the work belongs in: the helper changes files "
+                    "only there and runs its commands there. Leave out unless "
+                    "the task is about one folder."},
             },
             "required": ["persona", "prompt"],
         },
@@ -2774,7 +2772,7 @@ def _spawn_subagent(p: Dict[str, Any]) -> Dict[str, Any]:
     route, err = _sa.route_for(str(p.get("runs_on") or ""), str(p.get("model") or ""))
     if err:
         return {"ok": False, "error": err}
-    scope, err = _sa.make_scope(str(p.get("folder") or ""), p.get("only_tools") or [])
+    scope, err = _sa.make_scope(str(p.get("folder") or ""))
     if err:
         return {"ok": False, "error": err}
     return _sa.spawn_subagent(p.get("persona", ""), p.get("prompt", ""),
@@ -8117,9 +8115,7 @@ TOOL_DEFINITIONS.append({
                       "(claude-code, codex, opencode, cursor-agent, gemini-cli): one of its own models, "
                       "e.g. 'opencode/big-pickle'."},
             "folder": {"type": "string", "description": "Where this member works: an agent program runs there, "
-                       "a Hearth helper may change files only there. Default: the workspace."},
-            "only_tools": {"type": "array", "items": {"type": "string"},
-                           "description": "For a Hearth helper: narrow its tools to these for this task."},
+                       "a Hearth helper changes files and runs commands only there. Default: the workspace."},
         }, "required": ["prompt"]}},
         "plan": {"type": "string", "description": "The team's shared plan: who does what and how the parts fit. "
                  "Every member gets it; change it later with update_team_plan."},

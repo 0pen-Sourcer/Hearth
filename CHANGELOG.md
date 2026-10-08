@@ -15,7 +15,7 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - Helpers' changes are kept apart: an agent program working in a git repository gets its own worktree, and its changes wait to be brought in, discarded or undone (`helper_changes`, panel buttons, `/team changes|bring|discard|undo`). Hearth's own helpers claim the files they write, so two can't write one at once, and their changes can be undone.
 - `race_helpers`: one task to several agent programs on their own copies, a check command run in each, and one comparison back.
 - A team works from one plan (`launch_team` `plan`), and `update_team_plan` tells every working member when it changes.
-- A helper's task can keep it to one folder and fewer tools (`folder`, `only_tools`); the folder from New helper and from a team member is enforced, not only mentioned.
+- A helper's task can name the folder it works in (`folder`): its file changes stay there and its commands run there. The folder from New helper and from a team member is enforced, not only mentioned.
 - `delegate`: hand one task to another agent CLI and relay its answer. Twenty-three adapters, run headless on the user's install; Claude Code, Codex, Cursor and OpenCode have been run from Hearth. Installs and updates show in the Downloads list with Cancel.
 - Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar menu, Shift+Tab), the terminal (`/mode`), helpers and agent programs.
 - One set of chats for the window and the terminal (`hearth/chat_sync.py`): a terminal chat is listed in the window and can be carried on there, and `/chats` and `/chat` open any chat in the terminal.
