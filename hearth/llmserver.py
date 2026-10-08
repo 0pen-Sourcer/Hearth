@@ -1843,6 +1843,38 @@ def start_builtin(model_path: str, *args, **kwargs) -> Dict[str, Any]:
         return {"ok": False, "error": f"The model could not start ({type(e).__name__}: {e})"}
 
 
+def load_failure_hint(tail: str) -> str:
+    """Why the engine stopped while loading a model, in words, from the end of its log."""
+    hint = ""
+    if "ModuleNotFoundError" in tail:
+        hint = (". The server's extras are missing; run: pip install fastapi 'uvicorn[standard]' "
+                "sse-starlette pydantic-settings starlette-context")
+    elif "out of memory" in tail.lower() or "CUDA error" in tail:
+        hint = ". The graphics card ran out of memory; try a smaller model or a shorter context"
+    elif ("unknown model architecture" in tail.lower()
+            or "unsupported model architecture" in tail.lower()
+            or "unknown architecture" in tail.lower()):
+        # A brand-new model family the installed llama.cpp predates.
+        # Checked BEFORE the generic load failure because llama.cpp
+        # prints "error loading model" alongside this one. Reactive by
+        # design: no curated model-to-engine table to go stale, and it
+        # fires exactly when the engine is genuinely the problem.
+        hint = (". This model is newer than your engine, so it can't read it. "
+                "Update the engine in Models > Engine, then load it again.")
+    elif re.search(r"invalid ggml type (142|143)\b", tail.lower()):
+        # PrismML's ternary packing (PQ2_0 / PTQ1_0): only their own build reads it.
+        hint = (". This is a PrismML ternary model; only PrismML's own build of llama.cpp reads this "
+                "packing. The same model's Q2_0_g64 file works with this engine")
+    elif "invalid ggml type" in tail.lower():
+        hint = (". This file uses a kind of compression your engine can't read; it was made for a "
+                "different build of llama.cpp")
+    elif "could not load model" in tail.lower():
+        hint = ". The model file couldn't be read; it may be damaged or not a model"
+    elif "could not find module" in tail.lower():
+        hint = ". The engine's CUDA files are missing; repair Hearth in Settings, About, or re-run install.ps1 -BuiltinLLM cuda"
+    return hint
+
+
 def _start_builtin(model_path: str, port: Optional[int] = None,
                   ctx: int = 24576, n_gpu_layers: int = -1,
                   n_threads: Optional[int] = None,
@@ -2353,28 +2385,7 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
             return {"ok": False, "stopped": True, "error": "Stopped before it finished loading."}
         if spawned.poll() is not None:
             tail = _log_tail()
-            hint = ""
-            if "ModuleNotFoundError" in tail:
-                hint = " — missing server extras; run: pip install fastapi 'uvicorn[standard]' sse-starlette pydantic-settings starlette-context"
-            elif "out of memory" in tail.lower() or "CUDA error" in tail:
-                hint = " — out of VRAM; try a smaller model or lower n_ctx"
-            elif ("unknown model architecture" in tail.lower()
-                    or "unsupported model architecture" in tail.lower()
-                    or "unknown architecture" in tail.lower()):
-                # A brand-new model family the installed llama.cpp predates.
-                # Checked BEFORE the generic load failure because llama.cpp
-                # prints "error loading model" alongside this one. Reactive by
-                # design: no curated model-to-engine table to go stale, and it
-                # fires exactly when the engine is genuinely the problem.
-                hint = (". This model is newer than your engine, so it can't read it. "
-                        "Update the engine in Models > Engine, then load it again.")
-            elif "invalid ggml type" in tail.lower():
-                hint = (". This file uses a kind of compression your engine can't read; it was made for a "
-                        "different build of llama.cpp")
-            elif "could not load model" in tail.lower():
-                hint = " — model file unreadable or wrong format"
-            elif "could not find module" in tail.lower():
-                hint = " — CUDA runtime DLLs missing; re-run install.ps1 -BuiltinLLM cuda"
+            hint = load_failure_hint(tail)
             with _start_lock: _starting_paths.discard(normalized_path)
             _set_progress(phase="error",
                           error=f"server exited (code {spawned.returncode}){hint}",
