@@ -2234,6 +2234,25 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/runtime/builds":   # GET — the Engine pane reads this
             from . import llmserver
             return self._send_json(200, llmserver.list_llama_builds())
+        if path == "/api/model/facts":
+            # The model menu's details card: what a model takes in, whether it
+            # reasons, its context. v is a menu row's value.
+            from . import model_facts as _mf
+            v = str(self._query().get("v") or "")
+            kind, _, rest = v.partition("::")
+            who, _, model = rest.partition("::")
+            try:
+                if kind == "disk":
+                    facts = _mf.for_file(rest)
+                elif kind == "agent":
+                    facts = _mf.for_agent(who, model)
+                elif kind == "prov" and model:
+                    facts = _mf.for_provider(who, model)
+                else:
+                    facts = {}
+            except Exception as e:
+                facts = {"error": f"{type(e).__name__}: {e}"}
+            return self._send_json(200, facts)
         if path == "/api/runtime/info":
             from . import llmserver
             _info = llmserver.llama_runtime_info()

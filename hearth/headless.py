@@ -316,13 +316,37 @@ def provider_models(base: str, key: str = "", timeout: float = 6):
             rows = json.loads(r.read().decode("utf-8", "replace")).get("data") or []
     except Exception:
         return None
-    sizes = {}
+    sizes, facts = {}, {}
     for m in rows:
         n = next((m.get(f) for f in _SIZE_FIELDS if isinstance(m.get(f), int) and m.get(f) > 1024), None)
         if m.get("id") and n:
             sizes[m["id"]] = n
+        # What the list itself says a model takes and does (OpenRouter's rows say both).
+        f = {}
+        ins = (m.get("architecture") or {}).get("input_modalities") or m.get("input_modalities")
+        if isinstance(ins, list) and ins:
+            f["inputs"] = [str(x) for x in ins]
+        params = m.get("supported_parameters")
+        if isinstance(params, list):
+            f["reasoning"] = "reasoning" in params
+        if m.get("id") and f:
+            facts[m["id"]] = f
     _LIST_SIZES[base.rstrip("/")] = (time.time(), sizes)
+    _LIST_FACTS[base.rstrip("/")] = facts
     return [m["id"] for m in rows if m.get("id") and not any(p in m["id"].lower() for p in NOT_CHAT)]
+
+
+_LIST_FACTS: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+
+def listed_facts(base: str, model_id: str) -> Dict[str, Any]:
+    """What the provider's last-read list said about a model: inputs, reasoning, context."""
+    key = (base or "").rstrip("/")
+    out = dict((_LIST_FACTS.get(key) or {}).get(model_id) or {})
+    ctx = ((_LIST_SIZES.get(key) or (0, {}))[1]).get(model_id)
+    if ctx:
+        out["ctx"] = ctx
+    return out
 
 
 def listed_context(base: str, key: str, model_id: str) -> Optional[int]:

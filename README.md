@@ -105,7 +105,7 @@ OpenClaw and Hermes are agents that go wide, across many messaging channels. Ope
 
 **Can it replace ChatGPT?** For talking, looking things up and working on your own files and apps, on a good brain, yes. On a small local model it is quicker to set up than it is clever, so pick the brain to match the job.
 
-**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. There is no telemetry.
+**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. There is no telemetry. Hearth also asks GitHub for its own updates, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
 
 **Why "Hearth"?** It's the warm center of the house. JARVIS lives there.
 

@@ -191,6 +191,10 @@ jobs:
         run: |
           python tests/test_activity_log.py
 
+      - name: A model's details for the model menu, from its own source first
+        run: |
+          python tests/test_model_facts.py
+
       - name: A team of agents, as the panes show it
         # Tool results rendered as empty arrows, failures as done, and members
         # that never started were not mentioned to the model.

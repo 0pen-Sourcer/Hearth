@@ -593,6 +593,26 @@ with sync_playwright() as pw:
     check(f"it can be cancelled there, and offers no pause npm couldn't keep {dl['buttons']} {cancels}",
           dl["buttons"] == ["cancel"] and cancels == [{"id": "claude-code"}])
 
+    # A model's details (what it takes in, whether it reasons, its context)
+    # weren't anywhere; OpenCode shows them beside its menu.
+    facts_asked = []
+    pg.route("**/api/model/facts*", lambda r: (facts_asked.append(r.request.url) or r.fulfill(json={
+        "name": "Standin-9B-Q4_K_M", "where": "This PC", "inputs": ["text", "image"], "ctx": 262144, "size_gb": 5.4})))
+    pg.evaluate("mpOpen()")
+    pg.wait_for_timeout(300)
+    pg.hover('.mp-row[data-v^="disk::"]')
+    pg.wait_for_timeout(700)
+    card = pg.evaluate("document.getElementById('mp-card')?.innerText || ''")
+    pg.mouse.move(2, 2)
+    pg.wait_for_timeout(200)
+    gone = pg.evaluate("!document.getElementById('mp-card')")
+    pg.evaluate("mpClose()")
+    pg.unroute("**/api/model/facts*")
+    check(f"hovering a model shows what it takes in and how much it holds {card!r} {facts_asked[:1]}",
+          "text, image" in card and "144 tokens" in card and "This PC" in card
+          and facts_asked and "disk%3A%3A" in facts_asked[0])
+    check("and the card goes when the pointer leaves the menu", gone)
+
     check(f"the page ran without a script error {errors}", not errors)
 
     print()

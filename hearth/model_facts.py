@@ -1,0 +1,163 @@
+"""What a model takes in, whether it can reason, and how much it holds.
+
+Each fact comes from where the model is offered when that place says it: the
+model file on this PC, the agent's own model list, the provider's list. What
+those leave out is looked up in models.dev, the open model catalog OpenCode
+reads its own model details from, kept a day. A fact nobody gives is left out
+rather than guessed.
+"""
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+CATALOG_URL = "https://models.dev/api.json"
+_CACHE = Path(os.path.expanduser("~/.hearth/models_dev.json"))
+_OPENCODE_COPY = Path(os.path.expanduser("~/.cache/opencode/models.json"))
+_DAY = 86400
+
+# Hearth's name for a provider or agent, where the catalog uses another.
+_CATALOG_ID = {"gemini": "google", "grok": "xai", "claude-code": "anthropic", "codex": "openai"}
+
+_LOCK = threading.Lock()
+_INDEX: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_LOADED = [0.0]
+
+
+def _load() -> Dict[str, Any]:
+    fresh = _CACHE.is_file() and time.time() - _CACHE.stat().st_mtime < _DAY
+    if not fresh:
+        try:
+            import urllib.request
+            req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Hearth"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                raw = r.read()
+            json.loads(raw)
+            _CACHE.parent.mkdir(parents=True, exist_ok=True)
+            _CACHE.write_bytes(raw)
+        except Exception:
+            pass
+    for p in (_CACHE, _OPENCODE_COPY):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(d, dict) and d:
+                return d
+        except (OSError, ValueError):
+            continue
+    return {}
+
+
+def _index() -> Dict[str, Dict[str, Dict[str, Any]]]:
+    with _LOCK:
+        if not _INDEX or time.time() - _LOADED[0] > _DAY:
+            cat = _load()
+            if cat:
+                _INDEX.clear()
+                for pid, prov in cat.items():
+                    if isinstance(prov, dict):
+                        _INDEX[pid.lower()] = {str(k).lower(): v for k, v in (prov.get("models") or {}).items()
+                                               if isinstance(v, dict)}
+                _LOADED[0] = time.time()
+        return _INDEX
+
+
+def catalog_entry(provider: str, model_id: str) -> Optional[Dict[str, Any]]:
+    """The catalog's record for a model, by the provider it came from first."""
+    idx = _index()
+    mid = (model_id or "").strip().lower()
+    if mid.startswith("models/"):
+        mid = mid[len("models/"):]
+    if not idx or not mid:
+        return None
+    pid = _CATALOG_ID.get((provider or "").lower(), (provider or "").lower())
+    tries = [(pid, mid)]
+    if "/" in mid:                       # "vendor/model" as OpenRouter and OpenCode name them
+        vendor, rest = mid.split("/", 1)
+        tries += [(vendor, rest), (pid, rest), (_CATALOG_ID.get(vendor, vendor), rest)]
+    for p, m in tries:
+        hit = idx.get(p, {}).get(m)
+        if hit:
+            return hit
+    bare = mid.split("/")[-1]
+    return next((ms[bare] for ms in idx.values() if bare in ms), None)
+
+
+def from_catalog(provider: str, model_id: str) -> Dict[str, Any]:
+    e = catalog_entry(provider, model_id) or {}
+    out: Dict[str, Any] = {}
+    ins = (e.get("modalities") or {}).get("input")
+    if ins:
+        out["inputs"] = [str(x) for x in ins]
+    if "reasoning" in e:
+        out["reasoning"] = bool(e["reasoning"])
+    ctx = (e.get("limit") or {}).get("context")
+    if isinstance(ctx, int) and ctx > 0:
+        out["ctx"] = ctx
+    cost = e.get("cost") or {}
+    if cost and not any(cost.get(k) for k in ("input", "output")):
+        out["free"] = True
+    if e.get("name"):
+        out["name"] = e["name"]
+    return out
+
+
+def merge(own: Dict[str, Any], provider: str, model_id: str) -> Dict[str, Any]:
+    """The source's own facts, with the catalog's filling what they leave out."""
+    out = dict(from_catalog(provider, model_id))
+    out.update({k: v for k, v in own.items() if v not in (None, "", [])})
+    return out
+
+
+def for_file(path: str) -> Dict[str, Any]:
+    """A model file on this PC: what it holds, read from the file itself."""
+    from . import llmserver
+    out: Dict[str, Any] = {"name": Path(path).stem, "where": "This PC"}
+    ctx = llmserver.gguf_context_length(path)
+    if ctx:
+        out["ctx"] = ctx
+    # It sees images only with a vision projector beside it, which is what a load gives it.
+    out["inputs"] = ["text", "image"] if llmserver._find_mmproj(path) else ["text"]
+    try:
+        out["size_gb"] = round(os.path.getsize(path) / 1e9, 2)
+    except OSError:
+        pass
+    return out
+
+
+def for_agent(agent: str, model_id: str) -> Dict[str, Any]:
+    from . import claude_brain
+    info = claude_brain.agent_models(agent)
+    m = next((x for x in info.get("models") or [] if x.get("id") == model_id), None) or {}
+    real = m.get("model") or model_id
+    own = {"name": m.get("label") or real, "about": m.get("about") or "", "ctx": m.get("ctx"),
+           "efforts": m.get("efforts") or [], "where": info.get("label") or agent}
+    if m.get("efforts"):
+        own["reasoning"] = True
+    if agent == "codex":
+        own["inputs"] = _codex_inputs(real)
+    return merge(own, agent, real)
+
+
+def _codex_inputs(slug: str):
+    try:
+        from .codex_brain import _codex_home
+        with open(os.path.join(_codex_home(), "models_cache.json"), encoding="utf-8") as f:
+            for m in (json.load(f) or {}).get("models") or []:
+                if m.get("slug") == slug:
+                    return [str(x) for x in m.get("input_modalities") or []]
+    except Exception:
+        pass
+    return []
+
+
+def for_provider(pid: str, model_id: str) -> Dict[str, Any]:
+    from . import headless
+    label, base = headless.PROVIDERS.get(pid, (pid, ""))
+    own: Dict[str, Any] = {"name": model_id.replace("models/", ""), "where": label}
+    listed = headless.listed_facts(base, model_id) if base else {}
+    own.update(listed)
+    return merge(own, pid, model_id)

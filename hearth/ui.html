@@ -519,6 +519,15 @@
   .mp-keep small { font-size: 11.5px; color: var(--fg-faint); }
   .mp-keep .switch { flex: none; border: none; cursor: pointer; }
   .mp-sub .mp-row { padding: 6px 10px; font-size: 12.5px; }
+  /* A model's details beside the menu while its row is hovered. */
+  .mp-card { position: fixed; z-index: 1001; width: 250px; padding: 10px 12px; border-radius: var(--r);
+    background: var(--bg-2); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.28);
+    font: 12px var(--sans); color: var(--fg); pointer-events: none; display: grid;
+    grid-template-columns: auto 1fr; gap: 5px 14px; }
+  .mp-card .k { color: var(--fg-dim); }
+  .mp-card .v { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mp-card .about { grid-column: 1 / -1; color: var(--fg-dim); line-height: 1.4; margin-bottom: 2px; }
+  @media (max-width: 760px), (hover: none) { .mp-card { display: none; } }
   .mp-sub .mp-row .mp-s { font-size: 11px; }
   .mp-sub .mp-row.cur { background: color-mix(in srgb, var(--accent) 9%, transparent); }
   .btn-mini {
@@ -8618,6 +8627,12 @@ function mpOpen() {
     menu = document.createElement('div');
     menu.id = 'mp-menu'; menu.className = 'mp-menu'; menu.setAttribute('role', 'listbox'); menu.hidden = true;
     document.body.appendChild(menu);
+    menu.addEventListener('mouseover', (e) => {
+      const r = e.target.closest('.mp-row');
+      if (r && r !== menu._cardRow) { menu._cardRow = r; _mpCardFor(r); }
+    });
+    menu.addEventListener('mouseleave', () => { menu._cardRow = null; _mpCardHide(); });
+    menu.addEventListener('scroll', _mpCardHide, true);
     menu.addEventListener('click', (e) => {
       const get = e.target.closest('.mp-get');
       if (get) { e.stopPropagation(); mpClose(); if (get.dataset.setup) agentSetup(get.dataset.setup); return; }
@@ -8719,7 +8734,66 @@ function mpOpen() {
   const first = all || menu.querySelector('.mp-row.cur') || menu.querySelector('.mp-row:not([aria-disabled="true"])');
   if (first) first.focus({ preventScroll: true });
 }
+// What the details card asks about a row: its own value, or for the rows of
+// the brain in use, the same thing said with the provider or agent in front.
+function _mpFactsKey(r) {
+  const v = r.dataset.v || '';
+  if (/^(disk|prov|agent)::/.test(v)) {
+    if (/^agent::[^:]+$/.test(v)) {
+      const id = v.split('::')[1], info = STATE.agentInfo && STATE.agentInfo.provider === id ? STATE.agentInfo : null;
+      return `${v}::${(info && info.model) || ''}`;
+    }
+    return /^prov::[^:]+$/.test(v) ? '' : v;
+  }
+  const b = STATE.brain || {};
+  if (AGENT_BRAINS[b.providerKey]) return `agent::${b.providerKey}::${(STATE.agentInfo && STATE.agentInfo.model) || ''}`;
+  if (b.kind === 'cloud' && v) return `prov::${b.providerKey}::${v}`;
+  return '';
+}
+const MP_FACTS = new Map();
+const MP_INPUT_WORDS = { text: 'text', image: 'image', audio: 'audio', video: 'video', pdf: 'PDF', file: 'files' };
+function _mpCardHTML(f) {
+  const rows = [];
+  if (f.about) rows.push(`<div class="about">${esc(f.about)}</div>`);
+  const add = (k, v) => { if (v) rows.push(`<span class="k">${esc(k)}</span><span class="v" title="${esc(v)}">${esc(v)}</span>`); };
+  add('Model', f.name);
+  add('From', f.where);
+  add('Inputs', (f.inputs || []).map(x => MP_INPUT_WORDS[x] || x).join(', '));
+  add('Reasoning', f.reasoning == null ? '' : f.reasoning
+      ? ((f.efforts || []).length ? `Yes \u00b7 ${f.efforts.length} levels` : 'Yes') : 'No');
+  add('Context', f.ctx ? Number(f.ctx).toLocaleString() + ' tokens' : '');
+  add('Size', f.size_gb ? f.size_gb + ' GB' : '');
+  add('Price', f.free ? 'Free' : '');
+  return rows.length > (f.about ? 3 : 2) ? rows.join('') : '';
+}
+let _mpCardTimer = 0;
+function _mpCardHide() { clearTimeout(_mpCardTimer); document.getElementById('mp-card')?.remove(); }
+function _mpCardFor(r) {
+  _mpCardHide();
+  const key = r && _mpFactsKey(r);
+  if (!key) return;
+  _mpCardTimer = setTimeout(async () => {
+    let f = MP_FACTS.get(key);
+    if (!f) {
+      try { f = await api('/api/model/facts?v=' + encodeURIComponent(key)); } catch { f = {}; }
+      MP_FACTS.set(key, f);
+    }
+    const menu = document.getElementById('mp-menu');
+    if (!menu || menu.hidden || !r.isConnected || !r.matches(':hover, .kb')) return;
+    const html = _mpCardHTML(f);
+    if (!html) return;
+    const card = document.createElement('div');
+    card.id = 'mp-card'; card.className = 'mp-card'; card.innerHTML = html;
+    document.body.appendChild(card);
+    const m = menu.getBoundingClientRect(), row = r.getBoundingClientRect(), w = card.offsetWidth, h = card.offsetHeight;
+    const left = m.right + 8 + w <= innerWidth ? m.right + 8 : Math.max(8, m.left - 8 - w);
+    card.style.left = left + 'px';
+    card.style.top = Math.max(8, Math.min(row.top, innerHeight - h - 8)) + 'px';
+  }, 280);
+}
+
 function mpClose() {
+  _mpCardHide();
   const menu = document.getElementById('mp-menu');
   if (!menu || menu.hidden) return;
   menu.hidden = true;
