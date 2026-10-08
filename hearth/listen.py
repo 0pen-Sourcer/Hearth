@@ -783,13 +783,7 @@ def transcribe(audio) -> str:
             },
             condition_on_previous_text=False,
         )
-        text = " ".join(s.text.strip() for s in segments).strip()
-        # The language it was said in, so the reply is spoken in it too.
-        if text:
-            said = lang or (getattr(_info, "language", "")
-                            if getattr(_info, "language_probability", 0) >= 0.6 else "")
-            _voice.heard_language(said or "")
-        return text
+        return " ".join(s.text.strip() for s in segments).strip()
     except Exception as e:
         # An empty string is what "you said nothing" looks like too, so a
         # transcription that fails outright was indistinguishable from silence

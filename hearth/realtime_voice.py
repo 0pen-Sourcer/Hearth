@@ -762,10 +762,6 @@ def _run_session(sess: _Session) -> None:
                 # returns the finalized text. ~200-400ms after you stop talking.
                 text = rec.text()
                 _err_streak = 0
-                # The language it was said in, so the reply is spoken in it too.
-                if text:
-                    _tts.heard_language(lang or (getattr(rec, "detected_language", "") or ""
-                                                 if (getattr(rec, "detected_language_probability", 0) or 0) >= 0.6 else ""))
                 # Diagnostic: proves whether VAD is actually endpointing (a final
                 # utterance) vs blocking forever. If you SEE this line in the
                 # terminal after you stop talking, the final fired.

@@ -254,17 +254,17 @@ check("a sentence in Devanagari is read by a Hindi voice of the same kind",
 check("Japanese and Mandarin likewise, and English keeps the chosen voice",
       _v.voice_for("こんにちは", "am_michael")[:1] == "j" and _v.voice_for("你好", "af_heart")[:1] == "z"
       and _v.voice_for("Hello there", "am_michael") == "am_michael")
-# Spanish shares English's alphabet, so a Spanish reply went to the English
-# voice and was read with English sounds.
-_v.heard_language("es")
+# Spanish shares English's alphabet, so with Spanish set for listening a
+# Spanish reply still went to the English voice and was read with English sounds.
+os.environ["JARVIS_STT_LANGUAGE"] = "es"
 _es = _v.voice_for("Hola, ¿cómo estás? Ya está hecho.", "af_heart")
-_v.heard_language("en")
-check(f"a reply to someone who spoke Spanish is read by a Spanish voice of the same kind {_es}",
-      _es[:2] == "ef" and _v.voice_for("Hola, ¿cómo estás?", "af_heart") == "af_heart")
-_v.heard_language("es")
-check("a voice already of that language is kept",
-      _v.voice_for("Hola", "em_alex") == "em_alex")
-_v.heard_language("")
+_kept = _v.voice_for("Hola", "em_alex")
+os.environ["JARVIS_STT_LANGUAGE"] = ""
+check(f"with Spanish set for listening, a reply is read by a Spanish voice of the same kind {_es}",
+      _es[:2] == "ef" and _kept == "em_alex")
+check("with nothing set, the chosen voice reads Latin-alphabet text, whatever was said last",
+      _v.voice_for("Hola, ¿cómo estás?", "af_heart") == "af_heart")
+os.environ.pop("JARVIS_STT_LANGUAGE", None)
 
 print()
 if FAILS:
