@@ -17,7 +17,7 @@
 - [ ] My change matches the style of the surrounding code
 - [ ] I ran `python -c "import hearth"` and it still imports
 - [ ] If I added a tool, it's in `TOOL_DEFINITIONS` and works in the dev_tools REPL
-- [ ] If I touched the persona, I augmented it — didn't rewrite the existing voice
+- [ ] If I touched the persona, I added to it and didn't rewrite the existing voice
 - [ ] If I added a dep, it's optional / lazy-imported (Hearth installs in one step today; don't break that)
 - [ ] Docs / README updated if user-facing behavior changed
 - [ ] Tested on the OS my change affects (and noted which one below)

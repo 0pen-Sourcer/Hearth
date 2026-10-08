@@ -20,9 +20,9 @@ assignees: ''
 2.
 3.
 
-## CLI transcript
+## What you saw
 
-<!-- Paste the relevant chunk of your Hearth session. Include the user message and any tool calls / responses. Wrap in triple backticks. -->
+<!-- Paste the relevant part of the chat or terminal session, or a screenshot. Include your message and any tool calls and their results. Wrap text in triple backticks. -->
 
 ```
 ❯ <what you typed>
@@ -40,12 +40,12 @@ Get-Content "$HOME\Jarvis\logs\activity.jsonl" -Tail 20
 
 ## Environment
 
-- Hearth version / commit:
-- Python version:
+- Hearth version (Settings, About) or commit:
+- Installer (Full or Lite) or from source:
 - OS:
-- LLM server (LM Studio version / Ollama / other):
-- Model loaded:
-- Context size:
+- Brain (this PC's model with LM Studio / Ollama / Hearth's engine, a cloud provider, or an agent like Claude Code or Codex):
+- Model:
+- Approval mode (Ask, Auto-edit, Auto):
 
 ## Anything else?
 
