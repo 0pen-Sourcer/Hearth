@@ -12408,11 +12408,11 @@ async function refreshReminders() {
         <div class="lcard">
           <div class="lc-main">
             <div class="lc-title">${esc(it.what)}${tag}</div>
-            <div class="lc-meta">in ${fmtWhen(it.due_iso)} · ${esc(it.when_text || it.due_iso)}</div>
+            <div class="lc-meta">${it.watch ? `${esc(it.when_text)} · ${esc(it.watch)}` : `in ${fmtWhen(it.due_iso)} · ${esc(it.when_text || it.due_iso)}`}</div>
             ${meta}
           </div>
           <div class="lc-actions">
-            <button class="btn-mini" data-rsnooze="${esc(it.id)}" title="Snooze 10 min">snooze</button>
+            ${it.watch ? '' : `<button class="btn-mini" data-rsnooze="${esc(it.id)}" title="Snooze 10 min">snooze</button>`}
             <button class="btn-mini danger" data-rcancel="${esc(it.id)}" title="Cancel reminder">×</button>
           </div>
         </div>`;

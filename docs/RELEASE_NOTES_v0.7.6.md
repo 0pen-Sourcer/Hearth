@@ -28,6 +28,8 @@ A room holds eight desks. Past that the next room opens, a winter cabin, a libra
 
 Two helpers can't trip over each other. An agent program sent to work in a git repository works on its own copy of it, started from your folder as it is, unsaved changes included, and nothing it does reaches your folder until you say so. Its panel lists what it changed with the diff, and Bring in, Discard or Undo; the terminal has the same under /team changes, bring, discard and undo. Hearth's own helpers write directly, but a file one of them is working on is theirs until they finish, and what they changed can be undone. You can also give one task to two agents, say Codex and Claude Code, each on its own copy, have a check like your tests run on both, and pick the one to keep.
 
+A team starts from one plan that says who does what, and when JARVIS changes the plan every member still working hears about it before its next step. A helper can be kept to one folder for a task, so it reads what it needs but changes files only there, or given fewer tools than its role has.
+
 ## Claude Code, Codex or Cursor as JARVIS's brain
 
 If you already pay for Claude, JARVIS can think with it. Pick Claude Code from the model menu at the top of the window or in Settings, Chat brain, or type /brain claude-code in the terminal, and every message runs through Claude Code on your own install and plan, with no API key. It keeps all of Hearth: its tools reach your desktop, apps, memory and voice through Hearth, it stays JARVIS with your name and preferences, and each chat is one continuing Claude session, so it remembers what you said earlier. When it wants to do something risky, the same approval switch and prompt you already use ask you first, out loud too in voice mode. Its use counts toward your Claude plan's usage limits, the same as Claude Code itself; an API key is billed separately.
@@ -103,6 +105,8 @@ Passive memory works on reasoning models. Hearth notices durable facts on its ow
 ## Reminders
 
 Reminders are set for the time you meant. Hearth works out the exact time from what you said, and the reminder reads back the day and the time in plain words, so a slip shows up at once rather than at midnight. With the window and the terminal both open a reminder fires once instead of twice, and a reminder set while another one is firing is no longer lost.
+
+A reminder can watch a file or folder instead of the clock, like "when a PDF lands in Downloads, summarize it". It waits until the change holds still, so a download in progress isn't reported half done.
 
 ## Phone and teams
 

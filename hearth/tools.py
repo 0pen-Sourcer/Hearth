@@ -655,7 +655,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "('2026-05-27T19:00') or a duration from now ('25m', '2h', '3d'): convert "
             "what the user said yourself from the current local time you are given. "
             "Repeat with `recurring` ('every 30 minutes', 'daily'). Missed reminders "
-            "fire at the next launch."
+            "fire at the next launch. Or, instead of a time, `watch` a file or folder: "
+            "it fires when that changes (a file appears, is saved or removed), e.g. "
+            "'when a PDF lands in Downloads, summarize it'; with any `recurring` it "
+            "fires on every change until cancelled."
         ),
         "parameters": {
             "type": "object",
@@ -666,8 +669,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "action_tool": {"type": "string", "description": "A tool to run when it fires. Read-only tools run and their result joins the notification; tools that change something wait for the user to confirm."},
                 "action_args": {"type": "object", "description": "Arguments for action_tool, matching its parameters."},
                 "tag": {"type": "string", "description": "A label for grouping, like 'work' or 'medication'."},
+                "watch": {"type": "string", "description": "A file or folder to watch instead of a time. A folder is watched for the files directly in it."},
             },
-            "required": ["when", "what"],
+            "required": ["what"],
         },
     },
     {
@@ -6457,7 +6461,7 @@ _HANDLERS = {
     "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(
         p.get("when", ""), p.get("what", ""), p.get("recurring", ""),
         action_tool=p.get("action_tool", ""), action_args=p.get("action_args"),
-        tag=p.get("tag", "")),
+        tag=p.get("tag", ""), watch=p.get("watch", "")),
     "snooze_reminder": lambda p: __import__("hearth.reminders", fromlist=["snooze_reminder"]).snooze_reminder(
         p.get("id", ""), int(p.get("minutes", 10))),
     "list_reminders": lambda p: __import__("hearth.reminders", fromlist=["list_reminders"]).list_reminders(bool(p.get("include_fired"))),
