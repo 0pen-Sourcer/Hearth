@@ -164,10 +164,10 @@ unpacked = [m for m in own if not any(a == m or a.startswith(m + "/") for a in p
 check("every file repair checks for is one the patch restores"
       + (", missing " + ", ".join(unpacked) if unpacked else ""), not unpacked)
 
-# A PrismML ternary model failed with only "a different build of llama.cpp".
+# A model made for another build of llama.cpp said only that, with no way forward.
 _why = _ls.load_failure_hint("llama_model_load: tensor 'output.weight' has invalid ggml type 142. should be in [0, 42)")
-check(f"a model only PrismML's engine reads says so, and names the file that works {_why!r}",
-      "PrismML" in _why and "Q2_0_g64" in _why and "—" not in _ls.load_failure_hint("CUDA error out of memory"))
+check(f"a model made for another build of llama.cpp says how to add that build {_why!r}",
+      "Add an engine" in _why and "—" not in _ls.load_failure_hint("CUDA error out of memory"))
 
 print()
 if FAILS:
