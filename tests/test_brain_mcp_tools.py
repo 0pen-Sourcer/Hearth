@@ -18,6 +18,7 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WS = tempfile.mkdtemp(prefix="hearth-brainmcp-")
+HOME = tempfile.mkdtemp(prefix="hearth-brainmcp-home-")
 FAILS: list = []
 
 
@@ -34,7 +35,7 @@ with zipfile.ZipFile(ZIP, "w") as z:
 
 def server(brain: bool):
     env = dict(os.environ, HEARTH_WORKSPACE=WS, JARVIS_WORKSPACE=WS, PYTHONIOENCODING="utf-8",
-               HEARTH_NO_ACTIVITY_LOG="1")
+               HEARTH_NO_ACTIVITY_LOG="1", USERPROFILE=HOME, HOME=HOME)
     for k in ("HEARTH_BRAIN_URL", "HEARTH_BRAIN_TOKEN", "HEARTH_MCP_ALL_TOOLS", "HEARTH_BRAIN_GATE"):
         env.pop(k, None)
     if brain:
@@ -78,6 +79,11 @@ try:
     check(f"use_tool runs it {ran[:80]!r}", "inside/readme.txt" in ran)
     refused = text(rpc(p, 5, "tools/call", {"name": "use_tool", "arguments": {"name": "ask_user", "arguments": {}}}))
     check("a tool that needs Hearth's own window is still not reachable", refused.startswith("Error"))
+    import glob, time
+    time.sleep(0.5)
+    rec = [json.load(open(f, encoding="utf-8")) for f in glob.glob(os.path.join(HOME, ".hearth", "mcp_clients", "*.json"))]
+    check(f"the connected app is named past the Python launcher, not as python.exe {[r.get('client') for r in rec]}",
+          rec and all(not str(r.get("client") or "").startswith("python") for r in rec))
 finally:
     p.kill()
 

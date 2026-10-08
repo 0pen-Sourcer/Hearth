@@ -375,10 +375,19 @@ if __name__ == "__main__":
         _client = "unknown"
         try:
             import psutil  # type: ignore
-            _pn = psutil.Process(os.getppid()).name().lower()
+            # The app that started us, past any Python launcher (a venv's
+            # python.exe starts the real interpreter, so the parent is often
+            # just another python.exe) and Hearth's own runner.
+            _pr = psutil.Process(os.getppid())
+            for _ in range(4):
+                if not _pr.name().lower().startswith(("python", "py.exe", "pythonw", "uv", "cmd.exe")):
+                    break
+                _pr = _pr.parent() or _pr
+            _pn = _pr.name().lower()
             _client = _pn
             for _k, _label in (("claude", "Claude Desktop"), ("lmstudio", "LM Studio"),
-                               ("lm studio", "LM Studio"), ("cursor", "Cursor"),
+                               ("lm studio", "LM Studio"), ("cursor", "Cursor"), ("codex", "Codex"),
+                               ("opencode", "OpenCode"), ("hearth", "Hearth"),
                                ("code", "VS Code"), ("ollama", "Ollama")):
                 if _k in _pn:
                     _client = _label
