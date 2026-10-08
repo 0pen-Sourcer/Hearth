@@ -732,6 +732,10 @@ with sync_playwright() as pw:
     check("done ones have their own list, and an empty list offers examples to try",
           rem["done"] == 1 and rem["examples"] == 3)
     pg.evaluate("showView('chat')")
+    words = pg.evaluate("""() => [_lgLine('memory_forget', { name: 'old-note' }, true), _lgLine('memory_save', { name: 'tabs' }, true),
+                                  _lgLine('memory_recall', { query: 'tabs' }, true)]""")
+    check(f"forgetting and saving a memory are said as that, not as recalling {words}",
+          words[0].startswith("Forgot") and words[1].startswith("Saved") and words[2].startswith("Recalled"))
     check("a tool with no verb is named plainly, one with a target says what it did",
           logs["plain"] == "System info" and logs["ran"].startswith("Ran echo hi"))
     check("the server log's requests are read into sizes and speeds",

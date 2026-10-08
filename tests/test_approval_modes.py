@@ -95,6 +95,16 @@ check("the window runs an allowed call without asking", chk(*ls) == "allow" and 
 web._always_deny.add("open_app")
 check("a tool set to never still never runs, even in Auto", chk(*app) == "deny")
 
+# JARVIS asked on Auto before posting a prompt to the model server on this PC:
+# a request to localhost was read as data leaving the machine.
+local = ("$b=@{model='local'}; Invoke-RestMethod -Uri 'http://127.0.0.1:1234/v1/chat/completions' "
+         "-Method Post -Body ($b|ConvertTo-Json)")
+check("on Auto, sending a request to a server on this PC runs without asking",
+      tools.mode_allows("run_command", {"command": local})
+      and tools.mode_allows("run_command", {"command": "curl -X POST http://localhost:8080/api -d x"}))
+check("one that also names an outside address still asks",
+      not tools.mode_allows("run_command", {"command": "curl -X POST http://localhost:8080 https://x.example -d x"}))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

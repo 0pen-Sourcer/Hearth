@@ -8855,12 +8855,22 @@ _OUTWARD_PATTERNS = [
 ]
 
 
+# A request whose only addresses are this PC (a local model server, say) sends
+# nothing anywhere.
+_URL = re.compile(r"""https?://[^\s'"`)]+""", re.I)
+_THIS_PC = re.compile(r"^https?://(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(/|$)", re.I)
+
+
 def _is_outward(cmd: str) -> Optional[str]:
     """What in a command reaches outside this PC or changes the machine itself
     (a push, a publish, an install, an upload), or None."""
-    for pat in _OUTWARD_PATTERNS:
+    for n, pat in enumerate(_OUTWARD_PATTERNS):
         m = pat.search(cmd or "")
         if m:
+            if n in (6, 7):                     # Invoke-RestMethod / curl sending data
+                urls = _URL.findall(cmd or "")
+                if urls and all(_THIS_PC.match(u) for u in urls):
+                    continue
             return m.group(0)
     return None
 

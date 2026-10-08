@@ -12817,7 +12817,7 @@ function _lgItems(events) {
 // pointed at; otherwise the tool's own name, said plainly.
 function _lgLine(tool, args, done) {
   const what = _stepWhat(args), kind = _toolKind(tool || '');
-  if (what && (done ? ROOM_DONE_VERBS : ROOM_VERBS)[kind]) return _stepLine(tool, what, done);
+  if (STEP_OWN_WORDS[tool] || (what && (done ? ROOM_DONE_VERBS : ROOM_VERBS)[kind])) return _stepLine(tool, what, done);
   const plain = String(tool || 'tool').replace(/^mcp__\w+__/, '').replace(/_/g, ' ');
   return plain.charAt(0).toUpperCase() + plain.slice(1) + (what ? ' · ' + what : '');
 }
@@ -20516,7 +20516,13 @@ function _stepWhat(args) {
 // A step that has come back is told in the past: "Looked in Jarvis", not "Looking".
 const ROOM_DONE_VERBS = { folder: 'Looked in', search: 'Searched for', file: 'Read', edit: 'Changed', term: 'Ran',
   globe: 'Opened', web: 'Looked up', brain: 'Recalled' };
+// The memory tools share one icon, but recalling, saving and forgetting are
+// different things to say.
+const STEP_OWN_WORDS = { memory_save: ['Saving', 'Saved'], memory_forget: ['Forgetting', 'Forgot'],
+                         memory_list: ['Listing memories', 'Listed memories'] };
 function _stepLine(tool, what, done) {
+  const own = STEP_OWN_WORDS[tool];
+  if (own) return own[done ? 1 : 0] + (what ? ' ' + what : '');
   const kind = _toolKind(tool || '');
   if (done) {
     if (what && ROOM_DONE_VERBS[kind]) return ROOM_DONE_VERBS[kind] + ' ' + what;
