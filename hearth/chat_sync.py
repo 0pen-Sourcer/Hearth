@@ -47,7 +47,7 @@ def to_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 pending = []
             text = _text(m.get("content")).strip()
             if text:
-                out.append({"role": "user", "content": text})
+                out.append({"role": "user", "content": text, "via": "terminal"})
         elif role == "assistant":
             for tc in m.get("tool_calls") or []:
                 fn = tc.get("function") or {}
@@ -60,14 +60,15 @@ def to_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 pending.append(ev)
             text = _text(m.get("content")).strip()
             if text and not m.get("tool_calls"):
-                out.append({"role": "assistant", "content": text, **({"events": pending} if pending else {})})
+                out.append({"role": "assistant", "content": text, "via": "terminal",
+                            **({"events": pending} if pending else {})})
                 pending = []
         elif role == "tool":
             ev = calls.get(m.get("tool_call_id") or "")
             if ev is not None:
                 ev["result"] = _text(m.get("content"))[:4000]
     if pending:
-        out.append({"role": "assistant", "content": "", "events": pending})
+        out.append({"role": "assistant", "content": "", "events": pending, "via": "terminal"})
     return out
 
 
@@ -135,3 +136,22 @@ def newer(cid: str, seen: int) -> List[Dict[str, Any]]:
     """Turns added to a chat file elsewhere since `seen` of them were known."""
     d = load(cid) or {}
     return list((d.get("messages") or [])[seen:])
+
+
+def keep_terminal_turns(saved: Optional[Dict[str, Any]], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    """The window saves a chat whole. Turns the terminal added since the window
+    last read the file would be lost; put them back where they were, and mark
+    the chat changed so the window reads it again."""
+    if not saved:
+        return incoming
+    have = {(m.get("role"), _text(m.get("content"))) for m in incoming.get("messages") or []}
+    missing = [(i, m) for i, m in enumerate(saved.get("messages") or [])
+               if m.get("via") == "terminal" and (m.get("role"), _text(m.get("content"))) not in have]
+    if not missing:
+        return incoming
+    merged = list(incoming.get("messages") or [])
+    for i, m in missing:
+        merged.insert(min(i, len(merged)), m)
+    out = dict(incoming, messages=merged, msg_count=len(merged))
+    out["updated"] = max(int(incoming.get("updated") or 0), int(saved.get("updated") or 0)) + 1
+    return out

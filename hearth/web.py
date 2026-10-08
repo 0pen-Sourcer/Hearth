@@ -3144,6 +3144,9 @@ class HearthHandler(BaseHTTPRequestHandler):
                 prev = _load_convo(data["id"]) or {}
                 if prev.get("pinned"):
                     data["pinned"] = True
+            # Turns the terminal added that this window hadn't read yet stay.
+            from . import chat_sync as _cs
+            data = _cs.keep_terminal_turns(_load_convo(data["id"]), data)
             ok = _save_convo(data)
             return self._send_json(200 if ok else 500, {"ok": ok})
         if path == "/api/conversations/pin":

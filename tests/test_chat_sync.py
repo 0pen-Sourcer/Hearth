@@ -80,9 +80,28 @@ def run(cmd):
     return ansi.sub("", buf.getvalue())
 
 
+# The window saved its older copy of the chat right after the terminal added a
+# turn, and the terminal's turn was gone.
+import socket, threading, urllib.request    # noqa: E401,E402
+from hearth import web                         # noqa: E402
+stale = chat_sync.load(cid)
+cli.messages += [{"role": "user", "content": "one more from the terminal"}, {"role": "assistant", "content": "Done there."}]
+cli._chat_push()
+sk = socket.socket(); sk.bind(("127.0.0.1", 0)); port = sk.getsockname()[1]; sk.close()
+srv = web._QuietHTTPServer(("127.0.0.1", port), web.HearthHandler)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+stale["messages"] += [{"role": "user", "content": "from the window"}, {"role": "assistant", "content": "Window reply."}]
+req = urllib.request.Request(f"http://127.0.0.1:{port}/api/conversations", data=json.dumps(stale).encode(),
+                             headers={"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{port}"})
+urllib.request.urlopen(req, timeout=10).read()
+srv.shutdown()
+order = [m["content"] for m in chat_sync.load(cid)["messages"]][-4:]
+check(f"the window saving an older copy keeps the terminal's newest turn, in its place {order}",
+      order == ["one more from the terminal", "Done there.", "from the window", "Window reply."])
+
 listed = run("/chats")
 check(f"/chats lists chats from both places {listed!r}", "Plan the trip" in listed and "window" in listed and "terminal" in listed)
-out = run("/chat 1")
+out = run("/chat Plan the trip")
 check(f"/chat carries a window chat on in the terminal {out!r}",
       "Plan the trip" in out and cli.messages[-1]["content"] == "Three days: beach, fort, market."
       and cli._chat["id"] == "c_window1")
