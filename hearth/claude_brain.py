@@ -352,6 +352,30 @@ def chosen_model(provider: str) -> str:
         return ""
 
 
+# Claude Code says per turn whether fast mode was on (fast_mode_state). A model
+# it turned out not to be on for, with this plan, isn't offered it again.
+FAST_ABOUT = "Faster replies, uses more of the plan"
+
+
+def _no_fast() -> Dict[str, bool]:
+    try:
+        with open(os.path.join(_HOME, "claude_no_fast.json"), encoding="utf-8") as f:
+            return json.load(f) or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _mark_no_fast(model: str) -> None:
+    data = _no_fast()
+    data[model or "default"] = True
+    try:
+        os.makedirs(_HOME, exist_ok=True)
+        with open(os.path.join(_HOME, "claude_no_fast.json"), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
 def fast_on(provider: str) -> bool:
     """Whether the agent's Fast tier was switched on for it (quicker answers
     that use more of the plan)."""
@@ -393,7 +417,8 @@ def agent_models(provider: str) -> Dict[str, Any]:
                            "label": "Default" if default else (name if older else shown),
                            "about": desc if default else (rest if older else desc),
                            "model": full, "ctx": seen.get(full),
-                           "efforts": list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else []})
+                           "efforts": list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else [],
+                           "fast": "" if _no_fast().get("default" if default else value) else FAST_ABOUT})
     elif provider == "codex":
         from . import codex_brain
         models = codex_brain.models()
@@ -809,6 +834,10 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
     if effort and effort in next((m["efforts"] for m in agent_models(PROVIDER)["models"] if m["id"] == alias),
                                  CLAUDE_EFFORTS):
         args += ["--effort", effort]
+    # Fast is a setting of Claude Code's own; it says afterwards whether it applied.
+    want_fast = fast_on(PROVIDER) and not _no_fast().get(alias or "default")
+    if want_fast:
+        args += ["--settings", json.dumps({"fastMode": True})]
     cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
     os.makedirs(cwd, exist_ok=True)
 
@@ -925,6 +954,10 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
                 sid = ev.get("session_id") or sid
                 final_text = ev.get("result") or ""
                 answered = True
+                if want_fast and ev.get("fast_mode_state") == "off":
+                    _mark_no_fast(alias)
+                    emit("heads_up", title="Fast isn't available here",
+                         message="Claude Code ran this at normal speed: fast mode isn't on for this model or plan.")
         await proc.wait()
         err = (await proc.stderr.read()).decode("utf-8", "replace").strip()
     except Exception as e:

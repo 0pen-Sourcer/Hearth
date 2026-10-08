@@ -10404,6 +10404,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
         ev.type === 'assistant_chunk' || ev.type === 'tool_call' ||
         ev.type === 'tool_call_partial') _clearPromptPoll();
 
+    if (ev.type === 'heads_up') {
+      toast(ev.title || 'Heads up', ev.message || '', 'warn', 8000);
+      return;
+    }
     if (ev.type === 'model_loading') {
       // No model was loaded when this turn started, so the backend is booting
       // the default one on-demand (~8-40s). Show a cue instead of dead air —

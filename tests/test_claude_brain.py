@@ -72,7 +72,7 @@ out({{"type": "assistant", "message": {{"content": [{{"type": "tool_use", "id": 
 out({{"type": "user", "message": {{"content": [{{"type": "tool_result", "tool_use_id": "t1", "content": [{{"type": "text", "text": "Wednesday"}}]}},
      {{"type": "tool_result", "tool_use_id": "t2", "content": "edited"}}, {{"type": "tool_result", "tool_use_id": "t3", "content": "ok"}}]}}}})
 out({{"type": "stream_event", "event": {{"type": "content_block_delta", "delta": {{"type": "text_delta", "text": "Done."}}}}}})
-out({{"type": "result", "subtype": "success", "is_error": False, "session_id": "sess-123", "num_turns": 3, "total_cost_usd": 0.01, "result": "I'm JARVIS.Done.",
+out({{"type": "result", "subtype": "success", "is_error": False, "session_id": "sess-123", "num_turns": 3, "total_cost_usd": 0.01, "result": "I'm JARVIS.Done.", "fast_mode_state": "off",
      "modelUsage": {{"claude-haiku-4-5": {{"outputTokens": 12, "contextWindow": 200000}},
                     "claude-opus-5-5": {{"outputTokens": 480, "contextWindow": 1000000}}}}}})
 # Anything said while it worked is its next step; stdin closing ends it.
@@ -264,6 +264,21 @@ tools.approval_mode = lambda: "ask"
 check("with nobody watching, Ask lets nothing risky through",
       cb.decide(cb._TOKEN, "Bash", {"command": "del x"})["behavior"] == "deny")
 tools.approval_mode = real_mode
+
+
+# Claude Code's fast mode had no switch here; now it does, and Claude Code says whether it applied.
+from hearth import web as _w
+_cfg = _w._load_settings(); _cfg["fast_claude-code"] = True; _w._save_settings(_cfg)
+offered = [m.get("fast") for m in cb.agent_models("claude-code")["models"]]
+before = len(open(argv_log).read().splitlines())
+told = []
+asyncio.run(cb.run_turn("hello fast", emit=lambda t, **f: told.append((t, f)), history=[], permission_check=lambda n, a: "allow"))
+argv = json.loads(open(argv_log).read().splitlines()[before])["argv"]
+check(f"with Fast on, Claude Code is asked for fast mode {argv[argv.index('--settings') + 1] if '--settings' in argv else argv}",
+      all(offered) and "--settings" in argv and json.loads(argv[argv.index("--settings") + 1]) == {"fastMode": True})
+check("when it says fast mode wasn't on, that is said once and the model isn't offered Fast again",
+      any(t == "heads_up" for t, f in told) and not cb.agent_models("claude-code")["models"][0].get("fast"))
+_cfg = _w._load_settings(); _cfg.pop("fast_claude-code", None); _w._save_settings(_cfg)
 
 print()
 if FAILS:
