@@ -225,7 +225,7 @@ def _open_tmux(spawned: List[Dict[str, Any]]) -> bool:
 def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Spawn a team of background subagents and open a live pane per agent.
 
-    members: [{name, persona, prompt}]. persona defaults to 'coder'.
+    members: [{name, persona, prompt}]. persona defaults to 'general'.
     """
     from . import subagents
     if not members:
@@ -256,7 +256,7 @@ def launch_team(members: List[Dict[str, Any]]) -> Dict[str, Any]:
         return f"You are {name}, working at the same time as: {'; '.join(others)}. {how}\n\n{prompt}"
 
     for m in members:
-        persona = (m.get("persona") or "coder").strip()
+        persona = (m.get("persona") or "general").strip()
         name = str(m.get("name") or persona).strip()
         prompt = (m.get("prompt") or "").strip()
         if not prompt:

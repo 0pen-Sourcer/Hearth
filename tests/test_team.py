@@ -132,6 +132,31 @@ check("with allow-always for that tool, it runs", os.path.exists(TARGET))
 os.remove(os.path.join(WS, "permissions.json"))
 STATE["call"] = None
 
+# ------------------------------------------------------------ a general helper
+# Every helper role had a short fixed tool list, so a task that crossed areas
+# had no role that could do it. The general one starts with the everyday set and
+# loads more itself, into its own list, not the main assistant's.
+from hearth import tools as _T                                       # noqa: E402
+STATE["call"] = {"name": "load_tools", "arguments": json.dumps({"query": "archive"})}
+STATE["calls"] = 0
+r = subagents.spawn_subagent(persona="general", prompt="look inside the zip", mode="sync")
+_route = next(json.loads(l) for l in open(r["transcript_path"], encoding="utf-8") if '"route"' in l)
+_seen = _route["tools_exposed"]
+check(f"a general helper gets the everyday tools, never the mouse, team control or asking the person {len(_seen)}",
+      {"read_file", "web_search", "run_command", "load_tools"} <= set(_seen)
+      and not {"computer_click", "launch_team", "ask_user", "spawn_subagent"} & set(_seen))
+check("it loads a tool it needs on its own, without changing the main assistant's list",
+      "list_archive" in rendered(r["transcript_path"]) and "list_archive" not in _T._unlocked_tools)
+res = None
+_spawn0 = subagents.spawn_subagent
+subagents.spawn_subagent = lambda **kw: {"ok": True, "agent_id": "x", "transcript_path": "", "persona": kw["persona"]}     if not kw.get("persona_seen") else None
+_got = []
+subagents.spawn_subagent = lambda **kw: (_got.append(kw["persona"]) or {"ok": True, "agent_id": "x", "transcript_path": ""})
+team.launch_team([{"name": "Any", "prompt": "do it"}])
+subagents.spawn_subagent = _spawn0
+check(f"a team member with no role named is a general helper {_got}", _got == ["general"])
+STATE["call"] = None
+
 # --------------------------------------------------------- who actually started
 # The stand-in runs on 127.0.0.1, so this is a local endpoint: a limit of 4.
 team._open_wt = team._open_consoles = team._open_tmux = lambda _s: False

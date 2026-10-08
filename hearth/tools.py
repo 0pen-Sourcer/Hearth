@@ -719,8 +719,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "persona": {"type": "string", "description":
-                    "researcher, coder, archivist, librarian, summarizer or "
-                    "pdf_coordinator (list_subagent_personas describes them)."},
+                    "general (any task, or one that crosses areas), researcher, "
+                    "coder, archivist, librarian, summarizer or pdf_coordinator "
+                    "(list_subagent_personas describes them)."},
                 "prompt": {"type": "string", "description":
                     "The work, tightly scoped: one question, one file, one "
                     "chunk."},
@@ -8074,8 +8075,8 @@ TOOL_DEFINITIONS.append({
     "parameters": {"type": "object", "properties": {
         "members": {"type": "array", "items": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Short label, e.g. 'Architect', 'Frontend'."},
-            "persona": {"type": "string", "enum": ["coder", "researcher", "archivist", "summarizer"],
-                        "description": "Sub-agent role. Default 'coder'."},
+            "persona": {"type": "string", "enum": ["coder", "researcher", "archivist", "summarizer", "general"],
+                        "description": "Helper role. Default 'general', which can do any of it; pick another for a task that is clearly one kind."},
             "prompt": {"type": "string", "description": "The scoped task for this member."},
             "agent": {"type": "string", "description": "Leave out for a Hearth helper. Or an agent program "
                       "installed here, by id: " + ", ".join(__import__("hearth.external_agents", fromlist=["AGENTS"]).AGENTS)
@@ -8651,7 +8652,7 @@ def _words_of(text: str) -> frozenset:
     return frozenset(out)
 
 
-def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
+def unlock_tools(query: str = "", touch: bool = True) -> "List[Dict[str, Any]]":
     """Move deferred tools matching `query` into the active set so their schemas
     ship next turn. Scores name > category > description, drops stopwords, and
     caps the result so a vague query surfaces the RELEVANT tools, not a flood.
@@ -8667,9 +8668,11 @@ def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
             deferred.append({"name": td["name"], "description": td["description"], "parameters": td["parameters"]})
     except Exception:
         pass
+    # A helper finds tools for its own list without changing the main one.
+    _touch = _touch_unlocked if touch else (lambda _name: None)
     if not q or q == "all":
         for td in deferred:
-            _touch_unlocked(td["name"])
+            _touch(td["name"])
         return deferred
     # Picking by name is the main path: every deferred tool is named in this
     # tool's description, so the model chooses rather than hoping a keyword
@@ -8681,10 +8684,10 @@ def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
         picked = [by_name[n.strip()] for n in q[len("select:"):].split(",")
                   if n.strip() in by_name]
         for td in picked:
-            _touch_unlocked(td["name"])
+            _touch(td["name"])
         return picked
     if q in by_name:
-        _touch_unlocked(by_name[q]["name"])
+        _touch(by_name[q]["name"])
         return [by_name[q]]
     # Keyword fallback, for when the model is unsure of the name. Whole words
     # only, so a short word cannot land inside a longer one.
@@ -8710,7 +8713,7 @@ def unlock_tools(query: str = "") -> "List[Dict[str, Any]]":
     scored.sort(key=lambda x: -x[0])
     matched = [td for _, td in scored[:10]]   # cap — don't flood the context
     for td in matched:
-        _touch_unlocked(td["name"])
+        _touch(td["name"])
     return matched
 
 

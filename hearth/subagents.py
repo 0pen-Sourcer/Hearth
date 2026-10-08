@@ -732,6 +732,30 @@ _DANGEROUS_FOR_SUBAGENTS = {
 }
 
 
+# Only the main assistant runs these: starting or judging a team, and asking
+# the person a question (a helper has no one to ask).
+_MAIN_ONLY = {"launch_team", "race_helpers", "helper_changes", "ask_user", "end_session"}
+
+
+def _load_for_helper(tools: List[Dict[str, Any]], query: str) -> str:
+    """load_tools for a helper: adds what matches to this helper's own list."""
+    from .tools import unlock_tools
+    have = {t["function"]["name"] for t in tools}
+    added = []
+    for td in unlock_tools(query, touch=False):
+        n = td["name"]
+        if n in have or n in _DANGEROUS_FOR_SUBAGENTS or n in _MAIN_ONLY or n.startswith(("spawn_", "tell_")):
+            continue
+        tools.append({"type": "function", "function": {
+            "name": n, "description": td.get("description", ""),
+            "parameters": td.get("parameters", {"type": "object"})}})
+        added.append(td)
+    if not added:
+        return "No other tools matched that, or the ones that did stay with the main assistant."
+    return "Loaded these tools, you can call them now:\n" + "\n".join(
+        f"- {td['name']}: {td.get('description', '')[:160]}" for td in added)
+
+
 def concurrency_capacity() -> Tuple[int, str]:
     """(how many sub-agents can genuinely run at once, one-line reason).
 
@@ -762,6 +786,21 @@ def _filter_tools(allowed: List[str]) -> List[Dict[str, Any]]:
     import os
     from . import TOOL_DEFINITIONS
     block = {"spawn_subagent", "get_subagent_result", "list_subagent_personas", "tell_subagent"}
+    if allowed and "core" in allowed:
+        # The main assistant's everyday set, with load_tools for the rest. The
+        # team tools and asking the person stay with the main assistant, and the
+        # mouse and keyboard stay with the person.
+        from .tools import _DEFERRED_TOOLS, _LOAD_TOOLS_SCHEMA
+        allow = ({t["name"] for t in TOOL_DEFINITIONS if t["name"] not in _DEFERRED_TOOLS}
+                 - block - _DANGEROUS_FOR_SUBAGENTS - _MAIN_ONLY)
+        out = [_LOAD_TOOLS_SCHEMA]
+        allow.add("message_helper")
+        for t in TOOL_DEFINITIONS:
+            if t["name"] in allow:
+                out.append({"type": "function", "function": {
+                    "name": t["name"], "description": t.get("description", ""),
+                    "parameters": t.get("parameters", {"type": "object"})}})
+        return out
     if allowed and ("*" in allowed):
         allow = {t["name"] for t in TOOL_DEFINITIONS} - block
         # Wildcard doesn't mean "hand a child the keys to run_command + mouse".
@@ -1053,6 +1092,8 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
                          f"do with {name}; the main assistant can ask the user.)")
             elif name == "message_helper":
                 content = json.dumps(await message_helper(agent_id, _helper_label(tpath), args), ensure_ascii=False)
+            elif name == "load_tools":
+                content = _load_for_helper(tools, str(args.get("query") or ""))
             elif (held := _changes.claim(agent_id, name, args)):
                 content = held
             else:
