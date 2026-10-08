@@ -644,6 +644,9 @@ def persona_text(voice: bool, host: str = "Claude Code", tools: str = "mcp__hear
         f"To hand work to helpers, use Hearth's spawn_subagent, not {host}'s own sub-agents: "
         f"Hearth's helpers appear in the user's Team view, and each one's report is given to you "
         f"when it finishes, so after sending them you can simply end your message. "
+        f"A helper can think with the model on this PC (runs_on 'local'), with a provider and model "
+        f"you name, or be an agent program; never call a model server's API yourself to get work done. "
+        f"More of Hearth's tools exist than are listed: find them with find_tools and run one with use_tool. "
         f"Answer as the persona, never as {host}.\n\n")
     return preface + system_prompt(voice=voice)
 

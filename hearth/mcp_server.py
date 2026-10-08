@@ -300,6 +300,34 @@ for td in TOOL_DEFINITIONS:
     _mcp_exposed += 1
 
 
+# Hearth's own brain sees only the everyday tools; these two reach the rest,
+# the way load_tools does in Hearth itself.
+if _BRAIN_URL and _BRAIN_TOKEN and not _MCP_ALL_TOOLS:
+    def _reachable(name: str) -> bool:
+        return name in _DEFERRED_TOOLS and name not in _MCP_NEVER and name not in _IN_HEARTH
+
+    @mcp.tool(name="find_tools", structured_output=False,
+              description="Find more of Hearth's tools (they aren't all listed, to save room): "
+                          "archives, images, plugins, system details, voice, MCP servers and more. "
+                          "Give a word for what you need, or 'all'. Run one with use_tool.")
+    def find_tools(query: str) -> str:
+        from hearth.tools import unlock_tools
+        found = [td for td in unlock_tools(query, touch=False) if _reachable(td["name"])]
+        if not found:
+            return "Nothing more matched that. Try another word, or 'all'."
+        return "\n\n".join(f"{td['name']}: {td.get('description', '')}\nparameters: "
+                             f"{json.dumps(td.get('parameters') or {}, ensure_ascii=False)}" for td in found)
+    _mcp_exposed += 1
+
+    @mcp.tool(name="use_tool", structured_output=False,
+              description="Run one of the tools find_tools returned: its name and its arguments.")
+    def use_tool(name: str, arguments: Optional[dict] = None) -> str:
+        if not _reachable(name):
+            return f"Error: {name} isn't one of the tools find_tools offers."
+        return str(_run(name, dict(arguments or {})))
+    _mcp_exposed += 1
+
+
 if _BRAIN_URL and _BRAIN_TOKEN and not _BRAIN_GATE:
     @mcp.tool(name="approve", description="Hearth's permission check. Not for direct use.",
               structured_output=False)
