@@ -14,6 +14,7 @@ credit that comes with a Claude plan, not to the plan's interactive limits.
 from __future__ import annotations
 
 import glob
+import asyncio
 import json
 import os
 import shutil
@@ -596,11 +597,16 @@ def _user_line(text: str) -> str:
 
 def can_tell(agent_id: str) -> bool:
     with _OPEN_LOCK:
-        return agent_id in _OPEN
+        return agent_id in _OPEN or agent_id in _STEER
 
 
 def tell(agent_id: str, text: str) -> Optional[Dict[str, Any]]:
     """Give a running agent a message. None when it isn't one that can take it."""
+    with _OPEN_LOCK:
+        steer = _STEER.get(agent_id)
+    if steer is not None:
+        steer(text)
+        return {"ok": True, "note": "It will read this at its next step."}
     with _OPEN_LOCK:
         proc = _OPEN.get(agent_id)
         if proc is None:
@@ -811,6 +817,115 @@ def _parse_claude_line(line: str, emit, state) -> bool:
 # Agents that report each step: the name of their output format -> its reader.
 _READERS = {"claude": _parse_claude_line, "codex": _parse_codex, "cursor": _parse_cursor}
 
+# A Codex helper runs through Codex's app server when it can, which takes a
+# message part-way (turn/steer); `codex exec` runs to the end without one.
+_STEER: Dict[str, Any] = {}
+
+
+async def _codex_app(head: List[str], prompt: str, work: str, allow: str, emit, state: Dict[str, Any],
+                     agent_id: str) -> bool:
+    """Run one Codex helper task through `codex app-server`. False when there is
+    no app server to talk to, so the caller can fall back to `codex exec`."""
+    import asyncio
+    from .codex_brain import _Rpc, _shown_command, _mcp_text
+    flags = (["-c", "sandbox_workspace_write.network_access=true"] if allow == "auto"
+             else ["-c", "features.shell_tool=false", "-c", "features.unified_exec=false"])
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *head, "app-server", *flags, cwd=work, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL, limit=16 * 1024 * 1024, creationflags=_NO_WINDOW,
+            env=dict(os.environ, HEARTH_HELPER="1"))
+    except Exception:
+        return False
+    rpc = _Rpc(proc, who="Codex")
+    reader = asyncio.ensure_future(rpc.read())
+    said: "asyncio.Queue[str]" = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    try:
+        try:
+            await rpc.call("initialize", {"clientInfo": {"name": "hearth", "title": "Hearth", "version": "0.7.6"}}, 30)
+        except Exception:
+            return False
+        rpc.send({"method": "initialized"})
+        with _OPEN_LOCK:
+            _PROCS[agent_id] = proc
+        # Nobody is there to ask while a helper works, so it never stops to.
+        tid = ((await rpc.call("thread/start", {"cwd": work, "approvalPolicy": "never",
+                                                "sandbox": "workspace-write"})).get("thread") or {}).get("id")
+        turn = await rpc.call("turn/start", {"threadId": tid, "input": [{"type": "text", "text": prompt}]})
+        turn_id = (turn.get("turn") or {}).get("id")
+        with _OPEN_LOCK:
+            _STEER[agent_id] = lambda text: loop.call_soon_threadsafe(said.put_nowait, text)
+        texts: List[str] = []
+        while True:
+            while not said.empty():
+                try:
+                    await rpc.call("turn/steer", {"threadId": tid, "expectedTurnId": turn_id,
+                                                  "input": [{"type": "text", "text": said.get_nowait()}]}, 15)
+                except Exception:
+                    pass
+            try:
+                msg = await asyncio.wait_for(rpc.inbox.get(), timeout=0.4)
+            except asyncio.TimeoutError:
+                continue
+            if msg is None:
+                state.setdefault("ok", False)
+                state.setdefault("error", "Codex stopped before it finished")
+                break
+            meth, prm = msg.get("method"), msg.get("params") or {}
+            if "id" in msg:
+                rpc.send({"id": msg["id"], "result": {"decision": "decline"}})
+                continue
+            item = prm.get("item") or {}
+            kind, iid = item.get("type"), str(item.get("id") or "")
+            shown = {"commandExecution": ("run_command", {"command": _shown_command(item)}),
+                     "mcpToolCall": (item.get("tool", "tool"), item.get("arguments") or {}),
+                     "webSearch": ("web_search", {"query": item.get("query", "")}),
+                     "fileChange": ("edit_file", {"path": next((str(c.get("path") or "") for c in item.get("changes") or []
+                                                                if isinstance(c, dict)), "")})}.get(kind)
+            if meth == "item/started" and shown:
+                _step(emit, state, iid, *shown)
+            elif meth == "item/completed" and kind == "agentMessage" and item.get("text"):
+                texts.append(item["text"])
+                state["last_text"] = "\n\n".join(texts)
+            elif meth == "item/completed" and shown:
+                if kind == "commandExecution":
+                    body = str(item.get("aggregatedOutput") or "")
+                    if item.get("exitCode") not in (None, 0):
+                        body = (body + f"\n(exit code {item.get('exitCode')})").strip()
+                elif kind == "mcpToolCall":
+                    body = _mcp_text(item.get("result"))
+                elif kind == "fileChange":
+                    body = "\n".join(f"{c.get('kind', 'update')}: {c.get('path', '')}" for c in item.get("changes") or []
+                                     if isinstance(c, dict))
+                else:
+                    body = str(item.get("query") or "")
+                _step_done(emit, state, iid, shown[0], body)
+            elif meth == "error":
+                state["error"] = str((prm.get("error") or {}).get("message") or prm.get("message") or "")
+            elif meth == "turn/completed":
+                t = prm.get("turn") or {}
+                if t.get("status") == "failed":
+                    state["ok"] = False
+                    state["error"] = str((t.get("error") or {}).get("message") or state.get("error") or "the turn failed")
+                else:
+                    state["ok"], state["result"] = True, state.get("last_text", "")
+                break
+        return True
+    finally:
+        with _OPEN_LOCK:
+            _STEER.pop(agent_id, None)
+        reader.cancel()
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), 10)
+        except Exception:
+            pass
+
+
 
 def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
           on_done: Optional[Callable[[str, Dict[str, Any]], None]] = None,
@@ -869,45 +984,49 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
         out_lines: List[str] = []
         emit = lambda rec: _sa._append_transcript(tpath, rec)
         try:
-            proc = subprocess.Popen(argv, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                    creationflags=_NO_WINDOW,
-                                    # A helper does its task; it doesn't send helpers of its own.
-                                    env=dict(os.environ, HEARTH_HELPER="1"))
-            with _OPEN_LOCK:
-                _PROCS[agent_id] = proc
-            listening = bool(spec.get("takes_messages"))
-            try:
-                if listening:
-                    proc.stdin.write(_user_line(prompt))
-                    proc.stdin.flush()
-                    with _OPEN_LOCK:
-                        _OPEN[agent_id] = proc
-                else:
-                    if not spec.get("prompt_arg"):
-                        proc.stdin.write(prompt)
-                    proc.stdin.close()
-            except OSError:
-                pass
-            read = _READERS.get(spec["stream"])
-            for line in proc.stdout:
-                line = line.rstrip("\n")
-                if read and read(line, emit, state):
-                    if listening and "result" in state:
-                        # It has answered. Closing stdin is what lets it exit.
-                        listening = False
+            if agent == "codex" and not os.environ.get("HEARTH_CODEX_EXEC") and asyncio.run(
+                    _codex_app(head, prompt, work, allow, emit, state, agent_id)):
+                code = 0 if state.get("ok") else 1
+            else:
+                proc = subprocess.Popen(argv, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                                        creationflags=_NO_WINDOW,
+                                        # A helper does its task; it doesn't send helpers of its own.
+                                        env=dict(os.environ, HEARTH_HELPER="1"))
+                with _OPEN_LOCK:
+                    _PROCS[agent_id] = proc
+                listening = bool(spec.get("takes_messages"))
+                try:
+                    if listening:
+                        proc.stdin.write(_user_line(prompt))
+                        proc.stdin.flush()
                         with _OPEN_LOCK:
-                            _OPEN.pop(agent_id, None)
-                            try:
-                                proc.stdin.close()
-                            except OSError:
-                                pass
-                else:
-                    # Colour codes are for a terminal; here they would land in the result as noise.
-                    line = _ANSI.sub("", line)
-                    if line.strip():
-                        out_lines.append(line)
-            code = proc.wait()
+                            _OPEN[agent_id] = proc
+                    else:
+                        if not spec.get("prompt_arg"):
+                            proc.stdin.write(prompt)
+                        proc.stdin.close()
+                except OSError:
+                    pass
+                read = _READERS.get(spec["stream"])
+                for line in proc.stdout:
+                    line = line.rstrip("\n")
+                    if read and read(line, emit, state):
+                        if listening and "result" in state:
+                            # It has answered. Closing stdin is what lets it exit.
+                            listening = False
+                            with _OPEN_LOCK:
+                                _OPEN.pop(agent_id, None)
+                                try:
+                                    proc.stdin.close()
+                                except OSError:
+                                    pass
+                    else:
+                        # Colour codes are for a terminal; here they would land in the result as noise.
+                        line = _ANSI.sub("", line)
+                        if line.strip():
+                            out_lines.append(line)
+                code = proc.wait()
             if "ok" in state:
                 ok = bool(state.get("ok")) and code == 0
                 text = state.get("result") or state.get("last_text", "")
