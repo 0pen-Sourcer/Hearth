@@ -69,7 +69,16 @@ _VERB = {
 _BG_KEY = 0x00010101      # near-black, painted transparent via color-key
 _PILL = 0x00181114        # dark pill background (#141118)
 _FG = 0x00ECECEC          # near-white text
-_ACCENT = 0x006AA8C9      # gold dot (#c9a86a in BGR)
+_ACCENT = 0x006AA8C9      # gold dot (#c9a86a in BGR), when the look can't be read
+
+
+def _accent() -> int:
+    """The pulsing dot in the accent of the look in use."""
+    try:
+        from .voice_overlay import accent_colorref
+        return accent_colorref()
+    except Exception:
+        return _ACCENT
 _DONE = 0x008FD87B        # green dot (#7bd88f in BGR)
 
 
@@ -295,7 +304,7 @@ def _run() -> None:
                         dot_col = _DONE
                     else:
                         k = 0.55 + 0.45 * math.sin(frame["pulse"])
-                        dot_col = _scale_color(_ACCENT, k)
+                        dot_col = _scale_color(_accent(), k)
                     win32gui.SetTextColor(mem, dot_col)
                     win32gui.DrawText(mem, "●", -1,
                                       (PAD_L, 0, PAD_L + DOT_BOX, h),

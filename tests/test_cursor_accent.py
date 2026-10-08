@@ -29,6 +29,9 @@ web._save_settings(dict(web._load_settings(), ui_theme="dark", ui_accent="ocean"
 check(f"on Dark with the ocean accent, the browser cursor is blue {browse._cursor_js().count('91,147,194')}",
       browse._cursor_js().count("91,147,194") == 3)
 check(f"and so is the desktop ring {agent_cursor._accent()}", agent_cursor._accent() == (0x5B, 0x93, 0xC2))
+from hearth import activity_hud                   # noqa: E402
+check(f"the screenshot dots and the activity pill's dot follow it too {hex(activity_hud._accent())}",
+      activity_hud._accent() == (0xC2 << 16 | 0x93 << 8 | 0x5B))
 web._save_settings(dict(web._load_settings(), ui_theme="classic"))
 check(f"on Classic it is Classic's violet {agent_cursor._accent()}", agent_cursor._accent() == (0x8B, 0x5C, 0xF6))
 

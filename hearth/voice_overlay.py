@@ -54,6 +54,12 @@ def accent_rgb(settings: dict) -> tuple:
     return _ACCENTS.get(settings.get("ui_accent") or "rose", _ACCENTS["rose"])
 
 
+def accent_colorref(scale: float = 1.0) -> int:
+    """The saved look's accent as a win32 COLORREF (0x00BBGGRR), optionally dimmed."""
+    r, g, b = (int(c * scale) for c in _saved_accent())
+    return (b << 16) | (g << 8) | r
+
+
 def _saved_accent() -> tuple:
     try:
         from .web import _load_settings

@@ -45,6 +45,12 @@ def _run(duration: float) -> None:
         import win32gui
     except Exception:
         return
+    # The dots take the accent of the look in use.
+    try:
+        from .voice_overlay import accent_colorref
+        lit_col, dim_col = accent_colorref(), accent_colorref(0.45)
+    except Exception:
+        lit_col, dim_col = _LIT, _DIM
     try:
         hinst = win32api.GetModuleHandle(None)
         cls = "HearthCaptureCue"
@@ -74,7 +80,7 @@ def _run(duration: float) -> None:
                 win32gui.SetBkMode(hdc, win32con.TRANSPARENT)
                 x = 12
                 for i in range(total_dots):
-                    win32gui.SetTextColor(hdc, _LIT if i < lit else _DIM)
+                    win32gui.SetTextColor(hdc, lit_col if i < lit else dim_col)
                     win32gui.DrawText(hdc, "●", -1,
                                       (x, 0, x + 22, rect[3]),
                                       win32con.DT_CENTER | win32con.DT_VCENTER
