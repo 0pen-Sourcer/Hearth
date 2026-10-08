@@ -911,6 +911,11 @@ async def _codex_app(head: List[str], prompt: str, work: str, allow: str, emit, 
                 else:
                     state["ok"], state["result"] = True, state.get("last_text", "")
                 break
+        # Kept out of the person's own Codex list, as the brain's threads are.
+        try:
+            await rpc.call("thread/archive", {"threadId": tid}, 10)
+        except Exception:
+            pass
         return True
     finally:
         with _OPEN_LOCK:
