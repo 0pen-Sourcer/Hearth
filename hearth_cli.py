@@ -2419,6 +2419,33 @@ class JarvisCLI:
                 r = _sa.stop_subagent(a["id"])
                 print(f"  {C_OK if r.get('ok') else C_ERR}{r.get('note') or r.get('error')}{C_RESET}")
                 return True
+            # What a helper changed on disk: see it, bring it in, throw it away, or take it back.
+            acts = {"changes": "show", "bring": "bring_in", "discard": "discard", "undo": "undo"}
+            if len(parts) == 2 and parts[0] in acts and parts[1].isdigit() and 1 <= int(parts[1]) <= len(agents):
+                from hearth import helper_changes as _hc
+                a = agents[int(parts[1]) - 1]
+                r = _hc.act(a["id"], acts[parts[0]])
+                if not r.get("ok"):
+                    print(f"  {C_ERR}{r.get('error')}{C_RESET}")
+                elif parts[0] == "changes":
+                    files = r.get("files") or []
+                    if not files:
+                        print(f"  {C_DIM}It didn't change any files.{C_RESET}")
+                        return True
+                    print(f"  {C_TOOL}{len(files)} file(s){C_RESET} {C_DIM}{r.get('stat', '')}  {r.get('state', '')}{C_RESET}")
+                    for f in files[:30]:
+                        print(f"    {f}")
+                    for ln in (r.get("diff") or "").splitlines()[:80]:
+                        c = C_OK if ln.startswith("+") and not ln.startswith("+++") else C_ERR if ln.startswith("-") and not ln.startswith("---") else C_DIM
+                        print(f"  {c}{ln}{C_RESET}")
+                    nxt = ["bring", "discard"] if r.get("can_bring_in") else ["undo"] if r.get("can_undo") else []
+                    if nxt:
+                        print(f"  {C_DIM}" + ", ".join(f"/team {w} {parts[1]}" for w in nxt) + f"{C_RESET}")
+                else:
+                    n = len(r.get("files") or r.get("restored") or [])
+                    said = {"bring": "Brought in", "discard": "Thrown away", "undo": "Undone"}[parts[0]]
+                    print(f"  {C_OK}{said}: {n} file(s).{C_RESET}")
+                return True
             if arg.isdigit() and 1 <= int(arg) <= len(agents):
                 a = agents[int(arg) - 1]
                 path = _sa._transcript_path(a["id"])
@@ -2427,24 +2454,22 @@ class JarvisCLI:
                     lines = open(path, encoding="utf-8").read().splitlines()
                 except OSError:
                     lines = []
+                # Each step the way a live pane shows it.
+                from hearth import team as _team
                 for ln in lines[-60:]:
                     try:
                         rec = json.loads(ln)
                     except ValueError:
                         continue
-                    k = rec.get("kind")
-                    if k == "start":
-                        print(f"  {C_DIM}asked:{C_RESET} {str(rec.get('prompt') or '')[:300]}")
-                    elif k == "assistant_tool_call":
-                        for c in rec.get("calls") or []:
-                            print(f"  {C_TOOL}  🔧 {c.get('name')}{C_RESET} {C_DIM}{str(c.get('args') or '')[:140]}{C_RESET}")
-                    elif k == "tool_result":
-                        flat = " ".join(str(rec.get("preview") or "").split())
-                        print(f"  {C_DIM}    ↳ {flat[:140]}{C_RESET}")
-                    elif k == "assistant_final":
-                        print(f"  {C_OK}answer:{C_RESET} {str(rec.get('text') or '')[:1500]}")
-                    elif k == "end" and not rec.get("ok"):
-                        print(f"  {C_ERR}stopped: {rec.get('error')}{C_RESET}")
+                    shown = _team._render_entry(rec)
+                    if shown:
+                        print("\n".join("  " + x for x in shown.splitlines()))
+                ch = _sa.agent_story(a["id"]).get("changes") or {}
+                if ch.get("files"):
+                    where = {"waiting": "waiting on its own copy", "changed": "written to the folder",
+                             "brought_in": "brought in", "discarded": "thrown away", "undone": "undone"}.get(ch.get("state"), "")
+                    print(f"  {C_TOOL}changed {len(ch['files'])} file(s){C_RESET} {C_DIM}{where}. "
+                          f"/team changes {arg} shows them.{C_RESET}")
                 return True
             labels = {k: v["label"] for k, v in _xa.AGENTS.items()}
             colour = {"working": C_OK, "done": C_DIM, "failed": C_ERR, "stopped": C_WARN}
@@ -2456,7 +2481,8 @@ class JarvisCLI:
                 doing = doing.replace("\n", " ")[:90]
                 print(f"  {C_DIM}{n:>2}{C_RESET}  {C_TOOL}{(a.get('name') or what):<8}{C_RESET} "
                       f"{C_DIM}{what:<14}{C_RESET} {colour.get(a.get('status'), C_WARN)}{st:<9}{C_RESET} {C_DIM}{doing}{C_RESET}")
-            print(f"  {C_DIM}/team <n> shows every step of one, /team stop <n> stops one. Shell jobs are under /jobs.{C_RESET}")
+            print(f"  {C_DIM}/team <n> shows every step of one, /team stop <n> stops one, /team changes <n> shows what it "
+                  f"changed (then bring, discard or undo). Shell jobs are under /jobs.{C_RESET}")
             return True
         if low == "/me":
             # The personal part of first-run setup, any time. Enter keeps an answer.

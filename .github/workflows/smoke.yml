@@ -193,6 +193,7 @@ jobs:
           python tests/test_helper_messages.py
           python tests/test_acp_brain.py
           python tests/test_bridge_follow.py
+          python tests/test_cli_team.py
 
       - name: Voice sessions end cleanly and stay apart
         # Every session leaked its mic reader and a Whisper process, and a
