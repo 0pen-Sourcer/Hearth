@@ -392,7 +392,7 @@ with sync_playwright() as pw:
     ENDPOINT_EXTRA.clear()
     check(f"a switch to a provider ends with the same words as an agent switch, once {said}",
           len(said) == 1 and said[0][0].endswith("now thinks with Anthropic · claude-x")
-          and "Telegram moved over too" in said[0][1])
+          and "connectors switched over too" in said[0][1])
     check(f"the page doesn't save again what the server saved {SETTING_POSTS}", SETTING_POSTS == [])
 
     # Keeping the local model loaded beside a cloud brain was a switch deep in

@@ -8803,7 +8803,7 @@ async function switchEndpoint(body) {
   if (r.model) body.model = r.model;
   if (body.key || body.provider === 'local') STATE.settings = Object.assign({}, STATE.settings || {}, { llm_key: body.key });
   const bridges = Array.isArray(r.restarted_bridges) && r.restarted_bridges.length
-    ? ' ' + r.restarted_bridges.map(c => c[0].toUpperCase() + c.slice(1)).join(' and ') + ' moved over too.' : '';
+    ? ' Your connectors switched over too.' : '';
   const probe = body.provider === 'local' && r.local_probe ? r.local_probe.kind : '';
   if (probe === 'remote') {
     toast("That address isn't on this PC", body.url + ' is a cloud service. Pick its provider above, or use an address on this PC (localhost).', 'warn', 9000);
