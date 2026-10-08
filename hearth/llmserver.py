@@ -1385,7 +1385,21 @@ def llama_runtime_info() -> Dict[str, Any]:
         "managed": have_managed,   # True once Hearth downloaded its own copy
         "stub": stub_managed,      # downloaded but truncated (antivirus)
         "added": [{"id": e["id"], "label": e["label"], "source": e["source"]} for e in added_engines()],
+        # The build serving the model loaded now, when it isn't the one above
+        # (an added build reads a model the official one can't).
+        "running": _running_added(),
     }
+
+
+def _running_added() -> Optional[Dict[str, Any]]:
+    try:
+        exe = (_proc_info or {}).get("exe") or ""
+        if not exe or _proc is None or _proc.poll() is not None:
+            return None
+    except Exception:
+        return None
+    hit = next((e for e in added_engines() if os.path.normcase(e["exe"]) == os.path.normcase(exe)), None)
+    return {"label": hit["label"], "model": os.path.basename((_proc_info or {}).get("model_path") or "")} if hit else None
 
 
 # Highest arch the bundled llama-cpp-python wheel compiles kernels for

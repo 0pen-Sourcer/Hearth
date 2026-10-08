@@ -16058,7 +16058,9 @@ async function refreshRuntimeBar() {
     const adv = r.advice || {}, nudgeEl = $('runtime-nudge');
     if (r.engine === 'native') {
       const src = { hearth: "Hearth's own", lmstudio: "LM Studio's (signed)", other: 'detected copy' }[r.source] || r.source;
-      statusEl.innerHTML = `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} \u00b7 ${esc(src)}</span>`;
+      statusEl.innerHTML = r.running
+        ? `${esc(r.running.label)} <span style="color:var(--fg-faint)">\u00b7 running ${esc(r.running.model)}; others use llama.cpp ${esc(r.version || '')}</span>`
+        : `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} \u00b7 ${esc(src)}</span>`;
       const upd = r.update || {};
       if (btn) {
         if (r.source === 'hearth' && !upd.available) {

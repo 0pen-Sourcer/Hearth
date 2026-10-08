@@ -95,6 +95,17 @@ check("a GitHub page or owner/name is read as a repository",
       L._repo_of("https://github.com/Some-Fork/llama.cpp/releases") == "Some-Fork/llama.cpp"
       and L._repo_of("Some-Fork/llama.cpp") == "Some-Fork/llama.cpp" and L._repo_of(r"C:\builds\x") == "")
 
+# Settings named the official engine while an added build was running the model.
+class _Alive:
+    def poll(self):
+        return None
+L._proc, L._proc_info = _Alive(), {"exe": str(mine / "llama-server.exe"), "model_path": MODEL}
+info = L.llama_runtime_info()
+L._proc, L._proc_info = None, {}
+check(f"the engine card names the added build when it's the one running {info.get('running')}",
+      (info.get("running") or {}).get("label") == "other-llama" and info["running"]["model"] == "fork-only.gguf")
+check("and names none when the official engine runs", L.llama_runtime_info().get("running") is None)
+
 removed = L.remove_added_engine(str(mine / "llama-server.exe"))
 check("removing a folder build takes it off the list and leaves the folder alone",
       removed["ok"] and (mine / "llama-server.exe").is_file()
