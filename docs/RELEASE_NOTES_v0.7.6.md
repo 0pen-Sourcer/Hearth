@@ -18,11 +18,15 @@ When JARVIS splits a job across helpers, the Team view shows each one: what it i
 
 The room view shows it as a house by the fire. Helpers work at desks, read at the shelves or raise a hand when they need you, and JARVIS moves with the work, to a shelf while it reads and to a free desk while it writes. Click anyone and they turn and tell you where they are with their task. You can talk to JARVIS from a box under the room and read its answer over its head without going back to the chat, and if you ask it to brew itself a coffee, it walks over to the counter. While it thinks it paces, when it saves a memory it pins a note to the board, and it answers where it stands. Its bubble says what it is doing in plain words, and a command waiting for your yes can be approved right there in the room.
 
-You can tell a working helper something part-way through. Click it, type in its panel, and it reads your message before its next step. JARVIS can do the same on its own. A task handed to another agent's program runs to the end and can't take one, and the panel says so.
+You can tell a working helper something part-way through. Click it, type in its panel, and it reads your message before its next step. JARVIS can do the same on its own, and so can Claude Code and Codex helpers; another agent's program that runs its task to the end can't take one, and the panel says so.
+
+Helpers talk to each other. Each one on a team is told who else is on it, and one can ask another a question and wait for the answer, or send JARVIS word part-way instead of only at the end. In the room the one with something to say walks over and says it, the other answers, and JARVIS thanks a helper that reports in. A finished helper takes its break in one place and heads home after a while, instead of wandering the room.
 
 Starting a helper yourself asks what it should do first, then who does it: one of Hearth's own, named for the job (search the web, work on code, search my files, sum up a file), or an agent you have installed.
 
 A room holds eight desks. Past that the next room opens, a winter cabin, a library and an ocean room in turn, each in its own style, and a small wooden sign over the picture switches between them with a pixel wipe. Clicking someone's card takes you to their room. Appearance picks which room JARVIS calls home and offers the accent that suits it. A working helper can be stopped from its panel or with /team stop, a finished or failed one heads out of the door after a while, and walking side-on now has a real stride. One sentence can start a mixed team, with some helpers on this PC's model, some on a provider's model named in plain words like "haiku", and some handed to Codex, OpenCode or another agent you have installed.
+
+Two helpers can't trip over each other. An agent program sent to work in a git repository works on its own copy of it, started from your folder as it is, unsaved changes included, and nothing it does reaches your folder until you say so. Its panel lists what it changed with the diff, and Bring in, Discard or Undo; the terminal has the same under /team changes, bring, discard and undo. Hearth's own helpers write directly, but a file one of them is working on is theirs until they finish, and what they changed can be undone. You can also give one task to two agents, say Codex and Claude Code, each on its own copy, have a check like your tests run on both, and pick the one to keep.
 
 ## Claude Code, Codex or Cursor as JARVIS's brain
 
@@ -30,7 +34,11 @@ If you already pay for Claude, JARVIS can think with it. Pick Claude Code from t
 
 Codex works the same way on a ChatGPT plan. Pick it from the same menu, or type /brain codex. The Codex desktop app is enough, since it carries the command-line part Hearth runs. Its replies stream in as they are written, and something you type while it works reaches it part-way. Hearth keeps Codex under the same approval switch as everything else: every command it wants to run and every file it wants to change comes to Hearth first, which lets it through or asks you, exactly as the switch says, and a file change shows as a diff. On models that have it, the Think menu has Codex's Fast switch, which answers quicker and uses more of your plan. Its usage counts toward your plan's Codex limit, and when that runs out Hearth tells you when it resets.
 
+Claude Code's fast mode has a switch in the Think menu too; if your plan or that model doesn't have it, Claude Code says so after the reply and Hearth stops offering it there.
+
 Cursor works too, on a Cursor plan, through its command-line agent (the editor alone is not enough). Cursor's own shell is turned off for these runs and, while the switch is on Ask, so are its direct file writes, so commands and changes go through Hearth's tools and wait for your yes.
+
+Other agents can be the brain too, once installed, if they speak the Agent Client Protocol: OpenCode, Copilot CLI, Goose, Grok Build and Gemini CLI, and Pi, Amp and Antigravity through their adapter programs. Their commands and file changes come to Hearth's approval switch the same way, and a chat carries on in the same session. OpenCode has been run this way, including its free models; the others follow the protocol and haven't been run here yet.
 
 The model menu opens each agent into its own models, read from the agent itself, so they are the ones your install and plan really have: Opus, Sonnet and Haiku for Claude Code, the GPT models on your ChatGPT plan for Codex, and Cursor's list with a search box. The Think button sets how hard that model reasons, with the levels that model takes. The context shown is the agent model's own. With an agent as the brain no local model is needed. Helpers JARVIS starts use your local model when one is loaded and the same agent when none is.
 
@@ -40,7 +48,7 @@ JARVIS can hand a task to another coding agent you already have installed and br
 
 Installing or updating one of these agents shows in the Downloads list with the packages it has fetched, how long it has run and a Cancel button, and a finished row clears itself a few seconds later.
 
-They follow the same approval switch as Hearth's own tools, and an agent working longer than a few minutes carries on in the background and reports when it is done. In the chat and the Team room each agent carries a small badge in its maker's colour, so you can see at a glance who did what.
+A helper on one of these agents can be given one of its own models, and otherwise uses the one you picked for that agent as the brain. They follow the same approval switch as Hearth's own tools, and an agent working longer than a few minutes carries on in the background and reports when it is done. In the chat and the Team room each agent carries a small badge in its maker's colour, so you can see at a glance who did what.
 
 ## Approval modes
 
@@ -100,7 +108,7 @@ Reminders are set for the time you meant. Hearth works out the exact time from w
 
 A bridge started from the window stopped answering after a while and still showed as running, and now it keeps going. Its output goes to a log the window can show, for Telegram and WhatsApp as well as Discord. WhatsApp sends files back the way Telegram and Discord do, and all three send files whose paths have spaces in them. Announcements from the developer reach you now, where none ever could before.
 
-When Hearth launches a team of agents, each agent's window shows what its tools returned rather than empty lines, and an agent that failed says so rather than showing as done. If a team member could not start, Hearth is told which one and why, instead of believing that part of the job is being done.
+A phone bridge now stops when the Hearth that started it closes, so restarting can't leave two of them answering every message. When a team is started from the terminal, each agent gets a live pane showing what it does in words, what its tools returned, and an agent that failed says so rather than showing as done; started from the window, the Team room shows them instead. If a team member could not start, Hearth is told which one and why, instead of believing that part of the job is being done.
 
 ## Desktop control
 
@@ -146,6 +154,8 @@ The Logs page reads like the rest of the app now. Every tool JARVIS used is one 
 
 ## The terminal
 
+The terminal and the window share one set of chats. A chat in the terminal is listed in the window, marked as from the terminal, and can be carried on there; whatever is added in the window reaches the terminal before its next message; and /chats and /chat open any chat in the terminal, while /clear starts a new one. /team shows each helper's steps in words.
+
 The terminal no longer crashes on the first tool call of a session, and Ctrl+Z ends it instead of spinning forever. --help and --version answer instead of starting the whole app. /brain lmstudio and /brain builtin work, and switching to a local brain uses whatever model is actually loaded rather than naming one you may not have. A setting saved while on a cloud brain no longer switches to a random model from the provider's catalog. The terminal knows whether the loaded model can see, a prompt that overflows the context is trimmed and retried rather than resent until the turn dies, and /history shows messages that carry an image.
 
 ## Elsewhere
@@ -155,6 +165,8 @@ Searching past chats finds what you asked about. Most questions used to report n
 Repair checks every part of the install and puts back whatever is missing, Hearth's code, its skills and art, the voice files and the model engine, and says plainly which parts need a full reinstall. Installing or repairing the engine had started failing for everyone because the engine's project marked an unrelated release as its latest, and Hearth now picks the newest real build. Updating is safe to interrupt. If the power goes or you kill Hearth while it is replacing files, the next start puts it back the way it was rather than leaving you with an install that will not open. Your chats survive being killed mid-save too, and a save that got cut off no longer leaves a ghost copy of the chat sitting in the sidebar.
 
 Asking Hearth for a capability it does not have gets a straight answer instead of a handful of unrelated tools. And it can tell you your charge level, whether you are plugged in and roughly how long you have left.
+
+Messages that read like an error log now say what happened in plain words, such as "Couldn't delete it" or "The model didn't load" with the reason. A model only PrismML's build of the engine can read, like the ternary Bonsai models, says so when it fails to load and names the file of the same model that works.
 
 A command card shows the command that ran above its output, and the approval prompt can show the whole command before you allow it rather than cutting it off. Repairing an install reports in the same place as other downloads, with progress and a cancel. Email setup moved to Connectors where it belongs, and a voice install that fails part way can be retried instead of dead-ending. Settings now links to the project, so the source, releases and issue tracker are one click away.
 
