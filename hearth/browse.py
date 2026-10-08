@@ -56,9 +56,9 @@ _CURSOR_JS = r"""
     // Visible from the moment the page loads so users see the agent is in
     // control. Starts centered at top of viewport, glides on the first click.
     c.style.cssText = 'position:fixed;left:50%;top:80px;width:18px;height:18px;'
-      + 'border:2px solid #e07b4c;border-radius:50%;background:rgba(224,123,76,.25);'
+      + 'border:2px solid rgb(__RGB__);border-radius:50%;background:rgba(__RGB__,.25);'
       + 'z-index:2147483647;pointer-events:none;margin:-9px 0 0 -9px;'
-      + 'box-shadow:0 0 12px #e07b4c;opacity:.85;'
+      + 'box-shadow:0 0 12px rgb(__RGB__);opacity:.85;'
       + 'transition:left .45s ease, top .45s ease, opacity .2s';
     (document.body || document.documentElement).appendChild(c);
     // Auto-fade if the agent doesn't act soon after load; a glide pops it back.
@@ -75,6 +75,16 @@ _CURSOR_JS = r"""
 # mouse-move would be multiplied by slow_mo and crawl). Pair with a short sleep
 # before the click. This is the ONLY thing that moves the dot — so it always
 # represents the agent, never the user.
+def _cursor_js() -> str:
+    """The cursor script in the accent of the look in use."""
+    try:
+        from .voice_overlay import _saved_accent
+        r, g, b = _saved_accent()
+    except Exception:
+        r, g, b = 0xE0, 0x7B, 0x4C
+    return _CURSOR_JS.replace("__RGB__", f"{r},{g},{b}")
+
+
 _CURSOR_GLIDE_JS = r"""
 ([x, y]) => {
   const c = document.getElementById('__hearth_cursor');
@@ -207,7 +217,7 @@ class _BrowserWorker(threading.Thread):
             # the real mouse during clicks but draws no cursor, so without this
             # you can't SEE it drive. Runs on every navigation. Harmless headless.
             try:
-                self._page.add_init_script(_CURSOR_JS)
+                self._page.add_init_script(_cursor_js())
             except Exception:
                 pass
         except Exception as e:

@@ -19,8 +19,16 @@ from ctypes import wintypes
 _WIN = sys.platform == "win32"
 _ENABLED = os.environ.get("HEARTH_AGENT_CURSOR", "1") not in ("0", "false", "no")
 
-# Hearth's ember accent: #e07b4c.
-_R, _G, _B = 224, 123, 76
+# The ring takes the accent of the look in use, as the voice overlay does.
+_painted = None                 # the colour last drawn, so a change of accent repaints it
+
+
+def _accent() -> tuple:
+    try:
+        from .voice_overlay import _saved_accent
+        return _saved_accent()
+    except Exception:
+        return (0xE0, 0x7B, 0x4C)
 _SIZE = 46                      # overlay is _SIZE x _SIZE px, centered on the cursor
 _OUT = _SIZE / 2 - 2            # ring outer radius
 _IN = _OUT - 5                  # ring inner radius
@@ -119,7 +127,28 @@ def _build():
                                  ctypes.byref(bits), None, 0)
         old = g.SelectObject(mem_dc, dib)
 
-        buf = (ctypes.c_ubyte * (_SIZE * _SIZE * 4)).from_address(bits.value)
+        _build._keep = (dib, mem_dc, old)          # keep GDI objects alive
+        _build._bits = bits.value
+        u.ReleaseDC(None, screen_dc)
+        _ok = True
+        _paint(_accent())
+        return True
+    except Exception:
+        if os.environ.get("HEARTH_AGENT_CURSOR_DEBUG"):
+            import traceback; traceback.print_exc()
+        _ok = False
+        return False
+
+
+def _paint(rgb: tuple) -> None:
+    """Draw the ring in `rgb` into the layered window."""
+    global _painted
+    r_, g_, b_ = rgb
+    u = ctypes.windll.user32
+    dib, mem_dc, old = _build._keep
+    screen_dc = u.GetDC(None)
+    try:
+        buf = (ctypes.c_ubyte * (_SIZE * _SIZE * 4)).from_address(_build._bits)
         cx = cy = _SIZE / 2.0
         for y in range(_SIZE):
             for x in range(_SIZE):
@@ -134,9 +163,9 @@ def _build():
                     a = 0.0
                 al = int(max(0.0, min(1.0, a)) * 235)
                 o = (y * _SIZE + x) * 4            # BGRA, premultiplied
-                buf[o + 0] = _B * al // 255
-                buf[o + 1] = _G * al // 255
-                buf[o + 2] = _R * al // 255
+                buf[o + 0] = b_ * al // 255
+                buf[o + 1] = g_ * al // 255
+                buf[o + 2] = r_ * al // 255
                 buf[o + 3] = al
 
         class POINT(ctypes.Structure):
@@ -155,15 +184,9 @@ def _build():
         dst = POINT(0, 0)
         u.UpdateLayeredWindow(_hwnd, screen_dc, ctypes.byref(dst), ctypes.byref(size),
                               mem_dc, ctypes.byref(src), 0, ctypes.byref(blend), 2)  # ULW_ALPHA
-        _build._keep = (dib, mem_dc, old)          # keep GDI objects alive
+    finally:
         u.ReleaseDC(None, screen_dc)
-        _ok = True
-        return True
-    except Exception:
-        if os.environ.get("HEARTH_AGENT_CURSOR_DEBUG"):
-            import traceback; traceback.print_exc()
-        _ok = False
-        return False
+    _painted = rgb
 
 
 def show(x: int, y: int):
@@ -172,6 +195,9 @@ def show(x: int, y: int):
     try:
         if not _build():
             return
+        rgb = _accent()
+        if rgb != _painted:
+            _paint(rgb)
         u = ctypes.windll.user32
         # SWP_NOSIZE|NOACTIVATE|SHOWWINDOW, HWND_TOPMOST(-1)
         u.SetWindowPos(_hwnd, -1, int(x) - _SIZE // 2, int(y) - _SIZE // 2,
