@@ -4753,7 +4753,7 @@
           </div>
           <div id="runtime-nudge" style="display:none;margin:8px 0 2px;padding:9px 11px;background:color-mix(in srgb, var(--warn) 7%, transparent);border:1px solid color-mix(in srgb, var(--warn) 25%, transparent);border-radius:8px;font-size:12px;line-height:1.5;color:var(--fg-dim)"></div>
           <div id="runtime-err" style="display:none;margin:6px 0 2px;padding:8px 10px;background:color-mix(in srgb, var(--err) 7%, transparent);border:1px solid color-mix(in srgb, var(--err) 25%, transparent);border-radius:6px;font-size:12px;color:var(--err);line-height:1.4"></div>
-          <div id="prism-row" style="display:none;margin:6px 0 2px;font-size:12px;color:var(--fg-dim);line-height:1.5"></div>
+          <div id="added-engines" style="display:none;margin:6px 0 2px;font-size:12px;color:var(--fg-dim);line-height:1.5"></div>
           <div class="progress-row" id="runtime-dl" style="display:none;align-items:center;gap:8px;margin:6px 0 2px;">
             <div style="flex:1;height:6px;background:var(--bg-1);border-radius:4px;overflow:hidden;"><div id="runtime-dl-fill" style="height:100%;width:0%;background:var(--accent);transition:width .2s;"></div></div>
             <span id="runtime-dl-pct" style="color:var(--fg-dim);min-width:70px;text-align:right;font-size:11px;"></span>
@@ -15996,26 +15996,54 @@ async function refreshRuntimeBar() {
       nudgeEl.style.display = adv.nudge ? 'block' : 'none';
       if (adv.nudge) nudgeEl.textContent = adv.reason || '';
     }
-    // PrismML's engine runs only the ternary models stock llama.cpp can't read.
-    const pr = r.prism || {}, prEl = $('prism-row');
-    if (prEl) {
-      if (pr.installed) {
-        prEl.style.display = 'block';
-        prEl.innerHTML = `PrismML engine <span style="color:var(--fg-faint)">${esc(pr.installed)} · runs PrismML's ternary models</span>`;
-      } else if ((pr.needed_by || []).length) {
-        prEl.style.display = 'block';
-        prEl.innerHTML = `${esc(pr.needed_by[0])} needs PrismML's own engine. <button class="btn-mini" id="btn-prism-get" style="margin-left:6px">Get PrismML engine</button>`;
-        $('btn-prism-get').onclick = () => runtimeInstall('', 'prism');
-      } else prEl.style.display = 'none';
+    // Other builds of llama.cpp, for models the official one can't read.
+    const adEl = $('added-engines');
+    if (adEl) {
+      const rows = (r.added || []).map(e => `<div style="display:flex;align-items:center;gap:8px">
+        <span style="flex:1">${esc(e.label)} <span style="color:var(--fg-faint)">\u00b7 ${e.source === 'folder' ? 'your folder' : 'downloaded'}</span></span>
+        <button class="btn-mini danger" data-rmeng="${esc(e.id)}" title="Remove this engine">\u00d7</button></div>`).join('');
+      adEl.innerHTML = rows + `<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <button class="btn-mini" id="btn-engine-add">Add an engine</button>
+        <span style="font-size:11px;color:var(--fg-faint);line-height:1.3">For a model made for another build of llama.cpp</span></div>`;
+      adEl.style.display = 'block';
+      $('btn-engine-add').onclick = engineAddDialog;
+      adEl.querySelectorAll('button[data-rmeng]').forEach(b => b.onclick = async () => {
+        const rr = await api('/api/runtime/remove-added', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: b.dataset.rmeng }) });
+        if (!rr.ok) toast("Couldn't remove it", rr.error || '', 'err', 7000);
+        refreshRuntimeBar();
+      });
     }
   } catch { statusEl.textContent = 'unknown'; }
 }
+function engineAddDialog() {
+  showModal('Add an engine',
+    '<div style="line-height:1.55">Some models are made for a build of llama.cpp other than the official one, and their page says which. ' +
+    "Paste that build's GitHub page and Hearth downloads its Windows version for your card, or give a folder with " +
+    "<code>llama-server.exe</code> in it. Hearth uses it only for models the official build can't read, and remembers which one each model needs.</div>" +
+    '<input id="engine-add-src" type="text" placeholder="github.com/owner/llama.cpp or a folder" ' +
+    'style="width:100%;margin-top:12px;box-sizing:border-box">',
+    [ { label: 'Cancel' },
+      { label: 'Add', kind: 'primary', busyLabel: 'Adding\u2026', onclick: async () => {
+        const v = ($('engine-add-src')?.value || '').trim();
+        if (!v) return false;
+        const isFolder = /^[a-z]:[\\/]|^\\\\|^~/i.test(v);
+        if (!isFolder) { $('modal').classList.remove('open'); runtimeInstall('', v); return; }
+        const r = await api('/api/runtime/add-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: v }) });
+        if (!r.ok) { toast("That folder didn't work", r.error || '', 'err', 8000); return false; }
+        toast('Engine added', "Hearth uses it for models the official build can't read.", 'ok');
+        refreshRuntimeBar();
+      } } ]);
+  setTimeout(() => $('engine-add-src')?.focus(), 50);
+}
+
 // The engine is an asset like a model, so it shares the Downloads overlay —
 // its own row, its own icon, and a Cancel that keeps the partial for resume.
 const ENGINE_DL_ID = '__engine__';
 const _engDl = { t0: 0, b0: 0 };
 
-async function runtimeInstall(tag, engine) {
+async function runtimeInstall(tag, repo) {
   const dl = $('runtime-dl'), fill = $('runtime-dl-fill'), pct = $('runtime-dl-pct'), btn = $('btn-runtime-update');
   if (dl) dl.style.display = 'flex';
   if (btn) { btn.disabled = true; btn.textContent = 'Downloading…'; }
@@ -16023,7 +16051,7 @@ async function runtimeInstall(tag, engine) {
   try {
     const resp = await fetch('/api/runtime/install', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...(tag ? { tag } : {}), ...(engine ? { engine } : {}) }) });
+      body: JSON.stringify({ ...(tag ? { tag } : {}), ...(repo ? { repo } : {}) }) });
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
     for (;;) {
       const { done, value } = await reader.read();
@@ -16044,7 +16072,7 @@ async function runtimeInstall(tag, engine) {
           const secs = (now - _engDl.t0) / 1000;
           const speed = secs > 1 ? (ev.done - _engDl.b0) / secs : 0;
           dlUpsert(ENGINE_DL_ID, {
-            name: engine === 'prism' ? 'PrismML engine' : 'llama.cpp engine', kind: 'engine', status: 'downloading',
+            name: repo ? `Engine from ${repo.replace(/^https?:\/\/(www\.)?github\.com\//, '')}` : 'llama.cpp engine', kind: 'engine', status: 'downloading',
             pct: Math.round(ev.done / ev.total * 100),
             done: ev.done, total: ev.total, speed,
             eta: speed > 0 ? (ev.total - ev.done) / speed : 0,
@@ -16055,7 +16083,7 @@ async function runtimeInstall(tag, engine) {
           _engDl.t0 = 0;
           dlUpsert(ENGINE_DL_ID, { status: ev.ok ? 'done' : (ev.cancelled ? 'paused' : 'error'), pct: ev.ok ? 100 : undefined });
           const errEl = $('runtime-err');
-          if (ev.ok) { if (errEl) errEl.style.display = 'none'; toast(engine === 'prism' ? 'PrismML engine ready' : 'Engine ready', engine === 'prism' ? 'Its ternary models load now.' : 'llama.cpp ' + (ev.tag || ''), 'ok'); }
+          if (ev.ok) { if (errEl) errEl.style.display = 'none'; toast(repo ? 'Engine added' : 'Engine ready', repo ? "Hearth uses it for models the official build can't read." : 'llama.cpp ' + (ev.tag || ''), 'ok'); }
           else if (ev.cancelled) { if (errEl) errEl.style.display = 'none'; toast('Engine download cancelled', 'Progress kept, installing again resumes.', 'ok', 7000); }
           else {
             const msg = ev.error || 'unknown error';
@@ -16063,7 +16091,7 @@ async function runtimeInstall(tag, engine) {
               errEl.style.display = 'block';
               errEl.innerHTML = `Engine download failed: ${esc(msg)} <a href="#" style="color:var(--accent-2);margin-left:8px">Retry</a> <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
               const links = errEl.querySelectorAll('a');
-              if (links[0]) links[0].onclick = (e) => { e.preventDefault(); errEl.style.display='none'; runtimeInstall(tag, engine); return false; };
+              if (links[0]) links[0].onclick = (e) => { e.preventDefault(); errEl.style.display='none'; runtimeInstall(tag, repo); return false; };
               if (links[1]) links[1].onclick = (e) => { e.preventDefault(); navigator.clipboard.writeText(msg); return false; };
             }
             toast("The engine didn't download", msg, 'err', 8000);
@@ -16081,7 +16109,7 @@ async function runtimeInstall(tag, engine) {
       errEl.style.display = 'block';
       errEl.innerHTML = `Engine download failed: ${esc(msg)} <a href="#" style="color:var(--accent-2);margin-left:8px">Retry</a> <a href="#" style="color:var(--fg-dim);margin-left:6px">Copy</a>`;
       const links = errEl.querySelectorAll('a');
-      if (links[0]) links[0].onclick = (ev) => { ev.preventDefault(); errEl.style.display='none'; runtimeInstall(tag, engine); return false; };
+      if (links[0]) links[0].onclick = (ev) => { ev.preventDefault(); errEl.style.display='none'; runtimeInstall(tag, repo); return false; };
       if (links[1]) links[1].onclick = (ev) => { ev.preventDefault(); navigator.clipboard.writeText(msg); return false; };
     }
     toast("The engine didn't download", msg, 'err', 8000);

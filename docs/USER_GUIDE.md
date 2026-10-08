@@ -229,7 +229,7 @@ Reads default to your whole disk; writes, deletes and moves stay in the workspac
 ## When something goes wrong
 
 - **The app won't open**: check `~/Jarvis/logs/hearth_tray.log`. If Windows Defender quarantined `Hearth.exe`, restore it from Windows Security, Protection history.
-- **A model won't load**: the error says why (too big for the card, a newer model than the engine, a format the engine can't read). Update the engine in Models, Engine, or pick a smaller file.
+- **A model won't load**: the error says why (too big for the card, a newer model than the engine, a format the engine can't read). Update the engine in Models, Engine, or pick a smaller file. A model made for another build of llama.cpp (its page says which) loads once you add that build under Models, Engine, Add an engine.
 - **An agent brain gives no answer**: check it's signed in (`claude auth status`, `codex login status`, `cursor-agent status`), or open `/agents` in the terminal.
 - **Voice talks over itself on speakers**: pick speakers in Settings, Voice; on headphones it can be interrupted.
 - **Something broken**: Settings, About, Repair puts Hearth's own files back without touching your chats or memory.

@@ -183,9 +183,9 @@ jobs:
           python tests/test_reminder_store.py
           python tests/test_reminder_watch.py
 
-      - name: PrismML's ternary models run on PrismML's engine
+      - name: Other builds of llama.cpp for models the official build can't read
         run: |
-          python tests/test_prism_engine.py
+          python tests/test_added_engines.py
 
       - name: A team of agents, as the panes show it
         # Tool results rendered as empty arrows, failures as done, and members

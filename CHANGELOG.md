@@ -27,7 +27,7 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - Pinned chats; tool runs show the agents, skills and sites they reached; a running tool counts up on its card.
 
 ### Fixed
-- PrismML's engine as a second engine: a model whose tensors use PrismML's ternary types (PQ2_0, PTQ1_0) is found from its GGUF header and runs on PrismML's llama.cpp build, offered in Models, Engine; every other model keeps the stock build.
+- Other builds of llama.cpp (Models, Engine, Add an engine): by a GitHub page, fetched for the card like the official build, or by a folder. When the official build can't read a model (invalid ggml type, unknown architecture) Hearth tries the added builds and remembers which one read it. They never replace the official build for other models.
 - Engine install and repair took llama.cpp's "latest" release, which now points at a tag with no Windows files; the newest numbered build is used.
 - Repair checks real files, restores skills, art and the engine, and frees the patch backup. The update patch now carries `hearth/**` and `assets/**`.
 - The window's private mode forgot the chosen look on every launch; the server writes the saved look into the page.

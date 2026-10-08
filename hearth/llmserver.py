@@ -1185,9 +1185,9 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
     if lms.is_dir():
         candidates += sorted(lms.glob("*nvidia-cuda12*/llama-server.exe"),
                              key=lambda p: build_rank(p.parent.name), reverse=True)
-    # One built for another maker's card is not an engine on this PC, and
-    # PrismML's build only runs the models that need it (prism_engine).
-    candidates = [c for c in candidates if engine_fits(c) and not is_prism_build(c.parent.name)]
+    # One built for another maker's card is not an engine on this PC, and an
+    # added build only runs the models the official one can't read.
+    candidates = [c for c in candidates if engine_fits(c) and not is_added_build(c.parent.name)]
     # An explicit choice beats the ranking — the escape hatch when one engine
     # misbehaves on hardware we can't test.
     pref = get_engine_preference()
@@ -1247,40 +1247,112 @@ def reset_native_cache() -> None:
 
 
 _LLAMA_CPP_REPO = "ggml-org/llama.cpp"
-# PrismML's llama.cpp: the only build that reads their ternary packings.
-_PRISM_REPO = "PrismML-Eng/llama.cpp"
-_PRISM_TYPES = {142, 143}            # PQ2_0, PTQ1_0
+# Other builds of llama.cpp the person added, for models the official build
+# can't read (a fork with its own packing or model family). Downloaded ones sit
+# beside the official builds as <owner>@<tag>; one in a folder of its own is
+# listed in ~/.hearth/engines.json. Nothing here names any build: Hearth tries
+# them when the official one refuses a file, and remembers which one read it.
+_UNREADABLE = re.compile(r"invalid ggml type|unknown model architecture|unsupported model architecture"
+                         r"|unknown architecture", re.I)
 
 
-def is_prism_build(tag: str) -> bool:
-    return (tag or "").lower().startswith("prism-")
+def is_added_build(name: str) -> bool:
+    return "@" in (name or "")
 
 
-def prism_engine() -> Optional[Dict[str, Any]]:
-    """PrismML's engine, when one is installed: {exe, dll_dirs, label} or None."""
+def _hearth_file(name: str) -> Path:
+    return Path(os.path.expanduser("~/.hearth")) / name
+
+
+def _read_json(path: Path, empty):
+    try:
+        v = json.loads(path.read_text(encoding="utf-8"))
+        return v if isinstance(v, type(empty)) else empty
+    except (OSError, ValueError):
+        return empty
+
+
+def _write_json(path: Path, value) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=1), encoding="utf-8")
+
+
+def added_engines() -> List[Dict[str, Any]]:
+    """The added builds that can run here: {id, exe, dll_dirs, label, source}."""
+    out: List[Dict[str, Any]] = []
     root = Path(os.path.expanduser("~/.hearth/llamacpp"))
-    if not root.is_dir():
-        return None
-    for exe in sorted(root.glob("prism-*/llama-server.exe"), key=lambda p: p.parent.name, reverse=True):
-        if engine_fits(exe) and _usable_server_exe(exe) and not engine_is_known_bad(str(exe)):
-            return {"exe": str(exe), "dll_dirs": [str(exe.parent)], "label": exe.parent.name}
-    return None
+    if root.is_dir():
+        for exe in sorted(root.glob("*@*/llama-server.exe"), key=lambda p: p.stat().st_mtime, reverse=True):
+            owner, _, tag = exe.parent.name.partition("@")
+            out.append({"id": exe.parent.name, "exe": str(exe), "dll_dirs": [str(exe.parent)],
+                        "label": f"{owner} {tag}", "source": "github"})
+    for e in _read_json(_hearth_file("engines.json"), []):
+        exe = Path(str(e.get("exe") or ""))
+        out.append({"id": str(exe), "exe": str(exe), "dll_dirs": [str(exe.parent)],
+                    "label": e.get("name") or exe.parent.name, "source": "folder"})
+    return [e for e in out if _usable_server_exe(Path(e["exe"])) and engine_fits(e["exe"])
+            and not engine_is_known_bad(e["exe"])]
 
 
-def needs_prism(model_path: str) -> bool:
-    """True for a model packed in a way only PrismML's engine reads."""
-    return bool(gguf_tensor_types(model_path) & _PRISM_TYPES)
+def _model_key(model_path: str) -> str:
+    return os.path.normcase(os.path.abspath(model_path))
 
 
-def engine_for(model_path: str) -> Tuple[Optional[Dict[str, Any]], str]:
-    """The engine that can run this model, and why not when none can."""
-    if needs_prism(model_path):
-        p = prism_engine()
-        if p:
-            return p, ""
-        return None, ("This model uses PrismML's ternary packing, which only PrismML's own engine reads. "
-                      "Get it in Models, Engine (PrismML engine), then load the model again.")
-    return find_native_llama_server(), ""
+def engine_for(model_path: str) -> Optional[Dict[str, Any]]:
+    """The added build that last read this model, while it is still here."""
+    exe = _read_json(_hearth_file("engine_for_model.json"), {}).get(_model_key(model_path))
+    return next((e for e in added_engines() if e["exe"] == exe), None) if exe else None
+
+
+def _remember_engine(model_path: str, exe: Optional[str]) -> None:
+    memo = _read_json(_hearth_file("engine_for_model.json"), {})
+    if exe:
+        memo[_model_key(model_path)] = exe
+    elif memo.pop(_model_key(model_path), None) is None:
+        return
+    try:
+        _write_json(_hearth_file("engine_for_model.json"), memo)
+    except OSError:
+        pass
+
+
+def add_engine_folder(path: str) -> Dict[str, Any]:
+    """Add a build of llama.cpp that is already on disk (its folder or its exe)."""
+    p = Path(os.path.expanduser((path or "").strip().strip('"')))
+    if p.is_file() and p.name.lower() == "llama-server.exe":
+        exe = p
+    elif p.is_dir():
+        exe = next(iter(sorted(p.glob("llama-server.exe")) + sorted(p.glob("*/llama-server.exe"))), None)
+    else:
+        return {"ok": False, "error": f"there is no folder {p}"}
+    if not exe or not _usable_server_exe(exe):
+        return {"ok": False, "error": f"no working llama-server.exe in {p}"}
+    if not engine_fits(exe):
+        return {"ok": False, "error": "that build is for an NVIDIA card, and this PC doesn't have one"}
+    name = (p if p.is_dir() else exe.parent).name
+    items = [e for e in _read_json(_hearth_file("engines.json"), []) if e.get("exe") != str(exe)]
+    items.append({"name": name, "exe": str(exe)})
+    _write_json(_hearth_file("engines.json"), items)
+    return {"ok": True, "name": name, "exe": str(exe)}
+
+
+def remove_added_engine(engine_id: str) -> Dict[str, Any]:
+    """Forget an added build. One Hearth downloaded is deleted; a folder of the
+    person's own is only taken off the list."""
+    items = _read_json(_hearth_file("engines.json"), [])
+    keep = [e for e in items if e.get("exe") != engine_id]
+    if len(keep) != len(items):
+        _write_json(_hearth_file("engines.json"), keep)
+        return {"ok": True}
+    if is_added_build(engine_id):
+        return remove_llama_build(engine_id)
+    return {"ok": False, "error": f"no added engine '{engine_id}'"}
+
+
+def _repo_of(text: str) -> str:
+    """owner/name from a GitHub link or an owner/name pair; "" otherwise."""
+    m = re.search(r"(?:github\.com/)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?#].*)?$", (text or "").strip())
+    return f"{m.group(1)}/{m.group(2)}" if m else ""
 
 
 def llama_runtime_info() -> Dict[str, Any]:
@@ -1312,9 +1384,7 @@ def llama_runtime_info() -> Dict[str, Any]:
         "exe": exe or None,
         "managed": have_managed,   # True once Hearth downloaded its own copy
         "stub": stub_managed,      # downloaded but truncated (antivirus)
-        "prism": {"installed": (prism_engine() or {}).get("label") or "",
-                  "needed_by": [os.path.basename(m["path"]) for m in (_status_cache.get("disk_models_cache") or [])
-                                if str(m.get("path") or "").lower().endswith(".gguf") and needs_prism(m["path"])][:3]},
+        "added": [{"id": e["id"], "label": e["label"], "source": e["source"]} for e in added_engines()],
     }
 
 
@@ -1406,7 +1476,7 @@ def _latest_build_release(timeout: float = 12, repo: str = _LLAMA_CPP_REPO) -> O
         headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         rels = json.load(r)
-    shape = r"^prism-b\d+" if repo == _PRISM_REPO else r"^b\d+$"
+    shape = r"^b\d+$" if repo == _LLAMA_CPP_REPO else r"."
     for rel in rels if isinstance(rels, list) else []:
         tag = (rel.get("tag_name") or "").strip()
         if re.match(shape, tag) and any("bin-win-" in (a.get("name") or "") for a in rel.get("assets") or []):
@@ -1461,7 +1531,7 @@ def installed_llama_tags() -> List[str]:
     if not root.is_dir():
         return []
     out = [p.parent.name for p in root.glob("*/llama-server.exe")
-           if _usable_server_exe(p) and not is_prism_build(p.parent.name)]
+           if _usable_server_exe(p) and not is_added_build(p.parent.name)]
     return sorted(out, key=build_rank, reverse=True)
 
 
@@ -1637,12 +1707,14 @@ def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
 def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                            on_progress: Optional[Callable[[int, int], None]] = None,
                            force: bool = False, backend: Optional[str] = None,
-                           prism: bool = False) -> Dict[str, Any]:
+                           repo: str = "") -> Dict[str, Any]:
     """Download the official ggml-org llama.cpp Windows CUDA build (llama-server
     .exe + ggml DLLs) and its CUDA runtime into ~/.hearth/llamacpp/<tag>/. This
     is what lets Hearth's builtin run on any GPU without bundling a giant wheel
     and without depending on LM Studio — the 'updatable runtime'. Also serves as
     the Lite->Full upgrade (pull the runtime, not the whole app).
+    `repo` (a GitHub link or owner/name) fetches another build of llama.cpp the
+    same way, kept apart as <owner>@<tag>.
     Returns {ok, dir, tag} or {ok: False, error}."""
     import urllib.request
     import zipfile
@@ -1651,7 +1723,10 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     # and every later install aborts instantly.
     _llama_dl_cancel.clear()
     backend = (backend or engine_backend()).lower()
-    repo = _PRISM_REPO if prism else _LLAMA_CPP_REPO
+    if repo and not _repo_of(repo):
+        return {"ok": False, "error": f"'{repo}' isn't a GitHub page"}
+    repo = _repo_of(repo) if repo else _LLAMA_CPP_REPO
+    added = repo.lower() != _LLAMA_CPP_REPO.lower()
     try:
         if tag:
             req = urllib.request.Request(
@@ -1662,15 +1737,16 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         else:
             rel = _latest_build_release(timeout=20, repo=repo)
             if not rel:
-                return {"ok": False, "error": "no llama.cpp build with Windows files among the recent releases"}
+                return {"ok": False, "error": f"no build with Windows files among the recent releases of {repo}"}
     except Exception as e:
         return {"ok": False, "error": f"couldn't reach GitHub releases: {e}"}
     tagname = rel.get("tag_name") or tag or "latest"
     assets = rel.get("assets") or []
+    dirname = f"{repo.split('/')[0]}@{tagname}" if added else tagname
 
     # Already have this exact build — re-pulling 640 MB to land on the same
     # files is pure waste. `force` is the explicit repair path.
-    _have = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tagname}"))
+    _have = Path(os.path.expanduser(f"~/.hearth/llamacpp/{dirname}"))
     _same_build = _have.is_dir() and engine_build_of(_have / "llama-server.exe") == backend
     if not force and _same_build and _usable_server_exe(_have / "llama-server.exe"):
         reset_native_cache()
@@ -1685,12 +1761,19 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     # substring "bin-win-cuda-X-x64.zip" — so the binaries matcher must exclude
     # "cudart" or it grabs the runtime zip twice and misses llama-server.exe.
     if backend == "cuda":
+        # Builds differ in which CUDA versions they ship; take the one asked
+        # for when it is there, else the oldest, which the most drivers run.
+        _cudas = sorted({m.group(1) for a in assets if "cudart" not in a.get("name", "")
+                         for m in [re.search(r"bin-win-cuda-([\d.]+)-x64\.zip$", a.get("name", ""))] if m},
+                        key=lambda v: [int(x) for x in v.split(".") if x.isdigit()])
+        if _cudas and cuda not in _cudas:
+            cuda = _cudas[0]
         _tail = f"bin-win-cuda-{cuda}-x64.zip"
         bins = next((a for a in assets
                      if _tail in a.get("name", "") and "cudart" not in a.get("name", "")), None)
         runtime = next((a for a in assets
                         if f"cudart-llama-{_tail}" in a.get("name", "")), None)
-        if not bins or not runtime:
+        if not bins or (not runtime and not added):
             return {"ok": False, "error": f"no cuda-{cuda} Windows assets in release {tagname}"}
     else:
         # Vulkan and CPU builds are one archive each, with no separate runtime.
@@ -1700,7 +1783,7 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         if not bins:
             return {"ok": False, "error": f"no {backend} Windows build in release {tagname}"}
 
-    dest = Path(os.path.expanduser(f"~/.hearth/llamacpp/{tagname}"))
+    dest = Path(os.path.expanduser(f"~/.hearth/llamacpp/{dirname}"))
     dest.mkdir(parents=True, exist_ok=True)
     total = int(bins.get("size", 0)) + int((runtime or {}).get("size", 0))
     done = [0]
@@ -1767,13 +1850,16 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         return {"ok": False, "error": f"download/extract failed: {type(e).__name__}: {e}"}
     # Each runtime is ~555 MB on disk; keep the newest two so a bad new build
     # can still fall back, and drop the rest instead of stacking up forever.
-    # PrismML's builds are kept apart: the newest one only.
+    # An added build keeps only its newest copy from the same place.
     try:
         _root = Path(os.path.expanduser("~/.hearth/llamacpp"))
+        _owner = dirname.split("@")[0]
         _dirs = [d for d in _root.iterdir()
-                 if d.is_dir() and not d.name.startswith(".") and is_prism_build(d.name) == prism]
-        _vers = sorted(_dirs, key=(lambda p: p.name) if prism else (lambda p: build_rank(p.name)), reverse=True)
-        for _old in _vers[1 if prism else 2:]:
+                 if d.is_dir() and not d.name.startswith(".") and is_added_build(d.name) == added
+                 and (not added or d.name.split("@")[0] == _owner)]
+        _vers = sorted(_dirs, key=(lambda p: p.stat().st_mtime) if added else (lambda p: build_rank(p.name)),
+                       reverse=True)
+        for _old in _vers[1 if added else 2:]:
             shutil.rmtree(_old, ignore_errors=True)
     except OSError:
         pass
@@ -1794,7 +1880,8 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                           f"bytes, no llama-server-impl.dll beside it). Antivirus "
                           f"quarantine is the usual cause - allow {dest.parent} "
                           f"and install again.")}
-    return {"ok": True, "dir": str(dest), "tag": tagname, "backend": backend}
+    return {"ok": True, "dir": str(dest), "tag": tagname, "backend": backend,
+            **({"repo": repo, "id": dirname} if added else {})}
 
 
 _MANAGED_SERVER_FLAGS = {
@@ -1878,7 +1965,24 @@ def start_builtin(model_path: str, *args, **kwargs) -> Dict[str, Any]:
     window waited on "getting ready" forever and every retry was refused as a
     duplicate."""
     try:
-        return _start_builtin(model_path, *args, **kwargs)
+        r = _start_builtin(model_path, *args, **kwargs)
+        if r.get("ok") or r.get("stopped") or not _UNREADABLE.search(r.get("log_tail") or ""):
+            return r
+        # The engine couldn't read this file. Try the other builds added here,
+        # and remember the one that reads it so the next load goes straight there.
+        tried = {(engine_for(model_path) or {}).get("exe")}
+        for eng in added_engines():
+            if eng["exe"] in tried:
+                continue
+            tried.add(eng["exe"])
+            again = _start_builtin(model_path, *args, engine=eng, **kwargs)
+            if again.get("ok"):
+                _remember_engine(model_path, eng["exe"])
+                return dict(again, engine=eng["label"])
+            if again.get("stopped"):
+                return again
+        _remember_engine(model_path, None)
+        return r
     except Exception as e:
         with _start_lock:
             _starting_paths.discard(os.path.normcase(os.path.abspath(model_path)))
@@ -1904,13 +2008,9 @@ def load_failure_hint(tail: str) -> str:
         # fires exactly when the engine is genuinely the problem.
         hint = (". This model is newer than your engine, so it can't read it. "
                 "Update the engine in Models > Engine, then load it again.")
-    elif re.search(r"invalid ggml type (142|143)\b", tail.lower()):
-        # PrismML's ternary packing (PQ2_0 / PTQ1_0): only their own build reads it.
-        hint = (". This is a PrismML ternary model; only PrismML's own engine reads this packing. "
-                "Get it in Models, Engine (PrismML engine), or use the same model's Q2_0_g64 file")
     elif "invalid ggml type" in tail.lower():
-        hint = (". This file uses a kind of compression your engine can't read; it was made for a "
-                "different build of llama.cpp")
+        hint = (". This file was made for a different build of llama.cpp than yours. If its page says "
+                "which one, add that build in Models, Engine (Add an engine) and load it again")
     elif "could not load model" in tail.lower():
         hint = ". The model file couldn't be read; it may be damaged or not a model"
     elif "could not find module" in tail.lower():
@@ -1927,7 +2027,8 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
                   force: bool = False,
                   parallel_slots: Optional[int] = None,
                   extra_args: Optional[str] = None,
-                  _smoke_checked: bool = False) -> Dict[str, Any]:  # noqa: ARG001 — kept for caller compat; load no longer refuses on VRAM
+                  _smoke_checked: bool = False,
+                  engine: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:  # noqa: ARG001 — kept for caller compat; load no longer refuses on VRAM
     """Spawn llama-cpp-python's OpenAI-compatible server.
 
     Args:
@@ -1964,11 +2065,6 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
     # both ended up holding the same GGUF in VRAM. _start_lock + _starting_paths
     # close that window. Holds for the whole 10-30s spawn-and-wait, so we use
     # a non-blocking acquire to fail-fast on the duplicate call.
-    # A model no installed engine can read is refused before the running one
-    # is stopped for it.
-    _no_engine = engine_for(model_path)[1]
-    if _no_engine:
-        return {"ok": False, "error": _no_engine, "needs": "prism"}
     normalized_path = os.path.normcase(os.path.abspath(model_path))
     with _start_lock:
         if normalized_path in _starting_paths:
@@ -2016,7 +2112,7 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
     # flash on). Older cards keep the q8_0+flash VRAM saver. Only defaults are
     # touched — an explicit load-config choice is left alone (the GUI warns).
     _blackwell = (detect_gpu_compute_cap() or 0.0) >= 12.0
-    _native, _no_engine = engine_for(model_path)
+    _native = engine or engine_for(model_path) or find_native_llama_server()
     _use_native = _native is not None
 
     # The bundled llama-cpp-python wheel has no Blackwell (RTX 50-series, sm_120)
@@ -2715,60 +2811,6 @@ _VRAM_DRIVER_RESERVE_GB = 1.0
 
 _GGUF_FIXED_SZ = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
 _layer_count_cache: Dict[str, Optional[int]] = {}
-_tensor_types_cache: Dict[Tuple[str, float], frozenset] = {}
-
-
-def gguf_tensor_types(model_path: str) -> frozenset:
-    """The GGML types a GGUF's tensors are stored in, read from its header.
-    Empty when the file can't be read."""
-    import struct
-    try:
-        key = (os.path.normcase(os.path.abspath(model_path)), os.path.getmtime(model_path))
-    except OSError:
-        return frozenset()
-    if key in _tensor_types_cache:
-        return _tensor_types_cache[key]
-    types = set()
-    try:
-        with open(model_path, "rb") as f:
-            if f.read(4) != b"GGUF":
-                raise ValueError("not gguf")
-            f.read(4)
-            n_tensors = struct.unpack("<Q", f.read(8))[0]
-            kv_count = struct.unpack("<Q", f.read(8))[0]
-
-            def _skip(vt: int) -> None:
-                if vt in _GGUF_FIXED_SZ:
-                    f.read(_GGUF_FIXED_SZ[vt])
-                elif vt == 8:
-                    f.read(struct.unpack("<Q", f.read(8))[0])
-                elif vt == 9:
-                    et = struct.unpack("<I", f.read(4))[0]
-                    n = struct.unpack("<Q", f.read(8))[0]
-                    if et in _GGUF_FIXED_SZ:
-                        f.read(_GGUF_FIXED_SZ[et] * n)
-                    else:
-                        for _ in range(n):
-                            _skip(et)
-                else:
-                    raise ValueError(f"unknown gguf type {vt}")
-
-            for _ in range(kv_count):
-                f.read(struct.unpack("<Q", f.read(8))[0])
-                _skip(struct.unpack("<I", f.read(4))[0])
-            for _ in range(n_tensors):
-                f.read(struct.unpack("<Q", f.read(8))[0])          # name
-                n_dims = struct.unpack("<I", f.read(4))[0]
-                f.read(8 * n_dims)
-                types.add(struct.unpack("<I", f.read(4))[0])
-                f.read(8)                                          # offset
-    except Exception:
-        types = set()
-    out = frozenset(types)
-    _tensor_types_cache[key] = out
-    return out
-
-
 def gguf_layer_count(model_path: str) -> Optional[int]:
     """Read <arch>.block_count (the transformer layer count) straight from the
     GGUF header — no llama.cpp load, no deps. Lets the offload math size against
@@ -3659,9 +3701,7 @@ def start_helper(model_path: str, ctx: int = 16384, n_gpu_layers: int = -1,
     `ctx` is per helper; `slots` helpers can run on it at once."""
     if not model_path or not Path(model_path).is_file():
         return {"ok": False, "error": f"model file not found: {model_path}"}
-    native, why = engine_for(model_path)
-    if why:
-        return {"ok": False, "error": why}
+    native = engine_for(model_path) or find_native_llama_server()
     if not native:
         return {"ok": False, "error": "a helper model needs the llama.cpp engine; install it in Models > Engine"}
     stop_helper()

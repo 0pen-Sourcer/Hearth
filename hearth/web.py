@@ -3982,7 +3982,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             # rolled back; absent means latest.
             _body = self._read_json()
             _want_tag = (_body.get("tag") or "").strip()
-            _prism = _body.get("engine") == "prism"
+            _repo = str(_body.get("repo") or "").strip()
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -4006,7 +4006,7 @@ class HearthHandler(BaseHTTPRequestHandler):
 
             try:
                 result = llmserver.download_llama_runtime(
-                    tag=_want_tag or None, on_progress=on_progress, prism=_prism)
+                    tag=_want_tag or None, on_progress=on_progress, repo=_repo)
                 emit({"type": "done", **result})
             except Exception as e:
                 emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
@@ -4028,6 +4028,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             # Cancel the engine download AND drop its partial (does not resume).
             from . import llmserver
             return self._send_json(200, llmserver.discard_llama_download())
+        if path == "/api/runtime/add-folder":
+            from . import llmserver
+            return self._send_json(200, llmserver.add_engine_folder(str(self._read_json().get("path") or "")))
+        if path == "/api/runtime/remove-added":
+            from . import llmserver
+            return self._send_json(200, llmserver.remove_added_engine(str(self._read_json().get("id") or "")))
         if path == "/api/runtime/preference":
             from . import llmserver
             body = self._read_json()
