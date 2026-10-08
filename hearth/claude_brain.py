@@ -518,7 +518,7 @@ def decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
 # Tools whose state lives in this process, not in the MCP server the brain
 # talks to. The server passes these calls here, so a helper the brain sends
 # is one of Hearth's own: it shows in the Team view and can be told things.
-HEARTH_SIDE = ("spawn_subagent", "tell_subagent", "get_subagent_result", "launch_team", "helper_changes",
+HEARTH_SIDE = ("spawn_subagent", "tell_subagent", "get_subagent_result", "launch_team", "helper_changes", "delegate",
                "race_helpers")
 _sent: Dict[str, int] = {}     # helpers this turn sent -> checks since one was last seen running
 
@@ -531,7 +531,7 @@ def run_tool(token: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if name == "spawn_subagent":
         args["mode"] = "background"               # the turn waits for it and hands over its report
     out = str(execute_tool(name, args))
-    if name in ("spawn_subagent", "launch_team", "race_helpers"):
+    if name in ("spawn_subagent", "launch_team", "race_helpers", "delegate"):
         # The turn stays open until every helper it started has reported.
         import re
         for aid in set(re.findall(r"sub_\d+_[0-9a-f]{6}", out)):

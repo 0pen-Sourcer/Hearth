@@ -106,27 +106,31 @@ res = team.launch_team([{"name": "Ext", "agent": "stand-in", "prompt": "do it", 
 check("launch_team hands an agent member to that agent", res.get("ok") and calls and calls[0][0][:2] == ("stand-in", "do it"))
 xa.spawn = xa_spawn
 
-# delegate: one task, the agent's answer relayed in the same turn
+# delegate: hand the task over and move on; the answer arrives as a report.
+# It used to hold the turn for minutes waiting on a slow or stuck agent.
 from hearth import tools                                            # noqa: E402
-out = tools._delegate({"agent": "stand-in", "task": "read a.txt", "folder": work})
-check("delegate waits and relays the agent's answer", "Stand-in answered" in out and "The file says hello." in out)
-check("delegate without an agent says what is installed", tools._delegate({"task": "x"}).startswith("Error"))
-check("the model is told about the agents it can hand work to",
-      "delegate" in [t["name"] for t in tools.TOOL_DEFINITIONS])
-
-# A slow agent: the turn moves on, and the answer still arrives later.
+late = []
+subagents._BG_COMPLETION_CB = lambda i, res: late.append(res)
 xa.AGENTS["stand-in-slow"] = {"label": "Slow agent", "exe": ["stand-in"], "args": lambda allow: ["-c",
                               "import time, sys; sys.stdin.read(); time.sleep(1.5); print('late answer')"],
                               "stream": "text"}
-late = []
-subagents._BG_COMPLETION_CB = lambda i, res: late.append(res)
-tools._DELEGATE_WAIT_S = 0.3
+t0 = time.time()
 out = tools._delegate({"agent": "stand-in-slow", "task": "x", "folder": work})
-check("a slow agent does not hold the turn", "still working" in out)
+check(f"delegate hands the task over and returns at once {out[:50]!r}",
+      time.time() - t0 < 3 and out.startswith("Handed to Slow agent") and not late)
 t0 = time.time()
 while not late and time.time() - t0 < 20:
     time.sleep(0.1)
 check("its answer arrives afterwards like a background helper's", late and "late answer" in late[0].get("text", ""))
+late.clear()
+tools._delegate({"agent": "stand-in", "task": "read a.txt", "folder": work})
+t0 = time.time()
+while not late and time.time() - t0 < 20:
+    time.sleep(0.1)
+check("a quick agent's answer arrives the same way", late and "The file says hello." in late[0].get("text", ""))
+check("delegate without an agent says what is installed", tools._delegate({"task": "x"}).startswith("Error"))
+check("the model is told about the agents it can hand work to",
+      "delegate" in [t["name"] for t in tools.TOOL_DEFINITIONS])
 
 # A helper can be stopped part-way, along with whatever its program started.
 xa.AGENTS["stand-in-stuck"] = {"label": "Stuck agent", "exe": ["stand-in"], "args": lambda allow: ["-c",

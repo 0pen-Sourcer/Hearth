@@ -8095,10 +8095,12 @@ TOOL_DEFINITIONS.append({
 
 
 # ── Hand one task to another agent CLI and wait for its answer ──
-_DELEGATE_WAIT_S = 280
 
 
 def _delegate(p: Dict) -> str:
+    """Hand one task to an agent program and move on. Its answer reaches the
+    conversation later as a report, the way a background helper's does; nothing
+    waits on it, so a slow or stuck agent never holds the turn."""
     from . import external_agents as _xa, subagents as _sa
     agent = (p.get("agent") or "").strip().lower()
     task = (p.get("task") or "").strip()
@@ -8107,16 +8109,9 @@ def _delegate(p: Dict) -> str:
     folder = (p.get("folder") or "").strip()
     if folder:
         folder = os.path.abspath(os.path.expanduser(folder))
-    import threading
-    done = threading.Event()
-    box: Dict[str, Any] = {}
-    gave_up = threading.Event()
 
     def _finished(agent_id: str, result: Dict[str, Any]) -> None:
-        box.update(result)
-        done.set()
-        # Past the wait, the answer arrives like any background helper's.
-        if gave_up.is_set() and _sa._BG_COMPLETION_CB:
+        if _sa._BG_COMPLETION_CB:
             try:
                 _sa._BG_COMPLETION_CB(agent_id, result)
             except Exception:
@@ -8126,18 +8121,9 @@ def _delegate(p: Dict) -> str:
     if not r.get("ok"):
         return f"Error: {r.get('error')}. " + _xa.describe()
     label = r.get("label") or agent
-    if not done.wait(_DELEGATE_WAIT_S):
-        gave_up.set()
-        if done.is_set():            # finished in the gap between the two checks
-            gave_up.clear()
-        else:
-            return (f"{label} is still working on it in the background. Its answer will "
-                    f"arrive in this chat when it finishes; tell the user that.")
-    if not box.get("ok"):
-        return f"Error: {label} stopped: {box.get('error') or 'no reason given'}"
-    note = "" if r.get("tested") else f" ({label} support is new in Hearth; check the result.)"
-    text = (box.get("text") or "").strip() or "(it finished without a written answer)"
-    return f"{label} answered{note}:\n\n{text[:12000]}"
+    note = "" if r.get("tested") else f" {label} support is new in Hearth, so check its answer."
+    return (f"Handed to {label} ({r.get('agent_id')}). It works on its own; its answer will reach you "
+            f"as a report when it finishes, so tell the user it's on it and carry on.{note}")
 
 
 _HANDLERS["delegate"] = _delegate
@@ -8145,10 +8131,10 @@ TOOL_DEFINITIONS.append({
     "name": "delegate",
     "description":
         "Hand one task to another AI agent CLI installed on this PC (Claude Code, "
-        "Codex, Antigravity, Gemini CLI and others) and get its answer back. Use it "
-        "whenever the user names one: 'have Claude Code...', 'ask Codex to...'. It "
-        "runs on the user's own account in the given folder, can read and edit files "
-        "there, and waits up to a few minutes for the answer. Relay what it says. "
+        "Codex, Antigravity, Gemini CLI and others) and move on. Use it whenever the "
+        "user names one: 'have Claude Code...', 'ask Codex to...'. It runs on the "
+        "user's own account in the given folder, can read and edit files there, and "
+        "its answer reaches you later as a report; relay it then. "
         + _external_agents_line(),
     "parameters": {"type": "object", "properties": {
         "agent": {"type": "string", "description": "Which one, by id: " + ", ".join(

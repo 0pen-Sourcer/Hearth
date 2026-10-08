@@ -227,6 +227,22 @@ check("a team started by an agent brain runs in Hearth, and the turn waits for e
       '"ok": true' in r["result"] and set(cb._sent) == {"sub_1_aaaaaa", "sub_2_bbbbbb"})
 cb._sent.clear()
 tools.execute_tool = _ex
+# delegate from an agent brain waited inside the brain's tool server, which ends
+# with the brain's turn: the answer was lost and the call stayed "running".
+from hearth import external_agents as _xa, subagents as _sa   # noqa: E402
+_xspawn, _later = _xa.spawn, []
+_xa.spawn = lambda agent, task, cwd="", on_done=None, **k: (
+    _later.append(on_done) or {"ok": True, "agent_id": "sub_7_cccccc", "label": "OpenCode"})
+_sa.drain_pending_notifications()
+t0 = time.time()
+r = cb.run_tool(cb._TOKEN, "delegate", {"agent": "opencode", "task": "say hi"})
+check(f"delegate from an agent brain returns at once and the turn waits for it {r['result'][:60]!r}",
+      time.time() - t0 < 5 and "sub_7_cccccc" in r["result"] and "sub_7_cccccc" in cb._sent)
+_later[0]("sub_7_cccccc", {"ok": True, "text": "hi there", "name": "OpenCode"})
+news = cb.helper_news()
+check(f"its answer arrives as a report {news[:1]}", any("hi there" in n for n in news))
+_xa.spawn = _xspawn
+cb._sent.clear()
 
 # A report that was waiting when the user next speaks goes in ahead of what they said.
 sa._default_completion_cb("sub_1_aaaaaa", {"ok": True, "text": "the file has 40 lines", "name": "Noah"})
