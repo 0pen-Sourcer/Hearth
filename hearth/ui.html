@@ -19633,7 +19633,7 @@ function roomMainGoal(p) {
   }
   const tool = (ms.match(/calling ([a-z_]+)/) || [])[1] || '';
   // Something worth remembering gets pinned to the board.
-  if (/^memory_(save|update|write)|^remember/.test(tool)) {
+  if (/^memory_(save|update|write)|^remember|^update_team_plan/.test(tool)) {
     return roomHas(roomSkin(p.agent), 'pin') ? { at: ROOM.spots.pin, pose: 'pin', flip: true } : { at: ROOM.spots.board, pose: 'raise' };
   }
   if (/read|grep|find|list|search|fetch|browse|recall|pdf/.test(tool)) {

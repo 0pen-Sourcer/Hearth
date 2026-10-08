@@ -519,7 +519,7 @@ def decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
 # talks to. The server passes these calls here, so a helper the brain sends
 # is one of Hearth's own: it shows in the Team view and can be told things.
 HEARTH_SIDE = ("spawn_subagent", "tell_subagent", "get_subagent_result", "launch_team", "helper_changes",
-               "race_helpers")
+               "race_helpers", "update_team_plan")
 _sent: Dict[str, int] = {}     # helpers this turn sent -> checks since one was last seen running
 
 

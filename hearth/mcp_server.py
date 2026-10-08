@@ -179,7 +179,7 @@ def _ask_hearth(tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
 # Helpers live in the Hearth that started this server, so their tools run there.
 # A helper started by Hearth gets none of them: it does its task and reports.
 _IN_HEARTH = (("spawn_subagent", "tell_subagent", "get_subagent_result", "launch_team", "helper_changes",
-               "race_helpers")
+               "race_helpers", "update_team_plan")
               if (_BRAIN_URL and _BRAIN_TOKEN and not os.environ.get("HEARTH_HELPER")) else ())
 
 

@@ -772,6 +772,20 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "update_team_plan",
+        "description":
+            "Change the shared plan of a team started with launch_team; every member "
+            "still working is told the new plan before its next step.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "team": {"type": "string", "description": "The team id launch_team returned."},
+                "text": {"type": "string", "description": "The whole new plan."},
+            },
+            "required": ["team", "text"],
+        },
+    },
+    {
         "name": "race_helpers",
         "description":
             "Give one coding task to two or more agent programs at once (say codex and "
@@ -6441,6 +6455,8 @@ _HANDLERS = {
     "spawn_subagent": lambda p: _spawn_subagent(p),
     "list_subagent_personas": lambda p: __import__("hearth.subagents", fromlist=["list_personas"]).list_personas(),
     "get_subagent_result": lambda p: __import__("hearth.subagents", fromlist=["get_subagent_result"]).get_subagent_result(p.get("agent_id") or p.get("job_id") or p.get("id") or ""),
+    "update_team_plan": lambda p: __import__("hearth.team", fromlist=["update_plan"]).update_plan(
+        p.get("team") or "", p.get("text") or p.get("plan") or ""),
     "race_helpers": lambda p: __import__("hearth.team", fromlist=["race"]).race(
         p.get("task") or "", p.get("agents") or [], p.get("folder") or "", p.get("check") or ""),
     # Helpers' own loop handles it, knowing who sends; the main assistant has tell_subagent.
@@ -8039,11 +8055,11 @@ def _launch_team(p: Dict) -> str:
                 "summarizer). E.g. one architect, one frontend coder, "
                 "one backend coder.")
     from . import team as _team
-    r = _team.launch_team(members)
+    r = _team.launch_team(members, str(p.get("plan") or ""))
     if not r.get("ok"):
         why = "; ".join(f"{d['name']}: {d['reason']}" for d in r.get("dropped") or [])
         return f"Error: {r.get('error', 'team launch failed')}" + (f" ({why})" if why else "")
-    who = ", ".join(f"{m['name']} ({m['persona']})" for m in r.get("spawned", []))
+    who = ", ".join(f"{m['name']} ({m['persona']}, {m['agent_id']})" for m in r.get("spawned", []))
     return f"{r.get('note', 'Team launched.')}\nTeam: {who}"
 
 
@@ -8088,6 +8104,8 @@ TOOL_DEFINITIONS.append({
                       "e.g. 'opencode/big-pickle'."},
             "folder": {"type": "string", "description": "Working folder for an external agent. Default: the workspace."},
         }, "required": ["prompt"]}},
+        "plan": {"type": "string", "description": "The team's shared plan: who does what and how the parts fit. "
+                 "Every member gets it; change it later with update_team_plan."},
     }, "required": ["members"]},
 })
 
@@ -8501,6 +8519,7 @@ _DEFERRED_TOOLS = {
     "helper_changes",      # only matters once a helper has changed something
     "message_helper",      # helpers use it among themselves
     "race_helpers",        # comparing agents is an occasional ask
+    "update_team_plan",    # only matters once a team is running
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # ntfy push is opt-in / rare
     "focus_window",        # niche window management
@@ -9009,6 +9028,7 @@ _TOOL_CATEGORY = {
     "helper_changes": "Sub-agents",
     "message_helper": "Sub-agents",
     "race_helpers": "Sub-agents",
+    "update_team_plan": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory",
