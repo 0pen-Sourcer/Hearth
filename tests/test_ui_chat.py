@@ -490,6 +490,25 @@ with sync_playwright() as pw:
     check(f"a helper's card waits for the sentence to end instead of splitting it {split}",
           split and split[0].startswith("Team is working.") and "CARD" in split)
 
+    # A chat had in the terminal never showed in the window, and turns added there never reached it.
+    from hearth import chat_sync
+    tid = chat_sync.new_id()
+    chat_sync.append(tid, [{"role": "user", "content": "rename the photos"}, {"role": "assistant", "content": "Done, 12 renamed."}])
+    shared = pg.evaluate("""async (tid) => {
+      await syncConvosFromDisk();
+      const row = document.querySelector(`.convo[data-cid="${tid}"]`);
+      const out = { listed: !!row, mark: row && row.title };
+      if (row) row.click();
+      await new Promise(r => setTimeout(r, 300));
+      return out;
+    }""", tid)
+    time.sleep(1.1)
+    chat_sync.append(tid, [{"role": "user", "content": "and the videos?"}, {"role": "assistant", "content": "Those too."}])
+    later = pg.evaluate("""async () => { await syncConvosFromDisk(); await new Promise(r => setTimeout(r, 200));
+      return [...document.querySelectorAll('.msg')].map(m => m.textContent).join(' | '); }""")
+    check(f"a chat had in the terminal shows in the window, marked, and keeps up with it {shared} {later[-80:]!r}",
+          shared["listed"] and shared["mark"] == "Started in the terminal" and "Those too." in later)
+
     # Something said part-way showed as green text until the model took it,
     # then vanished; later there was no way to see what had changed course.
     steer_stream = "\n".join(json.dumps(e) for e in [

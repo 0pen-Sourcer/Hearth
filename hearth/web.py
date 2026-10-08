@@ -411,6 +411,7 @@ def _list_convos() -> List[Dict]:
             "created": data.get("created", 0),
             "msg_count": len(data.get("messages", [])),
             "pinned": bool(data.get("pinned")),
+            "source": data.get("source") or "",       # "terminal" for a chat the terminal started
         }
         with _CONVO_META_LOCK:
             _CONVO_META[fn] = (key, meta)

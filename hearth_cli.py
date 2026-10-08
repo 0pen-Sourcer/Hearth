@@ -303,7 +303,7 @@ SLASH_COMMANDS = {
     "/model": "pick a model on the current brain", "/models": "models on disk, downloads, the provider's list",
     "/tools": "the tools", "/clear": "start the conversation over", "/compact": "summarize old turns now",
     "/context": "set the context window", "/tokens": "how full the context is", "/history": "the last messages",
-    "/chats": "LM Studio threads", "/chat": "load a thread", "/workspace": "the workspace folder",
+    "/chats": "every chat, from the window too", "/chat": "carry on a chat here", "/workspace": "the workspace folder",
     "/log": "recent activity", "/mem": "what I remember", "/curate": "merge duplicate memories",
     "/rules": "the house rules file", "/name": "my name", "/me": "what I know and may do",
     "/team": "helpers working for me", "/agents": "agent programs on this PC", "/agent": "run a helper and wait",
@@ -1192,6 +1192,63 @@ class JarvisCLI:
         self.pt_session = None
         self._pt_init_attempted = False
         self.load_history()
+        self._chat_resume()
+
+    # The terminal's chat is also a chat file the window lists (hearth.chat_sync):
+    # id = that file, count = turns it held when last read or written here,
+    # sent = how many of self.messages are in it already.
+    _CHAT_STATE = os.path.join(WORKSPACE, "logs", "terminal_chat.json")
+
+    def _chat_resume(self) -> None:
+        try:
+            with open(self._CHAT_STATE, encoding="utf-8") as f:
+                st = json.load(f)
+        except (OSError, ValueError):
+            st = {}
+        self._chat = {"id": st.get("id"), "count": int(st.get("count") or 0),
+                      "sent": min(int(st.get("sent") or 0), len(self.messages)) if st.get("id") else len(self.messages)}
+
+    def _chat_keep(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._CHAT_STATE), exist_ok=True)
+            with open(self._CHAT_STATE, "w", encoding="utf-8") as f:
+                json.dump(self._chat, f)
+        except OSError:
+            pass
+
+    def _chat_new(self) -> None:
+        self._chat = {"id": None, "count": 0, "sent": len(self.messages)}
+        self._chat_keep()
+
+    def _chat_pull(self) -> None:
+        """Turns taken in the window on this chat since the terminal last looked."""
+        from hearth import chat_sync
+        ch = getattr(self, "_chat", None)
+        if not ch or not ch.get("id"):
+            return
+        new = chat_sync.newer(ch["id"], ch["count"])
+        if new:
+            self.messages.extend(chat_sync.from_chat(new))
+            ch["count"] += len(new)
+            ch["sent"] = len(self.messages)
+            self._chat_keep()
+
+    def _chat_push(self) -> None:
+        """The terminal's new turns, added to its chat file."""
+        from hearth import chat_sync
+        ch = getattr(self, "_chat", None)
+        if ch is None:
+            return
+        if len(self.messages) < ch["sent"]:          # summed up or trimmed: nothing new to add
+            ch["sent"] = len(self.messages)
+        fresh = self.messages[ch["sent"]:]
+        if not any(m.get("role") == "user" for m in fresh) and not ch.get("id"):
+            return
+        if not ch.get("id"):
+            ch["id"] = chat_sync.new_id()
+        ch["count"] = chat_sync.append(ch["id"], fresh)
+        ch["sent"] = len(self.messages)
+        self._chat_keep()
 
     def _ensure_pt_session(self) -> None:
         if self._pt_init_attempted or not _PT_AVAILABLE:
@@ -1439,8 +1496,12 @@ class JarvisCLI:
             with open(HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.messages, f, indent=2)
         except Exception as e:
-            print(f"{C_ERR}Save failed: {e}{C_RESET}")
+            print(f"{C_ERR}Couldn't save the chat: {e}{C_RESET}")
             return
+        try:
+            self._chat_push()
+        except Exception:
+            pass
 
         if not LMSTUDIO_SYNC:
             return
@@ -3097,6 +3158,7 @@ class JarvisCLI:
             return True
         if low == "/clear":
             self.messages = [self.messages[0]]
+            self._chat_new()
             # Deferred tools unlocked earlier are process-global, so without this
             # a cleared session keeps carrying whatever the last one opened and
             # the prompt never shrinks back.
@@ -3108,7 +3170,33 @@ class JarvisCLI:
             self.save_history()
             print(f"{C_OK}Context cleared.{C_RESET}")
             return True
-        if low == "/chats":
+        if low == "/chats" or (low.startswith("/chat ") and not low.startswith("/chat lm")):
+            from hearth import chat_sync
+            chats = chat_sync.listing(30)
+            arg = cmd.split(None, 1)[1].strip() if low.startswith("/chat ") else ""
+            if not arg:
+                if not chats:
+                    print(f"  {C_DIM}No chats yet.{C_RESET}")
+                    return True
+                for i, c in enumerate(chats, 1):
+                    here = " (this one)" if c["id"] == (self._chat or {}).get("id") else ""
+                    where = "terminal" if c["source"] == "terminal" else "window"
+                    print(f"  {C_DIM}{i:>2}{C_RESET}  {c['title'][:60]:<60} {C_DIM}{where}, {c['count']} msgs{here}{C_RESET}")
+                print(f"  {C_DIM}/chat <n> carries one on here. /chats lmstudio lists LM Studio threads.{C_RESET}")
+                return True
+            pick = chats[int(arg) - 1] if arg.isdigit() and 1 <= int(arg) <= len(chats) else next(
+                (c for c in chats if arg.lower() in c["title"].lower()), None)
+            if not pick:
+                print(f"  {C_ERR}No chat matches '{arg}'. /chats lists them.{C_RESET}")
+                return True
+            d = chat_sync.load(pick["id"]) or {}
+            turns = d.get("messages") or []
+            self.messages = [self.messages[0]] + chat_sync.from_chat(turns)
+            self._chat = {"id": pick["id"], "count": len(turns), "sent": len(self.messages)}
+            self._chat_keep()
+            print(f"  {C_OK}Carrying on: {pick['title']}{C_RESET} {C_DIM}({len(turns)} messages){C_RESET}")
+            return True
+        if low == "/chats lmstudio":
             self.all_chats_cache = self.get_all_lmstudio_chats()
             print(f"\n{C_BRAND}LM Studio threads:{C_RESET}")
             for i, c in enumerate(self.all_chats_cache[:25], 1):
@@ -3116,8 +3204,8 @@ class JarvisCLI:
                 print(f"  [{i}] {c['name']}{C_DIM}{here}{C_RESET}")
             print()
             return True
-        if low.startswith("/chat "):
-            arg = cmd.split(None, 1)[1].strip().strip("[]")
+        if low.startswith("/chat lm "):
+            arg = cmd.split(None, 2)[2].strip().strip("[]")
             if not self.all_chats_cache:
                 self.all_chats_cache = self.get_all_lmstudio_chats()
             chosen = None
@@ -5137,6 +5225,10 @@ class JarvisCLI:
                 pass
             # Expand @<path> file attachments (text or image)
             content = self._resolve_attachments(user_input)
+            try:
+                self._chat_pull()
+            except Exception:
+                pass
             self.messages.append({"role": "user", "content": content})
             # Ctrl-C during the response sets the cancel signal; the
             # stream loop checks it between chunks and bails cleanly

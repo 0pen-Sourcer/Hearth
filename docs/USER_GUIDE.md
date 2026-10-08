@@ -85,8 +85,8 @@ The desktop app and browser share one backend (`hearth/web.py`) and one HTML fil
 /context         set the context window
 /tokens          how full the context is
 /history         the last messages
-/chats           LM Studio threads
-/chat            load a thread
+/chats           every chat, from the window too
+/chat            carry on a chat here
 /workspace       the workspace folder
 /log             recent activity
 /mem             what I remember
