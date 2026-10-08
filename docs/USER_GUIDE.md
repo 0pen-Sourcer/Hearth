@@ -1,77 +1,142 @@
-# Hearth — user guide
+# Hearth user guide
 
-The "you just downloaded this and have no idea where to start" guide.
-
----
-
-## TL;DR — five minutes to a working Jarvis
-
-```powershell
-# 1. clone
-git clone https://github.com/0pen-sourcer/hearth.git
-cd hearth
-
-# 2. install (venv, deps, voice models)
-.\install.ps1
-
-# 3. or use LM Studio (https://lmstudio.ai): open it, click "Discover",
-#    grab Qwythos-9B Claude-Mythos (Q4_K_M), then "Local Server -> Start".
-#    (Hearth can also download + serve it itself from the Models tab.)
-
-# 4. create the Desktop + Startup-folder shortcuts (one-shot, optional)
-.\.venv\Scripts\python.exe -m hearth.install_shortcuts
-
-# 5. pick your launcher
-.\hearth.bat                                   # CLI (voice + keyboard)
-.\.venv\Scripts\python.exe -m hearth.tray --open   # tray + native window
-.\Hearth-cli.bat                               # CLI in Windows Terminal
-```
-
-That's it. Hearth is now a tray icon that launches on every boot, opens a chat window on click, and remembers you across sessions.
+For when you've just installed Hearth and want to know what it does and where things are.
 
 ---
 
-## Four ways to use it
+## Getting started
 
-| Interface | Launch | When |
-|---|---|---|
-| **CLI** | `.\hearth.bat` | Daily driver. Voice loop, slash commands, fast iteration. |
-| **Desktop app** | `.\.venv\Scripts\python.exe -m hearth.tray --open` OR `dist\Hearth\Hearth.exe` | Visual chat, multi-conversation sidebar, file drop, voice mode takeover, GPU stats. |
-| **Browser** | `python -m hearth.web` | Same UI in your default browser. Useful if you want LAN access. |
-| **MCP** | `python -m hearth.mcp_server` | Plugs Hearth's tools into **LM Studio's native chat UI** — gets tool cards rendered there. |
+1. **Install.** Download [Hearth for Windows](https://github.com/0pen-sourcer/Hearth/releases/latest). Full (about 1 GB) brings its own model engine; Lite (about 500 MB) is for when you already run LM Studio, Ollama or a cloud key. Both install to your user folder without admin rights. Windows Defender may flag the unsigned installer; it's a false positive, and you can restore the file from Windows Security, Protection history.
+2. **Pick a brain.** Setup finds what you already have: an agent like Claude Code or Codex, a model file on your disk, or a running LM Studio or Ollama. Pick one, or download a model from the Models tab later, or paste a cloud key.
+3. **Talk to it.** Type, or press the mic and speak.
 
-The desktop app and browser share one backend (`hearth/web.py`) and one HTML file (`hearth/ui.html`). Native window = same UI in a PyWebView wrapper.
+Setup also asks your name, how JARVIS should talk, headphones or speakers, how much may run without asking, and the look. It ends with a short tour, which you can take again from Settings, About.
 
----
-
-## The first 30 seconds in the GUI
-
-1. **Top bar.** The model menu on the left picks what JARVIS thinks with: a model on this PC, a cloud provider, or Claude Code, Codex or Cursor. The voice button sits on the right.
-2. **Sidebar.** New chat and your chats, then Team (the room where helpers work), Memory, Reminders, Skills, Files, Logs, Models and Settings.
-3. **Sticker.** The model menu button shows the brain in use, its loading progress, and a local model kept for helpers if you turned that on. The GPU chip beside it shows the graphics card.
-4. **Type something** and press Enter. Shift+Enter makes a new line.
-5. **First time?** Setup asks your name, how JARVIS should talk and which browser you use, then offers a short tour. The tour is under Settings, About.
+Running from source instead? See "Install from source" in the [README](../README.md).
 
 ---
 
-## Try these in chat to see what Hearth can do
+## The window at a glance
 
-| Prompt | What happens |
+1. **Top bar.** The model menu on the left picks what JARVIS thinks with. The GPU chip shows your graphics card, and the mic on the right starts voice mode.
+2. **Sidebar.** New chat and your chats (a chat started in the terminal has a `>_` mark), then Team, Memory, Reminders, Skills, Files, Logs, Models and Settings.
+3. **Sticker.** The model menu button shows the brain in use and its loading progress, and a local model kept for helpers if you turned that on.
+4. **Chat bar.** Think sets how hard the model reasons, the mic talks instead of typing, + attaches a file, and the switch beside Send sets what runs without asking (Ask, Auto-edit or Auto).
+
+---
+
+## Brains
+
+JARVIS can think with any of these, switched from the model menu at any time:
+
+- **A model on this PC**, through Hearth's own engine, LM Studio, Ollama or any OpenAI-compatible server. Private, free, and offline.
+- **A cloud model** with your own key from Anthropic, OpenAI, Google Gemini, OpenRouter, xAI or Groq.
+- **An agent you already pay for**: Claude Code, Codex or Cursor, on your plan and with no key. Other agents that speak the Agent Client Protocol work too once installed, such as OpenCode, Copilot CLI, Goose and Grok Build.
+
+Whatever the brain, JARVIS keeps Hearth's tools, memory and voice, and asks before anything risky. The Think menu lists the effort levels the chosen model has; on Codex and Claude Code it also has a Fast switch. With a cloud brain, a model on this PC can stay loaded (a switch in the model menu) to run helpers for free.
+
+**Which local model?** Any model of about 7B or larger trained for tool calling. The Models tab marks each file by whether it fits your graphics card. Small models handle everyday work well and can lose the thread on long multi-step jobs; for those, a cloud model or an agent brain is the better pick.
+
+---
+
+## Helpers and the Team room
+
+Bigger jobs go to helpers. Ask for them in plain words ("have Codex write the tests while a helper on Claude Haiku looks up the API"), or press **New helper** in the Team tab.
+
+- **Where they run.** One of Hearth's own helpers runs on JARVIS's brain, this PC's model, or a cloud model you name. Agent programs (Claude Code, Codex, Cursor, OpenCode and more) run on your own install and account.
+- **Watching them.** The Team room shows each helper at a desk; past eight, the next room opens. Click anyone to see who asked, the task, every step, and what it changed.
+- **Talking to them.** Type in a working helper's panel to tell it something part-way. Helpers also message each other and JARVIS as they work; in the room, the sender walks over and says it.
+- **Their changes.** An agent program working in a git repository gets its own copy of it. Its changes wait in its panel to be brought in, discarded or undone. Hearth's own helpers write directly, and what they changed can be undone.
+- **Stopping one.** The Stop button in its panel, or `/team stop <n>` in the terminal.
+- **Racing.** Ask for the same task from two agents ("have Codex and Claude Code both fix this bug and run the tests") and you get one comparison to choose from.
+
+---
+
+## Voice
+
+Press the mic in the top bar. The window turns into a dot grid that listens and speaks; press Esc to leave.
+
+- Speak, pause, and JARVIS answers out loud. The mic opens again for your reply.
+- **Interrupting.** On headphones, talk over a reply and it stops on your first word, then answers what you said instead. On speakers it waits for the reply to end, so it doesn't hear itself.
+- **The desktop HUD.** When Hearth isn't the focused window, a small dot grid floats over your other apps. Clicks pass through it; hold Ctrl to drag it.
+- **Wake word.** Right-click the tray icon and turn on **Wake word**. Saying "Jarvis" opens voice mode.
+- Voices, speed, the mic and the listening model are in Settings, Voice.
+
+---
+
+## Approvals
+
+A switch beside the send box decides what runs without asking:
+
+- **Ask** checks before anything acts on your machine.
+- **Auto-edit** lets file edits inside the workspace through.
+- **Auto** runs routine work on its own, and still asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs.
+
+When something needs your OK, a strip above the chat box asks: **Yes (once)**, **No**, **Always** or **Never** for that tool, or type what to do instead. Writes stay inside the workspace (`~/Jarvis`) unless you allow another folder. In the terminal, `/mode` sets the switch and `/perms` shows saved answers (`/perms forget <tool>`, `/perms reset`).
+
+---
+
+## Try these
+
+| Say | What happens |
 |---|---|
-| `find my [movie/game/folder name]` | Walks all drives + common dirs, returns paths sorted by relevance |
-| `play that` (after the find) | Opens the top match in your default player |
-| `what's eating up my disk` | Calls `disk_usage` — top folders + files by size |
-| `summarize ~/Jarvis/whatever.pdf` | Reads + 3-5 bullet summary |
-| `what's the latest news on [topic]` | DuckDuckGo search + fetches top URL + summary |
-| `what's my GPU temp` | Live `nvidia-smi` call |
-| `remind me to take a break in 30 minutes` | Toast notification fires in 30 |
-| `remember that my favorite framework is FastAPI` | Saves to `~/Jarvis/memory/` — persists across sessions |
-| `what did we talk about last week with that deployment bug` | Searches across ALL past chats via SQLite FTS5 |
-| `open chrome with my work profile` | Opens with the right profile (configurable in settings) |
+| `find my [movie / game / folder]` | Searches your drives and lists matches, best first |
+| `play that` (after a find) | Opens it in your default player |
+| `what's eating up my disk` | The biggest folders and files |
+| `summarize this PDF` (drop it in) | Reads it and sums it up, even hundreds of pages |
+| `what's the latest on [topic]` | Searches the web and reads the top results |
+| `remind me to stretch in 30 minutes` | A reminder, read back in words |
+| `remember I prefer FastAPI` | Saved to memory, used in later chats |
+| `what did we talk about last week about that bug` | Searches every past chat |
+| `open Chrome with my work profile` | Opens it with the right profile |
+| `set up a team to build a landing page` | Starts helpers you can watch in the Team room |
 
 ---
 
-## Slash commands (CLI)
+## Reminders
+
+Say it however you like. Hearth works out the exact time and reads back the day and time in words.
+
+| Say | Set for |
+|---|---|
+| `in 25 minutes` | now + 25 minutes |
+| `tomorrow at 7am` | tomorrow 07:00 |
+| `next monday at 10am` | the coming Monday, 10:00 |
+| `every weekday at 9am` | a recurring reminder |
+
+When it's time you get a Windows notification and, with voice on, it's read aloud. In the terminal it also prints into the chat. With an [ntfy](https://ntfy.sh) topic set, it reaches your phone too. All of them are listed in the Reminders tab.
+
+---
+
+## Your phone
+
+Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs on your PC and replies, files included. Set it up in **Settings, Connectors**. Full steps in [PHONE.md](PHONE.md).
+
+---
+
+## Memory and chats
+
+- **Memory.** Every fact JARVIS learns is a small file in `~/Jarvis/memory`. The ones that matter to your message are brought in automatically, and ones never used are archived rather than deleted. Read, change or delete them in the Memory tab.
+- **Past chats.** Every chat is searchable, so "what did we decide about X last week" works.
+- **One set of chats.** A chat from the terminal shows in the window and can be carried on there, and `/chats` and `/chat <n>` open any chat in the terminal.
+
+---
+
+## Dropping files
+
+Drag files onto the window. Hearth reads PDF, Word, Excel, PowerPoint, EPUB, notebooks, RTF, CSV, JSON, HTML and compressed files; it looks inside zip and tar archives without unpacking them; and with a model that can see, it reads images.
+
+---
+
+## Skills
+
+A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide deck. Built-in ones cover documents and diagrams. Install someone else's with `/skill install owner/repo` or by pasting its GitHub link in chat, and see them all in the Skills tab. Writing and sharing your own: [SKILLS.md](SKILLS.md).
+
+---
+
+## The terminal
+
+`hearth.bat` (from source) or **Hearth CLI** (from the installer) does everything the window does, with slash commands and voice. `@path` attaches a file.
 
 ```
 /help            every command
@@ -125,212 +190,51 @@ The desktop app and browser share one backend (`hearth/web.py`) and one HTML fil
 
 ---
 
-## Voice mode — the Dexter-style takeover
+## Settings
 
-Click the mic-with-circle icon top-right. The whole window goes black with a 15×15 dot grid in the center.
+- **Chat brain**: what JARVIS thinks with, as cards grouped by where it runs.
+- **Voice**: voice, speed, microphone, speakers or headphones, the listening model.
+- **Behavior**: approvals, Simple or Advanced, sounds and toasts.
+- **Appearance**: Classic, Light, Dark or System, the accent, and the Team room's home room.
+- **Connectors**: phone bridges, ntfy and email.
+- **About**: version, updates, repair, start at login, and the tour.
 
-1. **Tap mic** → "listening…" (the dot pattern stays calm at rest)
-2. **Speak** → mic captures audio
-3. **Stay silent 1.5s** → auto-transcribes via whisper
-4. **Jarvis replies** → text appears in the transcript area + voice speaks through your speakers, **dot grid does a smooth violet wave outward from center**
-5. **Mic auto-reopens** after TTS finishes — conversational loop
-6. **Press Esc** to exit
-
-**Why mic stays muted during TTS:** the speakers→mic feedback loop is worse than no interruption. Type any time though — keyboard always works in voice mode.
-
-**The desktop HUD.** When Hearth isn't the focused window, the same dot grid appears as a small always-on-top overlay so you can see it listening and talking while you work in other apps. It is **click-through by default**, so clicks pass straight to whatever is underneath and it never gets in your way. **Hold Ctrl to drag it** somewhere else. Without Ctrl it will feel like it can't be moved, which is deliberate rather than broken.
+Everything saves as you change it, with no restart.
 
 ---
 
-## Wake word — "Jarvis"
-
-Right-click tray → toggle **Wake word: on**.
-
-A background thread listens with whisper (energy-gated — only transcribes when audio crosses a voice-activity threshold, so it sleeps at ~0% CPU). When it hears "jarvis", "hey jarvis", "wake up jarvis", "yo jarvis" → tray fires `_open_desktop_window()` which brings the chat to focus.
-
-**Customize phrases** via env var (settings.json soon):
-```powershell
-$env:HEARTH_WAKE_PHRASES = "jarvis,hearth,computer"
-```
-
-Tune detection sensitivity + the idle-CPU budget via the `HEARTH_WAKE_*` env vars.
-
----
-
-## Reminders
-
-Say it however you like. Hearth works out the exact time from what you said and the
-current time, and the reminder reads back the day and time in words, so you can see
-it landed where you meant.
-
-| Say | Set for |
-|---|---|
-| `in 25 minutes` | now + 25min |
-| `in 2 hours` | now + 2h |
-| `tomorrow at 7am` | tomorrow 07:00 |
-| `tonight at 9pm` | today 21:00 |
-| `next monday at 10am` | nearest future Monday 10:00 |
-| `on the 30th at half two` | the 30th, 14:30 |
-| `every weekday at 9am` | a recurring reminder |
-
-When the time hits: Windows toast notification (via plyer / win10toast), **plus voice readout** if TTS is enabled. In the CLI the reminder also prints into the chat, since Windows often suppresses the toast (Focus Assist / notification settings), so a reminder that came due while you were away still shows up the moment you're back at the terminal. Set an [ntfy](https://ntfy.sh) topic (see below) and it pushes to your phone too.
-
-Storage: `~/Jarvis/reminders.json`. Edit by hand if you want.
-
-Tools: `set_reminder`, `list_reminders`, `cancel_reminder`.
-
----
-
-## Reach it from your phone
-
-Two opt-in, no-OAuth features (full setup in [PHONE.md](PHONE.md)):
-
-- **Telegram bridge** — text a private bot from anywhere; it runs the full agent on your PC and texts back, files included. A chat-id allowlist is the only gate. Run `python -m hearth.telegram_bridge`; check status with `/phone`.
-- **ntfy push** — pick a random topic name, subscribe in the ntfy phone app, set `HEARTH_NTFY_TOPIC`, and reminders push to your phone even when the PC is asleep.
-
----
-
-## Start at login
-
-The tray app can auto-launch when you sign in to Windows, so reminders fire even before you open Hearth. Toggle it in **Settings → About → Start Hearth at login** (it flips the same Startup-folder entry that Task Manager > Startup shows), or pass `--no-autostart` to `python -m hearth.install_shortcuts` to skip it at install time.
-
----
-
-## Skills (and sharing them)
-
-A skill is a folder with a `SKILL.md` that teaches Hearth a workflow. The model sees a one-line summary of each installed skill and loads the full steps only when it uses one, so you can have many installed cheaply. Built-ins cover documents (PDF/PPTX/XLSX/diagrams/ASCII) and PDF split/merge.
-
-The part that grows the app: **skills are shareable.**
+## Where things live
 
 ```
-/skill                       list installed skills
-/skill install <owner/repo>  install from GitHub (or a github URL, or ./local-path)
-/skill new <name>            scaffold your own under ~/Jarvis/skills/
-/skill remove <name>         uninstall one you added
+~/Jarvis/                  the assistant's home (HEARTH_WORKSPACE moves it)
+├── memory/                one file per fact, MEMORY.md as the index
+├── conversations/         every chat, window and terminal
+├── reminders.json         reminders
+├── settings.json          settings
+├── rules.md               your house rules, read every turn
+├── soul.md                who it is, written by itself
+├── logs/                  what it did, by day, and each part's log
+├── subagents/             each helper's transcript
+├── skills/                skills you installed or wrote
+└── voices/                voice and listening model files
 ```
 
-Install shows you what a skill declares (its tools, any scripts it ships) and warns if it can run shell commands before anything is written; the scripts only ever run through the normal command-permission prompt. To share one you wrote, push its folder to GitHub — others install it with one line. Full guide + the community index: [SKILLS.md](SKILLS.md).
+Reads default to your whole disk; writes, deletes and moves stay in the workspace unless you allow a folder. `HEARTH_LOCKDOWN=1` keeps reads inside the workspace too.
 
 ---
 
-## Memory across sessions
+## When something goes wrong
 
-Two layers:
-
-1. **Per-fact memory** (`~/Jarvis/memory/*.md`) — Jarvis saves your preferences here. Always loaded into context as an index. Categories: `user` / `feedback` / `project` / `reference`. View/edit/delete in the Memory tab. Tools: `memory_save`, `memory_recall`, `memory_forget`, `memory_list`.
-
-2. **Conversation FTS5 search** (`~/Jarvis/session_index.db`) — every message you've ever sent is indexed in SQLite FTS5. When you say "what did we talk about last week", Jarvis calls `search_chats` and gets back ranked snippets across all past chats. Auto-rebuilds when conversations change.
-
-Together: short-term you'd want a fact in mind → `memory_save`. Long-term recall of "we talked about that thing once" → `search_chats`.
-
----
-
-## File drop
-
-Drag any of these onto the window. Drop overlay appears. Hearth uploads → asks Jarvis to read it.
-
-- **PDF** → pypdf text extraction (per-page if needed)
-- **DOCX** → python-docx (paragraphs + tables)
-- **XLSX / XLSM** → openpyxl (sheets + sample rows)
-- **PPTX** → python-pptx (slide text)
-- **EPUB / IPYNB / RTF** → stdlib
-- **CSV / TSV** → stdlib csv
-- **JSON / JSONL** → structure dump
-- **HTML / XML** → stripped text
-- **`.gz / .bz2 / .xz`** → decompress + head
-- **ZIP / TAR.*** → `list_archive` (use `extract_archive_file` to pull one file out without unpacking)
-- **Images** → `view_image` (vision pipeline if the loaded model supports it)
+- **The app won't open**: check `~/Jarvis/logs/hearth_tray.log`. If Windows Defender quarantined `Hearth.exe`, restore it from Windows Security, Protection history.
+- **A model won't load**: the error says why (too big for the card, a newer model than the engine, a format the engine can't read). Update the engine in Models, Engine, or pick a smaller file.
+- **An agent brain gives no answer**: check it's signed in (`claude auth status`, `codex login status`, `cursor-agent status`), or open `/agents` in the terminal.
+- **Voice talks over itself on speakers**: pick speakers in Settings, Voice; on headphones it can be interrupted.
+- **Something broken**: Settings, About, Repair puts Hearth's own files back without touching your chats or memory.
+- The Logs tab shows every tool call and its result, which usually explains what happened.
 
 ---
 
-## Permission prompts
+## More
 
-Risky tools (delete, move, write, run_command, open_app) pop a modal in the GUI:
-
-- **Allow** — just this once
-- **Deny** — refuses, model sees the denial
-- **Always** — allow this tool for the rest of the session
-- **Never** — block this tool for the rest of the session
-
-CLI uses `[y/n/a/N]` keyboard prompts instead. `/perms` shows the current state. `/perms clear` resets.
-
----
-
-## Settings panel
-
-| Setting | Default | What it does |
-|---|---|---|
-| Auto-load preferred model | on | Tells LM Studio to load your pick at startup |
-| Preferred model | (none) | Which model to auto-load |
-| Default `/think` mode on | off | Show model reasoning inline |
-| TTS enabled | off | Speak every assistant reply |
-| TTS device | CPU | CPU / GPU CUDA / GPU DirectML |
-| STT enabled | off | Mic transcribes speech |
-| STT device | CPU | CPU / GPU CUDA |
-| STT model | base.en | tiny.en / base.en / small.en / medium.en |
-
-Persisted to `~/Jarvis/settings.json`. Some require app reload (voice device changes).
-
----
-
-## Picking the right model
-
-Tested on 8GB VRAM:
-
-| Model | Pros | Cons |
-|---|---|---|
-| **Qwythos-9B Claude-Mythos Q4_K_M** | Best tool adherence, decisive on multi-step chains, 1M context | Slightly more shell drift than Qwen |
-| Harmonic-Hermes-9B Q4_K_M | Also strong tool use, fast | A touch behind Qwythos on adherence |
-| Qwen 2.5 7B Instruct Q4_K_M | Cleaner memory tool use | ~30% slower overall |
-| ❌ RNJ-1 8B / any Gemma 3 | — | Emits tool calls as raw text inside the reasoning channel, NOT via OpenAI structured `tool_calls` field. Broken for Hearth until we ship an alt-format parser. |
-
-**Best local pick:** Qwythos 9B (Qwen3.5 base, distilled further for tool-calling). Harmonic Hermes is a solid alternative.
-
-**Wanting to try cloud?** Set `LOCAL_API_BASE=https://generativelanguage.googleapis.com/v1beta/openai` + your Gemini API key — Gemini has an OpenAI-compat endpoint that works with Hearth. But this defeats the "local-first" pitch; do it just to see the ceiling.
-
----
-
-## Workspace layout
-
-```
-~/Jarvis/                  ← agent's home (override with $env:HEARTH_WORKSPACE)
-├── memory/                ← per-fact .md files
-│   ├── MEMORY.md          ← always-loaded index
-│   └── <fact>.md
-├── conversations/         ← every chat as JSON, persists across restart
-│   └── c_<id>.json
-├── session_index.db       ← FTS5 index over all conversations
-├── reminders.json         ← scheduled reminders
-├── settings.json          ← UI + voice device settings
-├── rules.md               ← plain-text rules, re-read every turn
-├── logs/
-│   ├── activity.jsonl     ← every tool call
-│   ├── jarvis_history.json ← CLI conversation history
-│   ├── hearth_tray.log    ← bundled app stderr (when running from exe)
-│   └── hearth_cli.log     ← bundled CLI stderr
-├── voices/                ← Kokoro + Whisper model files
-├── screenshots/           ← screenshot tool output
-└── uploads/               ← files you dragged into the GUI
-```
-
-Reads default to **unrestricted** (whole disk — Jarvis needs to know your machine). Writes/deletes/moves **confined** to workspace. Override with `HEARTH_LOCKDOWN=1` to confine reads too.
-
----
-
-## When things break
-
-- **GUI exe shows traceback dialog** → check `~/Jarvis/logs/hearth_tray.log` for the actual error
-- **Wake word doesn't trigger** → check tray output (CLI mode) for "wake:" lines. Lower `ENERGY_THRESHOLD` in `hearth/wake.py` if mic is quiet
-- **Model says "I don't have memory of past chats"** → it didn't call `search_chats`. Persona is supposed to push it — if it keeps missing, paste the prompt
-- **TTS reads asterisks** → `_clean_for_tts` should strip them. If a specific pattern slips through, paste the text
-- **Voice mode loops on its own speech** → mic is supposed to be muted during TTS. If it's looping, the `voiceSpeaking` flag isn't being set — paste a console log
-- **`find_file` slow** → it's scanning drives. Pass a `path` arg in your prompt to scope it: `find X on G drive`
-
----
-
-## Help / contribute / file bugs
-
-- Issues: github.com/0pen-sourcer/hearth/issues
-- Source: github.com/0pen-sourcer/hearth
-- Docs: `docs/` folder in the repo
-- Full tool list: [`docs/TOOLS.md`](TOOLS.md)
+- Every tool: [TOOLS.md](TOOLS.md)
+- Issues and source: [github.com/0pen-sourcer/Hearth](https://github.com/0pen-sourcer/Hearth)

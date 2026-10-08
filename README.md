@@ -232,7 +232,7 @@ Hearth has over a hundred tools, but only a core set goes to the model in full e
 /import-memory   bring memory from ChatGPT or Claude
 ```
 
-`@path` attaches a file. The full list, with every command, is in the [user guide](docs/USER_GUIDE.md#slash-commands-cli).
+`@path` attaches a file. The full list, with every command, is in the [user guide](docs/USER_GUIDE.md#the-terminal).
 
 </details>
 
