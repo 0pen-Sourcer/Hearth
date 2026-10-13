@@ -10052,6 +10052,15 @@ async function send(forced = null, displayAs = null, opts = {}) {
       return;
     }
   }
+  // A reply running in another chat isn't this chat's turn to steer: a message
+  // typed in a new chat went into the old one as a mid-reply note.
+  if (STATE.streaming && !forced && !_silent && !_notify && STATE.streamingConvo
+      && STATE.streamingConvo !== (activeConvo() || {}).id) {
+    const other = (STATE.conversations || []).find(c => c.id === STATE.streamingConvo);
+    toast('JARVIS is still answering in another chat',
+          `${other && other.title ? '"' + other.title + '"' : 'That chat'} has to finish first. Your message is still in the box; send it then, or stop that reply.`, 'warn', 7000);
+    return;
+  }
   if (STATE.streaming) {
     // Mid-generation: don't drop the input — steer the running turn. The
     // backend injects it as a user turn between tool iterations so the model
@@ -10260,6 +10269,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   _pendingAttachments = [];
   _renderAttachTray();
   STATE.streaming = true; setSendStop(true);
+  STATE.streamingConvo = (activeConvo() || {}).id || null;
   currentAbort = new AbortController();
   setState('thinking…');
   startTTSGrid();  // wave-from-center grid while assistant is "speaking"

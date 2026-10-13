@@ -122,13 +122,22 @@ with sync_playwright() as pw:
       await send();
       const modal = !!document.querySelector('.modal-bg, .modal');
       document.getElementById('input').value = 'actually use tabs';
+      STATE.streamingConvo = STATE.activeId;
       await send();
-      STATE.streaming = false;
+      // A message typed in another chat while this one replies isn't a steer.
+      STATE.streamingConvo = 'some-other-chat';
+      document.getElementById('input').value = 'new question elsewhere';
+      await send();
+      const kept = document.getElementById('input').value;
+      STATE.streaming = false; STATE.streamingConvo = null;
+      document.getElementById('input').value = '';
       window.steerMessage = real;
-      return { steered, modal };
+      return { steered, modal, kept };
     }""")
     check(f"a slash command typed mid-reply is not sent to the model {slash}",
           slash["steered"] == ["actually use tabs"] and slash["modal"])
+    check(f"a message typed in another chat while one replies isn't sent to that reply {slash}",
+          slash["kept"] == "new question elsewhere" and "new question elsewhere" not in slash["steered"])
 
     partial = pg.evaluate("""() => [
       _partialJsonString('{"path": "notes.txt", "content": "line one\\\\nline \\\\"two\\\\" so f', 'content'),
