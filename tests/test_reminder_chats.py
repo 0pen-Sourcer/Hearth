@@ -75,15 +75,23 @@ check("a repeating reminder keeps to its one chat, and sees what it said last ti
       len(d.get("messages") or []) == 2 and asked[-1]["history"] == [{"role": "assistant", "content": "Time to stretch (1)."}])
 
 # Ideas on the Reminders page are made from what was talked about, not a fixed list.
+chat_sync.post("c_plain", "Exam form plans", "window", [{"role": "user", "content": "help me with the exam form"}])
 seen = []
 web.one_shot = lambda prompt, **_k: (seen.append(prompt), 'Sure: [{"title": "Exam form", '
                                      '"ask": "Remind me at 10am to finish the exam form"}]')[1]
 ideas = web.reminder_ideas()
-check(f"ideas are asked of the brain with the chats so far and what is already set {ideas}",
+check(f"ideas are asked of the brain with the chats so far (not reminders' own) and what is already set {ideas}",
       ideas == [{"title": "Exam form", "ask": "Remind me at 10am to finish the exam form", "repeats": False}]
-      and "Stand up and stretch" in seen[0])
+      and "Exam form plans" in seen[0] and "Stand up and stretch" in seen[0])
 web.reminder_ideas()
-check("and kept half a day instead of asked on every visit", len(seen) == 1)
+check("and kept instead of asked on every visit", len(seen) == 1)
+from hearth import memory                                            # noqa: E402
+memory.save("Board exams", "project", "his board exams", "Writes the CBSE board exams in March; revises maths every evening.")
+web.reminder_ideas(fresh=True)
+check("what JARVIS remembers about the person is in what the ideas are made from, not just memory titles",
+      "revises maths every evening" in seen[-1])
+check("and the prompt knows today's date, so something coming up in memory can be set ahead of it",
+      time.strftime("%Y") in seen[-1] and "coming up" in seen[-1])
 
 print()
 if FAILS:

@@ -815,18 +815,21 @@ with sync_playwright() as pw:
       document.querySelector('[data-rm="upcoming"]').click(); await new Promise(r => setTimeout(r, 50));
       await new Promise(r => setTimeout(r, 50));
       const none = $('rm-ideas').querySelectorAll('[data-rmask]').length;
+      const learn = ($('rm-ideas').querySelector('.rm-learn') || {}).textContent || '';
       ideas = [{ title: 'Exam form', ask: 'Remind me tomorrow at 10am to finish the exam form' }];
       RM_IDEAS.list = null; RM_IDEAS.asked = 0;
       await refreshReminders(); await new Promise(r => setTimeout(r, 50));
       const examples = [...$('rm-ideas').querySelectorAll('[data-rmask]')].map(x => x.dataset.rmask);
       window.api = real;
-      return { up, fits, done, none, examples, count: $('rm-n-up').textContent };
+      return { up, fits, done, none, learn, examples, count: $('rm-n-up').textContent };
     }""")
     check(f"reminders say when and what happens in words, and fit the window {rem}",
           len(rem["up"]) == 2 and "in 25 min" in rem["up"][0] and "then runs web search: weather today" in rem["up"][1]
           and "Repeats daily" in rem["up"][1] and rem["fits"])
     check(f"done ones have their own list; ideas are the server's, made from what was talked about, none when it has none {rem['examples']}",
           rem["done"] == 1 and rem["none"] == 0 and rem["examples"] == ["Remind me tomorrow at 10am to finish the exam form"])
+    check(f"with no ideas yet, the page says they come as JARVIS learns how you work {rem['learn']!r}",
+          "learns how you work" in rem["learn"])
     # Messages and chats carried no time at all.
     times = pg.evaluate("""() => {
       const y = Date.now() - 864e5, t = Date.now();

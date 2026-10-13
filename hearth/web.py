@@ -1736,29 +1736,36 @@ _IDEAS_LOCK = threading.Lock()
 
 
 def reminder_ideas(fresh: bool = False) -> List[Dict[str, str]]:
-    """Reminders this person would likely want, made from what they keep and
-    talk about, remade twice a day. None when there is nothing to go on."""
+    """Reminders this person would likely want, made from what JARVIS remembers
+    about them and what they talk about. Remade when either has moved on (at most
+    hourly) or after half a day. None when there is nothing to go on."""
     with _IDEAS_LOCK:
+        from . import chat_sync, memory, reminders as _r
+        listed = chat_sync.listing(20)
+        basis = [round(memory.changed_at()), max([int(c.get("updated") or 0) for c in listed] or [0])]
         try:
             with open(_IDEAS_FILE, encoding="utf-8") as f:
                 kept = json.load(f)
-            if not fresh and time.time() - float(kept.get("at") or 0) < 12 * 3600:
+            age = time.time() - float(kept.get("at") or 0)
+            if not fresh and (age < 3600 or (kept.get("basis") == basis and age < 12 * 3600)):
                 return kept.get("ideas") or []
         except (OSError, ValueError):
             pass
-        from . import chat_sync, memory, reminders as _r
         try:
-            mem = memory.index_for_prompt(25)
+            mem = (memory.about_the_person() + "\n" + memory.index_for_prompt(25)).strip()
         except Exception:
             mem = ""
-        chats = [c.get("title") for c in chat_sync.listing(20) if c.get("title")]
+        chats = [c.get("title") for c in listed if c.get("title") and c.get("source") != "reminder"]
         if not mem.strip() and not chats:
             return []
         have = [r.get("what") for r in _r.list_reminders() if r.get("what")]
         prompt = (
             "Suggest 3 reminders or scheduled tasks this person would likely want, from what they "
             "keep in memory and talk about. Each is something an assistant on their PC could remind "
-            "them of or do for them at a time or on repeat. Skip what they already have.\n\n"
+            "them of or do for them at a time or on repeat. Skip what they already have. Something "
+            "coming up in what they remember (an exam, a deadline, a trip, a bill) comes first, as a "
+            "reminder set ahead of it.\n\n"
+            f"Today is {time.strftime('%A %d %B %Y')}.\n\n"
             f"Memory:\n{mem[:2500]}\n\nRecent chats:\n" + "\n".join(f"- {t}" for t in chats[:20])
             + ("\n\nAlready set:\n" + "\n".join(f"- {w}" for w in have[:15]) if have else "")
             + '\n\nAnswer with JSON only: [{"title": "2-4 words", '
@@ -1776,7 +1783,7 @@ def reminder_ideas(fresh: bool = False) -> List[Dict[str, str]]:
             pass
         if ideas:
             os.makedirs(LOGS_DIR, exist_ok=True)
-            _atomic_write_json(_IDEAS_FILE, {"at": time.time(), "ideas": ideas[:3]})
+            _atomic_write_json(_IDEAS_FILE, {"at": time.time(), "basis": basis, "ideas": ideas[:3]})
         return ideas[:3]
 
 

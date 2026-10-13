@@ -1450,6 +1450,36 @@ def read_profile() -> str:
         return ""
 
 
+def about_the_person(max_chars: int = 3000) -> str:
+    """What is known about the person and what they are working on: the profile,
+    then their "user" and "project" memories, newest first."""
+    parts = []
+    prof = read_profile()
+    if prof:
+        parts.append(prof)
+    facts = []
+    for fn in _fact_files():
+        path = os.path.join(MEM_DIR, fn)
+        try:
+            fm, body = _read_body(path)
+            facts.append((os.path.getmtime(path), fm, body))
+        except Exception:
+            continue
+    for _t, fm, body in sorted(facts, key=lambda x: -x[0]):
+        if (fm.get("type") or "").lower() in ("user", "project"):
+            parts.append(f"{fm.get('name') or ''}: {' '.join(body.split())[:400]}")
+    out = "\n".join(parts)
+    return out[:max_chars]
+
+
+def changed_at() -> float:
+    """When a memory was last added or changed."""
+    try:
+        return max([os.path.getmtime(MEM_DIR)] + [os.path.getmtime(os.path.join(MEM_DIR, f)) for f in _fact_files()])
+    except OSError:
+        return 0.0
+
+
 def upsert_profile_line(line: str) -> str:
     """Add/refresh one user-preference line in profile.md. Substring-dedups so
     re-stating a known pref doesn't duplicate; when over cap, the oldest pref

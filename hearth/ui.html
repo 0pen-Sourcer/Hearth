@@ -2661,6 +2661,7 @@
   .rm-empty { padding: 26px 12px; color: var(--fg-faint); font: 13.5px var(--sans); text-align: center; }
   .rm-ideas h3 { margin: 22px 12px 4px; font: 500 12px var(--sans); color: var(--fg-faint); text-transform: uppercase; letter-spacing: .06em; }
   .rm-ideas .rm-row { cursor: pointer; }
+  .rm-learn { margin: 2px 12px; font: 13px/1.5 var(--sans); color: var(--fg-faint); }
   .rm-ideas .rm-act { opacity: 1; }
   .rm-ideas .rm-act button { background: none; }
   @media (hover: none) { .rm-act { opacity: 1; } }
@@ -12724,7 +12725,13 @@ function _rmIdeasDraw() {
   const box = $('rm-ideas');
   if (!box) return;
   const list = RM_IDEAS.list || [];
-  box.innerHTML = RM_FILTER === 'done' || !list.length ? '' : '<h3>For you</h3>' + list.map(x =>
+  if (RM_FILTER === 'done' || !RM_IDEAS.list) { box.innerHTML = ''; return; }
+  if (!list.length) {
+    box.innerHTML = '<h3>For you</h3><div class="rm-learn">Ideas show up here as JARVIS learns how you work: what you ask for, '
+      + 'what you keep coming back to, and what it remembers about you.</div>';
+    return;
+  }
+  box.innerHTML = '<h3>For you</h3>' + list.map(x =>
     `<div class="rm-row" data-rmask="${esc(x.ask)}"><span class="rm-ico">${_rmIco(x.repeats ? 'again' : 'bell')}</span>`
     + `<span class="what">${esc(x.title)}<small>${esc(x.ask)}</small></span>`
     + `<span class="rm-act"><button title="Set this one" aria-label="Set this one">${_rmIco('plus')}</button></span></div>`).join('');
