@@ -1193,10 +1193,12 @@ class JarvisCLI:
         self._pt_init_attempted = False
         self.load_history()
         self._chat_resume()
+        if self._side:
+            print(f"{C_DIM}Another terminal is on your last chat, so this one starts a new chat. /chats lists them all.{C_RESET}")
 
     # The terminal's chat is also a chat file the window lists (hearth.chat_sync):
     # id = that file, count = turns it held when last read or written here,
-    # sent = how many of self.messages are in it already.
+    # sent = how many of self.messages are in it already, pid = the terminal on it.
     _CHAT_STATE = os.path.join(WORKSPACE, "logs", "terminal_chat.json")
 
     def _chat_resume(self) -> None:
@@ -1205,10 +1207,23 @@ class JarvisCLI:
                 st = json.load(f)
         except (OSError, ValueError):
             st = {}
+        # Another terminal still open on the last chat keeps it; this one starts its
+        # own, so the two never write over each other's history.
+        held = int(st.get("pid") or 0)
+        from hearth.bridge_status import _alive
+        self._side = bool(held and held != os.getpid() and _alive(held))
+        if self._side:
+            self.messages = [m for m in self.messages[:1] if m.get("role") == "system"]
+            self._chat = {"id": None, "count": 0, "sent": len(self.messages)}
+            return
         self._chat = {"id": st.get("id"), "count": int(st.get("count") or 0),
                       "sent": min(int(st.get("sent") or 0), len(self.messages)) if st.get("id") else len(self.messages)}
+        self._chat_keep()
 
     def _chat_keep(self) -> None:
+        if getattr(self, "_side", False):
+            return
+        self._chat["pid"] = os.getpid()
         try:
             os.makedirs(os.path.dirname(self._CHAT_STATE), exist_ok=True)
             with open(self._CHAT_STATE, "w", encoding="utf-8") as f:
@@ -1492,9 +1507,10 @@ class JarvisCLI:
         # (prunable) working-context file, so search/recall keeps the full record.
         self._append_transcript()
         try:
-            os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
-            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.messages, f, indent=2)
+            if not getattr(self, "_side", False):        # the first terminal open owns this file
+                os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+                with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                    json.dump(self.messages, f, indent=2)
         except Exception as e:
             print(f"{C_ERR}Couldn't save the chat: {e}{C_RESET}")
             return

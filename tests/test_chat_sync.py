@@ -108,6 +108,26 @@ check(f"/chat carries a window chat on in the terminal {out!r}",
 run("/clear")
 check("/clear starts a new chat", cli._chat["id"] is None)
 
+# A second terminal opened while the first is still running starts its own chat;
+# before, both carried on the same one and wrote over each other's history file.
+run("/chat Plan the trip")
+held = json.load(open(cli._CHAT_STATE, encoding="utf-8"))
+held["pid"] = os.getppid()                          # a process that is still running
+json.dump(held, open(cli._CHAT_STATE, "w", encoding="utf-8"))
+before = open(hearth_cli.HISTORY_FILE, encoding="utf-8").read() if os.path.exists(hearth_cli.HISTORY_FILE) else ""
+two = hearth_cli.JarvisCLI.__new__(hearth_cli.JarvisCLI)
+two.messages = [{"role": "system", "content": "persona"}, {"role": "user", "content": "old turn"}]
+two._chat_resume()
+check(f"a second terminal doesn't take the chat the first is on {two._chat}",
+      two._chat["id"] is None and [m["role"] for m in two.messages] == ["system"])
+two.messages += [{"role": "user", "content": "from terminal two"}, {"role": "assistant", "content": "Hi from two."}]
+two.save_history()
+after = open(hearth_cli.HISTORY_FILE, encoding="utf-8").read() if os.path.exists(hearth_cli.HISTORY_FILE) else ""
+mine = chat_sync.load(two._chat["id"]) if two._chat["id"] else None
+check("its turns go to a chat of its own, and the first terminal's history file is left alone",
+      after == before and mine and [m["content"] for m in mine["messages"]] == ["from terminal two", "Hi from two."]
+      and json.load(open(cli._CHAT_STATE, encoding="utf-8"))["id"] == "c_window1")
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
