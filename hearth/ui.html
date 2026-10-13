@@ -552,10 +552,6 @@
     font-family: var(--mono); font-size: 11px;
     color: var(--fg-dim);
   }
-  .top-clock { display: flex; align-items: baseline; gap: 7px; padding: 4px 4px; font: 500 13px var(--sans);
-    color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .top-clock small { font-size: 12px; color: var(--fg-dim); font-weight: 400; }
-  @media (max-width: 760px) { .top-clock small { display: none; } }
   .gpu-chip .k { color: var(--fg-faint); font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; margin-right: 3px; }
   .gpu-chip .v { color: var(--fg); }
   .gpu-chip .warn { color: var(--warn); }
@@ -3812,7 +3808,6 @@
 
     <div class="top-spacer"></div>
 
-    <div class="top-clock" id="top-clock" hidden></div>
     <div class="gpu-chip" id="gpu-chip"><span class="k">gpu</span><span class="v">-</span></div>
 
     <button class="icon-btn" id="btn-voice-mode" title="Voice mode (full-screen)">
@@ -4685,15 +4680,6 @@
           <div class="ap-modes ap-two" id="ap-ui">
             <button type="button" class="ap-mode" data-ui="simple"><b>Simple</b><small>For everyday use. Tool steps fold into one line, and engine flags and per-tool permissions stay out of the way.</small></button>
             <button type="button" class="ap-mode" data-ui="advanced"><b>Advanced</b><small>Everything: each tool call as its own card, every counter, MCP servers and the built-in server's settings.</small></button>
-          </div>
-        </div>
-        <div class="ap-block">
-          <div class="ap-title">Clock</div>
-          <div class="ap-hint">The time in the top bar, in your PC's own format.</div>
-          <div class="ap-modes" id="ap-clock">
-            <button type="button" class="ap-mode" data-clock="off"><b>Off</b><small>Nothing in the top bar.</small></button>
-            <button type="button" class="ap-mode" data-clock="time"><b>Time</b><small>Just the time.</small></button>
-            <button type="button" class="ap-mode" data-clock="date"><b>Time and date</b><small>The time, with the day and date beside it.</small></button>
           </div>
         </div>
         <div class="ap-block">
@@ -19282,10 +19268,6 @@ window.addEventListener('load', function initSidebarDrawer() {
   if (!modes || !accents) return;
   const cur = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
   const uiBox = document.getElementById('ap-ui'), roomBox = document.getElementById('ap-room');
-  const clockBox = document.getElementById('ap-clock');
-  if (clockBox) clockBox.addEventListener('click', e => {
-    const b = e.target.closest('.ap-mode'); if (b) hearthSetClock(b.dataset.clock);
-  });
   if (roomBox) roomBox.addEventListener('click', e => {
     const b = e.target.closest('.ap-mode'); if (!b) return;
     hearthSetRoomLook(b.dataset.look);
@@ -19331,7 +19313,6 @@ window.addEventListener('load', function initSidebarDrawer() {
     if (homeBox) homeBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.home === cur('hearth_room_home', 'cabin')));
     if (wipeBox) wipeBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.wipe === cur('hearth_room_wipe', 'pixel')));
     if (uiBox) uiBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.ui === cur('hearth_ui', 'simple')));
-    if (clockBox) clockBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.clock === cur('hearth_clock', 'off')));
     modes.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === cur('hearth_theme', 'classic')));
     accents.querySelectorAll('.ap-accent').forEach(b => b.classList.toggle('on', b.dataset.accent === cur('hearth_accent', 'rose')));
   };
@@ -19886,26 +19867,6 @@ function hearthSetRoomHome(id) {
   if (ROOM.rooms.length) { roomOrder(); ROOM.labelSig = ''; const box = $('tm-rooms'); if (box) box.dataset.sig = ''; roomRoomsRender(); }
   document.dispatchEvent(new Event('hearth:look'));
 }
-// The clock in the top bar: off, the time, or the time and date.
-function clockMode() { try { return localStorage.getItem('hearth_clock') || 'off'; } catch { return 'off'; } }
-function clockPaint() {
-  const el = $('top-clock');
-  if (!el) return;
-  const mode = clockMode(), now = new Date();
-  el.hidden = mode === 'off';
-  if (mode === 'off') return;
-  const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const date = now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
-  el.innerHTML = esc(time) + (mode === 'date' ? `<small>${esc(date)}</small>` : '');
-  el.title = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-}
-function hearthSetClock(mode) {
-  try { localStorage.setItem('hearth_clock', mode); } catch {}
-  clockPaint();
-  document.dispatchEvent(new Event('hearth:look'));
-}
-// On the minute, so it never shows a minute late.
-(function clockTick() { clockPaint(); setTimeout(clockTick, 60000 - Date.now() % 60000 + 50); })();
 function hearthSetRoomWipe(how) {
   try { localStorage.setItem('hearth_room_wipe', how); } catch {}
   document.dispatchEvent(new Event('hearth:look'));
