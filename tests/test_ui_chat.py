@@ -694,6 +694,22 @@ with sync_playwright() as pw:
     }""")
     check(f"picking a room offers the accent that goes with it {offer}",
           offer.get("btn") and offer.get("offered") and offer.get("accent") == "ocean")
+    # Switching rooms one after another stacked an offer toast for each.
+    stack = pg.evaluate("""async () => {
+      document.querySelectorAll('#toasts > *').forEach(el => el.remove());
+      localStorage.setItem('hearth_theme', 'dark'); localStorage.setItem('hearth_accent', 'rose');
+      for (const id of ['winter', 'library', 'winter', 'library']) document.querySelector(`#ap-home .ap-mode[data-home="${id}"]`).click();
+      const offers = [...document.querySelectorAll('#toasts > *')].filter(el => /goes well/.test(el.textContent)).length;
+      document.querySelectorAll('#toasts > *').forEach(el => el.remove());
+      hearthSetRoomHome('cabin');
+      document.querySelector('#ap-accents .ap-accent[data-accent="sage"]').click();
+      const room = [...document.querySelectorAll('#toasts > *')].find(el => /Library room goes well/.test(el.textContent));
+      document.querySelectorAll('#toasts > *').forEach(el => el.remove());
+      hearthSetAppearance('classic', 'rose'); hearthSetRoomHome('cabin');
+      return { offers, room: !!room };
+    }""")
+    check(f"switching rooms shows one offer at a time, and an accent offers its room {stack}",
+          stack["offers"] == 1 and stack["room"])
 
     # The logs were raw rows from the first build: a call and its result as two
     # lines, tools named only by their code name, the server as raw text.

@@ -19068,10 +19068,29 @@ window.addEventListener('load', function initSidebarDrawer() {
     const want = ROOM_ACCENT[b.dataset.home], theme = cur('hearth_theme', 'classic');
     if (!want || (theme !== 'classic' && cur('hearth_accent', 'rose') === want[0])) return;
     const name = b.querySelector('b') ? b.querySelector('b').textContent : b.dataset.home;
-    askToast(`${want[1]} goes well with the ${name} room`, theme === 'classic'
+    lookOffer(`${want[1]} goes well with the ${name} room`, theme === 'classic'
       ? `Classic is always violet. Switch to Dark with the ${want[1]} accent?` : `Switch the accent to ${want[1]}?`,
-      'Switch', (t, close) => { close(); hearthSetAppearance(theme === 'classic' ? 'dark' : null, want[0]); });
+      () => hearthSetAppearance(theme === 'classic' ? 'dark' : null, want[0]));
   });
+  // One offer on screen at a time: picking room after room replaces it
+  // instead of stacking a toast for each.
+  let offerToast = null;
+  function lookOffer(title, body, onYes) {
+    if (offerToast && offerToast.isConnected) offerToast.remove();
+    offerToast = askToast(title, body, 'Switch', (t, close) => { close(); offerToast = null; onYes(); },
+                          () => { offerToast = null; });
+  }
+  // And the other way: an accent that has a room of its own offers it.
+  const ACCENT_ROOM = { ocean: 'winter', sage: 'library', rose: 'cabin' };
+  function offerRoomFor(accent) {
+    const room = ACCENT_ROOM[accent], home = cur('hearth_room_home', 'cabin');
+    if (!room || room === home || !homeBox) return;
+    const btn = homeBox.querySelector(`[data-home="${room}"]`);
+    if (!btn) return;
+    const name = btn.querySelector('b') ? btn.querySelector('b').textContent : room;
+    lookOffer(`The ${name} room goes well with this accent`, `Make the ${name} room home?`,
+              () => { hearthSetRoomHome(room); mark(); });
+  }
   if (wipeBox) wipeBox.addEventListener('click', e => {
     const b = e.target.closest('.ap-mode'); if (b) hearthSetRoomWipe(b.dataset.wipe);
   });
@@ -19105,7 +19124,7 @@ window.addEventListener('load', function initSidebarDrawer() {
     });
   }).catch(() => {});
   modes.addEventListener('click', e => { const b = e.target.closest('.ap-mode'); if (!b) return; window.hearthSetAppearance(b.dataset.mode, null); mark(); });
-  accents.addEventListener('click', e => { const b = e.target.closest('.ap-accent'); if (!b) return; window.hearthSetAppearance(null, b.dataset.accent); mark(); });
+  accents.addEventListener('click', e => { const b = e.target.closest('.ap-accent'); if (!b) return; window.hearthSetAppearance(null, b.dataset.accent); mark(); offerRoomFor(b.dataset.accent); });
   mark();
 })();
 
