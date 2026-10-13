@@ -492,6 +492,70 @@ def detect_running_server(default_api_base: str = "http://localhost:1234/v1") ->
     return None
 
 
+_SHAPE_CACHE: Dict[Tuple[str, float, int], Dict[str, bool]] = {}
+
+
+def gguf_shape(path) -> Dict[str, bool]:
+    """What a GGUF file is, from its header: `chat` when it carries a tokenizer
+    (every language model does; an image or video model's doesn't), and
+    `complete` when the file is as long as its own tensor table says. Both
+    True when the header can't be read, so nothing is hidden on a guess."""
+    import struct
+    try:
+        st = os.stat(path)
+        key = (os.path.normcase(str(path)), st.st_mtime, st.st_size)
+    except OSError:
+        return {"chat": True, "complete": True}
+    if key in _SHAPE_CACHE:
+        return _SHAPE_CACHE[key]
+    out = {"chat": True, "complete": True}
+    try:
+        with open(path, "rb") as f:
+            if f.read(4) != b"GGUF":
+                raise ValueError("not gguf")
+            f.read(4)
+            n_tensors = struct.unpack("<Q", f.read(8))[0]
+            n_kv = struct.unpack("<Q", f.read(8))[0]
+            tokenizer, align = False, 32
+
+            def val(vt):
+                if vt in _GGUF_FIXED_SZ:
+                    return f.read(_GGUF_FIXED_SZ[vt])
+                if vt == 8:
+                    return f.read(struct.unpack("<Q", f.read(8))[0])
+                if vt == 9:
+                    et = struct.unpack("<I", f.read(4))[0]
+                    n = struct.unpack("<Q", f.read(8))[0]
+                    if et in _GGUF_FIXED_SZ:
+                        f.read(_GGUF_FIXED_SZ[et] * n)
+                    else:
+                        for _ in range(n):
+                            val(et)
+                    return None
+                raise ValueError(f"unknown gguf type {vt}")
+
+            for _ in range(n_kv):
+                k = f.read(struct.unpack("<Q", f.read(8))[0]).decode("utf-8", "replace")
+                vt = struct.unpack("<I", f.read(4))[0]
+                v = val(vt)
+                if k.startswith("tokenizer.ggml."):
+                    tokenizer = True
+                elif k == "general.alignment" and v and vt == 4:
+                    align = struct.unpack("<I", v)[0] or 32
+            last = 0
+            for _ in range(n_tensors):
+                f.read(struct.unpack("<Q", f.read(8))[0])
+                f.read(8 * struct.unpack("<I", f.read(4))[0])
+                f.read(4)
+                last = max(last, struct.unpack("<Q", f.read(8))[0])
+            data_start = (f.tell() + align - 1) // align * align
+        out = {"chat": tokenizer, "complete": st.st_size > data_start + last}
+    except Exception:
+        pass
+    _SHAPE_CACHE[key] = out
+    return out
+
+
 def _model_entry(p, source: str, size_gb: Optional[float] = None) -> Dict[str, Any]:
     """One row describing a GGUF on disk.
 
@@ -508,6 +572,9 @@ def _model_entry(p, source: str, size_gb: Optional[float] = None) -> Dict[str, A
         # Repo it was downloaded from, when Hearth fetched it, so the UI can link
         # the real model page instead of guessing from the filename.
         "hf_repo": model_source(p.name),
+        # An image/video model, or a file cut short, is listed but can't be loaded as a chat model.
+        **({"not_chat": True} if not (_shape := gguf_shape(p))["chat"] else {}),
+        **({"incomplete": True} if not _shape["complete"] else {}),
     }
 
 

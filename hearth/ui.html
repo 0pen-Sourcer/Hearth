@@ -8276,7 +8276,7 @@ async function refreshModels() {
       // 2) Other disk models - swappable with one click. Skip anything LM
       //    Studio already reported (matched by ANY of path/filename/slug).
       if (disk.length) {
-        const remaining = disk.filter(dm => !anyKeyMatch(dm.path, dm.filename));
+        const remaining = disk.filter(dm => !anyKeyMatch(dm.path, dm.filename) && !dm.not_chat && !dm.incomplete);
         if (remaining.length) {
           const grp = document.createElement('optgroup');
           grp.label = 'Models on this PC';
@@ -16554,7 +16554,9 @@ function modelsRenderMine() {
           ? (loadedVia === 'builtin'
               ? '<button class="model-action is-secondary" data-stop="1">Eject</button>'
               : '<button class="model-action is-secondary" disabled title="Eject from LM Studio itself - Hearth doesn\'t own this server">In use (LM Studio)</button>')
-          : '<button class="model-action" data-use-path="' + esc(m.path) + '">Use this</button>'
+          : (m.incomplete || m.not_chat)
+            ? `<span class="model-badge" title="${m.incomplete ? 'The file is shorter than its own header says: the download stopped part-way.' : 'No tokenizer inside: an image or video model, not one Hearth can chat with.'}">${m.incomplete ? 'incomplete download' : 'not a chat model'}</span>`
+            : '<button class="model-action" data-use-path="' + esc(m.path) + '">Use this</button>'
         }
         <div class="model-expand" data-expand="${filenameId}">
           <div class="ex-head">Load configuration</div>

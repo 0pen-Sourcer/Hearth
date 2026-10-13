@@ -194,6 +194,10 @@ jobs:
         run: |
           python tests/test_brain_mcp_tools.py
 
+      - name: What a GGUF file is, from its header
+        run: |
+          python tests/test_gguf_shape.py
+
       - name: A model's details for the model menu, from its own source first
         run: |
           python tests/test_model_facts.py
