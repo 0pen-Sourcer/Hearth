@@ -585,6 +585,44 @@ def _claim_due(missed: bool = False) -> List[Dict]:
     return due
 
 
+def chat_id_for(r: Dict) -> str:
+    return "rem_" + str(r.get("id") or "")
+
+
+def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
+    """JARVIS says a due reminder in that reminder's own chat, never in the chat
+    someone has open. Written to the chat file by whichever process fired it, so
+    it is there even with the window closed; a repeating one stays in one chat."""
+    def _run() -> None:
+        from . import chat_sync, headless
+        cid = chat_id_for(r)
+        what = r.get("what") or "Reminder"
+        # A reply already running keeps the model; this one waits its turn.
+        end = time.time() + wait_s
+        while headless.turn_is_active() and time.time() < end:
+            time.sleep(1)
+        prior = chat_sync.from_chat((chat_sync.load(cid) or {}).get("messages") or [])
+        parts: List[str] = []
+
+        def emit(kind, **kw):
+            if kind == "assistant":
+                parts.append(kw.get("content") or "")
+        try:
+            import asyncio
+            # Nobody is there to approve anything, so nothing that asks gets run.
+            asyncio.run(headless.run_once(note, emit=emit, history=prior[-20:],
+                                          permission_check=lambda *_a: "deny"))
+        except Exception:
+            pass
+        text = "".join(parts).strip() or f"Reminder: {what}"
+        chat_sync.post(cid, what[:60], "reminder",
+                       [{"role": "assistant", "content": text, "via": "reminder",
+                         "at": datetime.now().isoformat(timespec="seconds")}], unread=True)
+    t = threading.Thread(target=_run, daemon=True, name="hearth-reminder-chat")
+    t.start()
+    return t
+
+
 def start_watcher(notify: Callable[[str, str], None]) -> None:
     """Begin firing reminders. `notify(title, body)` is called per fire.
 
@@ -660,13 +698,7 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
                         f'"{what}". Remind them about it now in your own words — '
                         f'brief and natural, not a canned line. If it implies a '
                         f'next action you can take, offer or do it.')
-            subagents.enqueue_notification(
-                source="reminder",
-                name=what[:60],
-                status="completed",
-                result_text=note,
-                summary=f"reminder due: {what}"[:160],
-            )
+            deliver(r, note)
         except Exception:
             pass
 

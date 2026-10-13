@@ -24,6 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WS = tempfile.mkdtemp(prefix="hearth-remstore-")
 os.environ["JARVIS_WORKSPACE"] = WS
 os.environ["HEARTH_NO_ACTIVITY_LOG"] = "1"
+os.environ["LOCAL_API_BASE"] = "http://127.0.0.1:9/v1"      # a fired reminder never reaches a real model
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 

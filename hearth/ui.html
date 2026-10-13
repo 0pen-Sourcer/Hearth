@@ -2620,19 +2620,46 @@
     font: 11.5px/1.5 var(--mono); color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
   .lg-sys { padding: 6px 8px 6px 94px; color: var(--fg-faint); font: 12px var(--sans); }
   .lg-empty { color: var(--fg-faint); padding: 32px; text-align: center; font: 13px var(--sans); }
-  /* Reminders: the same rows as the logs, with what happens and when in words. */
-  .rm-n { color: var(--fg-faint); font-weight: 500; margin-left: 2px; }
-  .rm-row { cursor: default; }
-  .rm-row .what { white-space: normal; }
-  .rm-row .what small { display: block; margin: 2px 0 0; font: 12px var(--sans); color: var(--fg-dim); }
-  .rm-row .rm-act { display: flex; gap: 6px; opacity: 0; transition: opacity .12s; }
-  .rm-row:hover .rm-act, .rm-row:focus-within .rm-act { opacity: 1; }
+  /* Reminders: one box on top, then each task with when it comes next. */
+  #view-reminders { overflow-y: auto; }
+  .rm-page { max-width: 760px; margin: 0 auto; padding: 18px 20px 40px; }
+  .rm-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .rm-n { color: var(--fg-faint); margin-left: 5px; }
+  .convo .convo-new { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; margin-left: 6px; }
+  .convo:hover .convo-new { display: none; }
+  .rm-n:empty { display: none; }
+  .rm-compose { display: flex; align-items: center; gap: 10px; padding: 5px 5px 5px 14px; margin-bottom: 14px;
+    background: var(--bg-1); border: 1px solid var(--border); border-radius: calc(var(--r) + 4px); transition: border-color .15s; }
+  .rm-compose:focus-within { border-color: var(--accent-line); }
+  .rm-compose > svg { width: 17px; height: 17px; color: var(--fg-faint); flex: none; }
+  .rm-compose input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--fg); font: 14.5px var(--sans); padding: 8px 0; }
+  .rm-compose .send-btn { width: 36px; height: 36px; flex: none; cursor: pointer; }
+  .rm-compose.busy .send-btn { opacity: .4; pointer-events: none; }
+  .rm-row { display: flex; align-items: center; gap: 14px; padding: 12px 12px; border-radius: 12px; position: relative; }
+  .rm-row + .rm-row::before { content: ''; position: absolute; left: 12px; right: 12px; top: 0; border-top: 1px solid var(--border); }
+  .rm-row:hover { background: var(--bg-1); }
+  .rm-row:hover::before, .rm-row:hover + .rm-row::before { opacity: 0; }
+  .rm-ico { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none;
+    background: var(--bg-2); color: var(--fg-dim); }
+  .rm-ico svg { width: 16px; height: 16px; }
+  .rm-ico.emo { font-size: 17px; line-height: 1; }
+  .rm-row .what { flex: 1; min-width: 0; font: 500 14.5px var(--sans); color: var(--fg); overflow-wrap: anywhere; }
+  .rm-row .what small { display: block; margin-top: 3px; font: 13px var(--sans); color: var(--fg-dim); }
   .rm-row.done .what { color: var(--fg-dim); }
-  .rm-ex { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
-  .rm-ex button { background: var(--bg-1); border: 1px solid var(--border); color: var(--fg-dim); border-radius: 999px;
-    padding: 6px 12px; font: 12.5px var(--sans); cursor: pointer; }
-  .rm-ex button:hover { color: var(--fg); border-color: var(--accent-line); }
-  @media (hover: none) { .rm-row .rm-act { opacity: 1; } }
+  .rm-row.pending .rm-ico svg { animation: stspin 1s linear infinite; }
+  .rm-act { display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+  .rm-row:hover .rm-act, .rm-row:focus-within .rm-act { opacity: 1; }
+  .rm-act button { width: 32px; height: 32px; border-radius: 8px; border: 0; background: var(--bg-2); color: var(--fg-dim);
+    display: grid; place-items: center; cursor: pointer; }
+  .rm-act button:hover { color: var(--fg); }
+  .rm-act button.danger:hover { color: var(--err); }
+  .rm-act svg { width: 15px; height: 15px; }
+  .rm-empty { padding: 26px 12px; color: var(--fg-faint); font: 13.5px var(--sans); text-align: center; }
+  .rm-ideas h3 { margin: 22px 12px 4px; font: 500 12px var(--sans); color: var(--fg-faint); text-transform: uppercase; letter-spacing: .06em; }
+  .rm-ideas .rm-row { cursor: pointer; }
+  .rm-ideas .rm-act { opacity: 1; }
+  .rm-ideas .rm-act button { background: none; }
+  @media (hover: none) { .rm-act { opacity: 1; } }
   .srv-sum { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; padding: 12px 16px 4px; }
   .srv-req { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; font: 12px var(--sans); color: var(--fg-dim); }
   .srv-req b { color: var(--fg); font-weight: 600; }
@@ -4049,14 +4076,20 @@
         <h2>Reminders</h2>
         <span class="sub">what JARVIS will remind you of, or do for you, and when</span>
       </div>
-      <div class="lg-bar">
-        <button class="lg-chip on" data-rm="upcoming">Upcoming <span class="rm-n" id="rm-n-up"></span></button>
-        <button class="lg-chip" data-rm="repeating">Repeating <span class="rm-n" id="rm-n-rep"></span></button>
-        <button class="lg-chip" data-rm="done">Done</button>
-        <input class="lg-find" id="rm-new" type="text" autocomplete="off"
-               placeholder="Remind me to&hellip; (press Enter, JARVIS sets it)">
+      <div class="rm-page">
+        <div class="rm-tabs">
+          <button class="lg-chip on" data-rm="upcoming">Upcoming<span class="rm-n" id="rm-n-up"></span></button>
+          <button class="lg-chip" data-rm="repeating">Repeating<span class="rm-n" id="rm-n-rep"></span></button>
+          <button class="lg-chip" data-rm="done">Done</button>
+        </div>
+        <form class="rm-compose" id="rm-compose" autocomplete="off">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M5 3 2 6M22 6l-3-3"/></svg>
+          <input id="rm-new" type="text" placeholder="Remind me, or schedule a task">
+          <button type="submit" class="send-btn" id="rm-send" title="Set it" aria-label="Set it"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg></button>
+        </form>
+        <div class="rm-list" id="reminders-box"><div class="lg-empty">Loading&hellip;</div></div>
+        <div class="rm-ideas" id="rm-ideas"></div>
       </div>
-      <div class="log-list" id="reminders-box"><div class="lg-empty">Loading&hellip;</div></div>
     </section>
 
     <!-- SKILLS -->
@@ -6729,7 +6762,7 @@ async function syncConvosFromDisk() {
     const c = STATE.conversations.find(x => x.id === meta.id);
     if (!c) { STATE.conversations.unshift({ ...meta, messages: [], _stub: true }); changed = true; continue; }
     if (!(+meta.updated > +c.updated) || (c.id === STATE.activeId && STATE.streaming)) continue;
-    Object.assign(c, { title: meta.title, updated: meta.updated, msg_count: meta.msg_count, source: meta.source });
+    Object.assign(c, { title: meta.title, updated: meta.updated, msg_count: meta.msg_count, source: meta.source, unread: meta.unread });
     changed = true;
     if (!c._stub) {
       try {
@@ -6901,16 +6934,21 @@ function renderConvoRow(c) {
   // data-cid: lets generateTitle's animator find this specific row after
   // the auto-title arrives, so the swap typewrites instead of jump-cuts.
   div.setAttribute('data-cid', c.id);
-  // A chat started in the terminal carries a prompt mark instead of a bubble.
-  const fromTerminal = c.source === 'terminal';
+  // A chat started in the terminal carries a prompt mark instead of a bubble,
+  // a reminder's own chat a clock, with a dot until it has been opened.
+  const fromTerminal = c.source === 'terminal', fromReminder = c.source === 'reminder';
   if (fromTerminal) div.title = 'Started in the terminal';
+  if (fromReminder) div.title = 'A reminder';
+  const unseen = c.unread && c.id !== STATE.activeId;
   div.innerHTML = `
     ${fromTerminal
       ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6"><path d="M4 17l6-5-6-5"/><path d="M12 19h8"/></svg>'
+      : fromReminder
+      ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="opacity:0.6"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M5 3 2 6M22 6l-3-3"/></svg>'
       : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.6">
       <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
     </svg>`}
-    <span class="title-text">${esc(c.title || 'Untitled')}</span>
+    <span class="title-text">${esc(c.title || 'Untitled')}</span>${unseen ? '<span class="convo-new" title="Not opened yet"></span>' : ''}
     <div class="convo-actions">
       <button class="a-btn pin${c.pinned ? ' on' : ''}" title="${c.pinned ? 'Unpin' : 'Pin to the top'}">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="${c.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>
@@ -6925,6 +6963,11 @@ function renderConvoRow(c) {
   `;
   div.addEventListener('click', e => {
     if (e.target.closest('.convo-actions')) return;
+    if (c.unread) {
+      c.unread = false;
+      api('/api/conversations/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                       body: JSON.stringify({ id: c.id }) }).catch(() => {});
+    }
     setActiveId(c.id); renderConvoList(); renderChat(); showView('chat');
   });
   div.querySelector('.pin').addEventListener('click', e => {
@@ -10292,12 +10335,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }, 450);
   }
 
-  input.value = ''; input.style.height = '42px';
-  // Wipe the attachment tray - the paths are now woven into the message.
-  // If the user pasted/attached more during streaming, they'll show up on
-  // the next send.
-  _pendingAttachments = [];
-  _renderAttachTray();
+  if (!opts.keepBox) {
+    input.value = ''; input.style.height = '42px';
+    // Wipe the attachment tray - the paths are now woven into the message.
+    // If the user pasted/attached more during streaming, they'll show up on
+    // the next send.
+    _pendingAttachments = [];
+    _renderAttachTray();
+  }
   STATE.streaming = true; setSendStop(true);
   STATE.streamingConvo = (activeConvo() || {}).id || null;
   currentAbort = new AbortController();
@@ -12573,8 +12618,18 @@ async function openTaskTranscript(agentId) {
 }
 
 let RM_FILTER = 'upcoming';
-const RM_EXAMPLES = ['Remind me to stretch in 30 minutes', 'Every weekday at 9am, tell me the weather',
-                     'Tomorrow at 7pm, remind me to call home'];
+// Ideas are made by the brain from what this person keeps and talks about.
+const RM_IDEAS = { list: null, asked: 0 };
+const RM_SVG = {
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  again: '<path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  run: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  done: '<path d="M20 6 9 17l-5-5"/>',
+  snooze: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/>',
+  cancel: '<path d="M18 6 6 18M6 6l12 12"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  wait: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/>' };
+const _rmIco = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${RM_SVG[k]}</svg>`;
 // When a reminder comes due, said the way a person would.
 function _rmIn(iso) {
   const d = new Date(iso), s = (d - Date.now()) / 1000;
@@ -12590,11 +12645,36 @@ function _rmDay(iso) {
   if (key(d) === key(new Date(t.getTime() - 864e5))) return 'Yesterday';
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
+// A task typed here gets a chat of its own where JARVIS sets it; the chat that
+// was open is left alone and this page stays where it is.
+let _rmPending = '';
 async function _rmAsk(text) {
   text = String(text || '').trim();
-  if (!text) return;
-  showView('chat');
-  await send(text);
+  if (!text || _rmPending) return false;
+  if (STATE.streaming) {
+    toast('JARVIS is answering in another chat', 'Set this once that reply is done, or stop it. What you typed is still in the box.', 'warn', 6000);
+    return false;
+  }
+  if (!STATE.loadedModel) { toast('No model loaded', 'Pick one from the top bar', 'warn'); return false; }
+  const back = STATE.activeId;
+  newConversation();
+  _rmPending = text;
+  if ($('rm-new').value.trim() === text) $('rm-new').value = '';
+  $('rm-compose').classList.add('busy');
+  refreshReminders();
+  try {
+    await send(`${text}\n\n(Sent from the Reminders page: set this with set_reminder, then say in one line what was set and when.)`,
+               text, { keepBox: true });
+  } finally {
+    _rmPending = '';
+    $('rm-compose').classList.remove('busy');
+    // The chat the person had open is the one they go back to.
+    if (back && back !== STATE.activeId && STATE.view !== 'chat' && STATE.conversations.some(c => c.id === back)) {
+      setActiveId(back); renderConvoList(); renderChat();
+    }
+    refreshReminders();
+  }
+  return true;
 }
 async function _rmAct(path, id, done) {
   try {
@@ -12604,12 +12684,30 @@ async function _rmAct(path, id, done) {
     else toast(path.endsWith('snooze') ? "Couldn't snooze it" : "Couldn't cancel it", rr.error || "It didn't say why.", 'err');
   } catch (e) { toast("That didn't work", e.message, 'err'); }
 }
+function _rmIdeasDraw() {
+  const box = $('rm-ideas');
+  if (!box) return;
+  const list = RM_IDEAS.list || [];
+  box.innerHTML = RM_FILTER === 'done' || !list.length ? '' : '<h3>For you</h3>' + list.map(x =>
+    `<div class="rm-row" data-rmask="${esc(x.ask)}"><span class="rm-ico emo">${x.emoji ? esc(x.emoji) : _rmIco('bell')}</span>`
+    + `<span class="what">${esc(x.title)}<small>${esc(x.ask)}</small></span>`
+    + `<span class="rm-act"><button title="Set this one" aria-label="Set this one">${_rmIco('plus')}</button></span></div>`).join('');
+}
+async function _rmIdeas() {
+  _rmIdeasDraw();
+  // Asked once a visit at most; the server keeps them half a day.
+  if (RM_IDEAS.list || Date.now() - RM_IDEAS.asked < 60e3) return;
+  RM_IDEAS.asked = Date.now();
+  try { RM_IDEAS.list = ((await api('/api/reminders/ideas')) || {}).ideas || []; } catch { RM_IDEAS.list = []; }
+  _rmIdeasDraw();
+}
 async function refreshReminders() {
   const box = document.getElementById('reminders-box');
   if (!box) return;
+  _rmIdeas();
   let items;
   try { items = ((await api('/api/reminders?all=1')) || {}).items || []; }
-  catch (e) { box.innerHTML = `<div class="lg-empty">Couldn't read your reminders: ${esc(e.message)}</div>`; return; }
+  catch (e) { box.innerHTML = `<div class="rm-empty">Couldn't read your reminders: ${esc(e.message)}</div>`; return; }
   const live = items.filter(x => !x.fired), rep = live.filter(x => x.recurring_seconds);
   const remCount = document.getElementById('nav-rem-count');
   if (remCount) remCount.textContent = live.length ? String(live.length) : '';
@@ -12618,32 +12716,25 @@ async function refreshReminders() {
   const shown = RM_FILTER === 'done'
     ? items.filter(x => x.fired).sort((a, b) => String(b.fired_at || b.due_iso).localeCompare(String(a.fired_at || a.due_iso)))
     : (RM_FILTER === 'repeating' ? rep : live).slice().sort((a, b) => String(a.due_iso).localeCompare(String(b.due_iso)));
-  if (!shown.length) {
-    box.innerHTML = `<div class="lg-empty">${RM_FILTER === 'done' ? 'Nothing has come due yet.'
-      : RM_FILTER === 'repeating' ? 'Nothing repeats yet. Say "every" and when, like "every Monday at 9am".'
-      : 'Nothing scheduled. Ask in plain words, or try one of these.'}${RM_FILTER === 'upcoming'
-      ? `<div class="rm-ex">${RM_EXAMPLES.map(t => `<button data-rmask="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}</div>`;
-    return;
-  }
-  const bell = '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>';
-  const again = '<path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>';
-  let html = '', day = '';
+  let html = _rmPending && RM_FILTER !== 'done'
+    ? `<div class="rm-row pending"><span class="rm-ico">${_rmIco('wait')}</span><span class="what">${esc(_rmPending)}<small>JARVIS is setting it&hellip;</small></span></div>` : '';
   for (const it of shown) {
-    const at = RM_FILTER === 'done' ? (it.fired_at || it.due_iso) : it.due_iso;
-    const d = _rmDay(at);
-    if (d !== day) { day = d; html += `<div class="lg-day">${esc(d)}</div>`; }
-    const when = RM_FILTER === 'done' ? 'came due' : _rmIn(it.due_iso);
-    const parts = [when, it.recurring_text ? `repeats ${it.recurring_text}` : '',
+    const done = RM_FILTER === 'done', at = done ? (it.fired_at || it.due_iso) : it.due_iso;
+    const time = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const parts = [it.recurring_text ? `Repeats ${it.recurring_text}` : (done ? '' : 'Once'),
+                   done ? `Came due ${_rmDay(at).toLowerCase()} at ${time}` : `${_rmDay(at)} ${time}, ${_rmIn(it.due_iso)}`,
                    it.action_tool ? `then runs ${String(it.action_tool).replace(/_/g, ' ')}${_stepWhat(it.action_args || {}) ? ': ' + _stepWhat(it.action_args || {}) : ''}` : '',
                    it.tag || ''].filter(Boolean);
-    const acts = RM_FILTER === 'done' ? '' : `<span class="rm-act">
-        <button class="btn-mini" data-rsnooze="${esc(it.id)}" title="Ten minutes later">Snooze</button>
-        <button class="btn-mini danger" data-rcancel="${esc(it.id)}" title="Cancel it">Cancel</button></span>`;
-    html += `<div class="lg-row rm-row${RM_FILTER === 'done' ? ' done' : ''}"><span class="t">${esc(new Date(at).toTimeString().slice(0, 5))}</span>`
-      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${it.recurring_seconds ? again : bell}</svg>`
+    const ico = done ? 'done' : it.action_tool ? 'run' : it.recurring_seconds ? 'again' : 'bell';
+    const acts = done ? '' : `<span class="rm-act">
+        <button data-rsnooze="${esc(it.id)}" title="Ten minutes later" aria-label="Snooze">${_rmIco('snooze')}</button>
+        <button class="danger" data-rcancel="${esc(it.id)}" title="Cancel it" aria-label="Cancel">${_rmIco('cancel')}</button></span>`;
+    html += `<div class="rm-row${done ? ' done' : ''}"><span class="rm-ico">${_rmIco(ico)}</span>`
       + `<span class="what">${esc(it.what || '')}<small>${esc(parts.join(' \u00b7 '))}</small></span>${acts}</div>`;
   }
-  box.innerHTML = html;
+  box.innerHTML = html || `<div class="rm-empty">${RM_FILTER === 'done' ? 'Nothing has come due yet.'
+    : RM_FILTER === 'repeating' ? 'Nothing repeats yet. Say "every" and when, like "every Monday at 9am".'
+    : 'Nothing scheduled yet. Say what and when in the box above.'}</div>`;
 }
 document.addEventListener('click', e => {
   const chip = e.target.closest('[data-rm]');
@@ -12653,17 +12744,17 @@ document.addEventListener('click', e => {
     refreshReminders();
     return;
   }
-  const ask = e.target.closest('[data-rmask]');
-  if (ask) { _rmAsk(ask.dataset.rmask); return; }
   const sn = e.target.closest('[data-rsnooze]');
   if (sn) { _rmAct('/api/reminders/snooze', sn.dataset.rsnooze, 'Snoozed ten minutes'); return; }
   const cn = e.target.closest('[data-rcancel]');
-  if (cn) _rmAct('/api/reminders/cancel', cn.dataset.rcancel, 'Reminder cancelled');
+  if (cn) { _rmAct('/api/reminders/cancel', cn.dataset.rcancel, 'Reminder cancelled'); return; }
+  const ask = e.target.closest('[data-rmask]');
+  if (ask) _rmAsk(ask.dataset.rmask);
 });
-document.addEventListener('keydown', e => {
-  if (e.target.id === 'rm-new' && e.key === 'Enter' && e.target.value.trim()) {
-    const t = e.target.value; e.target.value = ''; _rmAsk(t);
-  }
+document.addEventListener('submit', e => {
+  if (e.target.id !== 'rm-compose') return;
+  e.preventDefault();
+  _rmAsk($('rm-new').value);
 });
 
 function skillSummary(desc) {

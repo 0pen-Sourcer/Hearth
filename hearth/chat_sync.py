@@ -132,6 +132,20 @@ def append(cid: str, new: List[Dict[str, Any]]) -> int:
     return len(d["messages"])
 
 
+def post(cid: str, title: str, source: str, messages: List[Dict[str, Any]], unread: bool = False) -> None:
+    """Add messages the window's way to a chat of its own (a reminder's), making
+    the chat when it isn't there yet."""
+    now = int(time.time() * 1000)
+    d = load(cid) or {"id": cid, "title": title, "created": now, "pinned": False, "source": source, "messages": []}
+    d["messages"] = list(d.get("messages") or []) + messages
+    d["updated"] = now
+    d["msg_count"] = len(d["messages"])
+    if unread:
+        d["unread"] = True
+    os.makedirs(CONVOS_DIR, exist_ok=True)
+    atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
+
+
 def newer(cid: str, seen: int) -> List[Dict[str, Any]]:
     """Turns added to a chat file elsewhere since `seen` of them were known."""
     d = load(cid) or {}

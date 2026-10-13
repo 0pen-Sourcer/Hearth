@@ -411,7 +411,8 @@ def _list_convos() -> List[Dict]:
             "created": data.get("created", 0),
             "msg_count": len(data.get("messages", [])),
             "pinned": bool(data.get("pinned")),
-            "source": data.get("source") or "",       # "terminal" for a chat the terminal started
+            "source": data.get("source") or "",       # "terminal" or "reminder" for chats made elsewhere
+            "unread": bool(data.get("unread")),
         }
         with _CONVO_META_LOCK:
             _CONVO_META[fn] = (key, meta)
@@ -1689,6 +1690,95 @@ def _tail_log(n: int = 100) -> List[Dict]:
 # HTTP server
 # ---------------------------------------------------------------------------
 
+def one_shot(prompt: str, max_tokens: int = 512, timeout: float = 20) -> str:
+    """A short answer from the brain in use, with no tools or chat around it.
+    Empty when there is no brain or it doesn't answer."""
+    settings = _load_settings()
+    provider = (settings.get("llm_provider") or "").lower()
+    from . import claude_brain
+    if provider in claude_brain.BRAINS:
+        # An agent program is the brain: there is no model endpoint to ask.
+        return claude_brain.quick(prompt)
+    is_cloud = provider not in ("", "local", "lmstudio", "builtin")
+    model_id = (settings.get("llm_model") or "").strip()
+    if not model_id:
+        loaded = _detect_loaded()
+        if loaded:
+            model_id = loaded.get("id") or ""
+    if not model_id and is_cloud:
+        # Cloud provider with no model saved: the first chat model it lists.
+        from .headless import settle_model
+        model_id = settle_model(LOCAL_API_BASE, os.environ.get("LOCAL_API_KEY") or settings.get("llm_key") or "", "")
+    if not model_id:
+        return ""
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        # Headroom for a reasoning model to think and still answer: at 16 tokens a
+        # reasoning model spent the whole budget thinking and answered nothing.
+        "max_tokens": max_tokens,
+        "temperature": 0.3,
+        "stream": False,
+        # Skip the reasoning pass where the server honors it (local Qwen etc.).
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    api_key = (os.environ.get("LOCAL_API_KEY") or settings.get("llm_key") or "hearth-builtin")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    resp = _http_post_json(f"{LOCAL_API_BASE}/chat/completions", payload, timeout=timeout, headers=headers)
+    try:
+        return str(resp["choices"][0]["message"]["content"] or "")
+    except Exception:
+        return ""
+
+
+_IDEAS_FILE = os.path.join(LOGS_DIR, "reminder_ideas.json")
+_IDEAS_LOCK = threading.Lock()
+
+
+def reminder_ideas(fresh: bool = False) -> List[Dict[str, str]]:
+    """Reminders this person would likely want, made from what they keep and
+    talk about, remade twice a day. None when there is nothing to go on."""
+    with _IDEAS_LOCK:
+        try:
+            with open(_IDEAS_FILE, encoding="utf-8") as f:
+                kept = json.load(f)
+            if not fresh and time.time() - float(kept.get("at") or 0) < 12 * 3600:
+                return kept.get("ideas") or []
+        except (OSError, ValueError):
+            pass
+        from . import chat_sync, memory, reminders as _r
+        try:
+            mem = memory.index_for_prompt(25)
+        except Exception:
+            mem = ""
+        chats = [c.get("title") for c in chat_sync.listing(20) if c.get("title")]
+        if not mem.strip() and not chats:
+            return []
+        have = [r.get("what") for r in _r.list_reminders() if r.get("what")]
+        prompt = (
+            "Suggest 3 reminders or scheduled tasks this person would likely want, from what they "
+            "keep in memory and talk about. Each is something an assistant on their PC could remind "
+            "them of or do for them at a time or on repeat. Skip what they already have.\n\n"
+            f"Memory:\n{mem[:2500]}\n\nRecent chats:\n" + "\n".join(f"- {t}" for t in chats[:20])
+            + ("\n\nAlready set:\n" + "\n".join(f"- {w}" for w in have[:15]) if have else "")
+            + '\n\nAnswer with JSON only: [{"emoji": "one emoji", "title": "2-4 words", '
+              '"ask": "the request as they would type it, with when"}]')
+        raw = one_shot(prompt, max_tokens=700, timeout=45)
+        ideas: List[Dict[str, str]] = []
+        try:
+            got = json.loads(raw[raw.index("["): raw.rindex("]") + 1])
+            for x in got if isinstance(got, list) else []:
+                if isinstance(x, dict) and x.get("title") and x.get("ask"):
+                    ideas.append({"emoji": str(x.get("emoji") or "")[:4], "title": str(x["title"])[:60],
+                                  "ask": str(x["ask"])[:200]})
+        except ValueError:
+            pass
+        if ideas:
+            os.makedirs(LOGS_DIR, exist_ok=True)
+            _atomic_write_json(_IDEAS_FILE, {"at": time.time(), "ideas": ideas[:3]})
+        return ideas[:3]
+
+
 class HearthHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         # Quiet — only print errors
@@ -1955,6 +2045,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"path": detected or ""})
             except Exception as e:
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/reminders/ideas":
+            try:
+                return self._send_json(200, {"ideas": reminder_ideas(self._query().get("fresh") == "1")})
+            except Exception as e:
+                return self._send_json(200, {"ideas": [], "error": f"{type(e).__name__}: {e}"})
         if path == "/api/reminders":
             try:
                 from . import reminders as _r
@@ -3178,6 +3273,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             data = _cs.keep_terminal_turns(_load_convo(data["id"]), data)
             ok = _save_convo(data)
             return self._send_json(200 if ok else 500, {"ok": ok})
+        if path == "/api/conversations/seen":
+            data = _load_convo((self._read_json().get("id") or "").strip())
+            if not data:
+                return self._send_json(404, {"ok": False, "error": "conversation not found"})
+            if data.pop("unread", None) is not None:
+                _save_convo(data)
+            return self._send_json(200, {"ok": True})
         if path == "/api/conversations/pin":
             body = self._read_json()
             cid = (body.get("id") or "").strip()
@@ -5031,54 +5133,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             f"Conversation:\n{first[:500]}\n\n"
             f"Title:"
         )
-        settings = _load_settings()
-        provider = (settings.get("llm_provider") or "").lower()
-        from . import claude_brain
-        if provider in claude_brain.BRAINS:
-            # An agent program is the brain: there is no model endpoint to ask.
-            return self._send_json(200, {"title": _clean(claude_brain.quick(prompt)) or _fallback(first)})
-        is_cloud = provider not in ("", "local", "lmstudio", "builtin")
-        model_id = (settings.get("llm_model") or "").strip()
-        if not model_id:
-            loaded = _detect_loaded()
-            if loaded:
-                model_id = loaded.get("id") or ""
-        if not model_id and not is_cloud:
-            return self._send_json(200, {"title": _fallback(first)})
-        if not model_id and is_cloud:
-            # Cloud provider with no model saved: the first chat model it lists.
-            from .headless import settle_model
-            model_id = settle_model(LOCAL_API_BASE, os.environ.get("LOCAL_API_KEY") or settings.get("llm_key") or "", "")
-            if not model_id:
-                return self._send_json(200, {"title": _fallback(first)})
-        payload = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": prompt}],
-            # Headroom for a reasoning model to think AND still emit the title. At
-            # the old max_tokens=16, a reasoning model spent the whole budget on
-            # its reasoning pass and returned empty content, so every title fell
-            # back to the raw first message (the "all chats titled Yo!" bug).
-            "max_tokens": 512,
-            "temperature": 0.3,
-            "stream": False,
-            # Skip the reasoning pass where the server honors it (local Qwen etc.).
-            # Cloud models that ignore this still have the token headroom above.
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-        # Pass Authorization header so cloud endpoints (and our authed
-        # builtin) actually accept the call instead of 401'ing.
-        api_key = (os.environ.get("LOCAL_API_KEY") or
-                   settings.get("llm_key") or "hearth-builtin")
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        resp = _http_post_json(f"{LOCAL_API_BASE}/chat/completions", payload,
-                               timeout=20, headers=headers)
-        if not isinstance(resp, dict) or resp.get("error"):
-            return self._send_json(200, {"title": _fallback(first)})
-        try:
-            title = _clean(resp["choices"][0]["message"]["content"])
-            return self._send_json(200, {"title": title or _fallback(first)})
-        except Exception:
-            return self._send_json(200, {"title": _fallback(first)})
+        return self._send_json(200, {"title": _clean(one_shot(prompt, timeout=20)) or _fallback(first)})
 
     def _download_logs(self) -> None:
         log_path = os.path.join(LOGS_DIR, "activity.jsonl")

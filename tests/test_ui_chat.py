@@ -800,7 +800,10 @@ with sync_playwright() as pw:
         { id: 'r2', what: 'Weather for the walk', due_iso: iso(later), fired: false, recurring_seconds: 86400,
           recurring_text: 'daily', action_tool: 'web_search', action_args: { query: 'weather today' } },
         { id: 'r3', what: 'Call home', due_iso: iso(new Date(Date.now() - 3600e3)), fired: true, fired_at: iso(new Date(Date.now() - 3600e3)) }];
-      window.api = async (path) => path.startsWith('/api/reminders') ? { items } : real(path);
+      let ideas = [];
+      window.api = async (path) => path.startsWith('/api/reminders/ideas') ? { ideas }
+        : path.startsWith('/api/reminders') ? { items } : real(path);
+      RM_IDEAS.list = null; RM_IDEAS.asked = 0;
       showView('reminders');
       await refreshReminders();
       const box = $('reminders-box'), view = $('view-reminders');
@@ -810,15 +813,42 @@ with sync_playwright() as pw:
       const done = [...box.querySelectorAll('.rm-row')].length;
       items = [];
       document.querySelector('[data-rm="upcoming"]').click(); await new Promise(r => setTimeout(r, 50));
-      const examples = box.querySelectorAll('[data-rmask]').length;
+      await new Promise(r => setTimeout(r, 50));
+      const none = $('rm-ideas').querySelectorAll('[data-rmask]').length;
+      ideas = [{ emoji: 'x', title: 'Exam form', ask: 'Remind me tomorrow at 10am to finish the exam form' }];
+      RM_IDEAS.list = null; RM_IDEAS.asked = 0;
+      await refreshReminders(); await new Promise(r => setTimeout(r, 50));
+      const examples = [...$('rm-ideas').querySelectorAll('[data-rmask]')].map(x => x.dataset.rmask);
       window.api = real;
-      return { up, fits, done, examples, count: $('rm-n-up').textContent };
+      return { up, fits, done, none, examples, count: $('rm-n-up').textContent };
     }""")
     check(f"reminders say when and what happens in words, and fit the window {rem}",
           len(rem["up"]) == 2 and "in 25 min" in rem["up"][0] and "then runs web search: weather today" in rem["up"][1]
-          and "repeats daily" in rem["up"][1] and rem["fits"])
-    check("done ones have their own list, and an empty list offers examples to try",
-          rem["done"] == 1 and rem["examples"] == 3)
+          and "Repeats daily" in rem["up"][1] and rem["fits"])
+    check(f"done ones have their own list; ideas are the server's, made from what was talked about, none when it has none {rem['examples']}",
+          rem["done"] == 1 and rem["none"] == 0 and rem["examples"] == ["Remind me tomorrow at 10am to finish the exam form"])
+    # Typing a task in the Reminders box sent it into whatever chat was open.
+    own = pg.evaluate("""async () => {
+      const realSend = send, realModel = STATE.loadedModel;
+      let got = null;
+      window.send = async (text, shown, opts) => { got = { chat: STATE.activeId, view: STATE.view, shown, keep: !!(opts && opts.keepBox) }; };
+      STATE.loadedModel = STATE.loadedModel || 'stand-in';
+      STATE.conversations.unshift({ id: 'rm-open', title: 'Trip plans', messages: [{ role: 'user', content: 'plan my trip' }],
+                                    created: Date.now(), updated: Date.now() });
+      setActiveId('rm-open');
+      showView('reminders');
+      $('rm-new').value = 'Remind me to drink water in 5 minutes';
+      $('rm-compose').requestSubmit();
+      await new Promise(r => setTimeout(r, 150));
+      const out = { got, after: STATE.activeId, box: $('rm-new').value,
+                    open: STATE.conversations.find(c => c.id === 'rm-open').messages.length };
+      window.send = realSend; STATE.loadedModel = realModel;
+      return out;
+    }""")
+    check(f"a task typed in Reminders gets a chat of its own, the open chat is untouched and the page stays {own}",
+          own["got"] and own["got"]["chat"] != "rm-open" and own["got"]["view"] == "reminders"
+          and own["got"]["shown"] == "Remind me to drink water in 5 minutes" and own["got"]["keep"]
+          and own["after"] == "rm-open" and own["open"] == 1 and own["box"] == "")
     pg.evaluate("showView('chat')")
     words = pg.evaluate("""() => [_lgLine('memory_forget', { name: 'old-note' }, true), _lgLine('memory_save', { name: 'tabs' }, true),
                                   _lgLine('memory_recall', { query: 'tabs' }, true)]""")
