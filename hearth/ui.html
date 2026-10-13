@@ -6581,7 +6581,10 @@ function agentBrainsKnown(list) {
 // Format a token count for the bottom-bar `ctx` pill: 32768 → "32K", 977000 → "977K".
 function fmtCtxPill(n) {
   if (!n) return '-';
-  return (n >= 1024) ? `${Math.round(n/1024)}K` : `${n}`;
+  // 32768 is "32K" in powers of two; 90000 is "90K", not 88.
+  if (n >= 1024 * 1024 && n % (1024 * 1024) === 0) return `${n / (1024 * 1024)}M`;
+  if (n >= 1e6) return `${+(n / 1e6).toFixed(n % 1e5 ? 2 : 0)}M`;
+  return n >= 1024 ? `${n % 1024 === 0 ? n / 1024 : Math.round(n / 1000)}K` : `${n}`;
 }
 
 // Decide local vs cloud from BOTH the saved provider AND the live endpoint URL.
@@ -7058,6 +7061,9 @@ async function _updateCtxRingFromHistory() {
   }
   const eff = (b && (b.effective || b.total)) || 0;
   if (!eff) return;
+  // Measured last turn and nothing added since: that's the real number.
+  const cm = c.ctxMeasured;
+  if (cm && cm.budget && cm.n === (c.messages || []).length) { _paintCtxRing(cm.used, cm.budget, cm.at, true); return; }
   const chars = (c.messages || []).reduce((s, m) => s + ((m.content || '').length), 0);
   // Add the persona/system-prompt base the backend reports: the live ring counts
   // it, so without it the idle ring reads low then jumps the instant a turn runs.
@@ -11048,6 +11054,9 @@ async function send(forced = null, displayAs = null, opts = {}) {
       const wrap = document.getElementById('ctx-ring-wrap');
       if (wrap) wrap.classList.remove('compacting');
       if (ev.compact_at) STATE._compactAt = ev.compact_at;
+      // The server's count, corrected by what the model reported it read, is
+      // kept on the chat so the ring between turns shows it rather than a guess.
+      if (ev.measured && activeConvo()) activeConvo().ctxMeasured = { used: ev.used || 0, budget: ev.budget || 0, at: ev.compact_at, n: (activeConvo().messages || []).length };
       _paintCtxRing(ev.used || 0, ev.budget || 0, ev.compact_at, !!ev.measured);
       return;
     }
@@ -11232,7 +11241,7 @@ async function renderStatus(fresh) {
   const plans = limits.length ? `<div class="st-card"><h5>Usage</h5>${stUsageHTML(mine)}${otherRows}</div>` : '';
   const mode = (APPROVAL_MODES.find(m => m.id === st.mode) || {}).name || st.mode;
   const pc = `<div class="st-card"><h5>On this PC</h5><div class="st-rows">
-      <span>Engine</span><em>${st.local.running ? esc(st.local.model || 'running') + (st.local.ctx ? ` · ${Math.round(st.local.ctx / 1024)}K context` : '') : 'not running'}</em>
+      <span>Engine</span><em>${st.local.running ? esc(st.local.model || 'running') + (st.local.ctx ? ` · ${fmtCtxPill(st.local.ctx)} context` : '') : 'not running'}</em>
       ${st.local.helper ? `<span>Helper model</span><em>${esc(st.local.helper)}</em>` : ''}
       <span>Approval</span><em>${esc(mode)}</em>
       <span>Helpers</span><em>${st.helpers.working ? st.helpers.working + ' working' : 'none working'}${st.helpers.done ? ', ' + st.helpers.done + ' finished recently' : ''}</em>

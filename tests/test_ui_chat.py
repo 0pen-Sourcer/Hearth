@@ -177,6 +177,10 @@ with sync_playwright() as pw:
     }""")
     check(f"a model loaded from Models & engine shows its phase and progress there {mload}",
           mload["fill"] == "45%" and mload["pct"] == "45%" and mload["phase"])
+    # 90K loaded read as 88K, and the ring between turns called itself an estimate
+    # though the last turn had measured it.
+    ctxs = pg.evaluate("""() => [fmtCtxPill(90000), fmtCtxPill(32768), fmtCtxPill(1048576), fmtCtxPill(977000)]""")
+    check(f"context sizes read as they were set {ctxs}", ctxs == ["90K", "32K", "1M", "977K"])
     check(f"/status opens mid-reply, with only the brain in use open and a refresh {stat}",
           stat["opened"] and stat["bars"] == 1 and len(stat["folded"]) == 1 and "72%" in stat["folded"][0] and stat["fresh"])
     check(f"a message typed in another chat while one replies isn't sent to that reply {slash}",
