@@ -214,6 +214,27 @@ def read_runfile(verify: bool = True) -> Dict[str, Any]:
     return info
 
 
+def _port_of(url: str) -> Optional[int]:
+    from urllib.parse import urlparse
+    try:
+        return urlparse(url).port
+    except ValueError:
+        return None
+
+
+def ours_at(url: str) -> Dict[str, Any]:
+    """The built-in server answering at this address, when it is Hearth's own,
+    started by this process or by another Hearth window or terminal. {} when
+    what answers there is some other program."""
+    port = _port_of(url)
+    if port is None:
+        return {}
+    if _proc is not None and _proc.poll() is None and _port_of((_proc_info or {}).get("url") or "") == port:
+        return dict(_proc_info or {})
+    other = read_runfile()
+    return other if other and _port_of(other.get("url") or "") == port else {}
+
+
 def current_slots() -> int:
     """Concurrent slots the RUNNING built-in server actually has. 1 means every
     request queues, so a team of sub-agents finishes one at a time."""
@@ -2385,15 +2406,30 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
     # the locked region above; this catches the case where LM Studio / Ollama
     # / a stray process is already squatting the port we want).
     if foreign_running and (_proc is None or _proc.poll() is not None):
+        # Hearth's own server, started by another window or the terminal: the
+        # same model is used as it is, another model takes its place.
+        mine = ours_at(other_api)
+        if mine:
+            if os.path.normcase(os.path.abspath(mine.get("model_path") or "")) == os.path.normcase(os.path.abspath(model_path)):
+                with _start_lock:
+                    _starting_paths.discard(normalized_path)
+                return {"ok": True, "url": mine.get("url"), "pid": mine.get("pid"), "already": True,
+                        "adopted": True, "info": mine}
+            _stop_other_surface()
+            for _ in range(40):
+                if not external_server_running(other_api, timeout=0.3, api_key=BUILTIN_API_KEY):
+                    break
+                time.sleep(0.25)
+            foreign_running = external_server_running(other_api, timeout=0.5, api_key=None)
+    if foreign_running and (_proc is None or _proc.poll() is not None):
         with _start_lock:
             _starting_paths.discard(normalized_path)
         return {
             "ok": False,
             "error": (
-                f"Port {port} is already taken by another LLM server (most likely "
-                f"LM Studio or Ollama). Two ways out:\n"
-                f"  • Use what's already there → CLI: /brain lmstudio  ·  GUI: Settings → Chat brain → Local LM Studio\n"
-                f"  • Stop the other server, then retry  →  Hearth's built-in will boot on port {port}."
+                f"Another program is already serving models on port {port} (LM Studio, "
+                f"Ollama or similar). Close it and load again, or keep using what it serves "
+                f"by pointing Hearth at http://localhost:{port}/v1 in Settings > Chat brain."
             ),
             "conflict_port": port,
         }
@@ -2748,6 +2784,24 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
 _stop_asked = [0.0]           # when a stop was last asked for, so a load that dies then isn't called a failure
 
 
+def _stop_other_surface() -> bool:
+    """Stop a built-in server another Hearth window or terminal started."""
+    pid = read_runfile().get("pid")
+    if pid:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               capture_output=True, timeout=10,
+                               creationflags=0x08000000)
+            else:
+                os.kill(int(pid), signal.SIGTERM)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        _status_cache["data"] = None
+    _clear_runfile()
+    return bool(pid)
+
+
 def stop_builtin() -> Dict[str, Any]:
     """Terminate the running builtin server, if any. A model that is still
     loading is stopped the same way."""
@@ -2759,22 +2813,8 @@ def stop_builtin() -> Dict[str, Any]:
         # Not our subprocess, but the other surface may still be running one.
         # Now that status() reports it as builtin, Eject has to actually eject
         # it rather than silently no-op on the surface that didn't start it.
-        adopted = read_runfile()
-        pid = adopted.get("pid")
-        if pid:
-            try:
-                if os.name == "nt":
-                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                                   capture_output=True, timeout=10,
-                                   creationflags=0x08000000)
-                else:
-                    os.kill(int(pid), signal.SIGTERM)
-            except (OSError, ValueError, subprocess.SubprocessError):
-                pass
-            _clear_runfile()
-            _status_cache["data"] = None
+        if _stop_other_surface():
             return {"ok": True, "was_running": True, "adopted": True}
-        _clear_runfile()
         return {"ok": True, "was_running": False}
     try:
         _proc.terminate()
