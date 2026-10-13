@@ -1740,8 +1740,8 @@ def reminder_ideas(fresh: bool = False) -> List[Dict[str, str]]:
     about them and what they talk about. Remade when either has moved on (at most
     hourly) or after half a day. None when there is nothing to go on."""
     with _IDEAS_LOCK:
-        from . import chat_sync, memory, reminders as _r
-        listed = chat_sync.listing(20)
+        from . import memory, reminders as _r
+        listed = _list_convos()[:20]          # kept per file by mtime, unlike a full read of every chat
         basis = [round(memory.changed_at()), max([int(c.get("updated") or 0) for c in listed] or [0])]
         try:
             with open(_IDEAS_FILE, encoding="utf-8") as f:
