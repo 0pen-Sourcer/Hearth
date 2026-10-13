@@ -163,6 +163,20 @@ with sync_playwright() as pw:
       window.api = real;
       return { opened, bars, folded, fresh };
     }""")
+    # A model loaded from Models & engine showed a static line; the bar was only on the sticker.
+    mload = pg.evaluate("""async () => {
+      showView('models');
+      await new Promise(r => setTimeout(r, 300));
+      modelsSetStartingLock(true, 'Loading Big-Model.gguf…');
+      showLoadProgress('loading_weights', 45, '');
+      const fill = document.getElementById('mlb-fill'), pct = document.getElementById('mlb-pct');
+      const out = { fill: fill && fill.style.width, pct: pct && pct.textContent,
+                    phase: (document.getElementById('mlb-phase') || {}).textContent };
+      hideLoadProgress(); modelsSetStartingLock(false); showView('chat');
+      return out;
+    }""")
+    check(f"a model loaded from Models & engine shows its phase and progress there {mload}",
+          mload["fill"] == "45%" and mload["pct"] == "45%" and mload["phase"])
     check(f"/status opens mid-reply, with only the brain in use open and a refresh {stat}",
           stat["opened"] and stat["bars"] == 1 and len(stat["folded"]) == 1 and "72%" in stat["folded"][0] and stat["fresh"])
     check(f"a message typed in another chat while one replies isn't sent to that reply {slash}",

@@ -12402,6 +12402,12 @@ function showLoadProgress(phase, percent, marker) {
   $('st-loading-fill').style.width = Math.max(2, Math.min(100, percent)) + '%';
   $('st-loading-pct').textContent = Math.round(percent) + '%';
   if (marker) box.title = marker;
+  // The same progress in the Models tab, where the load was started.
+  if ($('mlb-fill')) {
+    $('mlb-fill').style.width = Math.max(2, Math.min(100, percent)) + '%';
+    $('mlb-pct').textContent = Math.round(percent) + '%';
+    $('mlb-phase').textContent = '· ' + (_PHASE_LABEL[phase] || phase || 'loading');
+  }
 }
 function hideLoadProgress() {
   if (STATE.loadingNow) { STATE.loadingNow = false; try { applyBrainState(); } catch {} }
@@ -15781,7 +15787,11 @@ function modelsSetStartingLock(on, label) {
       if (body) body.insertBefore(banner, body.firstChild);
     }
     banner.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent-2);animation:pulse 1.1s infinite"></span>' +
-      '<span>' + esc(label || 'Loading model… llama.cpp may take 10-30s on GPU, longer on CPU.') + '</span>';
+      '<span style="flex:1;min-width:0">' + esc(label || 'Loading model… llama.cpp may take 10-30s on GPU, longer on CPU.') +
+      ' <span id="mlb-phase" style="color:var(--fg-dim)"></span></span>' +
+      '<span style="width:160px;height:6px;border-radius:99px;background:var(--bg-3);overflow:hidden;flex:none">' +
+      '<i id="mlb-fill" style="display:block;height:100%;width:2%;background:var(--accent);transition:width .3s"></i></span>' +
+      '<span id="mlb-pct" style="min-width:36px;text-align:right;font-family:var(--mono);color:var(--fg-dim)"></span>';
   } else if (banner) {
     banner.remove();
   }
@@ -16906,6 +16916,7 @@ function modelsWireRowClicks(pane) {
       const fname = b.dataset.usePath.split(/[/\\]/).pop();
       modelsSetStartingLock(true, 'Loading ' + fname + '…');
       stickerSetLoadingModel((typeof cfg !== 'undefined' && cfg && cfg.model_path) || (typeof path !== 'undefined' ? path : ''), fname);
+      startLoadProgress();
       const savedCfg = (_modelsState.status && _modelsState.status.model_configs && _modelsState.status.model_configs[modelsCfgKey(b.dataset.usePath)]) || {};
       const body = Object.assign({ model_path: b.dataset.usePath }, savedCfg);
       try {
