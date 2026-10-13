@@ -648,6 +648,8 @@
     display: none; gap: 2px;
   }
   .convo:hover .convo-actions { display: flex; }
+  .convo .convo-when { flex: none; font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+  .convo:hover .convo-when { display: none; }
   .convo .a-btn.pin.on { color: var(--accent); }
   .convo .a-btn {
     width: 22px; height: 22px;
@@ -815,6 +817,9 @@
     letter-spacing: 0.3px;
   }
   .msg.user .role-name { color: var(--fg-dim); }
+  .msg .role-name .msg-time { margin-left: 8px; font-weight: 400; color: var(--fg-faint); text-transform: none; letter-spacing: 0; }
+  .chat-day { display: flex; align-items: center; gap: 12px; margin: 18px 0 4px; font: 500 11.5px var(--sans); color: var(--fg-faint); }
+  .chat-day::before, .chat-day::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
   .msg.assistant .role-name { color: var(--accent-2); }
   /* Chat-bubble mode — OPT-IN via Settings, default OFF (Hearth's own look:
      user turns left-aligned like everything else, no tint). When on, user turns
@@ -2642,7 +2647,6 @@
   .rm-ico { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none;
     background: var(--bg-2); color: var(--fg-dim); }
   .rm-ico svg { width: 16px; height: 16px; }
-  .rm-ico.emo { font-size: 17px; line-height: 1; }
   .rm-row .what { flex: 1; min-width: 0; font: 500 14.5px var(--sans); color: var(--fg); overflow-wrap: anywhere; }
   .rm-row .what small { display: block; margin-top: 3px; font: 13px var(--sans); color: var(--fg-dim); }
   .rm-row.done .what { color: var(--fg-dim); }
@@ -6948,7 +6952,7 @@ function renderConvoRow(c) {
       : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.6">
       <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
     </svg>`}
-    <span class="title-text">${esc(c.title || 'Untitled')}</span>${unseen ? '<span class="convo-new" title="Not opened yet"></span>' : ''}
+    <span class="title-text">${esc(c.title || 'Untitled')}</span>${unseen ? '<span class="convo-new" title="Not opened yet"></span>' : ''}<span class="convo-when">${esc(convoWhen(c.updated))}</span>
     <div class="convo-actions">
       <button class="a-btn pin${c.pinned ? ' on' : ''}" title="${c.pinned ? 'Unpin' : 'Pin to the top'}">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="${c.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>
@@ -7163,12 +7167,23 @@ function renderChat() {
     return;
   }
   if (!c.messages.length) { body.appendChild(emptyState()); return; }
+  let day = '';
   for (const m of c.messages) {
     // Render the message FIRST so think/tool events render INSIDE the assistant
     // bubble (under the "jarvis" header) instead of floating between the user
     // and assistant headers, where they visually look like they belong to YOU.
     const msgDiv = renderMessage(m);
     if (!msgDiv) continue;  // silent synthetic message (auto-fold)
+    if (m.at) {
+      const d = new Date(m.at).toDateString();
+      if (d !== day && (day || d !== new Date().toDateString())) {
+        const line = document.createElement('div');
+        line.className = 'chat-day';
+        line.textContent = dayLabel(m.at);
+        body.appendChild(line);
+      }
+      day = d;
+    }
     body.appendChild(msgDiv);
     if (m.role === 'assistant') {
       // Interleave text with tools/thinking by the position each event fired at
@@ -7335,6 +7350,27 @@ function _agentInitial() {
   return (n[0] || 'J').toUpperCase();
 }
 
+// When something was said, in the PC's own format.
+function clockOf(t) { return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+function fullWhen(t) {
+  return new Date(t).toLocaleString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function dayLabel(t) {
+  const d = new Date(t), key = x => x.toDateString(), now = new Date();
+  if (key(d) === key(now)) return 'Today';
+  if (key(d) === key(new Date(now.getTime() + 864e5))) return 'Tomorrow';
+  if (key(d) === key(new Date(now.getTime() - 864e5))) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric',
+                                    year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+}
+// A chat in the list: the time today, the weekday this week, else the date.
+function convoWhen(t) {
+  if (!t) return '';
+  const d = new Date(+t), now = new Date();
+  if (d.toDateString() === now.toDateString()) return clockOf(d);
+  if (now - d < 6 * 864e5) return d.toLocaleDateString([], { weekday: 'short' });
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+}
 function renderMessage(m) {
   // Never render silent turns or the notification-flush sentinel (old convos
   // saved it as a user message before the notify path skipped it).
@@ -7346,7 +7382,7 @@ function renderMessage(m) {
   div.innerHTML = `
     <div class="role-mark">${m.role === 'user' ? 'U' : esc(agentInit)}</div>
     <div class="body">
-      <div class="role-name">${m.role === 'user' ? 'you' : esc(agentLabel)}</div>
+      <div class="role-name">${m.role === 'user' ? 'you' : esc(agentLabel)}${m.at ? `<span class="msg-time" title="${esc(fullWhen(m.at))}">${esc(clockOf(m.at))}</span>` : ''}</div>
       <div class="content"></div>
       ${m.role === 'assistant' ? `
         <div class="actions">
@@ -8959,8 +8995,8 @@ async function switchEndpoint(body) {
   } else if (probe === 'none') {
     brainToast('this PC', 'Nothing is serving on ' + body.url + ' yet. Load a model in Models & engine.' + bridges, 'warn');
   } else if (body.provider === 'local') {
-    brainToast(probe === 'lmstudio' ? 'LM Studio' : 'the model on this PC',
-               (probe === 'lmstudio' ? 'Found on ' + body.url + '.' : 'Hearth\'s own engine.') + bridges);
+    brainToast(probe === 'other' ? 'the server on ' + body.url : 'the model on this PC',
+               (probe === 'other' ? 'Another program serves it, not Hearth.' : 'Hearth\'s own engine.') + bridges);
   } else {
     const _p = (STATE.providers || []).find(x => x.id === body.provider);
     const kept = !r.stopped_builtin && (STATE.settings || {}).keep_local_warm && STATE.brain && STATE.brain.kind === 'local' && STATE.brain.loaded;
@@ -10176,7 +10212,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // notification into the trailing turn itself. Everything else pushes the
   // user message as normal.
   if (!_notify) {
-    const userMsg = { role: 'user', content: prompt };
+    const userMsg = { role: 'user', content: prompt, at: Date.now() };
     if (displayAs && displayAs !== prompt) userMsg.displayContent = displayAs;
     // Keep the attachment list on the message so the bubble can show the real
     // thumbnail, and so it survives reload/re-render like any other content.
@@ -10207,7 +10243,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     .map(m => ({ role: m.role, content: m.content || '' }));
 
   // Open the placeholder assistant message NOW - it'll be filled by chunks.
-  const assistantMsg = { role: 'assistant', content: '', events: [] };
+  const assistantMsg = { role: 'assistant', content: '', events: [], at: Date.now() };
   c.messages.push(assistantMsg);
 
   // Render the whole list (cleans up after re-renders, persists tools).
@@ -12689,7 +12725,7 @@ function _rmIdeasDraw() {
   if (!box) return;
   const list = RM_IDEAS.list || [];
   box.innerHTML = RM_FILTER === 'done' || !list.length ? '' : '<h3>For you</h3>' + list.map(x =>
-    `<div class="rm-row" data-rmask="${esc(x.ask)}"><span class="rm-ico emo">${x.emoji ? esc(x.emoji) : _rmIco('bell')}</span>`
+    `<div class="rm-row" data-rmask="${esc(x.ask)}"><span class="rm-ico">${_rmIco(x.repeats ? 'again' : 'bell')}</span>`
     + `<span class="what">${esc(x.title)}<small>${esc(x.ask)}</small></span>`
     + `<span class="rm-act"><button title="Set this one" aria-label="Set this one">${_rmIco('plus')}</button></span></div>`).join('');
 }

@@ -815,7 +815,7 @@ with sync_playwright() as pw:
       document.querySelector('[data-rm="upcoming"]').click(); await new Promise(r => setTimeout(r, 50));
       await new Promise(r => setTimeout(r, 50));
       const none = $('rm-ideas').querySelectorAll('[data-rmask]').length;
-      ideas = [{ emoji: 'x', title: 'Exam form', ask: 'Remind me tomorrow at 10am to finish the exam form' }];
+      ideas = [{ title: 'Exam form', ask: 'Remind me tomorrow at 10am to finish the exam form' }];
       RM_IDEAS.list = null; RM_IDEAS.asked = 0;
       await refreshReminders(); await new Promise(r => setTimeout(r, 50));
       const examples = [...$('rm-ideas').querySelectorAll('[data-rmask]')].map(x => x.dataset.rmask);
@@ -827,6 +827,23 @@ with sync_playwright() as pw:
           and "Repeats daily" in rem["up"][1] and rem["fits"])
     check(f"done ones have their own list; ideas are the server's, made from what was talked about, none when it has none {rem['examples']}",
           rem["done"] == 1 and rem["none"] == 0 and rem["examples"] == ["Remind me tomorrow at 10am to finish the exam form"])
+    # Messages and chats carried no time at all.
+    times = pg.evaluate("""() => {
+      const y = Date.now() - 864e5, t = Date.now();
+      STATE.conversations.unshift({ id: 'times', title: 'Over two days', created: y, updated: t, messages: [
+        { role: 'user', content: 'old one', at: y }, { role: 'assistant', content: 'Old reply.', at: y + 1000 },
+        { role: 'user', content: 'new one', at: t }, { role: 'assistant', content: 'New reply.', at: t + 1000 },
+        { role: 'user', content: 'from before times were kept' }] });
+      setActiveId('times'); renderConvoList(); renderChat();
+      const body = $('chat-body');
+      const row = document.querySelector('.convo[data-cid="times"] .convo-when');
+      return { days: [...body.querySelectorAll('.chat-day')].map(x => x.textContent),
+               stamps: [...body.querySelectorAll('.msg')].map(x => !!x.querySelector('.msg-time')),
+               first: (body.querySelector('.msg-time') || {}).textContent, when: row && row.textContent };
+    }""")
+    check(f"each message says when it was said, with a line where the day changes, and each chat when it was last used {times}",
+          times["days"] == ["Yesterday", "Today"] and times["stamps"] == [True, True, True, True, False]
+          and any(ch.isdigit() for ch in times["first"] or "") and any(ch.isdigit() for ch in times["when"] or ""))
     # Typing a task in the Reminders box sent it into whatever chat was open.
     own = pg.evaluate("""async () => {
       const realSend = send, realModel = STATE.loadedModel;

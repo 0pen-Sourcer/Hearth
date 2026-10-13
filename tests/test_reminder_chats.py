@@ -76,11 +76,11 @@ check("a repeating reminder keeps to its one chat, and sees what it said last ti
 
 # Ideas on the Reminders page are made from what was talked about, not a fixed list.
 seen = []
-web.one_shot = lambda prompt, **_k: (seen.append(prompt), 'Sure: [{"emoji": "x", "title": "Exam form", '
+web.one_shot = lambda prompt, **_k: (seen.append(prompt), 'Sure: [{"title": "Exam form", '
                                      '"ask": "Remind me at 10am to finish the exam form"}]')[1]
 ideas = web.reminder_ideas()
 check(f"ideas are asked of the brain with the chats so far and what is already set {ideas}",
-      ideas == [{"emoji": "x", "title": "Exam form", "ask": "Remind me at 10am to finish the exam form"}]
+      ideas == [{"title": "Exam form", "ask": "Remind me at 10am to finish the exam form", "repeats": False}]
       and "Stand up and stretch" in seen[0])
 web.reminder_ideas()
 check("and kept half a day instead of asked on every visit", len(seen) == 1)

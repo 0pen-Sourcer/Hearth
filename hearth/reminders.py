@@ -617,7 +617,7 @@ def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
         text = "".join(parts).strip() or f"Reminder: {what}"
         chat_sync.post(cid, what[:60], "reminder",
                        [{"role": "assistant", "content": text, "via": "reminder",
-                         "at": datetime.now().isoformat(timespec="seconds")}], unread=True)
+                         "at": int(time.time() * 1000)}], unread=True)
     t = threading.Thread(target=_run, daemon=True, name="hearth-reminder-chat")
     t.start()
     return t

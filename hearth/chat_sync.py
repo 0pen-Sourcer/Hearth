@@ -39,6 +39,7 @@ def to_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     pending: List[Dict[str, Any]] = []
     calls: Dict[str, Dict[str, Any]] = {}
+    at = int(time.time() * 1000)
     for m in messages:
         role = m.get("role")
         if role == "user":
@@ -47,7 +48,7 @@ def to_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 pending = []
             text = _text(m.get("content")).strip()
             if text:
-                out.append({"role": "user", "content": text, "via": "terminal"})
+                out.append({"role": "user", "content": text, "via": "terminal", "at": at})
         elif role == "assistant":
             for tc in m.get("tool_calls") or []:
                 fn = tc.get("function") or {}
@@ -60,7 +61,7 @@ def to_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 pending.append(ev)
             text = _text(m.get("content")).strip()
             if text and not m.get("tool_calls"):
-                out.append({"role": "assistant", "content": text, "via": "terminal",
+                out.append({"role": "assistant", "content": text, "via": "terminal", "at": at,
                             **({"events": pending} if pending else {})})
                 pending = []
         elif role == "tool":

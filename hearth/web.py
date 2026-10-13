@@ -1761,7 +1761,7 @@ def reminder_ideas(fresh: bool = False) -> List[Dict[str, str]]:
             "them of or do for them at a time or on repeat. Skip what they already have.\n\n"
             f"Memory:\n{mem[:2500]}\n\nRecent chats:\n" + "\n".join(f"- {t}" for t in chats[:20])
             + ("\n\nAlready set:\n" + "\n".join(f"- {w}" for w in have[:15]) if have else "")
-            + '\n\nAnswer with JSON only: [{"emoji": "one emoji", "title": "2-4 words", '
+            + '\n\nAnswer with JSON only: [{"title": "2-4 words", '
               '"ask": "the request as they would type it, with when"}]')
         raw = one_shot(prompt, max_tokens=700, timeout=45)
         ideas: List[Dict[str, str]] = []
@@ -1769,8 +1769,9 @@ def reminder_ideas(fresh: bool = False) -> List[Dict[str, str]]:
             got = json.loads(raw[raw.index("["): raw.rindex("]") + 1])
             for x in got if isinstance(got, list) else []:
                 if isinstance(x, dict) and x.get("title") and x.get("ask"):
-                    ideas.append({"emoji": str(x.get("emoji") or "")[:4], "title": str(x["title"])[:60],
-                                  "ask": str(x["ask"])[:200]})
+                    ask = str(x["ask"])[:200]
+                    ideas.append({"title": str(x["title"])[:60], "ask": ask,
+                                  "repeats": bool(re.search(r"\b(every|daily|weekly|each)\b", ask, re.I))})
         except ValueError:
             pass
         if ideas:
@@ -3916,15 +3917,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                         # It may well answer /v1/models, but it is NOT a local
                         # server - never call it LM Studio.
                         local_probe = {"reachable": True, "kind": "remote"}
+                    elif _ls.ours_at(url):
+                        # Hearth's own server, from this window or the terminal.
+                        local_probe = {"reachable": True, "kind": "builtin"}
                     elif _ls.external_server_running(url, timeout=1.0, api_key=key or None):
-                        # Distinguish LM Studio from our own builtin — the
-                        # builtin is recognizable via the PID we track.
-                        is_ours = (_ls._proc is not None and _ls._proc.poll() is None
-                                   and (_ls._proc_info or {}).get("url") == url)
-                        local_probe = {
-                            "reachable": True,
-                            "kind": "builtin" if is_ours else "lmstudio",
-                        }
+                        local_probe = {"reachable": True, "kind": "other"}
                     else:
                         local_probe = {"reachable": False, "kind": "none"}
                 except Exception:
