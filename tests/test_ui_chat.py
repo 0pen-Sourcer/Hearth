@@ -827,6 +827,19 @@ with sync_playwright() as pw:
           and "Repeats daily" in rem["up"][1] and rem["fits"])
     check(f"done ones have their own list; ideas are the server's, made from what was talked about, none when it has none {rem['examples']}",
           rem["done"] == 1 and rem["none"] == 0 and rem["examples"] == ["Remind me tomorrow at 10am to finish the exam form"])
+    clock = pg.evaluate("""() => {
+      const out = {};
+      for (const m of ['date', 'time', 'off']) {
+        hearthSetClock(m);
+        const el = $('top-clock'), on = document.querySelector('#ap-clock .ap-mode.on');
+        out[m] = { shown: !el.hidden, date: !!el.querySelector('small'), text: el.textContent, picked: on && on.dataset.clock };
+      }
+      return out;
+    }""")
+    check(f"the clock shows the time, or the time and date, as picked in Appearance, and goes away when off {clock}",
+          clock["date"]["shown"] and clock["date"]["date"] and clock["date"]["picked"] == "date"
+          and clock["time"]["shown"] and not clock["time"]["date"] and any(ch.isdigit() for ch in clock["time"]["text"])
+          and not clock["off"]["shown"] and clock["off"]["picked"] == "off")
     # Typing a task in the Reminders box sent it into whatever chat was open.
     own = pg.evaluate("""async () => {
       const realSend = send, realModel = STATE.loadedModel;
