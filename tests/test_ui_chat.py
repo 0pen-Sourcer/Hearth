@@ -136,6 +136,35 @@ with sync_playwright() as pw:
     }""")
     check(f"a slash command typed mid-reply is not sent to the model {slash}",
           slash["steered"] == ["actually use tabs"] and slash["modal"])
+    # /status had to wait for the reply, opened every brain's usage at once, and never refreshed.
+    stat = pg.evaluate("""async () => {
+      const real = api, asked = [];
+      window.api = async (p) => p.startsWith('/api/status') ? (asked.push(p), {
+        brain: { id: 'claude-code', label: 'Claude Code', model: 'opus', kind: 'cloud', where: 'your Claude plan' },
+        context: 1000000, mode: 'ask', version: 'x', memories: 3, workspace: 'W', helpers: { working: 0, done: 0 },
+        local: { running: false }, limits: [
+          { id: 'claude-code', label: 'Claude Code', kind: 'plan', plan: 'Claude', at: Date.now() / 1000,
+            windows: [{ name: '5-hour', used: 40, resets_at: Date.now() / 1000 + 3600 }] },
+          { id: 'codex', label: 'Codex', kind: 'plan', plan: 'ChatGPT', at: Date.now() / 1000,
+            windows: [{ name: 'Weekly', used: 72, resets_at: Date.now() / 1000 + 86400 }] }] }) : real(p);
+      STATE.streaming = true;
+      document.getElementById('input').value = '/status';
+      await send();
+      await new Promise(r => setTimeout(r, 300));
+      const body = document.getElementById('modal-body');
+      const opened = !!body.querySelector('.st-panel');
+      const bars = body.querySelectorAll('.st-bar').length;
+      const folded = [...body.querySelectorAll('.st-other')].map(b => b.textContent.trim());
+      body.querySelector('#st-refresh').click();
+      await new Promise(r => setTimeout(r, 300));
+      const fresh = asked.some(p => p.includes('fresh=1'));
+      STATE.streaming = false;
+      document.getElementById('modal').classList.remove('open');
+      window.api = real;
+      return { opened, bars, folded, fresh };
+    }""")
+    check(f"/status opens mid-reply, with only the brain in use open and a refresh {stat}",
+          stat["opened"] and stat["bars"] == 1 and len(stat["folded"]) == 1 and "72%" in stat["folded"][0] and stat["fresh"])
     check(f"a message typed in another chat while one replies isn't sent to that reply {slash}",
           slash["kept"] == "new question elsewhere" and "new question elsewhere" not in slash["steered"])
 
