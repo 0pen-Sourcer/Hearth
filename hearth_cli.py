@@ -3567,6 +3567,22 @@ class JarvisCLI:
                 else:
                     print(f"{C_DIM}effort is {info['effort'] or 'default'}. /think default | {' | '.join(levels)}{C_RESET}")
                 return True
+            # A cloud model whose provider lists effort levels takes one by name.
+            _facts = {}
+            try:
+                from hearth import headless as _hl
+                _facts = _hl.listed_facts(LOCAL_API_BASE, self.current_model or "")
+            except Exception:
+                pass
+            _levels = _facts.get("efforts") or []
+            if len(parts) >= 2 and parts[1].lower() in _levels + ["default"]:
+                self.think_on = True
+                self.think_level = "" if parts[1].lower() == "default" else parts[1].lower()
+                print(f"{C_OK}effort: {parts[1].lower()}{C_RESET}")
+                return True
+            if len(parts) >= 2 and parts[1].lower() in ("off", "0", "false", "no") and _facts.get("can_off") is False:
+                print(f"{C_DIM}This model always reasons; pick how hard: /think default | {' | '.join(_levels)}{C_RESET}")
+                return True
             if len(parts) >= 2 and parts[1].lower() in ("on", "1", "true", "yes"):
                 self.think_on = True
             elif len(parts) >= 2 and parts[1].lower() in ("off", "0", "false", "no"):
@@ -5576,12 +5592,11 @@ class JarvisCLI:
         model = (self.current_model or "").lower()
         if model in self._no_reasoning_effort:
             return None
-        if self.think_on:
-            return None
-        base = (LOCAL_API_BASE or "").lower()
-        if "openai.com" in base:
-            return "minimal"
-        return "none"
+        # The same rule as the window: the provider's own levels, and nothing
+        # sent to switch off a model that can't stop reasoning.
+        from hearth import headless as _hl
+        return _hl._cloud_reasoning_effort(LOCAL_API_BASE, self.think_on, self.current_model or "",
+                                           getattr(self, "think_level", "") if self.think_on else "")
 
     async def _open_stream(self, create_kwargs: Dict):
         """Open the streaming completion, with two recoveries:

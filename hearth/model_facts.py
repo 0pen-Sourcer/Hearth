@@ -159,5 +159,12 @@ def for_provider(pid: str, model_id: str) -> Dict[str, Any]:
     label, base = headless.PROVIDERS.get(pid, (pid, ""))
     own: Dict[str, Any] = {"name": model_id.replace("models/", ""), "where": label}
     listed = headless.listed_facts(base, model_id) if base else {}
+    if base and not listed:
+        try:
+            from .web import _provider_key
+            headless.provider_models(base, _provider_key(pid), timeout=10)
+            listed = headless.listed_facts(base, model_id)
+        except Exception:
+            pass
     own.update(listed)
     return merge(own, pid, model_id)

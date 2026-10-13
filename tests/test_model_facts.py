@@ -60,6 +60,42 @@ headless._LIST_SIZES["https://openrouter.ai/api/v1"] = (0, {"x/y": 64000})
 check("a provider's own list is read for its models",
       headless.listed_facts("https://openrouter.ai/api/v1/", "x/y") == {"inputs": ["text", "image"], "reasoning": True, "ctx": 64000})
 
+# The think menu offered Off/On/Low/Medium/High to every cloud model; Anthropic's
+# own list says which effort levels a model takes and whether thinking turns off.
+import http.server, threading                                         # noqa: E401,E402
+from http.server import ThreadingHTTPServer                           # noqa: E402
+
+
+class _List(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *_a):
+        pass
+
+    def do_GET(self):
+        body = json.dumps({"data": [{"id": "claude-x", "max_input_tokens": 1000000, "capabilities": {
+            "effort": {"supported": True, "low": {"supported": True}, "high": {"supported": True},
+                       "max": {"supported": True}, "medium": {"supported": False}},
+            "thinking": {"supported": True, "types": {"adaptive": {"supported": True},
+                                                      "disabled": {"supported": False}}}}}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+srv = ThreadingHTTPServer(("127.0.0.1", 0), _List)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+base = f"http://127.0.0.1:{srv.server_address[1]}/v1"
+headless.provider_models(base, "k")
+lf = headless.listed_facts(base, "claude-x")
+check(f"a provider's effort levels and whether thinking turns off are read from its list {lf}",
+      lf.get("efforts") == ["low", "high", "max"] and lf.get("can_off") is False)
+check("off sends nothing to a model that can't turn thinking off, and a listed level is sent as asked",
+      headless._cloud_reasoning_effort(base, False, "claude-x") is None
+      and headless._cloud_reasoning_effort(base, True, "claude-x", "max") == "max"
+      and headless._cloud_reasoning_effort(base, True, "claude-x", "medium") is None)
+srv.shutdown()
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

@@ -9697,7 +9697,28 @@ function _thinkOptions() {
             ...levels.map(l => ({ on: true, level: l, label: named(l), sub: about[l] || '' }))];
   }
   const cloud = !!(STATE.brain && STATE.brain.kind === 'cloud');
-  return cloud ? THINK_OPTIONS : THINK_OPTIONS.filter(o => !o.level);
+  if (!cloud) return THINK_OPTIONS.filter(o => !o.level);
+  // The provider's own word on this model's effort levels, when it gives one.
+  const f = _cloudFacts();
+  if (f && (f.efforts || []).length) {
+    const named = l => ({ xhigh: 'Extra high', max: 'Max', minimal: 'Minimal' }[l] || l[0].toUpperCase() + l.slice(1)) + ' effort';
+    return [...(f.can_off === false ? [] : [THINK_OPTIONS[0]]), THINK_OPTIONS[1],
+            ...f.efforts.map(l => ({ on: true, level: l, label: named(l), sub: '' }))];
+  }
+  return THINK_OPTIONS;
+}
+const CLOUD_FACTS = new Map();
+function _cloudFacts() {
+  const b = STATE.brain || {}, model = (STATE.settings && STATE.settings.llm_model) || '';
+  if (!b.providerKey || !model) return null;
+  const key = `prov::${b.providerKey}::${model}`;
+  if (!CLOUD_FACTS.has(key)) {
+    CLOUD_FACTS.set(key, null);
+    api('/api/model/facts?v=' + encodeURIComponent(key))
+      .then(f => { CLOUD_FACTS.set(key, f || {}); try { renderThinkMenu(); applyThinkButton(); } catch {} })
+      .catch(() => CLOUD_FACTS.set(key, {}));
+  }
+  return CLOUD_FACTS.get(key);
 }
 
 function _thinkIndex() {

@@ -152,7 +152,7 @@ def _is_reasoning_param_error(e: Exception) -> bool:
     return False
 
 
-_EFFORT_LEVELS = {"minimal", "low", "medium", "high"}
+_EFFORT_LEVELS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 
 # Background fact-extraction is a SECOND LLM call. On a local single-slot server
 # it competes with the user's own next turn, so the chat would sit waiting behind
@@ -176,9 +176,13 @@ def _cloud_reasoning_effort(base: str, think: bool, model: str, level: str = "")
     default. Models that 400 on the field are remembered and sent nothing."""
     if (model or "").lower() in _NO_REASONING_EFFORT:
         return None
+    listed = listed_facts(base, model)
     if think:
         lv = (level or "").strip().lower()
-        return lv if lv in _EFFORT_LEVELS else None
+        return lv if lv in (listed.get("efforts") or _EFFORT_LEVELS) else None
+    # A model whose provider says reasoning can't be switched off keeps its default.
+    if listed.get("can_off") is False:
+        return None
     return "minimal" if "openai.com" in (base or "").lower() else "none"
 
 
@@ -329,6 +333,16 @@ def provider_models(base: str, key: str = "", timeout: float = 6):
         params = m.get("supported_parameters")
         if isinstance(params, list):
             f["reasoning"] = "reasoning" in params
+        # Anthropic's list names the effort levels each model takes, and
+        # whether its thinking can be switched off.
+        caps = m.get("capabilities") or {}
+        eff = caps.get("effort") or {}
+        if isinstance(eff, dict) and eff.get("supported"):
+            f["efforts"] = [k for k, v in eff.items() if isinstance(v, dict) and v.get("supported")]
+            f["reasoning"] = True
+        types = (caps.get("thinking") or {}).get("types") or {}
+        if isinstance(types, dict) and "disabled" in types:
+            f["can_off"] = bool((types.get("disabled") or {}).get("supported"))
         if m.get("id") and f:
             facts[m["id"]] = f
     _LIST_SIZES[base.rstrip("/")] = (time.time(), sizes)
