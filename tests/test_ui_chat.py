@@ -202,6 +202,8 @@ with sync_playwright() as pw:
       Object.assign(STATE.brain, deriveBrainKind());
       showView('team');
       await wait(2500);
+      // The room loads its art first; on a slow start JARVIS isn't in it yet.
+      for (let i = 0; i < 60 && !(ROOM.people && ROOM.people.get('__main')); i++) await wait(250);
       const out = { tab: TEAM.tab };
       setState('calling read_file…');
       await wait(400);

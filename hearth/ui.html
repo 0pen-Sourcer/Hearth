@@ -3233,13 +3233,13 @@
   /* Subtle 3-dot bounce while the model is generating. Calm, not eye-sore.
      Sits in the empty assistant bubble; overwritten on first content chunk. */
   .prompt-prog {
+    display: flex; align-items: center; gap: 10px;
     padding: 8px 2px;
-    font-family: var(--mono);
-    font-size: 12.5px;
-    font-style: italic;
+    font: 12.5px var(--sans);
     color: var(--fg-faint);
-    letter-spacing: .2px;
   }
+  .prompt-prog .pp-track { width: 120px; height: 3px; border-radius: 99px; background: var(--bg-3); overflow: hidden; flex: none; }
+  .prompt-prog .pp-track i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
   .prompt-prog .pp-num {
     display: inline-block;
     font-style: normal;
@@ -9616,7 +9616,7 @@ function _liveStatsUpdate(stats) {
   const el = _liveStats.el;
   if (!el || !el.isConnected || !stats) return;
   let txt = '';
-  if (stats.decode_tps != null) txt = `${stats.decode_tps} tok/s`;
+  if (stats.decode_tps != null) { txt = `${stats.decode_tps} tok/s`; _liveStats.generating = true; }
   else if (stats.prompt_tps != null) txt = `${stats.prompt_tps} tok/s prompt`;
   if (!txt) return;
   el.textContent = txt;
@@ -10250,6 +10250,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
       if (!liveContent || (!liveContent.querySelector('.dot-bounce') && !liveContent.querySelector('.prompt-prog'))) {
         _clearPromptPoll(); return;   // real content took over the bubble
       }
+      // Writing has begun (reasoning that isn't shown counts): the prompt is
+      // read, whatever the server's last progress figure says.
+      if (_liveStats && _liveStats.generating) {
+        if (liveContent.querySelector('.prompt-prog'))
+          liveContent.innerHTML = '<div class="dot-bounce"><span></span><span></span><span></span></div>';
+        setState('thinking…');
+        _clearPromptPoll(); return;
+      }
       try {
         const r = await api('/api/llmserver/prompt-progress');
         const p = r && r.progress;
@@ -10262,6 +10270,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
           if (box) {
             // Only swap the number span so the ppRoll keyframe replays -> the
             // digits roll up on each change instead of re-mounting the whole line.
+            const fill = box.querySelector('.pp-track i');
+            if (fill) fill.style.width = pct + '%';
             const num = box.querySelector('.pp-num');
             if (!num || num.dataset.v !== String(pct)) {
               const s = document.createElement('span');
@@ -10270,8 +10280,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
             }
           } else {
             liveContent.innerHTML =
-              '<div class="prompt-prog">Processing prompt <span class="pp-num" data-v="' +
-              pct + '">' + pct + '</span>%</div>';
+              '<div class="prompt-prog"><span class="pp-track"><i style="width:' + pct + '%"></i></span>' +
+              '<span>Reading the conversation · <span class="pp-num" data-v="' + pct + '">' + pct + '</span>%</span></div>';
           }
         } else if (liveContent.querySelector('.prompt-prog')) {
           liveContent.innerHTML =
