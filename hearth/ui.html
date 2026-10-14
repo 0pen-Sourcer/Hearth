@@ -20412,6 +20412,96 @@ function roomCarve(ctx, kx, ky) {
     })));
   }
 }
+// The fire in the grate burns. Each room's own flames are painted out of its
+// firebox once (wall colour per row), and their colours paint new flames on
+// the same pixel grid, layer over layer from the outer red to the white heart.
+const FIRE = { x: 720, y: 212, w: 96, h: 84, u: 3, step: 0.09 };
+const FIRE_FX = { plates: [], pals: [] };
+function roomFirePrep(style) {
+  if (FIRE_FX.plates[style]) return true;
+  const img = ROOM.bgs[style]; if (!img || !img.naturalWidth) return false;
+  const sx = img.naturalWidth / ROOM.W, sy = img.naturalHeight / ROOM.H;
+  const c = document.createElement('canvas'); c.width = FIRE.w; c.height = FIRE.h;
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.drawImage(img, FIRE.x * sx, FIRE.y * sy, FIRE.w * sx, FIRE.h * sy, 0, 0, FIRE.w, FIRE.h);
+  const d = g.getImageData(0, 0, FIRE.w, FIRE.h), px = d.data, lit = [];
+  const flame = i => px[i] >= 175 && px[i + 1] >= 80 && px[i] - px[i + 2] > 90;
+  for (let y = 0; y < FIRE.h; y++) {
+    const wall = [0, 0, 0]; let n = 0;
+    for (let x = 0; x < FIRE.w; x++) {
+      const i = (y * FIRE.w + x) * 4;
+      if (!flame(i)) { wall[0] += px[i]; wall[1] += px[i + 1]; wall[2] += px[i + 2]; n++; }
+    }
+    if (n) wall.forEach((v, k) => { wall[k] = v / n; });
+    for (let x = 0; x < FIRE.w; x++) {
+      const i = (y * FIRE.w + x) * 4;
+      if (!flame(i)) continue;
+      lit.push([px[i], px[i + 1], px[i + 2]]);
+      for (let k = 0; k < 3; k++) px[i + k] = wall[k];
+    }
+  }
+  g.putImageData(d, 0, 0);
+  lit.sort((a, b) => (a[0] + a[1] + a[2]) - (b[0] + b[1] + b[2]));
+  const pick = q => lit.length ? lit[Math.min(lit.length - 1, Math.floor(q * lit.length))] : [230, 130, 50];
+  // One colour per layer, from the outer edge to the near-white heart.
+  FIRE_FX.pals[style] = [pick(0.02), pick(0.4), pick(0.75), pick(1)].map(c => `rgb(${c[0]},${c[1]},${c[2]})`);
+  FIRE_FX.plates[style] = c;
+  return true;
+}
+// Tongues across the grate as [centre 0..1, height in rows, half-width in columns]:
+// one tall in the middle, two beside it, two small at the ends.
+const FIRE_TONGUES = [[0.5, 27, 6.5], [0.31, 18, 5], [0.69, 19, 5], [0.14, 10, 3.5], [0.86, 9, 3.5]];
+// Nested layers, outermost first: [height scale, width scale].
+const FIRE_LAYERS = [[1, 1], [0.8, 0.74], [0.58, 0.5], [0.34, 0.3]];
+function roomFireRows(t) {
+  // Each column's flame height per layer. Tongues stretch, shrink and lean on
+  // their own slow rhythms; time moves in steps so it flickers like drawn frames.
+  const cols = Math.round(FIRE.w / FIRE.u), step = Math.floor(t / FIRE.step), tt = step * FIRE.step;
+  return FIRE_LAYERS.map(([hs, ws], li) => {
+    const out = new Float32Array(cols);
+    FIRE_TONGUES.forEach(([cx, ht, hw], i) => {
+      const k = i * 1.7 + 0.4;
+      const tall = ht * hs * (0.84 + 0.1 * Math.sin(tt * 2.3 + k) + 0.06 * Math.sin(tt * 5.9 + k * 2.1));
+      const lean = 1.1 * Math.sin(tt * 1.6 + k * 1.3) + 0.5 * Math.sin(tt * 4.1 + k);
+      const mid = cx * cols + lean * hs, half = hw * ws;
+      for (let c = 0; c < cols; c++) {
+        const d = Math.abs(c + 0.5 - mid) / half;
+        if (d < 1) out[c] = Math.max(out[c], tall * (0.45 * (1 - d ** 1.6) + 0.55 * (1 - d) ** 1.3));
+      }
+    });
+    // The outer edges lick up and down a row from frame to frame.
+    if (li < 2) for (let c = 0; c < cols; c++) if (out[c] > 1) out[c] += (_fireHash(c * 31 + li, step) - 0.5) * 1.8;
+    return out;
+  });
+}
+function _fireHash(a, b) { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); }
+function roomFire(ctx, kx, ky, t) {
+  if (_reduceMotion() || !roomFirePrep(roomStyle(ROOM.view))) return;
+  const style = roomStyle(ROOM.view), pal = FIRE_FX.pals[style];
+  ctx.drawImage(FIRE_FX.plates[style], Math.round(FIRE.x * kx), Math.round(FIRE.y * ky), Math.round(FIRE.w * kx), Math.round(FIRE.h * ky));
+  const u = FIRE.u, base = FIRE.y + FIRE.h, layers = roomFireRows(t / 1000);
+  layers.forEach((tops, li) => {
+    ctx.fillStyle = pal[li];
+    tops.forEach((ht, c) => {
+      const n = Math.round(ht);
+      if (n < 1) return;
+      const x = FIRE.x + c * u, y = base - n * u;
+      ctx.fillRect(Math.round(x * kx), Math.round(y * ky), Math.ceil(u * kx), Math.round(base * ky) - Math.round(y * ky));
+    });
+  });
+  // A few sparks leave the tips and fade out on the way up.
+  const step = Math.floor(t / 1000 / FIRE.step), cols = layers[0].length;
+  for (let i = 0; i < 3; i++) {
+    const life = 14, k = step + i * 5, n = Math.floor(k / life), age = k % life;
+    const c = Math.round(cols * (0.3 + 0.4 * _fireHash(i, n)));
+    const r = layers[0][c] + 1 + age * 0.9;
+    if (age > 9 || r * u > FIRE.h - 2) continue;
+    ctx.fillStyle = pal[age < 4 ? 2 : 1];
+    const x = FIRE.x + (c + Math.round(Math.sin(age * 0.9 + i) * 1.2)) * u, y = base - Math.round(r) * u;
+    ctx.fillRect(Math.round(x * kx), Math.round(y * ky), Math.ceil(u * kx), Math.ceil(u * ky));
+  }
+}
 function roomProp(name) { return ROOM.man && ROOM.man.props ? ROOM.man.props[name] : null; }
 function roomDraw(t) {
   const cv = $('tm-canvas'); if (!cv || !ROOM.bg) return;
@@ -20424,6 +20514,7 @@ function roomDraw(t) {
   const inView = p => (p.room || 0) === ROOM.view;
   ctx.drawImage(ROOM.bgs[roomStyle(ROOM.view)] || ROOM.bg, 0, 0, cv.width, cv.height);
   roomCarve(ctx, kx, ky);
+  roomFire(ctx, kx, ky, t);
 
   // Everything that stands on the floor, with the y where it touches it.
   const items = [];
