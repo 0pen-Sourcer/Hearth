@@ -1127,18 +1127,14 @@ async def run_once(
         # templates reject with "System message must be at the beginning"). The
         # GUI shows the clean prompt via emit().
         _user_content = ("\n\n".join(_notif_ctx) + "\n\n---\n\n" + prompt) if _notif_ctx else prompt
-        # Volatile context (precise local time + memory recalled for THIS prompt)
-        # rides the tail so it doesn't bust the cached system+history prefix. Time
-        # lets the model reason "is it late?" / "remind me tomorrow" for free;
-        # recall surfaces the most relevant saved facts. emit() still shows the
-        # clean prompt so the GUI renders no extra text.
+        # The local time rides the tail so it doesn't bust the cached system+history
+        # prefix, and lets the model reason "is it late?" / "remind me tomorrow".
+        # Memory isn't matched in here: the index is in the system prompt and the
+        # model recalls what it needs. emit() still shows the clean prompt.
         import datetime as _dt
         _now = _dt.datetime.now().astimezone()
         _user_content += (f"\n\n[Current local time: {_now.strftime('%Y-%m-%d %H:%M')} "
                           f"({_now.strftime('%A')}, tz {_now.tzname() or _now.strftime('%z')}).]")
-        _mblock = _mem.recall_for_prompt(prompt)
-        if _mblock:
-            _user_content += "\n\n" + _mblock
         _turn_user = {"role": "user", "content": _user_content}
         messages.append(_turn_user)
         emit("user", content=prompt)
@@ -2420,7 +2416,7 @@ async def run_once(
         try:
             import threading as _threading
             from . import memory_extract as _mx_gate
-            if _mx_gate.may_note(messages):
+            if _mx_gate.enabled():
                 _threading.Thread(target=_bg_fact_extract, args=(list(messages),),
                                   daemon=True).start()
         except Exception:

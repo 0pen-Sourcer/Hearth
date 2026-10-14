@@ -83,6 +83,8 @@ for these; reserve 5 for things they EXPLICITLY asked to be remembered.
 - Things the assistant said, only things the USER said or revealed.
 - A fact already saved (see "Already saved" below) that the conversation does
   not change. Repeating it is noise.
+- Anything at all, once the user has said in this conversation not to save or
+  remember things. Return [].
 
 # Output format — STRICT JSON ONLY, no preamble, no markdown fences
 Return a JSON array. Each fact is an object with these exact keys:
@@ -209,28 +211,15 @@ def _fact_already_known(title: str) -> bool:
     return os.path.isfile(path)
 
 
-_DONT_SAVE = re.compile(
-    r"\b(?:don'?t|do not|never|stop)\s+(?:save|saving|remember|remembering|store|storing|"
-    r"note|noting|keep|keeping|write|writing)\b"
-    r"|\b(?:off the record|forget (?:this|that|it))\b", re.I)
-
-
-def may_note(messages: List[Dict[str, Any]]) -> bool:
-    """Whether facts from this chat may be noted in the background: not when
-    it's switched off (settings `auto_memory`), and not once the person has said
-    in this chat not to save or remember things."""
+def enabled() -> bool:
+    """Whether facts are noted in the background at all (Settings: Remember
+    things on its own). Being asked not to save is left to the extractor."""
     try:
         from .tools import WORKSPACE
         with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
-            if (json.load(f) or {}).get("auto_memory") is False:
-                return False
+            return (json.load(f) or {}).get("auto_memory") is not False
     except Exception:
-        pass
-    for m in messages:
-        if m.get("role") == "user" and isinstance(m.get("content"), str) \
-                and _DONT_SAVE.search(m["content"].split("\n\n[Current local time")[0]):
-            return False
-    return True
+        return True
 
 
 def extract_and_save(
