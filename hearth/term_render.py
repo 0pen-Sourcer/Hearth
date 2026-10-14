@@ -239,6 +239,9 @@ class Turn:
         if isinstance(stats, dict):
             self.stats.update(stats)
 
+    def _on_turn_messages(self, messages: Any = None, **_):
+        self.turn_messages = list(messages or [])
+
     def _on_done(self, stats: Any = None, **f):
         self._flush_text()
         self._end_thinking()

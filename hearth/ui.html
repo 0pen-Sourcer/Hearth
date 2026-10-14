@@ -10088,6 +10088,27 @@ function switchBranch(idx, dir) {
   renderChat();
 }
 
+// A reply's tool steps go back as the calls and results they were, so the
+// model knows on the next turn what it already ran and what came back.
+function historyOf(msgs) {
+  const history = [];
+  msgs
+    .filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__')
+    .forEach((m, n) => {
+      const tools = m.role === 'assistant' && Array.isArray(m.events)
+        ? m.events.filter(e => e && e.kind === 'tool' && e.name) : [];
+      if (tools.length) {
+        const calls = tools.map((e, i) => ({ id: String(e.id || `call_${n}_${i}`), type: 'function',
+          function: { name: e.name, arguments: JSON.stringify(e.args || {}) } }));
+        history.push({ role: 'assistant', content: '', tool_calls: calls });
+        tools.forEach((e, i) => history.push({ role: 'tool', tool_call_id: calls[i].id, name: e.name,
+          content: String(e.result == null ? '' : e.result).slice(0, 4000) || '(no output)' }));
+      }
+      if (m.role === 'assistant' && !(m.content || '').trim()) return;
+      history.push({ role: m.role, content: m.content || '' });
+    });
+  return history;
+}
 async function send(forced = null, displayAs = null, opts = {}) {
   // `forced` is the FULL prompt sent to the LLM (carries the path, the tool
   // instruction, etc.). `displayAs` is the OPTIONAL short version shown in
@@ -10238,10 +10259,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // On a normal turn the just-pushed user message is the last element, so slice
   // it off. On a flush turn we pushed nothing, so send the whole history. Either
   // way, scrub stale silent synthetic turns so they never reach the model.
-  const history = (_notify ? c.messages.slice() : c.messages.slice(0, -1))
-    .filter(m => !(m.role === 'assistant' && !(m.content || '').trim()))
-    .filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__')
-    .map(m => ({ role: m.role, content: m.content || '' }));
+  const history = historyOf(_notify ? c.messages.slice() : c.messages.slice(0, -1));
 
   // Open the placeholder assistant message NOW - it'll be filled by chunks.
   const assistantMsg = { role: 'assistant', content: '', events: [], at: Date.now() };

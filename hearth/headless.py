@@ -1038,7 +1038,15 @@ async def run_once(
                 _hc = h.get("content", "")
                 if h.get("role") == "assistant" and isinstance(_hc, str):
                     _hc = _strip_think(_hc)
-                messages.append({"role": h["role"], "content": _hc})
+                _m = {"role": h["role"], "content": _hc}
+                # Tool calls and their results stay in the history, so the model
+                # knows on the next turn what it already ran and what came back.
+                for _k in ("tool_calls", "tool_call_id", "name"):
+                    if h.get(_k):
+                        _m[_k] = h[_k]
+                messages.append(_m)
+        from .tools import sanitize_tool_pairing as _pair
+        messages[:] = _pair(messages)
     # A "notification flush" turn carries no real user message — the GUI fires
     # it (idle) only to let the model surface a due reminder / finished subagent.
     # The notification itself becomes the trailing user-role message: the model
@@ -1077,6 +1085,30 @@ async def run_once(
     except Exception:
         pass
 
+    _turn_user = None                    # this turn's prompt, to find what the turn added after it
+
+    def _turn_tail() -> List[Dict[str, Any]]:
+        """The assistant and tool messages this turn added, for the surface to keep
+        as history. Long tool results are cut; the model saw them in full."""
+        if _turn_user is None:
+            return []
+        # Trimming during the turn rebuilds the list, so match by what it says too.
+        at = next((i for i in range(len(messages) - 1, -1, -1)
+                   if messages[i] is _turn_user or (messages[i].get("role") == "user"
+                                                    and messages[i].get("content") == _turn_user["content"])), None)
+        if at is None:
+            return []
+        out = []
+        for m in messages[at + 1:]:
+            if m.get("role") not in ("assistant", "tool"):
+                continue
+            mm = {k: m[k] for k in ("role", "content", "tool_calls", "tool_call_id", "name") if m.get(k) is not None}
+            c = mm.get("content")
+            if mm["role"] == "tool" and isinstance(c, str) and len(c) > 4000:
+                mm["content"] = c[:4000] + "…"
+            out.append(mm)
+        return out
+
     if _is_flush:
         # Race: the queue was already drained by a real user turn between the
         # GUI's peek and this flush. Nothing to surface — don't feed the model a
@@ -1103,7 +1135,8 @@ async def run_once(
         _mblock = _mem.recall_for_prompt(prompt)
         if _mblock:
             _user_content += "\n\n" + _mblock
-        messages.append({"role": "user", "content": _user_content})
+        _turn_user = {"role": "user", "content": _user_content}
+        messages.append(_turn_user)
         emit("user", content=prompt)
 
     tools = to_openai_tools()
@@ -2248,6 +2281,7 @@ async def run_once(
 
         # Final assistant text — no more tool calls.
         if msg.content:
+            messages.append({"role": "assistant", "content": _strip_think(msg.content)})
             emit("assistant", content=msg.content)
         elif not msg.tool_calls:
             # Empty completion, no tool call — the model returned NOTHING. Say
@@ -2284,7 +2318,6 @@ async def run_once(
         ):
             _nextstep_nudged = True
             emit("nudge", reason="ignored NEXT STEP hint from tool result")
-            messages.append({"role": "assistant", "content": _strip_think(msg.content)})
             messages.append({
                 "role": "user",
                 "content": (
@@ -2327,6 +2360,7 @@ async def run_once(
         # SECOND ~600-token LLM call. It used to run synchronously here, so on a
         # local model the reply finished but the turn hung ~20s on this invisible
         # extra generation before 'done' ever fired.
+        emit("turn_messages", messages=_turn_tail())
         emit("done",
              duration_ms=int((time.time() - t_start) * 1000),
              iterations=iterations,
@@ -2426,6 +2460,7 @@ async def run_once(
             }, f, indent=2)
     except Exception:
         state_path = None
+    emit("turn_messages", messages=_turn_tail())
     emit("done",
          duration_ms=int((time.time() - t_start) * 1000),
          iterations=iterations,

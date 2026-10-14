@@ -30,6 +30,13 @@ async def pick(message: str, options: Sequence[Tuple[Any, str]], default: Any = 
     opts: List[Tuple[Any, Any]] = [(v, ANSI(label)) for v, label in options]
     if not opts:
         return None
+    import sys
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        # Piped or scripted: no screen to pick on, so the list is printed.
+        print(message)
+        for i, (_v, label) in enumerate(options, 1):
+            print(f"  {i:>2}. {label}")
+        return None
     if default is not None and all(v != default for v, _ in opts):
         default = None
     # The hint rides on the title line: a toolbar under the list has no height

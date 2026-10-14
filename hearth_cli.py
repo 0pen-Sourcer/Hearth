@@ -5808,7 +5808,7 @@ class JarvisCLI:
         if os.environ.get("HEARTH_OLD_TERMINAL") == "1":
             return await self._respond_legacy(depth)
         from hearth import headless as _hl
-        convo = [m for m in self.messages[1:] if m.get("role") in ("user", "assistant")]
+        convo = [m for m in self.messages[1:] if m.get("role") in ("user", "assistant", "tool")]
         if not convo or convo[-1].get("role") != "user":
             return
         content = convo[-1].get("content")
@@ -5820,8 +5820,14 @@ class JarvisCLI:
                     prompt += "\n\nAttached image is in this message; call view_image on it if you need to see it again."
         else:
             prompt = str(content or "")
-        history = [{"role": m["role"], "content": m["content"] if isinstance(m.get("content"), str)
-                    else _term_render.plain(json.dumps(m.get("content")))} for m in convo[:-1]]
+        history = []
+        for m in convo[:-1]:
+            h = {"role": m["role"], "content": m["content"] if isinstance(m.get("content"), (str, type(None)))
+                 else _term_render.plain(json.dumps(m.get("content")))}
+            for k in ("tool_calls", "tool_call_id", "name"):
+                if m.get(k):
+                    h[k] = m[k]
+            history.append(h)
         turn = _term_render.Turn(out=lambda line: print(line, flush=True),
                                  show_thinking=self.show_thinking, model=self._model_label())
         self._turn = turn
@@ -5858,8 +5864,14 @@ class JarvisCLI:
         if st.get("cost_usd"):
             u["cost"] = u.get("cost", 0.0) + float(st["cost_usd"])
         reply = turn.reply()
-        if reply:
+        kept = getattr(turn, "turn_messages", None)
+        if kept:
+            # The tool calls and what they returned stay in the history, so the
+            # next turn knows what was already run.
+            self.messages.extend(kept)
+        elif reply:
             self.messages.append({"role": "assistant", "content": reply})
+        if reply:
             if self.voice_on and voice.is_available():
                 try:
                     voice.speak(reply, blocking=False)

@@ -830,6 +830,18 @@ with sync_playwright() as pw:
           rem["done"] == 1 and rem["none"] == 0 and rem["examples"] == ["Remind me tomorrow at 10am to finish the exam form"])
     check(f"with no ideas yet, the page says they come as JARVIS learns how you work {rem['learn']!r}",
           "learns how you work" in rem["learn"])
+    # The next turn's history had each reply's text only, so the model decided it
+    # had never run the tools it ran.
+    hist = pg.evaluate("""() => historyOf([
+      { role: 'user', content: 'how big is Downloads?' },
+      { role: 'assistant', content: 'About 12 GB.', events: [
+        { kind: 'think', content: 'measure it' },
+        { kind: 'tool', id: 't1', name: 'disk_usage', args: { path: '~/Downloads' }, result: '12.4 GB' }] },
+      { role: 'user', content: 'thanks' }])""")
+    check(f"a reply's tool steps go to the next turn as the calls and results they were {[h['role'] for h in hist]}",
+          [h["role"] for h in hist] == ["user", "assistant", "tool", "assistant", "user"]
+          and hist[1]["tool_calls"][0]["function"]["name"] == "disk_usage"
+          and hist[2]["tool_call_id"] == "t1" and hist[2]["content"] == "12.4 GB" and hist[3]["content"] == "About 12 GB.")
     # Messages and chats carried no time at all.
     times = pg.evaluate("""() => {
       const y = Date.now() - 864e5, t = Date.now();
