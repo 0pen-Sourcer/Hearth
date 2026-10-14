@@ -133,6 +133,47 @@ def append(cid: str, new: List[Dict[str, Any]]) -> int:
     return len(d["messages"])
 
 
+def title_for(text: str, ask) -> str:
+    """A 3-5 word title for a chat from its opening, asked of the brain through
+    `ask(prompt) -> str`; the opening's first words when nothing answers."""
+    def fallback(t: str) -> str:
+        # Only the opener line: `text` may carry the reply too, for the topic.
+        t = (t.split("\n", 1)[0]).strip()
+        words = t.split()
+        return t[:50] if len(words) <= 6 else " ".join(words[:6]) + "…"
+
+    def clean(title: str) -> str:
+        title = (title or "").strip().strip('"\'`*').strip()
+        for prefix in ("Title:", "title:", "TITLE:", "Here is", "Here's"):
+            if title.startswith(prefix):
+                title = title[len(prefix):].strip(' :"\'`*').strip()
+        title = title.split("\n", 1)[0]
+        words = title.split()
+        if len(words) > 6:                 # more is the model echoing the prompt
+            title = " ".join(words[:6])
+        return title[:50].strip(" .,:;")
+
+    prompt = ("Output ONLY a 3-5 word title (no quotes, no preamble) that captures what this "
+              "conversation is about. Ignore greetings like 'hi'/'yo'. Nothing else.\n\n"
+              f"Conversation:\n{text[:500]}\n\nTitle:")
+    try:
+        got = clean(ask(prompt))
+    except Exception:
+        got = ""
+    return got or fallback(text)
+
+
+def retitle(cid: str, title: str) -> None:
+    """Give a chat its proper title, unless someone renamed it meanwhile."""
+    d = load(cid)
+    if not d or not title:
+        return
+    if d.get("title") and d.get("title") != _title(d.get("messages") or []):
+        return
+    d["title"] = title
+    atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
+
+
 def post(cid: str, title: str, source: str, messages: List[Dict[str, Any]], unread: bool = False) -> None:
     """Add messages the window's way to a chat of its own (a reminder's), making
     the chat when it isn't there yet."""

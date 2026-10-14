@@ -1330,9 +1330,20 @@ class JarvisCLI:
         fresh = self.messages[ch["sent"]:]
         if not any(m.get("role") == "user" for m in fresh) and not ch.get("id"):
             return
-        if not ch.get("id"):
+        new = not ch.get("id")
+        if new:
             ch["id"] = chat_sync.new_id()
         ch["count"] = chat_sync.append(ch["id"], fresh)
+        if new:
+            # A real title, asked of the brain the way the window asks, off the main loop.
+            opening = " ".join(str(m.get("content") or "") for m in fresh
+                               if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str))
+            model, cid = self.current_model, ch["id"]
+
+            def _name():
+                from hearth import headless as _hl
+                chat_sync.retitle(cid, chat_sync.title_for(opening, lambda p: _hl.one_shot(p, model)))
+            threading.Thread(target=_name, daemon=True).start()
         ch["sent"] = len(self.messages)
         self._chat_keep()
 

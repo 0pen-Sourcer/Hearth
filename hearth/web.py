@@ -1711,24 +1711,10 @@ def one_shot(prompt: str, max_tokens: int = 512, timeout: float = 20) -> str:
         model_id = settle_model(LOCAL_API_BASE, os.environ.get("LOCAL_API_KEY") or settings.get("llm_key") or "", "")
     if not model_id:
         return ""
-    payload = {
-        "model": model_id,
-        "messages": [{"role": "user", "content": prompt}],
-        # Headroom for a reasoning model to think and still answer: at 16 tokens a
-        # reasoning model spent the whole budget thinking and answered nothing.
-        "max_tokens": max_tokens,
-        "temperature": 0.3,
-        "stream": False,
-        # Skip the reasoning pass where the server honors it (local Qwen etc.).
-        "chat_template_kwargs": {"enable_thinking": False},
-    }
-    api_key = (os.environ.get("LOCAL_API_KEY") or settings.get("llm_key") or "hearth-builtin")
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    resp = _http_post_json(f"{LOCAL_API_BASE}/chat/completions", payload, timeout=timeout, headers=headers)
-    try:
-        return str(resp["choices"][0]["message"]["content"] or "")
-    except Exception:
-        return ""
+    api_key = (os.environ.get("LOCAL_API_KEY") or settings.get("llm_key")
+               or (_provider_key(provider) if is_cloud else "") or "hearth-builtin")
+    from .headless import one_shot as _ask
+    return _ask(prompt, model_id, base=LOCAL_API_BASE, key=api_key, max_tokens=max_tokens, timeout=timeout)
 
 
 _IDEAS_FILE = os.path.join(LOGS_DIR, "reminder_ideas.json")
@@ -5103,41 +5089,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         if not first:
             return self._send_json(400, {"error": "empty text"})
 
-        def _fallback(text: str) -> str:
-            # Only the opener line — `first` may now carry the assistant reply too
-            # (for topic context), which must never leak into a fallback title.
-            text = (text.split("\n", 1)[0]).strip()
-            words = text.split()
-            if len(words) <= 6:
-                return text[:50]
-            return " ".join(words[:6]) + "…"
-
-        # Pick a model: prefer the active brain (cloud or local). The old
-        # path only checked _detect_loaded() (local servers) and fell back
-        # to a verbatim truncate when on cloud — title would be "draw me a
-        # glowing logo" instead of "Hearth Logo Design". Now: use whatever
-        # the chat is actually pointed at.
-        def _clean(title: str) -> str:
-            # Strip wrappers / "Title:" prefix from chatty models
-            title = title.strip().strip('"\'`*').strip()
-            for prefix in ("Title:", "title:", "TITLE:", "Here is", "Here's"):
-                if title.startswith(prefix):
-                    title = title[len(prefix):].strip(' :"\'`*').strip()
-            title = title.split("\n", 1)[0]
-            # Hard cap at 6 words — anything more is the model echoing the prompt
-            words = title.split()
-            if len(words) > 6:
-                title = " ".join(words[:6])
-            return title[:50].strip(' .,:;')
-
-        prompt = (
-            f"Output ONLY a 3-5 word title (no quotes, no preamble) that captures "
-            f"what this conversation is about. Ignore greetings like 'hi'/'yo'. "
-            f"Nothing else.\n\n"
-            f"Conversation:\n{first[:500]}\n\n"
-            f"Title:"
-        )
-        return self._send_json(200, {"title": _clean(one_shot(prompt, timeout=20)) or _fallback(first)})
+        from . import chat_sync
+        return self._send_json(200, {"title": chat_sync.title_for(first, lambda p: one_shot(p, timeout=20))})
 
     def _download_logs(self) -> None:
         log_path = os.path.join(LOGS_DIR, "activity.jsonl")

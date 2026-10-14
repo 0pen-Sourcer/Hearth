@@ -169,6 +169,44 @@ def turn_is_active() -> bool:
     return _TURN_ACTIVE.is_set()
 
 
+def one_shot(prompt: str, model: str, base: str = "", key: str = "",
+             max_tokens: int = 512, timeout: float = 20) -> str:
+    """A short answer from the brain in use, with no tools or chat around it
+    (a chat's title, a list of ideas). Empty when nothing answers."""
+    base = base or LOCAL_API_BASE
+    key = key or LOCAL_API_KEY or "hearth-builtin"
+    from . import claude_brain
+    if claude_brain.active():
+        # An agent program is the brain: there is no model endpoint to ask.
+        return claude_brain.quick(prompt)
+    if not model:
+        return ""
+    messages = [{"role": "user", "content": prompt}]
+    from . import anthropic_chat as _ac
+    try:
+        if _ac.is_anthropic(base) and _ac.available():
+            # Anthropic's compatible endpoint refuses sampling fields on its newer
+            # models; its own API is what the chat uses too.
+            async def _ask():
+                c = _ac.AsyncAnthropicChat(api_key=key)
+                r = await c.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens,
+                                                    stream=False, hearth_think=False)
+                return r.choices[0].message.content or ""
+            return asyncio.run(_ask())
+        import openai
+        client = openai.OpenAI(base_url=base, api_key=key, timeout=timeout)
+        # Headroom for a reasoning model to think and still answer: at 16 tokens a
+        # reasoning model spent the whole budget thinking and answered nothing.
+        kw: Dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.3}
+        if _is_local_endpoint(base):
+            # Skip the reasoning pass where the server honors it (local Qwen etc.).
+            kw["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        # chat_create drops a field the provider names as refused and asks again.
+        return str(chat_create(client, **kw).choices[0].message.content or "")
+    except Exception:
+        return ""
+
+
 async def _until_stopped(aw, should_cancel):
     """Await a model call, giving it up the moment stop is asked. None when stopped."""
     if should_cancel is None:
