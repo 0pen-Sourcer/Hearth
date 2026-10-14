@@ -3904,7 +3904,7 @@
            Chat title stays visible in the sidebar (highlighted active chat),
            so the "which thread am I in" signal is preserved without the bar. -->
       <div class="chat-header" id="chat-header" hidden style="display:none;">
-        <span class="chat-header-icon">💬</span>
+        <span class="chat-header-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></span>
         <span class="chat-header-title" id="chat-header-title">-</span>
         <span class="chat-header-meta" id="chat-header-meta"></span>
       </div>
@@ -8140,7 +8140,7 @@ function makeMediaBlock(kind, path) {
   const enlargeLabel = kind === 'image' ? '⛶ enlarge' : '⛶ fullscreen';
   bar.innerHTML = `
     <button type="button" class="gen-media-btn" data-enlarge>${enlargeLabel}</button>
-    <button type="button" class="gen-media-btn" data-reveal>📁 reveal in folder</button>
+    <button type="button" class="gen-media-btn" data-reveal>Show in folder</button>
     <span class="gen-media-path" title="${path}">${fname}</span>
   `;
   bar.querySelector('[data-enlarge]').addEventListener('click', () => {
@@ -12662,7 +12662,7 @@ async function openTaskTranscript(agentId) {
           if (typeof a === 'string') { try { a = JSON.stringify(JSON.parse(a)); } catch {} }
           else a = JSON.stringify(a || {});
           a = String(a || ''); if (a === '{}') a = '';
-          parts.push(`<div class="tx-tool">🔧 ${esc(c.name || 'tool')}${a ? ' <span class="tx-args">' + esc(a.slice(0, 220)) + '</span>' : ''}</div>`);
+          parts.push(`<div class="tx-tool">${esc(c.name || 'tool')}${a ? ' <span class="tx-args">' + esc(a.slice(0, 220)) + '</span>' : ''}</div>`);
         }
       }
       else if (x.kind === 'tool_result')
@@ -12848,7 +12848,7 @@ async function refreshSkills() {
         const lines = [m.description || '(no description)'];
         if (m.scripts && m.scripts.length) lines.push('\nShips scripts: ' + m.scripts.join(', '));
         if (m.risky_tools && m.risky_tools.length) lines.push('Uses: ' + m.risky_tools.join(', '));
-        if (m.risky) lines.push('\n⚠ This skill can run shell commands / modify files. Only install if you trust the source.');
+        if (m.risky) lines.push('\nThis skill can run shell commands and change files. Only install it if you trust where it came from.');
         if (m.already_installed) lines.push('\n(overwrites the "' + m.name + '" skill you already have)');
         showModal('Install ' + m.name + (m.version ? ' v' + m.version : '') + '?', lines.join('\n'), [
           { label: 'Cancel' },

@@ -1722,7 +1722,7 @@ class JarvisCLI:
         warn = self._context_health_warning()
         if warn:
             overhead, headroom = warn
-            print(f"{C_WARN}⚠ context is tight{C_RESET}{C_DIM} - persona+tools use ~{overhead:,} of "
+            print(f"{C_WARN}context is tight{C_RESET}{C_DIM} - persona+tools use ~{overhead:,} of "
                   f"{self.context_tokens:,} tok, ~{max(0, headroom):,} left for chat+reply.{C_RESET}")
             print(f"{C_DIM}  Load this model at >=24K context in LM Studio for headroom (/context to check).{C_RESET}\n")
 
@@ -2739,7 +2739,7 @@ class JarvisCLI:
                 if m.get("risky_tools"):
                     print(f"  {C_ERR}uses risky tools:{C_RESET} {', '.join(m['risky_tools'])}")
                 if m.get("risky"):
-                    print(f"  {C_ERR}⚠ This skill can run shell commands / modify files. Only install ones you trust.{C_RESET}")
+                    print(f"  {C_ERR}This skill can run shell commands / modify files. Only install ones you trust.{C_RESET}")
                 if m.get("already_installed"):
                     print(f"  {C_DIM}(a skill named '{m['name']}' is already installed - this will overwrite it){C_RESET}")
                 ans = (await self._read_choice(f"  {C_TOOL}Install {m['name']}?{C_RESET} [y/N] ")).strip().lower()
@@ -3561,7 +3561,7 @@ class JarvisCLI:
                 else:
                     print(f"{C_DIM}  install: pip install faster-whisper sounddevice numpy{C_RESET}")
                 return True
-            print(f"{C_DIM}🎙 listening… speak then pause{C_RESET}")
+            print(f"{C_DIM}listening… speak, then pause{C_RESET}")
             text = await asyncio.to_thread(stt.listen_once)
             if text:
                 print(f"{C_OK}heard: {C_RESET}{text}")
@@ -4437,7 +4437,7 @@ class JarvisCLI:
         bar_color = C_OK if pct < 60 else C_WARN if pct < 85 else C_ERR
         bar = bar_color + "█" * filled + C_DIM + "·" * (bar_w - filled) + C_RESET
         v_on = "♪" if self.voice_on and voice.is_available() else " "
-        l_on = " 🎙" if self.listen_continuous else ""
+        l_on = " listening" if self.listen_continuous else ""
         multi = "  multi" if self.multiline_mode else ""
         # Lead with the agent's name (JARVIS) - it's who the user is talking to;
         # the model id rides along, dimmer, for transparency.
@@ -4621,7 +4621,7 @@ class JarvisCLI:
             try:
                 heard = listen_task.result()
                 # Echo what we heard so the user has visual confirmation
-                sys.stdout.write(f"{C_DIM}🎙 {C_RESET}{heard}\n")
+                sys.stdout.write(f"{C_DIM}heard: {C_RESET}{heard}\n")
                 sys.stdout.flush()
                 return heard
             except Exception:
@@ -4709,7 +4709,7 @@ class JarvisCLI:
         if stt_task is not None and stt_task in done:
             try:
                 heard = stt_task.result()
-                sys.stdout.write(f"{C_DIM}🎙 {C_RESET}{heard}\n")
+                sys.stdout.write(f"{C_DIM}heard: {C_RESET}{heard}\n")
                 sys.stdout.flush()
                 return heard
             except Exception:

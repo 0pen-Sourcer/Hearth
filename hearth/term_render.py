@@ -264,7 +264,7 @@ class Turn:
     def _on_facts_saved(self, titles: Any = None, **f):
         names = titles or f.get("saved") or []
         if names:
-            self.out(f"{DIM}✎ remembered: {', '.join(map(str, names))[:120]}{RESET}")
+            self.out(f"{DIM}↳ remembered: {', '.join(map(str, names))[:120]}{RESET}")
 
     def _on_cancelled(self, **_):
         self._flush_text()
