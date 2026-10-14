@@ -1338,7 +1338,7 @@ class JarvisCLI:
             # A real title, asked of the brain the way the window asks, off the main loop.
             opening = " ".join(str(m.get("content") or "") for m in fresh
                                if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str))
-            model, cid = self.current_model, ch["id"]
+            model, cid = getattr(self, "current_model", ""), ch["id"]
 
             def _name():
                 from hearth import headless as _hl
