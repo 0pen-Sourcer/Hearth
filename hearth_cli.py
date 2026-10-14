@@ -26,7 +26,7 @@ import shutil
 import asyncio
 import threading
 import urllib.request
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 # Answered before anything heavy loads. There was no argument handling at all,
@@ -73,6 +73,7 @@ _answer_flags(sys.argv)
 from openai import AsyncOpenAI  # noqa: E402
 from hearth.chat_call import chat_create
 from hearth import anthropic_chat as _anthropic_chat
+from hearth import term_render as _term_render
 
 
 def _stream_client_timeout():
@@ -150,6 +151,7 @@ try:
     from prompt_toolkit.key_binding import KeyBindings  # type: ignore
     from prompt_toolkit.keys import Keys  # type: ignore
     from prompt_toolkit.styles import Style  # type: ignore
+    from prompt_toolkit.filters import Condition  # type: ignore
     _PT_AVAILABLE = True
 
     class SafeFileHistory(FileHistory):  # type: ignore[misc]
@@ -650,6 +652,7 @@ GRAD = ["\033[38;5;166m", "\033[38;5;172m", "\033[38;5;173m",
         "\033[38;5;209m", "\033[38;5;215m", "\033[38;5;223m"]
 C_BRAND = "\033[38;5;209m"   # ember
 C_USER = "\033[1;97m"
+BOLD_ON = "\033[1m"
 C_BOT = "\033[38;5;223m"     # warm off-white
 C_TOOL = "\033[38;5;179m"
 C_OK = "\033[38;5;114m"
@@ -1165,6 +1168,10 @@ class JarvisCLI:
         # pasted block no longer splits into line-by-line sends. /multi stays as
         # a manual toggle for typing a multi-line message by hand.
         self.multiline_mode = False  # toggled with /multi
+        self._turn = None              # the turn on screen, while one runs
+        self.show_thinking = False     # ctrl+t: thinking as it comes, or folded
+        self._session_use = {}         # tokens and cost this session, for the footer
+        self._last_thinking = ""
         # ONE thinking toggle:
         #   /think on  → model reasons AND we show the body inline
         #   /think off → model skips reasoning entirely (no compute spent)
@@ -1340,21 +1347,40 @@ class JarvisCLI:
                 _completer = _SlashCompleter()
             except Exception:
                 _completer = None
+            @kb.add("escape", eager=True, filter=Condition(lambda: cli_self._turn is not None))
+            def _esc_stop(event):
+                """Esc while a reply runs: stop it now."""
+                cli_self._respond_cancel.set()
+
+            @kb.add("c-t")
+            def _toggle_thinking(event):
+                """Ctrl+T: show thinking as it comes, or fold it to one line."""
+                cli_self.show_thinking = not cli_self.show_thinking
+                if cli_self._turn is not None:
+                    cli_self._turn.show_thinking = cli_self.show_thinking
+
             self.pt_session = PromptSession(
                 history=SafeFileHistory(hist_path),
                 key_bindings=kb,
                 enable_history_search=True,
                 mouse_support=False,
                 completer=_completer,
-                complete_while_typing=True,
+                # Only a command line offers completions, so prose doesn't open a menu.
+                complete_while_typing=Condition(lambda: cli_self.pt_session is not None
+                                                and cli_self.pt_session.default_buffer.text.startswith("/")),
+                reserve_space_for_menu=6,
                 style=Style.from_dict({"bottom-toolbar": "noreverse #7a7a7a"}),
+                erase_when_done=True,
+                refresh_interval=0.15,
+                bottom_toolbar=self._footer,
             )
             session = self.pt_session
-
-            def _paste_hint(buf):
-                session.bottom_toolbar = "  paste again to expand" if PASTES.holds(buf.text) else None
-
-            session.default_buffer.on_text_changed += _paste_hint
+            # The input doesn't stretch, so the footer sits right under it.
+            try:
+                from prompt_toolkit.filters import to_filter
+                session.layout.current_window.dont_extend_height = to_filter(True)
+            except Exception:
+                pass
         except Exception:
             # No real console (piped, redirected, etc.) - fall back to input()
             self.pt_session = None
@@ -4315,6 +4341,49 @@ class JarvisCLI:
         server last reported it actually received."""
         return max(0, estimate_tokens(self.messages) + getattr(self, "_ctx_bias", 0))
 
+    def _live_message(self):
+        """Above the input: the line being written and the working line while a
+        reply runs, then the prompt mark."""
+        t = self._turn
+        return ANSI((t.live() if t is not None else "") + f"{C_USER}❯ {C_RESET}")
+
+    def _footer(self):
+        """Under the input: what answers, how hard it thinks, what runs without
+        asking, how full this chat is, and what this session has used."""
+        if self.pt_session is not None and PASTES.holds(self.pt_session.default_buffer.text):
+            return ANSI(f"{C_DIM}  paste again to expand{C_RESET}")
+        parts = [self._model_label()]
+        if self.think_on:
+            parts.append("think " + (getattr(self, "think_level", "") or "on"))
+        else:
+            parts.append("think off")
+        try:
+            from hearth.tools import approval_mode
+            parts.append({"ask": "Ask", "edits": "Auto-edit", "auto": "Auto"}.get(approval_mode(), approval_mode()))
+        except Exception:
+            pass
+        try:
+            pct = int(self._ctx_used() / self.context_tokens * 100)
+            parts.append(f"ctx {pct}%")
+        except Exception:
+            pass
+        u = self._session_use
+        if u.get("in"):
+            parts.append(f"↑{_term_render._k(u['in'])} ↓{_term_render._k(u.get('out', 0))}"
+                         + (f" ${u['cost']:.3f}" if u.get("cost") else ""))
+        try:
+            from hearth import subagents as _sa
+            n = sum(1 for a in _sa.list_subagent_activity(20) if a.get("status") == "running")
+            if n:
+                parts.append(f"{n} helper{'s' if n > 1 else ''} working")
+        except Exception:
+            pass
+        if self.voice_on:
+            parts.append("voice on")
+        if self.multiline_mode:
+            parts.append("multi-line")
+        return ANSI(f"{C_DIM} " + " · ".join(p for p in parts if p) + f"{C_RESET}")
+
     def _footer_prompt(self) -> str:
         try:
             est = self._ctx_used()
@@ -4618,14 +4687,14 @@ class JarvisCLI:
         IMPORTANT: must use prompt_async() - prompt() calls asyncio.run()
         internally and we're already inside the main event loop."""
         self._ensure_pt_session()
-        prompt_str = self._footer_prompt()
         if self.pt_session is not None:
-            self.pt_session.bottom_toolbar = None
-            return PASTES.expand(await self.pt_session.prompt_async(
-                ANSI(prompt_str),
-                multiline=self.multiline_mode,
-            ))
-        return await asyncio.to_thread(input, prompt_str)
+            text = PASTES.expand(await self.pt_session.prompt_async(
+                self._live_message, multiline=self.multiline_mode))
+            if text.strip():
+                shown = text if len(text) < 400 else text[:400] + f"… ({len(text)} chars)"
+                print(f"{C_USER}❯ {C_RESET}{BOLD_ON}{shown}{C_RESET}")
+            return text
+        return await asyncio.to_thread(input, self._footer_prompt())
 
     def _is_vision_capable(self) -> bool:
         """Whether the model this terminal talks to takes images, asked the
@@ -5765,7 +5834,139 @@ class JarvisCLI:
         if text:
             self.messages.append({"role": "assistant", "content": text})
 
-    async def respond(self, depth: int = 0):  # noqa: C901
+    async def respond(self, depth: int = 0):
+        """One turn on the shared engine (the window's and the phone bots'),
+        drawn here; typing while it runs steers it, Esc stops it."""
+        if os.environ.get("HEARTH_OLD_TERMINAL") == "1":
+            return await self._respond_legacy(depth)
+        from hearth import headless as _hl
+        convo = [m for m in self.messages[1:] if m.get("role") in ("user", "assistant")]
+        if not convo or convo[-1].get("role") != "user":
+            return
+        content = convo[-1].get("content")
+        if isinstance(content, list):
+            prompt = "\n".join(str(p.get("text") or "") for p in content
+                               if isinstance(p, dict) and p.get("type") == "text")
+            for p in content:
+                if isinstance(p, dict) and p.get("type") == "image_url":
+                    prompt += "\n\nAttached image is in this message; call view_image on it if you need to see it again."
+        else:
+            prompt = str(content or "")
+        history = [{"role": m["role"], "content": m["content"] if isinstance(m.get("content"), str)
+                    else _term_render.plain(json.dumps(m.get("content")))} for m in convo[:-1]]
+        turn = _term_render.Turn(out=lambda line: print(line, flush=True),
+                                 show_thinking=self.show_thinking, model=self._model_label())
+        self._turn = turn
+        self._respond_cancel.clear()
+        self._steer_q: List[str] = []
+        steer_task = asyncio.create_task(self._steer_loop())
+        try:
+            await _hl.run_once(
+                prompt, emit=turn.emit, model=self.current_model, think=self.think_on,
+                think_level=getattr(self, "think_level", "") or "", history=history,
+                permission_check=self._ask_permission, should_cancel=self._respond_cancel.is_set,
+                drain_steer=self._drain_steer, voice=bool(self.voice_on))
+        finally:
+            turn.running = False
+            self._turn = None
+            # Close the open input the normal way, so it erases itself instead
+            # of leaving the working line and a bare prompt in the scrollback.
+            self._steer_over = True
+            app = self.pt_session.app if self.pt_session is not None else None
+            if app is not None and app.is_running:
+                app.exit(result="")
+            try:
+                await asyncio.wait_for(steer_task, timeout=2)
+            except BaseException:
+                steer_task.cancel()
+            self._steer_over = False
+        self._last_thinking = turn.thinking or getattr(self, "_last_thinking", "")
+        st = turn.stats
+        u = self._session_use
+        u["in"] = u.get("in", 0) + int(st.get("prompt_tokens") or 0)
+        u["out"] = u.get("out", 0) + int(st.get("gen_tokens") or 0)
+        if st.get("cost_usd"):
+            u["cost"] = u.get("cost", 0.0) + float(st["cost_usd"])
+        reply = turn.reply()
+        if reply:
+            self.messages.append({"role": "assistant", "content": reply})
+            if self.voice_on and voice.is_available():
+                try:
+                    voice.speak(reply, blocking=False)
+                except Exception:
+                    pass
+        try:
+            self._chat_push()
+        except Exception:
+            pass
+
+    def _drain_steer(self) -> List[str]:
+        q, self._steer_q = getattr(self, "_steer_q", []), []
+        return q
+
+    async def _steer_loop(self) -> None:
+        """While a reply runs the input stays open: a line typed is sent to the
+        reply between its steps."""
+        if self.pt_session is None:
+            return
+        while True:
+            try:
+                text = (await self.pt_session.prompt_async(self._live_message)).strip()
+            except asyncio.CancelledError:
+                if not getattr(self, "_steer_paused", False):
+                    raise
+                while self._steer_paused and self._turn is not None:
+                    await asyncio.sleep(0.05)
+                continue
+            if getattr(self, "_steer_over", False):
+                return
+            if not text:
+                continue
+            if text in ("/stop", "/esc"):
+                self._respond_cancel.set()
+                continue
+            if text.startswith("/"):
+                print(f"{C_DIM}↳ {text.split()[0]} runs once this reply is finished (esc stops it){C_RESET}")
+                continue
+            self._steer_q.append(text)
+            print(f"{C_USER}❯ {C_RESET}{BOLD_ON}{text}{C_RESET}  {C_DIM}(sent to the reply){C_RESET}")
+
+    async def _ask_permission(self, name: str, args: Dict[str, Any]):
+        """Approval for one tool call, as a picker. The open input waits meanwhile."""
+        from hearth.tools import mode_allows
+        if mode_allows(name, args) or self.tool_perms.get(name) == "always":
+            return "allow"
+        if self.tool_perms.get(name) == "never":
+            return "deny"
+        from hearth import term_pick
+        app = self.pt_session.app if self.pt_session is not None else None
+        self._steer_paused = True
+        if app is not None and app.is_running:
+            app.exit(exception=asyncio.CancelledError())     # the steer prompt yields the screen
+            await asyncio.sleep(0.05)
+        try:
+            return await self._ask_permission_picker(name, args)
+        finally:
+            self._steer_paused = False
+
+    async def _ask_permission_picker(self, name: str, args: Dict[str, Any]):
+        from hearth import term_pick
+        what = _term_render.tool_words(name, args if isinstance(args, dict) else {})
+        picked = await term_pick.pick(
+            f"{C_WARN}Allow this?{C_RESET} {what}",
+            [("allow", "Yes, this once"), ("always", f"Yes, and don't ask again for {name}"),
+             ("deny", "No"), ("why", "No, and tell it what to do instead")], default="allow")
+        if picked == "always":
+            self.tool_perms[name] = "always"
+            _save_persisted_perms(self.tool_perms)
+            return "allow"
+        if picked == "why":
+            reason = (await self.pt_session.prompt_async(ANSI(f"{C_DIM}what instead?{C_RESET} "))).strip() \
+                if self.pt_session is not None else ""
+            return {"decision": "deny", "reason": reason}
+        return "allow" if picked == "allow" else "deny"
+
+    async def _respond_legacy(self, depth: int = 0):  # noqa: C901
         if depth > MAX_TURNS:
             # Generous safety ceiling (the loop guard handles real spirals long
             # before this); reaching it means something genuinely runaway.
@@ -6288,7 +6489,7 @@ class JarvisCLI:
                 print(f"{C_WARN}-> {note}{C_RESET}")
                 self.messages.append({"role": "user", "content": note})
                 self.save_history()
-                return await self.respond(depth + 1)
+                return await self._respond_legacy(depth + 1)
             self.save_history()
             return
 
@@ -6621,7 +6822,7 @@ class JarvisCLI:
             })
 
         print()
-        await self.respond(depth + 1)
+        await self._respond_legacy(depth + 1)
 
 
 if __name__ == "__main__":
@@ -6665,7 +6866,14 @@ if __name__ == "__main__":
     # surface as a clean exit, not the full asyncio traceback the user was
     # seeing when run_command got stuck on a daemon batch file.
     try:
-        asyncio.run(app.run())
+        # Output printed while the input is on screen goes above it instead of
+        # through it (a reply streaming while the prompt waits to steer).
+        if _PT_AVAILABLE and sys.stdout.isatty():
+            from prompt_toolkit.patch_stdout import patch_stdout
+            with patch_stdout(raw=True):
+                asyncio.run(app.run())
+        else:
+            asyncio.run(app.run())
     except KeyboardInterrupt:
         print(f"\n{C_DIM}● interrupted. goodbye.{C_RESET}")
         sys.exit(0)

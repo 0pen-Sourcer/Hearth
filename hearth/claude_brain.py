@@ -715,6 +715,8 @@ async def ask_hearth(permission_check, name: str, args: Dict[str, Any]) -> bool:
         except Exception:
             return False
     verdict = await asyncio.to_thread(permission_check, name, args)
+    if asyncio.iscoroutine(verdict):          # a check that asks on screen
+        verdict = await verdict
     if isinstance(verdict, dict):
         verdict = verdict.get("decision")
     return verdict == "allow"
