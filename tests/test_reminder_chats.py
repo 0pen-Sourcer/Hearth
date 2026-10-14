@@ -93,6 +93,15 @@ check("what JARVIS remembers about the person is in what the ideas are made from
 check("and the prompt knows today's date, so something coming up in memory can be set ahead of it",
       time.strftime("%Y") in seen[-1] and "coming up" in seen[-1])
 
+# Showing a reminder on the desktop crashed before it showed anything (a name
+# left over from renaming the environment settings).
+try:
+    reminders._push_phone("Hearth reminder", "check")
+    pushed = "ran"
+except NameError as e:
+    pushed = f"crashed: {e}"
+check(f"a reminder's phone push runs without crashing the desktop notice ({pushed})", pushed == "ran")
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

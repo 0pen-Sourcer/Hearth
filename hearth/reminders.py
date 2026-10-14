@@ -338,7 +338,7 @@ def _push_phone(title: str, body: str) -> bool:
     raises."""
     import os as _os
     topic = (_os.environ.get("HEARTH_NTFY_TOPIC")
-             or __env.get("NTFY_TOPIC") or "").strip()
+             or _env.get("NTFY_TOPIC") or "").strip()
     if not topic:
         # Fall back to the topic saved from the GUI (Settings -> Reach from phone),
         # which writes settings.json rather than an env var.
@@ -417,7 +417,12 @@ def _ensure_app_identity() -> Optional[str]:
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
                               r"Software\Classes\AppUserModelId\\" + _APP_ID) as k:
             winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "Hearth")
-            if icon:
+            # The notification header takes an image file; an .ico shows as the
+            # default window icon, so the PNG beside it is named here.
+            png = icon[:-4] + ".png" if icon and icon.lower().endswith(".ico") else icon
+            if png and os.path.isfile(png):
+                winreg.SetValueEx(k, "IconUri", 0, winreg.REG_SZ, png)
+            elif icon:
                 winreg.SetValueEx(k, "IconUri", 0, winreg.REG_SZ, icon)
     except Exception:
         pass
