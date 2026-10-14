@@ -799,12 +799,14 @@
   /* Flat message rendering: no bubbles, no avatars, no lettered tiles. The
      name over each turn says who is speaking, and the words get the width. */
   .msg {
-    padding: 14px 0;
-    border-top: 1px solid var(--border);
+    padding: 12px 0;
     animation: msgIn 0.2s var(--ease);
     display: flex;
   }
-  .chat-body .msg:first-of-type { border-top: none; }
+  /* One rule where a new exchange starts, none between a question and its reply. */
+  .chat-body .msg.user:not(:first-child) { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 18px; }
+  .chat-body .chat-day + .msg.user { border-top: none; margin-top: 0; padding-top: 12px; }
+  .chat-body .msg.user + .msg.assistant { padding-top: 4px; }
   @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
 
   .msg .role-mark { display: none; }
@@ -911,6 +913,10 @@
     opacity: 0; transition: opacity 0.15s;
   }
   .msg:hover .actions { opacity: 1; }
+  /* Your message's edit/copy sit beside its name instead of taking a row of their own. */
+  .chat-body .msg.user { position: relative; }
+  .chat-body .msg.user .actions { position: absolute; right: 0; top: 8px; margin-top: 0; }
+  .chat-body .msg.user:not(:first-child) .actions { top: 14px; }
   .msg .actions button {
     background: transparent; border: 1px solid var(--border);
     color: var(--fg-faint);
