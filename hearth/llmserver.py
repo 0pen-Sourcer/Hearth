@@ -2700,10 +2700,11 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
         # yet — slow socket close) or fails fast. 0.5s is long enough for the
         # response when the server IS ready and short enough to keep cadence.
         if external_server_running(api_base, timeout=0.5, api_key=BUILTIN_API_KEY):
-            try:
-                print(f"  [hearth.llmserver] ready in {time.time() - t_spawn:.1f}s", flush=True)
-            except Exception:
-                pass
+            if os.environ.get("HEARTH_QUIET_ENGINE") != "1":      # the terminal draws its own line
+                try:
+                    print(f"  [hearth.llmserver] ready in {time.time() - t_spawn:.1f}s", flush=True)
+                except Exception:
+                    pass
             _set_progress(phase="ready", percent=100,
                           marker=f"ready in {time.time() - t_spawn:.1f}s",
                           finished_at=time.time())

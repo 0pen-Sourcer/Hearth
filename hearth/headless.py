@@ -864,12 +864,16 @@ def _compute_gen_stats(t0: float, first_tok: Optional[float], content_chars: int
     except Exception:
         pass
     try:
-        gen_tokens = max(1, (content_chars + reason_chars) // 4)
+        u = getattr(chunk, "usage", None)
+        real = int(getattr(u, "completion_tokens", 0) or 0) if u is not None else 0
+        gen_tokens = real or max(1, (content_chars + reason_chars) // 4)
         out["gen_tokens"] = gen_tokens
         if first_tok:
             out["ttft_s"] = round(max(0.0, first_tok - t0), 2)
             dt = time.time() - first_tok
-            if dt > 0.05:
+            # A provider that sends its text in one burst gives no real rate:
+            # a few hundredths of a second read as thousands of tokens a second.
+            if dt > 0.5:
                 out["decode_tps"] = round(gen_tokens / dt, 1)
     except Exception:
         pass
@@ -2415,8 +2419,10 @@ async def run_once(
                       f"{type(_ee).__name__}: {_ee}", flush=True)
         try:
             import threading as _threading
-            _threading.Thread(target=_bg_fact_extract, args=(list(messages),),
-                              daemon=True).start()
+            from . import memory_extract as _mx_gate
+            if _mx_gate.may_note(messages):
+                _threading.Thread(target=_bg_fact_extract, args=(list(messages),),
+                                  daemon=True).start()
         except Exception:
             pass
         return 0

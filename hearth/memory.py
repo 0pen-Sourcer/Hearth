@@ -1081,6 +1081,10 @@ a an and are as at be but by can could do does for from get give had has have ho
 i in into is it its like make me my need of on or please run show so some tell that
 the their them then there these this those to use using want was what when where which
 who why will with would you your find open play set go got am pm
+still here yes yeah yep ok okay hey hi hello yo thanks thank just now really very much more
+any all doing done did going gonna know think sure right good new about again back also too
+not no out up off over let lets see look say said bye hmm well way thing things something
+anything lot ever even only yet sorry
 """.split())
 
 
@@ -1307,8 +1311,10 @@ def recall_for_prompt(query: str, max_chars: int = 900, limit: int = 2) -> str:
     if not picked:
         return ""
     return ("<memory>\n"
-            "Facts you saved earlier about this user and their machine. Treat them "
-            "as authoritative — use them instead of asking again or scanning the disk.\n"
+            "Hearth attached these from your saved memory because they may relate to "
+            "this message; the person did not write or paste them. Where one fits, trust "
+            "it over asking again or scanning the disk; where none does, ignore them and "
+            "don't mention them.\n"
             + "\n".join(picked)
             + "\n</memory>")
 

@@ -96,6 +96,9 @@ class Turn:
         self.stats: Dict[str, Any] = {}
         self.usage: Dict[str, Any] = {}
         self.pending_tools: Dict[str, str] = {}
+        self._said_hint = False
+        self.ended = False             # the model said goodbye (end_session)
+        self.table: List[str] = []     # table lines of the reply, drawn when it ends
 
     # ---- what sits above the input
     def live(self) -> str:
@@ -128,13 +131,17 @@ class Turn:
     def _end_thinking(self) -> None:
         if self.think_t0 is None:
             return
-        self.think_s += time.time() - self.think_t0
+        took = time.time() - self.think_t0
+        self.think_s += took
         self.think_t0 = None
         if self.show_thinking:
             if self.think_partial.strip():
                 self.out(DIM + ITAL + self.think_partial + RESET)
-        else:
-            self.out(f"{DIM}✻ Thought for {self.think_s:.0f}s{RESET}  {DIM}(ctrl+t shows thinking){RESET}")
+        elif took >= 1:
+            # A moment's thought before a step isn't worth a line.
+            hint = "" if self._said_hint else f"  {DIM}(ctrl+t shows thinking){RESET}"
+            self._said_hint = True
+            self.out(f"{DIM}✻ Thought for {took:.0f}s{RESET}{hint}")
         self.think_partial = ""
 
     def _on_thinking_chunk(self, content: str = "", **_):
@@ -163,16 +170,45 @@ class Turn:
             self._line(line)
 
     def _line(self, line: str) -> None:
+        st = line.strip()
+        if not self.in_code and st.startswith("|") and st.endswith("|") and len(st) > 1:
+            self.table.append(st)            # drawn whole once the table ends
+            return
+        self._flush_table()
         if line.strip().startswith("```"):
             self.in_code = not self.in_code
             self.out(DIM + ("─" * 3) + RESET)
             return
         self.out(md_line(line, self.in_code))
 
+    def _flush_table(self) -> None:
+        """A markdown table as aligned columns: header bold, a rule, then rows."""
+        rows = [[c.strip() for c in r.strip("|").split("|")] for r in self.table]
+        self.table = []
+        rows = [r for r in rows if not all(re.fullmatch(r":?-{2,}:?", c or "-") for c in r)]
+        if not rows:
+            return
+        n = max(len(r) for r in rows)
+        rows = [r + [""] * (n - len(r)) for r in rows]
+        width = max(20, shutil.get_terminal_size().columns - 4)
+        cols = [min(40, max(len(plain(md_line(r[i], False))) for r in rows)) for i in range(n)]
+        while sum(cols) + 2 * (n - 1) > width and max(cols) > 8:
+            cols[cols.index(max(cols))] -= 1
+
+        def cell(text, w, bold=False):
+            shown = plain(md_line(text, False))
+            shown = shown if len(shown) <= w else shown[: w - 1] + "…"
+            return (BOLD + shown + RESET if bold else shown) + " " * (w - len(shown))
+        self.out("  " + "  ".join(cell(c, cols[i], True) for i, c in enumerate(rows[0])))
+        self.out("  " + DIM + "  ".join("─" * w for w in cols) + RESET)
+        for r in rows[1:]:
+            self.out("  " + "  ".join(cell(c, cols[i]) for i, c in enumerate(r)))
+
     def _flush_text(self) -> None:
         if self.partial:
             self._line(self.partial)
             self.partial = ""
+        self._flush_table()
         self.in_code = False
 
     def _on_tool_call_partial(self, name: str = "", **_):
@@ -182,12 +218,17 @@ class Turn:
     def _on_tool_call(self, name: str = "", args: Any = None, id: str = "", **_):
         self._flush_text()
         self._end_thinking()
+        if name == "end_session":           # the goodbye itself is the reply; the terminal closes after
+            self.ended = True
+            return
         self.status = tool_words(name, args if isinstance(args, dict) else {})
         self.out(f"{ACCENT}●{RESET} {self.status}")
         if id:
             self.pending_tools[id] = name
 
     def _on_tool_result(self, name: str = "", content: Any = "", ok: Any = None, error: Any = None, **f):
+        if name == "end_session":
+            return
         text = str(content if content is not None else f.get("result") or "")
         bad = ok is False or bool(error) or text.lstrip().lower().startswith(("error", "denied", "refused"))
         first = " ".join(text.split())[:100] or ("failed" if bad else "done")

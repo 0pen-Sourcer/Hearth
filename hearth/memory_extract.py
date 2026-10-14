@@ -209,6 +209,30 @@ def _fact_already_known(title: str) -> bool:
     return os.path.isfile(path)
 
 
+_DONT_SAVE = re.compile(
+    r"\b(?:don'?t|do not|never|stop)\s+(?:save|saving|remember|remembering|store|storing|"
+    r"note|noting|keep|keeping|write|writing)\b"
+    r"|\b(?:off the record|forget (?:this|that|it))\b", re.I)
+
+
+def may_note(messages: List[Dict[str, Any]]) -> bool:
+    """Whether facts from this chat may be noted in the background: not when
+    it's switched off (settings `auto_memory`), and not once the person has said
+    in this chat not to save or remember things."""
+    try:
+        from .tools import WORKSPACE
+        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
+            if (json.load(f) or {}).get("auto_memory") is False:
+                return False
+    except Exception:
+        pass
+    for m in messages:
+        if m.get("role") == "user" and isinstance(m.get("content"), str) \
+                and _DONT_SAVE.search(m["content"].split("\n\n[Current local time")[0]):
+            return False
+    return True
+
+
 def extract_and_save(
     messages: List[Dict[str, Any]],
     llm_call: Callable[[str, str], str],

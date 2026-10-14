@@ -168,6 +168,30 @@ except ImportError:
     _PT_AVAILABLE = False
 
 
+def _shift_enter_is_newline() -> None:
+    """Shift+Enter adds a line, as in a chat box. The Windows console says Shift
+    was held on the Enter event, but prompt_toolkit drops it, so Shift+Enter
+    arrives as Esc+Enter, which the input already reads as a new line."""
+    try:
+        from prompt_toolkit.input import win32 as _w32
+        from prompt_toolkit.key_binding.key_processor import KeyPress
+        reader = _w32.ConsoleInputReader
+        if getattr(reader, "_hearth_shift_enter", False):
+            return
+        orig = reader._event_to_key_presses
+
+        def patched(self, ev):
+            out = orig(self, ev)
+            if (len(out) == 1 and out[0].key == Keys.ControlM
+                    and ev.ControlKeyState & self.SHIFT_PRESSED):
+                return [KeyPress(Keys.Escape, "\x1b"), KeyPress(Keys.ControlM, "\r")]
+            return out
+        reader._event_to_key_presses = patched
+        reader._hearth_shift_enter = True
+    except Exception:
+        pass
+
+
 def _enable_windows_vt_input() -> None:
     """Turn on ENABLE_VIRTUAL_TERMINAL_INPUT on the Windows console's stdin.
 
@@ -375,6 +399,18 @@ def _agent_line() -> str:
         return f"{_cb.BRAINS[a]} on this PC, your {_cb.PLANS.get(a, '')} plan" if a else ""
     except Exception:
         return ""
+
+
+def _same_endpoint(a: str, b: str) -> bool:
+    """One server, however it is written: localhost and 127.0.0.1, a trailing slash."""
+    from urllib.parse import urlparse
+
+    def norm(u: str):
+        p = urlparse((u or "").strip().rstrip("/"))
+        host = (p.hostname or "").lower()
+        host = "127.0.0.1" if host in ("localhost", "::1", "0.0.0.0") else host
+        return (p.scheme, host, p.port, p.path.rstrip("/"))
+    return norm(a) == norm(b)
 
 
 def _looks_like_key(s: str) -> bool:
@@ -1305,6 +1341,7 @@ class JarvisCLI:
             return
         self._pt_init_attempted = True
         _enable_windows_vt_input()   # so a pasted multi-line block arrives whole
+        _shift_enter_is_newline()
         try:
             hist_path = os.path.join(WORKSPACE, "logs", "input_history.txt")
             kb = KeyBindings()
@@ -2043,7 +2080,7 @@ class JarvisCLI:
         url, key, model, provider = _read_settings_endpoint()
         if not url:
             return
-        if url == LOCAL_API_BASE:
+        if _same_endpoint(url, LOCAL_API_BASE):
             # Same endpoint, but the MODEL behind it can still have changed —
             # swapping the built-in server's model keeps the URL identical, so
             # returning here is why a GUI swap never reached the CLI. Trust the
@@ -2052,9 +2089,12 @@ class JarvisCLI:
             # provider's is its whole catalog, whose first entry is not a pick.
             live = (_probe_live_model(url, LOCAL_API_KEY) if _is_local_endpoint(url)
                     else None) or model
-            if live and live != self.current_model:
+            same = os.path.basename(str(live or "")).lower() == os.path.basename(str(self.current_model or "")).lower()
+            if live and not same:
                 self.current_model = live
-                print(f"{C_DIM}↳ model synced → {_model_name_short(live)}{C_RESET}")
+                print(f"{C_DIM}↳ the window switched me to {C_RESET}{self._model_label()}")
+            elif live:
+                self.current_model = live
             return
         if not key and provider:
             key = _read_brain_key(provider)
@@ -2271,10 +2311,8 @@ class JarvisCLI:
                     return
                 path = r.get("path")
                 print(f"{C_OK}Saved to {path}{C_RESET}")
-                print(f"{C_DIM}Starting built-in server…{C_RESET}")
-                r2 = llmserver.start_builtin(path, **(llmserver.get_model_config(path) or {}))
+                r2 = await self._load_with_progress(path)
                 if r2.get("ok"):
-                    print(f"{C_OK}Built-in server up at {r2.get('url')}{C_RESET}")
                     self._retarget_to(r2.get("url"), "hearth-builtin", path)
                     self._save_preferred_model(path)  # auto-load next launch
                 else:
@@ -2317,11 +2355,9 @@ class JarvisCLI:
                     print(f"{C_ERR}'{arg}' isn't a file path or an on-disk filename. Run /models disk "
                           f"for what is here, or /models hf <search> to find one to download.{C_RESET}")
                     return
-            print(f"{C_DIM}Booting llama.cpp built-in server with {path}…{C_RESET}")
             try:
-                r = llmserver.start_builtin(path, **(llmserver.get_model_config(path) or {}))
+                r = await self._load_with_progress(path)
                 if r.get("ok"):
-                    print(f"{C_OK}Up at {r.get('url')}{C_RESET}")
                     self._retarget_to(r.get("url"), "hearth-builtin", path)
                     self._save_preferred_model(path)  # auto-load next launch
                 else:
@@ -2356,6 +2392,32 @@ class JarvisCLI:
             return
 
         await self._pick_model(disk=s.get("disk_models") or [], status=s)
+
+    async def _load_with_progress(self, path: str) -> Dict[str, Any]:
+        """Load a model file on Hearth's engine, off the main loop, with one live
+        line saying how far it is (Esc doesn't apply; /models stop does)."""
+        from hearth import llmserver
+        os.environ["HEARTH_QUIET_ENGINE"] = "1"
+        name = os.path.splitext(os.path.basename(path))[0]
+        job = asyncio.ensure_future(asyncio.to_thread(
+            llmserver.start_builtin, path, **(llmserver.get_model_config(path) or {})))
+        t0, i = time.time(), 0
+        spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        while not job.done():
+            p = llmserver.get_load_progress()
+            phase = str(p.get("phase") or "starting").replace("_", " ")
+            pct = int(p.get("percent") or 0)
+            sys.stdout.write(f"\r\033[K{C_BRAND}{spin[i % 10]}{C_RESET} {C_DIM}Loading {name} · {phase}"
+                             + (f" {pct}%" if pct else "") + f" · {time.time() - t0:.0f}s{C_RESET}")
+            sys.stdout.flush()
+            i += 1
+            await asyncio.sleep(0.15)
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+        r = job.result()
+        if r.get("ok"):
+            print(f"{C_DIM}↳ loaded {name} in {time.time() - t0:.0f}s{C_RESET}")
+        return r
 
     async def _pick_model(self, disk=None, status=None) -> None:
         """One list to pick from: what this brain's server offers, then the model
@@ -4340,7 +4402,9 @@ class JarvisCLI:
                          + (f" ${u['cost']:.3f}" if u.get("cost") else ""))
         try:
             from hearth import subagents as _sa
-            n = sum(1 for a in _sa.list_subagent_activity(20) if a.get("status") == "running")
+            # The same count the window's status uses: helpers actually working now,
+            # not every transcript without an end line.
+            n = sum(1 for a in _sa.team_state() if a.get("status") == "working")
             if n:
                 parts.append(f"{n} helper{'s' if n > 1 else ''} working")
         except Exception:
@@ -4775,6 +4839,8 @@ class JarvisCLI:
         'remember that', matching the GUI/headless behavior the CLI was missing.
         Fire-and-forget (zero added latency), guarded against overlapping runs,
         silent on failure. The extractor itself filters jokes/quotes + dedupes."""
+        if os.environ.get("HEARTH_OLD_TERMINAL") != "1":
+            return                       # the shared engine notes facts itself after each turn
         if getattr(self, "_extracting", False):
             return
         self._extracting = True
@@ -5857,6 +5923,8 @@ class JarvisCLI:
                 steer_task.cancel()
             self._steer_over = False
         self._last_thinking = turn.thinking or getattr(self, "_last_thinking", "")
+        if turn.ended:
+            self._exit_requested = True
         st = turn.stats
         u = self._session_use
         u["in"] = u.get("in", 0) + int(st.get("prompt_tokens") or 0)
@@ -6824,6 +6892,7 @@ if __name__ == "__main__":
         except Exception:
             pass
 
+    os.environ.setdefault("HEARTH_QUIET_ENGINE", "1")   # the terminal draws its own load line
     app = JarvisCLI()
     app.animate_intro()
     # Suppress the httpx/anyio cleanup spam that happens when the asyncio

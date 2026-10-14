@@ -4735,6 +4735,13 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">Remember things on its own</div>
+            <div class="hint">After a reply, JARVIS notes lasting facts from the chat into memory. Off, it only saves when you ask. Saying "don't save this" in a chat stops it for that chat.</div>
+          </div>
+          <div class="switch" data-key="auto_memory"></div>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">Chat bubbles</div>
             <div class="hint">Put your messages in bubbles on the right, like a messaging app.</div>
           </div>
@@ -13518,8 +13525,8 @@ async function refreshSettings() {
     // so it's honest even when settings.llm_provider is stale/inconsistent).
     $$('.switch').forEach(sw => {
       const k = sw.dataset.key;
-      // gen_stats + show_diffs + activity_hud default ON (only off when explicitly disabled); the rest default off.
-      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud') ? (s[k] !== false) : !!s[k]);
+      // gen_stats, show_diffs, activity_hud and auto_memory default ON (only off when explicitly disabled); the rest default off.
+      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud' || k === 'auto_memory') ? (s[k] !== false) : !!s[k]);
     });
     refreshEmail();
     // Agent name field - populated from current setting. The Rename button
