@@ -859,6 +859,26 @@ with sync_playwright() as pw:
     check(f"each message says when it was said, with a line where the day changes, and each chat when it was last used {times}",
           times["days"] == ["Yesterday", "Today"] and times["stamps"] == [True, True, True, True, False]
           and any(ch.isdigit() for ch in times["first"] or "") and any(ch.isdigit() for ch in times["when"] or ""))
+    # Your bubble was always the same blue whatever the theme and accent.
+    tints = pg.evaluate("""() => {
+      const root = document.documentElement, was = [root.dataset.theme, root.dataset.accent];
+      document.body.classList.add('chat-bubbles');
+      const bubble = document.querySelector('#chat-body .msg.user .content');
+      const out = {};
+      for (const [theme, accent] of [['dark', 'sage'], ['dark', 'rose'], ['light', 'rose'], ['classic', 'sage']]) {
+        root.dataset.theme = theme; root.dataset.accent = accent;
+        out[theme + '/' + accent] = getComputedStyle(bubble).backgroundColor;
+      }
+      const actions = bubble.closest('.msg').querySelector('.actions').getBoundingClientRect(),
+            name = bubble.closest('.msg').querySelector('.role-name').getBoundingClientRect();
+      out.apart = actions.right <= name.left || actions.top >= name.bottom;
+      document.body.classList.remove('chat-bubbles');
+      root.dataset.theme = was[0]; if (was[1]) root.dataset.accent = was[1]; else delete root.dataset.accent;
+      return out;
+    }""")
+    check(f"your bubble takes the accent and the theme, and its buttons stay off the name {tints}",
+          len({tints["dark/sage"], tints["dark/rose"], tints["light/rose"]}) == 3
+          and tints["classic/sage"] != tints["dark/sage"] and tints["apart"])
     # Typing a task in the Reminders box sent it into whatever chat was open.
     own = pg.evaluate("""async () => {
       const realSend = send, realModel = STATE.loadedModel;

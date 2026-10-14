@@ -825,13 +825,13 @@
   .msg.assistant .role-name { color: var(--accent-2); }
   /* Chat-bubble mode — OPT-IN via Settings, default OFF (Hearth's own look:
      user turns left-aligned like everything else, no tint). When on, user turns
-     right-align into a capped, tinted bubble. */
+     right-align into a capped bubble tinted with the theme's accent. */
   .chat-bubbles .msg.user { flex-direction: row-reverse; }
   .chat-bubbles .msg.user .role-name { text-align: right; }
   .chat-bubbles .msg.user .body { flex: 0 1 auto; max-width: min(80%, 60ch); }
   .chat-bubbles .msg.user .content {
-    background: color-mix(in srgb, var(--info) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--info) 16%, transparent);
+    background: color-mix(in srgb, var(--accent) 11%, var(--bg-1));
+    border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
     border-radius: 13px;
     padding: 9px 13px;
   }
@@ -917,6 +917,10 @@
   .chat-body .msg.user { position: relative; }
   .chat-body .msg.user .actions { position: absolute; right: 0; top: 8px; margin-top: 0; }
   .chat-body .msg.user:not(:first-child) .actions { top: 14px; }
+  /* With bubbles the name sits on the right, so they go to the bubble's left. */
+  .chat-bubbles .chat-body .msg.user .body { position: relative; }
+  .chat-bubbles .chat-body .msg.user .actions,
+  .chat-bubbles .chat-body .msg.user:not(:first-child) .actions { top: auto; bottom: 6px; right: calc(100% + 8px); }
   .msg .actions button {
     background: transparent; border: 1px solid var(--border);
     color: var(--fg-faint);
