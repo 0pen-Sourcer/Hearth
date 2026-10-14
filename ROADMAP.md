@@ -14,8 +14,8 @@ The core is stable and I use it every day.
 
 - Reading and writing files, running commands in PowerShell, cmd or bash, opening
   apps, and driving a real browser, including the Chrome you already use.
-- Memory that persists across sessions, folds the relevant facts back into context
-  on its own, and records it when something about you changes.
+- Memory that persists across sessions, notes lasting facts on its own, looks up what
+  a message needs, and records it when something about you changes.
 - Claude Code, Codex, Cursor, OpenCode and other agents as its brain, on your own plan,
   still using Hearth's tools and asking before anything risky.
 - Helpers and whole teams you can watch in a little pixel room. They run on your PC's
@@ -30,7 +30,8 @@ The core is stable and I use it every day.
   Chromium/Electron apps, and weaker on canvas-drawn UIs and games that don't
   expose their controls.
 - Voice in eight languages, local listen (Whisper) and speak (Kokoro), hands-free,
-  with a wake word. Interrupting by voice works on headphones.
+  with a wake word. Interrupting by voice works on headphones, and on speakers by
+  starting with its name ("Jarvis, stop").
 - Your phone through Telegram, Discord or WhatsApp, running the full agent on your PC.
 - An optional bundled llama.cpp engine. If you already run LM Studio or Ollama,
   point Hearth at that instead.
@@ -42,13 +43,11 @@ held back until the model actually needs one, so you don't trip over them.
 
 ## What I'm working on next
 
-- Interrupting by voice on speakers, not only headphones, with echo cancellation on the
-  microphone, and "Jarvis, stop" as the interrupt while Hearth is talking.
+- Talking over it on speakers without saying its name first, with echo cancellation
+  on the microphone.
 - A signed installer, so Windows stops warning about an unknown app.
-- A shared plan for a team that every helper reads, kept by JARVIS, next to the
-  messages they already send each other.
-- Running more models on this PC, including the ternary ones that need their own
-  build of the engine.
+- Images and video made on this PC by an engine Hearth runs itself, the way it runs
+  llama.cpp for chat, with ComfyUI as a bring-your-own option.
 
 ## Further out
 

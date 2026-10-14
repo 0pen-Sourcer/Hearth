@@ -24,6 +24,13 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - First-run setup finds the agents and model files already on the PC, writes its answers to profile.md, asks headphones or speakers, approval mode and look, and offers a short tour; `/me` in the terminal.
 - `hearth/gpu.py`: load and memory for any vendor's card from DXGI and the GPU performance counters. AMD and Intel cards get llama.cpp's Vulkan build.
 - Pinned chats; tool runs show the agents, skills and sites they reached; a running tool counts up on its card.
+- Anthropic as a provider talks to its own Messages API (`hearth/anthropic_chat.py`): the model's effort levels, streamed thinking, and fields a model refuses learned per model. Effort levels and whether thinking can be turned off come from each provider's model list.
+- The terminal runs turns on the shared engine (`headless.run_once`, drawn by `hearth/term_render.py`): replies stream above an input that stays open for steering, Esc stops, thinking folds to one line, tables render, and `/brain`, `/model`, `/mode`, `/think`, `/chats` and approvals are arrow-key pickers (`hearth/term_pick.py`).
+- Messages carry the time they were said, with a line where the day changes; the chat list shows when each chat was last used.
+- A due reminder is said in its own chat (clock mark, unread dot); the Reminders page starts a typed task in a new chat and suggests reminders from memory.
+- `auto_memory` setting (Remember things on its own) for the background fact saver, which also saves nothing from a chat that asked it not to.
+- A GGUF without a tokenizer (an image or video model) or cut short is marked in Models and left out of the model menu.
+- The Team room's fire is animated.
 
 ### Fixed
 - Other builds of llama.cpp (Models, Engine, Add an engine): by a GitHub page, fetched for the card like the official build, or by a folder. When the official build can't read a model (invalid ggml type, unknown architecture) Hearth tries the added builds and remembers which one read it. They never replace the official build for other models.
@@ -31,6 +38,12 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - Repair checks real files, restores skills, art and the engine, and frees the patch backup. The update patch now carries `hearth/**` and `assets/**`.
 - The window's private mode forgot the chosen look on every launch; the server writes the saved look into the page.
 - The send wrapper dropped its options, so a notification flush ran as an ordinary turn.
+- Stop closes the open request at once, also while a local model is still reading the prompt.
+- A turn's tool calls and results stay in the history for the next turn, in the window and the terminal.
+- Memories matched by keyword are no longer attached to every message; the index stays in the system prompt and the model recalls on demand.
+- A built-in server started by another window or the terminal is reused for the same model instead of failing on a taken port; a second terminal starts its own chat.
+- The context count after a one-round turn is the server's measured one, not an estimate.
+- Chat bubbles take the theme's accent instead of a fixed blue.
 
 ### Security
 - The local API refuses requests from other sites; a page in any browser tab could read stored keys and call tools.

@@ -19,7 +19,7 @@ Running from source instead? See "Install from source" in the [README](../README
 ## The window at a glance
 
 1. **Top bar.** The model menu on the left picks what JARVIS thinks with. The GPU chip shows your graphics card, and the mic on the right starts voice mode.
-2. **Sidebar.** New chat and your chats (a chat started in the terminal has a `>_` mark), then Team, Memory, Reminders, Skills, Files, Logs, Models and Settings.
+2. **Sidebar.** New chat and your chats, each with when it was last used (a chat started in the terminal has a prompt mark, a reminder's chat a clock), then Team, Memory, Reminders, Skills, Files, Logs, Models and Settings.
 3. **Sticker.** The model menu button shows the brain in use and its loading progress, and a local model kept for helpers if you turned that on.
 4. **Chat bar.** Think sets how hard the model reasons, the mic talks instead of typing, + attaches a file, and the switch beside Send sets what runs without asking (Ask, Auto-edit or Auto).
 
@@ -57,7 +57,7 @@ Bigger jobs go to helpers. Ask for them in plain words ("have Codex write the te
 Press the mic in the top bar. The window turns into a dot grid that listens and speaks; press Esc to leave.
 
 - Speak, pause, and JARVIS answers out loud. The mic opens again for your reply.
-- **Interrupting.** On headphones, talk over a reply and it stops on your first word, then answers what you said instead. On speakers it waits for the reply to end, so it doesn't hear itself.
+- **Interrupting.** On headphones, talk over a reply and it stops on your first word, then answers what you said instead. On speakers it ignores what the mic hears while it talks, so it doesn't answer itself, except anything that starts with its name: "Jarvis, stop" cuts the reply.
 - **The desktop HUD.** When Hearth isn't the focused window, a small dot grid floats over your other apps. Clicks pass through it; hold Ctrl to drag it.
 - **Wake word.** Right-click the tray icon and turn on **Wake word**. Saying "Jarvis" opens voice mode.
 - Voices, speed, the mic and the listening model are in Settings, Voice.
@@ -104,7 +104,7 @@ Say it however you like. Hearth works out the exact time and reads back the day 
 | `next monday at 10am` | the coming Monday, 10:00 |
 | `every weekday at 9am` | a recurring reminder |
 
-When it's time you get a Windows notification and, with voice on, it's read aloud. In the terminal it also prints into the chat. With an [ntfy](https://ntfy.sh) topic set, it reaches your phone too. All of them are listed in the Reminders tab.
+When it's time you get a Windows notification, and JARVIS says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With an [ntfy](https://ntfy.sh) topic set, it reaches your phone too. All of them are listed in the Reminders tab, where you can also type a new one and pick from ideas based on what JARVIS knows about you.
 
 ---
 
@@ -116,7 +116,8 @@ Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs 
 
 ## Memory and chats
 
-- **Memory.** Every fact JARVIS learns is a small file in `~/Jarvis/memory`. The ones that matter to your message are brought in automatically, and ones never used are archived rather than deleted. Read, change or delete them in the Memory tab.
+- **Memory.** Every fact JARVIS learns is a small file in `~/Jarvis/memory`. It keeps an index of them in view and looks up what a message needs, and ones never used are archived rather than deleted. Read, change or delete them in the Memory tab.
+- **Saving on its own.** After a reply JARVIS notes lasting facts from the chat. Turn that off in Settings, Appearance, Remember things on its own, and it saves only when you ask. Telling it in a chat not to save something works too.
 - **Past chats.** Every chat is searchable, so "what did we decide about X last week" works.
 - **One set of chats.** A chat from the terminal shows in the window and can be carried on there, and `/chats` and `/chat <n>` open any chat in the terminal.
 
@@ -136,7 +137,7 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 
 ## The terminal
 
-`hearth.bat` (from source) or **Hearth CLI** (from the installer) does everything the window does, with slash commands and voice. `@path` attaches a file.
+`hearth.bat` (from source) or **Hearth CLI** (from the installer) does everything the window does, with slash commands and voice. `@path` attaches a file. The prompt stays open while JARVIS replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
 
 ```
 /help            every command
@@ -145,7 +146,7 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 /model           pick a model on the current brain
 /models          models on disk, downloads, the provider's list
 /tools           the tools
-/clear           start the conversation over
+/clear           start a new chat
 /compact         summarize old turns now
 /context         set the context window
 /tokens          how full the context is
@@ -194,8 +195,8 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 
 - **Chat brain**: what JARVIS thinks with, as cards grouped by where it runs.
 - **Voice**: voice, speed, microphone, speakers or headphones, the listening model.
-- **Behavior**: approvals, Simple or Advanced, sounds and toasts.
-- **Appearance**: Classic, Light, Dark or System, the accent, and the Team room's home room.
+- **Behavior**: the agent's name, reasoning, house rules, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
+- **Appearance**: Classic, Light, Dark or System, Simple or Advanced, the accent, the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups), with the switch for saving memories on its own.
 - **Connectors**: phone bridges, ntfy and email.
 - **About**: version, updates, repair, start at login, and the tour.
 
@@ -211,6 +212,7 @@ Everything saves as you change it, with no restart.
 ├── conversations/         every chat, window and terminal
 ├── reminders.json         reminders
 ├── settings.json          settings
+├── profile.md             who you are and how you like replies
 ├── rules.md               your house rules, read every turn
 ├── soul.md                who it is, written by itself
 ├── logs/                  what it did, by day, and each part's log
