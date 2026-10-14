@@ -73,7 +73,7 @@ Press the mic and talk. Speech-to-text (faster-whisper) and text-to-speech (Koko
 
 ### Memory and skills
 
-Every fact JARVIS learns is a small markdown file in your workspace that you can read, edit or delete. The ones that matter to your message are brought in automatically, ones that are never used are archived rather than deleted, and a new fact that overlaps an old one updates it. Every past chat is searchable. A skill is a folder that teaches a workflow, like making a PDF, a slide deck or a spreadsheet, and installing someone else's is one line, `/skill install owner/repo`. See [docs/SKILLS.md](docs/SKILLS.md) and [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
+Every fact JARVIS learns is a small markdown file in your workspace that you can read, edit or delete. JARVIS keeps an index of them in view and looks up the ones a message needs. It notes lasting facts on its own unless you turn that off, ones that are never used are archived rather than deleted, and a new fact that overlaps an old one updates it. Every past chat is searchable. A skill is a folder that teaches a workflow, like making a PDF, a slide deck or a spreadsheet, and installing someone else's is one line, `/skill install owner/repo`. See [docs/SKILLS.md](docs/SKILLS.md) and [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
 
 ### Everywhere else
 
@@ -177,6 +177,7 @@ Hearth has over a hundred tools, but only a core set goes to the model in full e
 ```
 ~/Jarvis/                  the assistant's home (HEARTH_WORKSPACE moves it)
 ├── soul.md                who it is, written by itself, read every turn
+├── profile.md             who you are and how you like replies, read every turn
 ├── rules.md               your house rules, read every turn
 ├── memory/                one markdown file per fact, MEMORY.md as the index, _archive/ for cold ones
 ├── logs/                  what it did, by day
@@ -229,6 +230,7 @@ Hearth has over a hundred tools, but only a core set goes to the model in full e
 /allow       let me write under a folder       /think      reasoning on, off, or how hard
 /compact     sum up old turns now              /phone      reach me from your phone
 /context     set the context window            /update     get a newer version
+/chats       chats from here and the window    /clear      start a new chat
 /import-memory   bring memory from ChatGPT or Claude
 ```
 

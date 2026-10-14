@@ -16,7 +16,7 @@ Setup asks a few things and acts on them. Your name, what you do and how you lik
 
 When JARVIS splits a job across helpers, the Team view shows each one: what it is doing right now, when it finishes, why it didn't, and when it needs your OK for something. Every helper gets a first name, and each one's full log, step by step, is one click away. The terminal has the same list under /team.
 
-The room view shows it as a house by the fire. Helpers work at desks, read at the shelves or raise a hand when they need you, and JARVIS moves with the work, to a shelf while it reads and to a free desk while it writes. Click anyone and they turn and tell you where they are with their task. You can talk to JARVIS from a box under the room and read its answer over its head without going back to the chat, and if you ask it to brew itself a coffee, it walks over to the counter. While it thinks it paces, when it saves a memory it pins a note to the board, and it answers where it stands. Its bubble says what it is doing in plain words, and a command waiting for your yes can be approved right there in the room.
+The room view shows it as a house by the fire, and the fire burns. Helpers work at desks, read at the shelves or raise a hand when they need you, and JARVIS moves with the work, to a shelf while it reads and to a free desk while it writes. Click anyone and they turn and tell you where they are with their task. You can talk to JARVIS from a box under the room and read its answer over its head without going back to the chat, and if you ask it to brew itself a coffee, it walks over to the counter. While it thinks it paces, when it saves a memory it pins a note to the board, and it answers where it stands. Its bubble says what it is doing in plain words, and a command waiting for your yes can be approved right there in the room.
 
 You can tell a working helper something part-way through. Click it, type in its panel, and it reads your message before its next step. JARVIS can do the same on its own, and so can Claude Code and Codex helpers; another agent's program that runs its task to the end can't take one, and the panel says so.
 
@@ -48,7 +48,7 @@ JARVIS can hand a task to another coding agent you already have installed and br
 
 Installing or updating one of these agents shows in the Downloads list with the packages it has fetched, how long it has run and a Cancel button, and a finished row clears itself a few seconds later.
 
-A helper on one of these agents can be given one of its own models, and otherwise uses the one you picked for that agent as the brain. They follow the same approval switch as Hearth's own tools, and an agent working longer than a few minutes carries on in the background and reports when it is done. In the chat and the Team room each agent carries a small badge in its maker's colour, so you can see at a glance who did what.
+A helper on one of these agents can be given one of its own models, and otherwise uses the one you picked for that agent as the brain. They follow the same approval switch as Hearth's own tools. Handing a task over returns at once, so JARVIS stays free to talk, and the agent's answer arrives as a report when it is done. In the chat and the Team room each agent carries a small badge in its maker's colour, so you can see at a glance who did what.
 
 ## Approval modes
 
@@ -98,11 +98,15 @@ When something changes, Hearth records the change. Telling it you moved to Linux
 
 Recall reads each memory file once and reuses it, so a lookup stays fast as your memory grows. Saving a fact returns immediately, with the archiving of older facts moved into the background and running on its own schedule.
 
-Passive memory works on reasoning models. Hearth notices durable facts on its own without you saying "remember that", and it now has the room to finish writing them and can read the reply even when a model buries it in its reasoning. It also never competes with you for the model. If you send a message while it is working, your message goes first and the facts are picked up on the next pass.
+Passive memory works on reasoning models. Hearth notices durable facts on its own without you saying "remember that", and it now has the room to finish writing them and can read the reply even when a model buries it in its reasoning. It also never competes with you for the model. If you send a message while it is working, your message goes first and the facts are picked up on the next pass. Saving on its own has a switch in Settings, Remember things on its own, and when you tell it in a chat not to save something, it doesn't.
+
+Hearth no longer attaches memories picked by keyword to every message, which pulled in notes that had nothing to do with what you asked. The list of what it knows stays in its instructions and it looks up what it needs, the way it already did for everything else.
 
 ## Reminders
 
 Reminders are set for the time you meant. Hearth works out the exact time from what you said, and the reminder reads back the day and the time in plain words, so a slip shows up at once rather than at midnight. With the window and the terminal both open a reminder fires once instead of twice, and a reminder set while another one is firing is no longer lost.
+
+A reminder that comes due is said in a chat of its own, marked in the sidebar with a clock and an unread dot, instead of landing in the middle of whatever chat is open. Typing a task in the Reminders page starts it in a new chat and leaves the open one alone, and the page suggests reminders from what JARVIS knows about you and what is coming up.
 
 ## Phone and teams
 
@@ -128,7 +132,7 @@ Declining an action and telling Hearth what to do instead now makes it do that t
 
 ## Cloud models
 
-Reasoning is visible on OpenRouter and other providers that stream their thinking in a different field than local servers do. You can set how hard a model thinks, low, medium or high, on models that support it. A cloud model reports its real context window rather than a fixed guess, so a large context model shows what it actually has. Images reach cloud models that can see them. The model list is sorted and searchable instead of hundreds of unordered lines, and a cloud brain reads as online rather than loaded, since nothing is held in your VRAM.
+Reasoning is visible on OpenRouter and other providers that stream their thinking in a different field than local servers do. You can set how hard a model thinks on models that support it, with the levels the provider lists for that model, and turn thinking off where the model allows it. Anthropic models run on Anthropic's own API, so their thinking shows as it happens and the Think button's level reaches the model, which Anthropic's OpenAI-compatible endpoint ignored. A cloud model reports its real context window rather than a fixed guess, so a large context model shows what it actually has. Images reach cloud models that can see them. The model list is sorted and searchable instead of hundreds of unordered lines, and a cloud brain reads as online rather than loaded, since nothing is held in your VRAM.
 
 A model on this PC can stay loaded under a cloud brain, from one switch in the model menu, and then the helpers think with it for free while the cloud model talks to you; the sticker shows it beside the brain. Settings shows every brain as a card, grouped by where it runs, with its logo and whether it is in use or has a key saved, and the model menu has a way to a provider that has no key yet. Switching to a cloud brain no longer waits for the local model to leave the graphics card, every switch ends with the same message, and when a provider turns a key or a model down, Hearth repeats what the provider said.
 
@@ -136,7 +140,7 @@ A model on this PC can stay loaded under a cloud brain, from one switch in the m
 
 Loading a model shows real progress on the sticker instead of a blinking dot, and it names the model that is actually loading rather than the one that was there before. That progress is now measured rather than guessed at from the engine's log. The engine prints everything it knows about a model before it reads a single byte of it, so the bar used to jump most of the way up in the first second or two and then sit still for the whole real wait. It moves steadily for the length of the load instead, all the way through, and a model loading on its own when you open Hearth gets the same bar as one you picked by hand.
 
-A download that was interrupted in an awkward place used to stay broken forever, failing the same way on every retry with nothing you could do about it from inside the app. It starts over cleanly now, and pausing a download really pauses it, where resuming used to write a corrupted file. Downloads keep going when you close the window to the tray, and one that was cut off by a restart or a crash picks up where it stopped the next time Hearth opens. Every model links to its page on Hugging Face, so you can check the licence and what it was trained for without leaving the app, and a model Hearth downloaded remembers exactly which repo it came from. With no server running, the model list shows what is on your disk rather than saying there is nothing.
+A download that was interrupted in an awkward place used to stay broken forever, failing the same way on every retry with nothing you could do about it from inside the app. It starts over cleanly now, and pausing a download really pauses it, where resuming used to write a corrupted file. Downloads keep going when you close the window to the tray, and one that was cut off by a restart or a crash picks up where it stopped the next time Hearth opens. Every model links to its page on Hugging Face, so you can check the licence and what it was trained for without leaving the app, and a model Hearth downloaded remembers exactly which repo it came from. With no server running, the model list shows what is on your disk rather than saying there is nothing. A file that isn't a chat model, like an image or video model, or one a download cut short, is marked as such in Models and kept out of the model menu.
 
 On an RTX 50-series card Hearth no longer starts its bundled runtime, which has no kernels for those GPUs and would return empty replies on longer prompts. It asks you to install the standalone engine instead, which is one click in Models.
 
@@ -146,13 +150,17 @@ A run shows what it reached outside Hearth. The sites a search or a page read to
 
 File edits render as a diff with line numbers and a change count, in tight rows. Tool cards show a one line summary of what was passed rather than raw escaped JSON, and the terminal does the same with a glyph per kind of action and a short peek at long output. Steering Hearth mid answer separates the redirected part from what came before. Announcements from the developer stay as a card until you dismiss them.
 
-The window is responsive, so a narrow or half snapped window moves the sidebar into a drawer. Chat titles come from the first real exchange, so a chat that opens with a greeting still gets a title about the actual subject. Optional sound cues mark a finished turn, an error, or a permission request, all off by default, and user messages can sit in chat bubbles if you prefer, also off by default.
+The window is responsive, so a narrow or half snapped window moves the sidebar into a drawer. Chat titles come from the first real exchange, so a chat that opens with a greeting still gets a title about the actual subject. Optional sound cues mark a finished turn, an error, or a permission request, all off by default, and your messages can sit in chat bubbles tinted with your accent, also off by default.
+
+Each message shows when it was said, a line marks where the day changes, and every chat in the list shows when it was last used. Stop ends a reply at once, also while a local model is still reading a long prompt. What a reply ran is kept for the next turn, so JARVIS knows what it already did instead of doing it again. A message typed in another chat while one is replying waits in its box rather than being sent into that reply. /status, in the window or the terminal, shows what is thinking, how full the chat is and how much of your plan is left, and keeps updating while it is open.
 
 ## Logs
 
 The Logs page reads like the rest of the app now. Every tool JARVIS used is one row with what came back, in words, grouped by day, with the errors a click away and a search box. The model server's page sums up its recent requests, how much it read and wrote and how fast, above the raw lines, and the phone page folds a bridge's reconnects into one line.
 
 ## The terminal
+
+The terminal runs on the same engine as the window. Replies stream in above a prompt that stays open, so whatever you type while it works steers it, and Esc stops it at once. Thinking folds to one line, tables are drawn as tables, and /model, /brain, /mode, /think and /chats open a list you move through with the arrow keys, as do approvals. Chats started there get a real title. A second terminal opened beside the first starts its own chat instead of writing over the other's, and the terminal and the window use one built-in model server between them instead of fighting over it.
 
 The terminal and the window share one set of chats. A chat in the terminal is listed in the window, marked as from the terminal, and can be carried on there; whatever is added in the window reaches the terminal before its next message; and /chats and /chat open any chat in the terminal, while /clear starts a new one. /team shows each helper's steps in words.
 
