@@ -4688,8 +4688,9 @@ class JarvisCLI:
         internally and we're already inside the main event loop."""
         self._ensure_pt_session()
         if self.pt_session is not None:
+            carry, self._carry = getattr(self, "_carry", ""), ""
             text = PASTES.expand(await self.pt_session.prompt_async(
-                self._live_message, multiline=self.multiline_mode))
+                self._live_message, multiline=self.multiline_mode, default=carry))
             if text.strip():
                 shown = text if len(text) < 400 else text[:400] + f"… ({len(text)} chars)"
                 print(f"{C_USER}❯ {C_RESET}{BOLD_ON}{shown}{C_RESET}")
@@ -5874,6 +5875,8 @@ class JarvisCLI:
             self._steer_over = True
             app = self.pt_session.app if self.pt_session is not None else None
             if app is not None and app.is_running:
+                # Half-typed text carries over to the next prompt instead of being lost.
+                self._carry = self.pt_session.default_buffer.text
                 app.exit(result="")
             try:
                 await asyncio.wait_for(steer_task, timeout=2)
@@ -5953,15 +5956,18 @@ class JarvisCLI:
         from hearth import term_pick
         what = _term_render.tool_words(name, args if isinstance(args, dict) else {})
         picked = await term_pick.pick(
-            f"{C_WARN}Allow this?{C_RESET} {what}",
+            f"{C_WARN}Allow this?{C_RESET}",
             [("allow", "Yes, this once"), ("always", f"Yes, and don't ask again for {name}"),
              ("deny", "No"), ("why", "No, and tell it what to do instead")], default="allow")
+        said = {"allow": "allowed", "always": f"allowed, and won't ask again for {name}",
+                "deny": "declined", "why": "declined"}.get(picked, "declined")
+        print(f"  {C_DIM}↳ {said}{C_RESET}")
         if picked == "always":
             self.tool_perms[name] = "always"
             _save_persisted_perms(self.tool_perms)
             return "allow"
         if picked == "why":
-            reason = (await self.pt_session.prompt_async(ANSI(f"{C_DIM}what instead?{C_RESET} "))).strip() \
+            reason = (await self.pt_session.prompt_async(ANSI(f"  {C_DIM}what instead?{C_RESET} "))).strip() \
                 if self.pt_session is not None else ""
             return {"decision": "deny", "reason": reason}
         return "allow" if picked == "allow" else "deny"

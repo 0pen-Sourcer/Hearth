@@ -195,6 +195,7 @@ class Turn:
         self.status = "Working"
 
     def _on_steered(self, text: str = "", content: str = "", **_):
+        self._flush_text()
         self.out(f"{DIM}↳ taken in: {(text or content)[:100]}{RESET}")
 
     def _on_retry(self, attempt: int = 0, max_attempts: int = 0, wait_s: float = 0, message: str = "", **_):

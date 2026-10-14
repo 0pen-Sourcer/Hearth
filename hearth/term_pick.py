@@ -32,11 +32,13 @@ async def pick(message: str, options: Sequence[Tuple[Any, str]], default: Any = 
         return None
     if default is not None and all(v != default for v, _ in opts):
         default = None
+    app = ChoiceInput(
+        message=ANSI(message), options=opts, default=default, style=STYLE, symbol="›",
+        bottom_toolbar=ANSI("\x1b[2m " + hint + "\x1b[0m") if hint else None,
+        key_bindings=_escape_leaves(),
+    )._create_application()
+    app.erase_when_done = True          # the list goes; the caller prints what was picked
     try:
-        return await ChoiceInput(
-            message=ANSI(message), options=opts, default=default, style=STYLE, symbol="›",
-            bottom_toolbar=ANSI("\x1b[2m " + hint + "\x1b[0m") if hint else None,
-            key_bindings=_escape_leaves(),
-        ).prompt_async()
+        return await app.run_async()
     except (KeyboardInterrupt, EOFError):
         return None
