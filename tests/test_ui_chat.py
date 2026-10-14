@@ -859,6 +859,23 @@ with sync_playwright() as pw:
     check(f"each message says when it was said, with a line where the day changes, and each chat when it was last used {times}",
           times["days"] == ["Yesterday", "Today"] and times["stamps"] == [True, True, True, True, False]
           and any(ch.isdigit() for ch in times["first"] or "") and any(ch.isdigit() for ch in times["when"] or ""))
+    # Opening a memory showed its file: the --- header, type:, tags: and all.
+    fact = pg.evaluate("""async () => {
+      const realApi = api;
+      window.api = async (url, opts) => url.startsWith('/api/memory/') ? { body:
+        '---\\nname: Exam on December 12\\ntype: project\\ndescription: Operating systems final on December 12\\n' +
+        'tags: [cat:school]\\nupdated: 2026-10-14T09:00:00\\nrecall_count: 3\\n---\\n\\nOperating systems final on December 12.' } : realApi(url, opts);
+      memCache = [{ name: 'Exam on December 12', type: 'project', description: 'Operating systems final on December 12' }];
+      showView('memory'); MEM_VIEW = 'list'; renderMem('');
+      document.querySelector('#mem-list .item').click();
+      await new Promise(r => setTimeout(r, 100));
+      const text = document.getElementById('modal-body').innerText;
+      window.api = realApi; document.getElementById('modal').classList.remove('open'); showView('chat');
+      return text;
+    }""")
+    check(f"an opened memory reads as what it says, when it was saved and how often it was recalled {fact!r}",
+          "Operating systems final" in fact and "Recalled 3 times" in fact
+          and "---" not in fact and "type:" not in fact and "tags:" not in fact)
     # Your bubble was always the same blue whatever the theme and accent.
     tints = pg.evaluate("""() => {
       const root = document.documentElement, was = [root.dataset.theme, root.dataset.accent];

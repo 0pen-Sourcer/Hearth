@@ -2268,6 +2268,13 @@
   .tag.project   { background: color-mix(in srgb, var(--ok) 10%, transparent); color: var(--ok); }
   .tag.reference { background: color-mix(in srgb, var(--accent-2) 10%, transparent); color: var(--tool); }
   .tag.other     { background: var(--bg-3); color: var(--fg-faint); }
+  /* One fact, opened: what it says, then a quiet line of when and how often. */
+  .mem-fact .mf-text { color: var(--fg); line-height: 1.55; }
+  .mem-fact .mf-text p { margin: 0 0 8px; }
+  .mem-fact .mf-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+                       margin-top: 14px; color: var(--fg-faint); font-size: 12px; }
+  .mem-fact .mf-meta .tag { font-size: 10px; padding: 2px 6px; border-radius: var(--r-sm); text-transform: uppercase;
+                            letter-spacing: 0.5px; font-weight: 600; font-family: var(--mono); }
   /* Memory list row gets a left-border stripe matching its type. Makes
      scanning the Memory tab a glance instead of a read - pick out
      "all the user-facts" or "all the project-facts" by color band. */
@@ -3462,6 +3469,8 @@
   }
   /* A form in a dialog is the dialog, not a boxed read-out inside it. */
   .modal .modal-body:has(.nh-wrap) { max-height: none; overflow: visible; background: none; border: none; padding: 0; }
+  .modal .modal-body:has(.mem-fact) { background: none; border: none; padding: 0; white-space: normal;
+                                      font-family: var(--sans); font-size: 14px; }
   .modal:has(.nh-wrap) { width: 640px; }
   .modal .modal-actions {
     margin-top: 16px;
@@ -11872,6 +11881,24 @@ _wireDropTarget(document.getElementById('view-chat'));
 // MEMORY view
 // ============================================================
 let memCache = [];
+// A memory file opened from the list, tree or graph: its words, not its file.
+function memFactHTML(raw) {
+  const m = /^---\s*\n([\s\S]*?)\n---\s*\n?/.exec(raw || '');
+  const fm = {};
+  if (m) m[1].split('\n').forEach(l => { const i = l.indexOf(':'); if (i > 0) fm[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
+  const body = (m ? raw.slice(m[0].length) : (raw || '')).trim();
+  const desc = (fm.description || '').trim();
+  const text = body && body.replace(/\.$/, '') !== desc.replace(/\.$/, '') ? (desc ? `${desc}\n\n${body}` : body) : (desc || body);
+  const tcls = ['user', 'feedback', 'project', 'reference'].includes(fm.type) ? fm.type : 'other';
+  // "today", "yesterday", or the date as dayLabel writes it.
+  const when = s => { const t = Date.parse(s); if (isNaN(t)) return ''; const d = dayLabel(t);
+                      return /^(Today|Yesterday|Tomorrow)$/.test(d) ? d.toLowerCase() : d; };
+  const n = parseInt(fm.recall_count || '0', 10) || 0;
+  const meta = [`<span class="tag ${tcls}">${esc(fm.type || 'fact')}</span>`];
+  if (when(fm.updated)) meta.push(`<span>Saved ${esc(when(fm.updated))}</span>`);
+  meta.push(`<span>${n ? `Recalled ${n === 1 ? 'once' : n + ' times'}` : 'Not recalled yet'}${n && when(fm.last_recalled_at) ? `, last ${esc(when(fm.last_recalled_at))}` : ''}</span>`);
+  return `<div class="mem-fact"><div class="mf-text">${renderMD(text || '(empty)')}</div><div class="mf-meta">${meta.join('')}</div></div>`;
+}
 async function refreshMemory() {
   try {
     const { memories } = await api('/api/memory');
@@ -11920,7 +11947,7 @@ function renderMem(filter) {
       if (e.target.closest('.row-actions')) return;
       try {
         const r = await api(`/api/memory/${encodeURIComponent(m.name)}`);
-        showModal(m.name, r.body, [
+        showModal(m.name, memFactHTML(r.body), [
           { label: 'Close' },
           { label: 'Delete', kind: 'danger', onclick: async () => {
             try {
@@ -12056,7 +12083,7 @@ function renderMemTree(filter) {
         leaf.addEventListener('click', async () => {
           try {
             const r = await api(`/api/memory/${encodeURIComponent(m.name)}`);
-            showModal(m.name, r.body, [
+            showModal(m.name, memFactHTML(r.body), [
           { label: 'Close' },
           { label: 'Delete', kind: 'danger', onclick: async () => {
             try {
@@ -12264,7 +12291,7 @@ function renderMemGraph(filter) {
   nodeSel.on('click', async (event, d) => {
     try {
       const r = await api(`/api/memory/${encodeURIComponent(d.id)}`);
-      showModal(d.name, r.body, [
+      showModal(d.name, memFactHTML(r.body), [
         { label: 'Close' },
         { label: 'Delete', kind: 'danger', onclick: async () => {
           try {
@@ -12287,10 +12314,11 @@ function renderMemGraph(filter) {
   // forces settle. After the warm-up we attach tick + fade in the scene.
   gZoom.style.opacity = '0';
   _memSimulation = d3.forceSimulation(nodes)
-    .force('link', d3.forceLink(edges).id(d => d.id).distance(40).strength(0.6))
-    .force('charge', d3.forceManyBody().strength(-180))
+    .force('link', d3.forceLink(edges).id(d => d.id).distance(58).strength(0.5))
+    .force('charge', d3.forceManyBody().strength(-260))
     .force('center', d3.forceCenter(w / 2, h / 2))
-    .force('collide', d3.forceCollide().radius(18))
+    // Wide enough that two names a row apart don't print over each other.
+    .force('collide', d3.forceCollide().radius(30).strength(0.9))
     .force('typeX', d3.forceX(d => w / 2 + Math.cos(typeAngle[d.type]) * (w * 0.28)).strength(0.18))
     .force('typeY', d3.forceY(d => h / 2 + Math.sin(typeAngle[d.type]) * (h * 0.28)).strength(0.18))
     .stop();
@@ -12298,7 +12326,7 @@ function renderMemGraph(filter) {
   // ticks is enough for graphs up to ~50 nodes; cost is ~10ms on the
   // main thread (the alternative is the user seeing a star-of-lines for
   // 400ms while the live simulation runs).
-  for (let i = 0; i < 80; i++) _memSimulation.tick();
+  for (let i = 0; i < 160; i++) _memSimulation.tick();
   // Now place links + nodes at warmed positions and fade in.
   linkSel
     .attr('x1', l => l.source.x).attr('y1', l => l.source.y)
