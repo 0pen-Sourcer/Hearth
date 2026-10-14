@@ -12,7 +12,17 @@ from datetime import datetime
 
 from .tools import WORKSPACE, read_locked
 from .skills_loader import skills_for_prompt
-from .memory import index_for_prompt, read_rules, read_soul, read_profile
+from .memory import index_for_prompt, read_rules, read_soul, read_profile, DEFAULT_RULES
+
+
+def _own_lines(text: str, template: str = "") -> str:
+    """What the person wrote in a layer file: without the file's own heading (the
+    prompt gives each layer one), the template's instructions, or its example lines."""
+    tmpl = {l.strip() for l in template.splitlines() if l.strip()}
+    keep = [l for l in text.splitlines()
+            if not l.lstrip().startswith("# ") and not l.strip().startswith("Edit this file freely")
+            and l.strip() not in tmpl]
+    return "\n".join(keep).strip()
 
 # Persona name. "JARVIS" is the default flavor; rename freely via the
 # HEARTH_PERSONA_NAME env var (or by editing this line). The framework itself
@@ -80,9 +90,9 @@ def system_prompt(voice: bool = False) -> str:
     # server to re-prefill the whole persona + history. Precise time rides the
     # user turn instead (headless.run_once / CLI._prepare_context).
     today = datetime.now().strftime("%A, %d %B %Y")
-    rules = read_rules().strip()
+    rules = _own_lines(read_rules(), DEFAULT_RULES)
     soul = read_soul().strip()
-    profile = read_profile().strip()
+    profile = _own_lines(read_profile())
     mem_index = index_for_prompt().strip()
     workspace = WORKSPACE
     reads_line = (
@@ -189,8 +199,6 @@ line, never forced. No emoji unless they use them.
 - A capability that doesn't exist and will be needed again: create_plugin, then
   use it. A multi-step procedure you just worked out that will come up again:
   save it with create_skill so next time it is one load_skill away.
-- A long digest over many turns: keep notes with worklog instead of re-reading
-  the sources.
 - Code you write or change that can run: run it once before you call it working.
 - Reminders fire on their own. Never sleep or Start-Sleep to wait for anything.
 - Anything about an earlier conversation: search_chats before ever saying you
@@ -228,7 +236,8 @@ line, never forced. No emoji unless they use them.
   put the value in the body. When a fact changes, save over the same title. Not
   sure it exists: recall once, then update.
 - A saved preference can be stale. Offer it as "still into X?", and if they say
-  it's gone, save that.- For a vague "what should I do", check the obligations you know about (an exam,
+  it's gone, save that.
+- For a vague "what should I do", check the obligations you know about (an exam,
   a deadline) before hobbies. Reminders aren't in the prompt: list_reminders once.
 - Your soul is your own identity, a short file you change with edit_soul or
   append_soul when they give you a lasting directive about who you are.

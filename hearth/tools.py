@@ -8487,6 +8487,11 @@ _DEFERRED_TOOLS = {
     # email (opt-in, needs an app password) — surfaces via load_tools when the
     # user mentions email, so it never clutters the default tool list
     "read_inbox", "send_email",
+    # Rarely called while sent every turn (10-2026 logs: 2 to 42 calls in 17,000),
+    # and what they give is already in the prompt or covered by a core tool: the
+    # memory index and the skills list are in the system prompt, screenshot
+    # captures a window. Still reachable through load_tools.
+    "worklog", "memory_list", "list_skills", "capture_active_window",
     # multi-agent "watch a team" — niche power feature; the model loads it when
     # the user asks for a team, so it never sits in the default prompt.
     "launch_team",

@@ -2,7 +2,7 @@
 
 Hearth gives the model **111 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
-To keep the prompt small, **43** core tools load with their full description and **68** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **39** core tools load with their full description and **72** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -48,7 +48,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | Tool | What it does |
 |---|---|
 | `arrange_windows` † | Lay windows out on screen in ONE call: position and size several windows at named regions |
-| `capture_active_window` | Screenshot only the focused window, or a named one with window_title; tighter than screenshot for vision |
+| `capture_active_window` † | Screenshot only the focused window, or a named one with window_title; tighter than screenshot for vision |
 | `computer_click` † | Click the mouse |
 | `computer_drag` † | Drag-and-drop: press at (x1,y1), move to (x2,y2) while held, release |
 | `computer_key` | Press a key or chord: a named key ('enter','tab','esc','f5','up') or a combo joined with '+' ('ctrl+s','alt+tab','ctrl+shift+esc','win+d') |
@@ -120,7 +120,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `draft_soul` † | Propose a starter soul.md when soul.md is empty or sparse |
 | `edit_soul` † | Write your own identity to ~/Jarvis/soul.md |
 | `memory_forget` | Delete a memory by title |
-| `memory_list` | Show the full memory index (all titles and one-line hooks) |
+| `memory_list` † | Show the full memory index (all titles and one-line hooks) |
 | `memory_recall` | Search saved memories |
 | `memory_save` | Save a lasting fact about the user or their world (preferences, hardware, projects, people, setups) |
 | `read_soul` † | Read back your current soul.md content |
@@ -160,7 +160,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `delete_plugin` † | Delete an installed plugin by name (removes its file + unregisters the tool) |
 | `install_skill` † | Install a shareable skill from a GitHub repo or a local folder into ~/Jarvis/skills/ |
 | `list_plugins` † | List the self-authored/installed plugins in ~/Jarvis/plugins/ (name, status, description) |
-| `list_skills` | List available skills, bundled and installed |
+| `list_skills` † | List available skills, bundled and installed |
 | `load_skill` | Load a skill's full instructions and its bundled files before following it |
 
 ## Image generation
@@ -181,4 +181,4 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 |---|---|
 | `ask_user` † | Ask the user a multi-choice question when you genuinely need a decision before continuing, picking between two valid approaches, clarifying an ambiguous file/f… |
 | `end_session` † | Call this when the user is clearly wrapping up the conversation (says bye, goodbye, see you, thanks that's all, etc.) |
-| `worklog` | Your scratch pad for a long task: note findings as you go and read them back instead of re-reading the sources |
+| `worklog` † | Your scratch pad for a long task: note findings as you go and read them back instead of re-reading the sources |
