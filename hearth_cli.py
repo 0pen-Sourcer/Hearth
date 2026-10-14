@@ -307,18 +307,18 @@ SLASH_COMMANDS = {
     "/tools": "the tools", "/clear": "start the conversation over", "/compact": "summarize old turns now",
     "/context": "set the context window", "/tokens": "how full the context is", "/history": "the last messages",
     "/chats": "every chat, from the window too", "/chat": "carry on a chat here", "/workspace": "the workspace folder",
-    "/log": "recent activity", "/mem": "what I remember", "/curate": "merge duplicate memories",
+    "/log": "recent activity", "/mem": "my memories: what I remember", "/curate": "merge duplicate memories",
     "/rules": "the house rules file", "/name": "my name", "/me": "what I know and may do",
     "/team": "helpers working for me", "/agents": "agent programs on this PC", "/agent": "run a helper and wait",
     "/learn": "look at this PC again", "/migrate": "bring memory over from another agent",
     "/import-memory": "bring memory over from ChatGPT or Claude", "/jobs": "background jobs",
     "/mcp": "Model Context Protocol", "/skill": "skills", "/voice": "speaking: on, off, speed, mic",
     "/stt": "the listening model", "/listen": "talk instead of typing", "/sleep": "wait for the wake word",
-    "/wake": "wake up", "/think": "reasoning on or off, or how hard", "/multi": "multi-line input",
+    "/wake": "wake up", "/think": "thinking (reasoning): on, off, or how hard", "/multi": "multi-line input",
     "/mode": "what runs without asking: ask, edits, auto", "/perms": "saved permissions",
     "/allow": "let me write under a folder", "/disallow": "take that back", "/allowed": "folders I may write in",
     "/lockdown": "keep reads inside the workspace", "/about": "version and stats", "/update": "get a newer version",
-    "/repair": "restore damaged files", "/phone": "reach me from your phone", "/exit": "quit",
+    "/repair": "restore damaged files", "/phone": "reach me from Telegram, Discord or WhatsApp", "/exit": "quit",
     # Other names for the same commands.
     "/endpoint": "same as /brain", "/provider": "same as /brain", "/load": "same as /model",
     "/usage": "same as /status", "/import": "same as /import-memory", "/skills": "same as /skill",
@@ -385,6 +385,33 @@ def _looks_like_key(s: str) -> bool:
     if s.startswith(("sk-", "xai-", "AIza", "gsk_", "pplx-")):
         return True
     return len(s) >= 32 and not any(c in s for c in ".:")
+
+
+HELP_GROUPS = [
+    ("Brain", ["/brain", "/model", "/models", "/think", "/mode", "/status"]),
+    ("Chats", ["/chats", "/chat", "/clear", "/compact", "/history", "/multi"]),
+    ("What I know", ["/mem", "/me", "/name", "/rules", "/learn", "/curate", "/import-memory", "/migrate"]),
+    ("Helpers", ["/team", "/agents", "/agent", "/jobs"]),
+    ("Voice", ["/voice", "/listen", "/stt", "/sleep", "/wake"]),
+    ("This PC", ["/allow", "/disallow", "/allowed", "/lockdown", "/perms", "/workspace", "/tools", "/mcp", "/skill", "/log"]),
+    ("Hearth", ["/about", "/update", "/repair", "/phone", "/exit"]),
+]
+
+
+def _suggest_command(word: str) -> str:
+    """A command that fits a mistyped or made-up one: by spelling, then by
+    what each one does (/reasoning finds /think)."""
+    w = (word or "").lower().lstrip("/")
+    hit = ""
+    if len(w) >= 4:
+        stem = w[:5]
+        hit = next((c for c, d in SLASH_COMMANDS.items()
+                    if not d.startswith("same as") and stem in d.lower()), "")
+    if not hit:
+        import difflib
+        close = difflib.get_close_matches("/" + w, list(SLASH_COMMANDS), n=1, cutoff=0.75)
+        hit = close[0] if close else ""
+    return f"Did you mean {hit}?" if hit else "/help lists them."
 
 
 def _did_you_mean(word: str, choices) -> str:
@@ -1598,79 +1625,24 @@ class JarvisCLI:
             _ed_label = "Full"
         sub = f"  local-first personal AI  ◆  hearth v{HEARTH_VERSION} ({_ed_label})"
         os.system("cls" if os.name == "nt" else "clear")
-        # Gradient cascade banner
-        for i, ln in enumerate(art):
-            color = GRAD[i % len(GRAD)]
-            sys.stdout.write(f"{C_BOLD}{color}{ln}{C_RESET}\n")
-            sys.stdout.flush()
-            time.sleep(0.04)
-        sys.stdout.write(f"{C_DIM}{sub}{C_RESET}\n\n")
-
-        # Boot status panel
-        try:
-            idx = memory.list_index()
-            mem_lines = 0 if idx.startswith("(no") else idx.count("\n") + 1
-        except Exception:
-            mem_lines = 0
-        v_status = voice.status()
-        v_label = (
-            f"on ({v_status['engine']})" if self.voice_on and v_status["ready"]
-            else "ready, off" if v_status["ready"]
-            else "no engine - see /voice"
-        )
+        # Two lines: the mark, and beside it what is answering and where.
         try:
             from hearth.persona import NAME as _AGENT_NAME
         except Exception:
             _AGENT_NAME = "JARVIS"
-        rows = [
-            ("agent",     f"{_AGENT_NAME}"),
-            ("model",     self._model_label() if self.current_model != "local-model"
-                          else "(none detected yet - see below)"),
-            ("endpoint",  _agent_line() or f"{LOCAL_API_BASE}"),
-            ("context",   f"{self.context_tokens} tokens, compact @ {int(COMPACT_AT*100)}%"),
-            ("workspace", f"{WORKSPACE}"),
-            ("reads",     "sandbox only" if read_locked() else "unrestricted"),
-            ("tools",     _tools_banner_label()),
-            ("memories",  f"{mem_lines}"),
-            ("voice",     v_label),
+        home = os.path.expanduser("~")
+        ws = WORKSPACE.replace(home, "~") if WORKSPACE.lower().startswith(home.lower()) else WORKSPACE
+        beside = [
+            f"{C_BOLD}hearth{C_RESET} {C_DIM}{HEARTH_VERSION} · {_ed_label}{C_RESET}",
+            f"{C_BOT}{_AGENT_NAME}{C_RESET}{C_DIM} · {self._model_label()} · {ws}{C_RESET}",
         ]
-        # Status panel — rich Table inside a rounded Panel for clean alignment
-        # (no hand-computed padding), with an ANSI-box fallback if rich is absent.
-        _used_rich = False
-        if _RICH is not None:
-            try:
-                from rich.table import Table as _RTable
-                from rich.panel import Panel as _RPanel
-                from rich import box as _rbox
-                _t = _RTable.grid(padding=(0, 2))
-                _t.add_column(justify="right", style="color(240)", no_wrap=True)
-                _t.add_column(style="color(183)", overflow="fold")
-                for label, value in rows:
-                    _t.add_row(label, str(value))
-                _RICH.print(_RPanel(_t, border_style="color(103)",
-                                    box=_rbox.ROUNDED, padding=(0, 1),
-                                    expand=False))
-                _used_rich = True
-            except Exception:
-                _used_rich = False
-        if not _used_rich:
-            width = 64
-            sys.stdout.write(f"{C_FRAME}╭{'─' * (width - 2)}╮{C_RESET}\n")
-            for label, value in rows:
-                value = str(value)
-                sys.stdout.write(
-                    f"{C_FRAME}│ {C_DIM}{label:<10}{C_RESET} {C_BOT}{value}{C_RESET}"
-                    f"{' ' * (width - 4 - 11 - len(value))}{C_FRAME} │{C_RESET}\n"
-                    if len(value) <= width - 16
-                    else f"{C_FRAME}│ {C_DIM}{label:<10}{C_RESET} {C_BOT}{value[:width-16]}…{C_RESET}{C_FRAME} │{C_RESET}\n"
-                )
-            sys.stdout.write(f"{C_FRAME}╰{'─' * (width - 2)}╯{C_RESET}\n")
-        # Connectivity + model sanity. A fresh user should instantly know
-        # whether to go start LM Studio, load a model, or just start chatting.
+        for i, ln in enumerate(art):
+            color = GRAD[i % len(GRAD)]
+            sys.stdout.write(f"{C_BOLD}{color}{ln.rstrip()}{C_RESET}   {beside[i]}\n")
+            sys.stdout.flush()
+            time.sleep(0.04)
         if _agent_line() or not _is_local_endpoint(LOCAL_API_BASE):
-            print(f"{C_OK}● {_AGENT_NAME} online{C_RESET}{C_DIM}  ·  brain: {self._model_label()}"
-                  f"{'' if _agent_line() else ' (cloud)'}  ·  /help for commands{C_RESET}")
-            print(f"{C_DIM}  Enter = send · Esc+Enter = newline · /multi before pasting a block{C_RESET}\n")
+            print(f"\n{C_DIM}  /help for commands · esc stops a reply · ctrl+t shows thinking{C_RESET}\n")
         else:
             chat_models, reachable = self._probe_local_models()
             if not reachable:
@@ -1733,20 +1705,25 @@ class JarvisCLI:
             return [], False
 
     # -- Slash commands -----------------------------------------------------
+    async def model_ids(self) -> List[str]:
+        """The chat models the current brain's server lists."""
+        from hearth.headless import model_list_req
+        req = model_list_req(LOCAL_API_BASE, LOCAL_API_KEY or "hearth-builtin")
+        data = await asyncio.to_thread(
+            lambda: json.loads(urllib.request.urlopen(req, timeout=5).read().decode()))
+        # Hide non-chat models - xAI lists grok-imagine-image/-video etc.
+        # alongside chat models, but they 400 on /chat/completions (they're
+        # image/video endpoints). They only clutter the picker.
+        _NON_CHAT = ("imagine-image", "imagine-video", "imagine-audio",
+                     "embedding", "embed-", "-tts", "whisper")
+        ids = [m["id"] for m in data.get("data", [])
+               if m.get("id") and not any(p in m["id"].lower() for p in _NON_CHAT)]
+        self.last_model_list = ids
+        return ids
+
     async def fetch_models(self, filter_q: str = "", free_only: bool = False):
         try:
-            from hearth.headless import model_list_req
-            req = model_list_req(LOCAL_API_BASE, LOCAL_API_KEY or "hearth-builtin")
-            with urllib.request.urlopen(req, timeout=5) as r:
-                data = json.loads(r.read().decode())
-            # Hide non-chat models - xAI lists grok-imagine-image/-video etc.
-            # alongside chat models, but they 400 on /chat/completions (they're
-            # image/video endpoints). They only clutter the picker.
-            _NON_CHAT = ("imagine-image", "imagine-video", "imagine-audio",
-                         "embedding", "embed-", "-tts", "whisper")
-            ids = [m["id"] for m in data.get("data", [])
-                   if m.get("id") and not any(p in m["id"].lower() for p in _NON_CHAT)]
-            self.last_model_list = ids
+            ids = await self.model_ids()
             free_ids = [m for m in ids if m.lower().endswith(":free")]
 
             # A cloud catalog (OpenRouter lists 400+) is useless when dumped. Bare
@@ -2044,8 +2021,8 @@ class JarvisCLI:
                         self.context_tokens = detected_ctx
                 except Exception:
                     pass
-        print(f"{C_OK}↳ switched to {LOCAL_API_BASE}{C_RESET}  "
-              f"{C_DIM}(model: {self.current_model}){C_RESET}")
+        if not getattr(self, "_quiet_retarget", False):
+            print(f"{C_DIM}↳ now thinking with {C_RESET}{self._model_label()}")
 
     def _sync_brain_from_settings(self) -> None:
         """Keep the CLI on the same brain the GUI is using. If settings.json
@@ -2081,11 +2058,15 @@ class JarvisCLI:
             return
         if not key and provider:
             key = _read_brain_key(provider)
-        self._retarget_to(url, key or "hearth-builtin", None)
+        self._quiet_retarget = True
+        try:
+            self._retarget_to(url, key or "hearth-builtin", None)
+        finally:
+            self._quiet_retarget = False
         live = _probe_live_model(url, key) if provider in ("local", "lmstudio", "builtin") else None
         if live or model:
             self.current_model = live or model
-        print(f"{C_DIM}↳ brain synced from GUI → {provider or url}{C_RESET}")
+        print(f"{C_DIM}↳ the window switched me to {C_RESET}{self._model_label()}")
 
     async def _cmd_models(self, raw: str) -> None:
         """Full model picker/downloader - matches the GUI Models tab.
@@ -2374,34 +2355,55 @@ class JarvisCLI:
             await self.fetch_models()
             return
 
-        print()
-        _cloud = not _is_local_endpoint(LOCAL_API_BASE)
-        if _cloud:
+        await self._pick_model(disk=s.get("disk_models") or [], status=s)
+
+    async def _pick_model(self, disk=None, status=None) -> None:
+        """One list to pick from: what this brain's server offers, then the model
+        files on this PC. Enter switches to a model or loads a file."""
+        from hearth import term_pick
+        cloud = not _is_local_endpoint(LOCAL_API_BASE)
+        try:
+            ids = await self.model_ids()
+        except Exception:
+            ids = []
+        if cloud:
             from hearth.headless import PROVIDERS as _pv, provider_for as _pf
             _pid = _pf(LOCAL_API_BASE)
-            print(f"{C_OK}● {_pv[_pid][0] if _pid in _pv else 'Cloud provider'}{C_RESET}  {C_DIM}{LOCAL_API_BASE}{C_RESET}")
-            await self.fetch_models()
-        elif s.get("builtin_running"):
-            print(f"{C_OK}● Built-in server running{C_RESET}  {C_DIM}{s.get('builtin_url') or ''}{C_RESET}")
-        elif s.get("external_running"):
-            print(f"{C_OK}● External server detected{C_RESET}  {C_DIM}{LOCAL_API_BASE}{C_RESET}")
+            where = _pv[_pid][0] if _pid in _pv else "your provider"
+        elif status and status.get("builtin_running"):
+            where = "Hearth's engine"
+        elif ids:
+            where = "the server on this PC"
         else:
-            print(f"{C_DIM}○ No server reachable at {LOCAL_API_BASE}{C_RESET}")
-
-        if s.get("external_running") and not _cloud:
-            await self.fetch_models()
-
-        disk = s.get("disk_models") or []
-        if disk:
-            print(f"\n{C_BRAND}On your disk{C_RESET}  {C_DIM}({len(disk)}){C_RESET}")
-            for i, m in enumerate(disk[:6], 1):
-                print(f"  [{i}] {m.get('filename')}  {C_DIM}({m.get('size_gb')} GB · {m.get('source')}){C_RESET}")
-            if len(disk) > 6:
-                print(f"  {C_DIM}…and {len(disk)-6} more - /models disk{C_RESET}")
-            self._cli_disk_cache = disk
-
-        print()
-        print(f"{C_DIM}Subcommands:  /models <search>  ·  free  ·  disk  ·  hf <q>  ·  get <repo|n> [file|n]  ·  use <path|n>  ·  stop{C_RESET}\n")
+            where = ""
+        opts = []
+        for m in ids[:60]:
+            tag = f"  {C_DIM}in use{C_RESET}" if m == self.current_model else ""
+            free = f"  {C_DIM}free{C_RESET}" if m.lower().endswith(":free") else ""
+            opts.append((("model", m), f"{m}{free}{tag}"))
+        shown_files = [d for d in (disk or []) if not d.get("not_chat") and not d.get("incomplete")]
+        self._cli_disk_cache = disk or []
+        for d in shown_files[:30]:
+            opts.append((("file", d.get("path")),
+                         f"{d.get('filename')}  {C_DIM}{d.get('size_gb')} GB · on this PC{C_RESET}"))
+        if not opts:
+            print(f"{C_DIM}No models to pick from yet. /models hf <name> searches Hugging Face, "
+                  f"/brain picks a provider.{C_RESET}")
+            return
+        head = (f"{C_BOT}Models{C_RESET} {C_DIM}· {len(ids)} on {where}" if where else f"{C_BOT}Models{C_RESET} {C_DIM}·") \
+            + (f" · {len(shown_files)} on this PC" if shown_files else "") + C_RESET
+        if len(ids) > 60:
+            head += f"\n{C_DIM}  showing 60; /model <name> finds the rest{C_RESET}"
+        picked = await term_pick.pick(head, opts, default=("model", self.current_model))
+        if not picked:
+            print(f"{C_DIM}  /models hf <name> searches Hugging Face · /models disk lists every file · "
+                  f"/models stop · /models helper{C_RESET}")
+            return
+        kind, val = picked
+        if kind == "model":
+            await self.handle_command(f"/model {val}")
+        else:
+            await self.handle_command(f"/models use {val}")
 
     async def handle_command(self, text: str) -> bool:
         # `global` MUST sit at the very top of this function, BEFORE any
@@ -2416,68 +2418,22 @@ class JarvisCLI:
         if low in ("/exit", "/quit", "exit", "quit"):
             print(f"{C_DIM}Goodbye.{C_RESET}")
             sys.exit(0)
-        if low == "/help":
-            print(f"{C_BOT}Commands:{C_RESET}")
-            print(f"  {C_DIM}── Endpoint / model ─────────────────────────{C_RESET}")
-            print(f"  {C_TOOL}/brain{C_RESET} (or {C_TOOL}/endpoint{C_RESET}, {C_TOOL}/provider{C_RESET}) switch brain: local, anthropic, openai, gemini, grok, openrouter, groq, custom, claude-code, codex, cursor")
-            print(f"  {C_TOOL}/brain <provider> <model>{C_RESET}  that provider with one of its models (a key there is saved as the key)")
-            print(f"  {C_TOOL}/models{C_RESET}                model dashboard: server and models on disk")
-            print(f"  {C_TOOL}/models disk|hf|get|use|stop|helper{C_RESET}  find, download and load; `helper` loads a second, smaller model for helpers")
-            print(f"  {C_TOOL}/model <id|n>{C_RESET}          switch model on current server (alias: /load)")
-            print(f"  {C_DIM}── Chat / context ───────────────────────────{C_RESET}")
-            print(f"  {C_TOOL}/tools{C_RESET}                 list available tools")
-            print(f"  {C_TOOL}/clear{C_RESET}                 wipe context (keep system)")
-            print(f"  {C_TOOL}/chats{C_RESET}                 list LM Studio threads")
-            print(f"  {C_TOOL}/chat <n|name>{C_RESET}         load thread (read-only copy)")
-            print(f"  {C_TOOL}/history{C_RESET}               last 5 messages")
-            print(f"  {C_TOOL}/workspace{C_RESET}             show workspace path")
-            print(f"  {C_TOOL}/log [n]{C_RESET}               tail activity log")
-            print(f"  {C_TOOL}/tokens{C_RESET}                context usage estimate")
-            print(f"  {C_TOOL}/status{C_RESET}                what is thinking, how full this chat is, usage (alias: /usage)")
-            print(f"  {C_TOOL}/compact{C_RESET}               summarize old turns now")
-            print(f"  {C_TOOL}/mem{C_RESET}                   show memory index")
-            print(f"  {C_TOOL}/curate [apply]{C_RESET}        find + merge duplicate-topic memories (archive older)")
-            print(f"  {C_TOOL}/rules{C_RESET}                 show rules.md path")
-            print(f"  {C_TOOL}/name [NewName]{C_RESET}        show / set agent name (JARVIS, Cortana, Friday…)")
-            print(f"  {C_TOOL}/learn{C_RESET}                 re-scan this PC (hardware, models, drives) into memory")
-            print(f"  {C_TOOL}/migrate <hermes|openclaw>{C_RESET}  import memory/skills/config from another agent")
-            print(f"  {C_TOOL}/import-memory [file]{C_RESET}  pull your memory out of ChatGPT/Claude (alias: /import)")
-            print(f"  {C_TOOL}/jobs [all|<id>|kill <id>]{C_RESET}    background jobs (disk_usage / start_job / etc.)")
-            print(f"  {C_TOOL}/mcp [edit|config|run]{C_RESET}     Model Context Protocol - Hearth as server / configure outbound")
-            print(f"  {C_TOOL}/agent [<slug> \"<prompt>\"]{C_RESET}  list personas / spawn a sub-agent synchronously")
-            print(f"  {C_TOOL}/voice [on|off]{C_RESET}        TTS toggle (alias: /voices)")
-            print(f"  {C_TOOL}/voice speed <n>{C_RESET}       TTS playback rate (e.g. 1.2)")
-            print(f"  {C_TOOL}/voice devices{C_RESET}         list mics, and which one is in use")
-            print(f"  {C_TOOL}/voice device <n>{C_RESET}      pick a mic (or 'default')")
-            print(f"  {C_TOOL}/voice mic-test [s]{C_RESET}    record a moment and show the level")
-            print(f"  {C_TOOL}/voice duplex on|off{C_RESET}   hold the mic closed while Hearth speaks")
-            print(f"  {C_TOOL}/stt [model]{C_RESET}           the listening model: tiny.en, base.en, small.en and up")
-            print(f"  {C_TOOL}/listen{C_RESET}                one-shot voice input (record → transcribe)")
-            print(f"  {C_TOOL}/listen on|off{C_RESET}         continuous voice-in with TTS interrupt")
-            print(f"  {C_TOOL}/sleep{C_RESET} / {C_TOOL}/wake{C_RESET}          go quiet until the wake word (or /wake)")
-            print(f"  {C_TOOL}/context <n|auto>{C_RESET}      set context window (or auto-detect)")
-            print(f"  {C_TOOL}/think [on|off]{C_RESET}        toggle reasoning (off = fast, no thinking)")
-            print(f"  {C_TOOL}/multi{C_RESET}                 toggle multi-line input mode")
-            print(f"  {C_TOOL}/mode [ask|edits|auto]{C_RESET} what runs without asking (no argument = next mode)")
-            print(f"  {C_TOOL}/perms{C_RESET}                 show saved tool permissions (persist across restarts)")
-            print(f"  {C_TOOL}/perms forget <tool>{C_RESET}   forget the saved decision for one tool")
-            print(f"  {C_TOOL}/perms reset{C_RESET}           forget ALL saved tool decisions")
-            print(f"  {C_TOOL}/allow <path>{C_RESET}          let the assistant write under <path> this session")
-            print(f"  {C_TOOL}/disallow <path>{C_RESET}       revoke an /allow")
-            print(f"  {C_TOOL}/allowed{C_RESET}               list paths the assistant can write to")
-            print(f"  {C_TOOL}/lockdown [on|off]{C_RESET}     keep reads inside the workspace too")
-            print(f"  {C_TOOL}/me{C_RESET}                    what I call you, how I sound, headphones or speakers, what I may do")
-            print(f"  {C_TOOL}/team [n]{C_RESET}              helpers working for me, and every step of one")
-            print(f"  {C_TOOL}/agents [update id]{C_RESET}    agent CLIs installed here, and updating one")
-            print(f"  {C_TOOL}/about{C_RESET}                 version, endpoint, repo, stats")
-            print(f"  {C_TOOL}/update{C_RESET}                check GitHub for a newer release + install")
-            print(f"  {C_TOOL}/repair{C_RESET}                restore deleted/corrupted files by re-applying this version")
-            print(f"  {C_TOOL}/phone{C_RESET}                 reach Hearth from your phone (Telegram + ntfy status)")
-            print(f"  {C_TOOL}/skill [install <src>]{C_RESET}  list / install / remove shareable skills (GitHub or local)")
-            print(f"  {C_TOOL}/exit{C_RESET}                  quit (or /quit, or just say bye)")
-            print()
-            print(f"  {C_DIM}@<path>{C_RESET}                attach a file inline in your prompt")
-            print(f"  {C_DIM}Esc+Enter{C_RESET}              insert newline (paste multi-line works)")
+        if low == "/help" or low.startswith("/help "):
+            want = low[6:].strip().lstrip("/")
+            if want:
+                hit = "/" + want
+                if hit in SLASH_COMMANDS:
+                    print(f"  {C_TOOL}{hit}{C_RESET}  {SLASH_COMMANDS[hit]}")
+                    for c, d in _SUB_CHOICES.get(hit, []):
+                        print(f"    {C_DIM}{hit} {c}{C_RESET}" + (f"  {C_DIM}{d}{C_RESET}" if d else ""))
+                else:
+                    print(f"{C_DIM}no command {hit}. {_suggest_command(hit)}{C_RESET}")
+                return True
+            for group, cmds in HELP_GROUPS:
+                print(f"\n  {C_BOT}{group}{C_RESET}")
+                for c in cmds:
+                    print(f"    {C_TOOL}{c:<16}{C_RESET}{C_DIM}{SLASH_COMMANDS.get(c, '')}{C_RESET}")
+            print(f"\n  {C_DIM}Type / to see them as you go · /help <command> for one · @path attaches a file{C_RESET}")
             return True
         if low == "/update" or low.startswith("/update "):
             try:
@@ -2780,12 +2736,7 @@ class JarvisCLI:
             await self._cmd_models(cmd)
             return True
         if low == "/model" or low == "/load":
-            # Bare /model = show the current model + how to switch (was falling
-            # through to "Unknown command").
-            print(f"{C_BRAND}Current model:{C_RESET} {C_TOOL}{self.current_model}{C_RESET}  "
-                  f"{C_DIM}on {LOCAL_API_BASE}{C_RESET}")
-            print(f"{C_DIM}Switch: /model <id|n>  ·  list with /models  ·  "
-                  f"boot a local GGUF with /models use <n>{C_RESET}")
+            await self._pick_model()
             return True
         if low.startswith("/model ") or low.startswith("/load "):
             arg = cmd.split(None, 1)[1].strip().strip("[]")
@@ -2805,7 +2756,7 @@ class JarvisCLI:
                 if 0 <= idx < len(self.last_model_list):
                     self.current_model = self.last_model_list[idx]
                     self._keep_model(self.current_model)
-                    print(f"{C_OK}model → {self.current_model}{C_RESET}")
+                    print(f"{C_DIM}↳ now thinking with {C_RESET}{self._model_label()}")
                 else:
                     print(f"{C_ERR}out of range - /models to see the list{C_RESET}")
                     return True
@@ -2831,7 +2782,7 @@ class JarvisCLI:
                 from hearth.headless import find_model as _fm
                 self.current_model = _fm(self.last_model_list, arg) or arg
                 self._keep_model(self.current_model)
-                print(f"{C_OK}model → {self.current_model}{C_RESET}")
+                print(f"{C_DIM}↳ now thinking with {C_RESET}{self._model_label()}")
             # Re-detect context for the new model (unless pinned). Uses
             # the shared per-provider helper so cloud brains land at their
             # real ctx instead of the 8K default.
@@ -3589,9 +3540,10 @@ class JarvisCLI:
                     f"/agents setup {m}" for m in missing) + f"{C_RESET}")
             return True
         if low.startswith("/think"):
+            # What this brain's model offers: off (where it can be), its own
+            # default, and the effort levels its source lists. Bare /think picks.
             parts = cmd.split()
-            # An agent brain always reasons; /think sets how hard, from the
-            # levels its current model takes.
+            arg = parts[1].lower() if len(parts) >= 2 else ""
             try:
                 from hearth import claude_brain as _cb
                 _agent = _cb.current()
@@ -3600,43 +3552,44 @@ class JarvisCLI:
             if _agent:
                 info = _cb.agent_models(_agent)
                 levels = next((m["efforts"] for m in info["models"] if m["id"] == info["model"]), [])
-                arg = parts[1].lower() if len(parts) >= 2 else ""
-                if arg in levels or arg == "default":
-                    _save_setting("think_default", True)
-                    _save_setting("think_level", "" if arg == "default" else arg)
-                    print(f"{C_OK}effort: {arg}{C_RESET}")
-                elif not levels:
-                    print(f"{C_DIM}This {_cb.label()} model has no effort levels.{C_RESET}")
-                else:
-                    print(f"{C_DIM}effort is {info['effort'] or 'default'}. /think default | {' | '.join(levels)}{C_RESET}")
+                can_off, now = False, (info.get("effort") or "default")
+            else:
+                _facts = {}
+                try:
+                    from hearth import headless as _hl
+                    _facts = _hl.listed_facts(LOCAL_API_BASE, self.current_model or "")
+                except Exception:
+                    pass
+                levels = list(_facts.get("efforts") or [])
+                can_off = _facts.get("can_off") is not False
+                now = "off" if not self.think_on else (getattr(self, "think_level", "") or "default")
+            opts = ([("off", "Off: answer straight away")] if can_off else []) \
+                + [("default", "On: as hard as the model decides")] \
+                + [(lv, f"{lv.capitalize()}") for lv in levels]
+            if arg in ("on", "1", "true", "yes"):
+                arg = "default"
+            if arg in ("0", "false", "no"):
+                arg = "off"
+            if not arg:
+                from hearth import term_pick
+                arg = await term_pick.pick(f"{C_BOT}Thinking{C_RESET} {C_DIM}· {self._model_label()}{C_RESET}",
+                                           [(v, l) for v, l in opts], default=now)
+                if arg is None:
+                    return True
+            if arg not in [v for v, _ in opts]:
+                print(f"{C_DIM}This model takes: {', '.join(v for v, _ in opts)}.{C_RESET}")
                 return True
-            # A cloud model whose provider lists effort levels takes one by name.
-            _facts = {}
-            try:
-                from hearth import headless as _hl
-                _facts = _hl.listed_facts(LOCAL_API_BASE, self.current_model or "")
-            except Exception:
-                pass
-            _levels = _facts.get("efforts") or []
-            if len(parts) >= 2 and parts[1].lower() in _levels + ["default"]:
-                self.think_on = True
-                self.think_level = "" if parts[1].lower() == "default" else parts[1].lower()
-                print(f"{C_OK}effort: {parts[1].lower()}{C_RESET}")
-                return True
-            if len(parts) >= 2 and parts[1].lower() in ("off", "0", "false", "no") and _facts.get("can_off") is False:
-                print(f"{C_DIM}This model always reasons; pick how hard: /think default | {' | '.join(_levels)}{C_RESET}")
-                return True
-            if len(parts) >= 2 and parts[1].lower() in ("on", "1", "true", "yes"):
-                self.think_on = True
-            elif len(parts) >= 2 and parts[1].lower() in ("off", "0", "false", "no"):
+            if _agent:
+                _save_setting("think_default", True)
+                _save_setting("think_level", "" if arg == "default" else arg)
+            elif arg == "off":
                 self.think_on = False
             else:
-                # bare /think toggles
-                self.think_on = not self.think_on
-            if self.think_on:
-                print(f"{C_OK}thinking: ON - model reasons, body shown inline{C_RESET}")
-            else:
-                print(f"{C_OK}thinking: OFF - no reasoning compute, no <think> blocks{C_RESET}")
+                self.think_on = True
+                self.think_level = "" if arg == "default" else arg
+            said = {"off": "Thinking off", "default": "Thinking on, as hard as the model decides"}.get(
+                arg, f"Thinking at {arg}")
+            print(f"{C_DIM}↳ {said}{C_RESET}")
             return True
         if low == "/multi":
             self.multiline_mode = not self.multiline_mode
@@ -4153,9 +4106,7 @@ class JarvisCLI:
             return True
         if cmd.startswith("/"):
             _w = low.split()[0] if low.split() else low
-            _guess = _did_you_mean(_w, SLASH_COMMANDS)
-            print(f"{C_ERR}Unknown command." + (f" Did you mean {C_TOOL}{_guess}{C_RESET}{C_ERR}?" if _guess else "")
-                  + f" /help for the list.{C_RESET}")
+            print(f"{C_ERR}No command {_w}.{C_RESET} {C_DIM}{_suggest_command(_w)}{C_RESET}")
             return True
         return False
 
