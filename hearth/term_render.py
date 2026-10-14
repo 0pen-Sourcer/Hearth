@@ -95,6 +95,7 @@ class Turn:
         self.running = True
         self.stats: Dict[str, Any] = {}
         self.usage: Dict[str, Any] = {}
+        self.context: Dict[str, Any] = {}       # the engine's last context count
         self.pending_tools: Dict[str, str] = {}
         self._said_hint = False
         self.ended = False             # the model said goodbye (end_session)
@@ -244,6 +245,9 @@ class Turn:
 
     def _on_compacting(self, **_):
         self.status = "Summing up older turns"
+
+    def _on_context_state(self, **f):
+        self.context = f
 
     def _on_compacted(self, **f):
         self.out(f"{DIM}↳ older turns summed up to make room{RESET}")

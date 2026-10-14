@@ -328,7 +328,7 @@ SLASH_COMMANDS = {
     "/help": "every command", "/status": "what is thinking, how full this chat is, plan limits",
     "/brain": "switch what thinks: local, a provider or an agent",
     "/model": "pick a model on the current brain", "/models": "models on disk, downloads, the provider's list",
-    "/tools": "the tools", "/clear": "start the conversation over", "/compact": "summarize old turns now",
+    "/tools": "the tools", "/clear": "start a new chat", "/compact": "summarize old turns now",
     "/context": "set the context window", "/tokens": "how full the context is", "/history": "the last messages",
     "/chats": "every chat, from the window too", "/chat": "carry on a chat here", "/workspace": "the workspace folder",
     "/log": "recent activity", "/mem": "my memories: what I remember", "/curate": "merge duplicate memories",
@@ -425,7 +425,7 @@ def _looks_like_key(s: str) -> bool:
 
 HELP_GROUPS = [
     ("Brain", ["/brain", "/model", "/models", "/think", "/mode", "/status"]),
-    ("Chats", ["/chats", "/chat", "/clear", "/compact", "/history", "/multi"]),
+    ("Chats", ["/chats", "/chat", "/clear", "/compact", "/context", "/tokens", "/history", "/multi"]),
     ("What I know", ["/mem", "/me", "/name", "/rules", "/learn", "/curate", "/import-memory", "/migrate"]),
     ("Helpers", ["/team", "/agents", "/agent", "/jobs"]),
     ("Voice", ["/voice", "/listen", "/stt", "/sleep", "/wake"]),
@@ -3243,7 +3243,7 @@ class JarvisCLI:
             except Exception:
                 pass
             self.save_history()
-            print(f"{C_OK}Context cleared.{C_RESET}")
+            print(f"{C_OK}New chat.{C_RESET}")
             return True
         if low == "/chats" or (low.startswith("/chat ") and not low.startswith("/chat lm")):
             from hearth import chat_sync
@@ -5949,6 +5949,12 @@ class JarvisCLI:
             self.messages.extend(kept)
         elif reply:
             self.messages.append({"role": "assistant", "content": reply})
+        # The engine's count is what the server said it read; keep how far our
+        # own estimate is from it, so the footer, /tokens and /context read it.
+        ctx = turn.context
+        if ctx.get("measured") and ctx.get("used"):
+            self._ctx_bias = int(ctx["used"]) - estimate_tokens(self.messages)
+            self._ctx_measured = True
         if reply:
             if self.voice_on and voice.is_available():
                 try:

@@ -2398,6 +2398,12 @@ async def run_once(
         # SECOND ~600-token LLM call. It used to run synchronously here, so on a
         # local model the reply finished but the turn hung ~20s on this invisible
         # extra generation before 'done' ever fired.
+        # The count at the top of each round is from before the server answered,
+        # so a one-round turn would end on an estimate; say what it measured.
+        if _ctx_bias:
+            _est = max(0, estimate_tokens(messages) + _ctx_bias)
+            emit("context_state", used=_est, budget=_budget, pct=int(_est * 100 / max(1, _budget)),
+                 messages=len(messages), measured=True, compact_at=COMPACT_AT)
         emit("turn_messages", messages=_turn_tail())
         emit("done",
              duration_ms=int((time.time() - t_start) * 1000),

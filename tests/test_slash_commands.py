@@ -30,9 +30,11 @@ for grp in re.findall(r"low\s+in\s+\(([^)]*)\)", cli):
     handled |= set(re.findall(r'"(/[a-z][\w-]*)"', grp))
 i = cli.index("SLASH_COMMANDS = {")
 auto = set(re.findall(r'"(/[a-z][\w-]*)":', cli[i:cli.index("\n}\n", i)]))
-h = cli.index('if low == "/help":')
-help_text = cli[h:cli.index("return True", h)]
-listed_in_help = set(re.findall(r"(/[a-z][\w-]*)", help_text))
+# /help prints HELP_GROUPS; another name for a listed command is in its description.
+h = cli.index("HELP_GROUPS = [")
+listed_in_help = set(re.findall(r'"(/[a-z][\w-]*)"', cli[h:cli.index("\n]\n", h)])) | {"/help"}
+listed_in_help |= {c for c, d in re.findall(r'"(/[a-z][\w-]*)":\s*"([^"]*)"', cli[i:cli.index("\n}\n", i)])
+                   if d.startswith("same as /")}
 
 check(f"every terminal command in autocomplete is handled {sorted(auto - handled)}", not (auto - handled))
 check(f"every handled terminal command is in autocomplete {sorted(handled - auto)}", not (handled - auto))

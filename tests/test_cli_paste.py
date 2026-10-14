@@ -26,6 +26,7 @@ os.environ["HEARTH_NO_UPDATE_CHECK"] = "1"
 from prompt_toolkit.application import create_app_session  # noqa: E402
 from prompt_toolkit.input import create_pipe_input  # noqa: E402
 from prompt_toolkit.output import DummyOutput  # noqa: E402
+from prompt_toolkit.formatted_text import to_formatted_text  # noqa: E402
 
 import hearth_cli  # noqa: E402
 
@@ -56,13 +57,19 @@ def read(keys):
             cli.multiline_mode = False
             cli.pt_session = None
             cli._pt_init_attempted = False
+            cli._turn = None
             cli._footer_prompt = lambda: "> "
+            cli._model_label = lambda: "model"
+            cli.think_on, cli.voice_on, cli.context_tokens, cli._session_use = False, False, 32768, {}
+            cli._ctx_used = lambda: 0
             cli._ensure_pt_session()
             buf = cli.pt_session.default_buffer
 
             def note(b):
                 seen["line"] = b.text
-                seen["hint"] = cli.pt_session.bottom_toolbar
+                # The footer under the input turns into the hint while a marker is in the line.
+                text = "".join(t for _, t in to_formatted_text(cli._footer()))
+                seen["hint"] = text if "paste again" in text else None
 
             buf.on_text_changed += note
             inp.send_text(keys + "\r")
