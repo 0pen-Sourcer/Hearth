@@ -1887,8 +1887,7 @@ class JarvisCLI:
             print(f"  {C_TOOL}{lim['label']}{C_RESET} {C_DIM}{whose}{when}{C_RESET}")
             for w in lim.get("windows") or []:
                 if w.get("used") is None:
-                    since = f"reset {ago(now - w['resets_at'])} ago · " if w.get("resets_at") else ""
-                    print(f"    {w['name']:<8} {C_DIM}{since}fresh now{C_RESET}")
+                    print(f"    {w['name']:<8} {C_DIM}reset since it last reported{C_RESET}")
                     continue
                 resets = f" · resets in {ago(w['resets_at'] - now)}" if w.get("resets_at") else ""
                 print(f"    {w['name']:<8} {bar(w['used'])}  {w['used']}% used{C_DIM}{resets}{C_RESET}")

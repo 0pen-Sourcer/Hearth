@@ -11282,7 +11282,7 @@ function stUsageHTML(list, compact) {
     let body = '';
     if (u.windows) {
       body = u.windows.map(w => w.used == null
-        ? `<div class="st-bar"><div class="st-bar-top"><span>${esc(w.name)}</span><b>${w.resets_at ? 'reset ' + _stAgo(t - w.resets_at) + ' ago · ' : ''}fresh now</b></div></div>`
+        ? `<div class="st-bar"><div class="st-bar-top"><span>${esc(w.name)}</span><b>reset since it last reported</b></div></div>`
         : _stBar(w.name, w.used, `${w.used}% used${w.resets_at ? ' · resets in ' + _stAgo(w.resets_at - t) : ''}`)).join('');
       if (u.at && t - u.at > 1800) body += `<span class="st-note st-stale">${esc(u.label)} reports this when it runs, so it may have moved since.</span>`;
     } else if (u.credits) {
@@ -11299,7 +11299,7 @@ function _stSummary(u) {
   const t = Date.now() / 1000;
   if (u.windows) {
     const live = u.windows.filter(w => w.used != null);
-    if (!live.length) return 'fresh';
+    if (!live.length) return 'reset since it last reported';
     const top = live.reduce((a, w) => (w.used > a.used ? w : a), live[0]);
     return `${top.used}% of ${top.name.toLowerCase()}${u.at && t - u.at > 1800 ? ' · as of ' + _stAgo(t - u.at) + ' ago' : ''}`;
   }
