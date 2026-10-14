@@ -169,6 +169,40 @@ def turn_is_active() -> bool:
     return _TURN_ACTIVE.is_set()
 
 
+async def _until_stopped(aw, should_cancel):
+    """Await a model call, giving it up the moment stop is asked. None when stopped."""
+    if should_cancel is None:
+        return await aw
+    task = asyncio.ensure_future(aw)
+    while not task.done():
+        if should_cancel():
+            task.cancel()
+            return None
+        await asyncio.wait({task}, timeout=0.1)
+    return task.result()
+
+
+def _close_when_stopped(resp, should_cancel):
+    """Close a reply's stream as soon as stop is asked, so reading it ends now."""
+    if should_cancel is None or resp is None:
+        return None
+
+    async def watch():
+        while not should_cancel():
+            await asyncio.sleep(0.1)
+        for name in ("close", "aclose"):
+            fn = getattr(resp, name, None)
+            if fn is not None:
+                try:
+                    r = fn()
+                    if asyncio.iscoroutine(r):
+                        await r
+                except Exception:
+                    pass
+                return
+    return asyncio.ensure_future(watch())
+
+
 def _cloud_reasoning_effort(base: str, think: bool, model: str, level: str = ""):
     """`reasoning_effort` for a cloud model. /think OFF → skip the reasoning pass
     ("minimal" on OpenAI, "none" elsewhere). /think ON → the user's chosen effort
@@ -1504,8 +1538,11 @@ async def run_once(
                 activity_hud.thinking()
             except Exception:
                 pass
+            resp = None
             try:
-                resp = await chat_create(client, **kwargs)
+                # Stop works while the request is still out (a long prompt read on
+                # a local model sends nothing back for a minute).
+                resp = await _until_stopped(chat_create(client, **kwargs), should_cancel)
             except Exception as _re:
                 # Model doesn't expose reasoning_effort (plain grok-4, grok-3):
                 # strip it, remember, retry once. Other errors fall through to
@@ -1574,6 +1611,9 @@ async def run_once(
                 emit("error", message=info.hint, category=info.category,
                      retryable=info.retryable, detail=f"{type(e).__name__}: {e}")
                 return 4
+        if resp is None and should_cancel is not None and should_cancel():
+            emit("cancelled", message="stopped by user")
+            break
 
         # Streaming accumulator. OpenAI streams tool_calls as partial deltas
         # keyed by `index` — we merge them as they arrive. Content streams as
@@ -1588,6 +1628,9 @@ async def run_once(
         _s_live_last = 0.0              # throttle for the live tok/s event
         _tc_live_last = 0.0            # throttle for the live tool-call-args event
 
+        # Stop ends the reply now: the stream is closed rather than read to its end,
+        # and a local server drops the request with the connection.
+        _closer = _close_when_stopped(resp, should_cancel)
         try:
             async for chunk in resp:
                 _s_last_chunk = chunk
@@ -1661,8 +1704,17 @@ async def run_once(
                             emit("tool_call_partial", index=_sidx,
                                  name=_sl["name"], args_text=(_sl.get("arguments") or ""))
         except Exception as e:
-            emit("error", message=f"Streaming failed at depth {depth}: {type(e).__name__}: {e}")
-            return 4
+            if not (should_cancel is not None and should_cancel()):
+                emit("error", message=f"Streaming failed at depth {depth}: {type(e).__name__}: {e}")
+                return 4
+        finally:
+            if _closer is not None:
+                _closer.cancel()
+        if should_cancel is not None and should_cancel():
+            if content_buf:
+                messages.append({"role": "assistant", "content": "".join(content_buf)})
+            emit("cancelled", message="stopped by user")
+            break
 
         # Empty-stream rescue. llama.cpp's chatml-function-calling STREAMING
         # handler crashes mid-generation on some models ("ASGI callable
