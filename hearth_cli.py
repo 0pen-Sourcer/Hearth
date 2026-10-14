@@ -2837,6 +2837,15 @@ class JarvisCLI:
 
             parts = cmd.split(None, 2)
             if len(parts) == 1:
+                from hearth import term_pick
+                saved = _load_keys()
+                opts = [(pid, f"{pid}  {C_DIM}{about}{' · key saved' if pid in saved else ''}{C_RESET}")
+                        for pid, about in _brain_choices() if pid not in ("forget", "lmstudio")]
+                picked = await term_pick.pick(f"{C_BOT}What thinks{C_RESET} {C_DIM}· now {self._model_label()}{C_RESET}", opts)
+                if picked is None:
+                    return True
+                return await self.handle_command(f"/brain {picked}")
+            if len(parts) == 1:
                 # Just /brain - show current + how to switch + which keys are saved
                 provider_label = "cloud" if not _is_local_endpoint(LOCAL_API_BASE) else "local"
                 try:
@@ -3172,12 +3181,16 @@ class JarvisCLI:
                 if not chats:
                     print(f"  {C_DIM}No chats yet.{C_RESET}")
                     return True
+                from hearth import term_pick
+                mine = (self._chat or {}).get("id")
+                opts = []
                 for i, c in enumerate(chats, 1):
-                    here = " (this one)" if c["id"] == (self._chat or {}).get("id") else ""
-                    where = "terminal" if c["source"] == "terminal" else "window"
-                    print(f"  {C_DIM}{i:>2}{C_RESET}  {c['title'][:60]:<60} {C_DIM}{where}, {c['count']} msgs{here}{C_RESET}")
-                print(f"  {C_DIM}/chat <n> carries one on here. /chats lmstudio lists LM Studio threads.{C_RESET}")
-                return True
+                    where = {"terminal": "terminal", "reminder": "reminder"}.get(c["source"], "window")
+                    here = " · this one" if c["id"] == mine else ""
+                    opts.append((str(i), f"{c['title'][:70]}  {C_DIM}{where} · {c['count']} messages{here}{C_RESET}"))
+                arg = await term_pick.pick(f"{C_BOT}Chats{C_RESET} {C_DIM}· from the window and here{C_RESET}", opts)
+                if arg is None:
+                    return True
             pick = chats[int(arg) - 1] if arg.isdigit() and 1 <= int(arg) <= len(chats) else next(
                 (c for c in chats if arg.lower() in c["title"].lower()), None)
             if not pick:
@@ -3604,17 +3617,20 @@ class JarvisCLI:
             from hearth.tools import approval_mode, APPROVAL_MODES
             words = {"ask": "Ask: asks before anything that acts on your machine",
                      "edits": "Auto-edit: file edits in the workspace go through; commands still ask",
-                     "auto": "Auto: routine work runs without asking; deletes, moves, sends, uploads, pushes and installs still ask"}
+                     "auto": "Auto: routine work runs; deletes, sends, uploads, pushes and installs still ask"}
             arg = low[5:].strip()
             if not arg:
-                cur = approval_mode()
-                arg = APPROVAL_MODES[(APPROVAL_MODES.index(cur) + 1) % len(APPROVAL_MODES)]
+                from hearth import term_pick
+                arg = await term_pick.pick(f"{C_BOT}What runs without asking{C_RESET}",
+                                           [(m, words[m]) for m in APPROVAL_MODES], default=approval_mode())
+                if arg is None:
+                    return True
             arg = {"auto-edit": "edits", "autoedit": "edits", "edit": "edits"}.get(arg, arg)
             if arg not in APPROVAL_MODES:
                 print(f"{C_ERR}/mode ask | edits | auto{C_RESET}")
                 return True
             _save_setting("approval_mode", arg)
-            print(f"{C_OK}{words[arg]}{C_RESET}")
+            print(f"{C_DIM}↳ {words[arg]}{C_RESET}")
             return True
         if low == "/perms":
             if not self.tool_perms:
