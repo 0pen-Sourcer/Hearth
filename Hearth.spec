@@ -191,6 +191,7 @@ except Exception:
 # doesn't drop them during static analysis
 HIDDEN = [
     "openai", "openai._streaming", "openai.types.chat",
+    "anthropic",       # imported in a try in hearth.anthropic_chat
     "truststore",  # imported in a try/except in hearth/__init__ — pin it so
                    # the bundled exe keeps OS-cert-store TLS (cloud behind proxy)
     "pystray._win32", "PIL", "PIL.Image", "PIL.ImageDraw",

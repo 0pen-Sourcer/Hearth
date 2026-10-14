@@ -11,6 +11,7 @@
 
 # ---- Core (required) ----
 openai>=1.0
+anthropic>=1.13          # Anthropic as a brain: its own API takes effort and thinking
 prompt_toolkit>=3.0
 psutil
 pillow

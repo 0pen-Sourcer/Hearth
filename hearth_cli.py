@@ -72,6 +72,7 @@ _answer_flags(sys.argv)
 
 from openai import AsyncOpenAI  # noqa: E402
 from hearth.chat_call import chat_create
+from hearth import anthropic_chat as _anthropic_chat
 
 
 def _stream_client_timeout():
@@ -1098,7 +1099,7 @@ def autodetect_context(model_id: str) -> Optional[int]:
 class JarvisCLI:
     def __init__(self):
         self.openai_tools = to_openai_tools()
-        self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE, timeout=_stream_client_timeout())
+        self.client = _anthropic_chat.async_client(LOCAL_API_BASE, LOCAL_API_KEY, _stream_client_timeout())
         # Auto-detect unless the user explicitly overrode via env
         self.current_model = LOCAL_MODEL if os.getenv("LOCAL_MODEL") else autodetect_model()
         # Whether the user pinned context via env / /context. If they did,
@@ -1987,7 +1988,7 @@ class JarvisCLI:
             pass
         # Rebuild the OpenAI client so it uses the new base + key.
         try:
-            self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE, timeout=_stream_client_timeout())
+            self.client = _anthropic_chat.async_client(LOCAL_API_BASE, LOCAL_API_KEY, _stream_client_timeout())
         except Exception as e:
             print(f"{C_ERR}retarget: client rebuild failed: {e}{C_RESET}")
             return
@@ -3078,7 +3079,7 @@ class JarvisCLI:
 
             # Rebuild the AsyncOpenAI client so the next request uses new creds
             try:
-                self.client = AsyncOpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE, timeout=_stream_client_timeout())
+                self.client = _anthropic_chat.async_client(LOCAL_API_BASE, LOCAL_API_KEY, _stream_client_timeout())
             except Exception as e:
                 print(f"{C_WARN}client rebuild warning: {e}{C_RESET}")
 
@@ -5877,6 +5878,8 @@ class JarvisCLI:
                 eff = self._cloud_reasoning_effort()
                 if eff is not None:
                     create_kwargs["reasoning_effort"] = eff
+                if isinstance(self.client, _anthropic_chat.AsyncAnthropicChat):
+                    create_kwargs["hearth_think"] = self.think_on
             stream = await self._open_stream(create_kwargs)
         except Exception as e:
             spinner_task.cancel()

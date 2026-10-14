@@ -925,7 +925,11 @@ async def run_once(
         _timeout = _httpx.Timeout(None, connect=15.0, read=300.0, write=60.0, pool=15.0)
     except Exception:
         _timeout = 600.0  # fallback: a generous flat timeout beats a 3-minute cliff
-    client = AsyncOpenAI(base_url=LOCAL_API_BASE, api_key=_effective_key, timeout=_timeout)
+    # Anthropic's OpenAI-compatible endpoint ignores effort and refuses thinking;
+    # its own API takes both.
+    from . import anthropic_chat as _ac
+    client = _ac.async_client(LOCAL_API_BASE, _effective_key, _timeout)
+    _native_anthropic = not isinstance(client, AsyncOpenAI)
 
     # Auto-pick the LOADED model (not just downloaded) — LM Studio's v1
     # /models endpoint returns everything it knows about, but only one is
@@ -1473,6 +1477,8 @@ async def run_once(
                 # off, not just drop the reasoning_content. Otherwise the model
                 # reasons server-side and the latency is spent invisibly.
                 eff = _cloud_reasoning_effort(LOCAL_API_BASE, think, model, think_level)
+                if _native_anthropic:
+                    kwargs["hearth_think"] = think
                 if eff is not None:
                     kwargs["reasoning_effort"] = eff
                 elif "openrouter.ai" in (LOCAL_API_BASE or "").lower():
