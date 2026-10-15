@@ -100,7 +100,7 @@ Recall reads each memory file once and reuses it, so a lookup stays fast as your
 
 Passive memory works on reasoning models. Hearth notices durable facts on its own without you saying "remember that", and it now has the room to finish writing them and can read the reply even when a model buries it in its reasoning. It also never competes with you for the model. If you send a message while it is working, your message goes first and the facts are picked up on the next pass. Saving on its own has a switch in Settings, Remember things on its own, and when you tell it in a chat not to save something, it doesn't.
 
-Hearth no longer attaches memories picked by keyword to every message, which pulled in notes that had nothing to do with what you asked. The list of what it knows stays in its instructions and it looks up what it needs, the way it already did for everything else.
+Hearth no longer attaches memories picked by keyword to every message, which pulled in notes that had nothing to do with what you asked. The list of what it knows stays in its instructions and it looks up what it needs, the way it already did for everything else. Opening a memory in the Memory tab shows what it says, when it was saved and how often JARVIS has recalled it, rather than the file behind it.
 
 ## Reminders
 

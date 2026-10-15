@@ -44,6 +44,8 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - A built-in server started by another window or the terminal is reused for the same model instead of failing on a taken port; a second terminal starts its own chat.
 - The context count after a one-round turn is the server's measured one, not an estimate.
 - Chat bubbles take the theme's accent instead of a fixed blue.
+- An opened memory shows the fact, when it was saved and how often it was recalled, not the raw file with its header; graph labels no longer overlap.
+- The terminal's `/help` lists `/context` and `/tokens` again.
 
 ### Security
 - The local API refuses requests from other sites; a page in any browser tab could read stored keys and call tools.

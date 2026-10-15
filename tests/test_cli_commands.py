@@ -82,9 +82,11 @@ with create_pipe_input() as inp:
         check("prose is left alone", offered("tell me about /br") == [] and offered("hello") == [])
 
 # ---------------------------------------------------- a key or a model name
-keys = ["sk-or-v1-" + "a" * 64, "AIza" + "B" * 35, "xai-" + "c" * 80, "gsk_" + "d" * 52, "sk-ant-api03-" + "e" * 90]
+keys = ["sk-or-v1-" + "a" * 64, "AIza" + "B" * 35, "xai-" + "c" * 80, "gsk_" + "d" * 52, "sk-ant-api03-" + "e" * 90,
+        "AQ.Ab8RN6Kx" + "f" * 40]
 names = ["qwen/qwen3.8-27b:free", "models/gemini-3.5-flash", "gemini-3.5-flash", "claude-sonnet-5-5",
-         "use", "inclusionai/ling-3.1-flash"]
+         "use", "inclusionai/ling-3.1-flash", "Meta-Llama-3.1-70B-Instruct-Turbo",
+         "claude-opus-4-5-20251101", "llama-3.3-70b-versatile"]
 check("API keys are told from model names",
       all(hearth_cli._looks_like_key(k) for k in keys) and not any(hearth_cli._looks_like_key(n) for n in names))
 check("a typo gets a suggestion", hearth_cli._did_you_mean("cusror", ["cursor", "codex", "custom"]) == "cursor"

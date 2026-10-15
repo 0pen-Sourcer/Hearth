@@ -415,12 +415,12 @@ def _same_endpoint(a: str, b: str) -> bool:
 
 def _looks_like_key(s: str) -> bool:
     """An API key, as opposed to a model name typed after /brain <provider>."""
+    # By shape, since providers change their prefixes (Gemini's keys went from
+    # AIza to AQ.): a key carries a long random run, a model name is short words.
     s = (s or "").strip()
-    if not s or " " in s or "/" in s:
+    if not s or " " in s or "/" in s or ":" in s:
         return False
-    if s.startswith(("sk-", "xai-", "AIza", "gsk_", "pplx-")):
-        return True
-    return len(s) >= 32 and not any(c in s for c in ".:")
+    return max((len(r) for r in re.findall(r"[A-Za-z0-9]+", s)), default=0) >= 20
 
 
 HELP_GROUPS = [

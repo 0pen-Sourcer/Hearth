@@ -1087,9 +1087,8 @@ def _list_models() -> List[Dict]:
                  else "Gemini" if "googleapis" in _h else "Anthropic" if "anthropic" in _h else "the provider")
         _said = _GET_REFUSED.get(_list_url, "")
         if _said and "key" in _said.lower() and any(w in _said.lower() for w in ("invalid", "not valid", "incorrect")):
-            _hint = " A Gemini key starts with AIza." if _prov == "Gemini" else ""
             _models_notice = (f"{_prov} says the API key isn't valid. Paste the whole key again in Settings, "
-                              f"Chat brain.{_hint}")
+                              f"Chat brain.")
         elif _said:
             _models_notice = f"{_prov} wouldn't list its models: {_said}"
         else:

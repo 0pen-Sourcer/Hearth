@@ -41,6 +41,7 @@ SAMPLES = [
     ("OpenAI", "sk-proj-abcdefghijklmnopqrstuvwxyz012345", "OpenAI key"),
     ("OpenRouter", "sk-or-v1-abcdefghijklmnopqrstuvwxyz0123", "OpenRouter key"),
     ("Google", "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r", "Google API key"),
+    ("Google, newer format", "AQ.Ab8RN6KxQ1w2E3r4T5y6U7i8O9p0AsDfGhJkL", "Google API key"),
     ("GitHub", "ghp_abcdefghijklmnopqrstuvwxyz0123", "GitHub token"),
     ("HuggingFace", "hf_abcdefghijklmnopqrstuvwxyzABCD", "HF token"),
     ("AWS", "AKIAIOSFODNN7EXAMPLE", "AWS key"),

@@ -37,6 +37,7 @@ _KEY_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
     ("OpenRouter key", re.compile(r"\bsk-or-[A-Za-z0-9_-]{16,}")),
     ("OpenAI key",     re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}")),
     ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}")),
+    ("Google API key", re.compile(r"\bAQ\.[0-9A-Za-z_-]{20,}")),
     ("GitHub token",   re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}")),
     ("GitHub PAT",     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}")),
     ("HF token",       re.compile(r"\bhf_[A-Za-z0-9]{20,}")),
