@@ -887,6 +887,21 @@ with sync_playwright() as pw:
     }""")
     check(f"words said part-way sit in their own marked box, apart from the reply {steer}",
           steer["border"] != "0px" and steer["bg"] not in ("rgba(0, 0, 0, 0)", "transparent") and steer["who"] == "block")
+    # A finished helper's report started a second "jarvis" block under the first.
+    arr = pg.evaluate("""() => {
+      const box = document.createElement('div'); box.className = 'chat-body'; document.body.appendChild(box);
+      const a = renderMessage({ role: 'assistant', content: 'Handed it to OpenCode.' });
+      const b = renderMessage({ role: 'assistant', content: 'Leo is back.' });
+      box.appendChild(a); box.appendChild(b);
+      const card = makeSubagentCard({ persona: 'OpenCode', name: 'Leo', status: 'completed', elapsed_s: 37, result_text: 'All done.' });
+      box.appendChild(card);
+      const out = { second: getComputedStyle(b.querySelector('.role-name')).display,
+                    first: getComputedStyle(a.querySelector('.role-name')).display,
+                    cls: card.className };
+      box.remove(); return out;
+    }""")
+    check(f"a report arrives as the usual card and the reply carries on under one name {arr}",
+          arr["second"] == "none" and arr["first"] != "none" and "tool" in arr["cls"])
     # One call that never got a result made every later delegate on the Logs page read as running.
     pairs = pg.evaluate("""() => _lgItems([
       { ts: '2026-10-08T23:26:53', event: 'call', tool: 'delegate', args: { agent: 'gemini-cli' } },
