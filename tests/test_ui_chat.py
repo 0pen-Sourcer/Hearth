@@ -203,7 +203,9 @@ with sync_playwright() as pw:
       showView('team');
       await wait(2500);
       // The room loads its art first; on a slow start JARVIS isn't in it yet.
-      for (let i = 0; i < 60 && !(ROOM.people && ROOM.people.get('__main')); i++) await wait(250);
+      // A busy machine loads it slower; give it a minute, then say so plainly.
+      for (let i = 0; i < 240 && !(ROOM.people && ROOM.people.get('__main')); i++) await wait(250);
+      if (!(ROOM.people && ROOM.people.get('__main'))) return { missing: true };
       const out = { tab: TEAM.tab };
       setState('calling read_file…');
       await wait(400);
@@ -291,6 +293,8 @@ with sync_playwright() as pw:
       return out;
     }""")
     web._save_settings({"llm_provider": "local"})
+    if room.get("missing"):
+        sys.exit("FAIL  JARVIS never appeared in the Team room within a minute (its art didn't load)")
     check(f"in the room JARVIS says what it is doing, not dots {room}",
           room["doing"] == "Reading a file…" and room["thinking"] == "Thinking…")
     check("a permission question is asked in the room, with the approval strip right there",
