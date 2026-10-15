@@ -3209,9 +3209,11 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
         free_vram = detect_gpu_vram_gb()
     out = []
     has_recommended = False
+    addon = vision_addon(info.get("siblings") or [])
     for sib in info.get("siblings", []) or []:
         fn = sib.get("rfilename") or ""
-        if not fn.lower().endswith(".gguf"):
+        # A vision projector isn't a model to run; it comes along with one.
+        if not fn.lower().endswith(".gguf") or "mmproj" in fn.lower():
             continue
         raw_size = sib.get("size")
         actual = round(raw_size / (1024 ** 3), 2) if raw_size else None
@@ -3234,6 +3236,7 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
             "fit_label": fit["label"],
             "quant_tier": quant_tier(fn),
             "recommended": rec,
+            "vision": bool(addon),
         })
     # Sort: recommended first, then by VRAM fit (good→partial→overflow), then
     # by size ascending within tier. Keeps the safest pick on top regardless
@@ -3245,6 +3248,23 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
         f.get("size_gb") or 999,
     ))
     return out
+
+
+def vision_addon(siblings: List[Dict[str, Any]]) -> str:
+    """The repo's vision projector to fetch with a model from it, if it has one:
+    F16 before BF16 before F32 (same quality, the smaller file)."""
+    names = [str(x.get("rfilename") or "") for x in siblings]
+    names = [n for n in names if n.lower().endswith(".gguf") and "mmproj" in n.lower()]
+    def rank(n: str) -> int:
+        n = n.lower()
+        return 1 if "bf16" in n else 0 if "f16" in n else 2 if "f32" in n else 3
+    return sorted(names, key=lambda n: (rank(n), len(n)))[0] if names else ""
+
+
+def vision_addon_name(repo: str, filename: str) -> str:
+    """Saved under the repo's name, so two models' projectors in the one models
+    folder don't overwrite each other and each pairs with its own model."""
+    return f"{repo.split('/')[-1]}-{filename.split('/')[-1]}"
 
 
 _SOURCES_FILE = "sources.json"
@@ -3393,6 +3413,8 @@ def _run_download_job(job: Dict[str, Any]) -> None:
     try:
         result = download_from_hf_repo(job["repo"], job["filename"], on_progress=on_progress,
                                        cancel=job["stop"].is_set)
+        if result.get("ok"):
+            _fetch_vision_addon(job, on_progress)
     except Exception as e:
         result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     job["result"] = result
@@ -3405,6 +3427,28 @@ def _run_download_job(job: Dict[str, Any]) -> None:
         job["status"] = "paused"
     else:
         job["status"] = "error"
+
+
+def _fetch_vision_addon(job: Dict[str, Any], on_progress) -> None:
+    """A model that can see needs its projector beside it; fetch it once the
+    model is in. Missing it only costs vision, so a failure here is noted, not fatal."""
+    try:
+        url = f"https://huggingface.co/api/models/{urllib.parse.quote(job['repo'], safe='/')}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            addon = vision_addon(json.loads(r.read().decode("utf-8")).get("siblings") or [])
+        if not addon:
+            return
+        dest = MODELS_DIR / vision_addon_name(job["repo"], addon)
+        if dest.exists():
+            return
+        job["phase"] = "vision"
+        _download_with_resume(_hf_resolve_url(job["repo"], addon), dest, dest.with_suffix(dest.suffix + ".part"),
+                              on_progress, cancel=job["stop"].is_set)
+    except Exception as e:
+        job["vision_error"] = f"{type(e).__name__}: {e}"
+    finally:
+        job.pop("phase", None)
 
 
 def start_model_download(repo: str, filename: str) -> Dict[str, Any]:
