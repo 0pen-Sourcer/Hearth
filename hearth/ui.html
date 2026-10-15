@@ -1024,7 +1024,7 @@
   .tm-i-now i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); }
   .tm-i-now i.working { background: var(--ok); } .tm-i-now i.done { background: var(--accent-2); }
   .tm-i-now i.failed, .tm-i-now i.needs { background: var(--err); }
-  .tm-side b em { font-style: normal; font-weight: 500; color: var(--fg-faint); margin-left: 6px; }
+  .tm-side b em, .tx-wrap > b em { font-style: normal; font-weight: 500; color: var(--fg-faint); margin-left: 6px; }
   .tm-side > * { flex: none; }
   .tm-more { max-height: 7.6em; overflow: hidden; cursor: pointer;
     -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
@@ -1058,8 +1058,8 @@
   .tm-open-log { margin-top: 12px; align-self: flex-start; }
   .tm-side h4 { margin: 0 0 2px; color: var(--fg); font-size: 14px; }
   .tm-side .tm-side-sub { color: var(--fg-faint); font-size: 11.5px; margin-bottom: 10px; }
-  .tm-side b { display: block; color: var(--fg); font-size: 11.5px; margin: 12px 0 3px; }
-  .tm-side p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
+  .tm-side b, .tx-wrap > b { display: block; color: var(--fg); font-size: 11.5px; margin: 12px 0 3px; }
+  .tm-side p, .tx-wrap > p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
   .tm-side .tm-close { float: right; background: none; border: none; color: var(--fg-faint); font-size: 16px; line-height: 1; }
   /* The room takes whatever height is left once the strip and the message
      box have theirs, and keeps its 3:2 shape inside it. */
@@ -2221,24 +2221,13 @@
   /* Sub-agent transcript viewer (Team -> See every step). The modal
      body already scrolls and is monospaced/pre-wrap, so override to prose here
      and let the modal own the single scrollbar. */
-  .tx-wrap { font-family: var(--sans); white-space: normal; }
-  .tx-task { color: var(--fg); font-weight: 600; font-size: 13px; margin-bottom: 12px; }
-  .tx-prompt { color: var(--fg-dim); font-weight: 400; font-size: 12.5px; margin-top: 5px;
-    line-height: 1.5; padding: 9px 11px; background: var(--bg-0); border: 1px solid var(--border);
-    border-radius: 8px; }
-  .tx-tool { color: var(--accent); font-size: 12px; margin: 8px 0 2px;
-    font-family: var(--mono, ui-monospace, monospace); }
-  .tx-tool .tx-args { color: var(--fg-faint); }
-  .tx-res { color: var(--fg-dim); font-size: 12px; margin: 0 0 8px 16px; white-space: pre-wrap;
-    font-family: var(--mono); max-height: 130px; overflow: auto; border-left: 2px solid var(--border); padding-left: 11px; }
-  .tx-final { margin: 12px 0; color: var(--fg); font-size: 13.5px; line-height: 1.62; }
-  .tx-final h2, .tx-final h3, .tx-final h4 { margin: 12px 0 6px; }
-  .tx-final table { border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
-  .tx-final code { background: var(--bg-0); padding: 1px 5px; border-radius: 4px;
-    font-family: var(--mono, ui-monospace, monospace); }
-  .tx-end { font-weight: 600; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
-  .tx-end.ok { color: var(--ok); }
-  .tx-end.bad { color: var(--err); }
+  .modal .modal-body:has(.tx-wrap) { background: none; border: none; padding: 0; white-space: normal;
+    font-family: var(--sans); font-size: 13px; max-height: min(72vh, calc(100vh - 170px)); }
+  .tx-wrap { color: var(--fg); }
+  .tx-wrap .tx-sub { color: var(--fg-faint); font-size: 12px; }
+  .tx-wrap .tx-chat { padding: 0; margin-top: 12px; max-height: none; overflow: visible; }
+  .tx-wrap .tx-chat .msg { padding: 0; margin: 0; border: 0; }
+  .tx-wrap .tx-chat .role-name, .tx-wrap .tx-chat .actions { display: none; }
 
   .item {
     display: flex; align-items: center; gap: 12px;
@@ -7220,69 +7209,72 @@ function renderChat() {
       day = d;
     }
     body.appendChild(msgDiv);
-    if (m.role === 'assistant') {
-      // Interleave text with tools/thinking by the position each event fired at
-      // (ev.pos = chars of content that existed then). Text BEFORE a tool renders
-      // above it, text after below — instead of all tools bunched on top and all
-      // text at the bottom. Empty the bubble's own .content (renderMessage put the
-      // whole reply there) and rebuild as positioned segments; it stays as an
-      // empty, :empty-hidden placeholder. Events with no pos (older chats) default
-      // to 0 and land before the text, matching the old behavior.
-      const content = m.content || '';
-      const events = Array.isArray(m.events) ? m.events : [];
-      const firstContent = msgDiv.querySelector('.content');
-      if (firstContent) firstContent.innerHTML = '';
-      let cursor = 0, thinkBuf = '';
-      const putText = (upto) => {
-        if (upto <= cursor) return;
-        const seg = content.slice(cursor, upto); cursor = upto;
-        if (!seg.trim()) return;
-        appendPart(makeContentBlock(renderMD(stripGarbageToolCalls(seg))), msgDiv);
-      };
-      const flushThink = () => {
-        if (thinkBuf) { const tb = makeThink(thinkBuf); tb.classList.remove('open'); appendPart(tb, msgDiv); thinkBuf = ''; }
-      };
-      // Walk events in ORIGINAL (chronological) order; pos = how much text
-      // preceded each. Thinking renders where it started; a tool/media flushes the
-      // pending thinking FIRST, then the text up to it, then itself — so text lands
-      // AFTER the reasoning that preceded it, not above it.
-      for (const ev of events) {
-        const p = (ev.pos == null ? cursor : ev.pos);
-        if (ev.kind === 'think_chunk') { putText(p); thinkBuf += ev.content || ''; continue; }
-        if (ev.kind === 'nudge' || ev.kind === 'done') continue;
-        flushThink();
-        putText(p);
-        if (ev.kind === 'tool') {
-          if (_hideToolCard(ev.name)) continue;
-          const t = makeToolCard(ev.name, ev.args || {});
-          // Keep the green/red diff for file writes; the terse text result would
-          // clobber it. Other tools show their result as before.
-          if (!t.div.classList.contains('has-diff')) t.body.textContent = ev.result || '';
-          if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
-          appendPart(t.div, msgDiv);
-        } else if (ev.kind === 'media') {
-          appendPart(makeMediaBlock(ev.mediaKind, ev.path), msgDiv);
-        } else if (ev.kind === 'subagent_done') {
-          appendPart(makeSubagentCard(ev), msgDiv);
-        } else if (ev.kind === 'steer') {
-          appendPart(makeSteerNote(ev.text || '', false), msgDiv);
-        } else if (ev.kind === 'error') {
-          appendPart(makeMeta(ev.text || 'error', 'err'), msgDiv);
-        }
-      }
-      flushThink();
-      putText(content.length);
-      for (const ev of events) {
-        if (ev.kind !== 'done') continue;
-        if (ev.text) body.appendChild(makeMeta(ev.text, 'ok'));
-        attachStatsLine(msgDiv, ev.stats);
-      }
-    }
+    if (m.role === 'assistant') replayAssistant(msgDiv, m, body);
   }
   body.scrollTop = body.scrollHeight;
   _updateCtxRingFromHistory();  // reflect existing chat's usage on load/switch
 }
 
+// A saved reply drawn as it streamed: its text, thinking and tool cards in the
+// order they came. The chat uses it, and so does a helper's log.
+function replayAssistant(msgDiv, m, body) {
+  // Interleave text with tools/thinking by the position each event fired at
+  // (ev.pos = chars of content that existed then). Text BEFORE a tool renders
+  // above it, text after below — instead of all tools bunched on top and all
+  // text at the bottom. Empty the bubble's own .content (renderMessage put the
+  // whole reply there) and rebuild as positioned segments; it stays as an
+  // empty, :empty-hidden placeholder. Events with no pos (older chats) default
+  // to 0 and land before the text, matching the old behavior.
+  const content = m.content || '';
+  const events = Array.isArray(m.events) ? m.events : [];
+  const firstContent = msgDiv.querySelector('.content');
+  if (firstContent) firstContent.innerHTML = '';
+  let cursor = 0, thinkBuf = '';
+  const putText = (upto) => {
+    if (upto <= cursor) return;
+    const seg = content.slice(cursor, upto); cursor = upto;
+    if (!seg.trim()) return;
+    appendPart(makeContentBlock(renderMD(stripGarbageToolCalls(seg))), msgDiv);
+  };
+  const flushThink = () => {
+    if (thinkBuf) { const tb = makeThink(thinkBuf); tb.classList.remove('open'); appendPart(tb, msgDiv); thinkBuf = ''; }
+  };
+  // Walk events in ORIGINAL (chronological) order; pos = how much text
+  // preceded each. Thinking renders where it started; a tool/media flushes the
+  // pending thinking FIRST, then the text up to it, then itself — so text lands
+  // AFTER the reasoning that preceded it, not above it.
+  for (const ev of events) {
+    const p = (ev.pos == null ? cursor : ev.pos);
+    if (ev.kind === 'think_chunk') { putText(p); thinkBuf += ev.content || ''; continue; }
+    if (ev.kind === 'nudge' || ev.kind === 'done') continue;
+    flushThink();
+    putText(p);
+    if (ev.kind === 'tool') {
+      if (_hideToolCard(ev.name)) continue;
+      const t = makeToolCard(ev.name, ev.args || {});
+      // Keep the green/red diff for file writes; the terse text result would
+      // clobber it. Other tools show their result as before.
+      if (!t.div.classList.contains('has-diff')) t.body.textContent = ev.result || '';
+      if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
+      appendPart(t.div, msgDiv);
+    } else if (ev.kind === 'media') {
+      appendPart(makeMediaBlock(ev.mediaKind, ev.path), msgDiv);
+    } else if (ev.kind === 'subagent_done') {
+      appendPart(makeSubagentCard(ev), msgDiv);
+    } else if (ev.kind === 'steer') {
+      appendPart(makeSteerNote(ev.text || '', false), msgDiv);
+    } else if (ev.kind === 'error') {
+      appendPart(makeMeta(ev.text || 'error', 'err'), msgDiv);
+    }
+  }
+  flushThink();
+  putText(content.length);
+  for (const ev of events) {
+    if (ev.kind !== 'done') continue;
+    if (ev.text) body.appendChild(makeMeta(ev.text, 'ok'));
+    attachStatsLine(msgDiv, ev.stats);
+  }
+}
 let _prevLoadedReady = false;  // tracks model-loaded transitions to refresh the empty state
 let _appBooting = true;        // true during the first drive-scan after launch; cleared once the initial model/state poll returns
 // One source of truth for the empty screen's state, so a fresh build and an
@@ -12692,36 +12684,54 @@ function stopLoadProgress() {
 // ============================================================
 // SERVER settings pane - live status card + actions
 // ============================================================
+// A helper's run read as a reply in the chat: what it wrote, and each step as
+// the same tool card JARVIS's own replies use, folded the same way.
+function helperAsMessage(recs) {
+  let content = '';
+  const events = [], open = [];
+  const say = t => { t = String(t || '').trim(); if (t) content += (content ? '\n\n' : '') + t; };
+  const args = a => { if (typeof a !== 'string') return a || {}; try { return JSON.parse(a); } catch { return {}; } };
+  const close = (c, result) => events.push({ kind: 'tool', name: c.name || 'tool', args: args(c.args), result, pos: c.pos });
+  for (const x of recs) {
+    if (x.kind === 'assistant_tool_call') {
+      say(x.content);
+      for (const c of (x.calls || [])) open.push(Object.assign({}, c, { pos: content.length }));
+    } else if (x.kind === 'tool_result') {
+      close(open.shift() || { name: x.name, args: {}, pos: content.length }, String(x.preview || ''));
+    } else if (x.kind === 'assistant_final') {
+      while (open.length) close(open.shift(), '');
+      say(x.text || x.content);
+    } else if (x.kind === 'end' && !x.ok && x.error) {
+      events.push({ kind: 'error', text: String(x.error), pos: content.length });
+    }
+  }
+  while (open.length) close(open.shift(), '');
+  return { role: 'assistant', content, events };
+}
 async function openTaskTranscript(agentId) {
   try {
-    const r = await api('/api/subagent/transcript?agent_id=' + encodeURIComponent(agentId));
-    const lines = String((r && r.content) || '').split('\n').filter(Boolean);
-    const parts = [];
-    for (const ln of lines) {
-      let x; try { x = JSON.parse(ln); } catch { continue; }
-      if (x.kind === 'start')
-        parts.push(`<div class="tx-task">${esc(x.persona || 'agent')}<div class="tx-prompt">${esc(String(x.prompt || ''))}</div></div>`);
-      else if (x.kind === 'assistant_tool_call') {
-        if (x.content) parts.push(`<div class="tx-final">${renderMD(String(x.content))}</div>`);
-        for (const c of (x.calls || [])) {
-          let a = c.args;
-          if (typeof a === 'string') { try { a = JSON.stringify(JSON.parse(a)); } catch {} }
-          else a = JSON.stringify(a || {});
-          a = String(a || ''); if (a === '{}') a = '';
-          parts.push(`<div class="tx-tool">${esc(c.name || 'tool')}${a ? ' <span class="tx-args">' + esc(a.slice(0, 220)) + '</span>' : ''}</div>`);
-        }
-      }
-      else if (x.kind === 'tool_result')
-        parts.push(`<div class="tx-res">${esc(String(x.preview || '').slice(0, 600)) || '(no output captured)'}</div>`);
-      else if (x.kind === 'assistant_final')
-        parts.push(`<div class="tx-final">${renderMD(String(x.text || x.content || ''))}</div>`);
-      else if (x.kind === 'end')
-        parts.push(`<div class="tx-end ${x.ok ? 'ok' : 'bad'}">${x.ok ? '✓ done' : '✗ failed'}${x.error ? ': ' + esc(String(x.error).slice(0, 240)) : ''}${x.elapsed_s ? ' · ' + x.elapsed_s + 's' : ''}</div>`);
-    }
-    const html = parts.length ? parts.join('') : '<div class="list-empty">Transcript is empty (the agent may still be starting).</div>';
-    showModal('Task transcript', `<div class="tx-wrap">${html}</div>`, [{ label: 'Close', primary: true }]);
+    const [r, story] = await Promise.all([
+      api('/api/subagent/transcript?agent_id=' + encodeURIComponent(agentId)),
+      api('/api/team/story?id=' + encodeURIComponent(agentId)).catch(() => ({}))]);
+    const recs = String((r && r.content) || '').split('\n').filter(Boolean)
+      .map(ln => { try { return JSON.parse(ln); } catch { return null; } }).filter(Boolean);
+    const start = recs.find(x => x.kind === 'start') || {};
+    const p = ROOM.people.get(agentId), a = p ? p.agent : ((TEAM.agents || []).find(x => x.id === agentId) || {});
+    const who = story && story.by === 'you' ? 'you' : ((story && story.by) || _agentName());
+    const prompt = (story && story.prompt) || start.prompt || '';
+    showModal([a.name || start.name, a.persona || start.persona].filter((v, i, l) => v && l.indexOf(v) === i).join(' \u00b7 ') || 'Every step',
+      `<div class="tx-wrap">${a.runtime || a.updated ? `<div class="tx-sub">${esc([teamWhat(a), a.updated ? teamAgo(a.updated) : ''].filter(Boolean).join(' \u00b7 '))}</div>` : ''}`
+      + (prompt ? `<b>Asked by ${esc(who)}</b><p>${esc(prompt)}</p>` : '') + `<div class="chat-body tx-chat"></div></div>`,
+      [{ label: 'Close', primary: true }]);
+    const box = document.querySelector('#modal-body .tx-chat');
+    const m = helperAsMessage(recs);
+    const msgDiv = renderMessage(m);
+    if (!msgDiv) return;
+    box.appendChild(msgDiv);
+    replayAssistant(msgDiv, m, box);
+    if (!m.content && !m.events.length) box.innerHTML = '<div class="list-empty">Nothing yet; it may still be starting.</div>';
   } catch (e) {
-    toast('Could not load transcript', e.message || '', 'warn', 4000);
+    toast("Couldn't open its log", e.message || '', 'warn', 4000);
   }
 }
 

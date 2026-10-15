@@ -859,6 +859,25 @@ with sync_playwright() as pw:
     check(f"each message says when it was said, with a line where the day changes, and each chat when it was last used {times}",
           times["days"] == ["Yesterday", "Today"] and times["stamps"] == [True, True, True, True, False]
           and any(ch.isdigit() for ch in times["first"] or "") and any(ch.isdigit() for ch in times["when"] or ""))
+    # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
+    tx = pg.evaluate("""() => {
+      const m = helperAsMessage([
+        { kind: 'start', name: 'Sana', persona: 'OpenCode', prompt: 'read notes.txt' },
+        { kind: 'assistant_tool_call', content: 'Looking.', calls: [{ name: 'read_file', args: '{"path": "notes.txt"}' }] },
+        { kind: 'tool_result', name: 'read_file', preview: 'Buy milk on Friday' },
+        { kind: 'assistant_final', text: 'It says buy milk.' },
+        { kind: 'end', ok: true }]);
+      const box = document.createElement('div'); box.className = 'chat-body'; document.body.appendChild(box);
+      const div = renderMessage(m); box.appendChild(div); replayAssistant(div, m, box);
+      const out = { tools: m.events.filter(e => e.kind === 'tool').map(e => [e.name, e.args.path, e.result]),
+                    cards: box.querySelectorAll('.tool-card, .tool-run').length, text: box.innerText,
+                    glyph: /[\u2713\u2717]|\uD83D\uDD27/.test(box.innerText) };
+      box.remove();
+      return out;
+    }""")
+    check(f"a helper's full log is drawn like a reply: its words and its steps as the chat's tool cards {tx}",
+          tx["tools"] == [["read_file", "notes.txt", "Buy milk on Friday"]] and tx["cards"] >= 1
+          and "It says buy milk." in tx["text"] and "Looking." in tx["text"] and not tx["glyph"])
     # Opening a memory showed its file: the --- header, type:, tags: and all.
     fact = pg.evaluate("""async () => {
       const realApi = api;
