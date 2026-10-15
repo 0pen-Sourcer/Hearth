@@ -39,7 +39,7 @@ import threading
 import time
 import wave
 from io import BytesIO
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .tools import WORKSPACE
 
@@ -515,10 +515,31 @@ def reload() -> None:
     _last_load_error = None
 
 
+# The voice and speed are read when speaking, not when this module is first
+# imported: a surface that imports it before its settings are applied would
+# otherwise keep the defaults for the whole session. A pick made while running wins.
+_PICKED: Dict[str, Any] = {}
+
+
+def current_voice() -> str:
+    return _PICKED.get("voice") or (_env.get("VOICE", "") or "").strip() or "am_michael"
+
+
+def current_speed() -> float:
+    if "speed" in _PICKED:
+        return _PICKED["speed"]
+    try:
+        return max(0.5, min(2.5, float(_env.get("VOICE_SPEED", "") or 1.0)))
+    except ValueError:
+        return 1.0
+
+
 def set_default_voice(name: str) -> None:
     """Change the default voice id used for subsequent speak() calls."""
     global DEFAULT_KOKORO_VOICE
-    DEFAULT_KOKORO_VOICE = (name or "").strip() or DEFAULT_KOKORO_VOICE
+    if (name or "").strip():
+        _PICKED["voice"] = name.strip()
+    DEFAULT_KOKORO_VOICE = current_voice()
 
 
 def set_speed(speed: float) -> float:
@@ -530,6 +551,7 @@ def set_speed(speed: float) -> float:
     except (TypeError, ValueError):
         return DEFAULT_SPEED
     DEFAULT_SPEED = max(0.5, min(2.5, s))
+    _PICKED["speed"] = DEFAULT_SPEED
     return DEFAULT_SPEED
 
 
@@ -614,7 +636,7 @@ def voice_for(text: str, voice: str) -> str:
     written in a script only another language's voices read, or the language
     set for listening shares English's alphabet and the chosen voice isn't of
     that language."""
-    voice = voice or DEFAULT_KOKORO_VOICE
+    voice = voice or current_voice()
     for code, pat in _SCRIPTS:
         if pat.search(text or ""):
             return voice if voice[:1] == code else _same_kind(code, voice)
@@ -1093,7 +1115,7 @@ def speak(text: str, blocking: bool = False,
     # downloads. _engine caches, so the fetch happens at most once.
     if _load_engine(allow_download=True) is None:
         return "no_voice"
-    speed = speed if speed is not None else DEFAULT_SPEED
+    speed = speed if speed is not None else current_speed()
     note_spoken(text)
 
     if not _TTS_GAPLESS:
@@ -1188,8 +1210,8 @@ def status() -> dict:
         # for both and the Lite build had no way to get voice at all.
         "models_present": models_present(),
         "can_install_models": can_install_models(),
-        "default_voice": DEFAULT_KOKORO_VOICE,
-        "default_speed": DEFAULT_SPEED,
+        "default_voice": current_voice(),
+        "default_speed": current_speed(),
         "last_load_error": _last_load_error,
         # Soft warning — engine loaded but with a downgrade (e.g. CUDA->CPU
         # fallback). GUI should render this as a yellow toast w/ install hint
