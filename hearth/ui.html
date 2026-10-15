@@ -2830,8 +2830,10 @@
   .field {
     display: flex; align-items: center; padding: 12px 0;
     border-bottom: 1px solid var(--border);
-    gap: 16px;
+    gap: 16px; flex-wrap: wrap;
   }
+  /* A row's error gets a line of its own under it, never a column that squeezes the label. */
+  .field > [id$="-err"] { flex: 1 0 100%; margin-top: 0 !important; }
   .field .label { flex: 1; min-width: 0; }   /* min-width:0 prevents the label from being squished by a wide right column */
   .field .label .name { color: var(--fg); font-weight: 500; }
   .field .label .hint {
@@ -16234,8 +16236,9 @@ function modelVisionHTML(v, path) {
       + `<button class="model-mini" data-dl-open="1">Show in Downloads</button>`;
   if ((j && j.status === 'paused') || (d && d.status === 'paused'))
     return `<span class="model-vision-note">Its vision file is paused in Downloads.</span>`;
-  if (j && j.status === 'error')
-    return `<span class="model-vision-note err">Couldn't download its vision file. </span><button class="model-mini" data-vision-get="${esc(path)}">Try again</button>`;
+  const why = (d && d.status === 'error' && d.err) || (j && j.status === 'error' && ((j.result || {}).error || ''));
+  if ((j && j.status === 'error') || (d && d.status === 'error'))
+    return `<span class="model-vision-note err">Couldn't download its vision file${why ? ': ' + esc(why) : ''}. </span><button class="model-mini" data-vision-get="${esc(path)}">Try again</button>`;
   return `<span class="model-vision-note">It can see images once its vision file is downloaded${v.size_gb ? ` (${v.size_gb} GB)` : ''}. </span>`
     + `<button class="model-mini" data-vision-get="${esc(path)}">Add vision</button>`;
 }
@@ -16264,10 +16267,14 @@ async function modelsAddVision(path, ask = true) {
     try {
       const res = await fetch('/api/llmserver/vision-download', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                                  body: JSON.stringify({ path }) });
-      if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+      if (!res.ok || !res.body) throw new Error(res.status === 404 ? 'this copy of Hearth needs a restart to add vision' : 'the request failed (' + res.status + ')');
       const got = await streamDownload(res, null, null, null, v.save_as);
       if (got) { toast('Vision added', 'Load the model again and JARVIS can see images with it.', 'ok', 6000); MODEL_VISION.delete(path); }
-    } catch (e) { dlUpsert(v.save_as, { status: 'paused' }); }
+    } catch (e) {
+      // A dropped connection leaves the download running in the backend; anything else failed.
+      if (e && e.name === 'TypeError') dlUpsert(v.save_as, { status: 'paused' });
+      else dlUpsert(v.save_as, { status: 'error', err: (e && e.message) || "It didn't say why." });
+    }
     modelVisionFill();
   };
   if (!ask) return go();
@@ -17938,7 +17945,7 @@ function dlRender() {
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">
         <span style="font-size:11.5px;color:var(--fg-faint);font-family:var(--mono)">${meta}</span>
         ${ctrlBtn}
-      </div>${isAgent && d.line ? `<div style="font-size:11px;color:var(--fg-faint);font-family:var(--mono);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.line)}">${esc(d.line)}</div>` : ''}
+      </div>${isAgent && d.line ? `<div style="font-size:11px;color:var(--fg-faint);font-family:var(--mono);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.line)}">${esc(d.line)}</div>` : ''}${d.status === 'error' && d.err ? `<div style="font-size:11.5px;color:var(--err);margin-top:4px;overflow-wrap:anywhere">${esc(d.err)}</div>` : ''}
     </div>`;
   }).join('') : '<div style="color:var(--fg-dim);font-size:13px;padding:6px 0 14px">No downloads yet.</div>';
   // Only offer the model catalogue when this panel is actually about models.
@@ -18102,7 +18109,7 @@ async function streamDownload(res, bar, label, detail, filenameHint) {
         if (label) label.textContent = (filenameHint || 'Downloading') + ' - ' + pct + '%';
         if (detail) detail.textContent = _fmtGB(ev.done) + ' of ' + _fmtGB(ev.total);
       } else if (ev.type === 'done') {
-        if (!ev.ok) { dlUpsert(id, { status: 'error' }); if (label) label.textContent = 'Download failed'; if (detail) detail.textContent = ev.error || ''; return null; }
+        if (!ev.ok) { dlUpsert(id, { status: 'error', err: ev.error || "It didn't say why." }); if (label) label.textContent = 'Download failed'; if (detail) detail.textContent = ev.error || ''; return null; }
         modelPath = ev.path;
         dlUpsert(id, { pct: 100, status: 'done' });
         if (bar) bar.style.width = '100%';

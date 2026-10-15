@@ -2672,8 +2672,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _save_settings(self._read_json()))
         if path == "/api/voice/mic-test":
             try:
-                from . import listen as _listen
-                return self._send_json(200, _listen.mic_test())
+                from . import listen as _mic   # not `_listen`: that name in here shadows the module-wide one
+                return self._send_json(200, _mic.mic_test())
             except Exception as e:
                 return self._send_json(200, {"ok": False, "error": str(e)})
         if path == "/api/models/set-dir":
