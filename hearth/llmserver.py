@@ -3258,7 +3258,7 @@ _REPO_SIBLINGS: Dict[str, List[Dict[str, Any]]] = {}
 
 def _repo_siblings(repo: str) -> List[Dict[str, Any]]:
     if repo not in _REPO_SIBLINGS:
-        url = f"https://huggingface.co/api/models/{urllib.parse.quote(repo, safe='/')}"
+        url = f"https://huggingface.co/api/models/{urllib.parse.quote(repo, safe='/')}?blobs=true"
         req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
         with urllib.request.urlopen(req, timeout=8) as r:
             _REPO_SIBLINGS[repo] = json.loads(r.read().decode("utf-8")).get("siblings") or []
@@ -3298,21 +3298,16 @@ def vision_for_file(path: str, look_up: bool = True) -> Dict[str, Any]:
         repo = repo_for_file(path)
         if not repo:
             return {"state": "unknown"}
-        addon = vision_addon(_repo_siblings(repo))
-        return {"state": "needs_file", "repo": repo, "file": addon} if addon else {"state": "text", "repo": repo}
+        sibs = _repo_siblings(repo)
+        addon = vision_addon(sibs)
+        if not addon:
+            return {"state": "text", "repo": repo}
+        size = next((x.get("size") or (x.get("lfs") or {}).get("size") for x in sibs if x.get("rfilename") == addon), None)
+        return {"state": "needs_file", "repo": repo, "file": addon, "save_as": vision_addon_name(repo, addon),
+                "folder": os.path.dirname(os.path.abspath(path)),
+                "size_gb": round(size / 1e9, 2) if isinstance(size, (int, float)) else None}
     except Exception as e:
         return {"state": "unknown", "error": f"{type(e).__name__}: {e}"}
-
-
-def fetch_vision_for_file(path: str) -> Dict[str, Any]:
-    """Fetch a model's projector into the model's own folder, as a download job."""
-    v = vision_for_file(path)
-    if v.get("state") != "needs_file":
-        return {"ok": False, "error": "this model has no vision file to fetch" if v.get("state") != "sees"
-                else "it can already see"}
-    name = vision_addon_name(v["repo"], v["file"])
-    job = start_model_download(v["repo"], v["file"], dest_dir=os.path.dirname(os.path.abspath(path)), save_as=name)
-    return {"ok": True, "name": name, "status": job["status"]}
 
 
 def vision_addon_name(repo: str, filename: str) -> str:
@@ -3438,11 +3433,12 @@ def _write_pending(entries: Dict[str, Dict[str, Any]]) -> None:
         pass
 
 
-def save_pending_download(repo: str, filename: str, paused: bool = False) -> None:
-    """Remember which repo a download comes from so it can resume after a restart."""
+def save_pending_download(repo: str, filename: str, paused: bool = False, vision_for: str = "") -> None:
+    """Remember which repo a download comes from so it can resume after a restart;
+    a model's vision file also remembers the model it belongs beside."""
     with _dl_lock:
         entries = _read_pending()
-        entries[filename] = {"repo": repo, "paused": bool(paused)}
+        entries[filename] = {"repo": repo, "paused": bool(paused), **({"vision_for": vision_for} if vision_for else {})}
         _write_pending(entries)
 
 
@@ -3507,14 +3503,17 @@ def _fetch_vision_addon(job: Dict[str, Any], on_progress) -> None:
         job.pop("phase", None)
 
 
-def start_model_download(repo: str, filename: str, dest_dir: str = "", save_as: str = "") -> Dict[str, Any]:
+def start_model_download(repo: str, filename: str, dest_dir: str = "", save_as: str = "",
+                         vision_for: str = "") -> Dict[str, Any]:
     """Start a download, or return the one already running for this file."""
     name = (save_as or filename).split("/")[-1]
     with _dl_lock:
         job = _dl_jobs.get(name)
         if job and job["status"] == "downloading":
             return job
-        if not dest_dir:
+        if save_as and dest_dir:
+            save_pending_download(repo, name, vision_for=vision_for)
+        else:
             save_pending_download(repo, filename)
         job = {"repo": repo, "filename": filename, "status": "downloading",
                "done": 0, "total": 0, "result": None, "stop": _threading.Event(),
@@ -3638,6 +3637,7 @@ def list_partial_downloads() -> List[Dict[str, Any]]:
                             "gb": round(p.stat().st_size / (1024 ** 3), 2),
                             "path": str(p),
                             "repo": (pend.get(fn) or {}).get("repo", ""),
+                            "vision_for": (pend.get(fn) or {}).get("vision_for", ""),
                             "paused": bool((pend.get(fn) or {}).get("paused")),
                             "active": bool(job and job["status"] == "downloading")})
             except OSError:
@@ -3656,10 +3656,12 @@ def discard_partial(filename: str) -> Dict[str, Any]:
         return {"ok": False, "error": "no filename"}
     if not name.endswith(".part"):
         name += ".part"
-    target = (MODELS_DIR / name).resolve()
+    started = _dl_jobs.get(name[:-5]) or {}
+    base = Path(started["dest_dir"]) if started.get("dest_dir") else MODELS_DIR
+    target = (base / name).resolve()
     try:
-        # Never let a crafted name walk outside the models dir.
-        target.relative_to(MODELS_DIR.resolve())
+        # Never let a crafted name walk outside the folder its download was started for.
+        target.relative_to(base.resolve())
     except ValueError:
         return {"ok": False, "error": "outside models dir"}
     if not target.name.endswith(".gguf.part") or not target.is_file():

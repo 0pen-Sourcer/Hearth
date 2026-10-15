@@ -59,20 +59,31 @@ L.MODELS_DIR = e
 (e / "Ornith-1.5-9B-Q4_K_M.gguf").write_bytes(b"x")
 L._REPO_SIBLINGS.clear()
 L.search_huggingface = lambda q, limit=12: [{"hf_repo": "someone/Other-GGUF"}, {"hf_repo": "ornith-ai/Ornith-1.5-9B-GGUF"}]
-L._repo_siblings = lambda repo: ([{"rfilename": "Ornith-1.5-9B-Q4_K_M.gguf"}, {"rfilename": "mmproj-Ornith-1.5-9B-BF16.gguf"}]
+L._repo_siblings = lambda repo: ([{"rfilename": "Ornith-1.5-9B-Q4_K_M.gguf"}, {"rfilename": "mmproj-Ornith-1.5-9B-BF16.gguf", "size": 880000000}]
                                  if repo.startswith("ornith") else [{"rfilename": "Other-Q4_K_M.gguf"}])
 v = L.vision_for_file(str(e / "Ornith-1.5-9B-Q4_K_M.gguf"))
 check(f"a model whose repo ships a projector can see once it's fetched {v}",
       v.get("state") == "needs_file" and v.get("repo") == "ornith-ai/Ornith-1.5-9B-GGUF")
 check("the repo found by its file is remembered", L.model_source("Ornith-1.5-9B-Q4_K_M.gguf") == "ornith-ai/Ornith-1.5-9B-GGUF")
-started = []
-L.start_model_download = lambda repo, fn, dest_dir="", save_as="": (started.append((repo, fn, dest_dir, save_as)),
-                                                                    {"status": "downloading"})[1]
-r = L.fetch_vision_for_file(str(e / "Ornith-1.5-9B-Q4_K_M.gguf"))
-check(f"fetching puts it beside the model, under the repo's name {started}",
-      r.get("ok") and started and started[0][2] == str(e) and started[0][3] == "Ornith-1.5-9B-GGUF-mmproj-Ornith-1.5-9B-BF16.gguf")
-(e / started[0][3]).write_bytes(b"x")
+check(f"it says what it would fetch, how big, and where it goes: beside the model, under the repo's name {v}",
+      v.get("file") == "mmproj-Ornith-1.5-9B-BF16.gguf" and v.get("folder") == str(e)
+      and v.get("save_as") == "Ornith-1.5-9B-GGUF-mmproj-Ornith-1.5-9B-BF16.gguf" and v.get("size_gb") == 0.88)
+(e / v["save_as"]).write_bytes(b"x")
 check("with it there, it sees", L.vision_for_file(str(e / "Ornith-1.5-9B-Q4_K_M.gguf")).get("state") == "sees")
+
+# Its download sits beside the model, outside the models folder: Cancel has to find it there,
+# and a pending one remembers the model it belongs to, so Resume brings it back to the same place.
+import threading  # noqa: E402
+other = Path(tempfile.mkdtemp(prefix="hearth-vision3-"))
+name = "Ornith-1.5-9B-GGUF-mmproj-Ornith-1.5-9B-BF16.gguf"
+(other / (name + ".part")).write_bytes(b"x" * 10)
+L._dl_jobs[name] = {"dest_dir": str(other), "status": "paused", "stop": threading.Event()}
+gone = L.discard_partial(name)
+check(f"Cancel removes a vision file's partial download beside its model ({gone})",
+      gone.get("ok") and not (other / (name + ".part")).exists())
+L.save_pending_download("ornith-ai/Ornith-1.5-9B-GGUF", name, vision_for=str(other / "Ornith-1.5-9B-Q4_K_M.gguf"))
+check("a pending vision download remembers its model",
+      (L._read_pending().get(name) or {}).get("vision_for", "").endswith("Ornith-1.5-9B-Q4_K_M.gguf"))
 
 # A cloud model was judged by fragments of its name; its provider's catalog says what it takes.
 from hearth import tools as T, model_facts as MF  # noqa: E402

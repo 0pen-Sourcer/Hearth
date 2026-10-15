@@ -2541,7 +2541,8 @@ class HearthHandler(BaseHTTPRequestHandler):
 
     def _stream_model_download(self, repo: str, filename: str, *,
                                found: Optional[Dict[str, Any]] = None,
-                               error: str = "") -> None:
+                               error: str = "", dest_dir: str = "", save_as: str = "",
+                               vision_for: str = "") -> None:
         """Report a model download as NDJSON: {type:"progress", done, total}
         while it runs, then {type:"done", ok, path|error}. The download itself
         runs on a backend thread (llmserver), so closing the window drops this
@@ -2563,10 +2564,10 @@ class HearthHandler(BaseHTTPRequestHandler):
                              "error": error or "repo and filename required"})
             if found:
                 return send({"type": "done", **found})
-            llmserver.start_model_download(repo, filename)
+            llmserver.start_model_download(repo, filename, dest_dir=dest_dir, save_as=save_as, vision_for=vision_for)
             last = None
             while True:
-                st = llmserver.model_download_state(filename) or {}
+                st = llmserver.model_download_state(save_as or filename) or {}
                 if st.get("status") != "downloading":
                     res = st.get("result") or {"ok": False, "error": "download stopped"}
                     return send({"type": "done", **res})
@@ -4134,12 +4135,15 @@ class HearthHandler(BaseHTTPRequestHandler):
             repo = (body.get("repo") or "").strip()
             filename = (body.get("filename") or "").strip()
             return self._stream_model_download(repo, filename)
-        if path == "/api/llmserver/vision-fetch":
+        if path == "/api/llmserver/vision-download":
+            # A model's vision file, streamed like any model download, saved beside it.
             from . import llmserver
             mp = (self._read_json().get("path") or "").strip()
-            if not mp or not os.path.isfile(mp):
-                return self._send_json(400, {"ok": False, "error": "no such model file"})
-            return self._send_json(200, llmserver.fetch_vision_for_file(mp))
+            v = llmserver.vision_for_file(mp) if mp and os.path.isfile(mp) else {}
+            if v.get("state") != "needs_file":
+                return self._stream_model_download("", "", error="this model has no vision file to fetch")
+            return self._stream_model_download(v["repo"], v["file"], dest_dir=v["folder"], save_as=v["save_as"],
+                                               vision_for=mp)
         if path == "/api/llmserver/download-pause":
             from . import llmserver
             body = self._read_json()

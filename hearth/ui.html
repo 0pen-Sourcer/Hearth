@@ -16227,37 +16227,59 @@ function modelVisionHTML(v, path) {
   if (!v) return '';
   if (v.state === 'sees') return '<span class="model-tag cap-vision">Vision</span>';
   if (v.state !== 'needs_file') return '';
-  const j = v.job;
-  if (j && j.status === 'downloading')
-    return `<span class="model-vision-note">Adding its vision file${j.total ? ' \u00b7 ' + Math.round(j.done * 100 / j.total) + '%' : '\u2026'}</span>`;
+  const j = v.job, d = _dls[v.save_as];
+  if ((j && j.status === 'downloading') || (d && d.status === 'downloading'))
+    return `<span class="model-vision-note">Downloading its vision file, ${esc(v.file)}${d && d.pct != null ? ` \u00b7 ${d.pct}%` : ''}.</span>`
+      + `<button class="model-mini" data-dl-open="1">Show in Downloads</button>`;
+  if ((j && j.status === 'paused') || (d && d.status === 'paused'))
+    return `<span class="model-vision-note">Its vision file is paused in Downloads.</span>`;
   if (j && j.status === 'error')
-    return `<span class="model-vision-note err">Couldn't add its vision file. </span><button class="model-mini" data-vision-get="${esc(path)}">Try again</button>`;
-  return `<span class="model-vision-note">It can see with its vision file. </span><button class="model-mini" data-vision-get="${esc(path)}">Add vision</button>`;
+    return `<span class="model-vision-note err">Couldn't download its vision file. </span><button class="model-mini" data-vision-get="${esc(path)}">Try again</button>`;
+  return `<span class="model-vision-note">It can see images once its vision file is downloaded${v.size_gb ? ` (${v.size_gb} GB)` : ''}. </span>`
+    + `<button class="model-mini" data-vision-get="${esc(path)}">Add vision</button>`;
 }
 async function modelVisionFill(root) {
   for (const el of (root || document).querySelectorAll('[data-vision-path]')) {
     const path = el.dataset.visionPath;
     let v = MODEL_VISION.get(path);
-    if (!v || (v.job && v.job.status === 'downloading')) {
+    const busy = v && ((v.job && v.job.status === 'downloading') || (_dls[v.save_as] || {}).status === 'downloading');
+    if (!v || busy) {
       try { v = await api('/api/llmserver/vision?path=' + encodeURIComponent(path)); } catch { v = { state: 'unknown' }; }
       MODEL_VISION.set(path, v);
     }
     el.innerHTML = modelVisionHTML(v, path);
-    if (v.job && v.job.status === 'downloading') setTimeout(() => modelVisionFill(el.parentElement), 1200);
-    else if (v.job && v.job.status === 'done') { MODEL_VISION.delete(path); modelVisionFill(el.parentElement); }
+    const live = (v.job && v.job.status === 'downloading') || (_dls[v.save_as] || {}).status === 'downloading';
+    if (live) setTimeout(() => modelVisionFill(el.parentElement), 1500);
   }
 }
-document.addEventListener('click', async e => {
+// What it fetches, from where, how big and into which folder, said before it starts;
+// the download itself is an ordinary one, in Downloads with Pause and Cancel.
+async function modelsAddVision(path, ask = true) {
+  const v = MODEL_VISION.get(path) || await api('/api/llmserver/vision?path=' + encodeURIComponent(path)).catch(() => null);
+  if (!v || v.state !== 'needs_file') { toast('No vision file for this model', '', 'warn'); return; }
+  const go = async () => {
+    dlToggle(true);
+    dlUpsert(v.save_as, { name: v.save_as, status: 'downloading', pct: 0, repo: v.repo, filename: v.save_as, vision: path });
+    try {
+      const res = await fetch('/api/llmserver/vision-download', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                                 body: JSON.stringify({ path }) });
+      if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+      const got = await streamDownload(res, null, null, null, v.save_as);
+      if (got) { toast('Vision added', 'Load the model again and JARVIS can see images with it.', 'ok', 6000); MODEL_VISION.delete(path); }
+    } catch (e) { dlUpsert(v.save_as, { status: 'paused' }); }
+    modelVisionFill();
+  };
+  if (!ask) return go();
+  const model = path.split(/[\\/]/).pop();
+  showModal('Add vision to ' + model.replace(/\.gguf$/i, '') + '?',
+    `<div class="mem-fact"><div class="mf-text"><p>This downloads <b>${esc(v.file)}</b>${v.size_gb ? ` (${v.size_gb} GB)` : ''}, the vision part its makers publish in <b>${esc(v.repo)}</b> on Hugging Face.</p>`
+    + `<p>It's saved next to the model, in ${esc(v.folder)}, as ${esc(v.save_as)}. Once it's there, load the model again and it can see images.</p></div></div>`,
+    [{ label: 'Cancel' }, { label: 'Download', kind: 'primary', closes: true, onclick: go }]);
+}
+document.addEventListener('click', e => {
   const b = e.target.closest('[data-vision-get]');
-  if (!b) return;
-  e.stopPropagation();
-  b.disabled = true;
-  const path = b.dataset.visionGet;
-  const r = await api('/api/llmserver/vision-fetch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                                      body: JSON.stringify({ path }) }).catch(err => ({ ok: false, error: err.message }));
-  if (!r || !r.ok) { toast("Couldn't add its vision file", (r && r.error) || "It didn't say why.", 'err'); b.disabled = false; return; }
-  MODEL_VISION.set(path, Object.assign({}, MODEL_VISION.get(path), { job: { status: 'downloading', done: 0, total: 0 } }));
-  modelVisionFill(b.closest('.model-info'));
+  if (b) { e.stopPropagation(); modelsAddVision(b.dataset.visionGet); return; }
+  if (e.target.closest('[data-dl-open]')) { e.stopPropagation(); dlToggle(true); }
 }, true);
 function modelsCapTagsHTML(caps) {
   if (!caps || !caps.length) return '';
@@ -17831,6 +17853,7 @@ function dlToggle(force) {
           if (kind === 'engine') runtimeInstall();
           else if (kind === 'update') downloadUpdate();
           else if (kind === 'voice') _obFetchVoiceModels(null);
+          else if (d.vision) modelsAddVision(d.vision, false);
           else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {});
         } else if (ds.dlact === 'cancel') {
           if (kind === 'agent') api('/api/agents/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -18027,7 +18050,8 @@ function showResumableDownload(s) {
   $('models-dl-detail').textContent = part.gb + ' GB already on disk. Continuing from here, not from zero.';
   rb.hidden = false;
   rb.onclick = () => {
-    if (repo) { rb.hidden = true; modelsDownloadHF(repo, part.filename, {}); }
+    if (part.vision_for) { rb.hidden = true; modelsAddVision(part.vision_for, false); }
+    else if (repo) { rb.hidden = true; modelsDownloadHF(repo, part.filename, {}); }
     else {
       _modelsState.tab = 'discover'; modelsRenderDiscover();
       toast('Pick up where it stopped', 'Search for the same model and press Download. It carries on from the ' + part.gb + ' GB already there.', 'ok', 7000);
@@ -18038,7 +18062,8 @@ function showResumableDownload(s) {
   if (repo && (part.active || (!part.paused && !_autoResumedDl))) {
     _autoResumedDl = true;
     rb.hidden = true;
-    modelsDownloadHF(repo, part.filename, {});
+    if (part.vision_for) modelsAddVision(part.vision_for, false);
+    else modelsDownloadHF(repo, part.filename, {});
   } else if (part.paused) {
     $('models-dl-label').textContent = 'Paused: ' + part.filename;
   } else if (!repo) {
