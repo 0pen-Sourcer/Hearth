@@ -9785,7 +9785,8 @@ let _steerChips = [];
 function makeSteerNote(text, waiting) {
   const d = document.createElement('div');
   d.className = 'steer-note' + (waiting ? ' waiting' : '');
-  d.innerHTML = `<span class="steer-who">You, steering${waiting ? '<em> · waiting for its next step</em>' : ''}</span>`;
+  // Steering while it waits for the reply's next step; steered once the model has it.
+  d.innerHTML = `<span class="steer-who">${waiting ? 'You, steering<em> · waiting for its next step</em>' : 'You steered'}</span>`;
   const q = document.createElement('div'); q.className = 'steer-text'; q.textContent = text;
   d.appendChild(q);
   return d;

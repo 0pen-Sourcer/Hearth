@@ -238,7 +238,7 @@ class Turn:
 
     def _on_steered(self, text: str = "", content: str = "", **_):
         self._flush_text()
-        self.out(f"{DIM}↳ you, steering: {(text or content)[:100]}{RESET}")
+        self.out(f"{DIM}↳ you steered: {(text or content)[:100]}{RESET}")
 
     def _on_retry(self, attempt: int = 0, max_attempts: int = 0, wait_s: float = 0, message: str = "", **_):
         self.out(f"{WARN}↻ {message or 'retrying'} ({attempt}/{max_attempts}){RESET}")

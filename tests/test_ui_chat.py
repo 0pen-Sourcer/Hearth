@@ -886,11 +886,14 @@ with sync_playwright() as pw:
     steer = pg.evaluate("""() => {
       const n = makeSteerNote('keep the Zoom one', false); document.body.appendChild(n);
       const cs = getComputedStyle(n), w = getComputedStyle(n.querySelector('.steer-who'));
-      const out = { border: cs.borderLeftWidth, bg: cs.backgroundColor, who: w.display, size: w.fontSize };
+      const out = { border: cs.borderLeftWidth, bg: cs.backgroundColor, who: w.display, size: w.fontSize,
+                    taken: n.querySelector('.steer-who').textContent,
+                    waiting: makeSteerNote('keep the Zoom one', true).querySelector('.steer-who').textContent };
       n.remove(); return out;
     }""")
     check(f"words said part-way sit in their own marked box, apart from the reply {steer}",
-          steer["border"] != "0px" and steer["bg"] not in ("rgba(0, 0, 0, 0)", "transparent") and steer["who"] == "block")
+          steer["border"] != "0px" and steer["bg"] not in ("rgba(0, 0, 0, 0)", "transparent") and steer["who"] == "block"
+          and steer["taken"] == "You steered" and steer["waiting"].startswith("You, steering"))
     # One call that never got a result made every later delegate on the Logs page read as running.
     pairs = pg.evaluate("""() => _lgItems([
       { ts: '2026-10-08T23:26:53', event: 'call', tool: 'delegate', args: { agent: 'gemini-cli' } },
