@@ -3160,26 +3160,18 @@ def vram_fit_class(model_size_gb: Optional[float],
     return {"tier": "overflow",     "label": f"mostly on CPU — needs ~{required:.1f} GB, {free_vram_gb:.1f} GB free; still runs, just slower"}
 
 
-_QUANT_PATTERNS = [
-    ("F16",  ("f16", "fp16", "float16")),
-    ("Q8",   ("q8_0", "q8_k")),
-    ("Q6",   ("q6_k",)),
-    ("Q5",   ("q5_k_m", "q5_k_s", "q5_1", "q5_0")),
-    ("Q4",   ("q4_k_m", "q4_k_s", "q4_0", "q4_1")),
-    ("Q3",   ("q3_k_l", "q3_k_m", "q3_k_s")),
-    ("Q2",   ("q2_k",)),
-]
-
-
 def quant_tier(filename: str) -> str:
     """Return the bucket label (Q2..Q8/F16) for a GGUF filename. The picker
     uses this to badge each file and to mark the modal Q4_K_M as recommended.
     Returns empty string when no quant tag is detectable."""
     fn = (filename or "").lower()
-    for tier, tags in _QUANT_PATTERNS:
-        if any(t in fn for t in tags):
-            return tier
-    return ""
+    if re.search(r"(?:^|[-_.])b?f16(?:[-_.]|$)", fn) or any(t in fn for t in ("fp16", "float16")):
+        return "F16"
+    if re.search(r"(?:^|[-_.])f32(?:[-_.]|$)", fn):
+        return "F32"
+    # Q4_K_M, IQ4_NL, IQ3_XXS, TQ1_0 and the like: the digit is the tier.
+    m = re.search(r"(?:^|[-_.])(?:i|t|ud-)?q(\d)(?:[-_.]|$)", fn)
+    return f"Q{m.group(1)}" if m else ""
 
 
 def _is_recommended_quant(filename: str) -> bool:

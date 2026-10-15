@@ -44,6 +44,12 @@ check(f"a pasted page link searches for its repo {asked[-1].get('search')}",
       asked[-1].get("search") == ["unsloth/gemma-4-12b-it-GGUF"] and r and r[0]["hf_repo"] == "unsloth/gemma-4-12b-it-GGUF")
 check("an empty search asks nothing", llmserver.search_huggingface("  ") == [] and len(asked) == 2)
 
+# IQ and ternary quants had no tier chip in the pick list.
+tiers = {n: llmserver.quant_tier(n) for n in ("m-IQ4_NL.gguf", "m-IQ3_XXS.gguf", "m-UD-Q2_K_XL.gguf", "Bonsai-TQ1_0.gguf",
+                                              "m-Q4_K_M.gguf", "m-BF16.gguf", "m-F32.gguf", "qwen3-8b.gguf")}
+check(f"every quant gets its tier from its name {tiers}",
+      list(tiers.values()) == ["Q4", "Q3", "Q2", "Q1", "Q4", "F16", "F32", ""])
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
