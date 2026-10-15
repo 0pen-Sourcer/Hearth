@@ -92,6 +92,14 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
             " Use a paid tier with this provider, or pick another one.",
             retryable=False)
 
+    # --- out of credits: the account has nothing left to spend ---
+    if code == 402 or "insufficient credits" in text or "credit balance" in text or "insufficient_quota" in text:
+        said = _provider_says(exc)
+        return ApiErrorInfo("no_credits",
+            "This account has no credits left with the provider" + (f": {said.rstrip('.')}." if said else ".")
+            + " Add credits on the provider's site, or pick another brain.",
+            retryable=False)
+
     # --- rate limit / quota ---
     if code == 429 or "rate_limit" in text or "rate limit" in text or "quota" in text or "resource_exhausted" in text or "too many requests" in text:
         return ApiErrorInfo("rate_limit",
@@ -152,6 +160,8 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
             "The request timed out. The model may be slow or stuck. Retry, or pick a faster model.",
             retryable=True)
 
+    said = _provider_says(exc)
     return ApiErrorInfo("unknown",
-        f"Unexpected error talking to {here}. Your message is preserved, so you can resend it.",
+        (f"{here[:1].upper()}{here[1:]} said: {said.rstrip('.')}. " if said else f"Unexpected error talking to {here}. ")
+        + "Your message is preserved, so you can resend it.",
         retryable=True)

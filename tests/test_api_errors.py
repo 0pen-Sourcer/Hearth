@@ -59,6 +59,17 @@ plain = Err(400, "something odd")
 check("anything else is not mistaken for a plan limit",
       classify_api_error(plain, is_local=False).category != "too_big_for_plan")
 
+# An account with no credits got "Unexpected error talking to the cloud endpoint".
+broke = Err(402, "Error code: 402 - {'error': {'message': 'Insufficient credits. This account never purchased "
+                 "credits. Make sure your key is on the correct account or org, and if so, purchase more at "
+                 "https://openrouter.ai/settings/credits', 'code': 402}}")
+info = classify_api_error(broke, is_local=False)
+check(f"no credits says so, with the provider's own words ({info.hint})",
+      info.category == "no_credits" and "openrouter.ai/settings/credits" in info.hint and not info.retryable)
+odd = Err(418, "Error code: 418 - {'error': {'message': 'The teapot is busy.', 'code': 418}}")
+info = classify_api_error(odd, is_local=False)
+check(f"an error Hearth has no name for still says what the provider said ({info.hint})", "The teapot is busy." in info.hint)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
