@@ -302,6 +302,54 @@ def snooze_reminder(rid: str, minutes: int = 10) -> Dict:
     return {"ok": False, "error": f"no reminder with id {rid}"}
 
 
+def update_reminder(rid: str, what: Optional[str] = None, when: Optional[str] = None,
+                    recurring: Optional[str] = None, until: Optional[str] = None) -> Dict:
+    """Change what a reminder says, when it is due, or how it repeats ("" makes it
+    a one-off), and the last day a repeating one comes due (`until`, a date;
+    "" for never). Read the same way set_reminder reads them; a changed one that
+    had already come due is due again."""
+    now = datetime.now()
+    target = None
+    if when is not None:
+        target = parse_when(when, now)
+        if target is None:
+            return {"ok": False, "error": f"'{when}' is not a time I read"}
+        if target < now - timedelta(seconds=60):
+            return {"ok": False, "error": f"{target:%Y-%m-%d %H:%M} has already passed"}
+    sec = None
+    if recurring:
+        sec = _parse_recurring(recurring)
+        if sec is None:
+            return {"ok": False, "error": f"'{recurring}' is not a repeat I read"}
+    with _store_lock():
+        items = _load_all()
+        for r in items:
+            if r.get("id") != rid:
+                continue
+            if what is not None and what.strip():
+                r["what"] = what.strip()
+            if target is not None:
+                r["due_iso"] = target.isoformat(timespec="seconds")
+                r["when_text"] = when
+                r["fired"] = False
+                r.pop("fired_at", None)
+            if recurring is not None:
+                if recurring:
+                    r["recurring_text"], r["recurring_seconds"] = recurring, sec
+                else:
+                    r.pop("recurring_text", None)
+                    r.pop("recurring_seconds", None)
+            if until is not None:
+                if until.strip():
+                    r["until_iso"] = until.strip()[:10] + "T23:59:59"
+                else:
+                    r.pop("until_iso", None)
+            _save_all(items)
+            due = datetime.fromisoformat(r["due_iso"])
+            return {"ok": True, "id": rid, "set_for": describe_due(due, now), "reminder": dict(r)}
+    return {"ok": False, "error": f"no reminder with id {rid}"}
+
+
 def pause_reminder(rid: str, paused: bool = True) -> Dict:
     """Hold a reminder without losing it, or let it go again. A repeating one
     resumes at its next slot rather than firing for the ones it skipped."""
@@ -588,8 +636,12 @@ def _advance_after_fire(r: Dict, now: datetime, now_iso: str) -> None:
         step = timedelta(seconds=max(1.0, float(rec_s)))
         while next_due <= now:
             next_due += step
-        r["due_iso"] = next_due.isoformat(timespec="seconds")
         r["last_fired_at"] = now_iso
+        if r.get("until_iso") and next_due.isoformat(timespec="seconds") > r["until_iso"]:
+            r["fired"] = True
+            r["fired_at"] = now_iso
+            return
+        r["due_iso"] = next_due.isoformat(timespec="seconds")
     else:
         r["fired"] = True
         r["fired_at"] = now_iso

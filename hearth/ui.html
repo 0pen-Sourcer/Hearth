@@ -2657,6 +2657,15 @@
   .rm-row .what small { display: block; margin-top: 3px; font: 13px var(--sans); color: var(--fg-dim); }
   .rm-row.done .what { color: var(--fg-dim); }
   .rm-row.paused .what, .rm-row.paused .rm-ico { opacity: .55; }
+  .rm-edit { display: flex; flex-direction: column; gap: 12px; min-width: min(380px, 80vw); }
+  .rm-edit label { display: flex; flex-direction: column; gap: 5px; color: var(--fg-dim); font: 12.5px var(--sans); }
+  .rm-edit textarea { resize: vertical; min-height: 64px; }
+  .rm-edit label > span { display: flex; gap: 8px; }
+  .rm-edit label > span > * { flex: 1; }
+  .rm-edit [hidden] { display: none !important; }
+  .rm-edit input, .rm-edit select, .rm-edit textarea { background: var(--bg-0); border: 1px solid var(--border); border-radius: 8px; color: var(--fg);
+    padding: 8px 10px; font: 14px var(--sans); outline: none; }
+  .rm-edit input:focus, .rm-edit select:focus, .rm-edit textarea:focus { border-color: var(--accent-line); }
   #view-skills { overflow-y: auto; }
   .sk-note { margin: -4px 4px 14px; color: var(--fg-faint); font: 12.5px/1.55 var(--sans); }
   .rm-row.off .what, .rm-row.off .rm-ico { opacity: .5; }
@@ -12744,6 +12753,7 @@ const RM_SVG = {
   run: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
   done: '<path d="M20 6 9 17l-5-5"/>',
   pause: '<path d="M9 5v14M15 5v14"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   play: '<path d="M7 5v14l11-7z"/>',
   cancel: '<path d="M18 6 6 18M6 6l12 12"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -12795,6 +12805,44 @@ async function _rmAsk(text) {
   }
   return true;
 }
+// Change a reminder: what it says, when, and how often. The repeats offered are
+// the ones the reminder store reads; a reminder's own other repeat stays offered.
+const RM_REPEATS = ['', 'every 30 minutes', 'every hour', 'every 2 hours', 'daily', 'weekly'];
+let RM_ITEMS = [];
+function _rmEdit(id) {
+  const it = RM_ITEMS.find(x => x.id === id);
+  if (!it) return;
+  const pad = n => String(n).padStart(2, '0'), d = new Date(it.due_iso);
+  const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const reps = RM_REPEATS.includes(it.recurring_text || '') ? RM_REPEATS : RM_REPEATS.concat([it.recurring_text]);
+  const opt = r => `<option value="${esc(r)}"${(it.recurring_text || '') === r ? ' selected' : ''}>${r ? esc(r.charAt(0).toUpperCase() + r.slice(1)) : 'Once'}</option>`;
+  const until = it.until_iso ? it.until_iso.slice(0, 10) : '';
+  showModal('Change this reminder', `<div class="nh-wrap rm-edit">
+      <label>What<textarea id="rme-what" rows="3">${esc(it.what || '')}</textarea></label>
+      <label>${it.recurring_seconds ? 'Next time' : 'When'}<input id="rme-when" type="datetime-local" value="${local}"></label>
+      <label>Repeats<select id="rme-rep">${reps.map(opt).join('')}</select></label>
+      <label class="rme-ends"${it.recurring_text ? '' : ' hidden'}>Ends
+        <span><select id="rme-ends"><option value=""${until ? '' : ' selected'}>Never</option><option value="on"${until ? ' selected' : ''}>On a day</option></select>
+        <input id="rme-until" type="date" value="${until}"${until ? '' : ' hidden'}></span></label></div>`, [
+    { label: 'Close' },
+    { label: it.paused ? 'Resume' : 'Pause', closes: true, onclick: () =>
+        _rmAct('/api/reminders/pause', id, it.paused ? 'Resumed' : 'Paused', { paused: !it.paused }) },
+    { label: 'Save', kind: 'primary', onclick: async () => {
+      const when = $('rme-when').value, rep = $('rme-rep').value;
+      const body = { id, what: $('rme-what').value, recurring: rep,
+                     until: rep && $('rme-ends').value === 'on' ? $('rme-until').value : '' };
+      if (rep && $('rme-ends').value === 'on' && !body.until) { toast('Pick the last day', '', 'warn'); return false; }
+      if (when !== local) body.when = when;
+      const r = await api('/api/reminders/update', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                      body: JSON.stringify(body) }).catch(e => ({ ok: false, error: e.message }));
+      if (!r || !r.ok) { toast("Couldn't change it", (r && r.error) || "It didn't say why.", 'err'); return false; }
+      toast('Changed', r.set_for || '', 'ok', 3000);
+      refreshReminders();
+    } }]);
+  $('rme-rep').onchange = () => { $('modal-body').querySelector('.rme-ends').hidden = !$('rme-rep').value; };
+  $('rme-ends').onchange = () => { $('rme-until').hidden = $('rme-ends').value !== 'on'; };
+  setTimeout(() => $('rme-what') && $('rme-what').focus(), 50);
+}
 async function _rmAct(path, id, done, extra) {
   try {
     const rr = await api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -12833,6 +12881,7 @@ async function refreshReminders() {
   let items;
   try { items = ((await api('/api/reminders?all=1')) || {}).items || []; }
   catch (e) { box.innerHTML = `<div class="rm-empty">Couldn't read your reminders: ${esc(e.message)}</div>`; return; }
+  RM_ITEMS = items;
   const live = items.filter(x => !x.fired), rep = live.filter(x => x.recurring_seconds);
   const remCount = document.getElementById('nav-rem-count');
   if (remCount) remCount.textContent = live.length ? String(live.length) : '';
@@ -12846,7 +12895,7 @@ async function refreshReminders() {
   for (const it of shown) {
     const done = RM_FILTER === 'done', at = done ? (it.fired_at || it.due_iso) : it.due_iso;
     const time = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const parts = [it.recurring_text ? `Repeats ${it.recurring_text}` : (done ? '' : 'Once'),
+    const parts = [it.recurring_text ? `Repeats ${it.recurring_text}${it.until_iso ? ', until ' + _rmDay(it.until_iso).replace(/^(Today|Tomorrow)$/, w => w.toLowerCase()) : ''}` : (done ? '' : 'Once'),
                    done ? `Came due ${_rmDay(at).toLowerCase()} at ${time}`
                         : it.paused ? (it.recurring_seconds ? 'Paused, picks up at its next time when resumed' : 'Paused')
                         : `${_rmDay(at)} ${time}, ${_rmIn(it.due_iso)}`,
@@ -12854,6 +12903,7 @@ async function refreshReminders() {
                    it.tag || ''].filter(Boolean);
     const ico = done ? 'done' : it.action_tool ? 'run' : it.recurring_seconds ? 'again' : 'bell';
     const acts = done ? '' : `<span class="rm-act">
+        <button data-redit="${esc(it.id)}" title="Change it" aria-label="Change">${_rmIco('edit')}</button>
         <button data-rpause="${esc(it.id)}" data-paused="${it.paused ? 1 : 0}" title="${it.paused ? 'Resume it' : 'Pause it'}" aria-label="${it.paused ? 'Resume' : 'Pause'}">${_rmIco(it.paused ? 'play' : 'pause')}</button>
         <button class="danger" data-rcancel="${esc(it.id)}" title="Cancel it" aria-label="Cancel">${_rmIco('cancel')}</button></span>`;
     html += `<div class="rm-row${done ? ' done' : ''}${it.paused && !done ? ' paused' : ''}"><span class="rm-ico">${_rmIco(ico)}</span>`
@@ -12871,6 +12921,8 @@ document.addEventListener('click', e => {
     refreshReminders();
     return;
   }
+  const ed = e.target.closest('[data-redit]');
+  if (ed) { _rmEdit(ed.dataset.redit); return; }
   const pz = e.target.closest('[data-rpause]');
   if (pz) {
     const resume = pz.dataset.paused === '1';

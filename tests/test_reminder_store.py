@@ -129,6 +129,21 @@ R._save_all([{"id": "r_rep", "due_iso": _past, "what": "stretch", "fired": False
 paused = [R.pause_reminder("r_rep"), R.pause_reminder("r_one")]
 check("pausing a reminder says so", all(p.get("ok") and p.get("paused") for p in paused))
 check("a paused reminder that comes due does not fire", R._claim_due() == [])
+# A reminder couldn't be changed, only cancelled and set again.
+_soon = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+ch = R.update_reminder("r_one", what="Call mom back", when=_soon, recurring="daily",
+                       until=(datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d"))
+_r1 = next(r for r in R.list_reminders(include_fired=True) if r["id"] == "r_one")
+check(f"a reminder's words, time, repeat and last day can be changed ({ch.get('set_for')})",
+      ch.get("ok") and _r1["what"] == "Call mom back" and _r1["due_iso"].startswith(_soon)
+      and _r1["recurring_seconds"] == 86400 and _r1["until_iso"].endswith("T23:59:59") and not _r1.get("fired"))
+check("a time already gone is refused", not R.update_reminder("r_one", when="2001-01-01T09:00").get("ok"))
+R.update_reminder("r_one", recurring="")
+check("a repeat can be taken off", "recurring_seconds" not in next(r for r in R.list_reminders(True) if r["id"] == "r_one"))
+_last = {"id": "x", "due_iso": (datetime.now() - timedelta(minutes=1)).isoformat(timespec="seconds"),
+         "recurring_seconds": 86400, "until_iso": datetime.now().strftime("%Y-%m-%dT23:59:59")}
+R._advance_after_fire(_last, datetime.now(), datetime.now().isoformat(timespec="seconds"))
+check("a repeating one past its last day stops instead of coming back", _last.get("fired") is True)
 back = R.pause_reminder("r_rep", False)
 check(f"a repeating one resumes at its next time, not on the slots it skipped ({back.get('due_iso')})",
       back.get("ok") and not back.get("paused") and back["due_iso"] > datetime.now().isoformat(timespec="seconds")

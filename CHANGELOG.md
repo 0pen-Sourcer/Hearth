@@ -32,7 +32,7 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - A GGUF without a tokenizer (an image or video model) or cut short is marked in Models and left out of the model menu.
 - The Team room's fire is animated.
 - Skills page redone: a switch per skill (`skills_off` setting; a switched-off skill is left out of the prompt and `load_skill` refuses it), a readable detail view, and the add box takes any Agent Skills folder on GitHub.
-- Reminders can be paused and resumed (`pause_reminder`, the row's pause button); a repeating one resumes at its next slot. The row's old ten-minute snooze is gone from the list, since on a reminder not yet due it made it fire sooner.
+- Reminders can be changed in place (`update_reminder`, /api/reminders/update: words, time, repeat, last day `until_iso`) and paused and resumed (`pause_reminder`, the row's pause button); a repeating one resumes at its next slot. The row's old ten-minute snooze is gone from the list, since on a reminder not yet due it made it fire sooner.
 
 ### Fixed
 - Other builds of llama.cpp (Models, Engine, Add an engine): by a GitHub page, fetched for the card like the official build, or by a folder. When the official build can't read a model (invalid ggml type, unknown architecture) Hearth tries the added builds and remembers which one read it. They never replace the official build for other models.
