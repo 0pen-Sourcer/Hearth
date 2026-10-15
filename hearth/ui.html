@@ -2667,6 +2667,7 @@
   .rm-row .what { flex: 1; min-width: 0; font: 500 14.5px var(--sans); color: var(--fg); overflow-wrap: anywhere; }
   .rm-row .what small { display: block; margin-top: 3px; font: 13px var(--sans); color: var(--fg-dim); }
   .rm-row.done .what { color: var(--fg-dim); }
+  .rm-row.paused .what, .rm-row.paused .rm-ico { opacity: .55; }
   .rm-row.pending .rm-ico svg { animation: stspin 1s linear infinite; }
   .rm-act { display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
   .rm-row:hover .rm-act, .rm-row:focus-within .rm-act { opacity: 1; }
@@ -12725,7 +12726,8 @@ const RM_SVG = {
   again: '<path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   run: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
   done: '<path d="M20 6 9 17l-5-5"/>',
-  snooze: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/>',
+  pause: '<path d="M9 5v14M15 5v14"/>',
+  play: '<path d="M7 5v14l11-7z"/>',
   cancel: '<path d="M18 6 6 18M6 6l12 12"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   wait: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/>' };
@@ -12776,12 +12778,12 @@ async function _rmAsk(text) {
   }
   return true;
 }
-async function _rmAct(path, id, done) {
+async function _rmAct(path, id, done, extra) {
   try {
     const rr = await api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                 body: JSON.stringify({ id, minutes: 10 }) });
+                                 body: JSON.stringify(Object.assign({ id }, extra || {})) });
     if (rr.ok) { toast(done, '', 'ok', 2500); refreshReminders(); }
-    else toast(path.endsWith('snooze') ? "Couldn't snooze it" : "Couldn't cancel it", rr.error || "It didn't say why.", 'err');
+    else toast(path.endsWith('pause') ? "Couldn't change it" : "Couldn't cancel it", rr.error || "It didn't say why.", 'err');
   } catch (e) { toast("That didn't work", e.message, 'err'); }
 }
 function _rmIdeasDraw() {
@@ -12828,14 +12830,16 @@ async function refreshReminders() {
     const done = RM_FILTER === 'done', at = done ? (it.fired_at || it.due_iso) : it.due_iso;
     const time = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const parts = [it.recurring_text ? `Repeats ${it.recurring_text}` : (done ? '' : 'Once'),
-                   done ? `Came due ${_rmDay(at).toLowerCase()} at ${time}` : `${_rmDay(at)} ${time}, ${_rmIn(it.due_iso)}`,
+                   done ? `Came due ${_rmDay(at).toLowerCase()} at ${time}`
+                        : it.paused ? (it.recurring_seconds ? 'Paused, picks up at its next time when resumed' : 'Paused')
+                        : `${_rmDay(at)} ${time}, ${_rmIn(it.due_iso)}`,
                    it.action_tool ? `then runs ${String(it.action_tool).replace(/_/g, ' ')}${_stepWhat(it.action_args || {}) ? ': ' + _stepWhat(it.action_args || {}) : ''}` : '',
                    it.tag || ''].filter(Boolean);
     const ico = done ? 'done' : it.action_tool ? 'run' : it.recurring_seconds ? 'again' : 'bell';
     const acts = done ? '' : `<span class="rm-act">
-        <button data-rsnooze="${esc(it.id)}" title="Ten minutes later" aria-label="Snooze">${_rmIco('snooze')}</button>
+        <button data-rpause="${esc(it.id)}" data-paused="${it.paused ? 1 : 0}" title="${it.paused ? 'Resume it' : 'Pause it'}" aria-label="${it.paused ? 'Resume' : 'Pause'}">${_rmIco(it.paused ? 'play' : 'pause')}</button>
         <button class="danger" data-rcancel="${esc(it.id)}" title="Cancel it" aria-label="Cancel">${_rmIco('cancel')}</button></span>`;
-    html += `<div class="rm-row${done ? ' done' : ''}"><span class="rm-ico">${_rmIco(ico)}</span>`
+    html += `<div class="rm-row${done ? ' done' : ''}${it.paused && !done ? ' paused' : ''}"><span class="rm-ico">${_rmIco(ico)}</span>`
       + `<span class="what">${esc(it.what || '')}<small>${esc(parts.join(' \u00b7 '))}</small></span>${acts}</div>`;
   }
   box.innerHTML = html || `<div class="rm-empty">${RM_FILTER === 'done' ? 'Nothing has come due yet.'
@@ -12850,8 +12854,12 @@ document.addEventListener('click', e => {
     refreshReminders();
     return;
   }
-  const sn = e.target.closest('[data-rsnooze]');
-  if (sn) { _rmAct('/api/reminders/snooze', sn.dataset.rsnooze, 'Snoozed ten minutes'); return; }
+  const pz = e.target.closest('[data-rpause]');
+  if (pz) {
+    const resume = pz.dataset.paused === '1';
+    _rmAct('/api/reminders/pause', pz.dataset.rpause, resume ? 'Resumed' : 'Paused', { paused: !resume });
+    return;
+  }
   const cn = e.target.closest('[data-rcancel]');
   if (cn) { _rmAct('/api/reminders/cancel', cn.dataset.rcancel, 'Reminder cancelled'); return; }
   const ask = e.target.closest('[data-rmask]');

@@ -3208,6 +3208,16 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, _r.snooze_reminder(rid, mins))
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/reminders/pause":
+            try:
+                from . import reminders as _r
+                body = self._read_json()
+                rid = (body.get("id") or "").strip()
+                if not rid:
+                    return self._send_json(400, {"ok": False, "error": "missing id"})
+                return self._send_json(200, _r.pause_reminder(rid, body.get("paused", True) is not False))
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/reminders/cancel":
             try:
                 from . import reminders as _r

@@ -122,6 +122,18 @@ R.set_reminder("3h", "one")
 check("a save leaves no staged file behind",
       not [f for f in os.listdir(WS) if f.startswith(".hearth-tmp-")])
 
+# A reminder could be cancelled or pushed ten minutes, never held.
+_past = (datetime.now() - timedelta(hours=5, minutes=1)).isoformat(timespec="seconds")
+R._save_all([{"id": "r_rep", "due_iso": _past, "what": "stretch", "fired": False, "recurring_seconds": 7200},
+             {"id": "r_one", "due_iso": _past, "what": "call mom", "fired": False}])
+paused = [R.pause_reminder("r_rep"), R.pause_reminder("r_one")]
+check("pausing a reminder says so", all(p.get("ok") and p.get("paused") for p in paused))
+check("a paused reminder that comes due does not fire", R._claim_due() == [])
+back = R.pause_reminder("r_rep", False)
+check(f"a repeating one resumes at its next time, not on the slots it skipped ({back.get('due_iso')})",
+      back.get("ok") and not back.get("paused") and back["due_iso"] > datetime.now().isoformat(timespec="seconds")
+      and R._claim_due() == [])
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

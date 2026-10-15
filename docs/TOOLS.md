@@ -1,8 +1,8 @@
 # Tools
 
-Hearth gives the model **111 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
+Hearth gives the model **112 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
-To keep the prompt small, **39** core tools load with their full description and **72** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **39** core tools load with their full description and **73** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -133,6 +133,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `cancel_reminder` † | Cancel a scheduled reminder by id |
 | `list_reminders` | List all upcoming (un-fired) reminders |
 | `notify` † | Pop a desktop notification (Windows toast) RIGHT NOW |
+| `pause_reminder` † | Pause a reminder so it stops firing without deleting it, or resume it (paused=false) |
 | `send_to_phone` † | Push a message FROM this PC TO the user's phone on a connected channel |
 | `set_reminder` | Schedule a desktop notification, optionally running a tool at the same moment (action_tool with action_args) |
 | `snooze_reminder` † | Push a reminder's due time forward by N minutes (default 10) |

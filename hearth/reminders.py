@@ -302,6 +302,33 @@ def snooze_reminder(rid: str, minutes: int = 10) -> Dict:
     return {"ok": False, "error": f"no reminder with id {rid}"}
 
 
+def pause_reminder(rid: str, paused: bool = True) -> Dict:
+    """Hold a reminder without losing it, or let it go again. A repeating one
+    resumes at its next slot rather than firing for the ones it skipped."""
+    with _store_lock():
+        items = _load_all()
+        for r in items:
+            if r.get("id") != rid:
+                continue
+            if paused:
+                r["paused"] = True
+            else:
+                r.pop("paused", None)
+                rec_s = r.get("recurring_seconds")
+                if rec_s and isinstance(rec_s, (int, float)) and rec_s > 0:
+                    try:
+                        due = datetime.fromisoformat(r.get("due_iso", ""))
+                    except Exception:
+                        due = datetime.now()
+                    step = timedelta(seconds=max(1.0, float(rec_s)))
+                    while due <= datetime.now():
+                        due += step
+                    r["due_iso"] = due.isoformat(timespec="seconds")
+            _save_all(items)
+            return {"ok": True, "id": rid, "paused": bool(r.get("paused")), "due_iso": r.get("due_iso")}
+    return {"ok": False, "error": f"no reminder with id {rid}"}
+
+
 def list_reminders(include_fired: bool = False) -> List[Dict]:
     items = _load_all()
     if not include_fired:
@@ -580,7 +607,7 @@ def _claim_due(missed: bool = False) -> List[Dict]:
         pruned = _prune_old_fired(items) if missed else items
         due = []
         for r in pruned:
-            if r.get("fired"):
+            if r.get("fired") or r.get("paused"):
                 continue
             if r.get("due_iso", "") <= now_iso:
                 due.append(dict(r))

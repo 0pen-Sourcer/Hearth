@@ -688,6 +688,22 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "pause_reminder",
+        "description": (
+            "Pause a reminder so it stops firing without deleting it, or resume it "
+            "(paused=false). A repeating one resumes at its next time. Use for "
+            "'pause my stretch reminder', 'stop that one for now', 'turn it back on'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Reminder id from list_reminders."},
+                "paused": {"type": "boolean", "description": "true pauses (default), false resumes."},
+            },
+            "required": ["id"],
+        },
+    },
+    {
         "name": "list_reminders",
         "description": "List all upcoming (un-fired) reminders. Set include_fired=true to see history.",
         "parameters": {
@@ -6437,6 +6453,8 @@ _HANDLERS = {
         tag=p.get("tag", "")),
     "snooze_reminder": lambda p: __import__("hearth.reminders", fromlist=["snooze_reminder"]).snooze_reminder(
         p.get("id", ""), int(p.get("minutes", 10))),
+    "pause_reminder": lambda p: __import__("hearth.reminders", fromlist=["pause_reminder"]).pause_reminder(
+        p.get("id", ""), p.get("paused", True) is not False),
     "list_reminders": lambda p: __import__("hearth.reminders", fromlist=["list_reminders"]).list_reminders(bool(p.get("include_fired"))),
     "cancel_reminder": lambda p: {"ok": __import__("hearth.reminders", fromlist=["cancel_reminder"]).cancel_reminder(p.get("id", ""))},
     "spawn_subagent": lambda p: _spawn_subagent(p),
@@ -8184,7 +8202,7 @@ _DRYRUN_GUARDED = {
     "computer_scroll", "computer_drag", "desktop_click", "desktop_type", "smart_click",
     "execute_actions",   # a batch of the above, so it needs the same guard
     "browse", "browse_click", "browse_type", "browse_scroll", "browse_key",
-    "set_reminder", "cancel_reminder", "snooze_reminder",
+    "set_reminder", "cancel_reminder", "snooze_reminder", "pause_reminder",
     "send_email", "memory_save", "memory_forget", "edit_soul", "append_soul",
     "create_plugin", "delete_plugin", "create_skill", "install_skill",
     "generate_image", "generate_video", "launch_team", "delegate",
@@ -8477,7 +8495,7 @@ _DEFERRED_TOOLS = {
     "network_info", "disk_usage", "list_installed_apps", "learn_environment",
     "list_models",
     # reminders niche (set/list/cancel stay core)
-    "snooze_reminder",
+    "snooze_reminder", "pause_reminder",
     # voice selection (the UI handles voice; rare as a tool call)
     "set_voice", "list_voices",
     # browser niche (browse/click/type/scroll stay core)
@@ -9035,7 +9053,7 @@ _TOOL_CATEGORY = {
     "edit_soul": "Memory", "append_soul": "Memory", "read_soul": "Memory", "draft_soul": "Memory",
     # Reminders & alerts
     "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
-    "cancel_reminder": "Reminders & alerts", "snooze_reminder": "Reminders & alerts",
+    "cancel_reminder": "Reminders & alerts", "snooze_reminder": "Reminders & alerts", "pause_reminder": "Reminders & alerts",
     "notify": "Reminders & alerts", "send_to_phone": "Reminders & alerts",
     # Email
     "read_inbox": "Email", "send_email": "Email",

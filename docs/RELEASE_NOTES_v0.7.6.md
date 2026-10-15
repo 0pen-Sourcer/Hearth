@@ -106,7 +106,7 @@ Hearth no longer attaches memories picked by keyword to every message, which pul
 
 Reminders are set for the time you meant. Hearth works out the exact time from what you said, and the reminder reads back the day and the time in plain words, so a slip shows up at once rather than at midnight. With the window and the terminal both open a reminder fires once instead of twice, and a reminder set while another one is firing is no longer lost.
 
-A reminder that comes due is said in a chat of its own, marked in the sidebar with a clock and an unread dot, instead of landing in the middle of whatever chat is open. Typing a task in the Reminders page starts it in a new chat and leaves the open one alone, and the page suggests reminders from what JARVIS knows about you and what is coming up.
+A reminder that comes due is said in a chat of its own, marked in the sidebar with a clock and an unread dot, instead of landing in the middle of whatever chat is open. Typing a task in the Reminders page starts it in a new chat and leaves the open one alone, and the page suggests reminders from what JARVIS knows about you and what is coming up. A reminder can be paused instead of cancelled, from its row or by asking, and a repeating one picks up at its next time when you resume it.
 
 ## Phone and teams
 
