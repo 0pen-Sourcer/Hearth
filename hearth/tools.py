@@ -17,6 +17,7 @@ import re
 from functools import lru_cache
 import sys
 import json
+import uuid
 import glob as globmod
 import shlex
 import secrets
@@ -8194,6 +8195,8 @@ _ACTIVITY_MUTED = os.environ.get("HEARTH_NO_ACTIVITY_LOG") == "1"
 def _log_activity(event: str, **fields: Any) -> None:
     if _ACTIVITY_MUTED:
         return
+    if isinstance(fields.get("args"), dict) and "_approved" in fields["args"]:
+        fields["args"] = {k: v for k, v in fields["args"].items() if k != "_approved"}
     rec = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event, **fields}
     try:
         with open(ACTIVITY_LOG, "a", encoding="utf-8") as f:
@@ -8305,7 +8308,9 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
     if os.getenv("HEARTH_BENCH_DRYRUN") == "1" and name in _DRYRUN_GUARDED:
         _log_activity("call", tool=name, args=args)
         return f"[dry-run] {name} would run with {json.dumps(args, ensure_ascii=False, default=str)[:200]} — skipped (benchmark)."
-    _log_activity("call", tool=name, args=args)
+    # One id for the call and what came of it, so the log pairs them exactly.
+    _cid = uuid.uuid4().hex[:10]
+    _log_activity("call", tool=name, args=args, id=_cid)
     # Surface the desktop-activity overlay for computer-use tools, so the user
     # can see what JARVIS is doing while it drives another (focused) window.
     if name in _HUD_TOOLS:
@@ -8332,7 +8337,7 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
                    f"Received: {_got}. Nothing was created, written or changed. "
                    f"Call {name} again with the missing "
                    f"{'fields' if len(_missing) > 1 else 'field'} included.")
-            _log_activity("error", tool=name, error=f"missing {_missing}")
+            _log_activity("error", tool=name, id=_cid, error=f"missing {_missing}")
             return msg
     except Exception:
         pass  # never block a call because the schema lookup itself failed
@@ -8342,19 +8347,19 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         result = handler(args)
     except PermissionError as e:
         msg = f"Error ({name}): {e}"
-        _log_activity("error", tool=name, error=str(e))
+        _log_activity("error", tool=name, id=_cid, error=str(e))
         return msg
     except FileNotFoundError as e:
         msg = f"Error ({name}): file not found: {e}"
-        _log_activity("error", tool=name, error=str(e))
+        _log_activity("error", tool=name, id=_cid, error=str(e))
         return msg
     except KeyError as e:
         msg = f"Error ({name}): missing required parameter {e}"
-        _log_activity("error", tool=name, error=str(e))
+        _log_activity("error", tool=name, id=_cid, error=str(e))
         return msg
     except Exception as e:
         msg = f"Error ({name}): {type(e).__name__}: {e}"
-        _log_activity("error", tool=name, error=str(e))
+        _log_activity("error", tool=name, id=_cid, error=str(e))
         return msg
     if not isinstance(result, str):
         result = json.dumps(result, ensure_ascii=False, default=str)
@@ -8369,7 +8374,7 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         pass
     truncated = _trunc(result, _cap)
     dt_ms = int((datetime.now() - t0).total_seconds() * 1000)
-    _log_activity("result", tool=name, chars=len(truncated), ms=dt_ms,
+    _log_activity("result", tool=name, id=_cid, chars=len(truncated), ms=dt_ms,
                   ok=not _says_failed(truncated), preview=truncated[:300])
     return truncated
 

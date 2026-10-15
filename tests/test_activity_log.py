@@ -58,6 +58,36 @@ check("JSON with ok false counts as failed; other text doesn't",
       T._says_failed('{"ok": false, "error": "no"}') and not T._says_failed('{"ok": true}')
       and not T._says_failed("No errors found"))
 
+# A call whose result was never written gave every later result of that tool to
+# the call before it on the Logs page, so finished hand-offs read as running.
+# The marker that approves a risky call was written into the log, where a model
+# reading its own logs could find it.
+open(T.ACTIVITY_LOG, "w").close()
+T.execute_tool("list_directory", {"path": WS, "_approved": T.APPROVAL_TOKEN})
+rows = [json.loads(l) for l in open(T.ACTIVITY_LOG, encoding="utf-8")]
+calls = [r for r in rows if r["event"] == "call"]
+done = [r for r in rows if r["event"] in ("result", "error")]
+check("a call and its result share an id", calls and done and calls[0].get("id")
+      and calls[0]["id"] == done[0].get("id"))
+check("the approval marker never reaches the log", T.APPROVAL_TOKEN not in open(T.ACTIVITY_LOG, encoding="utf-8").read())
+
+# A git that hung on "is this a repo?" failed a hand-off after two minutes.
+import subprocess  # noqa: E402
+from hearth import helper_changes as HC  # noqa: E402
+_real_git = HC._git
+
+
+def _hangs(*a, **k):
+    if a[:2] == ("rev-parse", "--show-toplevel"):
+        raise subprocess.TimeoutExpired("git", k.get("timeout", 0))
+    return _real_git(*a, **k)
+
+
+HC._git = _hangs
+work, _note = HC.isolate("sub_1_abc", WS, "Ada", "look around")
+check("a git that doesn't answer means working in the folder itself", os.path.abspath(work) == os.path.abspath(WS))
+HC._git = _real_git
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

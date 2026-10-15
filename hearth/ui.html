@@ -2636,6 +2636,7 @@
   .lg-row.err .what { color: var(--err); }
   .lg-row.err svg { color: var(--err); }
   .lg-row.run .ms::after { content: 'running'; color: var(--accent-2); }
+  .lg-row.gone .ms::after { content: 'no result kept'; color: var(--fg-faint); }
   .lg-more { margin: 0 8px 8px 94px; padding: 8px 10px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r);
     font: 11.5px/1.5 var(--mono); color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
   .lg-sys { padding: 6px 8px 6px 94px; color: var(--fg-faint); font: 12px var(--sans); }
@@ -13231,13 +13232,18 @@ function _lgItems(events) {
     const tool = ev.tool || '';
     if (ev.event === 'server_start') { starts++; lastStart = ev.ts || lastStart; continue; }
     if (ev.event === 'call') {
-      const it = { ts: ev.ts || '', tool, args: ev.args || {}, state: 'run' };
+      const it = { ts: ev.ts || '', tool, args: ev.args || {}, state: 'run', id: ev.id };
       items.push(it);
       if (!open.has(tool)) open.set(tool, []);
       open.get(tool).push(it);
     } else if (ev.event === 'result' || ev.event === 'error') {
+      // By id when the log has one; older lines go to the latest call of that
+      // tool, since a call whose result was never written would otherwise take
+      // every later result one place back.
       const q = open.get(tool) || [];
-      const it = q.shift() || (items.push({ ts: ev.ts || '', tool, args: {}, state: 'run' }), items[items.length - 1]);
+      let at = ev.id ? q.findIndex(c => c.id === ev.id) : q.length - 1;
+      if (at < 0) at = q.length - 1;
+      const it = at >= 0 ? q.splice(at, 1)[0] : (items.push({ ts: ev.ts || '', tool, args: {}, state: 'run' }), items[items.length - 1]);
       if (ev.event === 'result') {
         it.state = ev.ok === false ? 'err' : 'ok'; it.ms = ev.ms; it.got = ev.preview || '';
       } else { it.state = 'err'; it.got = ev.error || 'failed'; }
@@ -13245,6 +13251,9 @@ function _lgItems(events) {
       items.push({ ts: ev.ts || '', sys: ev.event + (ev.tool ? ' · ' + ev.tool : '') });
     }
   }
+  // A call with no result an hour on isn't running; its result was never written.
+  const hour = Date.now() - 36e5;
+  for (const it of items) if (it.state === 'run' && Date.parse(it.ts) < hour) it.state = 'gone';
   return { items, starts, lastStart };
 }
 // A step said in words when Hearth has the verb for it and the thing it was

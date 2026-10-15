@@ -127,9 +127,9 @@ def keep_before(helper_id: str, name: str, args: Dict[str, Any]) -> None:
 _FOLDERS: Dict[str, Dict[str, str]] = {}     # working agent program -> its folder, name, task
 
 
-def _git(*args: str, cwd: str, check: bool = False) -> subprocess.CompletedProcess:
+def _git(*args: str, cwd: str, check: bool = False, timeout: float = 120) -> subprocess.CompletedProcess:
     r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", creationflags=_NO_WINDOW, timeout=120)
+                       errors="replace", creationflags=_NO_WINDOW, timeout=timeout)
     if check and r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip().splitlines()[-1] if (r.stderr or r.stdout).strip()
                            else f"git {args[0]} failed")
@@ -149,8 +149,13 @@ def isolate(helper_id: str, folder: str, name: str, task: str) -> Tuple[str, str
         _FOLDERS[helper_id] = {"folder": folder, "name": name, "task": task[:120]}
     top = ""
     if shutil.which("git"):
-        r = _git("rev-parse", "--show-toplevel", cwd=folder)
-        top = r.stdout.strip() if r.returncode == 0 else ""
+        # A git that doesn't answer quickly means working in the folder itself,
+        # not a hand-off that fails after minutes.
+        try:
+            r = _git("rev-parse", "--show-toplevel", cwd=folder, timeout=10)
+            top = r.stdout.strip() if r.returncode == 0 else ""
+        except (subprocess.TimeoutExpired, OSError):
+            top = ""
     if top and _git("rev-parse", "--verify", "HEAD", cwd=top).returncode == 0:
         base = _git("stash", "create", cwd=top).stdout.strip() or _git("rev-parse", "HEAD", cwd=top).stdout.strip()
         short = helper_id.rsplit("_", 1)[-1]

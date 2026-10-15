@@ -878,6 +878,17 @@ with sync_playwright() as pw:
     check(f"a helper's full log is drawn like a reply: its words and its steps as the chat's tool cards {tx}",
           tx["tools"] == [["read_file", "notes.txt", "Buy milk on Friday"]] and tx["cards"] >= 1
           and "It says buy milk." in tx["text"] and "Looking." in tx["text"] and not tx["glyph"])
+    # One call that never got a result made every later delegate on the Logs page read as running.
+    pairs = pg.evaluate("""() => _lgItems([
+      { ts: '2026-10-08T23:26:53', event: 'call', tool: 'delegate', args: { agent: 'gemini-cli' } },
+      { ts: '2026-10-12T00:32:01', event: 'call', tool: 'delegate', args: { agent: 'opencode' } },
+      { ts: '2026-10-12T00:32:01', event: 'result', tool: 'delegate', ok: true, preview: 'Handed to OpenCode' },
+      { ts: '2026-10-12T14:13:58', event: 'call', tool: 'delegate', args: { agent: 'claude-code' }, id: 'b' },
+      { ts: '2026-10-12T14:14:00', event: 'call', tool: 'delegate', args: { agent: 'codex' }, id: 'c' },
+      { ts: '2026-10-12T14:20:00', event: 'result', tool: 'delegate', ok: true, preview: 'Handed to Claude Code', id: 'b' },
+    ]).items.map(it => [it.args.agent, it.state])""")
+    check(f"each result goes to its own call, and a call with none, long ago, isn't running {pairs}",
+          pairs == [["gemini-cli", "gone"], ["opencode", "ok"], ["claude-code", "ok"], ["codex", "gone"]])
     # Opening a memory showed its file: the --- header, type:, tags: and all.
     fact = pg.evaluate("""async () => {
       const realApi = api;
