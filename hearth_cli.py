@@ -2499,7 +2499,8 @@ class JarvisCLI:
                 # A glance, not a wall: each group on one line, then what's worth knowing.
                 for group, cmds in HELP_GROUPS:
                     print(f"  {C_BOT}{group:<13}{C_RESET}{'  '.join(cmds)}")
-                print(f"\n  {C_DIM}Talk normally; commands are for settings. While I reply, typing steers me and Esc stops me.")
+                print(f"\n  {C_DIM}Talk normally; commands are for settings. While I reply, typing steers me, Esc stops me,")
+                print(f"  and /bg lets a slow command finish in the background while I carry on.")
                 print(f"  @path attaches a file · /mode sets what runs without asking")
                 print(f"  /help <command> explains one · /help all lists every command{C_RESET}")
                 return True
@@ -6001,6 +6002,13 @@ class JarvisCLI:
                 continue
             if text in ("/stop", "/esc"):
                 self._respond_cancel.set()
+                continue
+            if text == "/bg":
+                # A command the reply is waiting on carries on as a background job.
+                from hearth import jobs as _jobs
+                moved = _jobs.background_now()
+                print(f"{C_DIM}↳ " + ("moved to the background; you'll hear when it ends" if moved
+                                      else "nothing is running that can move") + f"{C_RESET}")
                 continue
             if text.startswith("/"):
                 print(f"{C_DIM}↳ {text.split()[0]} runs once this reply is finished (esc stops it){C_RESET}")

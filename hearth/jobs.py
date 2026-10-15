@@ -199,6 +199,20 @@ def _tell_finished(job_id: str, meta: Dict[str, Any]) -> None:
         pass
 
 
+# Commands a reply is waiting on, each with the switch that ends the wait early.
+_WAITING: Dict[str, threading.Event] = {}
+
+
+def background_now() -> List[str]:
+    """Stop waiting on the commands a reply is waiting for; each carries on as
+    a background job that reports when it ends."""
+    with _procs_lock:
+        ids = list(_WAITING)
+        for ev in _WAITING.values():
+            ev.set()
+    return ids
+
+
 def run_or_background(command: str, cwd: str, shell: str, wait_s: float) -> Dict[str, Any]:
     """Run a command and wait up to wait_s for it. One that ends in time comes
     back with its output and leaves nothing behind; one still going carries on
@@ -209,17 +223,32 @@ def run_or_background(command: str, cwd: str, shell: str, wait_s: float) -> Dict
     job_id = started["job_id"]
     with _procs_lock:
         proc = _procs.get(job_id)
+    handover = threading.Event()
+    with _procs_lock:
+        _WAITING[job_id] = handover
     try:
         if proc is not None:
-            proc.wait(timeout=wait_s)
+            end = time.time() + wait_s
+            while True:
+                try:
+                    proc.wait(timeout=min(0.25, max(0.0, end - time.time())))
+                    break
+                except subprocess.TimeoutExpired:
+                    if handover.is_set() or time.time() >= end:
+                        raise
     except subprocess.TimeoutExpired:
         meta = _read_meta(job_id) or {}
         meta["notify"] = True
         _write_meta(job_id, meta)
         # It may have ended between the wait and the line above.
         if (_read_meta(job_id) or {}).get("status") not in ("completed", "failed", "killed"):
-            return {"ok": True, "background": True, "job_id": job_id,
+            with _procs_lock:
+                _WAITING.pop(job_id, None)
+            return {"ok": True, "background": True, "job_id": job_id, "asked": handover.is_set(),
                     "output_tail": get_job(job_id, tail_lines=20).get("output_tail", "")}
+    finally:
+        with _procs_lock:
+            _WAITING.pop(job_id, None)
     # Ended: let the reader finish writing, then hand the output back.
     for _ in range(40):
         if (_read_meta(job_id) or {}).get("status") in ("completed", "failed", "killed"):

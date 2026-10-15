@@ -3231,6 +3231,9 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, _r.snooze_reminder(rid, mins))
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/jobs/background-now":
+            from . import jobs as _jobs
+            return self._send_json(200, {"ok": True, "jobs": _jobs.background_now()})
         if path == "/api/reminders/update":
             try:
                 from . import reminders as _r

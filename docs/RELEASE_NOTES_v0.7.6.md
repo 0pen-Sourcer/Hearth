@@ -146,7 +146,7 @@ On an RTX 50-series card Hearth no longer starts its bundled runtime, which has 
 
 ## Reading a run
 
-A run shows what it reached outside Hearth. The sites a search or a page read touched appear as their own icons, fetched from each site, another agent appears as its badge, and while it works the line says what it is doing right now, "Reading reddit.com" rather than a tool name. A command that runs for a while counts up on its own card instead of popping up a warning, and the context ring always reads as room left before the chat gets summarised.
+A run shows what it reached outside Hearth. The sites a search or a page read touched appear as their own icons, fetched from each site, another agent appears as its badge, and while it works the line says what it is doing right now, "Reading reddit.com" rather than a tool name. A command that runs for a while counts up on its own card instead of popping up a warning, and after half a minute the card offers Run in background, which lets it finish as a background job while JARVIS carries on (/bg in the terminal), and the context ring always reads as room left before the chat gets summarised.
 
 File edits render as a diff with line numbers and a change count, in tight rows. Tool cards show a one line summary of what was passed rather than raw escaped JSON, and the terminal does the same with a glyph per kind of action and a short peek at long output. Steering Hearth mid answer separates the redirected part from what came before. Announcements from the developer stay as a card until you dismiss them.
 

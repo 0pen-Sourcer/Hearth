@@ -173,6 +173,9 @@
   :root:not([data-ui="advanced"]) .set-card:not(:has(> .field:not([data-adv]))) { display: none !important; }
   .mode-btn { gap: 7px; }
   .tool.t-slow .t-ms { color: var(--warn, #d9a441); }
+  .tool .t-bg { margin-left: 8px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--fg-dim);
+    font: 11.5px var(--sans); padding: 2px 8px; cursor: pointer; }
+  .tool .t-bg:hover { color: var(--fg); border-color: var(--border-strong); }
   #mode-menu { min-width: 320px; }
   #mode-menu .think-menu-item { align-items: flex-start; line-height: 1.4; }
   #mode-menu .sub { display: inline-block; margin-top: 2px; }
@@ -10711,7 +10714,20 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // the loop didn't hang - it's a slow tool. They can hit Stop or wait.
       if (pendingTool && pendingTool.div) {
         pendingTool.div.classList.add('t-slow');
-        pendingTool.ms.title = 'Still running. Stop ends it; the next message can ask for it to run in the background.';
+        pendingTool.ms.title = 'Still running. Stop ends it; Run in background lets it finish while JARVIS carries on.';
+        // A command can carry on as a background job; the reply goes on without it.
+        if (ev.name === 'run_command' && !pendingTool.div.querySelector('.t-bg')) {
+          const b = document.createElement('button');
+          b.className = 't-bg';
+          b.textContent = 'Run in background';
+          b.addEventListener('click', async e => {
+            e.stopPropagation();
+            b.disabled = true; b.textContent = 'Moving it…';
+            try { await api('/api/jobs/background-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); }
+            catch (err) { toast("Couldn't move it", err.message, 'err'); b.disabled = false; b.textContent = 'Run in background'; }
+          });
+          (pendingTool.div.querySelector('.t-head') || pendingTool.div).appendChild(b);
+        }
       }
       return;
     }

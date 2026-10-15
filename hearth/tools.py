@@ -3769,7 +3769,8 @@ def _run_command(p: Dict) -> str:
         return f"Error: {r.get('error')}"
     if r.get("background"):
         so_far = (r.get("output_tail") or "").strip()
-        return (f"$ {cmd}\n[still running after {timeout}s, so it carries on in the background as job "
+        when = "moved to the background when asked" if r.get("asked") else f"still running after {timeout}s"
+        return (f"$ {cmd}\n[{when}, so it carries on in the background as job "
                 f"{r['job_id']}. You will be told when it ends; job_status shows its output so far, "
                 f"job_kill stops it. Carry on with other work meanwhile.]"
                 + (f"\nOutput so far:\n{so_far}" if so_far else ""))
