@@ -131,7 +131,7 @@ Drag files onto the window. Hearth reads PDF, Word, Excel, PowerPoint, EPUB, not
 
 ## Skills
 
-A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide deck. Built-in ones cover documents and diagrams. Install someone else's with `/skill install owner/repo` or by pasting its GitHub link in chat, and see them all in the Skills tab. Writing and sharing your own: [SKILLS.md](SKILLS.md).
+A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide deck. Built-in ones cover documents and diagrams. Skills use the Agent Skills format that Claude and Codex read too, so most skills on GitHub work here: paste a link or `owner/repo` in the Skills tab, ask in chat, or run `/skill install owner/repo`. Each one has a switch; one that's off stays on disk but JARVIS won't use it. Writing and sharing your own: [SKILLS.md](SKILLS.md).
 
 ---
 

@@ -162,7 +162,7 @@ def inspect_source(source: str) -> Dict[str, Any]:
     # Shipping executable scripts is itself a "runs code" signal even if no
     # risky tool is declared.
     ships_code = bool(scripts)
-    existing = {s["name"]: s for s in _sl.list_skills()}
+    existing = {s["name"]: s for s in _sl.list_skills(include_off=True)}
     return {
         "ok": True,
         "name": slug,

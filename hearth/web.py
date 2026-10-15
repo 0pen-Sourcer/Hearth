@@ -2053,7 +2053,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/skills":
             try:
                 from . import skills_loader as _sl
-                return self._send_json(200, {"items": _sl.list_skills()})
+                return self._send_json(200, {"items": _sl.list_skills(include_body=True, include_off=True)})
             except Exception as e:
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/bridges":
@@ -3107,6 +3107,20 @@ class HearthHandler(BaseHTTPRequestHandler):
 
             threading.Thread(target=_go, daemon=True).start()
             return self._send_json(200, {"ok": True, "started": True})
+        if path == "/api/skills/toggle":
+            try:
+                body = self._read_json()
+                name = (body.get("name") or "").strip()
+                if not name:
+                    return self._send_json(400, {"ok": False, "error": "missing name"})
+                cur = _load_settings()
+                off = [n for n in (cur.get("skills_off") or []) if n != name]
+                if body.get("on") is False:
+                    off.append(name)
+                _save_settings(dict(cur, skills_off=off))
+                return self._send_json(200, {"ok": True, "name": name, "on": name not in off})
+            except Exception as e:
+                return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/skills/remove":
             body = self._read_json()
             try:

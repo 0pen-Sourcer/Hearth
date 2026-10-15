@@ -174,6 +174,8 @@ Repair checks every part of the install and puts back whatever is missing, Heart
 
 Asking Hearth for a capability it does not have gets a straight answer instead of a handful of unrelated tools. And it can tell you your charge level, whether you are plugged in and roughly how long you have left.
 
+The Skills page is laid out like the rest of the app now. Each skill has a switch, so you can keep one on disk without JARVIS reaching for it, and opening one shows what it is for and what it brings, with the instructions JARVIS follows folded underneath. Skills use the Agent Skills format that Claude and Codex read too, so most skills published for those install here as they are.
+
 Messages that read like an error log now say what happened in plain words, such as "Couldn't delete it" or "The model didn't load" with the reason. Some models are made for a build of llama.cpp other than the official one, like PrismML's ternary Bonsai files. Add that build in Models, Engine, by pasting its GitHub page or picking its folder, and when the official engine can't read a model Hearth tries the builds you added and remembers which one works. Every other model stays on the official engine.
 
 A command card shows the command that ran above its output, and the approval prompt can show the whole command before you allow it rather than cutting it off. Repairing an install reports in the same place as other downloads, with progress and a cancel. Email setup moved to Connectors where it belongs, and a voice install that fails part way can be retried instead of dead-ending. Settings now links to the project, so the source, releases and issue tracker are one click away.

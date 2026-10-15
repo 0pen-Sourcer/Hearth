@@ -44,6 +44,16 @@ _USER_SKILLS_DIR = Path(_env.get("WORKSPACE")
                         or (Path.home() / "Jarvis")) / "skills"
 _BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 
+
+def skills_off() -> List[str]:
+    """Skills switched off on the Skills page: kept on disk, out of the model's view."""
+    try:
+        import json
+        with open(_USER_SKILLS_DIR.parent / "settings.json", encoding="utf-8") as f:
+            return [str(n) for n in (json.load(f) or {}).get("skills_off") or []]
+    except Exception:
+        return []
+
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n(.*)$", re.DOTALL)
 
 
@@ -105,7 +115,7 @@ def _scan_dir(root: Path) -> List[Tuple[str, Path, Dict[str, Any]]]:
     return out
 
 
-def list_skills(include_body: bool = False) -> List[Dict[str, Any]]:
+def list_skills(include_body: bool = False, include_off: bool = False) -> List[Dict[str, Any]]:
     """Return every available skill — bundled + user. User skills shadow
     bundled ones with the same slug. Default response is metadata only
     (name + description + version + folder); pass include_body=True for
@@ -131,7 +141,10 @@ def list_skills(include_body: bool = False) -> List[Dict[str, Any]]:
                             p.name for p in sub.iterdir()
                             if p.is_file() and not p.name.startswith("."))
             seen[slug] = entry
-    return list(seen.values())
+    off = set(skills_off())
+    for e in seen.values():
+        e["enabled"] = e["name"] not in off
+    return [e for e in seen.values() if include_off or e["enabled"]]
 
 
 def load_skill(name: str) -> Dict[str, Any]:
@@ -141,8 +154,11 @@ def load_skill(name: str) -> Dict[str, Any]:
     name = (name or "").strip()
     if not name:
         return {"ok": False, "error": "skill name required"}
-    for s in list_skills(include_body=True):
+    for s in list_skills(include_body=True, include_off=True):
         if s["name"] == name:
+            if not s["enabled"]:
+                return {"ok": False, "error": f"the skill '{name}' is switched off in Skills; "
+                                              "ask the person to turn it on first"}
             return {"ok": True, **s}
     available = ", ".join(s["name"] for s in list_skills()) or "(none)"
     return {"ok": False,
