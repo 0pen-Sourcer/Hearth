@@ -878,6 +878,15 @@ with sync_playwright() as pw:
     check(f"a helper's full log is drawn like a reply: its words and its steps as the chat's tool cards {tx}",
           tx["tools"] == [["read_file", "notes.txt", "Buy milk on Friday"]] and tx["cards"] >= 1
           and "It says buy milk." in tx["text"] and "Looking." in tx["text"] and not tx["glyph"])
+    # Something said part-way had no style, so it read as the reply's own words.
+    steer = pg.evaluate("""() => {
+      const n = makeSteerNote('keep the Zoom one', false); document.body.appendChild(n);
+      const cs = getComputedStyle(n), w = getComputedStyle(n.querySelector('.steer-who'));
+      const out = { border: cs.borderLeftWidth, bg: cs.backgroundColor, who: w.display, size: w.fontSize };
+      n.remove(); return out;
+    }""")
+    check(f"words said part-way sit in their own marked box, apart from the reply {steer}",
+          steer["border"] != "0px" and steer["bg"] not in ("rgba(0, 0, 0, 0)", "transparent") and steer["who"] == "block")
     # One call that never got a result made every later delegate on the Logs page read as running.
     pairs = pg.evaluate("""() => _lgItems([
       { ts: '2026-10-08T23:26:53', event: 'call', tool: 'delegate', args: { agent: 'gemini-cli' } },
