@@ -738,6 +738,43 @@ def user_line(text: str) -> bytes:
             + "\n").encode("utf-8")
 
 
+def on_plan(agent: str) -> Optional[bool]:
+    """Whether an agent bills a subscription rather than a key, from its own
+    sign-in; None when Hearth can't tell."""
+    if agent == "codex":
+        try:
+            from .codex_brain import _codex_home
+            with open(os.path.join(_codex_home(), "auth.json"), encoding="utf-8") as f:
+                return (json.load(f) or {}).get("auth_mode") == "chatgpt"
+        except Exception:
+            return None
+    if agent == "cursor-agent":
+        return True                      # Cursor bills its own plans
+    return None
+
+
+def priced(agent: str, stats: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """A turn's stats with what it cost: the agent's own figure, else its tokens
+    at the catalog's prices, marked when a plan covers it."""
+    if not stats:
+        return stats
+    out = dict(stats)
+    if out.get("plan") is None:
+        plan = on_plan(agent)
+        if plan is not None:
+            out["plan"] = plan
+    if out.get("cost_usd") is None and (out.get("tokens_in") or out.get("tokens_out")):
+        try:
+            from . import model_facts
+            cost = model_facts.turn_cost(agent, out.get("model") or chosen_model(agent) or "",
+                                         {"in": out.get("tokens_in") or 0, "out": out.get("tokens_out") or 0})
+            if cost:
+                out["cost_usd"] = round(cost, 6)
+        except Exception:
+            pass
+    return out
+
+
 async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
                    permission_check=None, should_cancel=None, voice: bool = False,
                    model: Optional[str] = None, drain_steer=None) -> int:
@@ -747,6 +784,14 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     A helper's report reaches it the same way, and the turn waits for helpers
     it sent."""
     _sent.clear()
+    # Every agent's turn ends with what it cost, by one rule for all of them.
+    _emit, agent = emit, current() or ""
+
+    def emit(kind: str, **fields) -> None:
+        if kind == "done":
+            fields["stats"] = priced(agent, fields.get("stats"))
+        _emit(kind, **fields)
+
     news = helper_news(emit)
     from .headless import NOTIFY_FLUSH
     if prompt.strip() == NOTIFY_FLUSH:

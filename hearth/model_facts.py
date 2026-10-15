@@ -83,7 +83,16 @@ def catalog_entry(provider: str, model_id: str) -> Optional[Dict[str, Any]]:
         if hit:
             return hit
     bare = mid.split("/")[-1]
-    return next((ms[bare] for ms in idx.values() if bare in ms), None)
+    hit = next((ms[bare] for ms in idx.values() if bare in ms), None)
+    if hit:
+        return hit
+    # A shorter name for the same model, as agents give them ("sonnet-4.5" for
+    # "claude-sonnet-4-5"): the one catalog id that ends with it.
+    short = bare.replace(".", "-")
+    norm = lambda k: k.split("/")[-1].replace(".", "-")
+    found = [(norm(k), v) for p, ms in idx.items() for k, v in ms.items() if norm(k).endswith("-" + short)]
+    # Hosts list it under longer names of their own; the plain name is the shortest.
+    return min(found, key=lambda f: len(f[0]))[1] if found else None
 
 
 def from_catalog(provider: str, model_id: str) -> Dict[str, Any]:

@@ -42,6 +42,47 @@ try:
 except Exception as e:
     check(f"the terminal's line for a turn on a plan ({type(e).__name__}: {e})", False)
 
+# Only Claude Code said what a turn cost; Codex, Cursor and the protocol agents
+# reported tokens and nothing else.
+import json, tempfile  # noqa: E401,E402
+from hearth import claude_brain as C, codex_brain  # noqa: E402
+home = tempfile.mkdtemp(prefix="hearth-codexhome-")
+with open(os.path.join(home, "auth.json"), "w", encoding="utf-8") as f:
+    json.dump({"auth_mode": "chatgpt"}, f)
+codex_brain._codex_home = lambda: home
+M.catalog_entry = lambda pid, mid: {"cost": {"input": 1, "output": 10}} if mid in ("gpt-x", "sonnet-x") else None
+st = {"tokens_in": 10000, "tokens_out": 1000}
+cx = C.priced("codex", dict(st, model="gpt-x"))
+cu = C.priced("cursor-agent", dict(st, model="sonnet-x"))
+oc = C.priced("opencode", dict(st, model="gpt-x"))
+check(f"Codex on a ChatGPT plan: its tokens priced and marked as plan usage {cx}", cx.get("plan") is True and abs(cx["cost_usd"] - 0.02) < 1e-9)
+check(f"Cursor the same {cu}", cu.get("plan") is True and abs(cu["cost_usd"] - 0.02) < 1e-9)
+check(f"an agent whose billing Hearth can't tell is priced without a plan mark {oc}", "plan" not in oc and abs(oc["cost_usd"] - 0.02) < 1e-9)
+with open(os.path.join(home, "auth.json"), "w", encoding="utf-8") as f:
+    json.dump({"auth_mode": "apikey"}, f)
+check("Codex on an API key is billed, not plan", C.priced("codex", dict(st, model="gpt-x")).get("plan") is False)
+check("a model the catalog doesn't know shows its tokens and no made-up cost",
+      "cost_usd" not in C.priced("cursor-agent", dict(st, model="composer-x")))
+
+# Through the brain dispatcher, as a real turn on Codex goes.
+import asyncio  # noqa: E402
+with open(os.path.join(home, "auth.json"), "w", encoding="utf-8") as f:
+    json.dump({"auth_mode": "chatgpt"}, f)
+C.current = lambda: "codex"
+C.helper_news = lambda emit: []
+C.helpers_out = lambda: False
+
+
+async def _codex_turn(prompt, emit, **kw):
+    emit("assistant", content="Done.")
+    emit("done", stats={"brain": "Codex", "model": "gpt-x", "tokens_in": 10000, "tokens_out": 1000})
+    return 0
+codex_brain.run_turn = _codex_turn
+seen = {}
+asyncio.run(C.run_turn("hi", emit=lambda k, **f: seen.update(f.get("stats") or {}) if k == "done" else None))
+check(f"a Codex turn through the dispatcher ends with its cost, as plan usage {seen}",
+      seen.get("plan") is True and abs((seen.get("cost_usd") or 0) - 0.02) < 1e-9)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
