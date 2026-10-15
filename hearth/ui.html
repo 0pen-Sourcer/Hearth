@@ -1827,6 +1827,12 @@
     border: 1px solid transparent;
   }
   .model-tag.cap-tool       { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent-2) 30%, transparent); background: color-mix(in srgb, var(--accent-2) 6%, transparent); }
+  .model-vision { margin-top: 5px; font-size: 12px; color: var(--fg-dim); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .model-vision:empty { display: none; }
+  .model-vision-note.err { color: var(--err); }
+  .model-mini { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--fg-dim); padding: 2px 8px;
+    font: 11.5px var(--sans); cursor: pointer; }
+  .model-mini:hover { color: var(--fg); border-color: var(--border-strong); }
   .model-tag.cap-vision     { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); background: color-mix(in srgb, var(--ok) 6%, transparent); }
   .model-tag.cap-reasoning  { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent); background: color-mix(in srgb, var(--warn) 6%, transparent); }
   .model-tag.cap-code       { color: var(--info); border-color: color-mix(in srgb, var(--info) 30%, transparent); background: color-mix(in srgb, var(--info) 6%, transparent); }
@@ -16178,6 +16184,45 @@ function hfLinkForModel(m) {
   return 'https://huggingface.co/models?search=' + encodeURIComponent(q);
 }
 
+// Whether a model on this PC can see: a projector beside it, or one its repo
+// publishes that can be fetched next to it. Asked once per file, drawn on its row.
+const MODEL_VISION = new Map();
+function modelVisionHTML(v, path) {
+  if (!v) return '';
+  if (v.state === 'sees') return '<span class="model-tag cap-vision">Vision</span>';
+  if (v.state !== 'needs_file') return '';
+  const j = v.job;
+  if (j && j.status === 'downloading')
+    return `<span class="model-vision-note">Adding its vision file${j.total ? ' \u00b7 ' + Math.round(j.done * 100 / j.total) + '%' : '\u2026'}</span>`;
+  if (j && j.status === 'error')
+    return `<span class="model-vision-note err">Couldn't add its vision file. </span><button class="model-mini" data-vision-get="${esc(path)}">Try again</button>`;
+  return `<span class="model-vision-note">It can see with its vision file. </span><button class="model-mini" data-vision-get="${esc(path)}">Add vision</button>`;
+}
+async function modelVisionFill(root) {
+  for (const el of (root || document).querySelectorAll('[data-vision-path]')) {
+    const path = el.dataset.visionPath;
+    let v = MODEL_VISION.get(path);
+    if (!v || (v.job && v.job.status === 'downloading')) {
+      try { v = await api('/api/llmserver/vision?path=' + encodeURIComponent(path)); } catch { v = { state: 'unknown' }; }
+      MODEL_VISION.set(path, v);
+    }
+    el.innerHTML = modelVisionHTML(v, path);
+    if (v.job && v.job.status === 'downloading') setTimeout(() => modelVisionFill(el.parentElement), 1200);
+    else if (v.job && v.job.status === 'done') { MODEL_VISION.delete(path); modelVisionFill(el.parentElement); }
+  }
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-vision-get]');
+  if (!b) return;
+  e.stopPropagation();
+  b.disabled = true;
+  const path = b.dataset.visionGet;
+  const r = await api('/api/llmserver/vision-fetch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                      body: JSON.stringify({ path }) }).catch(err => ({ ok: false, error: err.message }));
+  if (!r || !r.ok) { toast("Couldn't add its vision file", (r && r.error) || "It didn't say why.", 'err'); b.disabled = false; return; }
+  MODEL_VISION.set(path, Object.assign({}, MODEL_VISION.get(path), { job: { status: 'downloading', done: 0, total: 0 } }));
+  modelVisionFill(b.closest('.model-info'));
+}, true);
 function modelsCapTagsHTML(caps) {
   if (!caps || !caps.length) return '';
   return '<div class="model-tags">' +
@@ -16863,6 +16908,7 @@ function modelsRenderMine() {
           </div>
           <div class="model-meta">${m.size_gb} GB &middot; ${esc(m.path)}</div>
           ${modelsCapTagsHTML(caps)}
+          <div class="model-vision" data-vision-path="${esc(m.path)}"></div>
         </div>
         <div class="cell-size">${m.size_gb} GB</div>
         ${loaded
@@ -16906,6 +16952,7 @@ function modelsRenderMine() {
   html += '</div></div>';
   pane.innerHTML = html;
   modelsWireRowClicks(pane);
+  modelVisionFill(pane);
   // "Show in folder" — reveal the model file in the OS explorer (models live
   // outside the workspace, so this hits the un-sandboxed /api/model/reveal).
   pane.querySelectorAll('[data-reveal-model]').forEach(btn => {

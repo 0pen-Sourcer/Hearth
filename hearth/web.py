@@ -2510,6 +2510,15 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import llmserver
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("q", [""])[0]
             return self._send_json(200, {"results": llmserver.search_huggingface(q)})
+        if path == "/api/llmserver/vision":
+            from . import llmserver
+            mp = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("path", [""])[0]
+            if not mp or not os.path.isfile(mp):
+                return self._send_json(400, {"state": "unknown", "error": "no such model file"})
+            v = llmserver.vision_for_file(mp)
+            if v.get("state") == "needs_file":
+                v["job"] = llmserver.model_download_state(llmserver.vision_addon_name(v["repo"], v["file"]))
+            return self._send_json(200, v)
         if path == "/api/llmserver/hf-files":
             # ?repo=user/model lists the .gguf files in that repo
             from . import llmserver
@@ -4122,6 +4131,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             repo = (body.get("repo") or "").strip()
             filename = (body.get("filename") or "").strip()
             return self._stream_model_download(repo, filename)
+        if path == "/api/llmserver/vision-fetch":
+            from . import llmserver
+            mp = (self._read_json().get("path") or "").strip()
+            if not mp or not os.path.isfile(mp):
+                return self._send_json(400, {"ok": False, "error": "no such model file"})
+            return self._send_json(200, llmserver.fetch_vision_for_file(mp))
         if path == "/api/llmserver/download-pause":
             from . import llmserver
             body = self._read_json()

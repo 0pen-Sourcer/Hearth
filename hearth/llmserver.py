@@ -3253,6 +3253,68 @@ def vision_addon(siblings: List[Dict[str, Any]]) -> str:
     return sorted(names, key=lambda n: (rank(n), len(n)))[0] if names else ""
 
 
+_REPO_SIBLINGS: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def _repo_siblings(repo: str) -> List[Dict[str, Any]]:
+    if repo not in _REPO_SIBLINGS:
+        url = f"https://huggingface.co/api/models/{urllib.parse.quote(repo, safe='/')}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            _REPO_SIBLINGS[repo] = json.loads(r.read().decode("utf-8")).get("siblings") or []
+    return _REPO_SIBLINGS[repo]
+
+
+def repo_for_file(path: str) -> str:
+    """The Hugging Face repo a model file came from: remembered when Hearth
+    downloaded it, else found as a GGUF repo that holds a file of that exact
+    name (and remembered from then on)."""
+    name = os.path.basename(path)
+    repo = model_source(name)
+    if repo:
+        return repo
+    stem = re.sub(r"[-_.](?:ud-)?(?:i|t)?q\d[\w]*$|[-_.]b?f(?:16|32)$", "", Path(name).stem, flags=re.I)
+    for hit in search_huggingface(stem, limit=6):
+        r = hit.get("hf_repo") or ""
+        try:
+            if r and any((x.get("rfilename") or "").split("/")[-1] == name for x in _repo_siblings(r)):
+                record_model_source(path, r)
+                return r
+        except Exception:
+            continue
+    return ""
+
+
+def vision_for_file(path: str, look_up: bool = True) -> Dict[str, Any]:
+    """Whether a model file can see. "sees": its projector is beside it.
+    "needs_file": its repo publishes one that isn't here yet (it can see once
+    that's fetched). "text": no projector anywhere we know of. "unknown": the
+    repo couldn't be found or reached."""
+    if _find_mmproj(path):
+        return {"state": "sees"}
+    if not look_up:
+        return {"state": "unknown"}
+    try:
+        repo = repo_for_file(path)
+        if not repo:
+            return {"state": "unknown"}
+        addon = vision_addon(_repo_siblings(repo))
+        return {"state": "needs_file", "repo": repo, "file": addon} if addon else {"state": "text", "repo": repo}
+    except Exception as e:
+        return {"state": "unknown", "error": f"{type(e).__name__}: {e}"}
+
+
+def fetch_vision_for_file(path: str) -> Dict[str, Any]:
+    """Fetch a model's projector into the model's own folder, as a download job."""
+    v = vision_for_file(path)
+    if v.get("state") != "needs_file":
+        return {"ok": False, "error": "this model has no vision file to fetch" if v.get("state") != "sees"
+                else "it can already see"}
+    name = vision_addon_name(v["repo"], v["file"])
+    job = start_model_download(v["repo"], v["file"], dest_dir=os.path.dirname(os.path.abspath(path)), save_as=name)
+    return {"ok": True, "name": name, "status": job["status"]}
+
+
 def vision_addon_name(repo: str, filename: str) -> str:
     """Saved under the repo's name, so two models' projectors in the one models
     folder don't overwrite each other and each pairs with its own model."""
@@ -3306,7 +3368,8 @@ def model_source(filename: str) -> str:
 
 def download_from_hf_repo(repo: str, filename: str,
                           on_progress: Optional[Callable[[int, int], None]] = None,
-                          cancel: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
+                          cancel: Optional[Callable[[], bool]] = None,
+                          dest_dir: str = "", save_as: str = "") -> Dict[str, Any]:
     """Download an arbitrary GGUF picked from search_huggingface() results.
     A .part file holds it until it is whole, so an interrupted download
     never looks complete."""
@@ -3314,8 +3377,8 @@ def download_from_hf_repo(repo: str, filename: str,
         return {"ok": False, "error": "repo and filename required"}
     if not filename.lower().endswith(".gguf"):
         return {"ok": False, "error": "only .gguf files supported"}
-    safe_name = filename.split("/")[-1]
-    dest = MODELS_DIR / safe_name
+    safe_name = (save_as or filename).split("/")[-1]
+    dest = (Path(dest_dir) if dest_dir else MODELS_DIR) / safe_name
     if dest.exists():
         record_model_source(str(dest), repo)   # backfill if it predates the map
         return {"ok": True, "path": str(dest), "already": True}
@@ -3404,8 +3467,9 @@ def _run_download_job(job: Dict[str, Any]) -> None:
 
     try:
         result = download_from_hf_repo(job["repo"], job["filename"], on_progress=on_progress,
-                                       cancel=job["stop"].is_set)
-        if result.get("ok"):
+                                       cancel=job["stop"].is_set, dest_dir=job.get("dest_dir", ""),
+                                       save_as=job.get("save_as", ""))
+        if result.get("ok") and not job.get("save_as"):
             _fetch_vision_addon(job, on_progress)
     except Exception as e:
         result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -3443,16 +3507,18 @@ def _fetch_vision_addon(job: Dict[str, Any], on_progress) -> None:
         job.pop("phase", None)
 
 
-def start_model_download(repo: str, filename: str) -> Dict[str, Any]:
+def start_model_download(repo: str, filename: str, dest_dir: str = "", save_as: str = "") -> Dict[str, Any]:
     """Start a download, or return the one already running for this file."""
-    name = filename.split("/")[-1]
+    name = (save_as or filename).split("/")[-1]
     with _dl_lock:
         job = _dl_jobs.get(name)
         if job and job["status"] == "downloading":
             return job
-        save_pending_download(repo, filename)
+        if not dest_dir:
+            save_pending_download(repo, filename)
         job = {"repo": repo, "filename": filename, "status": "downloading",
-               "done": 0, "total": 0, "result": None, "stop": _threading.Event()}
+               "done": 0, "total": 0, "result": None, "stop": _threading.Event(),
+               "dest_dir": dest_dir, "save_as": save_as}
         _dl_jobs[name] = job
         _threading.Thread(target=_run_download_job, args=(job,), daemon=True,
                           name=f"download-{name}").start()

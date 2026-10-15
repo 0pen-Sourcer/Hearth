@@ -52,6 +52,35 @@ check(f"with two models' projectors side by side, each model gets its own ({os.p
       pick and os.path.basename(pick) == "gemma-4-12b-it-GGUF-mmproj-F16.gguf"
       and os.path.basename(L._find_mmproj(str(d / "Qwen3-VL-8B-Instruct-Q4_K_M.gguf"))) == "Qwen3-VL-8B-Instruct-GGUF-mmproj-F16.gguf")
 
+# A model whose projector wasn't beside it was called blind, even when its repo
+# publishes one; a model Hearth didn't download had no repo to ask.
+e = Path(tempfile.mkdtemp(prefix="hearth-vision2-"))
+L.MODELS_DIR = e
+(e / "Ornith-1.5-9B-Q4_K_M.gguf").write_bytes(b"x")
+L._REPO_SIBLINGS.clear()
+L.search_huggingface = lambda q, limit=12: [{"hf_repo": "someone/Other-GGUF"}, {"hf_repo": "ornith-ai/Ornith-1.5-9B-GGUF"}]
+L._repo_siblings = lambda repo: ([{"rfilename": "Ornith-1.5-9B-Q4_K_M.gguf"}, {"rfilename": "mmproj-Ornith-1.5-9B-BF16.gguf"}]
+                                 if repo.startswith("ornith") else [{"rfilename": "Other-Q4_K_M.gguf"}])
+v = L.vision_for_file(str(e / "Ornith-1.5-9B-Q4_K_M.gguf"))
+check(f"a model whose repo ships a projector can see once it's fetched {v}",
+      v.get("state") == "needs_file" and v.get("repo") == "ornith-ai/Ornith-1.5-9B-GGUF")
+check("the repo found by its file is remembered", L.model_source("Ornith-1.5-9B-Q4_K_M.gguf") == "ornith-ai/Ornith-1.5-9B-GGUF")
+started = []
+L.start_model_download = lambda repo, fn, dest_dir="", save_as="": (started.append((repo, fn, dest_dir, save_as)),
+                                                                    {"status": "downloading"})[1]
+r = L.fetch_vision_for_file(str(e / "Ornith-1.5-9B-Q4_K_M.gguf"))
+check(f"fetching puts it beside the model, under the repo's name {started}",
+      r.get("ok") and started and started[0][2] == str(e) and started[0][3] == "Ornith-1.5-9B-GGUF-mmproj-Ornith-1.5-9B-BF16.gguf")
+(e / started[0][3]).write_bytes(b"x")
+check("with it there, it sees", L.vision_for_file(str(e / "Ornith-1.5-9B-Q4_K_M.gguf")).get("state") == "sees")
+
+# A cloud model was judged by fragments of its name; its provider's catalog says what it takes.
+from hearth import tools as T, model_facts as MF  # noqa: E402
+MF.from_catalog = lambda pid, mid: {"inputs": ["text"]} if mid == "claude-sonnet-text-only" else {"inputs": ["text", "image"]}
+check("a cloud model's own catalog decides, not its name",
+      not T._loaded_model_is_vision(model="claude-sonnet-text-only", base="https://api.anthropic.com/v1")
+      and T._loaded_model_is_vision(model="ox-alpha", base="https://api.anthropic.com/v1"))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

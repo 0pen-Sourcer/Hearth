@@ -1977,14 +1977,17 @@ def _loaded_model_is_vision(model: Optional[str] = None, base: Optional[str] = N
                 pass
     except Exception:
         pass
-    # Heuristic fallback
-    needle = model_hint or ""
-    if needle and any(s in needle for s in
-                     ("vl", "vision", "gemma-3", "gemma-4", "gemma4", "llava",
-                      "moondream", "internvl", "minicpm-v", "qwen-vl", "qwen.5-vl",
-                      "gemini", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-sonnet",
-                      "claude-opus", "claude-haiku", "pixtral", "grok-2-vision")):
-        return True
+    # A cloud model: what its provider's catalog says it takes in.
+    if model_hint:
+        try:
+            from . import headless, model_facts
+            _pid = headless.provider_for(base)
+            if _pid:
+                _ins = model_facts.from_catalog(_pid, model_hint).get("inputs")
+                if _ins:
+                    return "image" in [str(x).lower() for x in _ins]
+        except Exception:
+            pass
     # Remote/cloud endpoint we couldn't classify from a catalog or probe (a
     # stealth codename like 'ox-alpha', a new Gemini/GPT id): most modern cloud
     # models are multimodal, and if one isn't the API rejects the image with a
@@ -5112,12 +5115,18 @@ def _view_image(p: Dict) -> str:
     # describe the image, or load a vision model.
     try:
         if not _loaded_model_is_vision():
-            return (f"This model can't see images right now (no vision projector loaded), "
-                    f"so it can't read {path}. Ask the user to describe what's in it, or "
-                    f"switch to a vision model (e.g. a *-VL / Gemma-3-vision). On Hearth's "
-                    f"built-in server, dropping the model's matching `mmproj-*.gguf` next "
-                    f"to the .gguf and reloading turns vision on. Do NOT claim the image is "
-                    f"blank — you simply can't see it.")
+            could = ""
+            try:
+                from . import llmserver
+                _running = (llmserver.status(os.environ.get("LOCAL_API_BASE", "")) or {}).get("builtin_model")
+                if _running and llmserver.vision_for_file(_running).get("state") == "needs_file":
+                    could = (" This model CAN see once its vision file is fetched: tell the user they can "
+                             "get it in Models (Add vision on the model's row), then reload the model.")
+            except Exception:
+                pass
+            return (f"This model can't see images right now, so it can't read {path}.{could} "
+                    f"Otherwise ask the user to describe what's in it, or to switch to a model "
+                    f"that can see. Do NOT claim the image is blank: you simply can't see it.")
     except Exception:
         pass
     # Return a structured marker. mcp_server.py detects this prefix and
