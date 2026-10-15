@@ -286,7 +286,9 @@ class _Stream:
         prompt = ((u.input_tokens or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0)
                   + (getattr(u, "cache_creation_input_tokens", 0) or 0))
         yield _chunk(usage=NS(prompt_tokens=prompt, completion_tokens=u.output_tokens or 0,
-                              total_tokens=prompt + (u.output_tokens or 0)))
+                              total_tokens=prompt + (u.output_tokens or 0),
+                              prompt_tokens_details=NS(cached_tokens=getattr(u, "cache_read_input_tokens", 0) or 0),
+                              cache_write_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0))
 
 
 class _Completions:

@@ -1271,6 +1271,25 @@ async def run_once(
     _wrapup_nudged: bool = False
     _wrapup_threshold = max(1, int(max_depth * WRAP_UP_AT_FRACTION))
     _turn_stats: Dict[str, Any] = {}   # tok/s of the last generation this turn
+    # Every call this turn, as the provider counted it; its cost from that.
+    _turn_use: Dict[str, Any] = {"in": 0, "out": 0, "cache_read": 0, "cache_write": 0, "reported": None}
+
+    def _with_use(stats: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        out = dict(stats or {})
+        if _turn_use["in"] or _turn_use["out"]:
+            out["tokens_in"], out["tokens_out"] = _turn_use["in"], _turn_use["out"]
+            cost = _turn_use["reported"]
+            if cost is None:
+                try:
+                    from . import model_facts
+                    pid = provider_for(LOCAL_API_BASE)
+                    if pid and pid != "local":
+                        cost = model_facts.turn_cost(pid, model or "", _turn_use)
+                except Exception:
+                    cost = None
+            if cost:
+                out["cost_usd"] = round(cost, 6)
+        return out or None
     # Ctx-ring calibration: the char-estimate undercounts (it ignores the tool
     # schemas + dense JSON), so the ring reads low then jumps. Once the server
     # reports real usage.prompt_tokens we learn the estimate's bias and add it to
@@ -1835,6 +1854,18 @@ async def run_once(
         try:
             _u = getattr(_s_last_chunk, "usage", None)
             _pt = int(getattr(_u, "prompt_tokens", 0) or 0) if _u else 0
+            if _u:
+                _turn_use["in"] += _pt
+                _turn_use["out"] += int(getattr(_u, "completion_tokens", 0) or 0)
+                _d = getattr(_u, "prompt_tokens_details", None)
+                _turn_use["cache_read"] += int(getattr(_d, "cached_tokens", 0) or 0) if _d else 0
+                _turn_use["cache_write"] += int(getattr(_u, "cache_write_tokens", 0) or 0)
+                # A provider that says what the call cost (OpenRouter) is taken at its word.
+                _c = getattr(_u, "cost", None)
+                if _c is None:
+                    _c = (getattr(_u, "model_extra", None) or {}).get("cost")
+                if isinstance(_c, (int, float)):
+                    _turn_use["reported"] = (_turn_use["reported"] or 0.0) + float(_c)
             if _pt > 0 and _est_sent > 0:
                 # Subtract the tool-schema tokens: the real prompt_tokens counts
                 # them, but the effective budget already EXCLUDES them (budget =
@@ -2408,7 +2439,7 @@ async def run_once(
         emit("done",
              duration_ms=int((time.time() - t_start) * 1000),
              iterations=iterations,
-             stats=(_turn_stats or None),
+             stats=_with_use(_turn_stats),
              reason=("stopped_early" if _stopped_note else "finished"),
              note=(_stopped_note or None))
 
@@ -2510,7 +2541,7 @@ async def run_once(
     emit("done",
          duration_ms=int((time.time() - t_start) * 1000),
          iterations=iterations,
-         stats=(_turn_stats or None),
+         stats=_with_use(_turn_stats),
          reason="max_depth_reached",
          snapshot=snapshot_text or None,
          resume_hint=(

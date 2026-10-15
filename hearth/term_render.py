@@ -297,12 +297,13 @@ class Turn:
         tps = self.stats.get("decode_tps") or self.stats.get("tps")
         if tps:
             bits.append(f"{float(tps):.0f} tok/s")
-        tin = self.stats.get("prompt_tokens") or self.stats.get("tokens_in")
-        tout = self.stats.get("gen_tokens") or self.stats.get("tokens_out")
+        # The whole turn when the engine counted it, else the last call.
+        tin = self.stats.get("tokens_in") or self.stats.get("prompt_tokens")
+        tout = self.stats.get("tokens_out") or self.stats.get("gen_tokens")
         if tin:
             bits.append(f"↑{_k(tin)} ↓{_k(tout or 0)}")
         if self.stats.get("cost_usd") is not None:
-            bits.append(f"${float(self.stats['cost_usd']):.3f}")
+            bits.append(f"${float(self.stats['cost_usd']):.3f}" + (" on your plan" if self.stats.get("plan") else ""))
         bits.append(f"{time.time() - self.t0:.1f}s")
         self.out(DIM + "  " + " · ".join(str(b) for b in bits if b) + RESET)
 

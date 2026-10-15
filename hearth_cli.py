@@ -4421,7 +4421,8 @@ class JarvisCLI:
         u = self._session_use
         if u.get("in"):
             parts.append(f"↑{_term_render._k(u['in'])} ↓{_term_render._k(u.get('out', 0))}"
-                         + (f" ${u['cost']:.3f}" if u.get("cost") else ""))
+                         + (f" ${u['cost']:.3f}" if u.get("cost") else "")
+                         + (f" ${u['plan_cost']:.3f} on plan" if u.get("plan_cost") else ""))
         try:
             from hearth import subagents as _sa
             # The same count the window's status uses: helpers actually working now,
@@ -5880,7 +5881,8 @@ class JarvisCLI:
                     state["open"] = False
                 st = f.get("stats") or {}
                 if st.get("cost_usd") is not None:
-                    print(f"{C_DIM}  {st.get('brain') or 'Claude Code'} · ${st['cost_usd']:.3f}{C_RESET}")
+                    print(f"{C_DIM}  {st.get('brain') or 'Claude Code'} · ${st['cost_usd']:.3f}"
+                          + (" on your plan" if st.get("plan") else "") + C_RESET)
                 elif st.get("tokens_in"):
                     print(f"{C_DIM}  {st.get('brain')} · {st['tokens_in']:,} in, {st.get('tokens_out') or 0:,} out{C_RESET}")
 
@@ -5949,10 +5951,12 @@ class JarvisCLI:
             self._exit_requested = True
         st = turn.stats
         u = self._session_use
-        u["in"] = u.get("in", 0) + int(st.get("prompt_tokens") or 0)
-        u["out"] = u.get("out", 0) + int(st.get("gen_tokens") or 0)
+        u["in"] = u.get("in", 0) + int(st.get("tokens_in") or st.get("prompt_tokens") or 0)
+        u["out"] = u.get("out", 0) + int(st.get("tokens_out") or st.get("gen_tokens") or 0)
         if st.get("cost_usd"):
-            u["cost"] = u.get("cost", 0.0) + float(st["cost_usd"])
+            # Billed and plan-covered amounts are kept apart.
+            k = "plan_cost" if st.get("plan") else "cost"
+            u[k] = u.get(k, 0.0) + float(st["cost_usd"])
         reply = turn.reply()
         kept = getattr(turn, "turn_messages", None)
         if kept:

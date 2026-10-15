@@ -105,6 +105,22 @@ def from_catalog(provider: str, model_id: str) -> Dict[str, Any]:
     return out
 
 
+def turn_cost(provider: str, model_id: str, use: Dict[str, Any]) -> Optional[float]:
+    """What a turn's tokens cost at the catalog's prices (dollars per million),
+    or None when the catalog has no price for the model. Cached input is
+    charged at its own rate where the catalog lists one."""
+    cost = (catalog_entry(provider, model_id) or {}).get("cost") or {}
+    rate = lambda k, alt=None: float(cost[k]) if isinstance(cost.get(k), (int, float)) else alt
+    pin, pout = rate("input"), rate("output")
+    if pin is None and pout is None:
+        return None
+    pin, pout = pin or 0.0, pout or 0.0
+    read, write = int(use.get("cache_read") or 0), int(use.get("cache_write") or 0)
+    fresh = max(0, int(use.get("in") or 0) - read - write)
+    return (fresh * pin + read * rate("cache_read", pin) + write * rate("cache_write", pin)
+            + int(use.get("out") or 0) * pout) / 1e6
+
+
 def merge(own: Dict[str, Any], provider: str, model_id: str) -> Dict[str, Any]:
     """The source's own facts, with the catalog's filling what they leave out."""
     out = dict(from_catalog(provider, model_id))

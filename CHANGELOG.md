@@ -31,6 +31,7 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - `auto_memory` setting (Remember things on its own) for the background fact saver, which also saves nothing from a chat that asked it not to.
 - A GGUF without a tokenizer (an image or video model) or cut short is marked in Models and left out of the model menu.
 - The Team room's fire is animated.
+- A turn on a provider brain shows what it cost: every call's tokens added up (cached input apart) and priced from the model catalog, or the provider's own figure when it gives one (`model_facts.turn_cost`). Claude Code's figure on a Claude plan is labelled as plan usage, not a bill.
 - Run in background on a slow command's card (`/bg` in the terminal): the wait ends at once and the command carries on as a job that reports when it ends (`jobs.background_now`).
 - Skills page redone: a switch per skill (`skills_off` setting; a switched-off skill is left out of the prompt and `load_skill` refuses it), a readable detail view, and the add box takes any Agent Skills folder on GitHub.
 - Reminders can be changed in place (`update_reminder`, /api/reminders/update: words, time, repeat, last day `until_iso`) and paused and resumed (`pause_reminder`, the row's pause button); a repeating one resumes at its next slot. The row's old ten-minute snooze is gone from the list, since on a reminder not yet due it made it fire sooner.

@@ -851,6 +851,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
     tool_names: Dict[str, Tuple[str, float]] = {}
     text_parts: List[str] = []
     final_text, result, sid = "", None, None
+    on_plan = False
     streamed = False
     gap = False                                   # a tool call came between two stretches of text
     writing: Optional[Dict[str, Any]] = None      # the tool call being generated right now
@@ -906,6 +907,8 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
                 note_claude_limits(ev)
             elif t == "system" and ev.get("subtype") == "init":
                 sid = ev.get("session_id") or sid
+                # "none": signed in with a Claude plan, not an API key.
+                on_plan = ev.get("apiKeySource") == "none"
             elif t == "stream_event":
                 inner = ev.get("event") or {}
                 d = inner.get("delta") or {}
@@ -991,6 +994,6 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
          iterations=int((result or {}).get("num_turns") or 1),
          stats={"brain": "Claude Code", "model": (max(usage, key=lambda k: (usage[k] or {}).get("outputTokens") or 0)
                                                  if usage else ""),
-                "cost_usd": (result or {}).get("total_cost_usd")} if result else None,
+                "cost_usd": (result or {}).get("total_cost_usd"), "plan": on_plan} if result else None,
          reason="finished")
     return 0
