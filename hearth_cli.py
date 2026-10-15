@@ -2394,7 +2394,10 @@ class JarvisCLI:
             if _c and (_now - _c[0]) < 8:
                 s = _c[1]
             else:
-                s = llmserver.status(LOCAL_API_BASE)
+                # Probing the servers and the disk takes a few seconds; say so,
+                # and keep it off the loop so the terminal doesn't look frozen.
+                print(f"{C_DIM}looking for models…{C_RESET}")
+                s = await asyncio.to_thread(llmserver.status, LOCAL_API_BASE)
                 self._status_cache = (_now, s)
         except Exception as e:
             print(f"{C_ERR}Could not fetch status: {e}{C_RESET}")
@@ -2492,7 +2495,15 @@ class JarvisCLI:
             sys.exit(0)
         if low == "/help" or low.startswith("/help "):
             want = low[6:].strip().lstrip("/")
-            if want:
+            if not want:
+                # A glance, not a wall: each group on one line, then what's worth knowing.
+                for group, cmds in HELP_GROUPS:
+                    print(f"  {C_BOT}{group:<13}{C_RESET}{'  '.join(cmds)}")
+                print(f"\n  {C_DIM}Talk normally; commands are for settings. While I reply, typing steers me and Esc stops me.")
+                print(f"  @path attaches a file · /mode sets what runs without asking")
+                print(f"  /help <command> explains one · /help all lists every command{C_RESET}")
+                return True
+            if want != "all":
                 hit = "/" + want
                 if hit in SLASH_COMMANDS:
                     print(f"  {C_TOOL}{hit}{C_RESET}  {SLASH_COMMANDS[hit]}")
