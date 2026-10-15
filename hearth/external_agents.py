@@ -81,9 +81,9 @@ AGENTS: Dict[str, Dict[str, Any]] = {
              "args": lambda allow: ["-p"], "stream": "text", "prompt_arg": True, "auto_only": True},
     # `app`: where its desktop app lives. The app has no command line of its
     # own, so it can't be handed a task; its CLI can, and shares its sign-in.
-    "opencode": {"label": "OpenCode", "maker": "SST", "exe": ["opencode"], "args": lambda allow: ["run"],
+    "opencode": {"label": "OpenCode", "maker": "SST", "exe": ["opencode"], "args": lambda allow: ["run", "--format", "json"],
                  "model": ("-m", 1),
-                 "stream": "text", "prompt_arg": True,
+                 "stream": "opencode", "prompt_arg": True,
                  "app": [r"%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe"]},
     "qwen-code": {"label": "Qwen Code", "maker": "Alibaba", "exe": ["qwen"],
                   "args": lambda allow: (["--yolo"] if allow == "auto" else []) + ["-p"],
@@ -809,13 +809,55 @@ def _parse_cursor(line: str, emit: Callable[[Dict[str, Any]], None], state: Dict
     return True
 
 
+# OpenCode's tool -> (Hearth's tool with the same card, the argument it shows, shown as).
+_OC_VIEW = {"read": ("read_file", "filePath", "path"), "write": ("write_file", "filePath", "path"),
+            "edit": ("edit_file", "filePath", "path"), "bash": ("run_command", "command", "command"),
+            "list": ("list_directory", "path", "path"), "glob": ("find_file", "pattern", "name"),
+            "grep": ("grep_search", "pattern", "pattern"), "webfetch": ("web_fetch", "url", "url"),
+            "websearch": ("web_search", "query", "query")}
+
+
+def _parse_opencode(line: str, emit: Callable[[Dict[str, Any]], None], state: Dict[str, Any]) -> bool:
+    """One line of `opencode run --format json`."""
+    try:
+        ev = json.loads(line.lstrip("﻿"))
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(ev, dict) or "type" not in ev:
+        return False
+    part = ev.get("part") or {}
+    t = ev["type"]
+    state.setdefault("ok", True)
+    if t == "tool_use":
+        st = part.get("state") or {}
+        tool = str(part.get("tool") or "tool")
+        args = st.get("input") or {}
+        name, key, shown = _OC_VIEW.get(tool, (tool, "", ""))
+        key_args = {shown: args.get(key, "")} if key else args
+        cid = str(part.get("callID") or part.get("id") or len(state.get("open", {})))
+        _step(emit, state, cid, name, key_args)
+        if st.get("status") in ("completed", "error"):
+            _step_done(emit, state, cid, name, str(st.get("output") or st.get("error") or ""))
+    elif t == "text":
+        text = str(part.get("text") or "").strip()
+        if text:
+            state["last_text"] = text
+            state["result"] = text
+    elif t == "error":
+        err = ev.get("error") or {}
+        state["ok"] = False
+        state["error"] = str((err.get("data") or {}).get("message") or err.get("name") or "OpenCode stopped with an error")
+    return True
+
+
 def _parse_claude_line(line: str, emit, state) -> bool:
     _parse_claude(line, emit, state)
     return line.lstrip().startswith("{")
 
 
 # Agents that report each step: the name of their output format -> its reader.
-_READERS = {"claude": _parse_claude_line, "codex": _parse_codex, "cursor": _parse_cursor}
+_READERS = {"claude": _parse_claude_line, "codex": _parse_codex, "cursor": _parse_cursor,
+            "opencode": _parse_opencode}
 
 # A Codex helper runs through Codex's app server when it can, which takes a
 # message part-way (turn/steer); `codex exec` runs to the end without one.
@@ -997,7 +1039,8 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
                                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                                         creationflags=_NO_WINDOW,
                                         # A helper does its task; it doesn't send helpers of its own.
-                                        env=dict(os.environ, HEARTH_HELPER="1"))
+                                        # PWD too: some agents trust it over the folder they start in.
+                                        env=dict(os.environ, HEARTH_HELPER="1", PWD=work))
                 with _OPEN_LOCK:
                     _PROCS[agent_id] = proc
                 listening = bool(spec.get("takes_messages"))

@@ -459,6 +459,32 @@ check(f"the sign-in window is known to be open, then known to be closed {_r}",
       _r.get("ok") and _r.get("paste") == "right-click" and _open_now is True and xa.signing("claude-code") is False)
 xa.find, xa._direct_argv, xa.shutil.which = _find, _argv, _which
 
+# An OpenCode helper's log was its console text: "% WebFetch ...", symbols and all,
+# saved as its answer. Its JSON events are read into steps like the others.
+_oc = [
+    '{"type":"step_start","part":{"type":"step-start"}}',
+    '{"type":"tool_use","part":{"type":"tool","callID":"c1","tool":"read","state":{"status":"completed",'
+    '"input":{"filePath":"notes.txt"},"output":"1: Buy milk on Friday."}}}',
+    '{"type":"text","part":{"type":"text","text":"It says to buy milk on Friday."}}',
+    '{"type":"step_finish","part":{"type":"step-finish"}}',
+]
+_recs, _st = [], {"pending": [], "tools": 0}
+_read = xa._READERS.get(xa.AGENTS["opencode"]["stream"])
+check("OpenCode helpers are run for its JSON events and read by a reader",
+      "--format" in xa.AGENTS["opencode"]["args"]("auto") and _read is not None)
+if _read:
+    for _l in _oc:
+        _read(_l, _recs.append, _st)
+    _calls = [c for r in _recs if r.get("kind") == "assistant_tool_call" for c in r["calls"]]
+    check(f"its steps come through as Hearth's tools with their results {_calls}",
+          _calls and _calls[0]["name"] == "read_file" and "notes.txt" in _calls[0]["args"]
+          and any(r.get("kind") == "tool_result" and "milk" in r.get("preview", "") for r in _recs))
+    check("its answer is the words it wrote, not its console", _st.get("result") == "It says to buy milk on Friday."
+          and _st.get("ok") is True)
+    _st2 = {"pending": [], "tools": 0}
+    _read('{"type":"error","error":{"name":"APIError","data":{"message":"free tier refused"}}}', _recs.append, _st2)
+    check("a refusal is a failure with its own words", _st2.get("ok") is False and "free tier refused" in _st2.get("error", ""))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
