@@ -2855,10 +2855,13 @@ def search_huggingface(query: str, limit: int = 12) -> List[Dict[str, Any]]:
     Hearth names no model of its own to download. Filters to GGUF repos so the
     list is restricted to things llama.cpp can actually load. Public API,
     no auth needed."""
-    if not query or not query.strip():
+    # A pasted page link searches for its repo. filter=gguf already keeps the
+    # list to GGUF repos; adding "gguf" to the words lost owner/name searches.
+    query = re.sub(r"^https?://(www\.)?huggingface\.co/", "", (query or "").strip()).strip("/")
+    if not query:
         return []
     url = ("https://huggingface.co/api/models?"
-           f"search={urllib.parse.quote(query.strip() + ' gguf')}"
+           f"search={urllib.parse.quote(query)}"
            f"&filter=gguf&sort=downloads&direction=-1&limit={limit}")
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
