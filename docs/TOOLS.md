@@ -168,12 +168,12 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 
 | Tool | What it does |
 |---|---|
-| `check_video_task` † | Poll a video generation task ONCE |
-| `forge_generate` † | Generate an image with the user's local Stable Diffusion install (Forge WebUI) |
+| `check_video_task` † | Check a video once, without waiting: pending, done, failed or expired |
+| `forge_generate` † | Make an image on this PC with the local Stable Diffusion install (Forge WebUI) |
 | `forge_shutdown` † | Kill the Forge process to free VRAM back to the LLM |
 | `forge_status` † | Check if Forge WebUI is running and reachable |
-| `generate_image` † | Generate an image, picture, photo, artwork or illustration from a text prompt |
-| `generate_video` † | Start an ASYNC video generation |
+| `generate_image` † | Make an image (picture, photo, artwork, illustration) from a text prompt with a cloud image model: xAI Grok, OpenAI or Google Gemini, whichever has a key saved… |
+| `generate_video` † | Start making a video with xAI Grok (needs a saved Grok key, whatever brain is in use) |
 | `list_generations` † | List the 10 most recent image/video generation tasks (live + finished) |
 
 ## Session

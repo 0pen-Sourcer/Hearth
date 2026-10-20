@@ -4,7 +4,7 @@ If you are on v0.7.2 or newer, Hearth patches itself, no reinstall. On v0.7.0 or
 
 ## New look
 
-Settings has an Appearance page with Classic, the violet look with the H logo and still the default, alongside new Light, Dark and System themes in a warmer palette with six accent colours and a mark that is an actual hearth. The tray icon and the window's own icon follow whichever you pick, and picking one repaints the window from where you clicked. Everything about how the chat looks lives on that page now, from generation stats to pop-ups, so Behavior is about what JARVIS does.
+Settings has an Appearance page with Classic, the violet look with the H logo and still the default, alongside new Light, Dark and System themes in a warmer palette with six accent colours and a mark that is an actual hearth. The tray icon, the window's own icon, the tab and desktop notices follow whichever you pick, the flame taking the accent colour, and picking one repaints the window from where you clicked. Everything about how the chat looks lives on that page now, from generation stats to pop-ups, so Behavior is about what JARVIS does.
 
 Simple, the default, keeps the machinery out of the way. A run of tool calls folds into one line such as "Read 3 files, searched the web" that you can open, the status bar stays quiet, and engine settings, MCP servers and the per-tool permission table stay out of sight. Advanced shows all of it. Chats can be pinned to the top of the sidebar, and a pin survives a reinstall.
 
@@ -106,7 +106,7 @@ Hearth no longer attaches memories picked by keyword to every message, which pul
 
 Reminders are set for the time you meant. Hearth works out the exact time from what you said, and the reminder reads back the day and the time in plain words, so a slip shows up at once rather than at midnight. With the window and the terminal both open a reminder fires once instead of twice, and a reminder set while another one is firing is no longer lost.
 
-A reminder that comes due is said in a chat of its own, marked in the sidebar with a clock and an unread dot, instead of landing in the middle of whatever chat is open. Typing a task in the Reminders page starts it in a new chat and leaves the open one alone, and the page suggests reminders from what JARVIS knows about you and what is coming up. A reminder can be changed in place, its words, time, repeat and the last day it repeats, and paused instead of cancelled, from its row or by asking, and a repeating one picks up at its next time when you resume it.
+A reminder that comes due is said in a chat of its own, marked in the sidebar with a clock and an unread dot, instead of landing in the middle of whatever chat is open. Typing a task in the Reminders page starts it in a new chat and leaves the open one alone, and the page suggests reminders from what JARVIS knows about you and what is coming up. A reminder can be changed in place, its words, time, repeat and the last day it repeats, and paused instead of cancelled, from its row or by asking, and a repeating one picks up at its next time when you resume it. One that came due while Hearth was closed says when it was due.
 
 ## Phone and teams
 
@@ -171,6 +171,8 @@ The terminal no longer crashes on the first tool call of a session, and Ctrl+Z e
 Searching past chats finds what you asked about. Most questions used to report no match even when there was one. The window opens fast with a long chat history, because it reads a chat only when you open it instead of loading every one in full to draw the sidebar.
 
 Repair checks every part of the install and puts back whatever is missing, Hearth's code, its skills and art, the voice files and the model engine, and says plainly which parts need a full reinstall. Installing or repairing the engine had started failing for everyone because the engine's project marked an unrelated release as its latest, and Hearth now picks the newest real build. Updating is safe to interrupt. If the power goes or you kill Hearth while it is replacing files, the next start puts it back the way it was rather than leaving you with an install that will not open. Your chats survive being killed mid-save too, and a save that got cut off no longer leaves a ghost copy of the chat sitting in the sidebar.
+
+Images and videos can be made from any brain. With a key saved for xAI Grok, OpenAI or Google Gemini, asking for an image works on a local model or a coding agent too, a video tells you when it is ready instead of waiting to be asked, and a picture from a Stable Diffusion install on your PC shows up in the chat like any other.
 
 Asking Hearth for a capability it does not have gets a straight answer instead of a handful of unrelated tools. And it can tell you your charge level, whether you are plugged in and roughly how long you have left.
 

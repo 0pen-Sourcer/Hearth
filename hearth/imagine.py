@@ -82,6 +82,39 @@ def _supported_for_video(provider: str) -> bool:
     return provider == "xai"
 
 
+# Media provider -> the id its key is saved under.
+_SAVED_AS = {"xai": "grok", "openai": "openai", "gemini": "gemini"}
+
+
+def _saved_key(provider: str) -> str:
+    try:
+        from .web import _provider_key
+        return _provider_key(_SAVED_AS.get(provider, provider))
+    except Exception:
+        return ""
+
+
+def _route(kind: str, base: Optional[str], api_key: Optional[str]):
+    """Where an image or a video is made: the brain in use when it can, else
+    any provider a key is saved for, so it works from a local model or an
+    agent brain too. Returns (base, key)."""
+    can = _supported_for_images if kind == "image" else _supported_for_video
+    base = base or os.environ.get("LOCAL_API_BASE", "")
+    key = api_key or os.environ.get("LOCAL_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    here = _detect_provider(base)
+    if can(here) and key:
+        return base, key
+    try:
+        from .headless import PROVIDERS
+    except Exception:
+        return base, key
+    for prov, pid in _SAVED_AS.items():
+        k = _saved_key(prov) if can(prov) else ""
+        if k and pid in PROVIDERS:
+            return PROVIDERS[pid][1], k
+    return base, key
+
+
 # Gemini model defaults — picked for the price/quality sweet spot. Pro is
 # only worth it for production assets, not chat-driven exploration.
 _GEMINI_DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
@@ -295,17 +328,13 @@ def generate_image(
 
     Saves files under WORKSPACE/generated/. Each provider has its own shape
     handled internally — caller doesn't have to care which is active."""
-    base = base or os.environ.get("LOCAL_API_BASE", "")
-    api_key = api_key or os.environ.get("LOCAL_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    base, api_key = _route("image", base, api_key)
     provider = _detect_provider(base)
     if not _supported_for_images(provider):
         return {
             "ok": False,
-            "error": (
-                f"Image generation not supported on this endpoint ({base or '(unset)'}). "
-                f"Switch to xAI (/brain grok), OpenAI (/brain openai), or Gemini "
-                f"(/brain gemini) first."
-            ),
+            "error": ("Making images needs a key saved for xAI Grok, OpenAI or Google Gemini. "
+                      "Add one in Settings under Brain; it doesn't have to be the brain in use."),
         }
     if not api_key:
         return {"ok": False, "error": "Missing API key for image generation."}
@@ -445,18 +474,13 @@ def start_video(
 
     Polling: call check_video_task(task_id) until status='done', then the
     response includes 'path' = saved local mp4."""
-    base = base or os.environ.get("LOCAL_API_BASE", "")
-    api_key = api_key or os.environ.get("LOCAL_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    base, api_key = _route("video", base, api_key)
     provider = _detect_provider(base)
     if not _supported_for_video(provider):
         return {
             "ok": False,
-            "error": (
-                f"Video generation not supported on this endpoint ({base or '(unset)'}). "
-                f"Only xAI's video API is wired today — switch with /brain grok "
-                f"and retry. Gemini's Veo + OpenAI Sora can be added later "
-                f"(both are on the OpenAI-compatible-ish surface)."
-            ),
+            "error": ("Making videos needs a key saved for xAI Grok. Add one in Settings "
+                      "under Brain; it doesn't have to be the brain in use."),
         }
     if not api_key:
         return {"ok": False, "error": "Missing API key for video generation."}
@@ -551,10 +575,12 @@ def check_video_task(task_id: str, *, api_key: Optional[str] = None,
         return {"ok": True, "task_id": task_id, "status": "done",
                 "path": task["path"], "url": task.get("url")}
 
-    api_key = api_key or os.environ.get("LOCAL_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    base = task.get("base") or os.environ.get("LOCAL_API_BASE", "").rstrip("/")
+    # The key of the provider that took the task, whatever brain is in use now.
+    api_key = (api_key or _saved_key(_detect_provider(base)) or os.environ.get("LOCAL_API_KEY")
+               or os.environ.get("OPENAI_API_KEY") or "")
     if not api_key:
         return {"ok": False, "error": "Missing API key.", "status": "unknown"}
-    base = task.get("base") or os.environ.get("LOCAL_API_BASE", "").rstrip("/")
     if not base:
         return {"ok": False, "error": "No base URL on file for this task.", "status": "unknown"}
 

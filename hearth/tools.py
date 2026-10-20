@@ -1052,14 +1052,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "generate_image",
         "description": (
-            "Generate an image, picture, photo, artwork or illustration from a text prompt. Saves to ~/Jarvis/generated/ "
-            "and returns the file path. The GUI renders it inline; CLI opens "
-            "it in the default image viewer. Supported providers: xAI Grok "
-            "(grok-imagine-image-quality), OpenAI (gpt-image-2 by default — "
-            "their new flagship), Google Gemini (gemini-2.5-flash-image, aka "
-            "Nano Banana). Auto-routes based on whatever /brain you're on. "
-            "Will fail loudly on local LM Studio / Ollama (they don't do "
-            "image gen)."
+            "Make an image (picture, photo, artwork, illustration) from a text prompt "
+            "with a cloud image model: xAI Grok, OpenAI or Google Gemini, whichever "
+            "has a key saved, the brain in use first. Works whatever brain you run "
+            "on. Saves it in the workspace's generated folder and shows it in the "
+            "chat. For the Stable Diffusion install on this PC, use forge_generate."
         ),
         "parameters": {
             "type": "object",
@@ -1075,13 +1072,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "generate_video",
         "description": (
-            "Start an ASYNC video generation. Returns a task_id immediately; "
-            "videos take 20-60+ seconds. Poll with check_video_task() or just "
-            "tell the user 'video's cooking, I'll let you know'. To ANIMATE an "
-            "image you just generated ('now animate it'), pass that image's file "
-            "PATH (the one generate_image returned) as image_url — do NOT "
-            "re-generate the image. Omit image_url for a fresh text-to-video. "
-            "xAI Grok only today."
+            "Start making a video with xAI Grok (needs a saved Grok key, whatever "
+            "brain is in use). Returns at once; it takes about a minute, and a "
+            "report arrives when it is ready, so carry on. To animate an image "
+            "made earlier, pass that image's path as image_url instead of making "
+            "the image again; leave it out for a video from text."
         ),
         "parameters": {
             "type": "object",
@@ -1098,11 +1093,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "check_video_task",
         "description": (
-            "Poll a video generation task ONCE. Does NOT block. Status is one "
-            "of: pending / done / failed / expired / unknown. When done, the "
-            "response includes 'path' = the saved mp4 file the GUI/CLI can "
-            "render. Safe to call repeatedly — caches the downloaded file. "
-            "NEVER invent a task_id: omit it to check your most recent video."
+            "Check a video once, without waiting: pending, done, failed or expired. "
+            "When done it shows the video in the chat. Leave task_id out for the "
+            "most recent video."
         ),
         "parameters": {
             "type": "object",
@@ -1602,21 +1595,20 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "forge_generate",
         "description": (
-            "Generate an image with the user's local Stable Diffusion install "
-            "(Forge WebUI). Orchestrates the full VRAM dance: (1) signal the "
-            "LLM server to release its model, (2) boot Forge in API mode if "
-            "it isn't already up, (3) POST to /sdapi/v1/txt2img, (4) save the "
-            "PNG to ~/Jarvis/screenshots/, (5) leave Forge running for follow-up "
-            "generations (use forge_shutdown to free VRAM back to the LLM). "
-            "Pony v6 XL is tag-based — write positive/negative as comma-separated "
-            "tags, not natural language. Use 'score_9, score_8_up, score_7_up' "
-            "as a quality prefix for Pony."
+            "Make an image on this PC with the local Stable Diffusion install "
+            "(Forge WebUI). Frees the GPU from the chat model first, starts Forge "
+            "if needed, saves the image in the workspace's generated folder and "
+            "shows it in the chat; Forge stays up for follow-ups and frees the GPU "
+            "after a while idle (forge_shutdown frees it now). Write the prompt the "
+            "way the loaded checkpoint expects (forge_status names it): "
+            "comma-separated tags for Pony and other anime-trained models, a plain "
+            "description for SDXL, Flux and most others."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "positive": {"type": "string", "description": "Tag-style positive prompt. E.g. 'score_9, score_8_up, masterpiece, 1girl, cinematic lighting, dark room'."},
-                "negative": {"type": "string", "description": "Negative tags. Pony default starter: 'score_6, score_5, score_4, low quality, blurry, deformed'."},
+                "positive": {"type": "string", "description": "What to draw, in the style the checkpoint expects."},
+                "negative": {"type": "string", "description": "What to keep out. Default: 'low quality, blurry, deformed, extra limbs, bad anatomy'."},
                 "width": {"type": "integer", "description": "Default 1024."},
                 "height": {"type": "integer", "description": "Default 1024."},
                 "steps": {"type": "integer", "description": "Default 25."},
@@ -5921,6 +5913,15 @@ def _start_forge_idle_watcher() -> None:
     _threading.Thread(target=_watch, daemon=True, name="forge-idle").start()
 
 
+def _forge_checkpoint(timeout: float = 3.0) -> str:
+    """The checkpoint Forge has loaded, or '' when it can't say."""
+    try:
+        with urllib.request.urlopen(f"{FORGE_URL}/sdapi/v1/options", timeout=timeout) as r:
+            return str((json.loads(r.read() or b"{}") or {}).get("sd_model_checkpoint") or "")
+    except Exception:
+        return ""
+
+
 def _forge_reachable(timeout: float = 1.5) -> bool:
     try:
         req = urllib.request.Request(f"{FORGE_URL}/sdapi/v1/options",
@@ -5941,6 +5942,8 @@ def _forge_status(p: Dict) -> str:
         "api_reachable": reachable,
         "ready": reachable,
     }
+    if reachable:
+        info["checkpoint"] = _forge_checkpoint()
     if not os.path.isdir(FORGE_DIR):
         info["error"] = f"FORGE_DIR not found: {FORGE_DIR} — set HEARTH_FORGE_DIR"
     return json.dumps(info, indent=2)
@@ -6108,8 +6111,7 @@ def _forge_generate(p: Dict) -> str:
     if not positive:
         return "Error: positive prompt required"
     negative = (p.get("negative") or
-                "score_6, score_5, score_4, low quality, blurry, deformed, "
-                "extra limbs, bad anatomy")
+                "low quality, blurry, deformed, extra limbs, bad anatomy")
     width = int(p.get("width") or 1024)
     height = int(p.get("height") or 1024)
     steps = int(p.get("steps") or 25)
@@ -6117,7 +6119,7 @@ def _forge_generate(p: Dict) -> str:
     sampler = p.get("sampler") or "Euler a"
     seed = int(p.get("seed") or -1)
 
-    # 1) Free LM Studio's VRAM (best-effort)
+    # 1) Free the GPU from the chat model (best-effort)
     vram_msg = _try_release_llm_vram()
 
     # 2) Make sure Forge is up
@@ -6159,7 +6161,9 @@ def _forge_generate(p: Dict) -> str:
 
     # 4) Save the first image
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = os.path.join(SHOTS_DIR, f"forge_{ts}.png")
+    out_dir = os.path.join(WORKSPACE, "generated")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"forge_{ts}.png")
     try:
         with open(out_path, "wb") as f:
             f.write(_b64.b64decode(images[0]))
@@ -6171,11 +6175,12 @@ def _forge_generate(p: Dict) -> str:
     _idle_note = (f"auto-frees VRAM after {_forge_idle_timeout//60} min idle"
                   if _forge_idle_timeout > 0 else
                   "auto-deload off — call forge_shutdown to free VRAM")
+    ckpt = _forge_checkpoint()
     return (
-        f"Saved: {out_path}\n"
+        f"Saved: {out_path}" + (f" ({ckpt})" if ckpt else "") + "\n"
         f"prompt: {positive}\n"
-        f"seed: {payload.get('info', '')[:200]}\n"
-        f"(VRAM: {vram_msg}. Forge stays up for follow-ups; {_idle_note}.)"
+        f"(GPU: {vram_msg}. Forge stays up for follow-ups; {_idle_note}.)\n"
+        f"__JARVIS_IMAGE__ {out_path} ({os.path.getsize(out_path)} bytes, png)"
     )
 
 
@@ -6398,12 +6403,39 @@ def _generate_video(p: Dict) -> str:
     )
     if not r.get("ok"):
         return f"Error: {r.get('error')}"
-    # Keep this terse — it shows in the tool card. Just enough for the model to
-    # carry the task_id and know it's async; no verbose NEXT-STEP dump.
+    _watch_video(str(r.get("task_id") or ""), (p.get("prompt") or "").strip())
     return (
-        f"Video rendering (~20-60s) · task {r.get('task_id')}. "
-        f"Tell the user it's cooking; call check_video_task() when they ask if it's ready."
+        f"Video started (task {r.get('task_id')}), usually about a minute. A report "
+        f"arrives when it is ready; nothing to wait for."
     )
+
+
+def _watch_video(task_id: str, prompt: str, every: float = 10.0, limit: float = 900.0) -> None:
+    """Poll a started video in the background and report when it ends."""
+    def _run():
+        from . import imagine
+        from .subagents import enqueue_notification
+        start = time.time()
+        while time.time() - start < limit:
+            time.sleep(every)
+            r = imagine.check_video_task(task_id)
+            status = r.get("status")
+            if status == "pending" and r.get("ok"):
+                continue
+            took = round(time.time() - start)
+            if status == "done":
+                enqueue_notification(source="video", name=prompt[:60], status="completed",
+                                     result_text="The video is ready. check_video_task shows it in the chat.",
+                                     summary="Your video is ready", elapsed_s=took)
+            elif status in ("failed", "expired"):
+                enqueue_notification(source="video", name=prompt[:60], status="failed",
+                                     result_text=f"The video {status}. {r.get('error', '')}".strip(),
+                                     summary=f"The video {status}", elapsed_s=took)
+            else:
+                continue
+            return
+    import threading
+    threading.Thread(target=_run, daemon=True, name="video-watch").start()
 
 
 def _check_video_task(p: Dict) -> str:
@@ -6418,13 +6450,11 @@ def _check_video_task(p: Dict) -> str:
     if status == "done":
         path = r.get("path") or "(no local path)"
         return (
-            f"Video DONE.\n"
-            f"  path:     {path}\n"
-            f"  duration: {r.get('duration', '?')}s\n"
+            f"Video ready: {path}\n"
             f"__JARVIS_VIDEO__ {path}"
         )
     if status == "pending":
-        return f"Video still cooking (task {task_id}). Check back in 10-20 seconds."
+        return f"Video still being made (task {task_id}). A report arrives when it is ready."
     return f"Video task {task_id}: status={status}. {r.get('error', '')}".strip()
 
 

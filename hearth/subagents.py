@@ -469,6 +469,9 @@ def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
     elif src == "command":
         lead = ("A command you ran earlier outlived its wait, carried on in the background "
                 "and has now ended; its output is below. Continue with it")
+    elif src == "video":
+        lead = ("A video you started earlier has finished; details below. If it is ready, "
+                "show it with check_video_task and tell them in a line")
     elif src == "update":
         lead = ("A helper you dispatched is still working and sent you word part-way; it is "
                 "below. Use it, answer with tell_subagent if it asks something, and keep "
