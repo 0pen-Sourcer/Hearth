@@ -113,6 +113,22 @@ with sync_playwright() as pw:
     check(f"regenerate cuts the old turn and sends once, in place {regen}",
           regen["calls"] == [["hey", 0]] and regen["left"] == 0)
 
+    fresh = pg.evaluate("""() => {
+      const y = new Date(); y.setDate(y.getDate() - 1); y.setHours(12, 0, 0, 0);
+      STATE.conversations = STATE.conversations.filter(x => convoMsgCount(x));
+      const old = { id: 'empty-yday', title: 'New chat', messages: [], created: +y, updated: +y };
+      STATE.conversations.push(old);
+      const c = newConversation();
+      const label = [...document.querySelectorAll('#convo-list .convo-section-label')]
+        .find(h => { let n = h.nextElementSibling;
+          while (n && !n.classList.contains('convo-section-label')) {
+            if (n.textContent.includes('New chat')) return true; n = n.nextElementSibling; }
+          return false; });
+      return { reused: c.id === old.id, under: label ? label.textContent : '' };
+    }""")
+    check(f"a reused empty chat is listed as new, under Today {fresh}",
+          fresh["reused"] and fresh["under"] == "Today")
+
     slash = pg.evaluate("""async () => {
       const steered = [];
       const real = window.steerMessage;

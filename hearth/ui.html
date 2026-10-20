@@ -6889,6 +6889,9 @@ function newConversation() {
   // infinitely many empty chats. If an empty one already exists, jump to it.
   const empty = STATE.conversations.find(x => !convoMsgCount(x));
   if (empty) {
+    // Reused, but it is a new chat now: it sits under Today, not the day it was made.
+    empty.created = empty.updated = Date.now();
+    persistConvo(empty);
     setActiveId(empty.id);
     renderConvoList();
     renderChat();
@@ -6952,14 +6955,12 @@ function renderConvoList() {
   // idle chats sat above it until you restarted.
   STATE.conversations.sort((a, b) => (b.updated || 0) - (a.updated || 0));
   // Group by recency
-  const now = Date.now();
+  // By calendar day, the same as the dates on the rows and in the chat.
   const groups = { Pinned: [], Today: [], Yesterday: [], Earlier: [] };
   for (const c of STATE.conversations) {
     if (c.pinned) { groups.Pinned.push(c); continue; }
-    const d = (now - c.updated) / 86400000;
-    if (d < 1) groups.Today.push(c);
-    else if (d < 2) groups.Yesterday.push(c);
-    else groups.Earlier.push(c);
+    const day = dayLabel(c.updated || 0);
+    (groups[day] || (day === 'Tomorrow' ? groups.Today : groups.Earlier)).push(c);
   }
   for (const [label, items] of Object.entries(groups)) {
     if (!items.length) continue;
