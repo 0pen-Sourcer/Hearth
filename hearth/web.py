@@ -5232,45 +5232,14 @@ def _preload_whisper_async() -> None:
 
 
 def _start_reminder_watcher() -> None:
-    """Background reminder watcher. Fires Windows toast notifications via
-    plyer (lightweight) or falls back to print + voice.speak()."""
+    """Background reminder watcher. Each fire goes through the same notifier
+    as the terminal and the notify tool, so it carries Hearth's name and icon."""
     try:
         from . import reminders as _rem
     except Exception:
         return
 
-    def _notify(title: str, body: str) -> None:
-        # The Windows notifier raises on over-long text from inside its own
-        # worker thread, where the handlers below cannot catch it, so the toast
-        # silently never appears. Trim to what the OS struct holds first.
-        try:
-            from .reminders import _fit_toast
-            title, body = _fit_toast(title, body)
-        except Exception:
-            title, body = (title or "")[:60], (body or "")[:250]
-        # 1. Try plyer (cross-platform desktop notifications)
-        try:
-            from plyer import notification  # type: ignore
-            notification.notify(title=title, message=body, app_name="Hearth", timeout=10)
-            return
-        except Exception:
-            pass
-        # 2. Try win10toast (Windows-specific)
-        try:
-            from win10toast import ToastNotifier  # type: ignore
-            ToastNotifier().show_toast(title, body, duration=8, threaded=True)
-            return
-        except Exception:
-            pass
-        # 3. Always also speak + log
-        print(f"[reminder] {title}: {body}", flush=True)
-        if _voice and _voice.is_available():
-            try:
-                _voice.speak(f"Reminder: {body}", blocking=False)
-            except Exception:
-                pass
-
-    _rem.start_watcher(_notify)
+    _rem.start_watcher(lambda title, body: _rem.desktop_notify(title, body))
 
 
 def _apply_saved_llm_endpoint() -> None:
