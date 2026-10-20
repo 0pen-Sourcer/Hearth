@@ -47,24 +47,17 @@ def _own_hwnd() -> int:
         return 0
 
 
-def _icon_file(look: str) -> Optional[str]:
-    """The window icon for a look: the H for Classic, the hearth otherwise.
-    Windows wants an .ico for a window icon; elsewhere a .png works."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    dirs = [os.path.join(os.path.dirname(here), "assets"),
-            os.path.join(getattr(sys, "_MEIPASS", ""), "assets")]
-    stem = "icon_classic" if look == "classic" else "icon"
-    for d in dirs:
-        for name in (stem + ".ico", "icon.ico", stem + ".png", "icon.png"):
-            f = os.path.join(d, name)
-            if os.path.isfile(f):
-                return f
-    return None
+def _icon_file(look: str, accent: str = "") -> Optional[str]:
+    """The window icon for a look. Windows wants an .ico for a window icon;
+    elsewhere a .png works."""
+    from . import look_icon
+    return look_icon.file(look, accent or look_icon.saved()[1],
+                          "ico" if sys.platform == "win32" else "png")
 
 
-def _set_window_icon(look: str) -> bool:
+def _set_window_icon(look: str, accent: str = "") -> bool:
     """Swap the running window's title-bar and taskbar icon."""
-    f = _icon_file(look)
+    f = _icon_file(look, accent)
     hwnd = _own_hwnd()
     if not f or not hwnd or not f.lower().endswith(".ico"):
         return False
@@ -207,7 +200,7 @@ def main(argv: Optional[list] = None) -> int:
     # PyWebView on Windows REQUIRES an .ico file for the window icon
     # (PNG raises System.ArgumentException). Prefer .ico, fall back to .png
     # (which works on Linux), else no icon at all.
-    # Classic keeps the original H; the other looks use the hearth.
+    # Classic keeps the original H; the other looks use the hearth in their accent.
     icon_path = _icon_file(_saved_look(args.url))
     kwargs = dict(
         width=args.width, height=args.height, min_size=(900, 600),
@@ -235,8 +228,8 @@ def main(argv: Optional[list] = None) -> int:
     _win_holder = {}
 
     class _WinApi:
-        def set_icon(self, look):
-            return _set_window_icon(str(look or ""))
+        def set_icon(self, look, accent=""):
+            return _set_window_icon(str(look or ""), str(accent or ""))
 
         def focus_window(self):
             win = _win_holder.get("win")

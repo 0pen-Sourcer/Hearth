@@ -30,19 +30,19 @@
       var cur = 'classic'; try { cur = localStorage.getItem('hearth_theme') || 'classic'; } catch (e) {}
       if (cur === 'system') root.dataset.theme = resolve('system');
     });
-    // Classic keeps the original H as the window and tab icon.
-    function lookIcon(m) {
-      var classic = m === 'classic';
+    // Classic keeps the original H as the window and tab icon; the other
+    // themes show the hearth with its flame in the accent.
+    function lookIcon(m, a) {
       try {
         var link = document.querySelector('link[rel="icon"]');
-        if (link) link.href = classic ? '/assets/icon_classic.png' : '/assets/icon.png';
+        if (link) link.href = '/api/look-icon?theme=' + encodeURIComponent(m) + '&accent=' + encodeURIComponent(a);
       } catch (e) {}
-      try { if (window.pywebview && window.pywebview.api && window.pywebview.api.set_icon) window.pywebview.api.set_icon(m); } catch (e) {}
+      try { if (window.pywebview && window.pywebview.api && window.pywebview.api.set_icon) window.pywebview.api.set_icon(m, a); } catch (e) {}
     }
     // The window's own icon is picked before the page knows the look, so the
     // page always says which one it is, once the native bridge is there.
-    document.addEventListener('DOMContentLoaded', function () { lookIcon(mode); });
-    window.addEventListener('pywebviewready', function () { lookIcon(mode); });
+    document.addEventListener('DOMContentLoaded', function () { lookIcon(mode, accent); });
+    window.addEventListener('pywebviewready', function () { lookIcon(mode, accent); });
     function remember(body) {
       try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {}
     }
@@ -53,8 +53,9 @@
       document.dispatchEvent(new Event('hearth:look'));
     };
     window.hearthSetAppearance = function (m, a) {
-      if (m) { try { localStorage.setItem('hearth_theme', m); } catch (e) {} root.dataset.theme = resolve(m); }
+      if (m) { mode = m; try { localStorage.setItem('hearth_theme', m); } catch (e) {} root.dataset.theme = resolve(m); }
       if (a) {
+        accent = a;
         try { localStorage.setItem('hearth_accent', a); } catch (e) {}
         if (a === 'ember') delete root.dataset.accent; else root.dataset.accent = a;
       }
@@ -62,7 +63,7 @@
       if (m) body.ui_theme = m;
       if (a) body.ui_accent = a;
       remember(body);
-      if (m) lookIcon(m);
+      if (m || a) lookIcon(mode, accent);
       document.dispatchEvent(new Event('hearth:look'));
     };
   })();

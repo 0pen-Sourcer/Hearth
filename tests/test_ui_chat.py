@@ -129,6 +129,20 @@ with sync_playwright() as pw:
     check(f"a reused empty chat is listed as new, under Today {fresh}",
           fresh["reused"] and fresh["under"] == "Today")
 
+    tab = pg.evaluate("""() => {
+      const was = [localStorage.getItem('hearth_theme'), localStorage.getItem('hearth_accent')];
+      const asked = [];
+      window.pywebview = { api: { set_icon: (m, a) => asked.push([m, a]) } };
+      hearthSetAppearance('dark', null);
+      hearthSetAppearance(null, 'sage');
+      const href = document.querySelector('link[rel="icon"]').getAttribute('href');
+      delete window.pywebview;
+      hearthSetAppearance(was[0] || 'classic', was[1] || 'rose');
+      return { href, last: asked[asked.length - 1] };
+    }""")
+    check(f"changing the accent changes the tab and window icon {tab}",
+          "accent=sage" in tab["href"] and "theme=dark" in tab["href"] and tab["last"] == ["dark", "sage"])
+
     slash = pg.evaluate("""async () => {
       const steered = [];
       const real = window.steerMessage;

@@ -1895,6 +1895,21 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_ui()
         if path.startswith("/assets/"):
             return self._serve_asset(path[len("/assets/"):])
+        if path == "/api/look-icon":
+            from . import look_icon
+            lq = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            f = look_icon.file(lq.get("theme", ["classic"])[0], lq.get("accent", ["rose"])[0], "png")
+            if not f:
+                return self.send_error(404, "no icon")
+            with open(f, "rb") as fh:
+                data = fh.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api/update/repair-plan":
             # What a repair would actually touch. Repair used to be one button
             # with a progress bar and no statement of what it would do or what

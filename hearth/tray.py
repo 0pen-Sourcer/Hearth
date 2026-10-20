@@ -34,10 +34,6 @@ from . import singleton
 from .tools import WORKSPACE
 
 
-_ACCENTS = {"ember": "#d9774a", "sage": "#74a883", "ocean": "#5b93c2", "rose": "#cf7089",
-            "violet": "#8b6cf0", "mono": "#a3a09a"}
-
-
 def _look() -> tuple:
     """The window's theme and accent, as it saved them in settings."""
     try:
@@ -47,37 +43,9 @@ def _look() -> tuple:
         return ("classic", "rose")
 
 
-def _tinted_icon(img, accent: str):
-    """Recolour the flame to the accent. The flame is the only strongly
-    orange part of the icon, so hue-shifting those pixels is enough."""
-    import colorsys
-    hexv = _ACCENTS.get(accent, _ACCENTS["ember"])
-    tr, tg, tb = (int(hexv[i:i + 2], 16) / 255 for i in (1, 3, 5))
-    th, _tl, ts = colorsys.rgb_to_hls(tr, tg, tb)
-    px = img.load()
-    for y in range(img.height):
-        for x in range(img.width):
-            r, g, b, a = px[x, y]
-            if a < 10:
-                continue
-            h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
-            if s > 0.45 and (h < 0.13 or h > 0.97) and l > 0.25:
-                nr, ng, nb = colorsys.hls_to_rgb(th, l, min(s, ts + 0.15) if accent != "mono" else 0.05)
-                px[x, y] = (int(nr * 255), int(ng * 255), int(nb * 255), a)
-    return img
-
-
 def _icon_for_look(theme: str, accent: str):
-    here = os.path.dirname(os.path.abspath(__file__))
-    assets = os.path.join(os.path.dirname(here), "assets")
-    try:
-        from PIL import Image  # type: ignore
-        if theme == "classic" and os.path.isfile(os.path.join(assets, "icon_classic.png")):
-            return Image.open(os.path.join(assets, "icon_classic.png")).convert("RGBA").resize((64, 64))
-        img = Image.open(os.path.join(assets, "icon.png")).convert("RGBA").resize((64, 64))
-        return img if accent == "ember" else _tinted_icon(img, accent)
-    except Exception:
-        return _icon_image()
+    from . import look_icon
+    return look_icon.image(theme, accent, 64) or _icon_image()
 
 
 def _icon_image():

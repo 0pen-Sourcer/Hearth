@@ -450,8 +450,16 @@ _identity_ready = False
 
 
 def _find_icon() -> Optional[str]:
-    """Locate Hearth's .ico, both in a PyInstaller bundle and from source."""
+    """Hearth's .ico in the saved look, else the shipped one, both in a
+    PyInstaller bundle and from source."""
     import sys
+    try:
+        from . import look_icon
+        f = look_icon.file(*look_icon.saved(), "ico")
+        if f:
+            return f
+    except Exception:
+        pass
     cands = []
     if getattr(sys, "frozen", False):
         base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
