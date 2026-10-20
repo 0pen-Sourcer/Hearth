@@ -677,6 +677,16 @@ def _claim_due(missed: bool = False) -> List[Dict]:
     return due
 
 
+def _when_said(iso: str) -> str:
+    """A due time as people say it: '9:30 AM', or 'Mon 9:30 AM' on another day."""
+    try:
+        d = datetime.fromisoformat(iso)
+    except Exception:
+        return ""
+    clock = d.strftime("%I:%M %p").lstrip("0")
+    return clock if d.date() == datetime.now().date() else d.strftime("%a ") + clock
+
+
 def chat_id_for(r: Dict) -> str:
     return "rem_" + str(r.get("id") or "")
 
@@ -761,35 +771,27 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
             notify(title, toast_body)
         except Exception:
             pass
-        # Surface EVERY reminder to the agent (not just action ones) so it
-        # DELIVERS the reminder as a real, natural message and is AWARE it
-        # fired — instead of a canned static toast the model never sees. The
-        # desktop toast above still covers the away/asleep case; this makes the
-        # in-app experience an actual model turn ("hey, you wanted me to remind
-        # you about X") that can also follow up or act, not a dead string.
+        # The reminder becomes a turn in its own chat, so JARVIS says it in his
+        # own words and knows it fired. The notice above covers an empty desk.
         try:
-            from . import subagents
             what = r.get("what", "")
+            due = _when_said(r.get("due_iso", ""))
+            late = f", due {due} while Hearth was closed" if missed and due else ""
             if needs_confirm:
                 try:
                     args_str = json.dumps(action_args, ensure_ascii=False)[:300]
                 except Exception:
                     args_str = str(action_args)[:300]
-                note = (f'A reminder you set just came due: "{what}". It is set to run the '
-                        f'{action_tool} tool with args {args_str}. Do NOT run it silently — '
-                        f'tell the user the reminder is due and that it wants to run this, then '
-                        f'ASK them to confirm. Only if they say yes, call {action_tool} with '
-                        f'those args (the normal permission prompt will still confirm). If they '
-                        f'say no, just drop it.')
+                note = (f'Reminder they set{late}: "{what}". It was set to run {action_tool} '
+                        f'with {args_str}. Nobody has approved that yet, so it has not run: '
+                        f'say it is due, say what it would do, and ask whether to go ahead. '
+                        f'If they say yes, run it then.')
             elif action_tool and full_result:
-                note = (f'A reminder you set just came due: "{what}". '
-                        f'It ran {action_tool} and got:\n{full_result}\n'
-                        f'Tell the user about it now, naturally.')
+                note = (f'Reminder they set{late}: "{what}". It ran {action_tool}, which '
+                        f'returned:\n{full_result}\nTell them what came of it.')
             else:
-                note = (f'A reminder the user asked you to set just came due: '
-                        f'"{what}". Remind them about it now in your own words — '
-                        f'brief and natural, not a canned line. If it implies a '
-                        f'next action you can take, offer or do it.')
+                note = (f'Reminder they set{late}: "{what}". Remind them in a line or two, '
+                        f'in your own words.')
             deliver(r, note)
         except Exception:
             pass

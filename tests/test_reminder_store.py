@@ -149,6 +149,30 @@ check(f"a repeating one resumes at its next time, not on the slots it skipped ({
       back.get("ok") and not back.get("paused") and back["due_iso"] > datetime.now().isoformat(timespec="seconds")
       and R._claim_due() == [])
 
+# What JARVIS is handed when a reminder fires: one missed while Hearth was
+# closed says when it was due; one that wants a risky tool asks, in plain words.
+_due = (datetime.now() - timedelta(hours=2)).replace(second=0, microsecond=0)
+R._save_all([{"id": "r_late", "what": "call mom", "due_iso": _due.isoformat(timespec="seconds")},
+             {"id": "r_act", "what": "open the report", "due_iso": _due.isoformat(timespec="seconds"),
+              "action_tool": "run_command", "action_args": {"command": "start report.pdf"}}])
+_notes = {}
+_real_deliver = R.deliver
+R.deliver = lambda r, note, **_k: _notes.setdefault(r["id"], note)
+R._watcher_stop.clear()
+R.start_watcher(lambda *_a: None)
+_end = time.time() + 10
+while time.time() < _end and len(_notes) < 2:
+    time.sleep(0.1)
+R.stop_watcher()
+R.deliver = _real_deliver
+_late = _notes.get("r_late", "")
+check(f"a missed reminder says when it was due ({_late[:90]})",
+      "while Hearth was closed" in _late and R._when_said(_due.isoformat()) in _late)
+_act = _notes.get("r_act", "")
+check(f"a reminder that wants a risky tool asks first, without shouting ({_act[:70]})",
+      "has not run" in _act and "ask whether to go ahead" in _act
+      and not any(w in _act for w in ("NOT", "ASK", "the user")))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
