@@ -2186,6 +2186,8 @@
   .src-list a img { grid-row: span 2; margin-top: 2px; }
   .src-list b { font-weight: 600; font-size: 12px; }
   .src-list small { color: var(--fg-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-frame { width: min(82vw, 1100px); height: 68vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; display: block; }
+  .file-text { white-space: pre-wrap; max-height: 62vh; overflow: auto; font: 12px/1.5 var(--mono); margin: 0; }
   .paste-view { white-space: pre-wrap; max-height: 60vh; overflow: auto; font: 12px/1.5 var(--mono); margin: 0; }
   .user-attach.is-paste { cursor: pointer; }
   .slash-item.mention { justify-content: flex-start; align-items: center; gap: 10px; padding: 7px 12px; }
@@ -12778,10 +12780,7 @@ function renderFiles(entries) {
         e.stopPropagation();
         const kind = /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name) ? 'image' : /\.(mp4|webm|mov|m4v)$/i.test(f.name) ? 'video' : '';
         if (kind) { openLightbox('/file?path=' + encodeURIComponent(fullPath), kind, fullPath); return; }
-        try {
-          const r = await api(`/api/file?path=${encodeURIComponent(fullPath)}&op=read`);
-          showModal(f.name, r.content, [{ label: 'Close' }]);
-        } catch (er) { toast('Read', er.message, 'err'); }
+        filePreview(f.name, fullPath);
       });
       const sumBtn = document.createElement('button');
       sumBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M3 12h12"/><path d="M3 18h18"/></svg>`;
@@ -12797,6 +12796,25 @@ function renderFiles(entries) {
   }
 }
 $('files-show-hidden').addEventListener('change', () => renderFiles(STATE.fileEntries || []));
+// A file opened from the Files tab looks like itself where the window can draw
+// it (a web page or PDF, in a sandbox that runs nothing), and as its text
+// otherwise, never as markup. Office files also offer the app they belong to.
+async function filePreview(name, path) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const url = '/file?path=' + encodeURIComponent(path);
+  const openIn = { label: 'Open in its app', onclick: () => api('/api/file/open', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).catch(e => toast("Couldn't open it", e.message, 'err')) };
+  if (ext === 'html' || ext === 'htm' || ext === 'pdf' || ext === 'svg') {
+    showModal(name, `<iframe class="file-frame" sandbox src="${esc(url)}" title="${esc(name)}"></iframe>`,
+              [openIn, { label: 'Close' }]);
+    return;
+  }
+  try {
+    const r = await api(`/api/file?path=${encodeURIComponent(path)}&op=read`);
+    const office = /^(pptx?|docx?|xlsx?|odt|odp|ods)$/.test(ext);
+    showModal(name, `<pre class="file-text">${esc(r.content || '')}</pre>`, office ? [openIn, { label: 'Close' }] : [{ label: 'Close' }]);
+  } catch (er) { toast('Read', er.message, 'err'); }
+}
 function fileIcon(f) {
   if (f.is_dir) return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
   return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;

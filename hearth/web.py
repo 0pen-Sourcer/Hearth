@@ -3497,6 +3497,20 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import external_agents as _xa
             r = _xa.update(str(body.get("id") or ""))
             return self._send_json(200 if r.get("ok") else 400, r)
+        if path == "/api/file/open":
+            # A file from the Files tab, in the app Windows opens it with.
+            real, why = _workspace_file(str((self._read_json() or {}).get("path") or ""))
+            if why:
+                return self._send_json(400, {"ok": False, "error": why})
+            try:
+                if sys.platform == "win32":
+                    os.startfile(real)  # type: ignore[attr-defined]
+                else:
+                    import subprocess as _sp
+                    _sp.Popen(["open" if sys.platform == "darwin" else "xdg-open", real])
+                return self._send_json(200, {"ok": True})
+            except OSError as e:
+                return self._send_json(500, {"ok": False, "error": str(e)})
         if path == "/api/voice/realtime/mute":
             # The mic button in voice mode. Kept here, not in the page: the
             # recorder is what has to stop keeping what it hears.
@@ -4687,23 +4701,13 @@ class HearthHandler(BaseHTTPRequestHandler):
         arbitrary files via the browser fetch. Reject anything that escapes.
         """
         import mimetypes
-        from .tools import list_extra_workspaces
         q = self._query()
         path = q.get("path", "")
         if not path:
             return self._send_json(400, {"error": "missing path"})
-        try:
-            # The Files tab names things from the workspace down.
-            real = os.path.realpath(path if os.path.isabs(path) else os.path.join(WORKSPACE, path))
-        except Exception:
-            return self._send_json(400, {"error": "bad path"})
-        ws_real = os.path.realpath(WORKSPACE)
-        allowed_roots = [ws_real] + [os.path.realpath(p) for p in list_extra_workspaces()]
-        if not any(real.lower().startswith(root.lower() + os.sep) or
-                   real.lower() == root.lower() for root in allowed_roots):
-            return self._send_json(403, {"error": "path outside allowed roots"})
-        if not os.path.isfile(real):
-            return self._send_json(404, {"error": "not found"})
+        real, why = _workspace_file(path)
+        if why:
+            return self._send_json(403 if why == "outside" else 404 if why == "missing" else 400, {"error": why})
         ctype, _ = mimetypes.guess_type(real)
         ctype = ctype or "application/octet-stream"
         try:
@@ -5307,6 +5311,22 @@ def what_to_get(local: bool, voice: bool) -> Dict[str, Any]:
                           "sub": "Speaking, and the speech model that turns what you say into text",
                           "size_gb": round(gb, 2) if gb else None})
     return {"items": items}
+
+
+def _workspace_file(path: str):
+    """(real path, "") for a file inside the workspace or an allowed folder,
+    else ("", why). The Files tab names things from the workspace down."""
+    from .tools import list_extra_workspaces
+    try:
+        real = os.path.realpath(path if os.path.isabs(path) else os.path.join(WORKSPACE, path))
+    except Exception:
+        return "", "bad path"
+    roots = [os.path.realpath(WORKSPACE)] + [os.path.realpath(p) for p in list_extra_workspaces()]
+    if not any(real.lower().startswith(r.lower() + os.sep) or real.lower() == r.lower() for r in roots):
+        return "", "outside"
+    if not os.path.isfile(real):
+        return "", "missing"
+    return real, ""
 
 
 def _start_reminder_watcher() -> None:

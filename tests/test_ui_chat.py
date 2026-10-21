@@ -635,6 +635,27 @@ with sync_playwright() as pw:
     pg.route("**/api/team/choices", reply({"roles": [], "agents": [
         {"id": "claude-code", "label": "Claude Code"}, {"id": "codex", "label": "Codex"},
         {"id": "opencode", "label": "OpenCode"}, {"id": "gemini-cli", "label": "Gemini CLI"}]}))
+    fprev = pg.evaluate("""async () => {
+      const realApi = window.api, out = {};
+      window.api = async (u, o) => u.includes('op=read') ? { content: '<b>not bold</b> a < b' } : realApi(u, o);
+      const body = () => document.getElementById('modal-body');
+      await filePreview('notes.txt', 'notes.txt');
+      out.txt = [body().querySelector('pre') ? body().querySelector('pre').textContent : '', !!body().querySelector('b')];
+      await filePreview('page.html', 'out/page.html');
+      const fr = body().querySelector('iframe');
+      out.html = fr ? [fr.getAttribute('sandbox'), fr.getAttribute('src')] : null;
+      await filePreview('deck.pptx', 'deck.pptx');
+      out.office = [...document.querySelectorAll('#modal-actions button')].map(b => b.textContent);
+      document.getElementById('modal').classList.remove('open');
+      window.api = realApi;
+      return out;
+    }""")
+    check(f"a file's markup shows as text, not as part of the page {fprev['txt']}",
+          fprev["txt"] == ["<b>not bold</b> a < b", False])
+    check(f"a web page opens as itself in a sandbox that runs nothing {fprev['html']}",
+          fprev["html"] == ["", "/file?path=out%2Fpage.html"])
+    check(f"an Office file offers the app it belongs to {fprev['office']}", "Open in its app" in fprev["office"])
+
     pasted = pg.evaluate("""async () => {
       const box = document.getElementById('input');
       box.value = 'look at this:';
