@@ -1073,6 +1073,23 @@ with sync_playwright() as pw:
           logs["n"] == 3 and logs["starts"] == 1 and logs["first"] == ["ok", 40] and logs["second"] == ["err", "not found"])
     check(f"a tool that answered with an error counts as one, with what it said {logs.get('third')}",
           logs["third"] == ["err", "Error: not found: C:/y"])
+    srvw = pg.evaluate("""() => {
+      const log = ["0.02.202.498 I srv    load_model: loading model 'F:\\\\Models\\\\Ornith-1.5-9B-Q4_K_M.gguf'",
+        "0.02.679.161 W common_fit_params: failed to fit params to free device memory: n_gpu_layers already set by user to 33, abort",
+        "0.03.055.519 W model has unused tensor blk.32.attn_norm.weight (size = 16384 bytes) -- ignoring",
+        "0.03.055.534 W model has unused tensor blk.32.post_attention_norm.weight (size = 16384 bytes) -- ignoring",
+        "0.03.055.562 W model has unused tensor blk.32.attn_q.weight (size = 18874368 bytes) -- ignoring",
+        "0.38.515.764 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 71680, kv_unified = 'false'",
+        "0.38.558.929 I srv  llama_server: model loaded",
+        "0.38.558.936 I srv  llama_server: listening on http://127.0.0.1:1234"].join('\\r\\n');   // as Windows writes it
+      const w = _srvWhat(log), box = document.createElement('div');
+      box.innerHTML = _srvWhatHTML(w, true);
+      return { model: w.model, ctx: w.ctx, at: w.at, secs: Math.round(w.loadedIn),
+               probs: [...w.problems.values()].map(p => p.n), text: box.textContent };
+    }""")
+    check(f"the server page says what it loaded, how long it took and its warnings once each {srvw}",
+          srvw["model"] == "Ornith-1.5-9B-Q4_K_M" and srvw["ctx"] == 71680 and srvw["at"] == "127.0.0.1:1234"
+          and srvw["secs"] == 36 and sorted(srvw["probs"]) == [1, 3] and "3 times" in srvw["text"])
     # The Reminders tab was the first build's: a hint line running off the
     # right edge, the same hint again when empty, times as "in 3h".
     rem = pg.evaluate("""async () => {

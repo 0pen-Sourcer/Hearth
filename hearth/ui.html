@@ -2758,6 +2758,17 @@
   .rm-ideas .rm-act button { background: none; }
   @media (hover: none) { .rm-act { opacity: 1; } }
   .srv-sum { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; padding: 12px 16px 4px; }
+  .srv-what { padding: 12px 16px 0; display: flex; flex-direction: column; gap: 8px; }
+  .srv-card { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; font: 12.5px var(--sans); color: var(--fg-dim); max-width: 560px; }
+  .srv-card .k { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; }
+  .srv-card .k span:last-child { color: var(--fg); text-align: right; }
+  .srv-probs { display: flex; flex-direction: column; gap: 4px; font: 12px var(--sans); max-width: 900px; }
+  .srv-probs > div { padding: 6px 10px; border-radius: 8px; background: var(--bg-1); border: 1px solid var(--border); color: var(--fg-dim); }
+  .srv-probs .err { color: var(--err); }
+  .srv-probs em { font-style: normal; color: var(--fg-faint); margin-left: 6px; }
+  .srv-raw-tog { align-self: flex-start; margin: 10px 16px 6px; background: none; border: 1px solid var(--border); color: var(--fg-dim);
+    border-radius: 99px; padding: 4px 12px; font: 12px var(--sans); cursor: pointer; }
+  .srv-raw-tog:hover { color: var(--fg); border-color: var(--border-strong); }
   .srv-req { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; font: 12px var(--sans); color: var(--fg-dim); }
   .srv-req b { color: var(--fg); font-weight: 600; }
   .srv-req .k { display: flex; justify-content: space-between; margin-top: 3px; }
@@ -4298,7 +4309,9 @@
       <div class="log-list" id="log-list"></div>
       <!-- Server log: raw text from llama_cpp.server, monospace, line-by-line.
            Auto-scrolls to the bottom unless the user paused or scrolled up. -->
+      <div class="srv-what" id="srv-what" hidden></div>
       <div class="srv-sum" id="srv-sum" hidden></div>
+      <button type="button" class="srv-raw-tog" id="srv-raw-tog" hidden>Show the raw log</button>
       <pre class="server-log" id="server-log" hidden></pre>
       <!-- Phone log: tailed *_bridge.log lines, each tagged with its channel
            (telegram/discord/whatsapp) so incoming reach-from-phone traffic is
@@ -13600,6 +13613,49 @@ function _srvRequests(text) {
   return [...tasks.values()].filter(r => r.total).slice(-6).reverse();
 }
 
+// The server's log said plainly: what it loaded and how, where it listens,
+// and its warnings and errors with repeats counted. The lines themselves stay
+// one click away for a bug report.
+let SRV_RAW = false;
+try { SRV_RAW = localStorage.getItem('hearth_srv_raw') === '1'; } catch {}
+function _srvWhat(text) {
+  const out = { model: '', ctx: 0, at: '', loadedIn: 0, loading: false, problems: new Map() };
+  const secsOf = (ts) => { const m = /^(\d+)\.(\d+)\.(\d+)/.exec(ts || ''); return m ? (+m[1]) * 60 + (+m[2]) + (+m[3]) / 1000 : 0; };
+  let startAt = 0;
+  for (const ln of String(text || '').split(/\r?\n/)) {
+    let m;
+    if ((m = /loading model '([^']+)'/.exec(ln))) { out.model = m[1].split(/[\\/]/).pop().replace(/\.gguf$/i, ''); out.loading = true; startAt = secsOf(ln); out.problems.clear(); }
+    if ((m = /n_ctx_slot = (\d+)/.exec(ln)) || (m = /--ctx-size (\d+)/.exec(ln))) out.ctx = +m[1];
+    if ((m = /listening on (\S+)/.exec(ln))) out.at = m[1].replace(/^https?:\/\//, '');
+    if (/llama_server: model loaded|model loaded$/.test(ln)) { out.loading = false; out.loadedIn = Math.max(0, secsOf(ln) - startAt); }
+    const lvl = /^\s*[\d.]+ ([WE]) (.*)$/.exec(ln) || (/\b(ERROR|CUDA error|out of memory)\b/.test(ln) ? [null, 'E', ln] : null);
+    if (lvl) {
+      // One line per kind of message: numbers, sizes and tensor names vary.
+      const key = lvl[2].replace(/blk\.\d+\.\S+/g, 'a tensor').replace(/\(size = \d+ bytes\)/g, '').replace(/\d+/g, 'N').trim();
+      const hit = out.problems.get(key) || { level: lvl[1], text: lvl[2].trim(), n: 0 };
+      hit.n++;
+      out.problems.set(key, hit);
+    }
+  }
+  return out;
+}
+function _srvWhatHTML(w, running) {
+  if (!w.model) return '';
+  const rows = [`<div class="k"><span>Model</span><span>${esc(w.model)}</span></div>`];
+  if (w.ctx) rows.push(`<div class="k"><span>Context</span><span>${fmtCtxPill(w.ctx)} tokens</span></div>`);
+  rows.push(`<div class="k"><span>State</span><span>${w.loading ? 'loading' : running ? 'ready' + (w.loadedIn ? `, loaded in ${Math.round(w.loadedIn)} s` : '') + (w.at ? ` · at ${esc(w.at)}` : '') : 'stopped'}</span></div>`);
+  const probs = [...w.problems.values()].sort((a, b) => (a.level === 'E' ? -1 : 1) - (b.level === 'E' ? -1 : 1));
+  const plist = probs.length ? `<div class="srv-probs">${probs.slice(0, 8).map(p => `<div class="${p.level === 'E' ? 'err' : 'warn'}">`
+    + `${esc(p.text.length > 160 ? p.text.slice(0, 160) + '…' : p.text)}${p.n > 1 ? ` <em>${p.n} times</em>` : ''}</div>`).join('')}</div>` : '';
+  return `<div class="srv-card">${rows.join('')}</div>${plist}`;
+}
+function _srvShowRaw(on) {
+  SRV_RAW = on;
+  try { localStorage.setItem('hearth_srv_raw', on ? '1' : '0'); } catch {}
+  $('server-log').hidden = LOGS_SOURCE !== 'server' || !on;
+  $('srv-raw-tog').textContent = on ? 'Hide the raw log' : 'Show the raw log';
+}
+document.addEventListener('click', (e) => { if (e.target.closest('#srv-raw-tog')) _srvShowRaw(!SRV_RAW); });
 async function refreshServerLog() {
   try {
     const r = await api('/api/logs/server?kb=64');
@@ -13613,6 +13669,11 @@ async function refreshServerLog() {
       pidEl.hidden = true;
     }
     const pre = $('server-log');
+    const what = $('srv-what'), wHTML = r.exists ? _srvWhatHTML(_srvWhat(r.text), r.running) : '';
+    what.hidden = !wHTML || LOGS_SOURCE !== 'server';
+    what.innerHTML = wHTML;
+    $('srv-raw-tog').hidden = !r.exists || LOGS_SOURCE !== 'server';
+    _srvShowRaw(SRV_RAW || !wHTML);
     const sum = $('srv-sum'), reqs = _srvRequests(r.text);
     sum.hidden = !reqs.length || LOGS_SOURCE !== 'server';
     sum.innerHTML = reqs.map(q => `<div class="srv-req"><b>Request ${esc(q.id)}</b> · ${q.total.toFixed(1)} s`
@@ -13705,11 +13766,11 @@ function setLogsSource(src) {
   document.querySelectorAll('.logs-tab').forEach(b => b.classList.toggle('active', b.dataset.logs === src));
   $('log-list').hidden = src !== 'agent';
   $('lg-bar').hidden = src !== 'agent';
-  if (src !== 'server') $('srv-sum').hidden = true;
-  $('server-log').hidden = src !== 'server';
+  if (src !== 'server') { $('srv-sum').hidden = true; $('srv-what').hidden = true; $('srv-raw-tog').hidden = true; }
+  $('server-log').hidden = src !== 'server' || !SRV_RAW;
   $('phone-log').hidden = src !== 'phone';
   $('logs-sub').textContent = src === 'server'
-    ? "the model server on this PC: recent requests, then everything it printed"
+    ? "the model server on this PC: what it loaded, what went wrong, recent requests"
     : src === 'phone'
     ? 'Telegram, Discord and WhatsApp: messages in and what ran'
     : 'every tool JARVIS used, with what came back';
