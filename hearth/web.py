@@ -1895,6 +1895,16 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_ui()
         if path.startswith("/assets/"):
             return self._serve_asset(path[len("/assets/"):])
+        if path == "/api/mention":
+            # What "@words" in the message box can point at.
+            from . import session_search as _ss
+            mq = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self._send_json(200, {"items": _ss.mention(mq.get("q", [""])[0])})
+        if path == "/api/read-chat":
+            # A chat attached to a message, read in order the way read_chat does.
+            from . import session_search as _ss
+            mq = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self._send_json(200, {"text": _ss.read_chat(mq.get("id", [""])[0])})
         if path == "/api/look-icon":
             from . import look_icon
             lq = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)

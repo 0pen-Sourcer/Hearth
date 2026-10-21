@@ -2172,6 +2172,11 @@
   .slash-item.active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .slash-item:hover { background: var(--bg-2); }
   .slash-cmd { color: var(--accent-2); font-family: var(--mono); font-weight: 600; font-size: 13px; }
+  .slash-item.mention { justify-content: flex-start; align-items: center; gap: 10px; padding: 7px 12px; }
+  .mention-ico { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px;
+    background: var(--bg-2); color: var(--fg-dim); }
+  .mention-name { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-size: 13px; }
+  .mention-sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-faint); font-size: 11.5px; }
   .slash-cmd b { color: var(--fg); }
   .slash-desc { color: var(--fg-faint); font-size: 11px; margin-left: 16px; text-align: right; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .slash-group { padding: 8px 14px 3px; font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--fg-faint); font-weight: 600; }
@@ -10304,6 +10309,11 @@ async function send(forced = null, displayAs = null, opts = {}) {
   const _attach = _pendingAttachments.slice();
   if (_attach.length && !forced) {
     const lines = _attach.map(a => {
+      if (a.kind === 'chat')
+        return a.preview ? `Attached chat "${a.name}":\n"""\n${a.preview}\n"""`
+                         : `Attached chat "${a.name}" (id ${a.chat}): read_chat reads it.`;
+      if (a.kind === 'folder')
+        return `Attached folder: "${a.path}" - list_directory on it if relevant to my message.`;
       if (a.isImage)
         return `Attached image: "${a.path}" - call view_image on it if relevant to my message.`;
       // Content pre-extracted at upload → inline it so the model has it without a
@@ -10410,6 +10420,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     if (_attach.length && !forced) {
       userMsg.attachments = _attach.map(a => ({
         name: a.name, path: a.path, isImage: !!a.isImage,
+        ...(a.kind ? { kind: a.kind } : {}), ...(a.chat ? { chat: a.chat } : {}),
       }));
     }
     if (_silent) userMsg.silent = true;  // skip rendering this bubble
@@ -11936,7 +11947,8 @@ function _renderAttachTray() {
     if (a.isImage && a.path) {
       lead = `<img src="/file?path=${encodeURIComponent(a.path)}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;display:block;">`;
     } else {
-      lead = `<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:var(--bg-1);border-radius:4px;color:var(--fg-faint);">${_ICON_FILE}</span>`;
+      const ico = (a.kind === 'chat' || a.kind === 'folder') ? _MENTION_ICO[a.kind] : _ICON_FILE;
+      lead = `<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:var(--bg-1);border-radius:4px;color:var(--fg-faint);">${ico}</span>`;
     }
     chip.innerHTML =
       lead +
@@ -16219,8 +16231,68 @@ const SLASH_COMMANDS = [
 ];
 let slashIdx = -1;
 
+// "@words" in the box: chats, folders and files to attach. The word typed so
+// far is everything after the "@" up to the caret.
+function _mentionWord() {
+  const before = input.value.slice(0, input.selectionStart == null ? input.value.length : input.selectionStart);
+  const m = /(^|\s)@([^\s@]*)$/.exec(before);
+  return m ? m[2] : null;
+}
+const _MENTION_ICO = {
+  chat: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  folder: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+};
+let _mentionAsk = 0, _mentionItems = [];
+async function updateMentionMenu(word) {
+  const ask = ++_mentionAsk;
+  let items = [];
+  try { items = (await api('/api/mention?q=' + encodeURIComponent(word))).items || []; } catch {}
+  if (ask !== _mentionAsk || _mentionWord() === null) return;
+  const menu = $('slash-menu');
+  _mentionItems = items;
+  if (!items.length) {
+    menu.innerHTML = `<div class="slash-none">Nothing called <b>${esc(word)}</b> in your chats or usual folders.</div>`;
+    menu.hidden = false; slashIdx = -1; return;
+  }
+  let group = '';
+  const GROUP = { chat: 'Chats', folder: 'Folders and files', file: 'Folders and files' };
+  menu.innerHTML = items.map((it, i) => {
+    const head = GROUP[it.kind] !== group ? `<div class="slash-group">${esc(group = GROUP[it.kind])}</div>` : '';
+    return `${head}<div class="slash-item mention${i === 0 ? ' active' : ''}" data-m="${i}">
+      <span class="mention-ico">${_MENTION_ICO[it.kind] || _ICON_FILE}</span>
+      <span class="mention-name">${esc(it.name)}</span><span class="mention-sub">${esc(it.sub || '')}</span></div>`;
+  }).join('');
+  menu.hidden = false;
+  slashIdx = 0;
+}
+async function pickMention(i) {
+  const it = _mentionItems[i];
+  if (!it) return;
+  // The "@word" leaves the text; the pick sits in the tray like an attachment.
+  const caret = input.selectionStart == null ? input.value.length : input.selectionStart;
+  const before = input.value.slice(0, caret).replace(/(^|\s)@[^\s@]*$/, '$1');
+  input.value = before + input.value.slice(caret);
+  input.setSelectionRange(before.length, before.length);
+  hideSlashMenu();
+  input.focus();
+  const a = { name: it.name, kind: it.kind };
+  if (it.kind === 'chat') {
+    a.chat = it.id;
+    try { a.preview = (await api('/api/read-chat?id=' + encodeURIComponent(it.id))).text || ''; } catch {}
+  } else {
+    a.path = it.path;
+    a.isImage = it.kind === 'file' && IMAGE_EXTS.has((it.name.split('.').pop() || '').toLowerCase());
+  }
+  if (!_pendingAttachments.some(x => (x.chat && x.chat === a.chat) || (x.path && x.path === a.path))) {
+    _pendingAttachments.push(a);
+    _renderAttachTray();
+  }
+}
+
 function updateSlashMenu() {
   const v = input.value;
+  const word = _mentionWord();
+  if (word !== null && !v.startsWith('/')) { updateMentionMenu(word); return; }
   if (!v.startsWith('/') || /\s/.test(v.trim()) && !SLASH_COMMANDS.some(c => c.cmd.includes(' ') && c.cmd.startsWith(v.trim().split(' ')[0] + ' '))) {
     hideSlashMenu(); return;
   }
@@ -16257,6 +16329,7 @@ function hideSlashMenu() {
 function pickSlash(idx) {
   const items = $('slash-menu').querySelectorAll('.slash-item');
   if (idx < 0 || idx >= items.length) return;
+  if (items[idx].dataset.m != null) { pickMention(+items[idx].dataset.m); return; }
   const cmd = items[idx].dataset.cmd;
   // Single-word commands get a trailing space so the user can type args next.
   // Sub-commands like '/voice on' are complete - leave as-is.
@@ -16282,6 +16355,8 @@ input.addEventListener('keydown', (e) => {
   } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
     if (slashIdx < 0) { hideSlashMenu(); return; }
     e.preventDefault();
+    // Picking a chat or file attaches it and keeps typing; it doesn't send.
+    if (items[slashIdx] && items[slashIdx].dataset.m != null) e.stopImmediatePropagation();
     pickSlash(slashIdx);
   } else if (e.key === 'Escape') {
     hideSlashMenu();

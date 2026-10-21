@@ -427,6 +427,80 @@ def format_matches(matches: List[Match]) -> str:
 # Reading one chat whole
 # ---------------------------------------------------------------------------
 
+_SKIP_DIRS = {"node_modules", ".git", "__pycache__", ".venv", "venv", "AppData", "$Recycle.Bin"}
+_CHATS: dict = {"stamp": None, "list": []}
+
+
+def _chat_titles() -> List[dict]:
+    """Every chat's title, read again only when a chat file has changed."""
+    from . import chat_sync
+    try:
+        stamp = tuple(sorted((e.name, e.stat().st_mtime_ns) for e in os.scandir(CONVOS_DIR)
+                             if e.name.endswith(".json")))
+    except OSError:
+        stamp = ()
+    if stamp != _CHATS["stamp"]:
+        _CHATS["list"] = [c for c in chat_sync.listing(limit=100000) if c.get("count")]
+        _CHATS["stamp"] = stamp
+    return _CHATS["list"]
+
+
+def mention(query: str, limit: int = 8, budget_s: float = 0.4) -> List[dict]:
+    """What "@words" in the message box can point at: chats by title, and files
+    and folders by name in the usual places, quickly and never exhaustively."""
+    import time as _time
+    from . import chat_sync
+    from .tools import WORKSPACE
+    words = [w for w in re.findall(r"\w+", (query or "").lower())]
+    out: List[dict] = []
+    for c in _chat_titles():
+        t = (c.get("title") or "").lower()
+        if all(w in t for w in words):
+            out.append({"kind": "chat", "name": c.get("title") or "Untitled", "id": c["id"],
+                        "sub": _when(c.get("updated")) + f" · {c.get('count', 0)} messages"})
+            if len([o for o in out if o["kind"] == "chat"]) >= (5 if words else 4):
+                break
+    home = os.path.expanduser("~")
+    roots = [WORKSPACE] + [os.path.join(home, d) for d in ("Desktop", "Documents", "Downloads")]
+    if not words:
+        for r in roots:
+            if os.path.isdir(r):
+                out.append({"kind": "folder", "name": os.path.basename(r) or r, "path": r, "sub": r})
+        return out
+    end = _time.time() + budget_s
+    found: List[dict] = []
+    seen = 0
+
+    def walk(d: str, depth: int) -> None:
+        nonlocal seen
+        if depth > 3 or _time.time() > end or len(found) >= limit * 3:
+            return
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            return
+        for e in entries:
+            seen += 1
+            if e.name.startswith(".") or e.name in _SKIP_DIRS:
+                continue
+            low = e.name.lower()
+            is_dir = e.is_dir(follow_symlinks=False)
+            if all(w in low for w in words):
+                found.append({"kind": "folder" if is_dir else "file", "name": e.name, "path": e.path,
+                              "sub": os.path.dirname(e.path)})
+            if is_dir:
+                walk(e.path, depth + 1)
+            if _time.time() > end:
+                return
+
+    for r in roots:
+        if os.path.isdir(r):
+            walk(r, 0)
+    # Closest names first: a name that starts with what was typed, then shorter.
+    lead = words[0] if words else ""
+    found.sort(key=lambda f: (not f["name"].lower().startswith(lead), len(f["name"])))
+    return out + found[:limit]
+
 _PER_MESSAGE = 2000
 
 

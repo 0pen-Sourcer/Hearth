@@ -266,6 +266,47 @@ with sync_playwright() as pw:
           and "local off" in marks["none"]["cls"] and not marks["none"]["dot"]
           and marks["loading"]["dot"] and marks["loading"]["hidden"])
 
+    at = pg.evaluate("""async () => {
+      const realApi = window.api, realFetch = window.fetch, sentBodies = [];
+      window.api = async (u, o) => {
+        if (u.startsWith('/api/mention')) return { items: [
+          { kind: 'chat', name: 'Launch warroom', id: 'c_launch', sub: 'yesterday · 40 messages' },
+          { kind: 'folder', name: 'launch-assets', path: 'C:/x/launch-assets', sub: 'C:/x' }] };
+        if (u.startsWith('/api/read-chat')) return { text: 'Chat: Launch warroom\\n#39 assistant\\nship it friday' };
+        return realApi(u, o);
+      };
+      window.fetch = async (u, o) => {
+        if (String(u) === '/chat') { sentBodies.push(o && o.body); return new Response('', { status: 200 }); }
+        return realFetch(u, o);
+      };
+      newConversation();
+      const box = document.getElementById('input');
+      box.value = 'carry on from @launch'; box.setSelectionRange(box.value.length, box.value.length);
+      box.dispatchEvent(new Event('input'));
+      await new Promise(r => setTimeout(r, 150));
+      const menu = document.getElementById('slash-menu');
+      const shown = { open: !menu.hidden, rows: menu.querySelectorAll('.slash-item.mention').length,
+                      groups: [...menu.querySelectorAll('.slash-group')].map(g => g.textContent) };
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise(r => setTimeout(r, 150));
+      const after = { text: box.value, chips: _pendingAttachments.map(a => a.kind + ':' + a.name), menu: !menu.hidden };
+      STATE.loadedModel = STATE.loadedModel || { id: 'x', state: 'loaded' };
+      STATE.streaming = false;
+      await send();
+      await new Promise(r => setTimeout(r, 200));
+      window.api = realApi; window.fetch = realFetch;
+      const body = sentBodies[0] || '';
+      const left = _pendingAttachments.length;
+      _pendingAttachments = []; _renderAttachTray(); STATE.streaming = false;
+      return { shown, after, left, carried: body.includes('ship it friday') && body.includes('Attached chat') };
+    }""")
+    check(f"@ in the box lists chats and folders to attach {at['shown']}",
+          at["shown"]["open"] and at["shown"]["rows"] == 2 and at["shown"]["groups"] == ["Chats", "Folders and files"])
+    check(f"picking one takes the @word out and puts it in the tray {at['after']}",
+          at["after"]["text"] == "carry on from " and at["after"]["chips"] == ["chat:Launch warroom"]
+          and not at["after"]["menu"])
+    check("and an attached chat goes with the message, read in order", at["carried"] and at["left"] == 0)
+
     check(f"changing the accent changes the tab and window icon {tab}",
           "accent=sage" in tab["href"] and "theme=dark" in tab["href"] and tab["last"] == ["dark", "sage"])
 
@@ -309,7 +350,7 @@ with sync_playwright() as pw:
       await new Promise(r => setTimeout(r, 300));
       const body = document.getElementById('modal-body');
       const opened = !!body.querySelector('.st-panel');
-      const bars = body.querySelectorAll('.st-bar').length;
+      const bars = [...body.querySelectorAll('.st-bar')].filter(b => !/Context used/.test(b.textContent)).length;
       const folded = [...body.querySelectorAll('.st-other')].map(b => b.textContent.trim());
       body.querySelector('#st-refresh').click();
       await new Promise(r => setTimeout(r, 300));

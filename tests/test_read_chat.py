@@ -70,6 +70,19 @@ check(f"when several fit as well, they are listed with ids ({both[:60]!r})",
 none = tools.execute_tool("read_chat", {"chat": "volcano trip"})
 check("a chat that isn't there says so and where to look", "search_chats" in none)
 
+# "@words" in the message box: chats by title, files and folders by name.
+from hearth import session_search  # noqa: E402
+os.makedirs(os.path.join(WS, "launch-assets"), exist_ok=True)
+open(os.path.join(WS, "launch-assets", "launch_plan.md"), "w").close()
+hits = session_search.mention("launch")
+kinds = [(h["kind"], h["name"]) for h in hits]
+check(f"@launch finds the chat, the folder and the file {kinds}",
+      ("chat", "Launch warroom") in kinds and ("folder", "launch-assets") in kinds
+      and ("file", "launch_plan.md") in kinds and kinds[0][0] == "chat")
+bare = session_search.mention("")
+check("a bare @ offers recent chats and the usual folders",
+      any(h["kind"] == "chat" for h in bare) and any(h["kind"] == "folder" for h in bare))
+
 # It costs nothing in an ordinary turn: held back until chats are searched.
 tools.reset_unlocked_tools()
 check("read_chat isn't sent with every turn", not tools._tool_active("read_chat"))
