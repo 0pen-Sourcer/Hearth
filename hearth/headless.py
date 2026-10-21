@@ -126,6 +126,8 @@ def bridge_reply_or_reason(reply_text: str, err_category=None, err_message=None)
                 "in Hearth (or point it at a cloud brain) and message me again.")
     if err_category == "rate_limit":
         return "I'm rate-limited right now. Give it a moment and try me again."
+    if err_category == "quota":
+        return ("The model I think with is out of usage for now. " + (err_message or "")).strip()
     if err_category == "auth":
         return "My model connection isn't authorized at the moment. Ping whoever runs Hearth."
     if err_message:
@@ -1684,6 +1686,8 @@ async def run_once(
                             _to_manual_messages(messages, _tools_block_text)
                             if _use_manual_tools else messages)
                         _wait = 0  # already fixed the cause; don't stall
+                    elif info.wait_s:
+                        _wait = min(float(info.wait_s), 60)   # what the provider asked for
                     else:
                         _wait = min(2 ** _retry_n, 8)  # 2s, 4s, 8s
                     emit("retry", attempt=_retry_n, max_attempts=_max_retries,

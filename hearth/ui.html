@@ -11422,7 +11422,16 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'error') {
       _playSound('error');
-      chatBody.appendChild(makeMeta(ev.message || 'error', 'err'));
+      const _err = makeMeta(ev.message || 'error', 'err');
+      if (ev.category === 'quota') {
+        // Out of usage: the way on is another brain, one click away.
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'btn-mini'; b.textContent = 'Pick another brain';
+        b.style.cssText = 'display:block;margin-top:8px';
+        b.addEventListener('click', () => mpOpen());
+        _err.appendChild(b);
+      }
+      chatBody.appendChild(_err);
       assistantMsg.events.push({ kind: 'error', text: ev.message, pos: assistantMsg.content.length });
       // ALSO toast so the user can't miss it. The chat inline meta is small
       // and the user reported "no responses" when an auth failure was
@@ -11433,7 +11442,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
         ev.category === 'auth' ? 'Auth failed' :
           ev.category === 'unreachable' ? 'Endpoint unreachable' :
             ev.category === 'rate_limit' ? 'Rate limited' :
-              'LLM error',
+              ev.category === 'quota' ? 'Out of usage' :
+                "The model didn't answer",
         ev.message || 'unknown',
         'err', 8000
       );

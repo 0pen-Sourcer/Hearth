@@ -70,6 +70,45 @@ odd = Err(418, "Error code: 418 - {'error': {'message': 'The teapot is busy.', '
 info = classify_api_error(odd, is_local=False)
 check(f"an error Hearth has no name for still says what the provider said ({info.hint})", "The teapot is busy." in info.hint)
 
+
+# Limits: a per-minute one clears by waiting as long as the provider asks; a
+# daily quota doesn't, so it is said once instead of retried for nothing.
+class _Resp:
+    def __init__(self, headers):
+        self.headers = headers
+
+
+class _Limited(Exception):
+    def __init__(self, msg, headers=None, body=None):
+        super().__init__(msg)
+        self.status_code = 429
+        self.response = _Resp(headers or {})
+        self.body = body
+
+
+minute = classify_api_error(_Limited("Error code: 429 - rate limit reached for requests",
+                                     headers={"retry-after": "20"}), is_local=False)
+check(f"a per-minute limit is retried after the wait the provider asked for ({minute})",
+      minute.category == "rate_limit" and minute.retryable and minute.wait_s == 20.0)
+gem = classify_api_error(_Limited("429 RESOURCE_EXHAUSTED ... 'retryDelay': '36s'"), is_local=False)
+check(f"Gemini's retryDelay is read too ({gem.wait_s})", gem.retryable and gem.wait_s == 36.0)
+day = classify_api_error(_Limited(
+    "429 RESOURCE_EXHAUSTED quota exceeded for metric generate_content_free_tier_requests, limit 250 per day",
+    body={"error": {"message": "You exceeded your current quota, please check your plan."}}), is_local=False)
+check(f"a daily quota isn't retried, and says so in the provider's words ({day.hint})",
+      day.category == "quota" and not day.retryable and "You exceeded your current quota" in day.hint)
+long_wait = classify_api_error(_Limited("rate limit", headers={"retry-after": "3600"}), is_local=False)
+check(f"a wait of an hour is a quota too, with when ({long_wait.hint})",
+      long_wait.category == "quota" and not long_wait.retryable and "60 minutes" in long_wait.hint)
+
+from hearth import claude_brain  # noqa: E402
+cc = claude_brain.out_of_usage("claude-code", {"message": "Claude Code stopped: You've hit your session limit · resets 3:20pm"})
+check(f"an agent out of usage says so in its own words, with when ({cc})",
+      cc.get("category") == "quota" and cc["message"].startswith("Claude Code is out of usage on your Claude plan")
+      and "resets 3:20pm" in cc["message"] and "stopped:" not in cc["message"])
+other = claude_brain.out_of_usage("codex", {"message": "Codex stopped: network error"})
+check("any other stop is left as it was", other == {"message": "Codex stopped: network error"})
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

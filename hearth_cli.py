@@ -5799,6 +5799,7 @@ class JarvisCLI:
                         "unreachable": "no answer from the model server",
                         "timeout": "the model server is taking too long",
                         "rate_limit": "rate-limited",
+                        "quota": "out of usage",
                         "server_error": "the model server returned an error",
                         "context_overflow": "prompt overflowed the context",
                     }.get(getattr(_info, "category", ""), "the request failed")

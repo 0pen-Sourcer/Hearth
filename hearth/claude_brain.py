@@ -25,6 +25,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -286,6 +287,24 @@ def _keep_limits(provider: str, windows: Dict[str, Any]) -> None:
             json.dump(all_, f)
     except OSError:
         pass
+
+
+_OUT_OF_USAGE = re.compile(
+    r"usage limit|session limit|weekly limit|5-hour limit|limit reached|hit your (?:\w+ )?limit|"
+    r"out of (?:usage|credits)|quota (?:exceeded|reached)|usageLimitExceeded", re.I)
+
+
+def out_of_usage(agent: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+    """An agent that stopped because its plan's usage ran out says so as that,
+    in its own words (which carry when it resets), not as a bare stop."""
+    msg = str(fields.get("message") or "")
+    if not _OUT_OF_USAGE.search(msg):
+        return fields
+    name = BRAINS.get(agent, "The agent")
+    said = re.sub(r"^\s*[\w .-]+? stopped:\s*", "", msg).strip()
+    return dict(fields, category="quota",
+                message=f"{name} is out of usage on your {PLANS.get(agent, name)} plan: {said.rstrip('.')}. "
+                        f"Pick another brain to carry on now.")
 
 
 def note_claude_limits(ev: Dict[str, Any]) -> None:
@@ -790,6 +809,8 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     def emit(kind: str, **fields) -> None:
         if kind == "done":
             fields["stats"] = priced(agent, fields.get("stats"))
+        elif kind == "error":
+            fields = out_of_usage(agent, fields)
         _emit(kind, **fields)
 
     news = helper_news(emit)

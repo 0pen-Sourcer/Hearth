@@ -21,6 +21,30 @@ class ApiErrorInfo:
     category: str   # short machine label, e.g. "rate_limit"
     hint: str       # one human sentence: what to do about it
     retryable: bool # could the SAME request succeed if retried (maybe after a wait)?
+    wait_s: Optional[float] = None  # how long the provider said to wait, when it said
+
+
+def _wait_said(exc: object, text: str) -> Optional[float]:
+    """Seconds the provider asked for: a Retry-After header, or Gemini's retryDelay."""
+    try:
+        headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+        v = headers.get("retry-after") or headers.get("Retry-After")
+        if v:
+            return float(v)
+    except (TypeError, ValueError):
+        pass
+    m = re.search(r"retry[_ ]?delay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s", text) \
+        or re.search(r"(?:try again|retry) in (\d+(?:\.\d+)?)\s*s(?:ec|econds?)?\b", text)
+    return float(m.group(1)) if m else None
+
+
+def _in_words(seconds: float) -> str:
+    s = int(round(seconds))
+    if s < 90:
+        return f"{s} seconds"
+    if s < 5400:
+        return f"{round(s / 60)} minutes"
+    return f"{round(s / 3600)} hours"
 
 
 def _status_code(exc: object, text: str) -> Optional[int]:
@@ -101,10 +125,25 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
             retryable=False)
 
     # --- rate limit / quota ---
+    # A per-minute limit clears by waiting, so it is retried, for as long as the
+    # provider asked. A daily or monthly quota doesn't clear in seconds:
+    # retrying it only spends the wait, so it is said once, with when it resets.
     if code == 429 or "rate_limit" in text or "rate limit" in text or "quota" in text or "resource_exhausted" in text or "too many requests" in text:
+        said = _provider_says(exc)
+        wait = _wait_said(exc, text)
+        words = f": {said.rstrip('.')}." if said else "."
+        long_quota = any(s in text for s in ("per day", "perday", "daily", "per month", "monthly", "free tier",
+                                             "exceeded your current quota", "usage limit"))
+        if long_quota or (wait is not None and wait > 120):
+            when = f" It allows more in about {_in_words(wait)}." if wait else ""
+            return ApiErrorInfo("quota",
+                "This provider's quota is used up" + words + when +
+                " Switch to another brain, or wait for it to reset.",
+                retryable=False, wait_s=wait)
         return ApiErrorInfo("rate_limit",
-            "Rate-limited or out of quota. Wait a moment and retry, or switch model/provider.",
-            retryable=True)
+            "This provider is limiting how fast requests come in" + words +
+            (f" It asked for {_in_words(wait)}." if wait else ""),
+            retryable=True, wait_s=wait)
 
     # --- context overflow ---
     if ("context" in text and ("exceed" in text or "too long" in text or "maximum" in text)) \
