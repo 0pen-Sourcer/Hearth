@@ -4735,7 +4735,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Listening runs on</div>
-            <div class="hint">The graphics card is much faster. If it says not installed, pick it anyway and Hearth downloads what it needs (about 500 MB, once).</div>
+            <div class="hint">The graphics card is much faster. The first time, Hearth asks, then downloads what it needs (about 500 MB, once) and shows it in Downloads.</div>
           </div>
           <select id="setting-stt-device" data-gpu="1">
             <option value="cpu">CPU</option>
@@ -5331,8 +5331,8 @@
             </button>
           </div>
         </div>
-        <div class="field"><div class="label">
-          <div class="name">LM Studio <code>lms</code> command</div>
+        <div class="field" id="field-lms" data-adv hidden><div class="label">
+          <div class="name">LM Studio</div>
           <div class="hint" id="setting-lms">…</div>
         </div></div>
 
@@ -14304,7 +14304,7 @@ async function refreshSettings() {
         if (opt.value === 'cpu') { opt.text = opt.dataset.base; opt.dataset.ni = ''; opt.disabled = false; continue; }
         const ok = isInstalled(opt);
         opt.disabled = false;  // keep selectable so picking it can install it
-        opt.text = ok ? opt.dataset.base : opt.dataset.base + ' (not installed)';
+        opt.text = ok ? opt.dataset.base : opt.dataset.base + ' · download, about 500 MB';
         opt.dataset.ni = ok ? '' : '1';
       }
       let prev = sel.value;
@@ -14653,6 +14653,8 @@ async function refreshSettings() {
         // whatever the user typed. (applyMode on first LOAD must NOT do this -
         // it would clobber a saved custom-local URL like Ollama on :11434.)
         if (v !== 'custom') llmUrl.value = (PRESETS[v] || PRESETS.local).url;
+        // An agent brain's address is Hearth's own name for it, not a server.
+        else if (!/^https?:\/\//i.test(llmUrl.value.trim())) llmUrl.value = '';
         // Switch the model to the new provider's default. Keeping grok-4.3 when
         // moving to Gemini would send an invalid model to the new endpoint.
         if (v !== 'custom') llmMdl.value = (PRESETS[v] || {}).sample || '';
@@ -15180,9 +15182,19 @@ async function refreshSettings() {
     }
 
     const st = await api('/api/state');
-    $('setting-endpoint').textContent = st.endpoint;
     $('setting-workspace').textContent = st.workspace;
-    $('setting-lms').textContent = st.lms_cli ? 'yes (model load works via CLI)' : 'no - model load needs LM Studio REST';
+    // The brain in words, as the status panel says it, not a bare address.
+    try {
+      const b = (await api('/api/status')).brain || {};
+      $('setting-endpoint').textContent = b.kind === 'local'
+        ? (b.model ? `${b.model}, on this PC` : 'A model on this PC, none loaded yet')
+        : [b.label, b.model].filter(Boolean).join(' · ') + (b.where ? ', through ' + b.where : '');
+    } catch { $('setting-endpoint').textContent = st.endpoint; }
+    // Only worth a line when LM Studio is around: it lets Hearth load its models.
+    const _lmsUsed = /:1234\b/.test(st.endpoint || '') || (st.provider || '') === 'lmstudio';
+    $('field-lms').hidden = !(st.lms_cli || _lmsUsed);
+    $('setting-lms').textContent = st.lms_cli ? 'Found its lms command, so Hearth can load LM Studio models for you.'
+      : 'Its lms command is not on this PC, so pick models in LM Studio itself.';
 
     // Models folder (relocatable to a drive with space). Loads the current path;
     // Save writes the pointer and takes effect on next launch.
@@ -21054,10 +21066,30 @@ function roomSkin(a) {
 async function roomLoad() {
   if (ROOM.bg) return true;
   try {
-    const man = await (await fetch('/assets/team/manifest.json', { cache: 'no-store' })).json();
+    // A request to Hearth's own server can stall or be reset on its way (some
+    // antivirus web shields sit on local traffic), so each piece is asked for
+    // again after a few seconds instead of leaving the room empty for good.
+    let man = null;
+    for (let n = 0; n < 4 && !man; n++) {
+      const stop = new AbortController(), t = setTimeout(() => stop.abort(), 6000);
+      try { man = await (await fetch('/assets/team/manifest.json', { cache: 'no-store', signal: stop.signal })).json(); } catch {}
+      clearTimeout(t);
+    }
+    if (!man) return false;
     ROOM.man = man;
-    const load = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej;
-                                                    i.src = src + (man.v ? '?v=' + man.v : ''); });
+    const once = (src) => new Promise((res, rej) => {
+      const i = new Image(), t = setTimeout(() => { i.src = ''; rej(new Error('slow')); }, 6000);
+      i.onload = () => { clearTimeout(t); res(i); };
+      i.onerror = () => { clearTimeout(t); rej(new Error('failed')); };
+      i.src = src;
+    });
+    const load = async (src) => {
+      const v = man.v ? '?v=' + man.v : '?';
+      for (let n = 0; ; n++) {
+        try { return await once(src + v + (n ? (man.v ? '&' : '') + 'try=' + n : '')); }
+        catch (e) { if (n >= 3) throw e; }
+      }
+    };
     // Everything is loaded before any of it is used: someone placed while the
     // rooms were half in would land in a room that isn't there yet.
     const rooms = man.rooms && man.rooms.length ? man.rooms : [{ id: 'cabin', name: 'Cabin', file: 'room.png' }];

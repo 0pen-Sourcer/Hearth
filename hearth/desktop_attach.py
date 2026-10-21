@@ -257,6 +257,7 @@ def main(argv: Optional[list] = None) -> int:
 
     _win_holder["win"] = webview.create_window(
         "Hearth", url=args.url, js_api=_WinApi(), **kwargs)
+    reload_if_stalled(_win_holder["win"], args.url)
     # Keep the window's storage between launches; the default private window
     # forgets every remembered choice each time Hearth starts.
     keep = {}
@@ -280,6 +281,30 @@ def main(argv: Optional[list] = None) -> int:
     except Exception as e:
         return _browser_fallback(e)
     return 0
+
+
+
+def reload_if_stalled(win, url: str, wait_s: float = 15.0, tries: int = 2) -> None:
+    """Ask for the page again when it hasn't arrived. A request to Hearth's own
+    server can stall or be reset on its way (some antivirus web shields sit on
+    local traffic), which leaves the window blank for good otherwise."""
+    import threading
+    import time
+    got = threading.Event()
+    try:
+        win.events.loaded += lambda *a: got.set()
+    except Exception:
+        return
+
+    def _watch() -> None:
+        for _ in range(tries):
+            if got.wait(wait_s):
+                return
+            try:
+                win.load_url(url)
+            except Exception:
+                return
+    threading.Thread(target=_watch, daemon=True, name="hearth-page-watch").start()
 
 
 if __name__ == "__main__":

@@ -5664,6 +5664,11 @@ class _QuietHTTPServer(ThreadingHTTPServer):
     handle_error dumps a full traceback per drop, which looks like Hearth is
     crashing when it's not. We silence ONLY the connection-class errors and
     keep tracebacks for everything else."""
+    # A page asks for many things at once (room art, state, previews). The
+    # default backlog of 5 makes Windows refuse or drop the rest, and the
+    # browser waits on them for many seconds.
+    request_queue_size = 128
+
     def handle_error(self, request, client_address):
         import sys
         exc = sys.exc_info()[1]

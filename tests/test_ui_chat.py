@@ -1346,6 +1346,27 @@ with sync_playwright() as pw:
     check(f"picking a room look plays that character in the room, and an approval pick goes back to the chat {extras['room']}",
           extras["room"]["on"] and "main_m.png" in extras["room"]["sheet"] and extras["room"]["cap"].startswith("Teal scarf")
           and extras["back"] is False)
+    # About said a bare address for the brain (LM Studio's, with Claude Code in
+    # use) and an LM Studio line to everyone; "Another server" kept the agent
+    # brain's internal address in its URL box.
+    about = pg.evaluate("""async () => {
+      showView('settings');
+      for (let i = 0; i < 60 && ($('setting-endpoint').textContent || '…') === '…'; i++) await new Promise(r => setTimeout(r, 50));
+      const mode = $('setting-brain-mode'), url = $('setting-llm-url');
+      url.value = 'claude-code://local';
+      mode.value = 'custom'; mode.dispatchEvent(new Event('change'));
+      const cleared = url.value;
+      url.value = 'http://192.168.1.5:8080/v1';
+      mode.value = 'custom'; mode.dispatchEvent(new Event('change'));
+      const kept = url.value;
+      showView('chat');
+      const st = await api('/api/state');
+      const lmsAround = !!st.lms_cli || /:1234/.test(st.endpoint || '');
+      return { said: $('setting-endpoint').textContent, lms: $('field-lms').hidden === !lmsAround, cleared, kept };
+    }""")
+    check(f"About names the brain in words, LM Studio's line only when it is around, and Another server starts empty {about}",
+          not about["said"].startswith("http") and about["lms"] is True and about["cleared"] == ""
+          and about["kept"] == "http://192.168.1.5:8080/v1")
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([

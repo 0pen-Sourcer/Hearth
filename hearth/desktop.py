@@ -140,6 +140,8 @@ def main(argv: Optional[list] = None) -> int:
         web_backend.set_window_ref(win)
     except Exception:
         pass
+    from .desktop_attach import reload_if_stalled
+    reload_if_stalled(win, url)
 
     def _bye() -> None:
         # Always kill the builtin llama.cpp child so port 1234 is freed,
