@@ -521,6 +521,10 @@
   .brain-card em { margin-left: auto; font-style: normal; font-size: 10.5px; color: var(--fg-dim); border: 1px solid var(--border);
     border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
   .brain-card.on em { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .brain-card .brain-upd { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px;
+    color: var(--accent-2); border: 1px solid var(--border); margin-left: auto; }
+  .brain-card .brain-upd:hover { border-color: var(--accent); background: var(--accent-bg); }
+  .brain-card .brain-upd + em { margin-left: 0; }
   .mp-helper { margin-left: 8px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--fg-dim);
     font-size: 11px; white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
   .dl-indet { height: 100%; width: 34%; border-radius: 4px; animation: dl-indet 1.3s ease-in-out infinite; }
@@ -5901,6 +5905,8 @@ async function checkAgentUpdates() {
   try { r = await api('/api/agents/updates'); } catch { return; }
   // Kept in settings: the desktop window forgets its own storage on restart,
   // so a "Later" kept there came back every launch.
+  STATE.agentUpdates = Object.fromEntries(((r && r.updates) || []).map(u => [u.id, u]));
+  renderBrainCards();
   const skipped = Object.assign({}, (STATE.settings || {}).agent_update_skip || {});
   const due = ((r && r.updates) || []).filter(u => skipped[u.id] !== u.latest);
   if (!due.length) return;
@@ -5945,6 +5951,7 @@ async function checkAgentUpdates() {
     go.disabled = !n;
   });
 }
+const _UPD_ARROW = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>';
 const _UPD_TICK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 async function updateAgent(u) {
   dlUpsert('agent:' + u.id, { name: `Updating ${u.label}`, kind: 'agent', agent: u.id, status: 'downloading',
@@ -5956,6 +5963,7 @@ async function updateAgent(u) {
                                                  body: JSON.stringify({ id: u.id }) });
     agentJobsPoll();
     toast(`${u.label} is up to date`, res.version ? 'Now on ' + res.version : '', 'ok', 5000);
+    if (STATE.agentUpdates) { delete STATE.agentUpdates[u.id]; renderBrainCards(); }
     if (STATE.agentInfo && STATE.agentInfo.provider === u.id) loadAgentInfo(u.id);
   } catch (e) {
     agentJobsPoll();
@@ -10006,8 +10014,11 @@ function renderBrainCards() {
   const card = v => {
     const [name, about] = BRAIN_CARD_ABOUT[v] || [v, ''];
     const tag = v === inUse ? 'In use' : saved.has(v) ? 'Key saved' : '';
+    // A newer version of an agent program, found whether or not the toast was put off.
+    const u = (STATE.agentUpdates || {})[v];
+    const upd = u ? `<span class="brain-upd" role="button" data-upd="${esc(v)}" title="Update to ${esc(u.latest)} (you have ${esc(u.installed)})">${_UPD_ARROW}</span>` : '';
     return `<button type="button" class="brain-card${v === picked ? ' on' : ''}" data-brain="${esc(v)}">${icon(v)}`
-      + `<span class="t"><b>${esc(name)}</b><small>${esc(about)}</small></span>${tag ? `<em>${tag}</em>` : ''}</button>`;
+      + `<span class="t"><b>${esc(name)}</b><small>${esc(about)}</small></span>${upd}${tag ? `<em>${tag}</em>` : ''}</button>`;
   };
   // An installed agent that speaks the protocol gets a card beside the three, and an option to pick.
   const agentIds = ['claude-code', 'codex', 'cursor-agent',
@@ -10038,6 +10049,13 @@ document.addEventListener('click', e => {
   setTimeout(() => { const b = $('tm-new'); if (b) b.click(); }, 60);
 });
 document.addEventListener('click', e => {
+  const up = e.target.closest('.brain-upd');
+  if (up) {
+    e.stopPropagation();
+    const u = (STATE.agentUpdates || {})[up.dataset.upd];
+    if (u) updateAgent(u);
+    return;
+  }
   const c = e.target.closest('.brain-card');
   if (!c) return;
   const sel = document.getElementById('setting-brain-mode');

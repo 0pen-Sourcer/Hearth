@@ -200,8 +200,8 @@ with sync_playwright() as pw:
       const realApi = window.api, realUpd = window.updateAgent, realSave = window.saveSetting;
       const updated = [], saved = {};
       window.api = async (u) => u.includes('/api/agents/updates') ? { updates: [
-        { id: 'claude', label: 'Claude Code', installed: '1', latest: '2' },
-        { id: 'gemini', label: 'Gemini CLI', installed: '1', latest: '3' },
+        { id: 'claude-code', label: 'Claude Code', installed: '1', latest: '2' },
+        { id: 'gemini-cli', label: 'Gemini CLI', installed: '1', latest: '3' },
         { id: 'opencode', label: 'OpenCode', installed: '1', latest: '4' }] } : realApi(u);
       window.updateAgent = (u) => updated.push(u.id);
       window.saveSetting = (k, v) => { saved[k] = v; };
@@ -209,17 +209,20 @@ with sync_playwright() as pw:
       await checkAgentUpdates();
       const toasts = document.querySelectorAll('.toast.ask').length;
       const t = document.querySelector('.toast.ask');
-      t.querySelector('input[data-i="1"]').click();
+      t.querySelector('.mp-row[data-i="1"]').click();
       const label = t.querySelector('button[data-a="yes"]').textContent;
       t.querySelector('button[data-a="yes"]').click();
+      const marks = [...document.querySelectorAll('#brain-cards .brain-upd')].map(x => x.dataset.upd);
       window.api = realApi; window.updateAgent = realUpd; window.saveSetting = realSave;
-      return { toasts, label, updated, skip: saved.agent_update_skip || null,
+      return { toasts, label, updated, marks, skip: saved.agent_update_skip || null,
                stripe: getComputedStyle(t).borderLeftWidth };
     }""")
     check(f"several agent updates are one toast, each can be left out {upd}",
-          upd["toasts"] == 1 and upd["label"] == "Update 2" and upd["updated"] == ["claude", "opencode"]
-          and upd["skip"] == {"gemini": "3"})
+          upd["toasts"] == 1 and upd["label"] == "Update 2" and upd["updated"] == ["claude-code", "opencode"]
+          and upd["skip"] == {"gemini-cli": "3"})
     check("and the toast has no coloured side stripe", upd["stripe"] == "1px")
+    check(f"an agent's card keeps an update mark whatever the toast was told {upd['marks']}",
+          "claude-code" in upd["marks"])
 
     check(f"changing the accent changes the tab and window icon {tab}",
           "accent=sage" in tab["href"] and "theme=dark" in tab["href"] and tab["last"] == ["dark", "sage"])
