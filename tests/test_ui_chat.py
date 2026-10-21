@@ -635,6 +635,32 @@ with sync_playwright() as pw:
     pg.route("**/api/team/choices", reply({"roles": [], "agents": [
         {"id": "claude-code", "label": "Claude Code"}, {"id": "codex", "label": "Codex"},
         {"id": "opencode", "label": "OpenCode"}, {"id": "gemini-cli", "label": "Gemini CLI"}]}))
+    media = pg.evaluate("""async () => {
+      showView('chat');
+      const c = newConversation();
+      c.messages = [{ role: 'user', content: 'look at my screen and draw a cat' }, { role: 'assistant', content: 'Here it is.', events: [
+        { kind: 'tool', name: 'view_image', args: { path: 'C:/w/shot.png' }, result: '__JARVIS_IMAGE__ C:/w/shot.png (10 bytes, png)', pos: 0 },
+        { kind: 'media', mediaKind: 'image', path: 'C:/w/shot.png', pos: 0 },
+        { kind: 'tool', name: 'generate_image', args: { prompt: 'a cat' }, result: '__JARVIS_IMAGE__ C:/w/generated/cat.png (10 bytes, png)', pos: 0 },
+        { kind: 'media', mediaKind: 'image', path: 'C:/w/generated/cat.png', pos: 0 },
+        { kind: 'done', duration_ms: 3000 }] }];
+      renderChat();
+      await new Promise(r => setTimeout(r, 100));
+      const msg = [...document.querySelectorAll('#chat-body .msg.assistant')].pop();
+      const shown = [...msg.querySelectorAll('.gen-media-img')].map(i => i.getAttribute('src'));
+      const barText = (msg.querySelector('.gen-media-bar') || {}).textContent || '';
+      openLightbox('/file?path=x', 'image', 'C:/Users/someone/Jarvis/generated/cat.png');
+      const lb = document.querySelector('.lightbox');
+      const out = { shown, barText: barText.trim(), closeIcon: !!lb.querySelector('.lightbox-close svg'),
+                    caption: lb.querySelector('.lightbox-caption').textContent };
+      closeLightbox();
+      return out;
+    }""")
+    check(f"a picture the model only looked at stays out of the chat; what it made shows {media['shown']}",
+          len(media["shown"]) == 1 and "cat.png" in media["shown"][0])
+    check(f"the picture has no toolbar text, the viewer a line-icon close and only the file name {media}",
+          media["barText"] == "" and media["closeIcon"] and media["caption"] == "cat.png")
+
     fprev = pg.evaluate("""async () => {
       const realApi = window.api, out = {};
       window.api = async (u, o) => u.includes('op=read') ? { content: '<b>not bold</b> a < b' } : realApi(u, o);

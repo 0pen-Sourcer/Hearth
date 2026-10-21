@@ -423,8 +423,7 @@
   .brain-now b { font-weight: 600; }
   .brain-now > span:not(.brain-mark) { color: var(--fg-dim); }
   .brain-now > span:empty { display: none; }
-  .model-maker { margin-left: 8px; font: 500 10.5px var(--sans); color: var(--ok); padding: 1px 7px; border-radius: 99px;
-    background: color-mix(in srgb, var(--ok) 12%, transparent); vertical-align: 1px; }
+  .model-maker { display: inline-grid; place-items: center; margin-left: 6px; color: var(--accent-2); vertical-align: -2px; cursor: help; }
   @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
   /* Unified download indicator: a small dot that turns violet + pulses while a
      background download runs, then does one "breathe" when it completes. One
@@ -3204,9 +3203,11 @@
     display: block;
     transition: transform 0.15s, box-shadow 0.15s;
   }
-  .gen-media-img:hover {
-    box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 40%, transparent);
-  }
+  .gen-media-wrap { position: relative; }
+  .gen-media-wrap .gen-media-bar { position: absolute; top: 8px; right: 8px; opacity: 0; transition: opacity .15s ease; }
+  .gen-media-wrap:hover .gen-media-bar, .gen-media-wrap:focus-within .gen-media-bar { opacity: 1; }
+  .gen-media-wrap .gen-media-btn { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-0) 72%, transparent); backdrop-filter: blur(6px); color: var(--fg); }
   /* Video uses native HTML5 controls (play/pause/seek/volume/fullscreen
      come for free). Same size constraints as image. */
   .gen-media-vid {
@@ -3246,27 +3247,26 @@
     width: auto;
     height: auto;
     border-radius: 8px;
-    box-shadow: 0 0 60px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 120px color-mix(in srgb, var(--accent) 15%, transparent);
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
   }
+  .lightbox.open .lightbox-content { animation: lbIn .24s cubic-bezier(.2,.9,.3,1); }
+  @keyframes lbIn { from { opacity: 0; transform: scale(.97); filter: blur(4px); } }
   .lightbox-close {
     position: absolute;
     top: 16px;
     right: 20px;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: color-mix(in srgb, var(--bg-1) 80%, transparent);
-    border: 1px solid var(--accent-line);
-    color: var(--fg);
-    font-size: 22px;
-    line-height: 1;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
     cursor: pointer;
-    transition: background 0.15s, transform 0.15s;
+    transition: background .15s, color .15s, border-color .15s;
   }
-  .lightbox-close:hover {
-    background: var(--accent-bg);
-    transform: scale(1.1);
-  }
+  .lightbox-close:hover { color: var(--fg); background: var(--bg-2); border-color: var(--border-strong); }
   .lightbox-caption {
     margin-top: 16px;
     color: var(--fg-faint);
@@ -7445,9 +7445,12 @@ function replayAssistant(msgDiv, m, body) {
   // preceded each. Thinking renders where it started; a tool/media flushes the
   // pending thinking FIRST, then the text up to it, then itself — so text lands
   // AFTER the reasoning that preceded it, not above it.
+  let lastTool = '';
   for (const ev of events) {
     const p = (ev.pos == null ? cursor : ev.pos);
     if (ev.kind === 'think_chunk') { putText(p); thinkBuf += ev.content || ''; continue; }
+    if (ev.kind === 'tool') lastTool = ev.name || '';
+    if (ev.kind === 'media' && lastTool && !MEDIA_MAKERS.has(lastTool)) continue;
     if (ev.kind === 'nudge' || ev.kind === 'done') continue;
     flushThink();
     putText(p);
@@ -8304,6 +8307,9 @@ function makeSubagentCard(notif) {
   return div;
 }
 
+const _ICON_MAKER = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 2.1 3.2-.3.9 3.1 2.8 1.6-1.2 3 1.2 3-2.8 1.6-.9 3.1-3.2-.3L12 22l-2.4-2.1-3.2.3-.9-3.1-2.8-1.6 1.2-3-1.2-3 2.8-1.6.9-3.1 3.2.3z"/><path d="m8.5 12 2.4 2.4 4.6-4.8"/></svg>';
+const MEDIA_MAKERS = new Set(['generate_image', 'generate_video', 'check_video_task', 'forge_generate']);
+const _ICON_FOLDER = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
 function makeMediaBlock(kind, path) {
   // Standalone media card - sits in the assistant's message stream (NOT
   // inside the tool card body). Survives re-render because it's keyed off
@@ -8318,7 +8324,7 @@ function makeMediaBlock(kind, path) {
     const img = document.createElement('img');
     img.className = 'gen-media-img';
     img.alt = fname;
-    img.title = 'Click to enlarge · double-click to reveal in folder';
+    img.title = fname;
     img.style.cursor = 'zoom-in';
     // Reveal: the image fades + sharpens in (blur->crisp) so it feels like it
     // "develops" into the panel instead of popping. Honours reduced-motion.
@@ -8350,7 +8356,7 @@ function makeMediaBlock(kind, path) {
     vid.controls = true;              // native play/pause/volume/seek
     vid.preload = 'metadata';         // load duration + first frame, not full video
     vid.className = 'gen-media-vid';
-    vid.title = 'Double-click frame to reveal in folder';
+    vid.title = fname;
     vid.style.opacity = '0';
     vid.style.filter = 'blur(16px)';
     vid.style.transition = 'opacity .7s ease, filter 1s ease';
@@ -8369,19 +8375,12 @@ function makeMediaBlock(kind, path) {
     });
     wrap.appendChild(vid);
   }
-  // Toolbar: enlarge / reveal / filename. Filename is clickable, opens lightbox.
+  // One quiet action over the corner on hover; a click opens the picture.
   const bar = document.createElement('div');
   bar.className = 'gen-media-bar';
-  const enlargeLabel = kind === 'image' ? '⛶ enlarge' : '⛶ fullscreen';
-  bar.innerHTML = `
-    <button type="button" class="gen-media-btn" data-enlarge>${enlargeLabel}</button>
-    <button type="button" class="gen-media-btn" data-reveal>Show in folder</button>
-    <span class="gen-media-path" title="${path}">${fname}</span>
-  `;
-  bar.querySelector('[data-enlarge]').addEventListener('click', () => {
-    openLightbox(fileUrl, kind, path);
-  });
-  bar.querySelector('[data-reveal]').addEventListener('click', async () => {
+  bar.innerHTML = `<button type="button" class="gen-media-btn" data-reveal title="Show ${esc(fname)} in its folder">${_ICON_FOLDER}</button>`;
+  bar.querySelector('[data-reveal]').addEventListener('click', async (e) => {
+    e.stopPropagation();
     try {
       await api('/api/file/reveal', {
         method: 'POST', headers: {'Content-Type':'application/json'},
@@ -8401,7 +8400,7 @@ function openLightbox(fileUrl, kind, path) {
     _lightboxEl = document.createElement('div');
     _lightboxEl.className = 'lightbox';
     _lightboxEl.innerHTML = `
-      <button class="lightbox-close" title="Close (Esc)">×</button>
+      <button class="lightbox-close" title="Close (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       <div class="lightbox-content"></div>
       <div class="lightbox-caption"></div>
     `;
@@ -8431,7 +8430,7 @@ function openLightbox(fileUrl, kind, path) {
     vid.autoplay = true;
     content.appendChild(vid);
   }
-  caption.textContent = path;
+  caption.textContent = String(path || '').split(/[\\/]/).pop();
   _lightboxEl.classList.add('open');
   document.body.style.overflow = 'hidden';   // lock page scroll while open
 }
@@ -11140,7 +11139,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // in ONE shot, no intermediate frames. So instead of faking
       // progress we just keep the user company with motion that matches
       // the Hearth palette. Forge could show real diffusion steps in v0.7.
-      if (ev.name === 'generate_image' || ev.name === 'generate_video') {
+      if (ev.name === 'generate_image' || ev.name === 'generate_video' || ev.name === 'forge_generate') {
         const isVid = ev.name === 'generate_video';
         const beats = isVid
           ? ['Sketching the scene…', 'Choreographing motion…', 'Lighting the set…',
@@ -11238,7 +11237,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
         // event + a live block under the tool card.
         const mediaRe = /__JARVIS_(IMAGE|VIDEO)__\s+([^\n]+?)(?:\s+\(\d+\s+bytes[^)]*\))?$/gim;
         let _firstMedia = true;
-        for (const m of [...raw.matchAll(mediaRe)]) {
+        // A picture or video a tool made goes in the chat; one the model only
+        // looked at (a screenshot, an image it opened) stays in its step.
+        const _made = MEDIA_MAKERS.has(pendingTool.div._toolName);
+        for (const m of _made ? [...raw.matchAll(mediaRe)] : []) {
           const kind = m[1].toLowerCase();
           const path = m[2].trim();
           // False positive: the marker appears INSIDE grepped/read source code
@@ -17750,7 +17752,7 @@ async function modelsRenderDiscover() {
     html += `
       <div class="model-row is-expandable" data-row="${rowId}" data-hf-repo="${esc(it.hf_repo)}">
         <div class="model-info">
-          <div class="model-name">${esc(it.hf_repo)}${it.makers ? ' <span class="model-maker" title="Published by the people who made the model">from its makers</span>' : ''}</div>
+          <div class="model-name">${esc(it.hf_repo)}${it.makers ? ' <span class="model-maker" title="Published by the people who made this model, not a copy or a remix">' + _ICON_MAKER + '</span>' : ''}</div>
           <div class="model-meta">${params ? params + ' · ' : ''}${(it.downloads || 0).toLocaleString()} downloads${it.likes ? ' · ' + it.likes.toLocaleString() + ' likes' : ''} · ${(it.tags || []).slice(0, 4).map(esc).join(' · ') || '-'}</div>
           ${modelsCapTagsHTML(caps)}
         </div>
