@@ -452,7 +452,9 @@ with sync_playwright() as pw:
       const row = document.querySelector('#mp-menu .mp-row[data-v="add-provider"]');
       if (!row) return { row: false };
       row.click();
-      await new Promise(r => setTimeout(r, 200));
+      // The cards are drawn once Settings has read the providers.
+      for (let i = 0; i < 40 && !(document.activeElement && document.activeElement.classList.contains('brain-card')); i++)
+        await new Promise(r => setTimeout(r, 50));
       const out = { row: true, view: STATE.view, focused: document.activeElement && document.activeElement.classList.contains('brain-card') ? 'brain-card' : '' };
       showView('chat');
       return out;
