@@ -17214,7 +17214,15 @@ function modelsUpdateVramEstimate(cfgEl) {
     // Spilling past free VRAM is NORMAL partial offload, not a failure — the
     // extra layers run on the CPU (slower, still works). Amber + calm wording,
     // never a red "too big" wall that scares people off a model that runs fine.
-    if (vram > freeGb * 1.15) { cls = 'est-warn'; tag = `. That's over the ${freeGb.toFixed(1)} GB free, so some layers run on the CPU (slower, still works)`; }
+    // Far over is a different thing to tell: most of the model on the CPU means
+    // a reply can take minutes to start, and a smaller quant or model is the fix.
+    // On Auto the GPU share is capped to what fits, so the total never looks
+    // over; what matters there is how much of the model is left for the CPU.
+    const onCpu = nglRaw === -1 ? 1 - frac : 0;
+    if (onCpu > 0.4) { cls = 'est-warn'; tag = `. About ${Math.round(onCpu * 100)}% of it won't fit in the ${freeGb.toFixed(1)} GB free and runs on the CPU, so replies can take minutes to start. A smaller quant or model will feel far faster`; }
+    else if (onCpu > 0.03) { cls = 'est-warn'; tag = `. About ${Math.round(onCpu * 100)}% of it runs on the CPU (slower, still works)`; }
+    else if (vram > freeGb * 1.6) { cls = 'est-warn'; tag = `. That's far over the ${freeGb.toFixed(1)} GB free: much of it runs on the CPU, so replies can take minutes to start. A smaller quant or model will feel far faster`; }
+    else if (vram > freeGb * 1.15) { cls = 'est-warn'; tag = `. That's over the ${freeGb.toFixed(1)} GB free, so some layers run on the CPU (slower, still works)`; }
     else if (vram > freeGb - 0.5) { cls = 'est-warn'; tag = ', close to the limit'; }
     else { cls = 'est-ok'; tag = ', fits'; }
   }

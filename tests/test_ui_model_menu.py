@@ -615,6 +615,25 @@ with sync_playwright() as pw:
           and facts_asked and "disk%3A%3A" in facts_asked[0])
     check("and the card goes when the pointer leaves the menu", gone)
 
+    # On Auto the estimate always read "fits" or "close", even when most of a
+    # 27B sat on the CPU and replies took minutes to start.
+    est = pg.evaluate("""() => {
+      const run = (sizeGb, layers, ngl) => {
+        const el = document.createElement('div');
+        el.dataset.modelSize = sizeGb; el.dataset.modelLayers = 64;
+        el.innerHTML = `<input data-cfg="ctx" value="8192"><input data-cfg="n_gpu_layers" value="${ngl}"><b class="ex-vram-est"></b>`;
+        const was = [STATE.gpuFreeGb, STATE.gpuTotalGb, STATE.loadedModel];
+        STATE.gpuFreeGb = 7.2; STATE.gpuTotalGb = 8; STATE.loadedModel = null;
+        modelsUpdateVramEstimate(el);
+        [STATE.gpuFreeGb, STATE.gpuTotalGb, STATE.loadedModel] = was;
+        return el.querySelector('.ex-vram-est').textContent;
+      };
+      return { small: run(5.0, 32, -1), big: run(16.0, 64, -1), forced: run(16.0, 64, 64) };
+    }""")
+    check(f"a model that fits says so, and one mostly on the CPU says replies can take minutes {est}",
+          est["small"].endswith("fits") and "runs on the CPU" in est["big"] and "minutes" in est["big"]
+          and "minutes" in est["forced"])
+
     check(f"the page ran without a script error {errors}", not errors)
 
     print()
