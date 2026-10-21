@@ -771,10 +771,13 @@ def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
             time.sleep(1)
         prior = chat_sync.from_chat((chat_sync.load(cid) or {}).get("messages") or [])
         parts: List[str] = []
+        why: List[str] = []
 
         def emit(kind, **kw):
             if kind == "assistant":
                 parts.append(kw.get("content") or "")
+            elif kind == "error":
+                why.append(str(kw.get("message") or "").strip())
         try:
             import asyncio
             # Nobody is there to approve anything, so nothing that asks gets run.
@@ -782,7 +785,11 @@ def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
                                           permission_check=lambda *_a: "deny"))
         except Exception:
             pass
-        text = "".join(parts).strip() or f"Reminder: {what}"
+        text = "".join(parts).strip()
+        if not text:
+            text = f"Reminder: {what}"
+            if why and why[-1]:
+                text += f"\n\n(I couldn't say it in my own words: {why[-1].rstrip('.')}.)"
         chat_sync.post(cid, what[:60], "reminder",
                        [{"role": "assistant", "content": text, "via": "reminder",
                          "at": int(time.time() * 1000)}], unread=True)

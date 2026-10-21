@@ -299,7 +299,7 @@ def out_of_usage(agent: str, fields: Dict[str, Any]) -> Dict[str, Any]:
     """An agent that stopped because its plan's usage ran out says so as that,
     in its own words (which carry when it resets), not as a bare stop."""
     msg = str(fields.get("message") or "")
-    if not _OUT_OF_USAGE.search(msg):
+    if fields.get("category") == "quota" or not _OUT_OF_USAGE.search(msg):
         return fields
     name = BRAINS.get(agent, "The agent")
     said = re.sub(r"^\s*[\w .-]+? stopped:\s*", "", msg).strip()
@@ -317,8 +317,29 @@ def note_claude_limits(ev: Dict[str, Any]) -> None:
         w = wins.get(name) or {}
         if w.get("utilization") is not None:
             out[key] = {"used": round(float(w["utilization"]) * 100), "resets_at": w.get("resetsAt")}
+    if str(info.get("status") or "").lower() == "rejected" and info.get("resetsAt"):
+        key = {"five_hour": "5 hours", "seven_day": "7 days"}.get(str(info.get("rateLimitType") or ""), "5 hours")
+        out[key] = {"used": 100, "resets_at": info.get("resetsAt"), "refused": True}
     if out:
         _keep_limits(PROVIDER, out)
+
+
+def used_up(agent: str) -> Optional[Dict[str, Any]]:
+    """A plan window this agent reported as used up and not reset yet: the
+    turn is not started, so nothing is spent finding that out again."""
+    lim = plan_limits(agent) or {}
+    now = time.time()
+    for name, w in (lim.get("windows") or {}).items():
+        try:
+            at = float(w.get("resets_at") or 0)
+        except (TypeError, ValueError):
+            continue
+        # Claude Code says when it refused; past 100% it may still run on extra
+        # usage. Codex only reports how much is used.
+        full = w.get("refused") or (agent == "codex" and (w.get("used") or 0) >= 100)
+        if full and at > now:
+            return {"window": name, "resets_at": at}
+    return None
 
 
 def _codex_limits() -> Optional[Dict[str, Any]]:
@@ -846,6 +867,15 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
             fields = out_of_usage(agent, fields)
         _emit(kind, **fields)
 
+    full = used_up(agent)
+    if full:
+        when = time.strftime("%I:%M %p", time.localtime(full["resets_at"])).lstrip("0")
+        emit("error", category="quota",
+             message=(f"{BRAINS.get(agent, 'The agent')} is out of usage on your {PLANS.get(agent, 'plan')} plan "
+                      f"until {when} (its {({'5 hours': '5-hour', '7 days': 'weekly'}).get(full['window'], full['window'])} limit). "
+                      f"Pick another brain to carry on now."))
+        emit("done", reply="", iterations=0)
+        return 0
     news = helper_news(emit)
     from .headless import NOTIFY_FLUSH
     # What was asked, as it sits in the chat: the session is matched against it
@@ -1086,7 +1116,12 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
         _remember(PROVIDER, name, (u or {}).get("contextWindow"))
     reply = "".join(text_parts).strip() or str(final_text).strip()
     if result and result.get("is_error"):
-        emit("error", message=("Claude Code stopped: " + str(result.get("result") or result.get("subtype") or "error"))[:600])
+        said = str(result.get("result") or result.get("subtype") or "error")
+        # Out of usage, Claude Code writes the limit line as text too; it is
+        # the stop, not something JARVIS said.
+        if reply and (reply == said.strip() or _OUT_OF_USAGE.search(reply) and len(reply) < 300):
+            reply = ""
+        emit("error", message=("Claude Code stopped: " + said)[:600])
     elif not reply and not (should_cancel and should_cancel()):
         emit("error", message=("Claude Code gave no answer. " + (err[-400:] if err else
                                "Check it's signed in: run `claude` once in a terminal.")))
