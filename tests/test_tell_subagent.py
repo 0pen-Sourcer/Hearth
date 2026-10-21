@@ -82,9 +82,9 @@ check("it wasn't there before it was said", not any("use tabs" in c for c in see
 lines = [json.loads(x) for x in open(subagents._transcript_path(told["id"]), encoding="utf-8")]
 check("the transcript records what was said and by whom",
       any(x.get("kind") == "told" and x.get("text") == "use tabs, not spaces" for x in lines))
-check("once it has finished, telling it says so",
-      not subagents.can_tell(told["id"])
-      and "finished" in subagents.tell_subagent(told["id"], "one more thing").get("error", ""))
+_again = subagents.tell_subagent(told["id"], "one more thing")
+check(f"once it has finished, telling it starts it again on that, as a follow-up {_again.get('note') or _again.get('error')!r}",
+      not subagents.can_tell(told["id"]) and _again.get("ok") and _again.get("follows") == told["id"])
 with subagents._BG_RESULTS_LOCK:
     subagents._BG_RUNNING.add("sub_other_agent")
 check("a task handed to another agent's program says it can't take one",

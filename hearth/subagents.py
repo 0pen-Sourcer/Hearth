@@ -1258,7 +1258,44 @@ def tell_subagent(agent_id: str, message: str, sender: str = "the user", reply_t
     if running:
         return {"ok": False, "error": "This agent's program runs its task to the end and can't take a "
                                       "message part-way."}
-    return {"ok": False, "error": "that helper has already finished"}
+    return follow_up(agent_id, text, sender)
+
+
+def follow_up(agent_id: str, message: str, sender: str = "the user") -> Dict[str, Any]:
+    """A message for a helper that has finished: it starts again on it, under
+    the same name and role, knowing what it was asked and what it reported."""
+    start: Dict[str, Any] = {}
+    try:
+        with _transcript_path(agent_id).open("r", encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    rec = json.loads(ln)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if rec.get("kind") == "start":
+                    start = rec
+                    break
+    except OSError:
+        pass
+    persona = str(start.get("persona") or "").strip()
+    if not persona:
+        return {"ok": False, "error": "that helper has already finished, and it can't be picked up again"}
+    if not (_PERSONA_DIR / f"{persona}.md").is_file():
+        # The transcript keeps the role's name; find the role it names.
+        persona = next((p["slug"] for p in list_personas()
+                        if str(p.get("name") or "").lower() == persona.lower()), persona)
+    story = agent_story(agent_id)
+    before = (story.get("final") or story.get("error") or "(it ended without a report)").strip()[:3000]
+    prompt = (f"{(story.get('prompt') or start.get('prompt') or '').strip()}\n\n"
+              f"You worked on this before and reported:\n{before}\n\n"
+              f"Now a follow-up from {sender}: {message}")
+    r = spawn_subagent(persona, prompt, mode="background", name=str(start.get("name") or "") or None,
+                       by=str(start.get("by") or ""))
+    if r.get("ok"):
+        r["note"] = ("It had finished, so it started again on this, knowing what it did before. "
+                     "Its report arrives like the first one.")
+        r["follows"] = agent_id
+    return r
 
 
 # How many messages one helper may send in a task, so two can't talk in circles.

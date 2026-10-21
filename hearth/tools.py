@@ -798,7 +798,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "extra detail, a change of direction. It reads it before its next "
             "step. Pass the 'sub_...' agent_id from spawn_subagent. Works for "
             "Hearth's own helpers and for Claude Code; other agents' programs "
-            "run a task to the end and can't take one.",
+            "run a task to the end and can't take one. A helper of Hearth's that "
+            "has finished takes it as a follow-up: it starts again, knowing what "
+            "it did, and reports again.",
         "parameters": {
             "type": "object",
             "properties": {
