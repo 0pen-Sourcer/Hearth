@@ -3713,6 +3713,14 @@
   .obd-ph { flex: 1; }
   .obd-mode { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--fg-dim); }
   .obd-mode svg { width: 11px; height: 11px; }
+  .ob-accents { margin-top: 10px; }
+  .ob-accents .ap-accent { font-size: 12px; cursor: pointer; color: var(--fg-dim); }
+  .ob-accents .ap-accent.on { color: var(--fg); }
+  .obd-win { position: relative; }
+  .obd-room { position: absolute; inset: 0; display: none; background-repeat: no-repeat; image-rendering: pixelated; }
+  .obd-win.room .obd-room { display: block; animation: msgIn .25s var(--ease); }
+  .obd-win.room .obd-chat, .obd-win.room .obd-strip, .obd-win.room .obd-input { visibility: hidden; }
+  .obd-guy { position: absolute; background-repeat: no-repeat; image-rendering: pixelated; }
   .obd-cap { margin-top: 10px; font-size: 12px; line-height: 1.45; color: var(--fg-dim); min-height: 34px; }
   .obd-cap b { color: var(--fg); font-weight: 600; }
   @media (max-width: 1180px) {
@@ -5417,7 +5425,7 @@
         <p class="ob-sub">I run on your PC and do real things on it: open apps, find and read your
           files, browse the web, and talk out loud if you want. Nothing leaves this machine unless you
           pick a cloud model. A few quick choices and we're going.</p>
-        <div class="ob-tipline">Every choice here can be changed later in Settings, including my name.</div>
+        <div class="ob-tipline">Every choice here can be changed later in Settings. My name is yours to pick too, a few steps on.</div>
       </div>
 
       <!-- ---- step 2: pick a brain ---- -->
@@ -5644,6 +5652,15 @@
             <button type="button" data-look="light">Light<small>For daytime</small></button>
             <button type="button" data-look="system">System<small>Follows Windows</small></button>
           </div>
+          <div class="ap-accents ob-accents" id="ob-accents">
+            <button type="button" class="ap-accent" data-accent="ember" style="--sw:#d9774a"><span></span>Ember</button>
+            <button type="button" class="ap-accent" data-accent="sage" style="--sw:#74a883"><span></span>Sage</button>
+            <button type="button" class="ap-accent" data-accent="ocean" style="--sw:#5b93c2"><span></span>Ocean</button>
+            <button type="button" class="ap-accent" data-accent="rose" style="--sw:#cf7089"><span></span>Rose</button>
+            <button type="button" class="ap-accent" data-accent="violet" style="--sw:#8b6cf0"><span></span>Violet</button>
+            <button type="button" class="ap-accent" data-accent="mono" style="--sw:#a3a09a"><span></span>Mono</button>
+          </div>
+          <div class="ap-accent-note">Classic always uses violet. Pick Dark, Light or System to choose an accent.</div>
         </div>
         <div class="ob-section">
           <div class="ob-label">How much to show</div>
@@ -5663,6 +5680,7 @@
         <div class="ob-demo" id="ob-demo" aria-hidden="true">
           <div class="obd-win">
             <div class="obd-chat"><div class="obd-feed"></div></div>
+            <div class="obd-room"><div class="obd-guy"></div></div>
             <div class="obd-strip"></div>
             <div class="obd-input"><span class="obd-ph"></span><span class="obd-mode"></span></div>
           </div>
@@ -14182,8 +14200,6 @@ async function refreshSettings() {
     // Route every other user-facing "Jarvis" through the configured name so a
     // rename doesn't leave stray "Jarvis" text that breaks the illusion.
     const _nm = _agentName();
-    const _permLbl = document.querySelector('#perm-strip .perm-label');
-    if (_permLbl && _permLbl.id !== 'ask-question') _permLbl.textContent = `Allow ${_nm} to run`;
     const _memSub = document.getElementById('mem-sub');
     if (_memSub) _memSub.textContent = `facts ${_nm} remembers across sessions`;
     document.querySelectorAll('[data-agent-name]').forEach(el => { el.textContent = _nm; });
@@ -19226,8 +19242,89 @@ for (const [key, id] of Object.entries(_OB_SEGS)) {
     if (key === 'roomlook') hearthSetRoomLook(obState.roomlook);
     _obPaintSegs(false);
     if (key === 'approval' || key === 'uimode') obDemoStart();
+    if (key === 'roomlook') obDemoStart('room');
     _saveOnboardingDraft();
   });
+}
+// The first step's "Hey, I'm JARVIS" tries on a few other names first, so a
+// newcomer sees it is theirs to name. Once per opening, and not when the
+// name has already been changed.
+const OB_NAME_TRIES = ['FRIDAY', 'Athena', 'Max'];
+let _obNamesRun = 0;
+async function _obNames() {
+  const el = document.querySelector('.ob-step[data-step="1"] .ob-agent-name');
+  const run = ++_obNamesRun;
+  if (!el || _reduceMotion() || _agentName() !== 'JARVIS') return;
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const swap = async (name) => {
+    if (!el.animate) { el.textContent = name; return; }
+    await el.animate([{ opacity: 1, filter: 'blur(0)' }, { opacity: 0, filter: 'blur(5px)' }], { duration: 160, easing: 'ease-in' }).finished;
+    el.textContent = name;
+    await el.animate([{ opacity: 0, filter: 'blur(5px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 220, easing: 'ease-out' }).finished;
+  };
+  await wait(1400);
+  for (const n of [...OB_NAME_TRIES, _agentName()]) {
+    if (run !== _obNamesRun || obStep !== 1) { el.textContent = _agentName(); return; }
+    await swap(n);
+    await wait(n === _agentName() ? 0 : 900);
+  }
+}
+
+// The name the preview uses: what was typed a step before, else the one in use.
+function _obName() {
+  const v = (($('ob-agent-name') || {}).value || '').trim();
+  return v || _agentName();
+}
+
+// The room look plays in the same window: the picked character walks in by
+// the fire and does what they do there, drawn from the room's own art.
+let _obdMan = null;
+async function _obdRoom(run, live, wait) {
+  const box = $('ob-demo'), win = box.querySelector('.obd-win');
+  const scene = box.querySelector('.obd-room'), guy = box.querySelector('.obd-guy');
+  if (!_obdMan) { try { _obdMan = await (await fetch('/assets/team/manifest.json')).json(); } catch { return; } }
+  const man = _obdMan, v = man.v ? '?v=' + man.v : '';
+  const her = _obSegValue('roomlook') !== 'him', skin = her ? 'main' : 'main_m';
+  let home = 'cabin';
+  try { home = localStorage.getItem('hearth_room_home') || 'cabin'; } catch {}
+  const room = (man.rooms || []).find(r => r.id === home) || (man.rooms || [])[0] || { file: 'room.png' };
+  const seg = document.querySelector(`#ob-roomlook [data-roomlook="${her ? 'her' : 'him'}"]`);
+  box.querySelector('.obd-cap').innerHTML = seg ? `<b>${esc(seg.querySelector('span').firstChild.textContent.trim())}.</b> ${esc(seg.querySelector('small').textContent)}, in the Team room.` : '';
+  win.classList.add('room');
+  // The part of the room around the fireplace, in the room's own units.
+  const Y0 = 130, VH = 470;
+  const k = win.clientHeight / VH, X0 = Math.round(770 - win.clientWidth / k / 2);
+  const [cw, ch] = man.cell || [104, 144];
+  scene.style.backgroundImage = `url(/assets/team/${room.file}${v})`;
+  scene.style.backgroundSize = `${1536 * k}px auto`;
+  scene.style.backgroundPosition = `${-X0 * k}px ${-Y0 * k}px`;
+  const sheet = new Image(); sheet.src = `/assets/team/${skin}.png${v}`;
+  await new Promise(r => { sheet.onload = sheet.onerror = r; });
+  guy.style.backgroundImage = `url(${sheet.src})`;
+  guy.style.backgroundSize = `${sheet.naturalWidth * k}px ${ch * k}px`;
+  guy.style.width = cw * k + 'px'; guy.style.height = ch * k + 'px';
+  const idx = (name) => {
+    const a = man.frames.indexOf(name); if (a >= 0) return a;
+    const b = ((man.extra || {})[skin] || []).indexOf(name); return b >= 0 ? man.frames.length + b : 0;
+  };
+  const put = (x, y, frame, flip) => {
+    guy.style.left = ((x - X0) * k - cw * k / 2) + 'px';
+    guy.style.top = ((y - Y0) * k - ch * k) + 'px';
+    guy.style.backgroundPosition = `${-idx(frame) * cw * k}px 0`;
+    guy.style.transform = flip ? 'scaleX(-1)' : 'none';
+  };
+  const BEATS = ['walk_side_1', 'walk_side_1', 'walk_side_3', 'walk_side_2', 'walk_side_2', 'walk_side_4'];
+  const to = her ? [640, 492] : [868, 478];
+  const poses = her ? [['tend_fire', 2600], ['gaze', 1400], ['idle', 900]] : [['side_read', 2600], ['wave', 1300], ['idle', 900]];
+  while (live()) {
+    let x = X0 + win.clientWidth / k + cw / 2; const y = to[1];
+    for (let beat = 0; x > to[0]; beat++) {
+      put(x, y, BEATS[beat % BEATS.length], true);
+      await wait(125); if (!live()) return;
+      x -= 100 * 0.125;
+    }
+    for (const [pose, ms] of poses) { put(to[0], y, pose, false); await wait(ms); if (!live()) return; }
+  }
 }
 // The "How should I work?" preview: one small task played out with the real
 // chat parts, under whichever approval mode and view is picked, then again.
@@ -19244,19 +19341,21 @@ const OBD_ASKS = {
 };
 let _obdRun = 0;
 function obDemoStop() { _obdRun++; }
-async function obDemoStart() {
+async function obDemoStart(what) {
   const run = ++_obdRun;
   const box = $('ob-demo');
   if (!box || getComputedStyle(box).display === 'none') return;
   const live = () => run === _obdRun && obStep === 7 && $('onboard').classList.contains('open');
   const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  box.querySelector('.obd-win').classList.remove('room');
+  if (what === 'room') return _obdRoom(run, live, wait);
   const feed = box.querySelector('.obd-feed'), strip = box.querySelector('.obd-strip');
   const follow = () => { const c = box.querySelector('.obd-chat'); c.scrollTop = c.scrollHeight; };
   const mode = _obSegValue('approval') || 'ask';
   const m = APPROVAL_MODES.find(x => x.id === mode) || APPROVAL_MODES[0];
   const seg = document.querySelector(`#ob-approval [data-approval="${mode}"]`);
   box.querySelector('.obd-mode').innerHTML = `${MODE_ICONS[m.id]}<span>${esc(m.name)}</span>`;
-  box.querySelector('.obd-ph').textContent = `Message ${_agentName()}…`;
+  box.querySelector('.obd-ph').textContent = `Message ${_obName()}…`;
   box.querySelector('.obd-cap').innerHTML = seg ? `<b>${esc(seg.firstChild.textContent.trim())}.</b> ${esc(seg.querySelector('small').textContent)}.` : '';
   while (live()) {
     feed.innerHTML = ''; strip.innerHTML = '';
@@ -19265,6 +19364,7 @@ async function obDemoStart() {
     feed.appendChild(you);
     await wait(700); if (!live()) return;
     const reply = renderMessage({ role: 'assistant', content: '' });
+    const who = reply.querySelector('.role-name'); if (who) who.textContent = _obName().toLowerCase();
     feed.appendChild(reply);
     for (const st of OBD_STEPS) {
       await wait(500); if (!live()) return;
@@ -19273,6 +19373,7 @@ async function obDemoStart() {
         ps.removeAttribute('id'); ps.hidden = false;
         ps.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
         ps.querySelector('.perm-tool').textContent = st.name;
+        ps.querySelectorAll('[data-agent-name]').forEach(e => { e.textContent = _obName(); });
         ps.querySelector('.perm-args').textContent = st.args.path || st.args.command;
         strip.appendChild(ps); follow();
         await wait(1300); if (!live()) return;
@@ -19288,9 +19389,30 @@ async function obDemoStart() {
       appendPart(t.div, reply); follow();
     }
     await wait(450); if (!live()) return;
-    appendPart(makeContentBlock(renderMD('Done. Notes tidied, committed, and the old copy is gone.')), reply); follow();
+    // Said as it comes, the way a reply streams in.
+    const said = 'Done. Notes tidied, committed, and the old copy is gone.'.split(' ');
+    const block = makeContentBlock('');
+    appendPart(block, reply);
+    for (let i = 1; i <= said.length; i++) {
+      block.innerHTML = renderMD(said.slice(0, i).join(' '));
+      follow(); await wait(55); if (!live()) return;
+    }
     await wait(3200);
   }
+}
+function _obPaintAccents() {
+  let a = 'rose';
+  try { a = localStorage.getItem('hearth_accent') || 'rose'; } catch {}
+  document.querySelectorAll('#ob-accents .ap-accent').forEach(b => b.classList.toggle('on', b.dataset.accent === a));
+}
+if ($('ob-accents')) {
+  $('ob-accents').addEventListener('click', (e) => {
+    const b = e.target.closest('.ap-accent'); if (!b) return;
+    window.hearthSetAppearance(null, b.dataset.accent);
+    _obPaintAccents();
+  });
+  document.addEventListener('hearth:look', _obPaintAccents);
+  _obPaintAccents();
 }
 // A row of options that changes size (the card widening, the window) puts
 // its highlight back on the picked option.
@@ -19329,6 +19451,7 @@ function obShow() {
 }
 
 function obRender() {
+  const cameFrom = _obMotion.shownStep;
   const prevEl = document.querySelector(`#ob-body .ob-step[data-step="${_obMotion.shownStep}"]`);
   const nextEl = document.querySelector(`#ob-body .ob-step[data-step="${obStep}"]`);
   const dir = obStep >= _obMotion.shownStep ? 1 : -1;
@@ -19359,8 +19482,9 @@ function obRender() {
   if (obStep === 6) setTimeout(() => $('ob-name').focus(), 80);
   if (obStep === 8) { _obProbeMigrate(); _obWireImport(); }
   document.querySelector('#onboard .ob-card').classList.toggle('ob-wide', obStep === 7);
-  if (obStep === 7) setTimeout(obDemoStart, 420); else obDemoStop();
-  if (obStep === 1) document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _agentName(); });
+  if (obStep !== 7) obDemoStop();
+  else if (cameFrom !== 7) setTimeout(() => obDemoStart(), 420);
+  if (obStep === 1) { document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _agentName(); }); _obNames(); }
   _obPaintSegs();
   _saveOnboardingDraft();
 }

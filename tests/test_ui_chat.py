@@ -1300,6 +1300,52 @@ with sync_playwright() as pw:
           fit["wide"] and fit["off"] == [])
     check(f"a delete and a move are said as such in the folded line, not as reading a file {fit['line']!r}",
           "deleted" in str(fit["line"]).lower() and "moved" in str(fit["line"]).lower() and "read" not in str(fit["line"]).lower())
+    # Setup said nothing of the name being the user's, picked no accent, and
+    # showed nothing of the room characters.
+    extras = pg.evaluate("""async () => {
+      const real = window.setTimeout;
+      window.setTimeout = (f, ms, ...a) => real(f, Math.min(ms || 0, 5), ...a);
+      const sleep = (ms) => new Promise(r => real(r, ms));
+      const el = document.querySelector('.ob-step[data-step="1"] .ob-agent-name');
+      const names = [];
+      const mo = new MutationObserver(() => { if (!names.includes(el.textContent)) names.push(el.textContent); });
+      mo.observe(el, { childList: true, characterData: true, subtree: true });
+      $('onboard').classList.add('open'); obStep = 1; obRender();
+      for (let i = 0; i < 300 && !(names.length > 2 && el.textContent === 'JARVIS'); i++) await sleep(10);
+      mo.disconnect();
+      const final = el.textContent;
+      // The preview speaks with the name typed in the step before.
+      $('ob-agent-name').value = 'Friday';
+      obStep = 7; obRender(); await sleep(50);
+      hearthSetAppearance('dark');
+      document.querySelector('#ob-accents [data-accent="sage"]').click();
+      const accent = [document.documentElement.dataset.accent, document.querySelector('#ob-accents .on').dataset.accent];
+      obState.approval = 'ask';
+      const p = obDemoStart();
+      for (let i = 0; i < 200 && !document.querySelector('#ob-demo .obd-strip .perm-strip'); i++) await sleep(10);
+      const said = [document.querySelector('#ob-demo .obd-ph').textContent,
+                    (document.querySelector('#ob-demo .msg.assistant .role-name') || {}).textContent,
+                    (document.querySelector('#ob-demo .obd-strip [data-agent-name]') || {}).textContent];
+      obDemoStop(); await p;
+      document.querySelector('#ob-roomlook [data-roomlook="him"]').click();
+      for (let i = 0; i < 200 && !document.querySelector('#ob-demo .obd-guy').style.backgroundImage; i++) await sleep(10);
+      const guy = document.querySelector('#ob-demo .obd-guy');
+      const room = { on: document.querySelector('#ob-demo .obd-win').classList.contains('room'), sheet: guy.style.backgroundImage,
+                     cap: document.querySelector('#ob-demo .obd-cap').textContent };
+      document.querySelector('#ob-approval [data-approval="edits"]').click();
+      const back = document.querySelector('#ob-demo .obd-win').classList.contains('room');
+      obDemoStop(); window.setTimeout = real;
+      $('ob-agent-name').value = ''; $('onboard').classList.remove('open');
+      return { names, final, accent, said, room, back };
+    }""")
+    check(f"setup's first line tries on other names before settling on the one in use {extras['names']}",
+          len(extras["names"]) >= 3 and extras["final"] == "JARVIS" and "FRIDAY" in extras["names"])
+    check(f"setup's look offers the accent, the same setting as Settings {extras['accent']}", extras["accent"] == ["sage", "sage"])
+    check(f"the preview talks as the name typed a step before {extras['said']}",
+          extras["said"] == ["Message Friday…", "friday", "Friday"])
+    check(f"picking a room look plays that character in the room, and an approval pick goes back to the chat {extras['room']}",
+          extras["room"]["on"] and "main_m.png" in extras["room"]["sheet"] and extras["room"]["cap"].startswith("Teal scarf")
+          and extras["back"] is False)
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([
