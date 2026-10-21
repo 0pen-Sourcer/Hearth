@@ -3390,26 +3390,37 @@
   .toast {
     background: var(--bg-2);
     border: 1px solid var(--border);
-    border-left-width: 3px;
-    border-radius: var(--r);
-    padding: 10px 14px;
-    font-size: 12px;
+    border-radius: calc(var(--r) + 2px);
+    padding: 11px 14px;
+    font-size: 12.5px;
     box-shadow: var(--shadow);
-    animation: toastIn 0.2s var(--ease);
+    display: grid; grid-template-columns: auto 1fr; column-gap: 10px;
+    animation: toastIn 0.32s cubic-bezier(.2, .9, .3, 1.05);
   }
-  @keyframes toastIn { from { transform: translateX(20px); opacity: 0; } }
-  .toast.ok   { border-left-color: var(--ok); }
-  .toast.warn { border-left-color: var(--warn); }
-  .toast.err  { border-left-color: var(--err); }
-  .toast .title { color: var(--fg); font-weight: 600; }
+  .toast.out { transition: opacity .22s ease, filter .22s ease, transform .22s ease;
+    opacity: 0; filter: blur(3px); transform: translateY(-4px); }
+  @keyframes toastIn { from { transform: translateY(-6px) scale(.98); opacity: 0; filter: blur(3px); } }
+  .toast .t-ico { grid-row: 1 / span 3; width: 15px; height: 15px; margin-top: 1px; }
+  .toast .t-ico:empty { display: none; }
+  .toast:has(.t-ico:empty) { column-gap: 0; }
+  .toast.warn .t-ico { color: var(--warn); }
+  .toast.err  .t-ico { color: var(--err); }
+  .toast .title { color: var(--fg); font-weight: 600; grid-column: 2; }
   .toast.ask { pointer-events: auto; }
-  .toast .ask-row { display: flex; gap: 8px; margin-top: 10px; }
+  .toast .ask-row { display: flex; gap: 8px; margin-top: 10px; grid-column: 2; }
   .toast .ask-row button { font: 500 12px var(--sans); padding: 5px 14px; border-radius: var(--r); cursor: pointer;
     background: var(--bg-3); border: 1px solid var(--border); color: var(--fg); }
   .toast .ask-row button:hover { border-color: var(--border-strong); }
   .toast .ask-row button.primary { background: var(--accent); border-color: transparent; color: var(--on-accent, #fff); }
   .toast .ask-busy { font-size: 12px; color: var(--fg-dim); }
-  .toast .body  { color: var(--fg-dim); margin-top: 3px; line-height: 1.45; }
+  .toast .body  { color: var(--fg-dim); margin-top: 3px; line-height: 1.45; grid-column: 2; }
+  .toast .body .mp-row { padding: 6px 8px; margin: 3px 0 0; font-size: 12.5px; }
+  .toast .body .mp-row .mp-s { font: 11px var(--mono); color: var(--fg-faint); }
+  .toast .upd-tick { flex: none; color: var(--accent); opacity: 0; transform: scale(.7);
+    transition: opacity .16s ease, transform .2s cubic-bezier(.2, .9, .3, 1.2); }
+  .toast .mp-row.cur .upd-tick { opacity: 1; transform: none; }
+  .toast { min-width: 300px; }
+  .toast .ask-row button:disabled { opacity: .45; cursor: default; }
 
   /* ============================================================
      MODAL
@@ -4021,7 +4032,7 @@
           <div id="ctx-ring" class="ctx-ring"></div>
           <div id="ctx-ring-pct" class="ctx-ring-pct">0%</div>
         </div>
-        <button class="mic-btn" id="btn-mic" title="Click to talk, click again to send (Whisper STT)">
+        <button class="mic-btn" id="btn-mic" title="Dictate: click to talk, click again to stop">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/><path d="M8 23h8"/></svg>
         </button>
         <div style="position:relative">
@@ -5613,7 +5624,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
     </button>
   </div>
-  <div class="voice-bottom-text">Esc to exit · type any time · Ctrl-drag the desktop HUD to move it</div>
+  <div class="voice-bottom-text">Esc to leave voice mode</div>
 </div>
 
 <!-- D3 v7 - vendored for the Memory tab's force-directed constellation
@@ -5852,18 +5863,29 @@ function toast(title, body = '', kind = 'ok', ms = 3500, force = false) {
   _toastLast[key] = now;
   const t = document.createElement('div');
   t.className = `toast ${kind}`;
-  t.innerHTML = `<div class="title">${esc(title)}</div>${body ? `<div class="body">${esc(body)}</div>` : ''}`;
+  t.innerHTML = `<span class="t-ico">${_TOAST_ICO[kind] || ''}</span><div class="title">${esc(title)}</div>${body ? `<div class="body">${esc(body)}</div>` : ''}`;
   $('toasts').appendChild(t);
-  setTimeout(() => { t.style.transition = 'opacity 0.3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, ms);
+  setTimeout(() => _toastOut(t), ms);
+}
+// Only something that needs a second look gets a mark; an ordinary notice is
+// just words.
+const _TOAST_ICO = {
+  warn: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  err: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+};
+function _toastOut(t) {
+  if (!t.isConnected || t.classList.contains('out')) return;
+  t.classList.add('out');
+  setTimeout(() => t.remove(), 240);
 }
 
 // A toast that asks: stays until answered, with a yes and a later.
 function askToast(title, body, yesLabel, onYes, onLater) {
   const t = document.createElement('div');
   t.className = 'toast ok ask';
-  t.innerHTML = `<div class="title">${esc(title)}</div><div class="body">${esc(body)}</div>
+  t.innerHTML = `<span class="t-ico"></span><div class="title">${esc(title)}</div><div class="body">${esc(body)}</div>
     <div class="ask-row"><button class="primary" data-a="yes">${esc(yesLabel)}</button><button data-a="later">Later</button></div>`;
-  const close = () => { t.style.transition = 'opacity 0.3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 300); };
+  const close = () => _toastOut(t);
   t.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -5877,31 +5899,68 @@ function askToast(title, body, yesLabel, onYes, onLater) {
 async function checkAgentUpdates() {
   let r;
   try { r = await api('/api/agents/updates'); } catch { return; }
-  let skipped = {};
-  try { skipped = JSON.parse(localStorage.getItem('hearth_agent_update_skip') || '{}'); } catch {}
-  for (const u of (r && r.updates) || []) {
-    if (skipped[u.id] === u.latest) continue;
-    askToast(`${u.label} has an update`, `You have ${u.installed}; ${u.latest} is out.`, 'Update', async (t, close) => {
-      close();
-      dlUpsert('agent:' + u.id, { name: `Updating ${u.label}`, kind: 'agent', agent: u.id, status: 'downloading',
-                                  pct: null, started: Date.now() / 1000, fetched: 0, line: '' });
-      dlToggle(true);
-      agentJobsWatch();
-      try {
-        const res = await api('/api/agents/update', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                                     body: JSON.stringify({ id: u.id }) });
-        agentJobsPoll();
-        toast(`${u.label} is up to date`, res.version ? 'Now on ' + res.version : '', 'ok', 5000);
-        if (STATE.agentInfo && STATE.agentInfo.provider === u.id) loadAgentInfo(u.id);
-      } catch (e) {
-        agentJobsPoll();
-        if (/Stopped/.test(e.message || '')) return;
-        toast(`${u.label} didn't update`, e.message.replace(/^\d+\s*/, ''), 'err', 9000);
-      }
-    }, () => {
-      skipped[u.id] = u.latest;
-      try { localStorage.setItem('hearth_agent_update_skip', JSON.stringify(skipped)); } catch {}
-    });
+  // Kept in settings: the desktop window forgets its own storage on restart,
+  // so a "Later" kept there came back every launch.
+  const skipped = Object.assign({}, (STATE.settings || {}).agent_update_skip || {});
+  const due = ((r && r.updates) || []).filter(u => skipped[u.id] !== u.latest);
+  if (!due.length) return;
+  const skip = (list) => {
+    if (!list.length) return;
+    for (const u of list) skipped[u.id] = u.latest;
+    if (STATE.settings) STATE.settings.agent_update_skip = skipped;
+    saveSetting('agent_update_skip', skipped);
+  };
+  if (due.length === 1) {
+    const u = due[0];
+    askToast(`${u.label} has an update`, `You have ${u.installed}; ${u.latest} is out.`, 'Update',
+             (t, close) => { close(); updateAgent(u); }, () => skip([u]));
+    return;
+  }
+  // Several: one toast, a tick per program, so any of them can be left out.
+  // One left out is not asked about again until a newer version comes.
+  const t = askToast(`${due.length} agent programs have updates`, '', `Update ${due.length}`, (t, close) => {
+    const picked = due.filter((u, i) => t.querySelector(`.mp-row[data-i="${i}"]`).classList.contains('cur'));
+    close();
+    skip(due.filter(u => !picked.includes(u)));
+    picked.forEach(updateAgent);
+  }, () => skip(due));
+  // Rows like the model menu's: the program's mark, its versions, and the
+  // menu's own outline for the ones that will update.
+  t.querySelector('.body').innerHTML = due.map((u, i) => {
+    const h = HARNESS[u.id] || {};
+    return `<button type="button" class="mp-row cur" data-i="${i}" aria-pressed="true">
+      <span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>
+      <span class="mp-txt"><span class="mp-t">${esc(u.label)}</span><span class="mp-s">${esc(u.installed)} → ${esc(u.latest)}</span></span>
+      <span class="upd-tick">${_UPD_TICK}</span></button>`;
+  }).join('');
+  const go = t.querySelector('button[data-a="yes"]');
+  t.querySelector('.body').addEventListener('click', (e) => {
+    const row = e.target.closest('.mp-row');
+    if (!row) return;
+    e.stopPropagation();
+    const on = row.classList.toggle('cur');
+    row.setAttribute('aria-pressed', String(on));
+    const n = t.querySelectorAll('.body .mp-row.cur').length;
+    go.textContent = n ? `Update ${n}` : 'Update';
+    go.disabled = !n;
+  });
+}
+const _UPD_TICK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+async function updateAgent(u) {
+  dlUpsert('agent:' + u.id, { name: `Updating ${u.label}`, kind: 'agent', agent: u.id, status: 'downloading',
+                              pct: null, started: Date.now() / 1000, fetched: 0, line: '' });
+  dlToggle(true);
+  agentJobsWatch();
+  try {
+    const res = await api('/api/agents/update', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                 body: JSON.stringify({ id: u.id }) });
+    agentJobsPoll();
+    toast(`${u.label} is up to date`, res.version ? 'Now on ' + res.version : '', 'ok', 5000);
+    if (STATE.agentInfo && STATE.agentInfo.provider === u.id) loadAgentInfo(u.id);
+  } catch (e) {
+    agentJobsPoll();
+    if (/Stopped/.test(e.message || '')) return;
+    toast(`${u.label} didn't update`, e.message.replace(/^\d+\s*/, ''), 'err', 9000);
   }
 }
 setTimeout(checkAgentUpdates, 30000);
@@ -7113,7 +7172,7 @@ function setActiveId(id) {
     if (_utterTimer) { clearTimeout(_utterTimer); _utterTimer = null; }
     _utterBuf = '';
     if (typeof setVoiceTranscript === 'function') setVoiceTranscript('');
-    if (voiceModeOn && !STATE.streaming) setVoiceStatus('listening');
+    if (voiceModeOn && !STATE.streaming && rtVoiceActive && _voiceReady) setVoiceStatus('listening');
   }
   updateChatHeader();
 }
@@ -7770,6 +7829,15 @@ const _RUN_VERBS = {
   web:    ['searched the web', 'searched the web {n} times'],
   plugin: ['used a plugin', 'used plugins {n} times'],
 };
+// What JARVIS is doing with a tool, said as words (voice mode's status line).
+const _RUN_DOING = {
+  folder: 'looking in a folder', search: 'searching', file: 'reading', edit: 'changing a file',
+  term: 'running a command', globe: 'checking the web', image: 'looking at an image',
+  video: 'making a video', brain: 'checking memory', bell: 'setting a reminder',
+  rocket: 'opening an app', monitor: 'using the desktop', users: 'asking a helper',
+  handoff: 'handing it over', web: 'searching the web', plugin: 'using a plugin',
+};
+function toolDoing(name) { return (_RUN_DOING[_toolKind(name)] || 'working') + '…'; }
 function _toolKind(name) {
   if (name === 'delegate') return 'handoff';
   if (name === 'web_search') return 'web';
@@ -10171,6 +10239,7 @@ function historyOf(msgs) {
   return history;
 }
 async function send(forced = null, displayAs = null, opts = {}) {
+  if (_dict && !forced) dictStop();   // sending what was dictated ends dictation
   // `forced` is the FULL prompt sent to the LLM (carries the path, the tool
   // instruction, etc.). `displayAs` is the OPTIONAL short version shown in
   // the chat bubble. Lets file uploads send "view_image at C:\...\foo.png"
@@ -10898,7 +10967,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // Voice mode has no tool cards to look at, so mirror the tool name into
       // the HUD. Without this the overlay sits on "thinking…" through a 30s
       // file scan and looks stuck.
-      if (voiceModeOn) setVoiceStatus(`running ${ev.name}…`);
+      if (voiceModeOn) setVoiceStatus(toolDoing(ev.name), 'working');
 
       // Generation placeholder - animated violet noise canvas + rotating
       // status text overlay. Why this and not "watch the image build":
@@ -15058,48 +15127,109 @@ async function transcribe() {
   } finally { setState('idle'); }
 }
 
-// Mic: click to start, auto-stop on silence (or click again to stop early).
-let micSilenceTimer = null;
-let micLastVoice = 0;
-let micWatchdog = null;
-// Aggressive auto-stop: 500ms of quiet after the user spoke. Voice mode is
-// turn-based and pauses naturally are short. Now that listen.py runs Silero
-// VAD via faster-whisper's vad_filter (much smarter than RMS at deciding
-// what's actually speech vs background hum), false-cuts on conversational
-// pauses are rare - we can safely go shorter than the old 1500ms / 700ms.
-const MIC_SILENCE_MS = 500;
-const MIC_MAX_MS = 30000;            // hard cap 30s
-const MIC_VOICE_THRESHOLD = 0.018;   // RMS-ish; tune
-// Barge-in threshold for interrupting AI mid-speech. Slightly higher than the
-// regular voice threshold so background noise during playback doesn't cause
-// false interrupts - the user needs to actually start talking.
-const MIC_BARGE_THRESHOLD = 0.030;
+// The composer mic dictates: what you say is typed into the box, where you can
+// fix it before sending. It listens with the same recorder as voice mode (the
+// mic picked in Settings, speech detection, live captions) and falls back to
+// recording in the page on installs without it.
+let _dict = null;   // { abort, base, said }
+function _dictShow() {
+  if (!_dict) return;
+  const tail = [_dict.said, _dict.partial].filter(Boolean).join(' ');
+  input.value = [_dict.base, tail].filter(Boolean).join(_dict.base && !/\s$/.test(_dict.base) ? ' ' : '');
+  input.dispatchEvent(new Event('input'));
+}
+function dictStop() {
+  if (!_dict) return;
+  const d = _dict; _dict = null;
+  d.partial = '';
+  try { d.abort.abort(); } catch {}
+  fetch('/api/voice/realtime/stop', { method: 'POST' }).catch(() => {});
+  const btn = $('btn-mic');
+  btn.classList.remove('recording', 'warming');
+  btn.style.setProperty('--mic-level', '0');
+  btn.title = 'Dictate: click to talk, click again to stop';
+  input.focus();
+}
+async function dictStart() {
+  const btn = $('btn-mic');
+  _dict = { abort: new AbortController(), base: input.value, said: '', partial: '' };
+  const d = _dict;
+  btn.classList.add('recording', 'warming');
+  btn.title = 'Getting the microphone ready… click to stop';
+  api('/api/voice/realtime/mute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ muted: false }) }).catch(() => {});
+  try {
+    const resp = await fetch('/api/voice/realtime/stream', { signal: d.abort.signal });
+    if (!resp.ok || !resp.body) throw new Error((await resp.json().catch(() => ({}))).error || 'the listener did not start');
+    const reader = resp.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    while (_dict === d) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        if (_dict !== d) break;
+        if (ev.type === 'ready' || ev.type === 'started') {
+          btn.classList.remove('warming'); btn.title = 'Listening: click to stop';
+          if (ev.warning) toast('Mic fell back to default', ev.warning, 'warn', 8000);
+        } else if (ev.type === 'mic' || ev.type === 'level') {
+          if (ev.type === 'mic') btn.style.setProperty('--mic-level', Math.min(1, (+ev.v || 0) * 1.2).toFixed(3));
+        } else if (ev.type === 'partial') {
+          d.partial = String(ev.text || '').trim(); _dictShow();
+        } else if (ev.type === 'final') {
+          const t = String(ev.text || '').trim();
+          d.partial = '';
+          if (t) d.said = d.said ? d.said + ' ' + t : t;
+          _dictShow();
+        } else if (ev.type === 'error') {
+          throw new Error(ev.message || 'the listener stopped');
+        } else if (ev.type === 'stopped') {
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    if (_dict === d && e.name !== 'AbortError') toast("Dictation stopped", (e && e.message) || '', 'warn', 5000);
+  }
+  if (_dict === d) dictStop();
+}
 
-// Click to start recording, click again to stop → transcribe + send. A silence
-// watchdog auto-stops if you go quiet for a while (so it never records forever if
-// you walk away), and a hard cap backstops both. The button glow is amplitude-
-// reactive, driven by the live mic RMS (the CSS reads --mic-level).
-async function micToggle() {
+// Without the listener: record in the page, stop after a real pause once you
+// have started talking (not before), and put the words in the box.
+const MIC_SILENCE_MS = 1400;          // quiet after speech that ends it
+const MIC_WAIT_MS = 10000;            // nothing said at all
+const MIC_MAX_MS = 60000;             // hard cap
+const MIC_VOICE_THRESHOLD = 0.018;
+// Barge-in threshold for interrupting AI mid-speech in voice mode. Higher than
+// the speech threshold so background noise during playback doesn't interrupt.
+const MIC_BARGE_THRESHOLD = 0.030;
+let micWatchdog = null;
+let micLastVoice = 0;   // voice mode's press-to-talk cycle
+async function micRecordToggle() {
   if (recorder.recording) { await micFinish(); return; }
-  $('btn-mic').classList.add('recording');
+  const btn = $('btn-mic');
+  btn.classList.add('recording');
   await startRecording();
-  micLastVoice = performance.now();
+  const t0 = performance.now();
+  let heard = 0;
   micWatchdog = setInterval(() => {
     if (!recorder.recording) return;
-    if (performance.now() - micLastVoice > MIC_SILENCE_MS) micFinish();
+    const now = performance.now();
+    if ((heard && now - heard > MIC_SILENCE_MS) || (!heard && now - t0 > MIC_WAIT_MS) || now - t0 > MIC_MAX_MS) micFinish();
   }, 200);
-  setTimeout(() => { if (recorder.recording) micFinish(); }, MIC_MAX_MS);
   if (recorder.processor) {
     const orig = recorder.processor.onaudioprocess;
     recorder.processor.onaudioprocess = (e) => {
       orig(e);
-      const input = e.inputBuffer.getChannelData(0);
+      const data = e.inputBuffer.getChannelData(0);
       let sum = 0;
-      for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-      const rms = Math.sqrt(sum / input.length);
-      if (rms > MIC_VOICE_THRESHOLD) micLastVoice = performance.now();
-      const level = Math.min(1, rms / 0.12);   // speech RMS ~0..0.12 → 0..1
-      try { $('btn-mic').style.setProperty('--mic-level', level.toFixed(3)); } catch {}
+      for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+      const rms = Math.sqrt(sum / data.length);
+      if (rms > MIC_VOICE_THRESHOLD) heard = performance.now();
+      try { btn.style.setProperty('--mic-level', Math.min(1, rms / 0.12).toFixed(3)); } catch {}
     };
   }
 }
@@ -15108,15 +15238,20 @@ async function micFinish() {
   const btn = $('btn-mic');
   btn.classList.remove('recording');
   btn.style.setProperty('--mic-level', '0');
-  // Surface a real failure instead of silently doing nothing (the "doesn't work").
   let text = '';
   try { text = await transcribe(); }
   catch (e) { toast("Couldn't hear that", (e && e.message) || "What you said wasn't turned into text.", 'err'); return; }
   if (text) {
-    input.value = text;
+    input.value = [input.value.trimEnd(), text].filter(Boolean).join(' ');
     input.dispatchEvent(new Event('input'));
-    send();
+    input.focus();
   }
+}
+async function micToggle() {
+  if (_dict) { dictStop(); return; }
+  if (recorder.recording) { await micFinish(); return; }
+  if (await probeRealtimeVoice()) { dictStart(); return; }
+  micRecordToggle();
 }
 $('btn-mic').addEventListener('click', micToggle);
 
@@ -15315,6 +15450,7 @@ async function enterVoiceMode() {
     toast('Load a model first', 'Voice needs a model running. Open Models and load one, then try voice again.', 'warn', 6000);
     return;
   }
+  if (_dict) dictStop();   // voice mode takes the listener over
   voiceModeOn = true;
   $('voice-mode').classList.add('show');
   setVoiceStatus('starting…');     // neutral until we know the brain is ready
@@ -15376,8 +15512,8 @@ async function enterVoiceMode() {
           && ($('voice-status-text').textContent || '').startsWith('starting')) {
         setVoiceStatus('tap mic to start talking');
       }
-    }).catch(() => {
-      if (voiceModeOn) setVoiceStatus('voice didn\'t start; type instead, the keyboard works');
+    }).catch((e) => {
+      if (voiceModeOn) setVoiceStatus("voice didn't start: " + ((e && e.message) || 'unknown error'));
     });
   } else {
     setVoiceStatus('warming up the model…');
@@ -15517,17 +15653,29 @@ window.addEventListener('load', () => {
   });
 });
 
-function setVoiceStatus(s) {
-  $('voice-status-text').textContent = s;
-  // Infer the HUD state from the status text so the grid picks the right effect
-  // (and CSS can tint) without threading a state arg through 15 call sites.
-  const low = (s || '').toLowerCase();
-  let st = 'idle';
-  if (low.includes('speak')) st = 'speaking';
-  else if (/warming|starting/.test(low)) st = 'warming';   // grid stays dark until ready
-  else if (/running|calling|reading|writing|searching/.test(low)) st = 'working';
-  else if (/think|transcrib/.test(low)) st = 'thinking';
-  else if (/listen|your turn/.test(low)) st = 'listening';
+// Everything before the first "listening" (the brain loading, the speech model,
+// the microphone opening) reads as one phase, so start-up doesn't cycle
+// through several phrases in a few seconds.
+const _VOICE_GETTING_READY = /^(starting|warming up the model|getting the microphone ready|restarting voice)…?\s*(\d+%)?$/i;
+function _voiceStateOf(low) {
+  if (low.includes('speak')) return 'speaking';
+  if (/getting ready|warming|starting|downloading/.test(low)) return 'warming';   // grid stays dark until ready
+  if (/running|calling|reading|writing|searching/.test(low)) return 'working';
+  if (/think|transcrib/.test(low)) return 'thinking';
+  if (/listen|your turn/.test(low)) return 'listening';
+  return 'idle';
+}
+function setVoiceStatus(s, state) {
+  const m = _VOICE_GETTING_READY.exec((s || '').trim());
+  if (m) s = 'getting ready…' + (m[2] ? ' ' + m[2] : '');
+  const el = $('voice-status-text');
+  if (el.textContent !== s) {
+    el.textContent = s;
+    el.animate([{ opacity: 0.35, filter: 'blur(2px)' }, { opacity: 1, filter: 'blur(0)' }],
+               { duration: 220, easing: 'ease-out' });
+  }
+  // The HUD state from the words, unless the caller says it.
+  const st = state || _voiceStateOf((s || '').toLowerCase());
   _voiceState = st;
   const vm = $('voice-mode'); if (vm) vm.dataset.vstate = st;
 }
@@ -15659,7 +15807,8 @@ function setMicUI() {
     btn.title = 'Muted: click to listen again'; setVoiceStatus('muted');
   } else if (rtVoiceActive) {
     btn.innerHTML = _MIC_ON_SVG; btn.style.color = 'var(--accent)'; btn.style.opacity = '1';
-    btn.title = 'Listening. Click to mute'; setVoiceStatus('listening');
+    btn.title = 'Listening. Click to mute';
+    if (_voiceReady) setVoiceStatus('listening');
   } else {
     btn.innerHTML = _MIC_ON_SVG; btn.style.color = ''; btn.style.opacity = '1';
     btn.title = 'Voice is off: click to start listening';
@@ -15685,7 +15834,6 @@ $('voice-mic-toggle').addEventListener('click', () => {
   probeRealtimeVoice().then(ok => { if (ok) startRealtimeVoice().catch(() => {}); else voiceCycle(); });
 });
 
-// Keyboard still works in voice mode (focus the hidden input)
 $('voice-mode').addEventListener('keydown', e => {
   if (e.key === 'Escape') exitVoiceMode();
 });
@@ -15770,7 +15918,7 @@ async function warmUpBrainForVoice() {
 let _rtUserStop = false, _rtFailed = false;
 async function startRealtimeVoice() {
   if (rtVoiceActive) return;
-  _rtUserStop = false; _rtFailed = false;
+  _rtUserStop = false; _rtFailed = false; _voiceReady = false;
   const ok = await probeRealtimeVoice();
   if (!ok) return false;
   // Don't present "listening" against a brain that can't answer yet.
@@ -15789,6 +15937,9 @@ async function startRealtimeVoice() {
     });
     if (!resp.ok || !resp.body) {
       rtVoiceActive = false;
+      _rtFailed = true;
+      const why = await resp.json().catch(() => ({}));
+      setVoiceStatus("voice didn't start: " + (why.detail || why.error || 'the listener refused'));
       return false;
     }
     rtVoiceReader = resp.body.getReader();

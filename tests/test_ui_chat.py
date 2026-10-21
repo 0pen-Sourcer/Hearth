@@ -140,6 +140,87 @@ with sync_playwright() as pw:
       hearthSetAppearance(was[0] || 'classic', was[1] || 'rose');
       return { href, last: asked[asked.length - 1] };
     }""")
+    dict_ = pg.evaluate("""async () => {
+      const realFetch = window.fetch, realSend = window.send, sent = [], stopped = [];
+      rtVoiceAvailable = true;
+      window.send = async (t) => { sent.push(t); };
+      window.fetch = async (url, o) => {
+        if (String(url).includes('/api/voice/realtime/stream')) {
+          const lines = ['{"type":"warming"}', '{"type":"ready"}', '{"type":"partial","text":"remind me"}',
+                         '{"type":"final","text":"remind me to stretch"}'];
+          const body = new ReadableStream({ start(c) {
+            lines.forEach(l => c.enqueue(new TextEncoder().encode(l + '\\n')));
+            o.signal.addEventListener('abort', () => { try { c.error(new DOMException('x', 'AbortError')); } catch {} });
+          } });
+          return new Response(body, { status: 200 });
+        }
+        if (String(url).includes('/api/voice/realtime/stop')) { stopped.push(1); return new Response('{}'); }
+        return new Response('{"ok":true}', { status: 200 });
+      };
+      const box = document.getElementById('input');
+      box.value = 'note:';
+      await micToggle();
+      await new Promise(r => setTimeout(r, 300));
+      const during = box.value, live = !!_dict;
+      await micToggle();
+      await new Promise(r => setTimeout(r, 50));
+      const after = { text: box.value, live: !!_dict, sent: sent.length, stopped: stopped.length };
+      window.fetch = realFetch; window.send = realSend; rtVoiceAvailable = null; box.value = '';
+      return { during, live, after,
+               bottom: document.querySelector('.voice-bottom-text').textContent,
+               doing: toolDoing('run_command') };
+    }""")
+    check(f"the composer mic types what you say into the box, after what was there {dict_}",
+          dict_["during"] == "note: remind me to stretch" and dict_["live"])
+    check("and stops on a second click without sending it",
+          not dict_["after"]["live"] and dict_["after"]["sent"] == 0 and dict_["after"]["stopped"] == 1
+          and dict_["after"]["text"] == "note: remind me to stretch")
+    check(f"voice mode promises nothing it doesn't do ({dict_['bottom']!r}) and names tools in words ({dict_['doing']!r})",
+          "type any time" not in dict_["bottom"] and dict_["doing"] == "running a command…")
+
+    boot = pg.evaluate("""() => {
+      const seen = [], el = document.getElementById('voice-status-text');
+      const note = () => { if (seen[seen.length - 1] !== el.textContent) seen.push(el.textContent); };
+      const was = [voiceModeOn, rtVoiceActive, _voiceReady];
+      voiceModeOn = true; rtVoiceActive = false; _voiceReady = false;
+      setVoiceStatus('starting…'); note();
+      setVoiceStatus('warming up the model… 40%'); note();
+      setVoiceStatus('warming up the model…'); note();
+      rtVoiceActive = true; setMicUI(); note();             // the stream opened, the listener isn't ready
+      setActiveId(STATE.activeId); note();                   // a chat switch mid-start
+      setVoiceStatus('getting the microphone ready…'); note();
+      _voiceReady = true; setVoiceStatus('listening'); note();
+      [voiceModeOn, rtVoiceActive, _voiceReady] = was;
+      return seen;
+    }""")
+    check(f"voice start-up reads as one phase, then listening once the listener is ready {boot}",
+          boot == ["getting ready…", "getting ready… 40%", "getting ready…", "listening"])
+
+    upd = pg.evaluate("""async () => {
+      const realApi = window.api, realUpd = window.updateAgent, realSave = window.saveSetting;
+      const updated = [], saved = {};
+      window.api = async (u) => u.includes('/api/agents/updates') ? { updates: [
+        { id: 'claude', label: 'Claude Code', installed: '1', latest: '2' },
+        { id: 'gemini', label: 'Gemini CLI', installed: '1', latest: '3' },
+        { id: 'opencode', label: 'OpenCode', installed: '1', latest: '4' }] } : realApi(u);
+      window.updateAgent = (u) => updated.push(u.id);
+      window.saveSetting = (k, v) => { saved[k] = v; };
+      document.querySelectorAll('.toast').forEach(t => t.remove());
+      await checkAgentUpdates();
+      const toasts = document.querySelectorAll('.toast.ask').length;
+      const t = document.querySelector('.toast.ask');
+      t.querySelector('input[data-i="1"]').click();
+      const label = t.querySelector('button[data-a="yes"]').textContent;
+      t.querySelector('button[data-a="yes"]').click();
+      window.api = realApi; window.updateAgent = realUpd; window.saveSetting = realSave;
+      return { toasts, label, updated, skip: saved.agent_update_skip || null,
+               stripe: getComputedStyle(t).borderLeftWidth };
+    }""")
+    check(f"several agent updates are one toast, each can be left out {upd}",
+          upd["toasts"] == 1 and upd["label"] == "Update 2" and upd["updated"] == ["claude", "opencode"]
+          and upd["skip"] == {"gemini": "3"})
+    check("and the toast has no coloured side stripe", upd["stripe"] == "1px")
+
     check(f"changing the accent changes the tab and window icon {tab}",
           "accent=sage" in tab["href"] and "theme=dark" in tab["href"] and tab["last"] == ["dark", "sage"])
 
