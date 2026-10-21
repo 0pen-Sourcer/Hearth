@@ -1206,6 +1206,34 @@ with sync_playwright() as pw:
     check(f"each message says when it was said, with a line where the day changes, and each chat when it was last used {times}",
           times["days"] == ["Yesterday", "Today"] and times["stamps"] == [True, True, True, True, False]
           and any(ch.isdigit() for ch in times["first"] or "") and any(ch.isdigit() for ch in times["when"] or ""))
+    # A question JARVIS asked left nothing in the chat but a raw tool line.
+    ask = pg.evaluate("""() => {
+      const q = { question: 'Which folder?', options: ['Downloads', 'Desktop', 'Documents'] };
+      STATE.conversations.unshift({ id: 'ask', title: 'Asked', created: Date.now(), updated: Date.now(), messages: [
+        { role: 'user', content: 'clean up' },
+        { role: 'assistant', content: 'Downloads it is.', events: [
+          { kind: 'tool', name: 'ask_user', args: q, result: '{"ok": true, "choice": "Downloads", "other": false}', pos: 0 }] },
+        { role: 'user', content: 'again' },
+        { role: 'assistant', content: 'Your own folder then.', events: [
+          { kind: 'tool', name: 'ask_user', args: q, result: '{"ok": true, "choice": "F:/Stuff", "other": true}', pos: 0 }] },
+        { role: 'user', content: 'and again' },
+        { role: 'assistant', content: 'You were away.', events: [
+          { kind: 'tool', name: 'ask_user', args: q, result: '{"ok": false, "error": "user did not answer within 3 minutes"}', pos: 0 }] }] });
+      setActiveId('ask'); renderChat();
+      const cards = [...$('chat-body').querySelectorAll('.ask-card')];
+      const first = cards[0]; const folded = !first.classList.contains('open');
+      first.querySelector('.ak-sub').click();
+      return { n: cards.length, folded, opened: first.classList.contains('open'),
+               inRun: cards.some(c => !!c.closest('.tool-run')),
+               states: cards.map(c => c.querySelector('.ak-state').textContent),
+               q: first.querySelector('.ak-q').textContent,
+               picked: cards.map(c => [...c.querySelectorAll('.ak-opt.sel .ak-lab')].map(x => x.textContent)),
+               opts: first.querySelectorAll('.ak-opt').length };
+    }""")
+    check(f"a question JARVIS asked stays in the chat as a card with every option and the one picked {ask}",
+          ask["n"] == 3 and ask["folded"] and ask["opened"] and not ask["inRun"]
+          and ask["states"] == ["Answered", "Answered", "Not answered"] and ask["q"] == "Which folder?"
+          and ask["opts"] == 3 and ask["picked"] == [["Downloads"], ["F:/Stuff"], []])
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([

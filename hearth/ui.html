@@ -1654,6 +1654,30 @@
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
   }
   /* Inline permission strip - sits right above the input. */
+  .tool.ask-card { margin: 10px 0; background: none; border: 0; border-radius: 0; overflow: visible; }
+  .ask-card .ak-title { display: flex; align-items: center; gap: 9px; font: 600 14px var(--sans); color: var(--fg); }
+  .ask-card .ak-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .ask-card.unanswered .ak-dot { background: var(--fg-faint); }
+  .ask-card .ak-sub { display: inline-flex; align-items: center; gap: 5px; margin: 3px 0 0 17px; padding: 0;
+    background: none; border: 0; color: var(--fg-faint); font: 12.5px var(--sans); cursor: pointer; }
+  .ask-card .ak-sub:hover { color: var(--fg-dim); }
+  .ask-card .ak-chev { width: 11px; height: 11px; transition: transform .18s; transform: rotate(180deg); }
+  .ask-card.open .ak-chev { transform: none; }
+  .ask-card .ak-box { display: none; margin: 9px 0 0 17px; padding: 14px 16px; border: 1px solid var(--border);
+    border-radius: 10px; background: var(--bg-1); }
+  .ask-card.open .ak-box { display: block; }
+  .ask-card .ak-q { font: 600 13.5px/1.45 var(--sans); color: var(--fg); margin-bottom: 10px; }
+  .ask-card .ak-opts { display: flex; flex-direction: column; gap: 2px; }
+  .ask-card .ak-opt { display: flex; align-items: flex-start; gap: 11px; padding: 7px 8px; margin: 0 -8px;
+    border: 0; border-radius: 7px; background: none; text-align: left; color: var(--fg-faint); font: 13px/1.4 var(--sans); }
+  .ask-card.waiting .ak-opt { color: var(--fg-dim); cursor: pointer; }
+  .ask-card.waiting .ak-opt:hover { background: var(--hover); color: var(--fg); }
+  .ask-card .ak-opt.sel { color: var(--fg); }
+  .ask-card .ak-radio { flex: none; width: 14px; height: 14px; margin-top: 2px; border-radius: 50%;
+    border: 1.5px solid currentColor; opacity: .7; box-sizing: border-box; }
+  .ask-card .ak-opt.sel .ak-radio { border-color: var(--accent); opacity: 1;
+    background: radial-gradient(circle, var(--accent) 0 3.5px, transparent 4px); }
+  .ask-card .ak-own .ak-lab { font-style: italic; }
   .perm-strip {
     margin: 0 16px 6px; padding: 10px 14px;
     background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 5%, transparent));
@@ -7464,6 +7488,7 @@ function replayAssistant(msgDiv, m, body) {
       // Keep the green/red diff for file writes; the terse text result would
       // clobber it. Other tools show their result as before.
       if (!t.div.classList.contains('has-diff')) t.body.textContent = ev.result || '';
+      if (t.div._askFill) { t.div._askFill(ev.result || ''); t.div.classList.remove('open'); }
       if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
       appendPart(t.div, msgDiv);
     } else if (ev.kind === 'media') {
@@ -7812,6 +7837,7 @@ function appendPart(node, msgDiv) {
 function _foldsIntoRun(el) {
   return !!(el && el.classList && el.classList.contains('tool')
     && !el.classList.contains('subagent') && !el.classList.contains('has-diff')
+    && !el.classList.contains('ask-card')
     && !el.classList.contains('open'));
 }
 // The agent CLIs Hearth can hand work to, each in its maker's colour with its
@@ -8228,7 +8254,49 @@ function _stopToolClock(t) {
   if (t && t.div) { t.div.classList.remove('t-slow', 't-running'); t.div.dispatchEvent(new Event('toolsettled', { bubbles: true })); }
 }
 
+// A question JARVIS put to you stays in the chat as a card: the question,
+// every option, the one you picked. Its options answer it while it waits.
+function makeAskCard(args) {
+  const div = document.createElement('div');
+  div.className = 'tool ask-card open waiting';
+  div._toolName = 'ask_user'; div._toolArgs = args;
+  const opts = Array.isArray(args.options) ? args.options.map(String) : [];
+  div.innerHTML = `
+    <div class="ak-title"><span class="ak-dot"></span>Question</div>
+    <button type="button" class="ak-sub"><span class="ak-state">Waiting for you</span> · 1 question
+      <svg class="ak-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></button>
+    <div class="ak-box">
+      <div class="ak-q">${esc(String(args.question || ''))}</div>
+      <div class="ak-opts">${opts.map((o, i) => `<button type="button" class="ak-opt" data-i="${i}"><span class="ak-radio"></span><span class="ak-lab">${esc(o)}</span></button>`).join('')}</div>
+    </div>
+    <div class="t-body" hidden></div><span class="t-ms" hidden></span>`;
+  div.querySelector('.ak-sub').addEventListener('click', () => div.classList.toggle('open'));
+  div.querySelectorAll('.ak-opt').forEach(b => b.addEventListener('click', () => {
+    if (!div.classList.contains('waiting') || !pendingAskId) return;
+    sendAskAnswer(opts[+b.dataset.i], false);
+  }));
+  div._askFill = (raw) => {
+    let r = null;
+    try { r = JSON.parse(raw); } catch {}
+    div.classList.remove('waiting');
+    const st = div.querySelector('.ak-state');
+    if (!r || !r.ok) { st.textContent = 'Not answered'; div.classList.add('unanswered'); return; }
+    st.textContent = 'Answered';
+    const choice = String(r.choice || '');
+    const hit = r.other ? -1 : opts.indexOf(choice);
+    div.querySelectorAll('.ak-opt').forEach(b => b.classList.toggle('sel', +b.dataset.i === hit));
+    if (hit < 0 && choice) {
+      const own = document.createElement('div');
+      own.className = 'ak-opt sel ak-own';
+      own.innerHTML = `<span class="ak-radio"></span><span class="ak-lab">${esc(choice)}</span>`;
+      div.querySelector('.ak-opts').appendChild(own);
+    }
+  };
+  return { div, body: div.querySelector('.t-body'), ms: div.querySelector('.t-ms') };
+}
+
 function makeToolCard(name, args) {
+  if (name === 'ask_user') return makeAskCard(args || {});
   // Every tool - including browse / browse_click / browse_scroll / browse_type /
   // browse_close - renders with the SAME card shape: header with name + args,
   // expandable body with the full result. The old browse-only "quiet" mode
@@ -11235,6 +11303,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
           } else {
             pendingTool.body.textContent = raw;
           }
+          if (pendingTool.div._askFill) pendingTool.div._askFill(raw);
         }
 
         // Detect media markers and surface them as a SEPARATE message-level
