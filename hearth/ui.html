@@ -8014,6 +8014,8 @@ const _RUN_VERBS = {
   handoff:['handed off a task', 'handed off {n} tasks'],
   web:    ['searched the web', 'searched the web {n} times'],
   plugin: ['used a plugin', 'used plugins {n} times'],
+  del:    ['deleted something', 'deleted {n} things'],
+  move:   ['moved something', 'moved {n} things'],
 };
 // What JARVIS is doing with a tool, said as words (voice mode's status line).
 const _RUN_DOING = {
@@ -8022,11 +8024,14 @@ const _RUN_DOING = {
   video: 'making a video', brain: 'checking memory', bell: 'setting a reminder',
   rocket: 'opening an app', monitor: 'using the desktop', users: 'asking a helper',
   handoff: 'handing it over', web: 'searching the web', plugin: 'using a plugin',
+  del: 'deleting', move: 'moving',
 };
 function toolDoing(name) { return (_RUN_DOING[_toolKind(name)] || 'working') + '…'; }
 function _toolKind(name) {
   if (name === 'delegate') return 'handoff';
   if (name === 'web_search') return 'web';
+  if (name === 'delete_path') return 'del';
+  if (name === 'move_path') return 'move';
   const icon = _toolIcon(name);
   for (const [k, v] of Object.entries(_TOOL_ICONS)) if (v === icon) return k;
   return 'file';
@@ -19287,6 +19292,7 @@ async function obDemoStart() {
     await wait(3200);
   }
 }
+window.addEventListener('resize', () => { if ($('onboard') && $('onboard').classList.contains('open')) _obPaintSegs(true); });
 function _saveOnboardingDraft() { try { localStorage.setItem('hearth_onboarding_draft', JSON.stringify({step: obStep, state: obState})); } catch {} }
 function _loadOnboardingDraft() { try { const d = JSON.parse(localStorage.getItem('hearth_onboarding_draft')||'null'); if(d && d.state && d.step) return d; } catch {} return null; }
 function _clearOnboardingDraft() { try { localStorage.removeItem('hearth_onboarding_draft'); } catch {} }
@@ -19345,7 +19351,11 @@ function obRender() {
   if (obStep === 5) obLoadWhatToGet();
   if (obStep === 6) setTimeout(() => $('ob-name').focus(), 80);
   if (obStep === 8) { _obProbeMigrate(); _obWireImport(); }
-  document.querySelector('#onboard .ob-card').classList.toggle('ob-wide', obStep === 7);
+  const _card = document.querySelector('#onboard .ob-card');
+  if (_card.classList.contains('ob-wide') !== (obStep === 7)) {
+    _card.classList.toggle('ob-wide', obStep === 7);
+    _card.addEventListener('transitionend', (e) => { if (e.propertyName === 'max-width') _obPaintSegs(true); }, { once: true });
+  }
   if (obStep === 7) setTimeout(obDemoStart, 420); else obDemoStop();
   if (obStep === 1) document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _agentName(); });
   _obPaintSegs();

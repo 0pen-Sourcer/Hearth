@@ -1260,6 +1260,30 @@ with sync_playwright() as pw:
     check(f"setup plays each approval mode out: what asks first and what just runs {demo}",
           demo["seen"] == {"ask": ["edit_file", "run_command", "delete_path"], "edits": ["run_command", "delete_path"],
                            "auto": ["delete_path"]} and demo["cards"] == 3 and demo["mode"] == "Auto")
+    # The card widens on that step, and the picked option's highlight stayed
+    # where the narrow card had put it, half over the next option.
+    fit = pg.evaluate("""async () => {
+      $('onboard').classList.remove('open');
+      document.querySelector('#onboard .ob-card').classList.remove('ob-wide');
+      obStep = 6; obShow(); await new Promise(r => setTimeout(r, 300));
+      obStep = 7; obRender(); await new Promise(r => setTimeout(r, 1500));
+      const off = [];
+      for (const id of ['ob-approval', 'ob-look', 'ob-uimode']) {
+        const box = $(id), hl = box.querySelector('.ob-seg-hl'), on = box.querySelector('button.on');
+        if (!hl || !on) { off.push(id + ' missing'); continue; }
+        const a = hl.getBoundingClientRect(), b = on.getBoundingClientRect();
+        if (Math.abs(a.left - b.left) > 2 || Math.abs(a.width - b.width) > 2) off.push(`${id} ${Math.round(a.left)}/${Math.round(b.left)} ${Math.round(a.width)}/${Math.round(b.width)}`);
+      }
+      obDemoStop(); $('onboard').classList.remove('open');
+      const run = makeToolRun();
+      run._cards.appendChild(makeToolCard('delete_path', { path: 'a' }).div);
+      run._cards.appendChild(makeToolCard('move_path', { src: 'b', dst: 'c' }).div);
+      return { wide: document.querySelector('#onboard .ob-card').classList.contains('ob-wide'), off, line: _summarizeRun(run) || run.textContent };
+    }""")
+    check(f"once the setup card has widened, each picked option's highlight sits on it {fit['off']}",
+          fit["wide"] and fit["off"] == [])
+    check(f"a delete and a move are said as such in the folded line, not as reading a file {fit['line']!r}",
+          "deleted" in str(fit["line"]).lower() and "moved" in str(fit["line"]).lower() and "read" not in str(fit["line"]).lower())
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([
