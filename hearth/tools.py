@@ -3270,11 +3270,10 @@ def _web_search(p: Dict) -> str:
     st = _WEB_SEARCH_STATE
     if now < st["cooldown_until"]:
         _wait = int(st["cooldown_until"] - now)
-        return (f"web_search is on cooldown for ~{_wait}s — it returned nothing several "
-                f"times in a row, which means it's rate-limited or blocked, not that the "
-                f"topic has no results. Do NOT call web_search again right now. Instead: "
-                f"answer from what you already found, call web_fetch/browse on a specific "
-                f"URL you know, or tell the user you couldn't verify it live.")
+        return (f"web_search is resting for about {_wait}s: it came back empty several "
+                f"times in a row, which means the search is blocked or rate-limited, not "
+                f"that there's nothing to find. Answer from what you already have, open a "
+                f"page you know with web_fetch or browse, or say you couldn't check it live.")
     result = _web_search_raw(p)
     _empty = (not result) or result.strip() == "(no results)" or result.lstrip().startswith("Error")
     if _empty:
@@ -3282,11 +3281,11 @@ def _web_search(p: Dict) -> str:
         if st["fails"] >= 3:
             st["cooldown_until"] = now + _WEB_SEARCH_COOLDOWN_S
             st["fails"] = 0
-            return (f"web_search returned nothing 3 times in a row — it's rate-limited or "
-                    f"blocked, not just empty. It's now on a ~{_WEB_SEARCH_COOLDOWN_S // 60}-"
-                    f"minute cooldown, so STOP retrying it. Answer from what you already "
-                    f"have, use web_fetch/browse on a specific URL, or tell the user you "
-                    f"couldn't verify this live.")
+            return (f"web_search came back empty 3 times in a row, so the search is blocked "
+                    f"or rate-limited rather than the topic being empty. It rests for about "
+                    f"{_WEB_SEARCH_COOLDOWN_S // 60} minutes. Answer from what you already "
+                    f"have, open a page you know with web_fetch or browse, or say you "
+                    f"couldn't check it live.")
     else:
         st["fails"] = 0
     return result
@@ -3665,18 +3664,18 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
     if not _approved and not _auto:
         bad = _is_destructive(cmd)
         if bad:
+            if _autonomous:
+                where = ("A helper can't run destructive commands. Put what you would "
+                         "run and why in your report, and JARVIS can ask them.")
+            else:
+                where = ("Nobody approved it where they can see it, so it can't run from "
+                         "here even if they say yes in this chat. Say what it would do and "
+                         "what it would touch; it runs from the Hearth window or terminal "
+                         "once they approve it there.")
             return (
-                f"Error ({tool}): refused to run a destructive command "
-                f"WITHOUT explicit user approval.\n"
-                f"  Detected pattern: '{bad}'\n"
-                f"  Full command:     {cmd}\n\n"
-                f"NEXT STEP: tell the user EXACTLY what this command would do "
-                f"and what it would touch (path, target, etc.). Wait for the "
-                f"user to type 'yes do it' or similar before retrying. Don't "
-                f"retry with `--force`, don't try to bypass with another shell, "
-                f"don't pipe to a different cmdlet. Just ask first.\n"
-                f"If the user truly wants this command auto-run, they can set "
-                f"HEARTH_AUTO_APPROVE=1."
+                f"Error ({tool}): refused to run a destructive command ('{bad}').\n"
+                f"  Command: {cmd}\n"
+                f"{where} Don't look for another way to run it."
             )
     return None
 
@@ -3774,6 +3773,9 @@ def _run_command(p: Dict) -> str:
     body = out.strip()
     if status_hint:
         body = f"{status_hint}\n{body}" if body else status_hint
+    unknown = _unknown_command_hint(stdout, shell)
+    if unknown:
+        body = f"{body}\n{unknown}" if body else unknown
     skill_nudge = _skill_crystallization_nudge(cmd)
     if skill_nudge:
         body = f"{skill_nudge}\n{body}" if body else skill_nudge
@@ -3808,6 +3810,28 @@ def _skill_crystallization_nudge(cmd: str) -> str:
         return ("[skill nudge] You're hand-rolling openpyxl. The `make-xlsx` "
                 "skill already wraps this (with comma-vs-tab autodetect + "
                 "freeze pane). Call load_skill('make-xlsx') next time.")
+    return ""
+
+
+# Commands people know from bash that PowerShell and cmd don't have.
+_BASH_ONLY = {"head", "tail", "grep", "sed", "awk", "wc", "which", "touch", "export",
+              "xargs", "cut", "tr", "chmod", "uniq", "find", "less", "nano", "unzip"}
+
+
+def _unknown_command_hint(output: str, shell: str) -> str:
+    """When the shell didn't know a name: say why, if it's one Hearth knows."""
+    if shell not in ("powershell", "cmd"):
+        return ""
+    m = (re.search(r"The term '([^']+)' is not recognized", output)
+         or re.search(r"'([^']+)' is not recognized as an internal or external command", output))
+    if not m:
+        return ""
+    name = m.group(1).strip()
+    if name in _HANDLERS:
+        return f"[{name} is one of your tools, not a command: call it as a tool.]"
+    if name.lower() in _BASH_ONLY:
+        b = " or run it with shell='bash'" if _shells.bash_path() else ""
+        return f"[{name} is a bash command and this ran in {shell}: use the {shell} way{b}.]"
     return ""
 
 
@@ -5119,8 +5143,8 @@ def _view_image(p: Dict) -> str:
             except Exception:
                 pass
             return (f"This model can't see images right now, so it can't read {path}.{could} "
-                    f"Otherwise ask the user to describe what's in it, or to switch to a model "
-                    f"that can see. Do NOT claim the image is blank: you simply can't see it.")
+                    f"Otherwise ask them to describe it, or to switch to a model that can "
+                    f"see. It isn't blank; you just can't see it.")
     except Exception:
         pass
     # Return a structured marker. mcp_server.py detects this prefix and
@@ -8302,11 +8326,9 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         except Exception:
             _skill_names = set()
         if name in _skill_names:
-            return (f"'{name}' is a SKILL, not a tool — there is nothing to call "
-                    f"by that name. Call load_skill(\"{name}\") to get its steps, "
-                    f"then FOLLOW them yourself: they tell you to write a small "
-                    f"build script and run it with run_command. Do NOT call "
-                    f"'{name}' as a tool again — it will keep failing.")
+            return (f"'{name}' is a skill, not a tool, so there is nothing to call by "
+                    f"that name. load_skill(\"{name}\") gives its steps; follow them with "
+                    f"your own tools. Calling '{name}' again fails the same way.")
         # Common hallucination: a "switch browser tab" tool. There isn't one —
         # Chrome tabs live inside ONE window, so switch them with keystrokes.
         # focus_window switches OS windows, not tabs.

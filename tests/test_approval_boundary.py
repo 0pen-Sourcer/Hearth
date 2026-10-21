@@ -49,6 +49,14 @@ for _guess in (True, 1, "1", "yes", "true", "approved", T.APPROVAL_TOKEN[:16],
 
 check("with no approval at all it is still refused", REFUSED in _run({}))
 
+# The refusal only reaches the model where nobody can approve (a phone bridge,
+# MCP), so a yes typed there can't clear it. Telling it to wait for one made it
+# ask, hear yes, retry and get refused again.
+_said = _run({})
+check(f"the refusal says a yes here can't run it, and where it can ({_said[-160:]!r})",
+      "even if they say yes" in _said and "window or terminal" in _said
+      and "yes do it" not in _said and "AUTO_APPROVE" not in _said)
+
 # The trusted path has to keep working, or the guard just blocks everyone.
 check("the in-process token does clear it", REFUSED not in _run({"_approved": T.APPROVAL_TOKEN}))
 

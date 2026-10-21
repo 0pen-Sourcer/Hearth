@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from . import bridge_status as _bridge_status
 import os
 from collections import deque
 from pathlib import Path
@@ -112,19 +113,7 @@ _IMAGE_EXTS = (".png", ".jpg", ".jpeg")
 
 # System message injected every bridge turn (not persisted): teaches the model
 # it CAN send files here by naming their path.
-_CHANNEL_PRIMER = {
-    "role": "system",
-    "content": (
-        "You're reachable over WhatsApp right now — a chat bridge, not the "
-        "desktop GUI — and the user is NOT sitting at this PC; they're on their "
-        "phone or another device, reading your messages in the chat. To SHOW "
-        "them a FILE or IMAGE (a screenshot, a PDF, a chart you made), just "
-        "include its absolute local path in your reply — the bridge auto-sends "
-        "any local path you mention. Do NOT open_app / preview / 'open in default "
-        "viewer' to show them: they can't see this screen. You CAN send files "
-        "here, so never tell the user you can't. Keep replies chat-length."
-    ),
-}
+_CHANNEL_PRIMER = _bridge_status.channel_primer("WhatsApp")
 
 
 async def _run(prompt: str, history: list) -> str:

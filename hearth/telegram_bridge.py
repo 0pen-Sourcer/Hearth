@@ -24,6 +24,7 @@ owner), so keep allowed_chat_ids tight and the token out of any repo.
 from __future__ import annotations
 
 import asyncio
+from . import bridge_status as _bridge_status
 from . import env as _env
 import json
 import mimetypes
@@ -146,20 +147,7 @@ def _send_document(token: str, chat_id: int, path: str) -> None:
 
 # System message injected every bridge turn (not persisted, so the history cap
 # can't drop it): teaches the model it CAN send files here by naming their path.
-_CHANNEL_PRIMER = {
-    "role": "system",
-    "content": (
-        "You're reachable over Telegram right now — a chat bridge, not the "
-        "desktop GUI — and the user is NOT sitting at this PC; they're on their "
-        "phone or another device, reading your messages in the chat. To SHOW "
-        "them a FILE or IMAGE (a screenshot, a PDF, a chart you made), just "
-        "include its absolute local path in your reply — the bridge auto-sends "
-        "any local path you mention as a document. Do NOT open_app / preview / "
-        "'open in default viewer' to show them: they can't see this screen. You "
-        "CAN send files here, so never tell the user you can't. Keep replies "
-        "chat-length and don't reference GUI-only buttons."
-    ),
-}
+_CHANNEL_PRIMER = _bridge_status.channel_primer("Telegram")
 
 
 async def _run(prompt: str, history: list, on_tool=None) -> str:

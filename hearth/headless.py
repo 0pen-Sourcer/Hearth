@@ -2070,12 +2070,10 @@ async def run_once(
                     if decision in ("deny", "never", "timeout"):
                         if decision == "timeout":
                             tool_result = (
-                                f"This tool call was NOT executed - the user did "
-                                f"not respond to the approval prompt in time. "
-                                f"NOTHING ran. No file was created, written, moved, "
-                                f"or changed. Do NOT say it succeeded or that any "
-                                f"file/output was produced. Tell the user it is "
-                                f"still waiting on their approval, then stop."
+                                f"Not run: the approval prompt timed out with no "
+                                f"answer, so nothing was created, written, moved or "
+                                f"changed. Say it is waiting on their approval, "
+                                f"then stop."
                             )
                         elif _deny_reason:
                             # Declined WITH a redirect: the user isn't saying "stop
@@ -2085,20 +2083,16 @@ async def run_once(
                             # a redirect needing tool calls (copy files, check
                             # downloads) only be talked about, never done.
                             tool_result = (
-                                f"The user declined THAT specific action and redirected "
-                                f"you. Do NOT retry the declined call or a workaround for "
-                                f"it. Instead, follow their instruction now, using "
-                                f"whatever tools it needs: \"{_deny_reason}\"."
+                                f"They said no to that and told you what to do instead. "
+                                f"Leave the declined call and any way around it, and do "
+                                f"this now, with whatever tools it needs: \"{_deny_reason}\"."
                             )
                         else:
                             tool_result = (
-                                f"The user DECLINED this action - it did NOT run, "
-                                f"nothing was created, written, moved, or changed. A "
-                                f"decline means the user is steering and likely wants "
-                                f"something different. STOP this line of action now: "
-                                f"do NOT retry it and do NOT try a workaround. Give a "
-                                f"brief reply that you've stopped, and ask them what "
-                                f"they'd like instead."
+                                f"They said no, so it didn't run and nothing changed. "
+                                f"A no means they want something different: don't retry "
+                                f"it or find a way around it. Say briefly that you've "
+                                f"stopped and ask what they'd like instead."
                             )
                             # Bare decline, no redirect = user taking the wheel; end
                             # the loop so the model asks instead of grinding retries.
@@ -2123,9 +2117,8 @@ async def run_once(
                 elif is_risky(name):
                     if _env.get("AUTO_APPROVE", "1") == "0":
                         tool_result = (
-                            f"The user declined this tool call. Strict permission "
-                            f"mode is on (HEARTH_AUTO_APPROVE=0) and '{name}' "
-                            f"is risky."
+                            f"Not run: '{name}' needs approval and nobody is here to "
+                            f"give it (HEARTH_AUTO_APPROVE=0)."
                         )
                         gd = guard.after(name, args, tool_result)
                         if gd.action in ("warn", "stop"):
@@ -2281,11 +2274,10 @@ async def run_once(
                 messages.append({
                     "role": "user",
                     "content": (
-                        "STOP. You've already called tools enough times this turn "
-                        "to have what you need. Do NOT call any more tools. Answer "
-                        "the original request NOW in plain text using the results "
-                        "you already have. If something genuinely failed, say so "
-                        "plainly and stop."
+                        "That's enough tool calls for this turn; you have what you "
+                        "need. Answer the original request now from the results "
+                        "above, with no more tools. If something failed, say so "
+                        "plainly."
                     ),
                 })
             # Cloud vision: the image couldn't ride the tool message, so hand it

@@ -154,6 +154,22 @@ quick = run("Write-Output quick", shell="powershell")
 check("a command that ends in time leaves no job behind",
       "quick" in quick and not any(j.get("command") == "Write-Output quick" for j in jobs.list_jobs()))
 
+# A name the shell doesn't know gets a reason when Hearth knows one: a tool
+# typed as a command, or a bash command run in PowerShell.
+if sys.platform == "win32":
+    as_cmd = run("job_kill j-123")
+    check(f"a tool typed as a command is pointed back at the tool ({as_cmd[-70:]!r})",
+          "is not recognized" in as_cmd and "job_kill is one of your tools" in as_cmd)
+    # head may well be on PATH (Git's tools), so the shell's own words are used.
+    said = ("head : The term 'head' is not recognized as the name of a cmdlet, function, "
+            "script file, or operable program.")
+    bashy = T._unknown_command_hint(said, "powershell")
+    check(f"a bash command in PowerShell says so ({bashy!r})", "head is a bash command" in bashy)
+    check("but not in bash itself", T._unknown_command_hint(said, "bash") == "")
+    plain = run("definitely-not-a-thing-xyz")
+    check("an unknown name with nothing to add stays as the shell said it",
+          "is not recognized" in plain and "one of your tools" not in plain and "bash command" not in plain)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

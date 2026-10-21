@@ -209,7 +209,7 @@ said = "".join(f["content"] for t, f in events if t == "assistant_chunk")
 check("a helper the brain sends is started in the background, whatever mode it asked for",
       '"mode": "background"' in sent[0]["result"])
 check("the turn stays open until the helper has reported", time.time() - t0 >= 1.4)
-check("its report is handed to the brain in the same run", "Told: [SYSTEM NOTIFICATION" in said and "17*23 = 391" in said)
+check("its report is handed to the brain in the same run", "Told: [Background event" in said and "17*23 = 391" in said)
 check("and shows in the chat as a finished helper",
       any(t == "subagent_done" and f["name"] == "Maya" and f["agent_id"] == AID for t, f in events))
 check("then the turn ends once", [t for t, _ in events].count("done") == 1)

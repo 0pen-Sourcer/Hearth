@@ -464,8 +464,8 @@ def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
     allows; the banner makes the provenance unmistakable either way."""
     src = (notif.get("source") or notif.get("persona") or "").lower()
     if src == "reminder":
-        lead = ("A reminder you set earlier has come due; its details are below. "
-                "Deliver it to the user now, naturally")
+        lead = ("A reminder they set has come due; its details are below. Remind "
+                "them in your own words")
     elif src == "command":
         lead = ("A command you ran earlier outlived its wait, carried on in the background "
                 "and has now ended; its output is below. Continue with it")
@@ -477,15 +477,13 @@ def format_notification_as_user_message(notif: Dict[str, Any]) -> str:
                 "below. Use it, answer with tell_subagent if it asks something, and keep "
                 "waiting for its final report")
     elif src in ("schedule", "cron", "timer"):
-        lead = ("A scheduled background event you set up has fired; its details "
-                "are below. Act on it for the user")
+        lead = ("Something you scheduled has fired; its details are below. Act on it")
     else:
-        lead = ("A subagent you dispatched earlier has finished; its result is "
-                "below. Continue the user's original task with it")
+        lead = ("A helper you started has finished; its result is below. Carry on "
+                "with the task it was for")
     return (
-        f"[SYSTEM NOTIFICATION — automated background event, NOT a message from "
-        f"the user. {lead}; do not thank the "
-        f"user for it or treat it as a new user request.]\n"
+        f"[Background event, not a message from them. {lead}. Don't thank them "
+        f"for it or treat it as a new request.]\n"
         f"<task-notification>\n"
         f"  <agent-id>{notif.get('agent_id', '')}</agent-id>\n"
         f"  <persona>{notif.get('persona', '')}</persona>\n"
