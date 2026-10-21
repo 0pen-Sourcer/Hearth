@@ -2187,6 +2187,19 @@
     max-height: min(70vh, calc(100vh - 170px)); overflow-x: hidden; }
   .modal:has(.st-panel) { width: min(560px, calc(100vw - 32px)); }
   .st-panel { display: flex; flex-direction: column; gap: 10px; width: 100%; min-width: 0; box-sizing: border-box; }
+  /* /status above the message box: one panel, sections divided by a line. */
+  .status-pop { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 210;
+    max-height: min(62vh, 560px); overflow-y: auto; background: var(--bg-1); border: 1px solid var(--border);
+    border-radius: var(--r-lg, 12px); box-shadow: 0 -10px 30px rgba(0,0,0,.35); padding: 10px 16px 12px;
+    animation: slash-in .16s var(--ease); }
+  .status-pop[hidden] { display: none; }
+  .status-pop .st-top { display: flex; align-items: center; justify-content: space-between; padding: 2px 0 6px; }
+  .status-pop .st-top b { font-size: 13px; font-weight: 600; }
+  .status-pop .st-close { background: none; border: 0; color: var(--fg-faint); cursor: pointer; padding: 4px; display: grid; place-items: center; border-radius: 6px; }
+  .status-pop .st-close:hover { color: var(--fg); background: var(--bg-2); }
+  .status-pop .st-panel { gap: 0; }
+  .status-pop .st-card { border: 0; border-top: 1px solid var(--border); border-radius: 0; background: none; padding: 10px 0; }
+  .status-pop .st-card:first-child { border-top: 0; }
   .st-card { min-width: 0; }
   .st-bar-top { gap: 10px; flex-wrap: wrap; }
   .st-stale { color: var(--warn); }
@@ -4042,6 +4055,7 @@
         <!-- Slash-command autocomplete. Floats above the input as soon as you
              type `/`. Arrow keys + Enter / Tab to select, Esc to dismiss. -->
         <div class="slash-menu" id="slash-menu" hidden></div>
+        <div class="status-pop" id="status-pop" hidden></div>
         <div style="position:relative">
         <button class="toggle-btn" id="btn-think" title="Show model reasoning">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z"/></svg>
@@ -6838,6 +6852,11 @@ function applyBrainState() {
   }
 
   mpSync();
+  // JARVIS's tag in the Team room shows the brain's mark from the moment it changes.
+  try {
+    const me = typeof ROOM !== 'undefined' && ROOM.people && ROOM.people.get('__main');
+    if (me && me.agent) me.agent.runtime = mainBrainMark();
+  } catch {}
 
   // Eject only makes sense for a LOCAL, currently-loaded model (frees VRAM).
   // Cloud brains use no local VRAM → no eject affordance at all.
@@ -11506,25 +11525,35 @@ function _stSummary(u) {
   return u.note ? 'not reported' : '';
 }
 const ST = { open: new Set(), timer: 0 };
+// Status opens just above the message box, the size of what it says, and
+// stays live while open. Esc, a click elsewhere or Close puts it away.
+function _stOpen() { const p = $('status-pop'); return p && !p.hidden; }
+function hideStatus() {
+  const p = $('status-pop');
+  if (p) p.hidden = true;
+  clearInterval(ST.timer);
+}
 async function showStatus() {
-  const firstOpen = !$('modal').classList.contains('open') || !$('modal-body').querySelector('.st-panel');
-  if (firstOpen) {
+  const pop = $('status-pop');
+  if (!_stOpen()) {
     ST.open.clear();
-    showModal('Status', '<div class="st-panel"><div class="st-card"><span class="st-note">Looking…</span></div></div>', [{ label: 'Close' }]);
+    pop.innerHTML = '<div class="st-panel"><div class="st-card"><span class="st-note">Looking…</span></div></div>';
+    pop.hidden = false;
   }
   await renderStatus(false);
-  // Live while it's open: the context fills and the reply moves on.
   clearInterval(ST.timer);
-  ST.timer = setInterval(() => {
-    if (!$('modal').classList.contains('open') || !$('modal-body').querySelector('.st-panel')) { clearInterval(ST.timer); return; }
-    renderStatus(false);
-  }, 4000);
+  ST.timer = setInterval(() => { if (!_stOpen()) { clearInterval(ST.timer); return; } renderStatus(false); }, 4000);
 }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _stOpen()) hideStatus(); });
+document.addEventListener('mousedown', (e) => {
+  if (_stOpen() && !e.target.closest('#status-pop')) hideStatus();
+});
 async function renderStatus(fresh) {
   let st;
+  const box = $('status-pop');
   try { st = await api('/api/status' + (fresh ? '?fresh=1' : '')); }
-  catch (e) { $('modal-body').innerHTML = `<div class="st-panel"><div class="st-card">${esc(e.message)}</div></div>`; return; }
-  if (!$('modal-body').querySelector('.st-panel')) return;
+  catch (e) { box.innerHTML = `<div class="st-panel"><div class="st-card">${esc(e.message)}</div></div>`; return; }
+  if (!_stOpen()) return;
   const b = st.brain || {}, h = HARNESS[b.id] || BRAIN_MARKS[b.id];
   const ico = h ? `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>`
                : `<span class="mp-ico">${b.kind === 'local' ? MP_CHIP : MP_CLOUD}</span>`;
@@ -11560,14 +11589,16 @@ async function renderStatus(fresh) {
       <span>Helpers</span><em>${st.helpers.working ? st.helpers.working + ' working' : 'none working'}${st.helpers.done ? ', ' + st.helpers.done + ' finished recently' : ''}</em>
       <span>Memories</span><em>${st.memories}</em>
       <span>Workspace</span><em>${esc(st.workspace)}</em></div></div>`;
-  const scroll = $('modal-body').scrollTop;
-  $('modal-body').innerHTML = `<div class="st-panel">${brain}${ctx}${plans}${pc}<div class="st-foot"><span>Updates while open</span><span>Hearth ${esc(st.version)}</span></div></div>`;
-  $('modal-body').scrollTop = scroll;
+  const scroll = box.scrollTop;
+  box.innerHTML = `<div class="st-top"><b>Status</b><button type="button" class="st-close" title="Close (Esc)">${_ICON_X}</button></div>`
+    + `<div class="st-panel">${brain}${ctx}${plans}${pc}<div class="st-foot"><span>Updates while open</span><span>Hearth ${esc(st.version)}</span></div></div>`;
+  box.scrollTop = scroll;
+  box.querySelector('.st-close').onclick = hideStatus;
   $('st-refresh').onclick = async (e) => {
     e.currentTarget.classList.add('spin');
     await renderStatus(true);
   };
-  $('modal-body').querySelectorAll('.st-other').forEach(btn => btn.onclick = () => {
+  box.querySelectorAll('.st-other').forEach(btn => btn.onclick = () => {
     const id = btn.dataset.st;
     if (ST.open.has(id)) ST.open.delete(id); else ST.open.add(id);
     renderStatus(false);

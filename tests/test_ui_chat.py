@@ -348,17 +348,18 @@ with sync_playwright() as pw:
       document.getElementById('input').value = '/status';
       await send();
       await new Promise(r => setTimeout(r, 300));
-      const body = document.getElementById('modal-body');
-      const opened = !!body.querySelector('.st-panel');
+      const body = document.getElementById('status-pop');
+      const opened = !body.hidden && !!body.querySelector('.st-panel') && !document.getElementById('modal-body').querySelector('.st-panel');
       const bars = [...body.querySelectorAll('.st-bar')].filter(b => !/Context used/.test(b.textContent)).length;
       const folded = [...body.querySelectorAll('.st-other')].map(b => b.textContent.trim());
       body.querySelector('#st-refresh').click();
       await new Promise(r => setTimeout(r, 300));
       const fresh = asked.some(p => p.includes('fresh=1'));
       STATE.streaming = false;
-      document.getElementById('modal').classList.remove('open');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      const closed = body.hidden;
       window.api = real;
-      return { opened, bars, folded, fresh };
+      return { opened, bars, folded, fresh, closed };
     }""")
     # A model loaded from Models & engine showed a static line; the bar was only on the sticker.
     mload = pg.evaluate("""async () => {
@@ -379,7 +380,7 @@ with sync_playwright() as pw:
     ctxs = pg.evaluate("""() => [fmtCtxPill(90000), fmtCtxPill(32768), fmtCtxPill(1048576), fmtCtxPill(977000)]""")
     check(f"context sizes read as they were set {ctxs}", ctxs == ["90K", "32K", "1M", "977K"])
     check(f"/status opens mid-reply, with only the brain in use open and a refresh {stat}",
-          stat["opened"] and stat["bars"] == 1 and len(stat["folded"]) == 1 and "72%" in stat["folded"][0] and stat["fresh"])
+          stat["opened"] and stat["closed"] and stat["bars"] == 1 and len(stat["folded"]) == 1 and "72%" in stat["folded"][0] and stat["fresh"])
     check(f"a message typed in another chat while one replies isn't sent to that reply {slash}",
           slash["kept"] == "new question elsewhere" and "new question elsewhere" not in slash["steered"])
 
@@ -397,6 +398,7 @@ with sync_playwright() as pw:
       const wait = (ms) => new Promise(r => setTimeout(r, ms));
       STATE.settings = Object.assign({}, STATE.settings || {}, { llm_provider: 'claude-code' });
       Object.assign(STATE.brain, deriveBrainKind());
+      applyBrainState();
       showView('team');
       await wait(2500);
       // The room loads its art first; on a slow start JARVIS isn't in it yet.
@@ -416,6 +418,8 @@ with sync_playwright() as pw:
       const strip = document.getElementById('perm-strip');
       out.stripInRoom = !strip.hidden && strip.nextElementSibling === document.getElementById('tm-compose');
       out.mark = !!document.querySelector('#tm-labels .tm-label .hx-mini svg');
+      out.markWhy = { brain: mainBrainMark(), provider: (STATE.settings || {}).llm_provider,
+                      label: (document.querySelector('#tm-labels .tm-label') || {}).innerHTML || '' };
       // A name tag between two pixels makes its border shimmer as people walk.
       { const m = ROOM.people.get('__main'); m.pos = [m.pos[0] + 0.37, m.pos[1] + 0.29]; ROOM.labelSig = ''; roomDraw(performance.now()); }
       const sb = document.getElementById('tm-labels').getBoundingClientRect();
@@ -498,7 +502,7 @@ with sync_playwright() as pw:
           room["asking"] == "I need to run a command for this. Okay?" and room["stripInRoom"] and room["stripBack"])
     check(f"JARVIS works at the free desk nearest it and asks about a command from there {room.get('nearDesk')} {room.get('askHere')}",
           room.get("nearDesk") == 6 and room.get("askHere") == ["type", True, True])
-    check("JARVIS's tag carries the mark of the brain it is running on", room["mark"])
+    check(f"JARVIS's tag carries the mark of the brain it is running on {room.get('markWhy')}", room["mark"])
     check(f"name tags sit on whole pixels {room['whole']}",
           room["whole"] and all(abs(v - round(v)) < 0.01 for xy in room["whole"] for v in xy))
     check(f"it paces while it thinks instead of standing in one spot {room['pace']}", room["pace"] == ["think", True, True])
