@@ -394,9 +394,7 @@ def format_matches(matches: List[Match]) -> str:
         except Exception:
             n_files = n_indexed = -1
         if n_files == 0:
-            return ("No past conversations exist yet — this is the first "
-                    "chat. Don't say 'I have no history'; say 'this is "
-                    "our first session, what's up?'.")
+            return "There are no earlier chats; this is the first one."
         return (f"No past conversations matched the query. "
                 f"({n_files} conversation file(s) in store, {n_indexed} "
                 f"indexed messages — try broader terms, fewer terms, or "
@@ -421,8 +419,99 @@ def format_matches(matches: List[Match]) -> str:
             f"    {m.snippet}\n"
             f"    convo_id={m.conversation_id}"
         )
-    out.append(
-        "\nTo read full context: use the conversation_id with the chat sidebar, "
-        "or just summarize what's above for the user."
-    )
+    out.append("\nread_chat with a convo_id reads that whole chat in order.")
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Reading one chat whole
+# ---------------------------------------------------------------------------
+
+_PER_MESSAGE = 2000
+
+
+def _find_chat(chat: str) -> tuple:
+    """(chat, candidates): the chat named by id or title, or the closest titles
+    when the name fits several."""
+    from . import chat_sync
+    want = (chat or "").strip()
+    if not want:
+        return None, []
+    every = chat_sync.listing(limit=100000)
+    for c in every:
+        if c["id"] == want:
+            return c, []
+    low = want.lower()
+    words = set(re.findall(r"\w+", low))
+
+    def fit(c):
+        t = (c.get("title") or "").lower()
+        if t == low:
+            return 3.0
+        if low in t:
+            return 2.0
+        tw = set(re.findall(r"\w+", t))
+        return len(words & tw) / max(1, len(words))
+    ranked = sorted(((fit(c), c) for c in every), key=lambda x: (-x[0], -int(x[1]["updated"] or 0)))
+    ranked = [(f, c) for f, c in ranked if f >= 0.5]
+    if not ranked:
+        return None, []
+    top = ranked[0][0]
+    tied = [c for f, c in ranked if f == top]
+    if len(tied) == 1 or top >= 3.0:
+        return tied[0], []
+    return None, [c for _f, c in ranked[:6]]
+
+
+def _when(ms) -> str:
+    import datetime
+    try:
+        v = float(ms or 0)
+        return datetime.datetime.fromtimestamp(v / (1000 if v > 1e12 else 1)).strftime("%Y-%m-%d %H:%M") if v else ""
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def _line(i: int, m: dict) -> str:
+    from .chat_sync import _text
+    text = _text(m.get("content")).strip()
+    if len(text) > _PER_MESSAGE:
+        text = text[:_PER_MESSAGE].rstrip() + f" … ({len(text) - _PER_MESSAGE} more characters)"
+    steps = [e.get("name") for e in (m.get("events") or []) if isinstance(e, dict) and e.get("kind") == "tool" and e.get("name")]
+    did = f"  [used: {', '.join(steps[:12])}{'…' if len(steps) > 12 else ''}]" if steps else ""
+    when = _when(m.get("at"))
+    return f"#{i} {m.get('role')}{(' · ' + when) if when else ''}{did}\n{text}"
+
+
+def read_chat(chat: str, start: Optional[int] = None, budget: int = 11000) -> str:
+    """One chat in order, for picking up where it left off. Long chats show the
+    first message and the most recent ones; `start` reads on from a message."""
+    from . import chat_sync
+    found, near = _find_chat(chat)
+    if not found:
+        if near:
+            rows = "\n".join(f"- {c['title']}  ({_when(c['updated'])}, {c['count']} messages)  id={c['id']}" for c in near)
+            return f"More than one chat fits \"{chat}\". Read one by its id:\n{rows}"
+        return f"No chat is called \"{chat}\". search_chats finds one by what was said in it."
+    d = chat_sync.load(found["id"]) or {}
+    msgs = [m for m in (d.get("messages") or [])
+            if m.get("role") in ("user", "assistant") and not m.get("silent")
+            and chat_sync._text(m.get("content")).strip() != "__HEARTH_NOTIFY_FLUSH__"]
+    head = f"Chat: {found['title']} ({_when(found['updated'])}, {len(msgs)} messages, id={found['id']})"
+    if not msgs:
+        return head + "\nIt has no messages."
+    lines = [_line(i, m) for i, m in enumerate(msgs)]
+    if start is not None:
+        start = max(0, min(int(start), len(lines) - 1))
+        out, used, i = [], 0, start
+        while i < len(lines) and (not out or used + len(lines[i]) <= budget):
+            out.append(lines[i]); used += len(lines[i]); i += 1
+        more = f"\n[#{i}–#{len(lines) - 1} follow; read_chat with start={i} goes on]" if i < len(lines) else ""
+        return head + "\n\n" + "\n\n".join(out) + more
+    # The first message says what the chat was for; the latest say where it got to.
+    first = lines[0]
+    tail, used, i = [], len(first), len(lines) - 1
+    while i > 0 and (not tail or used + len(lines[i]) <= budget):
+        tail.insert(0, lines[i]); used += len(lines[i]); i -= 1
+    gap = f"[#1–#{i} left out; read_chat with start=1 reads them]" if i >= 1 else ""
+    return head + "\n\n" + "\n\n".join([first] + ([gap] if gap else []) + tail)

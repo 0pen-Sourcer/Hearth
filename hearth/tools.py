@@ -259,6 +259,7 @@ RESULT_CAPS: Dict[str, int] = {
     "list_installed_apps": 6000,
     "system_info": 3000,
     "memory_recall": 8000,
+    "read_chat": 12000,
     "memory_list": 6000,
     "disk_usage": 6000,
     "locate_path": 4000,
@@ -634,10 +635,28 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "read_chat",
+        "description": (
+            "Read one earlier chat in order, by its title or id: what it was about, "
+            "and the latest turns in full. Use it to pick up where a chat left off, or "
+            "when asked to read or continue a chat. A long chat shows its first "
+            "message and its most recent ones; start reads on from a message number."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "chat": {"type": "string", "description": "The chat's title (or words from it) or its id."},
+                "start": {"type": "integer", "description": "Read from this message number on, for the part left out."},
+            },
+            "required": ["chat"],
+        },
+    },
+    {
         "name": "search_chats",
         "description": (
             "Full-text search over every past conversation. Use it for anything that "
-            "happened in an earlier chat. Returns matches with snippets."
+            "happened in an earlier chat. Returns matches with snippets and each "
+            "chat's id; read_chat reads one whole."
         ),
         "parameters": {
             "type": "object",
@@ -6511,6 +6530,8 @@ _HANDLERS = {
     "list_archive": _list_archive,
     "extract_archive_file": _extract_archive_file,
     "summarize_file": _summarize_file,
+    "read_chat":      lambda p: __import__("hearth.session_search", fromlist=["read_chat"]).read_chat(
+        p.get("chat", ""), p.get("start")),
     "search_chats":   lambda p: __import__("hearth.session_search", fromlist=["search","format_matches"]).format_matches(__import__("hearth.session_search", fromlist=["search"]).search(p.get("query", ""), int(p.get("limit") or 8))),
     "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(
         p.get("when", ""), p.get("what", ""), p.get("recurring", ""),
@@ -9116,7 +9137,7 @@ _TOOL_CATEGORY = {
     "race_helpers": "Sub-agents",
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
-    "memory_forget": "Memory", "search_chats": "Memory",
+    "memory_forget": "Memory", "search_chats": "Memory", "read_chat": "Memory",
     "edit_soul": "Memory", "append_soul": "Memory", "read_soul": "Memory", "draft_soul": "Memory",
     # Reminders & alerts
     "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
