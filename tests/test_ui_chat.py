@@ -1265,15 +1265,31 @@ with sync_playwright() as pw:
     fit = pg.evaluate("""async () => {
       $('onboard').classList.remove('open');
       document.querySelector('#onboard .ob-card').classList.remove('ob-wide');
-      obStep = 6; obShow(); await new Promise(r => setTimeout(r, 300));
-      obStep = 7; obRender(); await new Promise(r => setTimeout(r, 1500));
       const off = [];
-      for (const id of ['ob-approval', 'ob-look', 'ob-uimode']) {
-        const box = $(id), hl = box.querySelector('.ob-seg-hl'), on = box.querySelector('button.on');
-        if (!hl || !on) { off.push(id + ' missing'); continue; }
-        const a = hl.getBoundingClientRect(), b = on.getBoundingClientRect();
-        if (Math.abs(a.left - b.left) > 2 || Math.abs(a.width - b.width) > 2) off.push(`${id} ${Math.round(a.left)}/${Math.round(b.left)} ${Math.round(a.width)}/${Math.round(b.width)}`);
-      }
+      const measure = (how) => {
+        for (const id of ['ob-approval', 'ob-look', 'ob-uimode']) {
+          const box = $(id), hl = box.querySelector('.ob-seg-hl'), on = box.querySelector('button.on');
+          if (!hl || !on) { off.push(`${how} ${id} missing`); continue; }
+          const a = hl.getBoundingClientRect(), b = on.getBoundingClientRect();
+          if (Math.abs(a.left - b.left) > 2 || Math.abs(a.width - b.width) > 2) off.push(`${how} ${id} ${Math.round(a.left)}/${Math.round(b.left)} ${Math.round(a.width)}/${Math.round(b.width)}`);
+        }
+      };
+      obStep = 6; obShow(); await new Promise(r => setTimeout(r, 300));
+      obStep = 7; obRender();
+      // The Continue button's hover colour finishes before the card has widened.
+      await new Promise(r => setTimeout(r, 30));
+      $('ob-next').dispatchEvent(new TransitionEvent('transitionend', { propertyName: 'background-color', bubbles: true }));
+      await new Promise(r => setTimeout(r, 1500));
+      measure('next');
+      // Setup reopened where it was left (a saved draft) lands right on the step.
+      obDemoStop(); $('onboard').classList.remove('open');
+      document.querySelector('#onboard .ob-card').classList.remove('ob-wide');
+      obStep = 7; obShow();
+      // A button's own colour change ends before the card has finished widening.
+      await new Promise(r => setTimeout(r, 30));
+      document.querySelector('#ob-look button').dispatchEvent(new TransitionEvent('transitionend', { propertyName: 'border-color', bubbles: true }));
+      await new Promise(r => setTimeout(r, 1500));
+      measure('reopened');
       obDemoStop(); $('onboard').classList.remove('open');
       const run = makeToolRun();
       run._cards.appendChild(makeToolCard('delete_path', { path: 'a' }).div);

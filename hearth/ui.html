@@ -19292,7 +19292,14 @@ async function obDemoStart() {
     await wait(3200);
   }
 }
-window.addEventListener('resize', () => { if ($('onboard') && $('onboard').classList.contains('open')) _obPaintSegs(true); });
+// A row of options that changes size (the card widening, the window) puts
+// its highlight back on the picked option.
+if (window.ResizeObserver) {
+  const _obSegSize = new ResizeObserver((rows) => {
+    for (const r of rows) if (r.target.offsetParent) _obSlideSeg(r.target, true);
+  });
+  for (const id of Object.values(_OB_SEGS)) { const b = document.getElementById(id); if (b) _obSegSize.observe(b); }
+}
 function _saveOnboardingDraft() { try { localStorage.setItem('hearth_onboarding_draft', JSON.stringify({step: obStep, state: obState})); } catch {} }
 function _loadOnboardingDraft() { try { const d = JSON.parse(localStorage.getItem('hearth_onboarding_draft')||'null'); if(d && d.state && d.step) return d; } catch {} return null; }
 function _clearOnboardingDraft() { try { localStorage.removeItem('hearth_onboarding_draft'); } catch {} }
@@ -19351,11 +19358,7 @@ function obRender() {
   if (obStep === 5) obLoadWhatToGet();
   if (obStep === 6) setTimeout(() => $('ob-name').focus(), 80);
   if (obStep === 8) { _obProbeMigrate(); _obWireImport(); }
-  const _card = document.querySelector('#onboard .ob-card');
-  if (_card.classList.contains('ob-wide') !== (obStep === 7)) {
-    _card.classList.toggle('ob-wide', obStep === 7);
-    _card.addEventListener('transitionend', (e) => { if (e.propertyName === 'max-width') _obPaintSegs(true); }, { once: true });
-  }
+  document.querySelector('#onboard .ob-card').classList.toggle('ob-wide', obStep === 7);
   if (obStep === 7) setTimeout(obDemoStart, 420); else obDemoStop();
   if (obStep === 1) document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _agentName(); });
   _obPaintSegs();
