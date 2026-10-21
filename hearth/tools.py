@@ -3699,6 +3699,12 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
     return None
 
 
+def _job_controls_in() -> None:
+    # There is a job now: what checks on it and stops it comes with it.
+    for n in ("job_status", "job_wait", "job_kill", "get_job_result"):
+        _touch_unlocked(n)
+
+
 def _run_command(p: Dict) -> str:
     shell, shell_note = _shells.normalize_shell(p.get("shell"))
     if shell_note:
@@ -3781,6 +3787,7 @@ def _run_command(p: Dict) -> str:
     if r.get("background"):
         so_far = (r.get("output_tail") or "").strip()
         when = "moved to the background when asked" if r.get("asked") else f"still running after {timeout}s"
+        _job_controls_in()
         return (f"$ {cmd}\n[{when}, so it carries on in the background as job "
                 f"{r['job_id']}. You will be told when it ends; job_status shows its output so far, "
                 f"job_kill stops it. Carry on with other work meanwhile.]"
@@ -6572,6 +6579,7 @@ _HANDLERS = {
     # Background-job tracking — see hearth/jobs.py. Lazy-import so a missing
     # ~/Jarvis/jobs/ dir or a stale module doesn't break tool registration.
     "start_job":  lambda p: (_destructive_refusal(p, p.get("command", ""), "start_job")
+        or _job_controls_in()
         or __import__("hearth.jobs", fromlist=["start_job"]).start_job(
         p.get("command", ""), cwd=p.get("cwd"),
         shell=p.get("shell") or "",
@@ -6687,7 +6695,14 @@ def _browse_key(p: Dict) -> str:
     return _b.browse_key(p)
 
 
-_HANDLERS["browse"] = _browse
+def _browse_then(p):
+    # A page is open now: clicking and typing on it come with it.
+    _touch_unlocked("browse_click")
+    _touch_unlocked("browse_type")
+    return _browse(p)
+
+
+_HANDLERS["browse"] = _browse_then
 _HANDLERS["browse_click"] = _browse_click
 _HANDLERS["browse_type"] = _browse_type
 _HANDLERS["browse_scroll"] = _browse_scroll
@@ -8638,6 +8653,10 @@ _DEFERRED_TOOLS = {
     "manage_window", "list_windows",  # window mgmt is niche; focus_window covers it
     "cancel_reminder",     # reminders are managed in the GUI; set_reminder stays core
     "browse_scroll",       # browse + browse_click cover normal page use
+    # Only useful after their parent ran, which brings them in (see below):
+    # clicking and typing on a page once one is open, and a job's result once
+    # there is a job.
+    "browse_click", "browse_type", "get_job_result",
 }
 
 # User plugins are deferred by DEFAULT so the core prompt stays bounded no matter

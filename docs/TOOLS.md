@@ -2,7 +2,7 @@
 
 Hearth gives the model **113 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
-To keep the prompt small, **40** core tools load with their full description and **73** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **36** core tools load with their full description and **77** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -32,11 +32,11 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | Tool | What it does |
 |---|---|
 | `browse` | Drive a real, visible Chromium window: navigate, get the page text and a numbered list of links and buttons, then act with browse_click and browse_type |
-| `browse_click` | Click a link or button on the CURRENT browser page by its visible text (use the exact text from the CLICKABLE list that browse returned) |
+| `browse_click` † | Click a link or button on the CURRENT browser page by its visible text (use the exact text from the CLICKABLE list that browse returned) |
 | `browse_close` † | Close the browser session |
 | `browse_key` † | Press a keyboard key/shortcut on the current browser page, for media controls and shortcuts that aren't clickable buttons |
 | `browse_scroll` † | Smooth-scroll the current browser page so you can see more content |
-| `browse_type` | Type into a field on the current browser page (a search box, login field, etc.) |
+| `browse_type` † | Type into a field on the current browser page (a search box, login field, etc.) |
 | `list_browsers` † | List installed browsers detected on this machine |
 | `open_in_browser` | Open a URL in a SPECIFIC browser (and optional profile), the user SEES it in their own browser, and it stays open |
 | `open_url` | Open a URL in the user's default browser for them to use |
@@ -91,7 +91,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 
 | Tool | What it does |
 |---|---|
-| `get_job_result` | Get the result of a background job by id |
+| `get_job_result` † | Get the result of a background job by id |
 | `job_kill` † | Terminate a running background job by job_id |
 | `job_status` † | Return current status + last ~40 lines of output for a background job |
 | `job_wait` † | Block up to `timeout_s` seconds for the job to finish, then return final status + output |
@@ -123,7 +123,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `memory_list` † | Show the full memory index (all titles and one-line hooks) |
 | `memory_recall` | Search saved memories |
 | `memory_save` | Save a lasting fact about the user or their world (preferences, hardware, projects, people, setups) |
-| `read_chat` | Read one earlier chat in order, by its title or id: what it was about, and the latest turns in full |
+| `read_chat` † | Read one earlier chat in order, by its title or id: what it was about, and the latest turns in full |
 | `read_soul` † | Read back your current soul.md content |
 | `search_chats` | Full-text search over every past conversation |
 
