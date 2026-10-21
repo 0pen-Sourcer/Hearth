@@ -2172,6 +2172,22 @@
   .slash-item.active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .slash-item:hover { background: var(--bg-2); }
   .slash-cmd { color: var(--accent-2); font-family: var(--mono); font-weight: 600; font-size: 13px; }
+  .src-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 2px; padding: 3px 9px 3px 6px;
+    border: 1px solid var(--border); border-radius: 99px; font-size: 11.5px; color: var(--fg-dim); cursor: default; }
+  .src-chip > img, .src-list img { width: 14px; height: 14px; border-radius: 3px; }
+  .src-chip em { font-style: normal; color: var(--fg-faint); }
+  .src-list { display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 50; min-width: 280px; max-width: 420px;
+    flex-direction: column; padding: 6px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+  .src-chip:hover .src-list, .src-chip:focus-within .src-list { display: flex; }
+  .src-list a { display: grid; grid-template-columns: 16px 1fr; column-gap: 8px; padding: 6px 8px; border-radius: 6px;
+    color: var(--fg); text-decoration: none; }
+  .src-list a:hover { background: var(--bg-2); }
+  .src-list a img { grid-row: span 2; margin-top: 2px; }
+  .src-list b { font-weight: 600; font-size: 12px; }
+  .src-list small { color: var(--fg-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .paste-view { white-space: pre-wrap; max-height: 60vh; overflow: auto; font: 12px/1.5 var(--mono); margin: 0; }
+  .user-attach.is-paste { cursor: pointer; }
   .slash-item.mention { justify-content: flex-start; align-items: center; gap: 10px; padding: 7px 12px; }
   .mention-ico { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px;
     background: var(--bg-2); color: var(--fg-dim); }
@@ -7023,6 +7039,8 @@ function newConversation() {
   const empty = STATE.conversations.find(x => !convoMsgCount(x));
   if (empty) {
     // Reused, but it is a new chat now: it sits under Today, not the day it was made.
+    // One listed from disk and never opened has nothing to load; it is a plain chat.
+    if (empty._stub) { empty._stub = false; empty.messages = []; }
     empty.created = empty.updated = Date.now();
     persistConvo(empty);
     setActiveId(empty.id);
@@ -7436,6 +7454,7 @@ function replayAssistant(msgDiv, m, body) {
   for (const ev of events) {
     if (ev.kind !== 'done') continue;
     if (ev.text) body.appendChild(makeMeta(ev.text, 'ok'));
+    attachSources(msgDiv, events);
     attachStatsLine(msgDiv, ev.stats);
   }
 }
@@ -7669,6 +7688,10 @@ function renderMessage(m) {
         cap.className = 'user-attach-name';
         cap.textContent = a.name;
         chip.appendChild(cap);
+        if (a.kind === 'paste' && a.text) {
+          chip.classList.add('is-paste'); chip.title = 'Open what was pasted';
+          chip.addEventListener('click', () => showPasted(a));
+        }
         tray.appendChild(chip);
       });
       contentEl.appendChild(tray);
@@ -8456,6 +8479,36 @@ function makeStatsLine(stats) {
 // which would float it up to the header line on the right.
 // Off only when the user explicitly disabled the footer in Settings (default on).
 function _statsEnabled() { return !(STATE.settings && STATE.settings.gen_stats === false); }
+// Where a reply's facts came from: under a reply that used the web, one chip
+// with the first source and how many more, every link listed on hover.
+function sourcesOf(events) {
+  const urls = [];
+  const add = (u) => { u = String(u || '').replace(/[)\].,;'"]+$/, ''); if (/^https?:\/\//.test(u) && !urls.includes(u)) urls.push(u); };
+  for (const ev of events || []) {
+    if (ev.kind !== 'tool') continue;
+    const a = ev.args || {};
+    if (ev.name === 'web_fetch' || ev.name === 'browse' || ev.name === 'open_in_browser') add(a.url);
+    if (ev.name === 'web_search') for (const u of String(ev.result || '').match(/https?:\/\/[^\s<>"]+/g) || []) add(u);
+  }
+  return urls.slice(0, 8);
+}
+function attachSources(msgEl, events) {
+  const body = msgEl && (msgEl.querySelector(':scope > .body') || msgEl.querySelector('.body'));
+  if (!body || body.querySelector('.src-chip')) return;
+  const urls = sourcesOf(events);
+  if (!urls.length) return;
+  const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+  const chip = document.createElement('span');
+  chip.className = 'src-chip';
+  chip.tabIndex = 0;
+  chip.innerHTML = `<img src="/api/favicon?d=${encodeURIComponent(host(urls[0]))}" alt="" onerror="this.remove()">`
+    + `<span>${esc(host(urls[0]))}</span>${urls.length > 1 ? `<em>+${urls.length - 1}</em>` : ''}`
+    + `<span class="src-list">${urls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">`
+      + `<img src="/api/favicon?d=${encodeURIComponent(host(u))}" alt="" onerror="this.remove()">`
+      + `<b>${esc(host(u))}</b><small>${esc(u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 70))}</small></a>`).join('')}</span>`;
+  const actions = body.querySelector('.actions');
+  if (actions) body.insertBefore(chip, actions); else body.appendChild(chip);
+}
 function attachStatsLine(msgEl, stats) {
   if (!msgEl || !_statsEnabled()) return;
   const body = msgEl.querySelector(':scope > .body') || msgEl.querySelector('.body');
@@ -10348,6 +10401,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
   const _attach = _pendingAttachments.slice();
   if (_attach.length && !forced) {
     const lines = _attach.map(a => {
+      if (a.kind === 'paste')
+        return `Pasted text:\n"""\n${a.text}\n"""`;
       if (a.kind === 'chat')
         return a.preview ? `Attached chat "${a.name}":\n"""\n${a.preview}\n"""`
                          : `Attached chat "${a.name}" (id ${a.chat}): read_chat reads it.`;
@@ -10460,6 +10515,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       userMsg.attachments = _attach.map(a => ({
         name: a.name, path: a.path, isImage: !!a.isImage,
         ...(a.kind ? { kind: a.kind } : {}), ...(a.chat ? { chat: a.chat } : {}),
+        ...(a.kind === 'paste' ? { text: a.text } : {}),
       }));
     }
     if (_silent) userMsg.silent = true;  // skip rendering this bubble
@@ -11334,6 +11390,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
           const bs = chatBody.querySelectorAll('.msg.assistant');
           _lm = bs.length ? bs[bs.length - 1] : null;
         }
+        attachSources(_lm, assistantMsg.events);
         attachStatsLine(_lm, _doneStats);
       }
       if (ev.reason === 'end_session') {
@@ -11993,6 +12050,7 @@ const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','bmp','tiff']);
 // Inline SVGs - keeping these out of the emoji set on purpose. Hearth's
 // UI uses no emojis anywhere; chips get small icon glyphs instead.
 const _ICON_FILE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+const _ICON_TEXT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h6"/></svg>';
 const _ICON_X = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
 function _renderAttachTray() {
@@ -12008,17 +12066,19 @@ function _renderAttachTray() {
     if (a.isImage && a.path) {
       lead = `<img src="/file?path=${encodeURIComponent(a.path)}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;display:block;">`;
     } else {
-      const ico = (a.kind === 'chat' || a.kind === 'folder') ? _MENTION_ICO[a.kind] : _ICON_FILE;
+      const ico = (a.kind === 'chat' || a.kind === 'folder') ? _MENTION_ICO[a.kind] : a.kind === 'paste' ? _ICON_TEXT : _ICON_FILE;
       lead = `<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:var(--bg-1);border-radius:4px;color:var(--fg-faint);">${ico}</span>`;
     }
     chip.innerHTML =
       lead +
       `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;">${esc(a.name)}</span>` +
       `<button data-i="${i}" style="background:none;border:none;color:var(--fg-faint);cursor:pointer;padding:0 2px;display:inline-flex;align-items:center;">${_ICON_X}</button>`;
-    chip.querySelector('button').addEventListener('click', () => {
+    chip.querySelector('button').addEventListener('click', (e) => {
+      e.stopPropagation();
       _pendingAttachments.splice(i, 1);
       _renderAttachTray();
     });
+    if (a.kind === 'paste') { chip.style.cursor = 'pointer'; chip.title = 'Open what was pasted'; chip.addEventListener('click', () => showPasted(a)); }
     _attachTray.appendChild(chip);
   });
 }
@@ -12074,7 +12134,19 @@ if (_chatInputEl) {
         return;
       }
     }
+    // A long paste goes with the message as a document instead of filling the
+    // box: a chip says how long it is and opens it.
+    const txt = (ev.clipboardData && ev.clipboardData.getData('text/plain')) || '';
+    const lines = txt ? txt.split(/\r?\n/).length : 0;
+    if (txt.length > 2000 || lines > 40) {
+      ev.preventDefault();
+      _pendingAttachments.push({ kind: 'paste', name: `Pasted text · ${lines} line${lines === 1 ? '' : 's'}`, text: txt });
+      _renderAttachTray();
+    }
   });
+}
+function showPasted(a) {
+  showModal(a.name, `<pre class="paste-view">${esc(a.text || '')}</pre>`, [{ label: 'Close' }]);
 }
 
 // Drag-and-drop into the chat input or its surrounding row.

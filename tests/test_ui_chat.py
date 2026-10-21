@@ -635,6 +635,44 @@ with sync_playwright() as pw:
     pg.route("**/api/team/choices", reply({"roles": [], "agents": [
         {"id": "claude-code", "label": "Claude Code"}, {"id": "codex", "label": "Codex"},
         {"id": "opencode", "label": "OpenCode"}, {"id": "gemini-cli", "label": "Gemini CLI"}]}))
+    pasted = pg.evaluate("""async () => {
+      const box = document.getElementById('input');
+      box.value = 'look at this:';
+      _pendingAttachments = []; _renderAttachTray();
+      const long = Array.from({ length: 120 }, (_, i) => 'line ' + i).join('\\n');
+      const dt = new DataTransfer(); dt.setData('text/plain', long);
+      box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      const short = new DataTransfer(); short.setData('text/plain', 'just a word');
+      const ev2 = new ClipboardEvent('paste', { clipboardData: short, bubbles: true, cancelable: true });
+      box.dispatchEvent(ev2);
+      await new Promise(r => setTimeout(r, 50));
+      const out = { box: box.value, chips: _pendingAttachments.map(a => a.name), shortKept: !ev2.defaultPrevented };
+      document.querySelector('#attach-tray > div').click();
+      await new Promise(r => setTimeout(r, 50));
+      out.opened = (document.getElementById('modal-body').textContent || '').includes('line 119');
+      document.getElementById('modal').classList.remove('open');
+      _pendingAttachments = []; _renderAttachTray(); box.value = '';
+      // A reply that used the web shows where it came from.
+      showView('chat');
+      const c = newConversation();
+      c.messages = [{ role: 'user', content: 'who won' }, { role: 'assistant', content: 'Team A won.', events: [
+        { kind: 'tool', name: 'web_search', args: { query: 'who won' }, result: '1. https://www.bbc.com/sport/x\\n2. https://espn.com/y', pos: 0 },
+        { kind: 'tool', name: 'web_fetch', args: { url: 'https://www.bbc.com/sport/x' }, result: '...', pos: 0 },
+        { kind: 'done', duration_ms: 3000, stats: { duration_ms: 3000 } }] }];
+      renderChat();
+      await new Promise(r => setTimeout(r, 100));
+      const msg = [...document.querySelectorAll('#chat-body .msg.assistant')].pop();
+      const chip = msg.querySelector('.src-chip');
+      out.src = chip ? chip.firstElementChild.nextElementSibling.textContent + '|' + (chip.querySelector('em') || {}).textContent : '';
+      out.links = chip ? chip.querySelectorAll('.src-list a').length : 0;
+      return out;
+    }""")
+    check(f"a long paste becomes a chip that opens it, a short one stays in the box {pasted}",
+          pasted["box"] == "look at this:" and pasted["chips"] == ["Pasted text · 120 lines"]
+          and pasted["shortKept"] and pasted["opened"])
+    check(f"a reply that used the web shows its sources ({pasted['src']}, {pasted['links']})",
+          pasted["src"] == "bbc.com|+1" and pasted["links"] == 2)
+
     get = pg.evaluate("""async () => {
       const wait = (ms) => new Promise(r => setTimeout(r, ms));
       const realApi = window.api, realDl = window.modelsDownloadHF, realVoice = window._obFetchVoiceModels;
