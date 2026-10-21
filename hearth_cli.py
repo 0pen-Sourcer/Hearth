@@ -1989,8 +1989,25 @@ class JarvisCLI:
                 pass
             disk = _ls.scan_disk_for_models()
             if not disk:
-                print(f"  {C_DIM}No local models on disk yet. After setup, run {C_RESET}{C_TOOL}/models{C_RESET}"
-                      f"{C_DIM} to search Hugging Face and download one.{C_RESET}\n")
+                # The same first model the window's setup offers: this month's most
+                # downloaded chat model its makers publish that fits this card.
+                pick = None
+                try:
+                    print(f"  {C_DIM}No local models on disk yet. Looking for one that fits this PC…{C_RESET}", flush=True)
+                    pick = _ls.suggest_model()
+                except Exception:
+                    pick = None
+                if pick:
+                    size = f"{pick.get('size_gb')} GB" if pick.get("size_gb") else "size unknown"
+                    print(f"  {C_TOOL}{pick['repo']}{C_RESET}{C_DIM}  {pick['filename']} · {size}{C_RESET}")
+                    print(f"  {C_DIM}The most downloaded chat model this month that its makers publish and this card runs.{C_RESET}")
+                    yes = input(f"  {C_DIM}Download it now? [Y/n]{C_RESET} ").strip().lower()
+                    if yes in ("", "y", "yes"):
+                        await self._cmd_models(f"/models get {pick['repo']} {pick['filename']}")
+                        print()
+                        return
+                print(f"  {C_DIM}Run {C_RESET}{C_TOOL}/models{C_RESET}"
+                      f"{C_DIM} any time to search Hugging Face and download one.{C_RESET}\n")
                 return
             print(f"  {C_TOOL}Pick a model to run locally{C_RESET}{C_DIM}:{C_RESET}")
             for i, m in enumerate(disk[:6], 1):
