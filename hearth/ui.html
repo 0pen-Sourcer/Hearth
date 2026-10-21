@@ -3695,6 +3695,31 @@
     overflow: hidden;
     transform-origin: 50% 50%;
   }
+  .ob-card { transition: max-width .38s var(--ease); }
+  .ob-card.ob-wide { max-width: 1140px; }
+  .ob-split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 32px; align-items: start; }
+  .ob-demo { position: sticky; top: 0; padding-top: 4px; }
+  .obd-win { height: 440px; display: flex; flex-direction: column; border: 1px solid var(--border-strong);
+    border-radius: var(--r-lg, 12px); background: var(--bg-0); overflow: hidden; }
+  .obd-chat { flex: 1; min-height: 0; overflow: hidden; padding-top: 10px; scroll-behavior: smooth; }
+  .obd-feed { zoom: .88; padding: 0 6px 4px; }
+  .obd-feed .msg { animation: msgIn .25s var(--ease); }
+  .obd-feed .actions, .obd-feed .msg-time { display: none !important; }
+  .obd-strip .perm-strip { zoom: .88; margin: 0 12px 6px; }
+  .obd-strip .perm-key.obd-press { background: var(--bg-3); color: var(--fg); }
+  .obd-strip .perm-key.obd-press b { color: var(--accent); }
+  .obd-input { display: flex; align-items: center; gap: 8px; margin: 0 10px 10px; padding: 9px 10px 9px 13px;
+    border: 1px solid var(--border); border-radius: var(--r); background: var(--bg-1); font-size: 12px; color: var(--fg-faint); }
+  .obd-ph { flex: 1; }
+  .obd-mode { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--fg-dim); }
+  .obd-mode svg { width: 11px; height: 11px; }
+  .obd-cap { margin-top: 10px; font-size: 12px; line-height: 1.45; color: var(--fg-dim); min-height: 34px; }
+  .obd-cap b { color: var(--fg); font-weight: 600; }
+  @media (max-width: 1180px) {
+    .ob-card.ob-wide { max-width: 720px; }
+    .ob-split { display: block; }
+    .ob-demo { display: none; }
+  }
   .ob-progress {
     display: flex; gap: 8px;
     padding: 18px 28px 0 28px;
@@ -4083,7 +4108,7 @@
            instead" field. No center modal, no mouse required. -->
       <div class="perm-strip" id="perm-strip" hidden>
         <div class="perm-line">
-          <span class="perm-label">Allow the assistant to run</span>
+          <span class="perm-label">Allow <span data-agent-name>JARVIS</span> to run</span>
           <code class="perm-tool" id="perm-tool"></code>
           <span class="perm-args" id="perm-args"></span>
           <span class="perm-close" id="perm-close" title="Cancel">×</span>
@@ -5594,6 +5619,8 @@
 
       <!-- ---- step 6: how I work and how I look ---- -->
       <div class="ob-step" data-step="7" hidden>
+       <div class="ob-split">
+        <div class="ob-split-main">
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>
@@ -5632,6 +5659,16 @@
             <button type="button" data-roomlook="him"><i style="background-image:url(/assets/team/main_m.png)"></i><span>Teal scarf<small>Always on his feet</small></span></button>
           </div>
         </div>
+        </div>
+        <div class="ob-demo" id="ob-demo" aria-hidden="true">
+          <div class="obd-win">
+            <div class="obd-chat"><div class="obd-feed"></div></div>
+            <div class="obd-strip"></div>
+            <div class="obd-input"><span class="obd-ph"></span><span class="obd-mode"></span></div>
+          </div>
+          <div class="obd-cap"></div>
+        </div>
+       </div>
       </div>
 
       <!-- ---- step 7: migrate ---- -->
@@ -19183,8 +19220,72 @@ for (const [key, id] of Object.entries(_OB_SEGS)) {
     if (key === 'uimode') hearthSetInterface(obState.uimode);
     if (key === 'roomlook') hearthSetRoomLook(obState.roomlook);
     _obPaintSegs(false);
+    if (key === 'approval' || key === 'uimode') obDemoStart();
     _saveOnboardingDraft();
   });
+}
+// The "How should I work?" preview: one small task played out with the real
+// chat parts, under whichever approval mode and view is picked, then again.
+const OBD_TASK = 'Tidy my notes and commit them';
+const OBD_STEPS = [
+  { name: 'edit_file', args: { path: 'notes.md', old_text: '- call mum\n- buy milk', new_text: '## Today\n- Call mum\n- Buy milk' }, result: 'Edited notes.md' },
+  { name: 'run_command', args: { command: 'git commit -am "tidy notes"' }, result: '[main 4f2a1c9] tidy notes\n 1 file changed, 2 insertions(+), 1 deletion(-)' },
+  { name: 'delete_path', args: { path: 'notes_old.md' }, result: 'Deleted notes_old.md' },
+];
+const OBD_ASKS = {
+  ask: () => true,
+  edits: (n) => n !== 'edit_file',
+  auto: (n) => n === 'delete_path',
+};
+let _obdRun = 0;
+function obDemoStop() { _obdRun++; }
+async function obDemoStart() {
+  const run = ++_obdRun;
+  const box = $('ob-demo');
+  if (!box || getComputedStyle(box).display === 'none') return;
+  const live = () => run === _obdRun && obStep === 7 && $('onboard').classList.contains('open');
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const feed = box.querySelector('.obd-feed'), strip = box.querySelector('.obd-strip');
+  const follow = () => { const c = box.querySelector('.obd-chat'); c.scrollTop = c.scrollHeight; };
+  const mode = _obSegValue('approval') || 'ask';
+  const m = APPROVAL_MODES.find(x => x.id === mode) || APPROVAL_MODES[0];
+  const seg = document.querySelector(`#ob-approval [data-approval="${mode}"]`);
+  box.querySelector('.obd-mode').innerHTML = `${MODE_ICONS[m.id]}<span>${esc(m.name)}</span>`;
+  box.querySelector('.obd-ph').textContent = `Message ${_agentName()}…`;
+  box.querySelector('.obd-cap').innerHTML = seg ? `<b>${esc(seg.firstChild.textContent.trim())}.</b> ${esc(seg.querySelector('small').textContent)}.` : '';
+  while (live()) {
+    feed.innerHTML = ''; strip.innerHTML = '';
+    const you = renderMessage({ role: 'user', content: OBD_TASK });
+    you.querySelector('.content').textContent = OBD_TASK;
+    feed.appendChild(you);
+    await wait(700); if (!live()) return;
+    const reply = renderMessage({ role: 'assistant', content: '' });
+    feed.appendChild(reply);
+    for (const st of OBD_STEPS) {
+      await wait(500); if (!live()) return;
+      if (OBD_ASKS[mode](st.name)) {
+        const ps = $('perm-strip').cloneNode(true);
+        ps.removeAttribute('id'); ps.hidden = false;
+        ps.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
+        ps.querySelector('.perm-tool').textContent = st.name;
+        ps.querySelector('.perm-args').textContent = st.args.path || st.args.command;
+        strip.appendChild(ps); follow();
+        await wait(1300); if (!live()) return;
+        ps.querySelector('[data-decision="allow"]').classList.add('obd-press');
+        await wait(350); if (!live()) return;
+        strip.innerHTML = '';
+      }
+      const t = makeToolCard(st.name, st.args);
+      if (st.name === 'run_command') fillCommandCard(st.args, st.result, t.body);
+      else if (!t.div.classList.contains('has-diff')) t.body.textContent = st.result;
+      t.div.classList.remove('open');
+      t.ms.textContent = `${120 + st.result.length * 3}ms`;
+      appendPart(t.div, reply); follow();
+    }
+    await wait(450); if (!live()) return;
+    appendPart(makeContentBlock(renderMD('Done. Notes tidied, committed, and the old copy is gone.')), reply); follow();
+    await wait(3200);
+  }
 }
 function _saveOnboardingDraft() { try { localStorage.setItem('hearth_onboarding_draft', JSON.stringify({step: obStep, state: obState})); } catch {} }
 function _loadOnboardingDraft() { try { const d = JSON.parse(localStorage.getItem('hearth_onboarding_draft')||'null'); if(d && d.state && d.step) return d; } catch {} return null; }
@@ -19244,6 +19345,8 @@ function obRender() {
   if (obStep === 5) obLoadWhatToGet();
   if (obStep === 6) setTimeout(() => $('ob-name').focus(), 80);
   if (obStep === 8) { _obProbeMigrate(); _obWireImport(); }
+  document.querySelector('#onboard .ob-card').classList.toggle('ob-wide', obStep === 7);
+  if (obStep === 7) setTimeout(obDemoStart, 420); else obDemoStop();
   if (obStep === 1) document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _agentName(); });
   _obPaintSegs();
   _saveOnboardingDraft();

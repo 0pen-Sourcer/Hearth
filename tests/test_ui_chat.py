@@ -1234,6 +1234,32 @@ with sync_playwright() as pw:
           ask["n"] == 3 and ask["folded"] and ask["opened"] and not ask["inRun"]
           and ask["states"] == ["Answered", "Answered", "Not answered"] and ask["q"] == "Which folder?"
           and ask["opts"] == 3 and ask["picked"] == [["Downloads"], ["F:/Stuff"], []])
+    # Setup's "How should I work?" step said what each approval mode does, and
+    # showed nothing of it. It plays one task out with the chat's own parts.
+    demo = pg.evaluate("""async () => {
+      const seen = {};
+      const real = window.setTimeout;
+      window.setTimeout = (f, ms, ...a) => real(f, Math.min(ms || 0, 5), ...a);   // the same timeline, fast
+      for (const mode of ['ask', 'edits', 'auto']) {
+        obState.approval = mode; obStep = 7; $('onboard').classList.add('open');
+        const strip = document.querySelector('#ob-demo .obd-strip');
+        const asked = [];
+        const mo = new MutationObserver(() => { const t = strip.querySelector('.perm-tool'); if (t && !asked.includes(t.textContent)) asked.push(t.textContent); });
+        mo.observe(strip, { childList: true, subtree: true });
+        document.querySelector('#onboard .ob-card').classList.add('ob-wide');
+        const p = obDemoStart();
+        for (let i = 0; i < 200 && !document.querySelector('#ob-demo .obd-feed').textContent.includes('Done.'); i++) await new Promise(r => real(r, 10));
+        mo.disconnect(); obDemoStop(); await p;
+        seen[mode] = asked;
+      }
+      window.setTimeout = real;
+      $('onboard').classList.remove('open');
+      const feed = document.querySelector('#ob-demo .obd-feed');
+      return { seen, cards: feed.querySelectorAll('.tool').length, mode: document.querySelector('#ob-demo .obd-mode').textContent };
+    }""")
+    check(f"setup plays each approval mode out: what asks first and what just runs {demo}",
+          demo["seen"] == {"ask": ["edit_file", "run_command", "delete_path"], "edits": ["run_command", "delete_path"],
+                           "auto": ["delete_path"]} and demo["cards"] == 3 and demo["mode"] == "Auto")
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([
