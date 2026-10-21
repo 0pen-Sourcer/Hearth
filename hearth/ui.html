@@ -229,6 +229,7 @@
   .ap-prev-classic i:first-child { background: #8b5cf6; }
   .ap-prev-classic i:last-child { background: #34343f; }
   .ap-modes.ap-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ap-modes.ap-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ap-accents { display: flex; flex-wrap: wrap; gap: 8px; }
   .ap-accent { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; border-radius: 999px;
     border: 1px solid var(--border); background: var(--bg-2); }
@@ -3418,6 +3419,12 @@
   .toast .ask-row button.primary { background: var(--accent); border-color: transparent; color: var(--on-accent, #fff); }
   .toast .ask-busy { font-size: 12px; color: var(--fg-dim); }
   .toast .body  { color: var(--fg-dim); margin-top: 3px; line-height: 1.45; grid-column: 2; }
+  .toast .upd-sum { display: flex; align-items: center; gap: 6px; width: 100%; margin: 2px 0 0; padding: 0;
+    background: none; border: 0; color: var(--fg-dim); font: 12.5px var(--sans); text-align: left; cursor: pointer; }
+  .toast .upd-sum:hover { color: var(--fg); }
+  .toast .upd-names { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toast .upd-sum .mp-more { width: 22px; height: 22px; transition: transform .2s ease; }
+  .toast .upd-list { margin-top: 4px; }
   .toast .body .mp-row { padding: 6px 8px; margin: 3px 0 0; font-size: 12.5px; }
   .toast .body .mp-row .mp-s { font: 11px var(--mono); color: var(--fg-faint); }
   .toast .upd-tick { flex: none; color: var(--accent); opacity: 0; transform: scale(.7);
@@ -4567,7 +4574,7 @@
         <div class="field" id="field-stt-language">
           <div class="label">
             <div class="name">Spoken language</div>
-            <div class="hint">Leave it on detect and Hearth works out each utterance on its own. Naming the language is a little faster and a little more accurate when you always speak the same one.</div>
+            <div class="hint">On detect, Hearth listens in the language of the voice you picked, and with an English voice works out the language from what you say. Naming one is a little faster and more accurate when you always speak it.</div>
           </div>
           <select id="setting-stt-language">
             <option value="">Detect it</option>
@@ -4656,6 +4663,13 @@
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" class="switch-box" id="setting-lockdown"/>
           </label>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Remember things on its own</div>
+            <div class="hint">After a reply, JARVIS notes lasting facts from the chat into memory. Off, it only saves when you ask.</div>
+          </div>
+          <div class="switch" data-key="auto_memory"></div>
         </div>
         <div class="field">
           <div class="label">
@@ -4797,13 +4811,6 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Remember things on its own</div>
-            <div class="hint">After a reply, JARVIS notes lasting facts from the chat into memory. Off, it only saves when you ask.</div>
-          </div>
-          <div class="switch" data-key="auto_memory"></div>
-        </div>
-        <div class="field">
-          <div class="label">
             <div class="name">Chat bubbles</div>
             <div class="hint">Put your messages in bubbles on the right, like a messaging app.</div>
           </div>
@@ -4833,28 +4840,11 @@
           <div class="switch" data-key="activity_hud"></div>
         </div>
 
-        <!-- Toast quiet-mode: user-controlled noise level for popups -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Pop-ups</h4>
-        <div class="field">
-          <div class="label">
-            <div class="name">Mute all pop-ups</div>
-            <div class="hint">Hide every pop-up notice. Errors still go to Logs.</div>
-          </div>
-          <div class="switch" data-key="mute_toasts"></div>
-        </div>
-        <div class="field">
-          <div class="label">
-            <div class="name">"Remembered" pop-up</div>
-            <div class="hint">A notice when Hearth saves something new about you.</div>
-          </div>
-          <div class="switch" data-key="toast_facts_saved"></div>
-        </div>
-        <div class="field">
-          <div class="label">
-            <div class="name">"Summarised" pop-up</div>
-            <div class="hint">A notice when an older part of the chat is summarised to make room.</div>
-          </div>
-          <div class="switch" data-key="toast_compacted"></div>
+        <div class="ap-modes ap-three" id="ap-popups">
+          <button type="button" class="ap-mode" data-pop="all"><b>All</b><small>Every notice, including what was remembered or summarised.</small></button>
+          <button type="button" class="ap-mode" data-pop="needed"><b>Only what needs you</b><small>Questions, warnings and errors.</small></button>
+          <button type="button" class="ap-mode" data-pop="none"><b>None</b><small>Nothing pops up. Errors still go to Logs.</small></button>
         </div>
 
         </div><!-- /pane appearance -->
@@ -5856,7 +5846,8 @@ function _playSound(kind) {
 function toast(title, body = '', kind = 'ok', ms = 3500, force = false) {
   // force = a signed admin broadcast; it overrides Mute-all (rare + trusted, the
   // one toast the user should never miss). Normal status toasts still honor mute.
-  if (!force && STATE.settings && STATE.settings.mute_toasts) return;  // muted in Settings -> Behavior
+  const pop = popupsMode();                 // Settings -> Appearance -> Pop-ups
+  if (!force && (pop === 'none' || (pop === 'needed' && kind === 'ok'))) return;
   // Throttle identical toasts. Background pollers (model status every 9s, server
   // checks) could re-fire the same notice — e.g. "no model loaded" — on every
   // tick. Suppress a repeat within the cooldown and slide the window forward so
@@ -5883,13 +5874,21 @@ function _toastOut(t) {
   setTimeout(() => t.remove(), 240);
 }
 
-// A toast that asks: stays until answered, with a yes and a later.
+// All, only what needs you, or none. The two older switches still count for
+// anyone who set them.
+function popupsMode() {
+  const st = STATE.settings || {};
+  return st.popups || (st.mute_toasts ? 'none' : 'all');
+}
+// A toast that asks: stays until answered, with a yes and a later. With
+// pop-ups off it is built but never shown.
 function askToast(title, body, yesLabel, onYes, onLater) {
   const t = document.createElement('div');
   t.className = 'toast ok ask';
   t.innerHTML = `<span class="t-ico"></span><div class="title">${esc(title)}</div><div class="body">${esc(body)}</div>
     <div class="ask-row"><button class="primary" data-a="yes">${esc(yesLabel)}</button><button data-a="later">Later</button></div>`;
   const close = () => _toastOut(t);
+  if (popupsMode() === 'none') return t;
   t.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -5924,31 +5923,44 @@ async function checkAgentUpdates() {
   }
   // Several: one toast, a tick per program, so any of them can be left out.
   // One left out is not asked about again until a newer version comes.
-  const t = askToast(`${due.length} agent programs have updates`, '', `Update ${due.length}`, (t, close) => {
+  const t = askToast(`${due.length} agent programs have updates`, '', 'Update all', (t, close) => {
     const picked = due.filter((u, i) => t.querySelector(`.mp-row[data-i="${i}"]`).classList.contains('cur'));
     close();
     skip(due.filter(u => !picked.includes(u)));
     picked.forEach(updateAgent);
   }, () => skip(due));
-  // Rows like the model menu's: the program's mark, its versions, and the
-  // menu's own outline for the ones that will update.
-  t.querySelector('.body').innerHTML = due.map((u, i) => {
-    const h = HARNESS[u.id] || {};
-    return `<button type="button" class="mp-row cur" data-i="${i}" aria-pressed="true">
-      <span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>
-      <span class="mp-txt"><span class="mp-t">${esc(u.label)}</span><span class="mp-s">${esc(u.installed)} → ${esc(u.latest)}</span></span>
-      <span class="upd-tick">${_UPD_TICK}</span></button>`;
-  }).join('');
+  // Folded to one line, like the sticker; the arrow opens a row per program
+  // (its mark, its versions, the sticker's outline) to leave any out.
+  const names = () => due.filter((u, i) => t.querySelector(`.mp-row[data-i="${i}"]`).classList.contains('cur'))
+                         .map(u => u.label).join(', ');
+  t.querySelector('.body').innerHTML = `<button type="button" class="upd-sum"><span class="upd-names"></span>${_mpChev('')}</button>
+    <div class="upd-list" hidden>${due.map((u, i) => {
+      const h = HARNESS[u.id] || {};
+      return `<button type="button" class="mp-row cur" data-i="${i}" aria-pressed="true">
+        <span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>
+        <span class="mp-txt"><span class="mp-t">${esc(u.label)}</span><span class="mp-s">${esc(u.installed)} → ${esc(u.latest)}</span></span>
+        <span class="upd-tick">${_UPD_TICK}</span></button>`;
+    }).join('')}</div>`;
+  t.querySelector('.upd-names').textContent = names();
   const go = t.querySelector('button[data-a="yes"]');
   t.querySelector('.body').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (e.target.closest('.upd-sum')) {
+      const list = t.querySelector('.upd-list');
+      list.hidden = !list.hidden;
+      t.querySelector('.upd-sum .mp-more').classList.toggle('open', !list.hidden);
+      if (!list.hidden) list.animate([{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }],
+                                     { duration: 200, easing: 'cubic-bezier(.2,.9,.3,1)' });
+      return;
+    }
     const row = e.target.closest('.mp-row');
     if (!row) return;
-    e.stopPropagation();
     const on = row.classList.toggle('cur');
     row.setAttribute('aria-pressed', String(on));
-    const n = t.querySelectorAll('.body .mp-row.cur').length;
-    go.textContent = n ? `Update ${n}` : 'Update';
+    const n = t.querySelectorAll('.upd-list .mp-row.cur').length;
+    go.textContent = n === due.length ? 'Update all' : n ? `Update ${n}` : 'Update';
     go.disabled = !n;
+    t.querySelector('.upd-names').textContent = names() || 'None picked';
   });
 }
 const _UPD_ARROW = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>';
@@ -13753,6 +13765,8 @@ async function refreshSettings() {
       if (now - v.at < 4000) s[k] = v.value; else delete _justSaved[k];
     }
     STATE.settings = s;
+    const popBox = document.getElementById('ap-popups');
+    if (popBox) popBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.pop === popupsMode()));
     // The brain is derived from settings: the first state poll can run before
     // they arrive and call an agent or cloud brain "local" until the next one.
     if (deriveBrainKind().providerKey !== (STATE.brain && STATE.brain.providerKey)) refreshState();
@@ -19800,10 +19814,21 @@ window.addEventListener('load', function initSidebarDrawer() {
   if (wipeBox) wipeBox.addEventListener('click', e => {
     const b = e.target.closest('.ap-mode'); if (b) hearthSetRoomWipe(b.dataset.wipe);
   });
+  const popBox = document.getElementById('ap-popups');
+  if (popBox) popBox.addEventListener('click', e => {
+    const b = e.target.closest('.ap-mode'); if (!b) return;
+    STATE.settings = STATE.settings || {};
+    STATE.settings.popups = b.dataset.pop;
+    STATE.settings.mute_toasts = b.dataset.pop === 'none';
+    saveSetting('popups', b.dataset.pop);
+    saveSetting('mute_toasts', b.dataset.pop === 'none');
+    mark();
+  });
   const mark = () => {
     if (roomBox) roomBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.look === cur('hearth_room_look', 'her')));
     if (homeBox) homeBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.home === cur('hearth_room_home', 'cabin')));
     if (wipeBox) wipeBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.wipe === cur('hearth_room_wipe', 'pixel')));
+    if (popBox) popBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.pop === popupsMode()));
     if (uiBox) uiBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.ui === cur('hearth_ui', 'simple')));
     modes.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === cur('hearth_theme', 'classic')));
     accents.querySelectorAll('.ap-accent').forEach(b => b.classList.toggle('on', b.dataset.accent === cur('hearth_accent', 'rose')));

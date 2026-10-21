@@ -533,6 +533,63 @@ def _fit_toast(title: str, body: str) -> tuple:
     return t, b
 
 
+# Hearth's own tray icon, when this process has one. A notice shown through it
+# adds nothing to the tray; every other way adds an icon of its own, and one
+# that isn't taken down cleanly stays behind as a ghost until the mouse passes.
+_tray_notify: Optional[Callable[[str, str], None]] = None
+_balloons: list = []
+
+
+def use_tray(fn: Optional[Callable[[str, str], None]]) -> None:
+    global _tray_notify
+    _tray_notify = fn
+
+
+def _balloon(title: str, body: str, icon: Optional[str]) -> bool:
+    """A notice from a process with no tray icon of its own (the terminal): its
+    icon comes down when the notice ends, and at exit if that comes first."""
+    try:
+        from plyer.platforms.win.libs.balloontip import WindowsBalloonTip  # type: ignore
+    except Exception:
+        return False
+
+    def _run():
+        tip = None
+        try:
+            tip = WindowsBalloonTip.__new__(WindowsBalloonTip)
+            _balloons.append(tip)
+            tip.__init__(title=title, message=body, app_name="Hearth", app_icon=icon or "", timeout=10)
+        except Exception:
+            pass
+        finally:
+            _take_down(tip)
+
+    threading.Thread(target=_run, daemon=True, name="hearth-notice").start()
+    return True
+
+
+def _take_down(tip) -> None:
+    if tip is None:
+        return
+    try:
+        tip.remove_notify()
+    except Exception:
+        pass
+    try:
+        _balloons.remove(tip)
+    except ValueError:
+        pass
+
+
+def _take_down_all() -> None:
+    for tip in list(_balloons):
+        _take_down(tip)
+
+
+import atexit as _atexit  # noqa: E402
+_atexit.register(_take_down_all)
+
+
 def desktop_notify(title: str, body: str) -> bool:
     """Pop a desktop notification now. Tries plyer (cross-platform) then
     win10toast (Windows), falling back to stdout + TTS. Also pushes to the
@@ -544,6 +601,12 @@ def desktop_notify(title: str, body: str) -> bool:
     # at 64. Overshooting raises inside the notifier's own worker thread, which
     # no try/except here can catch, so the toast just never appeared. Trim first.
     title, body = _fit_toast(title, body)
+    if _tray_notify is not None:
+        try:
+            _tray_notify(title, body)
+            return True
+        except Exception:
+            pass
     icon = _ensure_app_identity()
     # When we have the .ico, prefer win10toast FIRST — its `icon_path` actually
     # renders our icon on the toast. plyer's Windows backend usually shows a
@@ -557,6 +620,9 @@ def desktop_notify(title: str, body: str) -> bool:
             return True
         except Exception:
             pass
+    import sys
+    if sys.platform == "win32" and _balloon(title, body, icon):
+        return True
     try:
         from plyer import notification  # type: ignore
         kw = {"title": title, "message": body, "app_name": "Hearth", "timeout": 10}

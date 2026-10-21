@@ -62,6 +62,46 @@ reminders.desktop_notify("Hearth", "Water")
 check("the shared notifier passes the icon too",
       bool(shown) and shown[0].get("app_icon") == icon)
 
+# With Hearth's tray icon in this process, a notice goes through it and adds no
+# icon of its own (every added one that isn't taken down is a ghost in the tray).
+through_tray = []
+reminders.use_tray(lambda t, b: through_tray.append((t, b)))
+shown.clear()
+reminders.desktop_notify("Hearth", "Stretch")
+reminders.use_tray(None)
+check("in the window's process a notice goes through the tray icon",
+      through_tray == [("Hearth", "Stretch")] and not shown)
+
+# Without one (the terminal), the notice's own icon comes down even when the
+# process ends before the notice does.
+if sys.platform == "win32":
+    import threading as _th
+    _bt = types.ModuleType("plyer.platforms.win.libs.balloontip")
+    _bt.WindowsBalloonTip = None
+    sys.modules["plyer.platforms.win.libs.balloontip"] = _bt
+    opened, removed, gate = [], [], _th.Event()
+
+    class _Tip:
+        def __init__(self, **kw):
+            opened.append(kw.get("app_icon"))
+            gate.wait(5)              # the notice is still up
+        def remove_notify(self):
+            removed.append(1)
+
+    real_tip = _bt.WindowsBalloonTip
+    _bt.WindowsBalloonTip = _Tip
+    try:
+        reminders.desktop_notify("Hearth", "Water")
+        end = __import__("time").time() + 3
+        while not opened and __import__("time").time() < end:
+            __import__("time").sleep(0.02)
+        reminders._take_down_all()        # what runs at exit
+        gate.set()
+    finally:
+        _bt.WindowsBalloonTip = real_tip
+    check(f"the terminal's notice carries the icon and is taken down at exit ({opened}, {len(removed)})",
+          opened and opened[0] == icon and len(removed) >= 1)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

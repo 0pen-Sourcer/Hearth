@@ -224,6 +224,28 @@ with sync_playwright() as pw:
     check(f"an agent's card keeps an update mark whatever the toast was told {upd['marks']}",
           "claude-code" in upd["marks"])
 
+    pops = pg.evaluate("""() => {
+      const was = Object.assign({}, STATE.settings || {}), out = {};
+      const count = () => document.querySelectorAll('#toasts .toast').length;
+      for (const mode of ['all', 'needed', 'none']) {
+        document.querySelectorAll('#toasts .toast').forEach(t => t.remove());
+        STATE.settings = Object.assign({}, was, { popups: mode });
+        toast('Remembered 1 thing', 'a' + mode, 'ok', 60000);
+        toast('Mic fell back', 'b' + mode, 'warn', 60000);
+        askToast('An update', 'c', 'Update', () => {});
+        out[mode] = count();
+      }
+      STATE.settings = Object.assign({}, was, { popups: undefined, mute_toasts: true });
+      document.querySelectorAll('#toasts .toast').forEach(t => t.remove());
+      toast('x', 'old switch', 'warn', 60000);
+      out.oldMute = count();
+      document.querySelectorAll('#toasts .toast').forEach(t => t.remove());
+      STATE.settings = was;
+      return out;
+    }""")
+    check(f"pop-ups: all shows everything, only-what-needs-you drops plain notices, none shows nothing {pops}",
+          pops == {"all": 3, "needed": 2, "none": 0, "oldMute": 0})
+
     check(f"changing the accent changes the tab and window icon {tab}",
           "accent=sage" in tab["href"] and "theme=dark" in tab["href"] and tab["last"] == ["dark", "sage"])
 

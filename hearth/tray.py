@@ -399,6 +399,12 @@ def main(argv: Optional[list] = None) -> int:
     # before it ever appears. Windows uses a different pystray backend so it
     # never surfaced there.
     icon = pystray.Icon("hearth", img, "Hearth - local AI", menu)
+    # Notices from this process go through this icon instead of adding one each.
+    try:
+        from . import reminders as _rem
+        _rem.use_tray(lambda title, body: icon.notify(body, title))
+    except Exception:
+        pass
 
     def _follow_look():
         # The window saves its theme and accent; redraw the tray icon to match.
