@@ -10,7 +10,7 @@ Simple, the default, keeps the machinery out of the way. A run of tool calls fol
 
 ## A first run that sets Hearth up for you
 
-Setup asks a few things and acts on them. Your name, what you do and how you like to be spoken to now reach JARVIS on every message. Before, the window saved them to settings nothing read, so JARVIS never knew them. It asks whether you will hear it on headphones or speakers, which decides whether you can talk over it, how much it may do on its own, and which look and how much detail you want, applied as you pick them. It ends on things worth trying instead of an empty box. The terminal asks the same questions, and /me asks them again whenever you like.
+Setup asks a few things and acts on them. Your name, what you do and how you like to be spoken to now reach JARVIS on every message. Before, the window saved them to settings nothing read, so JARVIS never knew them. It asks whether you will hear it on headphones or speakers, which decides whether you can talk over it, how much it may do on its own, and which look and how much detail you want, applied as you pick them. With no model on your PC yet, it offers one that fits your graphics card, the most downloaded chat model its own makers publish, and shows what else your choices need, the engine and JARVIS's voice and hearing, each with its size. What you keep ticked downloads while you finish. It ends on things worth trying instead of an empty box. The terminal asks the same questions, and /me asks them again whenever you like.
 
 ## Team
 

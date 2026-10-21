@@ -3453,6 +3453,14 @@
   .toast .upd-list { margin-top: 4px; }
   .toast .body .mp-row { padding: 6px 8px; margin: 3px 0 0; font-size: 12.5px; }
   .toast .body .mp-row .mp-s { font: 11px var(--mono); color: var(--fg-faint); }
+  .ob-get { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
+  .ob-get .mp-row { border: 1px solid var(--border); padding: 10px 12px; }
+  .ob-get .mp-row .mp-s { white-space: normal; }
+  .ob-get-size { flex: none; font: 11.5px var(--mono); color: var(--fg-dim); }
+  .ob-get .upd-tick { flex: none; color: var(--accent); opacity: 0; transform: scale(.7);
+    transition: opacity .16s ease, transform .2s cubic-bezier(.2, .9, .3, 1.2); }
+  .ob-get .mp-row.cur .upd-tick { opacity: 1; transform: none; }
+  .ob-get-total { margin-top: 10px; font-size: 12px; color: var(--fg-faint); }
   .toast .upd-tick { flex: none; color: var(--accent); opacity: 0; transform: scale(.7);
     transition: opacity .16s ease, transform .2s cubic-bezier(.2, .9, .3, 1.2); }
   .toast .mp-row.cur .upd-tick { opacity: 1; transform: none; }
@@ -5309,6 +5317,7 @@
       <div class="dot"></div>
       <div class="dot"></div>
       <div class="dot"></div>
+      <div class="dot"></div>
     </div>
 
     <div class="ob-body" id="ob-body">
@@ -5464,6 +5473,17 @@
       <div class="ob-step" data-step="5" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>
+          </svg>
+        </div>
+        <h1 class="ob-title">What to get.</h1>
+        <p class="ob-sub">For what you picked, this PC still needs these. They come down in the background while you finish, and Downloads shows each one. Untick anything you'd rather get later.</p>
+        <div class="ob-get" id="ob-get"><div class="ob-status-row"><span class="ob-dot"></span><span>Looking at what this PC has…</span></div></div>
+        <div class="ob-get-total" id="ob-get-total"></div>
+      </div>
+      <div class="ob-step" data-step="6" hidden>
+        <div class="ob-hero">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
             <circle cx="12" cy="7" r="4"/>
           </svg>
@@ -5509,7 +5529,7 @@
       </div>
 
       <!-- ---- step 6: how I work and how I look ---- -->
-      <div class="ob-step" data-step="6" hidden>
+      <div class="ob-step" data-step="7" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>
@@ -5551,7 +5571,7 @@
       </div>
 
       <!-- ---- step 7: migrate ---- -->
-      <div class="ob-step" data-step="7" hidden>
+      <div class="ob-step" data-step="8" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -5594,7 +5614,7 @@
       </div>
 
       <!-- ---- step 8: all set ---- -->
-      <div class="ob-step" data-step="8" hidden>
+      <div class="ob-step" data-step="9" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/>
@@ -5613,7 +5633,7 @@
     </div>
 
     <div class="ob-footer">
-      <div class="ob-meta" id="ob-step-meta">Step 1 of 8</div>
+      <div class="ob-meta" id="ob-step-meta">Step 1 of 9</div>
       <div class="ob-buttons">
         <button class="ob-btn ghost" id="ob-skip">Skip setup</button>
         <button class="ob-btn" id="ob-back" hidden>Back</button>
@@ -18474,7 +18494,7 @@ send = async function(forced = null, displayAs = null, opts = {}) {
 // ============================================================
 // ONBOARDING - multi-step card overlay on first launch.
 // ============================================================
-const OB_TOTAL_STEPS = 8;
+const OB_TOTAL_STEPS = 9;
 // Migrate step (7) self-detects whether any source agent is installed.
 // When the probe comes back empty, _obSkipMigrate is set and obNext/Back
 // jump over step 6 so the user doesn't see an empty 'nothing here' card.
@@ -18572,7 +18592,7 @@ async function _obProbeMigrate() {
   } catch {
     _obSkipMigrate = true;
     setTimeout(() => {
-      if (obStep === 7 && _obSkipMigrate) { obStep = 8; obRender(); }
+      if (obStep === 8 && _obSkipMigrate) { obStep = 9; obRender(); }
     }, 400);
   }
 }
@@ -18941,8 +18961,9 @@ function obRender() {
   if (obStep === 2) obLoadBrains();
   if (obStep === 3) obWireCloudStep();
   if (obStep === 4) obLoadVoiceStatus();
-  if (obStep === 5) setTimeout(() => $('ob-name').focus(), 80);
-  if (obStep === 7) { _obProbeMigrate(); _obWireImport(); }
+  if (obStep === 5) obLoadWhatToGet();
+  if (obStep === 6) setTimeout(() => $('ob-name').focus(), 80);
+  if (obStep === 8) { _obProbeMigrate(); _obWireImport(); }
   if (obStep === 1) document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _agentName(); });
   _obPaintSegs();
   _saveOnboardingDraft();
@@ -19111,7 +19132,7 @@ async function obLoadBrains() {
     });
   }
   if (!slots.length) {
-    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>Nothing to pick yet. Skip this, then get a model in the Models tab.</span></div>';
+    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>No model on this PC yet. Continue, and I\'ll offer one that fits it, or add a cloud key on the next page.</span></div>';
     return;
   }
   let html = '';
@@ -19480,14 +19501,68 @@ async function obFinish(skipped) {
   if (!skipped) startTour();
 }
 
+// "What to get": what this PC still needs for the choices made, each a row with
+// its size, ticked unless left out. Nothing needed, and the page passes itself.
+let _obGet = [], _obGetFrom = 4;
+const _OB_GET_ICO = {
+  model: () => MP_CHIP, engine: () => MP_CHIP,
+  voice: () => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/></svg>',
+};
+function _obWantsLocal() {
+  let b = null; try { b = obState.brain ? JSON.parse(obState.brain) : null; } catch {}
+  return !b && !((obState.cloud || {}).key);
+}
+function _obGetTotal() {
+  const on = _obGet.filter((it, i) => document.querySelector(`#ob-get .mp-row[data-i="${i}"]`)?.classList.contains('cur'));
+  const gb = on.reduce((a, it) => a + (it.size_gb || 0), 0);
+  $('ob-get-total').textContent = !on.length ? 'Nothing will be downloaded now.'
+    : gb ? `About ${gb >= 1 ? gb.toFixed(1) + ' GB' : Math.round(gb * 1024) + ' MB'} in all.` : '';
+}
+async function obLoadWhatToGet() {
+  const box = $('ob-get');
+  box.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>Looking at what this PC has…</span></div>';
+  $('ob-get-total').textContent = '';
+  let r = { items: [] };
+  try { r = await api(`/api/setup/what-to-get?local=${_obWantsLocal() ? 1 : 0}&voice=${obState.voice === 'full' ? 1 : 0}`); } catch {}
+  if (obStep !== 5) return;
+  _obGet = r.items || [];
+  if (!_obGet.length) { obStep = _obGetFrom > 5 ? 4 : 6; obRender(); return; }
+  box.innerHTML = _obGet.map((it, i) => `<button type="button" class="mp-row cur" data-i="${i}" aria-pressed="true">
+      <span class="mp-ico">${(_OB_GET_ICO[it.id] || _OB_GET_ICO.model)()}</span>
+      <span class="mp-txt"><span class="mp-t">${esc(it.title)}</span><span class="mp-s">${esc(it.sub || '')}</span></span>
+      ${it.size_gb ? `<span class="ob-get-size">${it.size_gb >= 1 ? it.size_gb.toFixed(1) + ' GB' : Math.round(it.size_gb * 1024) + ' MB'}</span>` : ''}
+      <span class="upd-tick">${_UPD_TICK}</span></button>`).join('');
+  box.onclick = (e) => {
+    const row = e.target.closest('.mp-row'); if (!row) return;
+    row.setAttribute('aria-pressed', String(row.classList.toggle('cur')));
+    _obGetTotal();
+  };
+  _obGetTotal();
+}
+function obStartWhatToGet() {
+  const on = _obGet.filter((it, i) => document.querySelector(`#ob-get .mp-row[data-i="${i}"]`)?.classList.contains('cur'));
+  // The engine first, so it's in place by the time the model it runs arrives.
+  for (const it of on.sort((a, b) => (a.id === 'engine' ? -1 : b.id === 'engine' ? 1 : 0))) {
+    try {
+      if (it.id === 'engine') $('btn-runtime-update')?.click();
+      else if (it.id === 'model') modelsDownloadHF(it.repo, it.filename);
+      else if (it.id === 'voice') _obFetchVoiceModels(null);
+    } catch {}
+  }
+  if (on.length) dlToggle(true);
+  _obGet = [];
+}
+
 // The page after the brain step offers a cloud key. Someone who just picked
 // a brain doesn't need it; it stays in Settings.
 const _obSkips = () => obStep === 3 && !!obState.brain;
 $('ob-next').addEventListener('click', async () => {
+  if (obStep === 5) obStartWhatToGet();
+  _obGetFrom = obStep;
   if (obStep < OB_TOTAL_STEPS) { obStep++; if (_obSkips()) obStep++; obRender(); return; }
   await obFinish(false);
 });
-$('ob-back').addEventListener('click', () => { if (obStep > 1) { obStep--; if (_obSkips()) obStep--; obRender(); } });
+$('ob-back').addEventListener('click', () => { _obGetFrom = obStep; if (obStep > 1) { obStep--; if (_obSkips()) obStep--; obRender(); } });
 $('ob-skip').addEventListener('click', () => obFinish(true));
 document.addEventListener('keydown', (e) => {
   if (!$('onboard').classList.contains('open')) return;

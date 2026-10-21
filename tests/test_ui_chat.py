@@ -635,6 +635,46 @@ with sync_playwright() as pw:
     pg.route("**/api/team/choices", reply({"roles": [], "agents": [
         {"id": "claude-code", "label": "Claude Code"}, {"id": "codex", "label": "Codex"},
         {"id": "opencode", "label": "OpenCode"}, {"id": "gemini-cli", "label": "Gemini CLI"}]}))
+    get = pg.evaluate("""async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms));
+      const realApi = window.api, realDl = window.modelsDownloadHF, realVoice = window._obFetchVoiceModels;
+      const started = [], asked = [];
+      let items = [
+        { id: 'model', title: 'Ornith-1.5-9B', sub: '9.2B, fits your 8 GB card', size_gb: 5.04, repo: 'r/m', filename: 'm.gguf' },
+        { id: 'voice', title: "JARVIS's voice and hearing", sub: 'Speaking and listening', size_gb: 0.48 }];
+      window.api = async (u, o) => u.startsWith('/api/setup/what-to-get') ? (asked.push(u), { items }) : realApi(u, o);
+      window.modelsDownloadHF = (repo, f) => started.push('model:' + f);
+      window._obFetchVoiceModels = () => started.push('voice');
+      obState = { brain: '', voice: 'full', cloud: { provider: 'local', key: '', model: '' } };
+      document.getElementById('onboard').classList.add('open');
+      obStep = 4; obRender(); await wait(200);
+      document.getElementById('ob-next').click(); await wait(400);
+      const out = { step: obStep, asked: asked[0] || '', rows: document.querySelectorAll('#ob-get .mp-row').length,
+                    total: document.getElementById('ob-get-total').textContent };
+      document.querySelector('#ob-get .mp-row[data-i="1"]').click();
+      out.totalAfter = document.getElementById('ob-get-total').textContent;
+      document.getElementById('ob-next').click(); await wait(300);
+      out.started = started.slice(); out.after = obStep;
+      // Nothing needed: the page passes itself, going forward and coming back.
+      items = [];
+      obStep = 4; obRender(); await wait(200);
+      document.getElementById('ob-next').click(); await wait(500);
+      out.skipFwd = obStep;
+      document.getElementById('ob-back').click(); await wait(500);
+      out.skipBack = obStep;
+      window.api = realApi; window.modelsDownloadHF = realDl; window._obFetchVoiceModels = realVoice;
+      document.getElementById('onboard').classList.remove('open');
+      obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
+      return out;
+    }""")
+    check(f"setup offers what this PC still needs, with sizes {get}",
+          get["step"] == 5 and "local=1" in get["asked"] and "voice=1" in get["asked"] and get["rows"] == 2
+          and "5.5 GB" in get["total"] and "5.0 GB" in get["totalAfter"])
+    check("Continue fetches only what's ticked, and setup carries on",
+          get["started"] == ["model:m.gguf"] and get["after"] == 6)
+    check(f"with nothing to get the page passes itself both ways ({get['skipFwd']}, {get['skipBack']})",
+          get["skipFwd"] == 6 and get["skipBack"] == 4)
+
     flow = pg.evaluate("""async () => {
       const wait = (ms) => new Promise(r => setTimeout(r, ms));
       obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };

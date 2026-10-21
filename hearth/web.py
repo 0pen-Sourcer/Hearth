@@ -1895,6 +1895,11 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_ui()
         if path.startswith("/assets/"):
             return self._serve_asset(path[len("/assets/"):])
+        if path == "/api/setup/what-to-get":
+            # First run: what this PC still needs for what was picked, with sizes.
+            wq = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self._send_json(200, what_to_get(local=wq.get("local", ["0"])[0] == "1",
+                                                    voice=wq.get("voice", ["0"])[0] == "1"))
         if path == "/api/mention":
             # What "@words" in the message box can point at.
             from . import session_search as _ss
@@ -5254,6 +5259,54 @@ def _preload_whisper_async() -> None:
             except Exception:
                 pass
     threading.Thread(target=_go, daemon=True).start()
+
+
+def what_to_get(local: bool, voice: bool) -> Dict[str, Any]:
+    """What first-run setup offers to download for the choices made: a model
+    when this PC is the brain and none is on disk, the engine where the build
+    has none, and the voice and speech files when talking was picked."""
+    from . import llmserver
+    items: List[Dict[str, Any]] = []
+    if local:
+        try:
+            have = bool(llmserver.scan_disk_for_models() or llmserver.list_local_models())
+        except Exception:
+            have = True
+        if not have:
+            pick = llmserver.suggest_model()
+            if pick:
+                vram = llmserver.detect_gpu_vram_gb()
+                items.append({"id": "model", "title": pick["repo"].split("/")[-1].replace("-GGUF", "").replace("-gguf", ""),
+                              "sub": f"{pick['params_b']}B, the most downloaded fit for "
+                                     + (f"your {vram:.0f} GB card" if vram else "this PC") + " this month",
+                              "size_gb": pick.get("size_gb"), "repo": pick["repo"], "filename": pick["filename"]})
+        try:
+            needs_engine = llmserver._is_lite_edition() and not llmserver.find_native_llama_server()
+        except Exception:
+            needs_engine = False
+        if needs_engine:
+            items.append({"id": "engine", "title": "The engine that runs it",
+                          "sub": "llama.cpp, built for the graphics card in this PC", "size_gb": None})
+    if voice:
+        try:
+            missing_voice = bool(_voice) and not _voice.models_present()
+            missing_ear = bool(_listen) and not _listen.model_present()
+        except Exception:
+            missing_voice = missing_ear = False
+        if missing_voice or missing_ear:
+            gb = 0.0
+            if missing_voice:
+                gb += 0.34                       # the voice model and its voices
+            if missing_ear:
+                try:
+                    repo = "Systran/faster-whisper-" + _listen.model_size()
+                    gb += sum(int(x.get("size") or 0) for x in llmserver._repo_siblings(repo)) / (1024 ** 3)
+                except Exception:
+                    pass
+            items.append({"id": "voice", "title": f"{(_load_settings().get('agent_name') or 'JARVIS')}'s voice and hearing",
+                          "sub": "Speaking, and the speech model that turns what you say into text",
+                          "size_gb": round(gb, 2) if gb else None})
+    return {"items": items}
 
 
 def _start_reminder_watcher() -> None:

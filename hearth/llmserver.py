@@ -3242,6 +3242,62 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
     return out
 
 
+_SUGGEST: Dict[str, Any] = {}
+_NOT_A_START = re.compile(r"uncensor|abliterat|heretic|obliterat|nsfw|erotic|roleplay|rp-", re.I)
+
+
+def _from_its_maker(m: Dict[str, Any]) -> bool:
+    """A GGUF the model's own makers published: its base model is theirs, or,
+    with no base named, their name is in the model's."""
+    repo = str(m.get("id") or m.get("modelId") or "")
+    owner = repo.split("/")[0].lower()
+    bases = [t.split(":")[-1] for t in (m.get("tags") or []) if str(t).startswith("base_model:")]
+    if bases:
+        return all(b.split("/")[0].lower() == owner for b in bases)
+    stem = re.sub(r"[-_.]?(ai|ml|labs?|org|inc|team|research)$", "", owner)
+    return len(stem) >= 3 and stem.replace("-", "") in repo.split("/")[-1].lower().replace("-", "")
+
+
+def suggest_model(vram_gb: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """A first model for this PC, chosen the way people are choosing now: the
+    most downloaded chat GGUF this month that its makers published and that
+    fits the graphics card. Hearth keeps no list of models; Hugging Face is
+    asked each time (once a day at most)."""
+    vram = detect_gpu_vram_gb() if vram_gb is None else vram_gb
+    budget = (vram * 0.85) if vram else 3.5        # no card: a small model on the processor
+    key = round(budget, 1)
+    hit = _SUGGEST.get(key)
+    if hit and time.time() - hit["at"] < 86400:
+        return hit["pick"]
+    url = ("https://huggingface.co/api/models?filter=gguf&pipeline_tag=text-generation"
+           "&sort=downloads&direction=-1&limit=60&expand[]=gguf&expand[]=downloads&expand[]=tags")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            models = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+    pick = None
+    for m in models:
+        repo = str(m.get("id") or "")
+        params = ((m.get("gguf") or {}).get("total") or 0) / 1e9
+        if not repo or params < 1 or _NOT_A_START.search(repo) or not _from_its_maker(m):
+            continue
+        if params * 0.6 + 0.5 > budget:              # a Q4_K_M of it, roughly, with room to run
+            continue
+        files = [f for f in list_hf_files(repo) if not f.get("error")]
+        good = [f for f in files if f.get("recommended")] or \
+               [f for f in files if f.get("fit_tier") == "good" and (f.get("quant_tier") or 0) >= 4]
+        if not good:
+            continue
+        f = good[0]
+        pick = {"repo": repo, "filename": f["filename"], "size_gb": f.get("size_gb"),
+                "params_b": round(params, 1), "downloads": m.get("downloads") or 0}
+        break
+    _SUGGEST[key] = {"at": time.time(), "pick": pick}
+    return pick
+
+
 def vision_addon(siblings: List[Dict[str, Any]]) -> str:
     """The repo's vision projector to fetch with a model from it, if it has one:
     F16 before BF16 before F32 (same quality, the smaller file)."""
