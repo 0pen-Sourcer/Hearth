@@ -222,6 +222,20 @@ def _port_of(url: str) -> Optional[int]:
         return None
 
 
+def vram_for_a_new_model() -> Optional[float]:
+    """Graphics memory a model would have once loaded. Loading one stops
+    Hearth's own server first, so what its current model holds counts as free;
+    another program's model stays where it is."""
+    free = detect_gpu_vram_free_gb()
+    total = detect_gpu_vram_gb()
+    if free is None:
+        return total
+    ours = (_proc is not None and _proc.poll() is None) or bool(read_runfile())
+    if ours and total:
+        return max(free, total - 1.2)
+    return free
+
+
 def ours_at(url: str) -> Dict[str, Any]:
     """The built-in server answering at this address, when it is Hearth's own,
     started by this process or by another Hearth window or terminal. {} when
@@ -3196,9 +3210,7 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
             info = json.loads(r.read().decode("utf-8"))
     except Exception as e:
         return [{"error": f"could not reach HuggingFace: {type(e).__name__}: {e}"}]
-    free_vram = detect_gpu_vram_free_gb()
-    if free_vram is None:
-        free_vram = detect_gpu_vram_gb()
+    free_vram = vram_for_a_new_model()
     out = []
     has_recommended = False
     addon = vision_addon(info.get("siblings") or [])
