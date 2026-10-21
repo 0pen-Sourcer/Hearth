@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import contextvars
 import json
 import os
 import re
@@ -592,10 +593,42 @@ def _load_sessions() -> Dict[str, Any]:
         return {}
 
 
-def _save_session(key: str, sid: str) -> None:
+def _fingerprint(text: Any) -> str:
+    return hashlib.sha1(str(text or "").strip()[:2000].encode("utf-8", "replace")).hexdigest()
+
+
+def session_for(key: str, history: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """The agent's own session for this chat, if it still matches the chat. A
+    session remembers the last message it answered; when that message is no
+    longer in the chat (an earlier one was edited, or the reply regenerated),
+    the agent starts again from the chat as it now reads."""
+    if not history:
+        return None
+    rec = _load_sessions().get(key) or {}
+    last = rec.get("last")
+    if last and not any(m.get("role") == "user" and _fingerprint(m.get("content")) == last for m in history):
+        return None
+    return rec.get("session")
+
+
+_ASKED: "contextvars.ContextVar[Optional[str]]" = contextvars.ContextVar("hearth_asked", default=None)
+
+
+def asked(prompt: str) -> Optional[str]:
+    """The message this turn answers, for the session to remember; None for a
+    turn nobody typed (a report coming in), which leaves the last one kept.
+    A brain run without the dispatcher answers the prompt it was given."""
+    a = _ASKED.get()
+    return prompt if a is None else (a or None)
+
+
+def _save_session(key: str, sid: str, last: Any = None) -> None:
     with _SESSIONS_LOCK:
         data = _load_sessions()
+        keep = (data.get(key) or {}).get("last") if last is None else _fingerprint(last)
         data[key] = {"session": sid, "at": int(time.time())}
+        if keep:
+            data[key]["last"] = keep
         if len(data) > 400:                       # keep the newest 400 chats
             data = dict(sorted(data.items(), key=lambda kv: kv[1].get("at", 0))[-400:])
         os.makedirs(_HOME, exist_ok=True)
@@ -815,6 +848,9 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
 
     news = helper_news(emit)
     from .headless import NOTIFY_FLUSH
+    # What was asked, as it sits in the chat: the session is matched against it
+    # next turn, and reports put in front of it here are not part of it.
+    _ASKED.set("" if prompt.strip() == NOTIFY_FLUSH else prompt)
     if prompt.strip() == NOTIFY_FLUSH:
         if not news:
             emit("done", reply="", iterations=0)
@@ -879,7 +915,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
     ensure_bridge()
     history = history or []
     key = _chat_key(history, prompt)
-    session = (_load_sessions().get(key) or {}).get("session") if history else None
+    session = session_for(key, history)
     text_in = prompt
     if history and not session:
         # A chat that started on another brain: Claude hasn't seen it, so it
@@ -1041,7 +1077,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
         _checks.pop(_TOKEN, None)
 
     if sid:
-        _save_session(key, sid)
+        _save_session(key, sid, last=asked(prompt))
     # The model that did the work: Claude Code also runs a small one on the
     # side, so it's the one with the most output.
     usage = (result or {}).get("modelUsage") or {}

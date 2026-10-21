@@ -187,7 +187,7 @@ async def _run_exec(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]
     _base.ensure_bridge()
     history = history or []
     key = "codex:" + _base._chat_key(history, prompt)
-    session = (_base._load_sessions().get(key) or {}).get("session") if history else None
+    session = _base.session_for(key, history)
     text_in = prompt
     if history and not session:
         earlier = _base._transcript(history)
@@ -309,7 +309,7 @@ async def _run_exec(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]
         _base._checks.pop(_base._TOKEN, None)
 
     if sid:
-        _base._save_session(key, sid)
+        _base._save_session(key, sid, last=_base.asked(prompt))
     reply = "".join(text_parts).strip()
     if failure:
         emit("error", message=("Codex stopped: " + failure)[:600])
@@ -439,7 +439,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
     _base.ensure_bridge()
     history = history or []
     key = "codex:" + _base._chat_key(history, prompt)
-    session = (_base._load_sessions().get(key) or {}).get("session") if history else None
+    session = _base.session_for(key, history)
     text_in = prompt
     persona = _base.persona_text(
         voice, host="Codex", tools=f"the {SERVER} MCP tools",
@@ -660,7 +660,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
             pass
 
     if tid:
-        _base._save_session(key, tid)
+        _base._save_session(key, tid, last=_base.asked(prompt))
     import re as _re
     reply = _re.sub(r"\n{3,}", "\n\n", "".join(text_parts)).strip()
     if failure and not reply:

@@ -180,7 +180,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     _base.ensure_bridge()
     history = history or []
     key = "cursor:" + _base._chat_key(history, prompt)
-    session = (_base._load_sessions().get(key) or {}).get("session") if history else None
+    session = _base.session_for(key, history)
     text_in = prompt
     if not session:
         persona = _base.persona_text(
@@ -282,7 +282,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
         _base._checks.pop(_base._TOKEN, None)
 
     if sid:
-        _base._save_session(key, sid)
+        _base._save_session(key, sid, last=_base.asked(prompt))
     reply = "".join(text_parts).strip() or str((result or {}).get("result") or "").strip()
     if result and result.get("is_error"):
         emit("error", message=("Cursor stopped: " + str(result.get("result") or result.get("subtype") or "error"))[:600])

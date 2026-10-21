@@ -193,7 +193,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     _base.ensure_bridge()
     history = history or []
     key = f"{provider}:" + _base._chat_key(history, prompt)
-    session = (_base._load_sessions().get(key) or {}).get("session") if history else None
+    session = _base.session_for(key, history)
     cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
     os.makedirs(cwd, exist_ok=True)
     try:
@@ -351,7 +351,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     except Exception:
         pass
     if sid:
-        _base._save_session(key, sid)
+        _base._save_session(key, sid, last=_base.asked(prompt))
     reply = "".join(text_parts).strip()
     if failure:
         emit("error", message=(failure + (f" ({err.splitlines()[-1][:300]})" if err else ""))[:700])
