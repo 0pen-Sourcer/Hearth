@@ -1425,6 +1425,39 @@ with sync_playwright() as pw:
     check(f"a chat that opened with a greeting is named from the next message, then left alone {named} {title_asks}",
           named["second"] == "Biggest Files in Downloads" and named["third"] == "Biggest Files in Downloads"
           and len(title_asks) == 2 and "biggest files" in title_asks[1])
+    # A reply gave no sign of what it had in mind from other chats, and the
+    # server wasn't told which chat a turn was in.
+    lately = pg.evaluate("""async () => {
+      let body = null;
+      const realFetch = window.fetch;
+      window.fetch = (u, o) => {
+        if (String(u) !== '/chat') return realFetch(u, o);
+        body = JSON.parse(o.body);
+        const lines = [{ type: 'context_used', threads: [{ topic: 'CBSE private form', where: 'Form submitted.', open: ['Fee payment'], ago: 'yesterday' }] },
+          { type: 'assistant_chunk', content: 'The CBSE fee?' }, { type: 'assistant', content: 'The CBSE fee?' },
+          { type: 'done', duration_ms: 5, iterations: 1, reason: 'finished' }];
+        return Promise.resolve(new Response(lines.map(l => JSON.stringify(l)).join('\\n') + '\\n', { status: 200 }));
+      };
+      const c = newConversation();
+      STATE.loadedModel = { id: 'x', state: 'loaded' };
+      document.getElementById('input').value = 'I got something, guess';
+      await send();
+      await new Promise(r => setTimeout(r, 500));
+      window.fetch = realFetch;
+      const last = [...document.querySelectorAll('#chat-body .msg.assistant')].pop();
+      const btn = last && last.querySelector('.a-mem');
+      if (btn) btn.click();
+      const pop = document.querySelector('.lately-pop');
+      const out = { chat: body && body.chat === activeConvo().id, btn: !!btn,
+                    rows: pop ? [...pop.querySelectorAll('.lp-row b')].map(b => b.textContent) : [],
+                    open: pop ? (pop.querySelector('.lp-open') || {}).textContent : '',
+                    kept: (activeConvo().messages.slice(-1)[0].context || []).length };
+      if (pop) pop.remove();
+      return out;
+    }""")
+    check(f"a reply that had other chats in mind shows what, and the turn says which chat it is in {lately}",
+          lately["chat"] and lately["btn"] and lately["rows"] == ["CBSE private form"]
+          and "Fee payment" in (lately["open"] or "") and lately["kept"] == 1)
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([

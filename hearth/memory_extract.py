@@ -162,6 +162,33 @@ def _already_saved_block() -> str:
     return f"# Already saved (titles, newest first)\n{listing}\n\n# Recent conversation\n"
 
 
+THREAD_PROMPT = """
+# Where this chat stands
+Also say where THIS conversation stands, for a short "lately" list the assistant
+reads in their other chats. Then return an OBJECT, not a bare array:
+  {"facts": [ ...the facts as above... ],
+   "thread": {"topic": "2-5 words", "where": "one short line: what it is about and where it stands now",
+              "open": ["what they said they will do or are waiting on, not done yet"],
+              "closed": ["items from 'Open before' that are now done"]}}
+Open items are THEIR pending things (a purchase not made yet, a fee not paid, a reply
+they are waiting for), not work the assistant is doing. Use "thread": null for a chat
+with nothing ongoing (a one-off question, small talk), and when they asked not to
+save or remember anything.
+"""
+
+
+def _thread_block(chat_id: Optional[str]) -> str:
+    try:
+        from . import threads as _threads
+        t = _threads.get(chat_id) if chat_id else None
+    except Exception:
+        t = None
+    if not t:
+        return "\n# Open before (this chat)\n(nothing)\n"
+    items = "\n".join(f"- {o}" for o in t.get("open") or []) or "(nothing)"
+    return f"\n# Open before (this chat)\nTopic: {t.get('topic', '')}\n{items}\n"
+
+
 def _safe_strip_json(s: str) -> str:
     """Some small models wrap JSON in ```json fences or add a one-line
     intro. Pull the first balanced [...] or {...} out of the string."""
@@ -170,6 +197,11 @@ def _safe_strip_json(s: str) -> str:
     s = re.sub(r"^```(?:json)?\s*", "", s)
     s = re.sub(r"\s*```$", "", s)
     s = s.strip()
+    # An object (facts + where the chat stands) when it opens before any array.
+    if "{" in s and "}" in s and ("[" not in s or s.index("{") < s.index("[")):
+        start, end = s.index("{"), s.rindex("}")
+        if end > start:
+            return s[start: end + 1]
     # Find first [ to last ] — JSON array case
     if "[" in s and "]" in s:
         start = s.index("[")
@@ -229,6 +261,7 @@ def extract_and_save(
     recent_turns: int = DEFAULT_RECENT_TURNS,
     confidence_floor: int = DEFAULT_CONFIDENCE_FLOOR,
     skip_known: bool = True,
+    chat_id: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """Run the extraction pass and persist surviving facts.
 
@@ -254,11 +287,11 @@ def extract_and_save(
     if not transcript.strip():
         return saved, ["no user/assistant content to scan"]
 
-    user_prompt = (EXTRACTION_PROMPT + _already_saved_block() + "\n"
-                   + transcript + "\n\nJSON:")
+    user_prompt = (EXTRACTION_PROMPT + (THREAD_PROMPT if chat_id else "") + _already_saved_block() + "\n"
+                   + transcript + "\n" + (_thread_block(chat_id) if chat_id else "") + "\nJSON:")
     try:
         raw = llm_call(
-            "You are a precise JSON-emitting fact extractor. Output ONLY a JSON array.",
+            "You are a precise JSON-emitting fact extractor. Output ONLY JSON.",
             user_prompt,
         )
     except Exception as e:
@@ -272,9 +305,19 @@ def extract_and_save(
         warnings.append(f"extractor returned non-JSON: {e} — raw head: {raw[:120]!r}")
         return saved, warnings
 
+    thread = None
+    if isinstance(facts, dict):
+        thread = facts.get("thread")
+        facts = facts.get("facts") or []
     if not isinstance(facts, list):
         warnings.append(f"extractor returned non-list: {type(facts).__name__}")
         return saved, warnings
+    if chat_id and isinstance(thread, dict):
+        try:
+            from . import threads as _threads
+            _threads.note(chat_id, thread)
+        except Exception as e:
+            warnings.append(f"thread note failed: {type(e).__name__}: {e}")
 
     for f in facts:
         if not isinstance(f, dict):
@@ -372,6 +415,18 @@ def extract_and_save(
         NOTICED.append({"at": _time.time(), "titles": [f.get("title", "") for f in saved]})
         del NOTICED[:-20]
     return saved, warnings
+
+
+def make_brain_llm_call(model: str = "") -> Callable[[str, str], str]:
+    """The memory pass through whatever the brain is: an agent program (its
+    quick one-shot), Anthropic's own API, or an OpenAI-compatible server."""
+    def _call(system: str, user: str) -> str:
+        from . import claude_brain as _cb
+        if _cb.active():
+            return _cb.quick(system + "\n\n" + user, timeout=150)
+        from .headless import one_shot
+        return one_shot(system + "\n\n" + user, model, max_tokens=2000, timeout=90)
+    return _call
 
 
 def make_openai_llm_call(client, model: str, *, temperature: float = 0.0,

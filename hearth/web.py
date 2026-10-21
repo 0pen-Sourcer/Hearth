@@ -4845,6 +4845,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         model = body.get("model") or None
         history = body.get("history") or []
         voice = bool(body.get("voice"))  # voice-mode turn → spoken-register prompt
+        chat_id = str(body.get("chat") or "")[:80] or None   # which chat this turn is in
         # First message of a chat: drop deferred tools the PREVIOUS conversation
         # unlocked. They're process-global, so without this a fresh chat starts
         # carrying whatever the last one happened to open.
@@ -4939,7 +4940,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 prompt, emit=emit, think=think, think_level=think_level, model=model, history=history,
                 permission_check=_make_permission_check(emit),
                 should_cancel=_CANCEL.is_set, drain_steer=_drain_steer,
-                voice=voice,
+                voice=voice, chat_id=chat_id,
             ))
         except Exception as e:
             emit("error", message=f"{type(e).__name__}: {e}")

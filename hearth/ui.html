@@ -1675,6 +1675,13 @@
   .ask-card .ak-opt.sel .ak-radio { border-color: var(--accent); opacity: 1;
     background: radial-gradient(circle, var(--accent) 0 3.5px, transparent 4px); }
   .ask-card .ak-own .ak-lab { font-style: italic; }
+  .lately-pop { position: fixed; z-index: 500; width: 340px; max-height: 60vh; overflow-y: auto; }
+  .lately-pop .lp-row { padding: 8px 12px; border-top: 1px solid var(--border); }
+  .lately-pop .lp-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--fg); }
+  .lately-pop .lp-top span { color: var(--fg-faint); font-size: 11.5px; white-space: nowrap; }
+  .lately-pop .lp-where { font-size: 12px; color: var(--fg-dim); margin-top: 2px; line-height: 1.4; }
+  .lately-pop .lp-open { font-size: 11.5px; color: var(--fg-faint); margin-top: 3px; }
+  .lately-pop .lp-foot { padding: 8px 12px; font-size: 11px; color: var(--fg-faint); border-top: 1px solid var(--border); }
   .retry-note { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 12.5px; color: var(--fg-faint); }
   .retry-note .rn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-faint); animation: rnPulse 1.2s ease-in-out infinite; }
   @keyframes rnPulse { 50% { opacity: .25; } }
@@ -7760,6 +7767,16 @@ function renderMessage(m) {
     if (regenBtn) {
       regenBtn.addEventListener('click', () => regenerateFromMessage(m));
     }
+    // What it had in mind from their other chats, when anything went in.
+    if (Array.isArray(m.context) && m.context.length) {
+      const mem = document.createElement('button');
+      mem.className = 'a-mem';
+      mem.title = 'What I had in mind from your other chats';
+      mem.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg> lately';
+      mem.addEventListener('click', (e) => { e.stopPropagation(); showLately(mem, m.context); });
+      const acts = div.querySelector('.actions');
+      if (acts) acts.appendChild(mem);
+    }
   } else {
     // User messages render plain text. If `displayContent` was set (file
     // uploads etc.), show that instead so verbose tool-instruction prompts
@@ -10928,7 +10945,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(Object.assign({ prompt, think: _think, history, voice: voiceModeOn },
+      body: JSON.stringify(Object.assign({ prompt, think: _think, history, voice: voiceModeOn, chat: (activeConvo() || {}).id || null },
                                          _chatModel ? { model: _chatModel } : {})),
       signal: currentAbort ? currentAbort.signal : undefined,
     });
@@ -11095,6 +11112,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
       return;
     }
 
+    if (ev.type === 'context_used') {
+      assistantMsg.context = Array.isArray(ev.threads) ? ev.threads : [];
+      return;
+    }
     if (ev.type === 'heads_up') {
       toast(ev.title || 'Heads up', ev.message || '', 'warn', 8000);
       return;
@@ -12950,6 +12971,26 @@ function renderFiles(entries) {
   }
 }
 $('files-show-hidden').addEventListener('change', () => renderFiles(STATE.fileEntries || []));
+// Under a reply: the threads from their other chats that went in with the
+// message, so it's plain why it guessed what it did.
+function showLately(anchor, rows) {
+  document.querySelectorAll('.lately-pop').forEach(x => x.remove());
+  const pop = document.createElement('div');
+  pop.className = 'lately-pop mp-menu';
+  pop.innerHTML = `<div class="mp-sec">What I had in mind · ${rows.length}</div>` + rows.map(t => `
+    <div class="lp-row"><div class="lp-top"><b>${esc(t.topic || '')}</b><span>${esc(t.ago || '')}</span></div>
+      ${t.where ? `<div class="lp-where">${esc(t.where)}</div>` : ''}
+      ${(t.open || []).length ? `<div class="lp-open">Still open: ${esc(t.open.join('; '))}</div>` : ''}</div>`).join('')
+    + `<div class="lp-foot">From your recent chats. Switch it off with "Remember things on its own" in Settings.</div>`;
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(window.innerWidth - 348, r.left)) + 'px';
+  const h = pop.offsetHeight;
+  pop.style.top = (r.top - h - 8 > 8 ? r.top - h - 8 : r.bottom + 8) + 'px';
+  const away = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', away, true); } };
+  setTimeout(() => document.addEventListener('mousedown', away, true), 0);
+}
+
 // The Files tab's Open menu: the apps Windows offers for the file (its own
 // icons and names), the default app, and the folder it sits in.
 async function fileOpenMenu(anchor, path) {

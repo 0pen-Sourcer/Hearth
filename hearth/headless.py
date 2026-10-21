@@ -171,6 +171,54 @@ def turn_is_active() -> bool:
     return _TURN_ACTIVE.is_set()
 
 
+def lately_block(chat_id: Optional[str], emit=None) -> str:
+    """What has been going on in their other chats, for in front of a message.
+    Empty when memory is switched off or nothing is going on. The surface hears
+    which threads went in, so the reply can show them."""
+    try:
+        from . import memory_extract as _mx, threads as _threads
+        if not _mx.enabled():
+            return ""
+        rows = _threads.recent(exclude=chat_id)
+        text = _threads.block(exclude=chat_id)
+    except Exception:
+        return ""
+    if text and emit is not None:
+        try:
+            emit("context_used", threads=[{"topic": t.get("topic", ""), "where": t.get("where", ""),
+                                           "open": t.get("open") or [], "ago": t.get("ago", "")} for t in rows])
+        except Exception:
+            pass
+    return text
+
+
+def note_turn_async(messages: List[Dict[str, Any]], model: str, chat_id: Optional[str], emit=None) -> None:
+    """The memory pass for a turn an agent program answered: facts, and where
+    the chat stands. In the background; it never holds up the reply."""
+    try:
+        from . import memory_extract as _mx
+        if not _mx.enabled():
+            return
+    except Exception:
+        return
+
+    def _go() -> None:
+        try:
+            saved, warns = _mx.extract_and_save(messages, _mx.make_brain_llm_call(model),
+                                                recent_turns=4, chat_id=chat_id)
+            if saved and emit is not None:
+                try:
+                    emit("facts_saved", count=len(saved), titles=[f["title"] for f in saved])
+                except Exception:
+                    pass
+            elif warns:
+                print("[hearth.memory_extract] nothing saved: " + "; ".join(warns)[:300], flush=True)
+        except Exception as e:
+            print(f"[hearth.memory_extract] extract failed: {type(e).__name__}: {e}", flush=True)
+    import threading as _threading
+    _threading.Thread(target=_go, daemon=True, name="hearth-memory-pass").start()
+
+
 def one_shot(prompt: str, model: str, base: str = "", key: str = "",
              max_tokens: int = 512, timeout: float = 20) -> str:
     """A short answer from the brain in use, with no tools or chat around it
@@ -935,6 +983,7 @@ async def run_once(
     drain_steer=None,
     supervised: bool = True,
     voice: bool = False,
+    chat_id: Optional[str] = None,
 ) -> int:
     """Run a single prompt against the model. Returns process exit code.
 
@@ -944,14 +993,29 @@ async def run_once(
     after the system prompt, then the new `prompt` is appended as a user msg.
     Without it, behavior is the same as before: single-shot prompt.
     """
+    # What has been going on lately in their other chats, put in front of the
+    # message (never ahead of the history, so the cached prefix holds).
+    _lately = "" if prompt.strip() == NOTIFY_FLUSH else lately_block(chat_id, emit)
     # An agent program as the brain (Claude Code, Codex) runs the whole turn itself.
     try:
         from . import claude_brain as _cb
         if _cb.active():
-            return await _cb.run_turn(prompt, emit=emit, history=history,
-                                      permission_check=permission_check if supervised else None,
-                                      should_cancel=should_cancel, voice=voice, model=model,
-                                      drain_steer=drain_steer)
+            _reply: List[str] = []
+
+            def _agent_emit(kind: str, **fields) -> None:
+                if kind == "done" and fields.get("reply"):
+                    _reply.append(str(fields["reply"]))
+                emit(kind, **fields)
+            rc = await _cb.run_turn(prompt, emit=_agent_emit, history=history,
+                                    permission_check=permission_check if supervised else None,
+                                    should_cancel=should_cancel, voice=voice, model=model,
+                                    drain_steer=drain_steer, context=_lately)
+            # The memory pass runs for an agent brain too, through its own one-shot.
+            if _reply and prompt.strip() != NOTIFY_FLUSH:
+                note_turn_async(list(history or []) + [{"role": "user", "content": prompt},
+                                                       {"role": "assistant", "content": _reply[-1]}],
+                                model or "", chat_id, emit)
+            return rc
     except ImportError:
         pass
     try:
@@ -1167,6 +1231,8 @@ async def run_once(
         # templates reject with "System message must be at the beginning"). The
         # GUI shows the clean prompt via emit().
         _user_content = ("\n\n".join(_notif_ctx) + "\n\n---\n\n" + prompt) if _notif_ctx else prompt
+        if _lately:
+            _user_content = f"<lately>\n{_lately}\n</lately>\n\n{_user_content}"
         # The local time rides the tail so it doesn't bust the cached system+history
         # prefix, and lets the model reason "is it late?" / "remind me tomorrow".
         # Memory isn't matched in here: the index is in the system prompt and the
@@ -2465,11 +2531,15 @@ async def run_once(
 
         def _run_extract(_msgs):
             try:
-                from . import memory_extract as _mx
-                import openai as _oai_module
-                _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-                _llm = _mx.make_openai_llm_call(_sync, model)
-                _saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=4)
+                from . import memory_extract as _mx, anthropic_chat as _ac
+                if _ac.is_anthropic(LOCAL_API_BASE):
+                    # Anthropic's compatible endpoint refuses what this call sends; its own API works.
+                    _llm = _mx.make_brain_llm_call(model)
+                else:
+                    import openai as _oai_module
+                    _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+                    _llm = _mx.make_openai_llm_call(_sync, model)
+                _saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=4, chat_id=chat_id)
                 if _saved:
                     try:
                         emit("facts_saved", count=len(_saved),

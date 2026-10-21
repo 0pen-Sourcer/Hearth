@@ -782,7 +782,7 @@ def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
             import asyncio
             # Nobody is there to approve anything, so nothing that asks gets run.
             asyncio.run(headless.run_once(note, emit=emit, history=prior[-20:],
-                                          permission_check=lambda *_a: "deny"))
+                                          permission_check=lambda *_a: "deny", chat_id=cid))
         except Exception:
             pass
         text = "".join(parts).strip()

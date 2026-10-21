@@ -5937,7 +5937,8 @@ class JarvisCLI:
                 prompt, emit=turn.emit, model=self.current_model, think=self.think_on,
                 think_level=getattr(self, "think_level", "") or "", history=history,
                 permission_check=self._ask_permission, should_cancel=self._respond_cancel.is_set,
-                drain_steer=self._drain_steer, voice=bool(self.voice_on))
+                drain_steer=self._drain_steer, voice=bool(self.voice_on),
+                chat_id=(getattr(self, "_chat", None) or {}).get("id"))
         finally:
             turn.running = False
             self._turn = None

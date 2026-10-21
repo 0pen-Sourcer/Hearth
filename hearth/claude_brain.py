@@ -850,7 +850,7 @@ def priced(agent: str, stats: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
 
 async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
                    permission_check=None, should_cancel=None, voice: bool = False,
-                   model: Optional[str] = None, drain_steer=None) -> int:
+                   model: Optional[str] = None, drain_steer=None, context: str = "") -> int:
     """One turn on whichever agent program is the brain. Something said while
     it works reaches it: Claude Code reads it part-way; Codex and Cursor run a
     step to its end, so they are given it as soon as that step finishes.
@@ -888,6 +888,9 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
         prompt = "\n\n".join(news)
     elif news:
         prompt = "\n\n".join(news) + "\n\n" + prompt
+    if context and prompt.strip() != NOTIFY_FLUSH:
+        # What has been going on in their other chats; not part of what was asked.
+        prompt = f"<lately>\n{context}\n</lately>\n\n{prompt}"
     other = {"codex": "codex_brain", "cursor-agent": "cursor_brain"}.get(current() or "") or (
         "acp_brain" if current() in ACP else "")
     if not other:
