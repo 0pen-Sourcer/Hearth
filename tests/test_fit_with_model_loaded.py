@@ -55,6 +55,14 @@ theirs = llmserver.list_hf_files("maker/Chat-8B-GGUF")[0]
 check(f"with another program's model holding the card, it still says it won't fit ({theirs['fit_tier']})",
       theirs["fit_tier"] != "good")
 
+# A model that just misses the free memory was called "mostly on CPU".
+llmserver._total_ram_gb = lambda: 32.0
+near = llmserver.vram_fit_class(6.48, 6.8)
+far = llmserver.vram_fit_class(14.0, 6.8)
+check(f"one that just misses runs mostly on the card, and says so ({near['tier']}: {near['label']})",
+      near["tier"] == "partial" and "% on CPU" in near["label"])
+check(f"one far over is still mostly on the CPU ({far['tier']})", far["tier"] == "overflow")
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

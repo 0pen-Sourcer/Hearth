@@ -3171,6 +3171,11 @@ def vram_fit_class(model_size_gb: Optional[float],
     ram = _total_ram_gb()
     if ram is not None and required > free_vram_gb + max(0.0, ram - 2.0):
         return {"tier": "toobig",   "label": f"too big to load — needs ~{required:.1f} GB, over VRAM + system RAM combined"}
+    # How much of it lands on the card decides what to call it: a model that
+    # just misses runs nearly all on the GPU, which isn't "mostly on CPU".
+    on_gpu = usable / required if required else 0.0
+    if on_gpu >= 0.5:
+        return {"tier": "partial",  "label": f"about {round((1 - on_gpu) * 100)}% on CPU ({required:.1f} GB vs {usable:.1f} GB usable), slower but runs fine"}
     return {"tier": "overflow",     "label": f"mostly on CPU — needs ~{required:.1f} GB, {free_vram_gb:.1f} GB free; still runs, just slower"}
 
 
