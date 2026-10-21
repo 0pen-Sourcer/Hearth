@@ -1367,6 +1367,64 @@ with sync_playwright() as pw:
     check(f"About names the brain in words, LM Studio's line only when it is around, and Another server starts empty {about}",
           not about["said"].startswith("http") and about["lms"] is True and about["cleared"] == ""
           and about["kept"] == "http://192.168.1.5:8080/v1")
+    # A request the provider refused for a moment was retried in silence: the
+    # window looked stuck while the terminal said "retrying 1/5".
+    retried = pg.evaluate("""async () => {
+      const lines = [
+        { type: 'retry', attempt: 1, max_attempts: 5, wait_s: 2, category: 'rate_limit', message: 'busy' },
+        { type: 'retry', attempt: 2, max_attempts: 5, wait_s: 4, category: 'rate_limit', message: 'busy' },
+        { type: 'assistant_chunk', content: 'Here it is.' }, { type: 'assistant', content: 'Here it is.' },
+        { type: 'done', duration_ms: 10, iterations: 1, reason: 'finished' }];
+      const realFetch = window.fetch;
+      // The reply arrives a piece at a time, the way a real one does.
+      window.fetch = (u, o) => {
+        if (String(u) !== '/chat') return realFetch(u, o);
+        const enc = new TextEncoder();
+        const body = new ReadableStream({ async start(ctl) {
+          for (const l of lines) { ctl.enqueue(enc.encode(JSON.stringify(l) + '\\n')); await new Promise(r => setTimeout(r, 120)); }
+          ctl.close(); } });
+        return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } }));
+      };
+      const seen = [];
+      const look = setInterval(() => document.querySelectorAll('#chat-body .retry-note').forEach(n => {
+        if (!seen.includes(n.textContent)) seen.push(n.textContent); }), 20);
+      newConversation();
+      STATE.loadedModel = { id: 'x', state: 'loaded' };
+      document.getElementById('input').value = 'hi';
+      await send();
+      await new Promise(r => setTimeout(r, 300));
+      clearInterval(look); window.fetch = realFetch;
+      return { seen, left: document.querySelectorAll('#chat-body .retry-note').length };
+    }""")
+    check(f"a retried request says so in the reply, try by try, and the line goes when the answer comes {retried}",
+          retried["seen"][:2] == ["Reconnecting · try 1 of 5, in 2 s", "Reconnecting · try 2 of 5, in 4 s"] and retried["left"] == 0)
+    # A chat opened with "Yo!" was named once, off the greeting, and never again.
+    titles = iter(["", "Biggest Files in Downloads"])
+    title_asks: list = []
+
+    def _title(r):
+        title_asks.append(json.loads(r.request.post_data or "{}").get("text", ""))
+        r.fulfill(status=200, content_type="application/json", body=json.dumps({"title": next(titles, "Should Not Be Asked")}))
+    pg.route("**/api/title", _title)
+    pg.route("**/chat", lambda r: r.fulfill(status=200, content_type="application/x-ndjson", body="\n".join(json.dumps(e) for e in [
+        {"type": "assistant_chunk", "content": "Sure."}, {"type": "assistant", "content": "Sure."},
+        {"type": "done", "duration_ms": 5, "iterations": 1, "reason": "finished"}]) + "\n"))
+    named = pg.evaluate("""async () => {
+      const c = newConversation();
+      STATE.loadedModel = { id: 'x', state: 'loaded' };
+      const settle = async () => { for (let i = 0; i < 60; i++) { await new Promise(r => setTimeout(r, 50)); } };
+      const say = async (t) => { STATE.loadedModel = { id: 'x', state: 'loaded' }; document.getElementById('input').value = t; await send(); await settle(); };
+      await say('Yo!');
+      const first = c.title;
+      await say('find the biggest files in Downloads');
+      const second = c.title;
+      await say('and the oldest ones');
+      return { first, second, third: c.title };
+    }""")
+    pg.unroute("**/chat"); pg.unroute("**/api/title")
+    check(f"a chat that opened with a greeting is named from the next message, then left alone {named} {title_asks}",
+          named["second"] == "Biggest Files in Downloads" and named["third"] == "Biggest Files in Downloads"
+          and len(title_asks) == 2 and "biggest files" in title_asks[1])
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([

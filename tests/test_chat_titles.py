@@ -52,6 +52,12 @@ check("nothing answering keeps the opening's first words",
       chat_sync.title_for("help me plan a trip to Goa in December please", lambda p: "")
       == "help me plan a trip to…")
 
+# A bare "Yo!" was named "Greeting only, no task yet".
+asked_for = []
+title = chat_sync.title_for("Yo!\n\nAssistant: Yo! What do you need?", lambda p: asked_for.append(p) or "NONE")
+check(f"a chat that is only a greeting gets no title yet, so the next message names it {title!r}",
+      title == "" and "NONE" in asked_for[0] and "Ignore greetings" not in asked_for[0])
+
 chat_sync.post("c1", "help me plan a trip", "terminal", [{"role": "user", "content": "help me plan a trip"}])
 d = chat_sync.load("c1")
 d["title"] = "help me plan a trip"

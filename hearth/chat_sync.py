@@ -153,13 +153,17 @@ def title_for(text: str, ask) -> str:
             title = " ".join(words[:6])
         return title[:50].strip(" .,:;")
 
-    prompt = ("Output ONLY a 3-5 word title (no quotes, no preamble) that captures what this "
-              "conversation is about. Ignore greetings like 'hi'/'yo'. Nothing else.\n\n"
+    prompt = ("Output ONLY a 3-5 word title (no quotes, no preamble) for this conversation, the way "
+              "a person would name it after what was asked. If nothing has been asked yet (only a "
+              "greeting or small talk), output exactly NONE.\n\n"
               f"Conversation:\n{text[:500]}\n\nTitle:")
     try:
         got = clean(ask(prompt))
     except Exception:
         got = ""
+    # Nothing to name yet: no title, so the chat is named from what comes next.
+    if got.upper().strip(" .!") == "NONE":
+        return ""
     return got or fallback(text)
 
 
