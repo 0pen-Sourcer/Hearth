@@ -2539,6 +2539,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             # ?q=qwen returns HF GGUF results
             from . import llmserver
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("q", [""])[0]
+            if not q.strip():
+                return self._send_json(200, {"results": llmserver.popular_chat_models()})
             return self._send_json(200, {"results": llmserver.search_huggingface(q)})
         if path == "/api/llmserver/vision":
             from . import llmserver

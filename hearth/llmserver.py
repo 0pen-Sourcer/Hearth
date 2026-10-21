@@ -3258,6 +3258,37 @@ def _from_its_maker(m: Dict[str, Any]) -> bool:
     return len(stem) >= 3 and stem.replace("-", "") in repo.split("/")[-1].lower().replace("-", "")
 
 
+_POPULAR: Dict[str, Any] = {}
+
+
+def popular_chat_models(limit: int = 12) -> List[Dict[str, Any]]:
+    """The most downloaded chat GGUFs this month, the ones their own makers
+    publish first, for the Models page before anything is searched. Nothing is
+    hidden; the order only says who made what."""
+    if _POPULAR.get("at", 0) > time.time() - 3600:
+        return _POPULAR["list"]
+    url = ("https://huggingface.co/api/models?filter=gguf&pipeline_tag=text-generation"
+           "&sort=downloads&direction=-1&limit=40&expand[]=gguf&expand[]=downloads&expand[]=likes&expand[]=tags")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            models = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return [{"error": f"{type(e).__name__}: {e}"}]
+    out = []
+    for m in models:
+        repo = str(m.get("id") or "")
+        if not repo:
+            continue
+        out.append({"hf_repo": repo, "name": repo.split("/")[-1], "downloads": m.get("downloads", 0),
+                    "likes": m.get("likes", 0), "tags": [t for t in (m.get("tags") or []) if not str(t).startswith("base_model:")][:6],
+                    "params_b": round(((m.get("gguf") or {}).get("total") or 0) / 1e9, 1) or None,
+                    "makers": _from_its_maker(m)})
+    out.sort(key=lambda x: (not x["makers"], -(x["downloads"] or 0)))
+    _POPULAR.update(at=time.time(), list=out[:limit])
+    return _POPULAR["list"]
+
+
 def suggest_model(vram_gb: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """A first model for this PC, chosen the way people are choosing now: the
     most downloaded chat GGUF this month that its makers published and that

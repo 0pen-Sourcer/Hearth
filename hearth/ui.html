@@ -422,6 +422,9 @@
   .brain-now { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg); }
   .brain-now b { font-weight: 600; }
   .brain-now > span:not(.brain-mark) { color: var(--fg-dim); }
+  .brain-now > span:empty { display: none; }
+  .model-maker { margin-left: 8px; font: 500 10.5px var(--sans); color: var(--ok); padding: 1px 7px; border-radius: 99px;
+    background: color-mix(in srgb, var(--ok) 12%, transparent); vertical-align: 1px; }
   @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
   /* Unified download indicator: a small dot that turns violet + pulses while a
      background download runs, then does one "breathe" when it completes. One
@@ -2771,6 +2774,8 @@
   .srv-raw-tog { align-self: flex-start; margin: 10px 16px 6px; background: none; border: 1px solid var(--border); color: var(--fg-dim);
     border-radius: 99px; padding: 4px 12px; font: 12px var(--sans); cursor: pointer; }
   .srv-raw-tog:hover { color: var(--fg); border-color: var(--border-strong); }
+  .eng-builds:not(.show-all) .eng-older { display: none; }
+  .eng-more { margin: 10px 0 0; }
   .srv-req { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; font: 12px var(--sans); color: var(--fg-dim); }
   .srv-req b { color: var(--fg); font-weight: 600; }
   .srv-req .k { display: flex; justify-content: space-between; margin-top: 3px; }
@@ -17316,8 +17321,9 @@ function _renderModelsHeader(s) {
   if (provider !== 'local') {
     const agent = AGENT_BRAINS[provider];
     const who = agent || (BRAIN_MARKS[provider] || {}).maker || (provider === 'custom' ? 'your server' : provider);
-    const model = agent ? agentModelLabel(provider) : String(st.llm_model || '').replace(/^models\//, '');
-    head.innerHTML = now(brainMarkHTML(provider), model, (agent ? 'through ' : 'on ') + esc(who),
+    const model = agent ? agentModelLabel(provider).replace(agent, '').replace(/^\s*·\s*/, '')
+                        : String(st.llm_model || '').replace(/^models\//, '');
+    head.innerHTML = now(brainMarkHTML(provider), model || (agent ? agent : ''), model ? (agent ? 'through ' : 'on ') + esc(who) : '',
                          'The models here run on this PC when you switch to one.');
   } else if (s.builtin_running) {
     head.innerHTML = now(brainMarkHTML(''), (s.builtin_model || '').split(/[\\/]/).pop().replace(/\.gguf$/i, ''), 'on this PC');
@@ -17431,7 +17437,7 @@ function modelsRenderMine() {
             <span class="model-badge badge-src">${esc(m.source)}</span>
             ${loaded ? `<span class="model-badge badge-loaded">running${loadedVia === 'external' ? ' · LM Studio' : ''}</span>` : ''}
           </div>
-          <div class="model-meta">${m.size_gb} GB &middot; ${esc(m.path)}</div>
+          <div class="model-meta">${esc(m.path)}</div>
           ${modelsCapTagsHTML(caps)}
           <div class="model-vision" data-vision-path="${esc(m.path)}"></div>
         </div>
@@ -17564,8 +17570,11 @@ async function modelsRenderEngine() {
     const cap = bl.gpu_compute_cap;
     html += `<div class="models-section">
       <div class="sec-head"><h3>Available builds</h3><span class="sub">official llama.cpp</span></div>
-      <div class="sec-body">
+      <div class="sec-body eng-builds">
         <div class="engine-note" style="margin-bottom:10px">llama.cpp ships new builds most days. You don't need to keep up. Only change this if a model won't load, output looks wrong, or it's slow on a new GPU.</div>`;
+    // The newest, and any this PC has a story with; the rest fold away.
+    const keep = (b, i) => i === 0 || b.installed || b.verified || b.known_bad || (pinned && b.tag.toLowerCase() === pinned);
+    const older = builds.filter((b, i) => !keep(b, i)).length;
     for (let i = 0; i < builds.length; i++) {
       const b = builds[i];
       let badges = i === 0 ? '<span class="model-badge badge-rec">latest</span>' : '';
@@ -17593,10 +17602,10 @@ async function modelsRenderEngine() {
       const capNote = cap ? `Your GPU is compute <b>${cap}</b>.`
                           : 'No NVIDIA GPU here, so a CUDA build will not help.';
       html += `
-        <div class="model-row is-expandable${b.installed ? ' is-loaded' : ''}" data-row="${rowId}">
+        <div class="model-row is-expandable${b.installed ? ' is-loaded' : ''}${keep(b, i) ? '' : ' eng-older'}" data-row="${rowId}">
           <div class="model-info">
             <div class="model-name">${esc(b.tag)}${badges}</div>
-            <div class="model-meta">${b.size_mb} MB &middot; released ${esc(b.published)}</div>
+            <div class="model-meta">${b.size_mb} MB${b.published ? ` &middot; released ${esc(b.published)}` : ''}</div>
             <div class="cuda-chips">${chips}</div>
           </div>
           <span class="model-row-chevron" aria-hidden="true">▾</span>
@@ -17624,6 +17633,7 @@ async function modelsRenderEngine() {
           </div>
         </div>`;
     }
+    if (older) html += `<button type="button" class="srv-raw-tog eng-more" onclick="this.closest('.eng-builds').classList.toggle('show-all'); this.textContent = this.closest('.eng-builds').classList.contains('show-all') ? 'Hide older builds' : 'Show ${older} older builds'">Show ${older} older builds</button>`;
     html += '</div></div>';
   }
   pane.innerHTML = html;
@@ -17711,7 +17721,7 @@ async function modelsRenderDiscover() {
   try {
     const url = q
       ? '/api/llmserver/hf-search?q=' + encodeURIComponent(q)
-      : '/api/llmserver/hf-search?q=' + encodeURIComponent('gguf');
+      : '/api/llmserver/hf-search?q=';
     const r = await api(url);
     list = r.results || [];
   } catch (e) {
@@ -17725,22 +17735,22 @@ async function modelsRenderDiscover() {
   }
   const subText = q
     ? `${list.length} repo${list.length === 1 ? '' : 's'} matching “${esc(q)}”`
-    : `Top ${list.length} most-downloaded GGUF repos - type in the search box to filter.`;
+    : `The chat models downloaded most this month, the ones their makers publish first. Search for anything else.`;
   let html = `<div class="models-section">
     <div class="sec-head">
-      <h3>${q ? 'Hugging Face results' : 'Popular GGUFs on Hugging Face'}</h3>
+      <h3>${q ? 'Hugging Face results' : 'Popular chat models'}</h3>
       <span class="sub">${subText}</span>
     </div>
     <div class="sec-body">`;
   for (let i = 0; i < list.length; i++) {
     const it = list[i];
     const caps = modelsCapTags(it.hf_repo, it.tags || []);
-    const params = modelParamsLabel(it.hf_repo);
+    const params = it.params_b ? it.params_b + 'B' : modelParamsLabel(it.hf_repo);
     const rowId = 'hf-' + i;
     html += `
       <div class="model-row is-expandable" data-row="${rowId}" data-hf-repo="${esc(it.hf_repo)}">
         <div class="model-info">
-          <div class="model-name">${esc(it.hf_repo)}</div>
+          <div class="model-name">${esc(it.hf_repo)}${it.makers ? ' <span class="model-maker" title="Published by the people who made the model">from its makers</span>' : ''}</div>
           <div class="model-meta">${params ? params + ' · ' : ''}${(it.downloads || 0).toLocaleString()} downloads${it.likes ? ' · ' + it.likes.toLocaleString() + ' likes' : ''} · ${(it.tags || []).slice(0, 4).map(esc).join(' · ') || '-'}</div>
           ${modelsCapTagsHTML(caps)}
         </div>

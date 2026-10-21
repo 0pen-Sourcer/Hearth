@@ -71,6 +71,12 @@ L._SUGGEST.clear()
 small = L.suggest_model(4)
 check(f"on a 4 GB card something smaller ({small and small['repo']})", small and small["repo"] == "Maker/Small-4B-GGUF")
 L._SUGGEST.clear()
+L.urllib.request.urlopen = lambda req, timeout=0: _Resp(json.dumps(LISTING).encode())
+pop = L.popular_chat_models()
+check(f"the Models page lists makers' own releases first and hides none ({[p['hf_repo'] for p in pop]})",
+      len(pop) == len(LISTING) and [p["makers"] for p in pop] == sorted([p["makers"] for p in pop], reverse=True)
+      and pop[0]["hf_repo"] == "maker-ai/Maker-35B-GGUF")
+L._POPULAR.clear()
 L.urllib.request.urlopen = lambda req, timeout=0: (_ for _ in ()).throw(OSError("offline"))
 check("offline it offers nothing rather than guessing", L.suggest_model(8) is None)
 
