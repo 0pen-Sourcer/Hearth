@@ -1900,6 +1900,28 @@ class HearthHandler(BaseHTTPRequestHandler):
             wq = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             return self._send_json(200, what_to_get(local=wq.get("local", ["0"])[0] == "1",
                                                     voice=wq.get("voice", ["0"])[0] == "1"))
+        if path == "/api/file/openers":
+            # The apps Windows offers for this file, for the Files tab's Open menu.
+            from . import openers as _op
+            fq = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            real, why = _workspace_file(fq.get("path", [""])[0])
+            if why:
+                return self._send_json(400, {"apps": [], "error": why})
+            return self._send_json(200, {"apps": [{"name": o["name"], "exe": o["exe"], "default": o["default"]}
+                                                  for o in _op.openers(real)]})
+        if path == "/api/file/opener-icon":
+            from . import openers as _op
+            exe = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("exe", [""])[0]
+            png = _op.icon_png(exe) if exe.lower().endswith(".exe") else None
+            if not png:
+                return self.send_error(404, "no icon")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(png)
+            return
         if path == "/api/mention":
             # What "@words" in the message box can point at.
             from . import session_search as _ss
@@ -3501,17 +3523,21 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200 if r.get("ok") else 400, r)
         if path == "/api/file/open":
             # A file from the Files tab, in the app Windows opens it with.
-            real, why = _workspace_file(str((self._read_json() or {}).get("path") or ""))
+            ob = self._read_json() or {}
+            real, why = _workspace_file(str(ob.get("path") or ""))
             if why:
                 return self._send_json(400, {"ok": False, "error": why})
             try:
-                if sys.platform == "win32":
+                if ob.get("exe"):
+                    from . import openers as _op
+                    _op.open_with(real, str(ob["exe"]))
+                elif sys.platform == "win32":
                     os.startfile(real)  # type: ignore[attr-defined]
                 else:
                     import subprocess as _sp
                     _sp.Popen(["open" if sys.platform == "darwin" else "xdg-open", real])
                 return self._send_json(200, {"ok": True})
-            except OSError as e:
+            except (OSError, ValueError) as e:
                 return self._send_json(500, {"ok": False, "error": str(e)})
         if path == "/api/voice/realtime/mute":
             # The mic button in voice mode. Kept here, not in the page: the
@@ -4418,7 +4444,9 @@ class HearthHandler(BaseHTTPRequestHandler):
         if not path:
             return self._send_json(400, {"error": "missing path"})
         try:
-            real = os.path.realpath(os.path.expanduser(path))
+            p = os.path.expanduser(path)
+            # The Files tab names things from the workspace down.
+            real = os.path.realpath(p if os.path.isabs(p) else os.path.join(WORKSPACE, p))
         except Exception:
             return self._send_json(400, {"error": "bad path"})
         if not os.path.exists(real):

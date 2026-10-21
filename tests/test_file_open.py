@@ -61,6 +61,32 @@ if sys.platform == "win32":
     check(f"a file outside the workspace is refused ({st}, {out})", st == 400 and not opened)
     st, out = post({"path": "..\\..\\Windows\\win.ini"})
     check("and so is a way out of it", st == 400 and not opened)
+
+    # Open with: only an app Windows lists for the file is ever started.
+    from hearth import openers  # noqa: E402
+    launched = []
+    openers.subprocess.Popen = lambda argv, **kw: launched.append(argv)
+    openers.openers = lambda p: [{"exe": r"C:\Apps\Editor.exe", "name": "Editor", "default": True}]
+    st, out = post({"path": "deck.pptx", "exe": r"C:\Apps\Editor.exe"})
+    check(f"a listed app opens the file ({st}, {launched})", st == 200 and launched
+          and launched[0][0] == r"C:\Apps\Editor.exe" and launched[0][1].endswith("deck.pptx"))
+    launched.clear()
+    st, out = post({"path": "deck.pptx", "exe": r"C:\Windows\System32\cmd.exe"})
+    check(f"any other program is refused ({st}, {out})", st != 200 and not launched)
+
+    # Show in folder finds a Files-tab path from the workspace down.
+    import subprocess as _sub  # noqa: E402
+    shown = []
+    real_popen = _sub.Popen
+    _sub.Popen = lambda argv, **kw: shown.append(argv)
+    c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
+    c.request("POST", "/api/file/reveal", json.dumps({"path": "deck.pptx"}),
+              {"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{PORT}"})
+    r = c.getresponse(); r.read(); c.close()
+    _sub.Popen = real_popen
+    check(f"show in folder finds a workspace path ({r.status}, {shown})",
+          r.status == 200 and shown
+          and os.path.join(os.path.realpath(WS), "deck.pptx").lower() in " ".join(map(str, shown[0])).lower())
 srv.shutdown()
 
 print()

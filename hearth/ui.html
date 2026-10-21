@@ -2190,6 +2190,10 @@
   .src-list small { color: var(--fg-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-frame { width: min(82vw, 1100px); height: 68vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; display: block; }
   .file-text { white-space: pre-wrap; max-height: 62vh; overflow: auto; font: 12px/1.5 var(--mono); margin: 0; }
+  .file-open-btn { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--sans); }
+  .file-open-menu { position: fixed; z-index: 500; }
+  .file-open-menu .mp-ico img { width: 18px; height: 18px; display: block; }
+  .file-open-menu .fo-sep { height: 1px; background: var(--border); margin: 4px 6px; }
   .paste-view { white-space: pre-wrap; max-height: 60vh; overflow: auto; font: 12px/1.5 var(--mono); margin: 0; }
   .user-attach.is-paste { cursor: pointer; }
   .slash-item.mention { justify-content: flex-start; align-items: center; gap: 10px; padding: 7px 12px; }
@@ -12780,29 +12784,73 @@ function renderFiles(entries) {
     } else {
       const fullPath = (STATE.filePath ? STATE.filePath + '/' : '') + f.name;
       const actions = div.querySelector('.row-actions');
-      const readBtn = document.createElement('button');
-      readBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
-      readBtn.title = 'Read'; actions.append(readBtn);
-      readBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
+      const openBtn = document.createElement('button');
+      openBtn.className = 'file-open-btn';
+      openBtn.innerHTML = `Open <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`;
+      openBtn.title = 'Open with';
+      actions.append(openBtn);
+      openBtn.addEventListener('click', (e) => { e.stopPropagation(); fileOpenMenu(openBtn, fullPath); });
+      div.addEventListener('click', () => {
         const kind = /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name) ? 'image' : /\.(mp4|webm|mov|m4v)$/i.test(f.name) ? 'video' : '';
-        if (kind) { openLightbox('/file?path=' + encodeURIComponent(fullPath), kind, fullPath); return; }
-        filePreview(f.name, fullPath);
+        if (kind) openLightbox('/file?path=' + encodeURIComponent(fullPath), kind, fullPath);
+        else filePreview(f.name, fullPath);
       });
-      const sumBtn = document.createElement('button');
-      sumBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M3 12h12"/><path d="M3 18h18"/></svg>`;
-      sumBtn.title = 'Summarize in chat'; actions.append(sumBtn);
-      sumBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showView('chat');
-        send(`Summarize ~/Jarvis/${fullPath}`);
-      });
-      div.addEventListener('click', () => readBtn.click());
     }
     list.appendChild(div);
   }
 }
 $('files-show-hidden').addEventListener('change', () => renderFiles(STATE.fileEntries || []));
+// The Files tab's Open menu: the apps Windows offers for the file (its own
+// icons and names), the default app, and the folder it sits in.
+async function fileOpenMenu(anchor, path) {
+  document.querySelectorAll('.file-open-menu').forEach(m => m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'file-open-menu mp-menu';
+  menu.innerHTML = '<div class="mp-sec">Open with</div><div class="fo-apps"><div class="mp-s" style="padding:6px 10px">Looking…</div></div>'
+    + `<div class="fo-sep"></div>`
+    + `<button type="button" class="mp-row" data-fo="default"><span class="mp-ico">${_ICON_FILE}</span><span class="mp-txt"><span class="mp-t">Default app</span></span></button>`
+    + `<button type="button" class="mp-row" data-fo="attach"><span class="mp-ico">${_MENTION_ICO.chat}</span><span class="mp-txt"><span class="mp-t">Attach to a message</span></span></button>`
+    + `<button type="button" class="mp-row" data-fo="folder"><span class="mp-ico">${_ICON_FOLDER}</span><span class="mp-txt"><span class="mp-t">Show in folder</span></span></button>`
+    + `<button type="button" class="mp-row" data-fo="copy"><span class="mp-ico">${_ICON_TEXT}</span><span class="mp-txt"><span class="mp-t">Copy path</span></span></button>`;
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.width = '260px';
+  menu.style.top = Math.min(window.innerHeight - 340, r.bottom + 6) + 'px';
+  menu.style.left = Math.max(8, r.right - 260) + 'px';
+  const close = () => { menu.remove(); document.removeEventListener('mousedown', away, true); };
+  const away = (e) => { if (!menu.contains(e.target)) close(); };
+  setTimeout(() => document.addEventListener('mousedown', away, true), 0);
+  const post = (body) => api('/api/file/open', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Object.assign({ path }, body)) }).catch(e => toast("Couldn't open it", e.message, 'err'));
+  menu.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-fo]'); if (!b) return;
+    close();
+    if (b.dataset.fo === 'default') post({});
+    else if (b.dataset.fo === 'app') post({ exe: b.dataset.exe });
+    else if (b.dataset.fo === 'folder') api('/api/file/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }) }).catch(er => toast("Couldn't show it in its folder", er.message, 'err'));
+    else if (b.dataset.fo === 'copy') navigator.clipboard.writeText(path).then(() => toast('Path copied', '', 'ok', 1500));
+    else if (b.dataset.fo === 'attach') {
+      const name = path.split(/[\\/]/).pop();
+      // The model is given the whole path, not one from the workspace down.
+      const full = STATE.filePathAbs ? STATE.filePathAbs.replace(/[\\/]+$/, '') + '\\' + name : path;
+      if (!_pendingAttachments.some(x => x.path === full)) {
+        _pendingAttachments.push({ name, path: full, isImage: IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()) });
+        _renderAttachTray();
+      }
+      showView('chat');
+      input.focus();
+    }
+  });
+  let apps = [];
+  try { apps = (await api('/api/file/openers?path=' + encodeURIComponent(path))).apps || []; } catch {}
+  const box = menu.querySelector('.fo-apps');
+  if (!box) return;
+  box.innerHTML = apps.length ? apps.map(a => `<button type="button" class="mp-row" data-fo="app" data-exe="${esc(a.exe)}">
+      <span class="mp-ico"><img src="/api/file/opener-icon?exe=${encodeURIComponent(a.exe)}" alt="" onerror="this.replaceWith(document.createTextNode('${esc((a.name || '?')[0])}'))"></span>
+      <span class="mp-txt"><span class="mp-t">${esc(a.name)}</span></span>${a.default ? '<span class="mp-badge">default</span>' : ''}</button>`).join('')
+    : '<div class="mp-s" style="padding:6px 10px">Windows names no app for this kind of file.</div>';
+}
 // A file opened from the Files tab looks like itself where the window can draw
 // it (a web page or PDF, in a sandbox that runs nothing), and as its text
 // otherwise, never as markup. Office files also offer the app they belong to.
