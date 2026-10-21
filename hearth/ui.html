@@ -18634,7 +18634,9 @@ function dlRender() {
     const pctTxt = d.status === 'done' ? '✓ done' : d.status === 'error' ? 'failed'
       : d.pct == null ? (isAgent ? _fmtETA((Date.now() / 1000) - (d.started || Date.now() / 1000)) : '…') : d.pct + '%';
     const barCol = d.status === 'error' ? 'var(--err)' : 'linear-gradient(90deg, var(--accent), var(--accent-2))';
-    const meta = d.total ? (_fmtGB(d.done) + ' / ' + _fmtGB(d.total) + (d.status === 'downloading' ? '  ·  ' + _fmtSpeed(d.speed) + '  ·  ETA ' + _fmtETA(d.eta) : ''))
+    // Each piece keeps together; the line breaks between them, never inside "76.5 MB/s".
+    const _nb = (s) => String(s).replace(/ /g, ' ');
+    const meta = d.total ? (_nb(_fmtGB(d.done) + ' / ' + _fmtGB(d.total)) + (d.status === 'downloading' ? '  ·  ' + _nb(_fmtSpeed(d.speed)) + '  ·  ' + _nb('ETA ' + _fmtETA(d.eta)) : ''))
       : isAgent ? (d.fetched ? `${d.fetched} package${d.fetched === 1 ? '' : 's'} fetched` : (d.status === 'downloading' ? 'starting…' : '')) : '';
     const _btnCss = 'background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-dim);font-size:11px;padding:3px 9px;cursor:pointer;flex-shrink:0';
     const isEngine = d.kind === 'engine';
