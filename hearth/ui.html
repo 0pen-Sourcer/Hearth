@@ -411,9 +411,17 @@
   }
   .model-state.loaded { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
   .model-state.loading { background: var(--warn); animation: pulse 1.1s infinite; }
-  .model-agent { display: inline-flex; width: 14px; height: 14px; color: var(--hx); font-size: 10px; font-weight: 700;
-    align-items: center; justify-content: center; }
-  .model-agent svg { width: 14px; height: 14px; fill: currentColor; }
+  .model-agent { display: inline-flex; align-items: center; }
+  .brain-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none;
+    color: var(--hx, var(--fg-dim)); font-size: 10px; font-weight: 700; }
+  .brain-mark svg { width: 14px; height: 14px; fill: currentColor; }
+  .brain-mark.local svg { fill: none; }
+  .brain-mark.local { color: var(--fg-dim); }
+  .brain-mark.off { color: var(--fg-faint); opacity: .7; }
+  .brain-mark .hx-fav { width: 14px; height: 14px; border-radius: 3px; }
+  .brain-now { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg); }
+  .brain-now b { font-weight: 600; }
+  .brain-now > span:not(.brain-mark) { color: var(--fg-dim); }
   @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
   /* Unified download indicator: a small dot that turns violet + pulses while a
      background download runs, then does one "breathe" when it completes. One
@@ -6798,19 +6806,20 @@ function applyBrainState() {
   const dot = $$id('model-state');
   const agent = AGENT_BRAINS[b.providerKey] ? b.providerKey : '';
   if (dot) {
-    dot.classList.toggle('loaded', b.loaded && !b.busy);
     dot.classList.toggle('loading', !!b.busy);
-    dot.hidden = !!agent && !b.busy;
+    dot.hidden = !b.busy;
   }
   const mark = $$id('model-agent');
   if (mark) {
-    mark.hidden = !agent || !!b.busy;
-    if (agent && mark.dataset.id !== agent) {
-      const h = HARNESS[agent] || {};
-      mark.dataset.id = agent;
-      mark.style.setProperty('--hx', h.c || 'var(--accent)');
-      mark.innerHTML = harnessMark(h);
-      mark.title = (h.label || agent) + ' is thinking for JARVIS';
+    const key = agent || (b.kind === 'cloud' ? b.providerKey || '' : '');
+    const off = !key && !b.loaded;
+    mark.hidden = !!b.busy;
+    const sig = key + (off ? ':off' : '');
+    if (mark.dataset.id !== sig) {
+      mark.dataset.id = sig;
+      mark.innerHTML = brainMarkHTML(key, off);
+      const h = HARNESS[key] || BRAIN_MARKS[key];
+      mark.title = h ? `${AGENT_BRAINS[key] || h.maker} is thinking for JARVIS` : off ? 'No model loaded' : 'A model on this PC';
     }
   }
   const sel = $$id('model-select');
@@ -8617,7 +8626,7 @@ function mpSync() {
   const picked = STATE.brain && STATE.brain.kind === 'cloud' ? String((STATE.settings || {}).llm_model || '').replace(/^models\//, '') : '';
   name.textContent = agent ? agentModelLabel(agent)
     : (o && o.value) ? (o.dataset.name || _mpClean(raw).replace(/\.gguf$/i, '')) : (picked || 'No model loaded');
-  tag.textContent = /●\s*online/i.test(raw) ? 'online' : /●\s*loaded/i.test(raw) ? 'loaded' : '';
+  tag.textContent = '';   // the brain's mark beside the name says it
   // The model on this PC kept loaded beside a cloud brain runs the helpers.
   const help = document.getElementById('mp-helper');
   if (help) {
@@ -16986,32 +16995,7 @@ async function refreshModelsView() {
   }
   _modelsState.status = s;
 
-  // Server status pill - honest about all three brain modes:
-  //   1. built-in (Hearth owns the server)
-  //   2. external (LM Studio / Ollama on port 1234)
-  //   3. cloud (Gemini / OpenAI / Grok / OpenRouter via Settings → Chat brain)
-  // The user reported confusion when on a cloud brain - Models tab looked
-  // dead even though chat was working. This makes the truth visible at a glance.
-  const isBuiltin = s.builtin_running;
-  const isExt = s.external_running;
-  let settingsSnapshot = STATE.settings || {};
-  const _liveP = providerFromEndpoint(STATE.endpoint || settingsSnapshot.llm_url || '');
-  const provider = (settingsSnapshot.llm_provider && settingsSnapshot.llm_provider !== 'local')
-                   ? settingsSnapshot.llm_provider
-                   : (_liveP.key !== 'local' ? _liveP.key : 'local');
-  const usingCloud = provider !== 'local';
-  const cloudLabel = {
-    gemini: 'Gemini', openai: 'OpenAI', grok: 'Grok',
-    openrouter: 'OpenRouter', groq: 'Groq', custom: 'custom endpoint',
-  }[provider] || provider;
-  // ORDER MATTERS: cloud wins if explicitly picked. Without this, the
-  // pill said "External server · LM Studio" whenever LM Studio happened
-  // to be running locally, even when the user had picked Grok as their
-  // brain. Confused everyone.
-  if (usingCloud) head.innerHTML = '<span class="server-pill is-on">Cloud brain &middot; ' + esc(cloudLabel) + (settingsSnapshot.llm_model ? ' &middot; ' + esc(settingsSnapshot.llm_model) : '') + '</span><span class="server-pill-note">Local models below are for switching brains.</span>';
-  else if (isBuiltin) head.innerHTML = '<span class="server-pill is-on">Built-in server &middot; ' + esc(s.builtin_url || '') + (s.builtin_model ? ' &middot; ' + esc((s.builtin_model || '').split(/[\\/]/).pop()) : '') + '</span>';
-  else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; ' + (s.external_model_id ? esc(s.external_model_id) : 'OpenAI-compatible API on this PC') + '</span>';
-  else head.innerHTML = '<span class="server-pill is-off">No brain active &middot; pick a model below</span>';
+  _renderModelsHeader(s);
 
   // Lite build has no built-in server — steer to cloud/LM Studio or Full.
   if (s.is_lite) {
@@ -17029,29 +17013,32 @@ async function refreshModelsView() {
 
 // Header-only renderer broken out so the stale-while-revalidate path above
 // can paint with cached state instantly without duplicating the pill logic.
+// What JARVIS thinks with, said once at the top of Models: the brain's own mark,
+// the model, and where it runs. Cloud wins when it is the pick, even with LM
+// Studio running on this PC.
 function _renderModelsHeader(s) {
   const head = $('models-server-line');
   if (!head) return;
-  const isBuiltin = s.builtin_running;
-  const isExt = s.external_running;
-  const settingsSnapshot = STATE.settings || {};
-  const _liveP = providerFromEndpoint(STATE.endpoint || settingsSnapshot.llm_url || '');
-  const provider = (settingsSnapshot.llm_provider && settingsSnapshot.llm_provider !== 'local')
-                   ? settingsSnapshot.llm_provider
-                   : (_liveP.key !== 'local' ? _liveP.key : 'local');
-  const usingCloud = provider !== 'local';
-  const cloudLabel = {
-    gemini: 'Gemini', openai: 'OpenAI', grok: 'Grok',
-    openrouter: 'OpenRouter', groq: 'Groq', custom: 'custom endpoint',
-  }[provider] || provider;
-  // ORDER MATTERS: cloud wins if explicitly picked. Without this, the
-  // pill said "External server · LM Studio" whenever LM Studio happened
-  // to be running locally, even when the user had picked Grok as their
-  // brain. Confused everyone.
-  if (usingCloud) head.innerHTML = '<span class="server-pill is-on">Cloud brain &middot; ' + esc(cloudLabel) + (settingsSnapshot.llm_model ? ' &middot; ' + esc(settingsSnapshot.llm_model) : '') + '</span><span class="server-pill-note">Local models below are for switching brains.</span>';
-  else if (isBuiltin) head.innerHTML = '<span class="server-pill is-on">Built-in server &middot; ' + esc(s.builtin_url || '') + (s.builtin_model ? ' &middot; ' + esc((s.builtin_model || '').split(/[\\/]/).pop()) : '') + '</span>';
-  else if (isExt) head.innerHTML = '<span class="server-pill is-on">External server &middot; ' + (s.external_model_id ? esc(s.external_model_id) : 'OpenAI-compatible API on this PC') + '</span>';
-  else head.innerHTML = '<span class="server-pill is-off">No brain active &middot; pick a model below</span>';
+  const st = STATE.settings || {};
+  const live = providerFromEndpoint(STATE.endpoint || st.llm_url || '');
+  const provider = (st.llm_provider && st.llm_provider !== 'local') ? st.llm_provider
+                 : (live.key !== 'local' ? live.key : 'local');
+  const now = (mark, model, where, note) => `<span class="brain-now">${mark}`
+    + (model ? `<b>${esc(model)}</b>` : '') + `<span>${where}</span></span>`
+    + (note ? `<span class="server-pill-note">${note}</span>` : '');
+  if (provider !== 'local') {
+    const agent = AGENT_BRAINS[provider];
+    const who = agent || (BRAIN_MARKS[provider] || {}).maker || (provider === 'custom' ? 'your server' : provider);
+    const model = agent ? agentModelLabel(provider) : String(st.llm_model || '').replace(/^models\//, '');
+    head.innerHTML = now(brainMarkHTML(provider), model, (agent ? 'through ' : 'on ') + esc(who),
+                         'The models here run on this PC when you switch to one.');
+  } else if (s.builtin_running) {
+    head.innerHTML = now(brainMarkHTML(''), (s.builtin_model || '').split(/[\\/]/).pop().replace(/\.gguf$/i, ''), 'on this PC');
+  } else if (s.external_running) {
+    head.innerHTML = now(brainMarkHTML(''), s.external_model_id || '', 'through a server on this PC');
+  } else {
+    head.innerHTML = now(brainMarkHTML('', true), '', 'Nothing loaded. Pick a model below.');
+  }
   $('tab-mine-n').textContent = (s.disk_models || []).length;
 }
 function _renderModelsPanes(s) {
@@ -19895,6 +19882,13 @@ const BRAIN_MARKS = {
   openrouter: { label: 'OpenRouter', maker: 'OpenRouter', c: '#6467f2', site: 'openrouter.ai' },
   groq:       { label: 'Groq',       maker: 'Groq',       c: '#f55036', site: 'groq.com' },
 };
+// A brain's own mark: the agent's or the provider's, else the chip for a model
+// on this PC (dim when none is loaded).
+function brainMarkHTML(key, off = false) {
+  const h = HARNESS[key] || BRAIN_MARKS[key];
+  return h ? `<span class="brain-mark" style="--hx:${h.c}">${harnessMark(h)}</span>`
+           : `<span class="brain-mark local${off ? ' off' : ''}">${MP_CHIP}</span>`;
+}
 function mainBrainMark() {
   const k = (STATE.brain && STATE.brain.providerKey) || '';
   return HARNESS[k] || BRAIN_MARKS[k] ? k : '';

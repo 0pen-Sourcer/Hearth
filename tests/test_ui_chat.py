@@ -246,6 +246,26 @@ with sync_playwright() as pw:
     check(f"pop-ups: all shows everything, only-what-needs-you drops plain notices, none shows nothing {pops}",
           pops == {"all": 3, "needed": 2, "none": 0, "oldMute": 0})
 
+    marks = pg.evaluate("""() => {
+      const was = STATE.brain, out = {};
+      const read = () => { const m = document.getElementById('model-agent'), d = document.getElementById('model-state');
+        return { hidden: m.hidden, cls: (m.querySelector('.brain-mark') || {}).className || '',
+                 hx: (m.querySelector('.brain-mark') || { style: { getPropertyValue: () => '' } }).style.getPropertyValue('--hx'),
+                 dot: !d.hidden }; };
+      STATE.brain = Object.assign({}, was, { kind: 'cloud', providerKey: 'anthropic', loaded: true, busy: false });
+      applyBrainState(); out.cloud = read();
+      STATE.brain = Object.assign({}, was, { kind: 'local', providerKey: 'local', loaded: false, busy: false });
+      applyBrainState(); out.none = read();
+      STATE.brain = Object.assign({}, was, { kind: 'local', providerKey: 'local', loaded: true, busy: true });
+      applyBrainState(); out.loading = read();
+      STATE.brain = was; applyBrainState();
+      return out;
+    }""")
+    check(f"the sticker shows the brain's own mark, not a status dot {marks}",
+          not marks["cloud"]["hidden"] and marks["cloud"]["hx"] == "#d97757" and not marks["cloud"]["dot"]
+          and "local off" in marks["none"]["cls"] and not marks["none"]["dot"]
+          and marks["loading"]["dot"] and marks["loading"]["hidden"])
+
     check(f"changing the accent changes the tab and window icon {tab}",
           "accent=sage" in tab["href"] and "theme=dark" in tab["href"] and tab["last"] == ["dark", "sage"])
 
