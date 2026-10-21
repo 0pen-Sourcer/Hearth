@@ -152,6 +152,13 @@ check(f"an agent brain is handed the same lines {str(seen.get('context'))[:60]!r
 check(f"and its turn runs the memory pass, with the reply and the chat {noted}",
       noted == [("The CBSE fee?", "c_here")])
 
+# The terminal says it too, in one quiet line.
+from hearth import term_render  # noqa: E402
+lines = []
+turn = term_render.Turn(out=lines.append, show_thinking=False, model="m")
+turn.emit("context_used", threads=[{"topic": "CBSE private form"}, {"topic": "Phone hunt"}])
+check(f"the terminal names what it had in mind {lines}", any("had in mind: CBSE private form, Phone hunt" in l for l in lines))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
