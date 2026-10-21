@@ -118,6 +118,7 @@ Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs 
 
 - **Memory.** Every fact JARVIS learns is a small file in `~/Jarvis/memory`. It keeps an index of them in view and looks up what a message needs, and ones never used are archived rather than deleted. Read, change or delete them in the Memory tab.
 - **Saving on its own.** After a reply JARVIS notes lasting facts from the chat. Turn that off in Settings, Appearance, Remember things on its own, and it saves only when you ask. Telling it in a chat not to save something works too.
+- **What's going on lately.** JARVIS also notes where each chat stands and what's still open: the phone you're still hunting for, the form waiting on a payment. A few lines of that come along with each new message, so "guess what, I got it" gets a real guess. The small icon under a reply shows what it had in mind. The same switch turns this off.
 - **Past chats.** Every chat is searchable, so "what did we decide about X last week" works.
 - **One set of chats.** A chat from the terminal shows in the window and can be carried on there, and `/chats` and `/chat <n>` open any chat in the terminal.
 
