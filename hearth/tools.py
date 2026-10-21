@@ -6523,6 +6523,11 @@ def _list_generations(p: Dict) -> str:
 # DISPATCH
 # ============================================================
 
+def _search_chats(p: Dict) -> str:
+    from . import session_search
+    return session_search.format_matches(session_search.search(p.get("query", ""), int(p.get("limit") or 8)))
+
+
 _HANDLERS = {
     "read_file": _read_file,
     "write_file": _write_file,
@@ -6532,7 +6537,7 @@ _HANDLERS = {
     "summarize_file": _summarize_file,
     "read_chat":      lambda p: __import__("hearth.session_search", fromlist=["read_chat"]).read_chat(
         p.get("chat", ""), p.get("start")),
-    "search_chats":   lambda p: __import__("hearth.session_search", fromlist=["search","format_matches"]).format_matches(__import__("hearth.session_search", fromlist=["search"]).search(p.get("query", ""), int(p.get("limit") or 8))),
+    "search_chats":   lambda p: (_touch_unlocked("read_chat"), _search_chats(p))[1],   # reading one whole comes with it
     "set_reminder":   lambda p: __import__("hearth.reminders", fromlist=["set_reminder"]).set_reminder(
         p.get("when", ""), p.get("what", ""), p.get("recurring", ""),
         action_tool=p.get("action_tool", ""), action_args=p.get("action_args"),
@@ -8547,6 +8552,8 @@ for _cd in (
 
 
 _DEFERRED_TOOLS = {
+    # reading one chat whole: searching chats brings it in (see search_chats)
+    "read_chat",
     # image / video generation. All deferred, including forge_generate: local
     # Forge image-gen is niche (most turns aren't image gen), and its schema is
     # one of the heavier ones, so it shouldn't sit in every prompt just because

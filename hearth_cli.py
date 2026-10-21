@@ -5267,6 +5267,13 @@ class JarvisCLI:
             _rem.start_watcher(_reminder_fire)
         except Exception:
             pass
+        # Memory upkeep (stale facts decay, duplicates merge) on the same timer
+        # the window runs, so it doesn't wait for a fact to be saved.
+        try:
+            from hearth.web import _start_memory_maintenance_loop
+            _start_memory_maintenance_loop()
+        except Exception:
+            pass
         await self._maybe_run_onboarding()
 
         # Every boot (after the one-time onboarding), cheaply re-check the machine

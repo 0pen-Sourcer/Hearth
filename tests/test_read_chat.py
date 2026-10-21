@@ -70,6 +70,12 @@ check(f"when several fit as well, they are listed with ids ({both[:60]!r})",
 none = tools.execute_tool("read_chat", {"chat": "volcano trip"})
 check("a chat that isn't there says so and where to look", "search_chats" in none)
 
+# It costs nothing in an ordinary turn: held back until chats are searched.
+tools.reset_unlocked_tools()
+check("read_chat isn't sent with every turn", not tools._tool_active("read_chat"))
+tools.execute_tool("search_chats", {"query": "launch"})
+check("searching chats brings it in", tools._tool_active("read_chat"))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
