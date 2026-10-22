@@ -177,9 +177,8 @@ def skills_for_prompt(max_per_skill: int = 120) -> str:
     # (same idea as the memory-index + tool-diet caps).
     _MAX_IN_PROMPT = 30
     extra = max(0, len(skills) - _MAX_IN_PROMPT)
-    lines = ["# Available skills — these are NOT tools. To use one, call "
-             "load_skill(\"<name>\") and follow its steps; never call the skill "
-             "name itself as a tool."]
+    lines = ["# Skills (not tools: for a request that matches one, load_skill(\"<name>\") "
+             "first and follow its steps)"]
     for s in skills[:_MAX_IN_PROMPT]:
         desc = (s.get("description") or "").strip()
         if len(desc) > max_per_skill:

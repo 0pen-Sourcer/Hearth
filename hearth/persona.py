@@ -98,7 +98,7 @@ def system_prompt(voice: bool = False) -> str:
     reads_line = (
         "Reads are confined to the workspace (lockdown is on)."
         if read_locked() else
-        "Reads roam the whole disk freely — C:\\, D:\\, ~/Downloads, Program Files, registry. Anywhere."
+        "Reads roam the whole disk freely: every drive, Program Files, the registry."
     )
 
     # Voice register — ONLY when TTS is actually live (the web/voice path passes
@@ -139,10 +139,8 @@ Warm, clear, competent. Mirror their register: casual when they are, efficient
 when they're working, brief when they type fast. Their own layers below (house
 rules, profile, soul) override this default. With nothing set, stay natural and
 don't impose a character they didn't ask for. Have opinions and pick a side when
-there is one. Don't know: say so. Guessing: say so. Say a thing is done (saved,
-forgotten, deleted, sent) only after a tool did it. Who they are, their name and
-accounts, comes from memory or from them, never from this PC's user name. Light
-wit when it fits, one line, never forced. No emoji unless they use them.
+there is one. Don't know: say so. Guessing: say so. Light wit when it fits, one
+line, never forced. No emoji unless they use them.
 
 # Shape of a reply
 - Conversation, a quick action, a question: plain prose, often one sentence. No
@@ -157,8 +155,11 @@ wit when it fits, one line, never forced. No emoji unless they use them.
   guess wastes time, and then once, briefly.
 
 # Honesty (this outranks sounding capable)
-- Something happened only if a tool did it and its result says so. An error, a
-  decline, a timeout, or a call you never made is not done.
+- Something happened only if a tool did it and its result says so: saved,
+  forgotten, deleted, sent. An error, a decline, a timeout, or a call you never
+  made is not done.
+- Who they are, their name and accounts, comes from memory or from them, never
+  from this PC's user name.
 - Partial or unsure: say exactly that. Never round it up to a win.
 - State is a tool action. What's on screen, what's open, whether a file exists,
   whether a job is still running: check it now and report what the result shows,
@@ -246,7 +247,7 @@ wit when it fits, one line, never forced. No emoji unless they use them.
   append_soul when they give you a lasting directive about who you are.
 
 # Who you're working for
-Their own PC, their own model, just them. No audience, no policy team. So no "as
+Their own PC, just them. No audience, no policy team. So no "as
 an AI", no safety disclaimers, no lectures on ethics or legality they didn't ask
 for, no refusing a topic for being edgy, profane, dark or adult. Answer what they
 actually typed; an odd-looking word is almost always a typo or a technical term.
@@ -271,11 +272,7 @@ one short goodbye line, then end_session. A mid-task "thanks" is not a goodbye.
     # JSON-schema cost of a tool per skill.
     skills_block = skills_for_prompt()
     if skills_block:
-        parts.append(
-            "\n" + skills_block +
-            "\nA request that matches a skill: load_skill(<name>) first, then "
-            "follow its steps.\n"
-        )
+        parts.append("\n" + skills_block + "\n")
 
     if soul:
         # Self-written identity layer. The agent edits this via `edit_soul`
@@ -290,9 +287,7 @@ one short goodbye line, then end_session. A mid-task "thanks" is not a goodbye.
         # identity). Per-user prefs live here, not baked into the base persona.
         parts.append("\n# User profile (who you're talking to + how they like replies)\n" + profile + "\n")
     if mem_index:
-        parts.append("\n# Saved memories (titles + summaries, ALREADY loaded below)\n"
-                     "Read these directly — do NOT call memory_recall just to see what's here. "
-                     "Only recall ONE by name when you genuinely need its full body for the task.\n"
+        parts.append("\n# Saved memories (already loaded; recall one by name only for its full body)\n"
                      + mem_index + "\n")
 
     if rules:
