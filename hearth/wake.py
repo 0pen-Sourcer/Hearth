@@ -252,6 +252,11 @@ class WakeListener:
                 return None, "no microphone is connected"
         if _ll.is_system_audio_device(name):
             return None, f"'{name}' is not a microphone; pick yours in Settings > Voice"
+        if not cfg.get("wake_on_bluetooth") and _ll.is_bluetooth_handsfree(name, rows):
+            # Holding a Bluetooth headset's mic keeps it in hands-free mode (call-quality
+            # sound) for as long as Hearth runs. Voice mode still uses it when asked.
+            return None, (f"'{name}' is a Bluetooth headset; the wake word leaves its mic alone so it keeps "
+                          f"full-quality sound (Settings > Voice can let it listen)")
         try:
             return _ll.MicInput(dev, self.sample_rate, int(self.sample_rate * BLOCK_S)), ""
         except Exception as e:

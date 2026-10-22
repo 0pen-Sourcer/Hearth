@@ -4607,10 +4607,17 @@
         <div class="field">
           <div class="label">
             <div class="name">Wake word</div>
-            <div class="hint">Say this to start talking to Hearth, even while it sits in the tray. It follows the assistant's name. Separate phrases with commas. It keeps the microphone open, which switches some headsets into call mode, so leave it off if you don't use it.</div>
+            <div class="hint">Say this to start talking to Hearth, even while it sits in the tray. It follows the assistant's name. Separate phrases with commas. It keeps the microphone open while it listens.</div>
             <div class="voice-status" id="wake-status">checking…</div>
           </div>
           <div class="switch" data-key="tray_wake_on"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Wake word on a Bluetooth headset</div>
+            <div class="hint">A Bluetooth headset whose mic is held open switches to call mode, and music and video sound flat until it's let go. So the wake word leaves a Bluetooth mic alone unless this is on. Pressing the mic still uses it.</div>
+          </div>
+          <div class="switch" data-key="wake_on_bluetooth"></div>
         </div>
         <div class="field">
           <div class="label">

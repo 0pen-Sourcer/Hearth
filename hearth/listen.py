@@ -116,6 +116,26 @@ def device_rows() -> tuple:
         return [], None
 
 
+def is_bluetooth_handsfree(name: str, rows: Optional[list] = None) -> bool:
+    """Whether a mic is a Bluetooth headset's hands-free mic. Windows lists such a
+    mic, raw, under its Bluetooth hands-free driver (bthhfenum.sys) with the
+    headset's own name in brackets; holding it open keeps the headset in
+    hands-free mode, where it plays at call quality."""
+    if sys.platform != "win32" or not name:
+        return False
+    m = re.search(r"\(([^()]+)\)\s*$", name.strip())
+    own = (m.group(1) if m else name).strip().lower()
+    if not own:
+        return False
+    if rows is None:
+        rows, _ = device_rows()
+    for _i, n, ch, _api in rows:
+        low = str(n).lower()
+        if "bthhfenum" in low and ch > 0 and own in low:
+            return True
+    return False
+
+
 def list_input_devices() -> list:
     """[{index, name, default}] of real microphones for the mic picker, from the
     current device table. Skips raw kernel-streaming duplicates and loopback
