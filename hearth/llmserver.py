@@ -1057,45 +1057,12 @@ def _lib_name(stem: str) -> str:
     return "lib" + stem + (".dylib" if sys.platform == "darwin" else ".so")
 
 
-def asset_os() -> str:
-    """How llama.cpp's release files name this system."""
-    return "win" if sys.platform == "win32" else "macos" if sys.platform == "darwin" else "ubuntu"
-
-
-def asset_arch() -> str:
-    import platform
-    return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
-
-
-_ASSET = re.compile(r"^(cudart-)?llama-(?:[^-]+-)?bin-(win|ubuntu|macos)-(?:(.+)-)?(x64|arm64)\.(zip|tar\.gz)$")
-
-
-def parse_asset(name: str) -> Optional[Dict[str, Any]]:
-    """What a release file is: llama-<tag>-bin-<os>-<kind>-<arch>.<zip|tar.gz>,
-    or the CUDA runtime beside it (cudart-...). macOS builds name no kind: Metal
-    is built in. A plain Linux build is the CPU one."""
-    m = _ASSET.match(name or "")
-    if not m:
-        return None
-    cudart, os_, kind, arch, _ext = m.groups()
-    kind = kind or ("metal" if os_ == "macos" else "cpu")
-    backend, _, ver = kind.partition("-")
-    return {"os": os_, "arch": arch, "backend": backend, "cuda": ver if backend == "cuda" else "",
-            "cudart": bool(cudart)}
-
-
-def _assets_here(assets) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
-    """(asset, what it is) for the release files built for this system."""
-    out = []
-    for a in assets or []:
-        p = parse_asset(a.get("name") or "")
-        if p and p["os"] == asset_os() and p["arch"] == asset_arch():
-            out.append((a, p))
-    return out
+from .release_files import classify as parse_asset, for_this_system as _assets_here  # noqa: E402
 
 
 def _system_name() -> str:
-    return {"win": "Windows", "macos": "macOS", "ubuntu": "Linux"}[asset_os()]
+    from .release_files import this_os
+    return {"win": "Windows", "mac": "macOS", "linux": "Linux"}[this_os()]
 
 
 def _with_libs(env: Dict[str, str], dirs: List[str]) -> Dict[str, str]:
@@ -1983,22 +1950,14 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         # must not be left mixed in with the new ones.
         shutil.rmtree(_have, ignore_errors=True)
 
-    here = _assets_here(assets)
+    from .release_files import pick as _pick
+    bins, runtime, _picked = _pick(assets, backend, cuda)
     if backend == "cuda":
-        # Builds differ in which CUDA versions they ship; take the one asked
-        # for when it is there, else the oldest, which the most drivers run.
-        _cudas = sorted({p["cuda"] for _a, p in here if p["backend"] == "cuda" and not p["cudart"]},
-                        key=lambda v: [int(x) for x in v.split(".") if x.isdigit()])
-        if _cudas and cuda not in _cudas:
-            cuda = _cudas[0]
-        bins = next((a for a, p in here if p["backend"] == "cuda" and p["cuda"] == cuda and not p["cudart"]), None)
-        runtime = next((a for a, p in here if p["backend"] == "cuda" and p["cuda"] == cuda and p["cudart"]), None)
+        cuda = _picked or cuda
         if not bins or (not runtime and not added):
             return {"ok": False, "error": f"no CUDA {cuda} build for {_system_name()} in release {tagname}"}
     else:
         # Vulkan, CPU and Metal builds are one archive each, with no separate runtime.
-        bins = next((a for a, p in here if p["backend"] == backend and not p["cudart"]), None)
-        runtime = None
         if not bins:
             return {"ok": False, "error": f"no {backend} build for {_system_name()} in release {tagname}"}
 

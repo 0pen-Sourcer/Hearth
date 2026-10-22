@@ -2166,6 +2166,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             # Which coding agents read and write this memory too.
             from . import shared_memory as _sm
             return self._send_json(200, {"agents": _sm.status()})
+        if path == "/api/images":
+            # The image and video engine, its model folders and which models are ready.
+            from . import sdserver
+            return self._send_json(200, sdserver.overview(start_engine=self._query().get("start", ["1"])[0] != "0"))
         if path == "/api/threads":
             # What's going on lately, as kept for the next messages.
             from . import threads as _threads
@@ -4230,6 +4234,14 @@ class HearthHandler(BaseHTTPRequestHandler):
             body = self._read_json()
             repo = (body.get("repo") or "").strip()
             filename = (body.get("filename") or "").strip()
+            category = str(body.get("category") or "").strip()
+            if category:
+                # An image or video model file goes in the image engine's folder for its kind.
+                from . import sdserver
+                if category not in sdserver.CATEGORIES or category == "recipes":
+                    return self._stream_model_download("", "", error=f"no such model folder '{category}'")
+                return self._stream_model_download(repo, filename, dest_dir=str(sdserver.models_dir() / category),
+                                                   save_as=os.path.basename(filename))
             return self._stream_model_download(repo, filename)
         if path == "/api/llmserver/vision-download":
             # A model's vision file, streamed like any model download, saved beside it.
@@ -4245,6 +4257,50 @@ class HearthHandler(BaseHTTPRequestHandler):
             body = self._read_json()
             return self._send_json(200, {"ok": llmserver.pause_model_download(
                 (body.get("filename") or "").strip())})
+        if path == "/api/images/install":
+            # The image engine, fetched for this system and card, as NDJSON progress.
+            from . import sdserver
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            _seen = [0.0]
+
+            def _emit(obj):
+                try:
+                    self.wfile.write((json.dumps(obj, default=str) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def _prog(done, total):
+                if time.time() - _seen[0] >= 0.2 or done == total:
+                    _seen[0] = time.time()
+                    _emit({"type": "progress", "done": done, "total": total})
+            try:
+                _emit({"type": "done", **sdserver.install(on_progress=_prog)})
+            except Exception as e:
+                _emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
+            return
+        if path == "/api/images/open-folder":
+            from . import sdserver
+            from .tools import open_outside
+            open_outside(str(sdserver.models_dir()))
+            return self._send_json(200, {"ok": True})
+        if path == "/api/images/cancel":
+            from . import sdserver
+            return self._send_json(200, sdserver.cancel_install())
+        if path == "/api/images/folder":
+            from . import sdserver
+            body = self._read_json()
+            return self._send_json(200, sdserver.set_folder(str(body.get("path") or ""), add=not body.get("remove")))
+        if path == "/api/images/load":
+            from . import sdserver
+            body = self._read_json()
+            rid = str(body.get("recipe") or "")
+            if not rid:
+                return self._send_json(200, {"ok": True, **sdserver.api("POST", "/sdcpp/v1/models/unload")})
+            return self._send_json(200, sdserver.ensure_loaded(bool(body.get("video")), rid))
         if path == "/api/runtime/install":
             # Download Hearth's own llama.cpp runtime (the native llama-server.exe
             # + CUDA DLLs). Streams NDJSON progress like the model download. The

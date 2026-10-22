@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from hearth import llmserver as L  # noqa: E402
+from hearth import llmserver as L, release_files  # noqa: E402
 
 FAILS: list = []
 
@@ -59,6 +59,12 @@ check("a macOS build is Metal", p("llama-b11808-bin-macos-arm64.tar.gz")["backen
 check("a CUDA build carries its version", p("llama-b11808-bin-ubuntu-cuda-12.8-x64.tar.gz")["cuda"] == "12.8")
 check("the CUDA runtime is told apart", p("cudart-llama-bin-win-cuda-12.4-x64.zip")["cudart"]
       and not p("llama-b11808-bin-win-cuda-12.4-x64.zip")["cudart"])
+check("stable-diffusion.cpp's names read the same way",
+      p("sd-master-a77d362-bin-win-cuda12-x64.zip")["cuda"] == "12"
+      and p("sd-master-a77d362-bin-Linux-Ubuntu-24.04-x86_64-vulkan.zip")["backend"] == "vulkan"
+      and p("sd-master-a77d362-bin-Linux-Ubuntu-24.04-x86_64.zip")["backend"] == "cpu"
+      and p("sd-master-a77d362-bin-Darwin-macOS-26.6.2-arm64.zip")["backend"] == "metal"
+      and p("cudart-sd-bin-win-cu12-x64.zip")["cudart"])
 check("files that aren't builds are left out",
       p("llama-b11808-ui.tar.gz") is None and p("llama-b11808-xcframework.zip") is None)
 
@@ -66,9 +72,9 @@ check("files that aren't builds are left out",
 def stand_in(name: str, system: str) -> bytes:
     """An archive shaped like the real one: server + its impl library + a link."""
     exe = "llama-server.exe" if system == "win" else "llama-server"
-    ext = {"win": ".dll", "macos": ".dylib", "ubuntu": ".so"}[system]
+    ext = {"win": ".dll", "mac": ".dylib", "linux": ".so"}[system]
     pre = "" if system == "win" else "lib"
-    head = b"MZ" if system == "win" else (b"\xcf\xfa\xed\xfe" if system == "macos" else b"\x7fELF")
+    head = b"MZ" if system == "win" else (b"\xcf\xfa\xed\xfe" if system == "mac" else b"\x7fELF")
     kind = (p(name) or {}).get("backend", "cpu")
     files = {exe: head + b"\0" * 9000, f"{pre}llama-server-impl{ext}": b"x" * 20000,
              f"{pre}ggml-base{ext}.0": b"x" * 100}
@@ -113,20 +119,20 @@ L._latest_build_release = lambda timeout=20, repo="": {
 
 real_platform = sys.platform
 for system, platform, arch, backend, want in [
-        ("ubuntu", "linux", "x64", "cpu", ["llama-b11808-bin-ubuntu-x64.tar.gz"]),
-        ("ubuntu", "linux", "x64", "cuda", ["llama-b11808-bin-ubuntu-cuda-12.8-x64.tar.gz",
+        ("linux", "linux", "x64", "cpu", ["llama-b11808-bin-ubuntu-x64.tar.gz"]),
+        ("linux", "linux", "x64", "cuda", ["llama-b11808-bin-ubuntu-cuda-12.8-x64.tar.gz",
                                             "cudart-llama-b11808-bin-ubuntu-cuda-12.8-x64.tar.gz"]),
-        ("ubuntu", "linux", "x64", "vulkan", ["llama-b11808-bin-ubuntu-vulkan-x64.tar.gz"]),
-        ("ubuntu", "linux", "arm64", "cpu", ["llama-b11808-bin-ubuntu-arm64.tar.gz"]),
-        ("macos", "darwin", "arm64", "metal", ["llama-b11808-bin-macos-arm64.tar.gz"]),
-        ("macos", "darwin", "x64", "metal", ["llama-b11808-bin-macos-x64.tar.gz"]),
+        ("linux", "linux", "x64", "vulkan", ["llama-b11808-bin-ubuntu-vulkan-x64.tar.gz"]),
+        ("linux", "linux", "arm64", "cpu", ["llama-b11808-bin-ubuntu-arm64.tar.gz"]),
+        ("mac", "darwin", "arm64", "metal", ["llama-b11808-bin-macos-arm64.tar.gz"]),
+        ("mac", "darwin", "x64", "metal", ["llama-b11808-bin-macos-x64.tar.gz"]),
         ("win", "win32", "x64", "cuda", ["llama-b11808-bin-win-cuda-12.4-x64.zip",
                                          "cudart-llama-bin-win-cuda-12.4-x64.zip"])]:
     shutil.rmtree(home / ".hearth", ignore_errors=True)
     asked.clear()
     sys.platform = platform
     L.SERVER_EXE = "llama-server.exe" if platform == "win32" else "llama-server"
-    L.asset_arch = lambda a=arch: a
+    release_files.this_arch = lambda a=arch: a
     try:
         out = L.download_llama_runtime(backend=backend, force=True)
     finally:

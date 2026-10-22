@@ -29,7 +29,10 @@ with open(os.path.join(WS, "settings.json"), "w", encoding="utf-8") as f:
                "provider_keys": {"grok": "xai-saved-key"}}, f)
 sys.path.insert(0, ROOT)
 
-from hearth import imagine, subagents, tools  # noqa: E402
+from hearth import imagine, sdserver, subagents, tools  # noqa: E402
+
+# This is about the cloud route: a model on this PC would be used first.
+sdserver.has_model = lambda video: False
 
 FAILS: list = []
 

@@ -4438,11 +4438,13 @@
         <button class="models-tab active" data-tab="mine">My Models <span class="count" id="tab-mine-n">0</span></button>
         <button class="models-tab" data-tab="discover">Discover</button>
         <button class="models-tab" data-tab="engine">Engine</button>
+        <button class="models-tab" data-tab="images">Images &amp; video</button>
       </div>
       <div class="models-body">
         <div class="models-pane" data-pane="mine" id="models-pane-mine"></div>
         <div class="models-pane" data-pane="discover" id="models-pane-discover" hidden></div>
         <div class="models-pane" data-pane="engine" id="models-pane-engine" hidden></div>
+        <div class="models-pane" data-pane="images" id="models-pane-images" hidden></div>
         <div class="progress-row" id="models-dl" hidden>
           <div class="label" id="models-dl-label"></div>
           <div class="progress-bar"><div id="models-dl-bar"></div></div>
@@ -8999,9 +9001,10 @@ async function agentSetup(id, done) {
         await read(true);
       } else if (busy === 'signin') {
         const opened = await api('/api/agents/signin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        const keys = { 'ctrl+v': 'Ctrl+V', 'ctrl+shift+v': 'Ctrl+Shift+V', 'cmd+v': 'Cmd+V' };
         note = opened.paste === 'right-click'
           ? 'In that window, if it asks for a code: copy it from the browser, then right-click in the window to paste it, and press Enter.'
-          : 'In that window, if it asks for a code: copy it from the browser, paste it with Ctrl+V, and press Enter.';
+          : `In that window, if it asks for a code: copy it from the browser, paste it with ${keys[opened.paste] || 'Ctrl+V'}, and press Enter.`;
         paint();
         // The sign-in happens in its own window; look again until it is done,
         // or until that window is closed without finishing.
@@ -17489,15 +17492,15 @@ async function refreshRuntimeBar() {
 function engineAddDialog() {
   showModal('Add an engine',
     '<div style="line-height:1.55">Some models are made for a build of llama.cpp other than the official one, and their page says which. ' +
-    "Paste that build's GitHub page and Hearth downloads its Windows version for your card, or give a folder with " +
-    "<code>llama-server.exe</code> in it. Hearth uses it only for models the official build can't read, and remembers which one each model needs.</div>" +
+    "Paste that build's GitHub page and Hearth downloads its version for this computer and card, or give a folder with " +
+    "<code>llama-server</code> in it. Hearth uses it only for models the official build can't read, and remembers which one each model needs.</div>" +
     '<input id="engine-add-src" type="text" placeholder="github.com/owner/llama.cpp or a folder" ' +
     'style="width:100%;margin-top:12px;box-sizing:border-box">',
     [ { label: 'Cancel' },
       { label: 'Add', kind: 'primary', busyLabel: 'Adding\u2026', onclick: async () => {
         const v = ($('engine-add-src')?.value || '').trim();
         if (!v) return false;
-        const isFolder = /^[a-z]:[\\/]|^\\\\|^~/i.test(v);
+        const isFolder = /^[a-z]:[\\/]|^\\\\|^~|^\//i.test(v);
         if (!isFolder) { $('modal').classList.remove('open'); runtimeInstall('', v); return; }
         const r = await api('/api/runtime/add-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: v }) });
@@ -17862,6 +17865,141 @@ function modelsRenderMine() {
          } }]);
     });
   });
+}
+
+// Images & video: Hearth's own engine for pictures and short videos
+// (stable-diffusion.cpp), the folders it reads models from, and which models
+// the files there make ready. What each model family needs comes from the
+// engine's own recipes; nothing here names a model.
+const IMG_DL_ID = '__imgengine__';
+const _imgDl = { t0: 0, b0: 0 };
+
+async function imagesInstall() {
+  dlToggle(true);
+  dlUpsert(IMG_DL_ID, { name: 'Image engine', kind: 'imgengine', status: 'downloading', pct: 0 });
+  try {
+    const resp = await fetch('/api/images/install', { method: 'POST' });
+    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'progress' && ev.total) {
+          const now = Date.now();
+          if (!_imgDl.t0) { _imgDl.t0 = now; _imgDl.b0 = ev.done; }
+          const secs = (now - _imgDl.t0) / 1000, speed = secs > 1 ? (ev.done - _imgDl.b0) / secs : 0;
+          dlUpsert(IMG_DL_ID, { status: 'downloading', pct: Math.round(ev.done / ev.total * 100),
+            done: ev.done, total: ev.total, speed, eta: speed > 0 ? (ev.total - ev.done) / speed : 0 });
+        } else if (ev.type === 'done') {
+          _imgDl.t0 = 0;
+          dlUpsert(IMG_DL_ID, { status: ev.ok ? 'done' : (ev.cancelled ? 'paused' : 'error'), pct: ev.ok ? 100 : undefined });
+          if (ev.ok) toast('Image engine ready', ev.already ? 'It was already here.' : 'Add a model to its folder and it shows up here.', 'ok');
+          else if (!ev.cancelled) toast("The image engine didn't download", ev.error || '', 'err', 9000);
+        }
+      }
+    }
+  } catch (e) {
+    dlUpsert(IMG_DL_ID, { status: 'error' });
+    toast("The image engine didn't download", e.message || '', 'err', 8000);
+  }
+  if (_modelsState.tab === 'images') modelsRenderImages();
+}
+
+function imagesFolderDialog() {
+  showModal('Add a models folder',
+    '<div style="line-height:1.55">A folder of image or video models you already have, such as a ComfyUI or ' +
+    'Stable Diffusion WebUI <code>models</code> folder. Hearth reads it where it is; nothing is copied.</div>' +
+    '<input id="img-folder-src" type="text" placeholder="the folder\'s path" ' +
+    'style="width:100%;margin-top:12px;box-sizing:border-box">',
+    [ { label: 'Cancel' },
+      { label: 'Add', kind: 'primary', busyLabel: 'Adding…', onclick: async () => {
+        const v = ($('img-folder-src')?.value || '').trim();
+        if (!v) return false;
+        const r = await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: v }) });
+        if (!r.ok) { toast("That folder didn't work", r.error || '', 'err', 8000); return false; }
+        modelsRenderImages();
+      } } ]);
+  setTimeout(() => $('img-folder-src')?.focus(), 50);
+}
+
+async function modelsRenderImages() {
+  const pane = $('models-pane-images'); if (!pane) return;
+  pane.innerHTML = '<div class="models-empty">Checking the image engine…</div>';
+  let o = {};
+  try { o = await api('/api/images'); } catch (e) { o = { error: e.message }; }
+  if (_modelsState.tab !== 'images') return;
+  const kind = (r) => `<span class="model-badge badge-src">${r.video ? 'video' : 'image'}</span>`;
+  let html = '';
+  if (!o.installed) {
+    html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3><span class="sub">not installed</span></div>
+      <div class="sec-body"><div class="engine-note" style="margin-bottom:10px">Hearth makes pictures and short videos on this PC
+      with stable-diffusion.cpp. The engine is a small download built for your graphics card; models come after.
+      Without it, pictures are made with a cloud provider you have a key for.</div>
+      <button class="model-action" id="img-install">Install the engine</button></div></div>`;
+    pane.innerHTML = html;
+    $('img-install').onclick = imagesInstall;
+    return;
+  }
+  const st = o.status || {};
+  const loaded = st.state === 'ready' ? (st.recipe || '') : '';
+  const rows = o.recipes || [];
+  const ready = rows.filter(r => r.ready), more = rows.filter(r => !r.ready);
+  html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3>
+      <span class="sub">${esc(o.build || '')} &middot; ${esc(o.backend || '')}</span></div>
+    <div class="sec-body"><div class="server-card">
+      <div class="server-card-row"><span class="k">Loaded</span><span class="v">${loaded ? esc((rows.find(r => r.id === loaded) || {}).name || loaded)
+        : (st.state === 'loading' ? 'loading…' : '<span style="color:var(--fg-faint)">nothing yet; the first picture loads one</span>')}</span></div>
+      ${st.error ? `<div class="server-card-row"><span class="k">Last error</span><span class="v" style="color:var(--err)">${esc(st.error)}</span></div>` : ''}
+    </div>${o.error ? `<div class="engine-note" style="margin-top:8px;color:var(--err)">${esc(o.error)}</div>` : ''}</div></div>`;
+  html += `<div class="models-section"><div class="sec-head"><h3>Ready to use</h3><span class="sub">${ready.length} on this PC</span></div><div class="sec-body">`;
+  html += ready.length ? ready.map(r => `<div class="model-row${r.id === loaded ? ' is-loaded' : ''}">
+      <div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}${r.id === loaded ? '<span class="model-badge badge-loaded">loaded</span>' : ''}</div>
+      <div class="model-meta">${esc(Object.values(r.picks || {}).map(p => p.split('/').pop()).join(' · '))}</div></div>
+      ${r.id === loaded ? '<button class="model-action is-secondary" data-img-unload="1">Unload</button>'
+        : `<button class="model-action" data-img-load="${esc(r.id)}" data-img-video="${r.video ? 1 : 0}">Load</button>`}</div>`).join('')
+    : `<div class="engine-note">No model here yet. Put a model's files in the folder below, in the subfolder for each kind
+       (checkpoints, diffusion_models, text_encoders, vae), or add a ComfyUI or WebUI models folder you already have.
+       The list under it says what each model needs.</div>`;
+  html += '</div></div>';
+  html += `<div class="models-section"><div class="sec-head"><h3>Model folders</h3></div><div class="sec-body">` +
+    (o.roots || []).map((d, i) => `<div class="model-row"><div class="model-info"><div class="model-name" style="font-family:var(--mono);font-size:12px">${esc(d)}</div>
+      <div class="model-meta">${i === 0 ? "Hearth's own" : 'yours, read in place'}</div></div>
+      ${i === 0 ? '<button class="model-action is-secondary" data-img-open="1">Open</button>'
+        : `<button class="model-action is-secondary" data-img-remove="${esc(d)}">Remove</button>`}</div>`).join('') +
+    `<button class="btn-mini" id="img-add-folder" style="margin-top:8px;width:auto;display:inline-flex">Add a folder</button></div></div>`;
+  if (more.length) {
+    html += `<div class="models-section"><div class="sec-head"><h3>More it can run</h3><span class="sub">${more.length} model families</span></div>
+      <div class="sec-body"><details><summary style="cursor:pointer;color:var(--fg-dim)">Show what each needs</summary>` +
+      more.map(r => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}</div>
+        <div class="model-meta">needs ${esc(r.missing.join(', '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">model page &#8599;</a>` : ''}</div></div></div>`).join('') +
+      '</details></div></div>';
+  }
+  pane.innerHTML = html;
+  pane.querySelectorAll('[data-img-load]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Loading…';
+    const r = await api('/api/images/load', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipe: b.dataset.imgLoad, video: b.dataset.imgVideo === '1' }) }).catch(e => ({ ok: false, error: e.message }));
+    if (!r.ok) toast("It didn't load", r.error || '', 'err', 9000);
+    modelsRenderImages();
+  });
+  pane.querySelectorAll('[data-img-unload]').forEach(b => b.onclick = async () => {
+    await api('/api/images/load', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+    modelsRenderImages();
+  });
+  pane.querySelectorAll('[data-img-remove]').forEach(b => b.onclick = async () => {
+    await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: b.dataset.imgRemove, remove: true }) }).catch(() => {});
+    modelsRenderImages();
+  });
+  pane.querySelectorAll('[data-img-open]').forEach(b => b.onclick = () =>
+    api('/api/images/open-folder', { method: 'POST' }).catch(e => toast("Couldn't open it", e.message, 'err')));
+  const add = $('img-add-folder'); if (add) add.onclick = imagesFolderDialog;
 }
 
 // Engine pane: what's running inference, and every llama.cpp build you can
@@ -18506,6 +18644,7 @@ document.querySelectorAll('.models-tab').forEach(t => {
     // must not break which pane renders.
     if (name === 'discover') modelsRenderDiscover();
     if (name === 'engine') modelsRenderEngine();
+    if (name === 'images') modelsRenderImages();
   });
 });
 
@@ -18662,6 +18801,7 @@ function dlToggle(force) {
         const d = _dls[id] || {};
         if (ds.dlact === 'pause') {
           if (kind === 'engine') api('/api/runtime/cancel', { method: 'POST' }).catch(() => {});
+          else if (kind === 'imgengine') api('/api/images/cancel', { method: 'POST' }).catch(() => {});
           else if (kind === 'update') api('/api/update/cancel', { method: 'POST' }).catch(() => {});
           else if (kind === 'voice') api('/api/voice/install-cancel', { method: 'POST' }).catch(() => {});
           else {
@@ -18674,6 +18814,7 @@ function dlToggle(force) {
           dlUpsert(id, { status: 'paused' });
         } else if (ds.dlact === 'resume') {
           if (kind === 'engine') runtimeInstall();
+          else if (kind === 'imgengine') imagesInstall();
           else if (kind === 'update') downloadUpdate();
           else if (kind === 'voice') _obFetchVoiceModels(null);
           else if (d.vision) modelsAddVision(d.vision, false);
@@ -18682,6 +18823,7 @@ function dlToggle(force) {
           if (kind === 'agent') api('/api/agents/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                            body: JSON.stringify({ id: d.agent }) }).catch(() => {});
           else if (kind === 'engine') api('/api/runtime/discard', { method: 'POST' }).catch(() => {});
+          else if (kind === 'imgengine') api('/api/images/cancel', { method: 'POST' }).catch(() => {});
           else if (kind === 'update') api('/api/update/cancel', { method: 'POST' }).catch(() => {});
           else if (kind === 'voice') api('/api/voice/install-cancel', { method: 'POST' }).catch(() => {});
           else {

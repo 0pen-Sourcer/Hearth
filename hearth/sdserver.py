@@ -1,0 +1,541 @@
+"""Hearth's own engine for images and video: stable-diffusion.cpp's sd-server.
+
+Run the way the chat engine is: a prebuilt release downloaded into
+~/.hearth/sdcpp/<tag>/, started on its own local port, stopped with Hearth.
+Model files live in ~/.hearth/image-models/ in the engine's category folders
+(checkpoints, diffusion_models, text_encoders, vae, loras, ...), plus any folders
+the person adds (an existing ComfyUI or WebUI models folder works as is).
+
+What a model family needs is the engine's own business: it ships a recipe per
+family (SD 1.x to 3.5, SDXL, FLUX, Qwen Image, Z-Image, Wan, LTX, HunyuanVideo
+and more) naming the files each needs. Hearth reads those recipes, matches them
+against the files on disk, and loads one; it keeps no family table of its own.
+The engine places weights on the card, in RAM or on disk by what is free, so it
+can sit beside a loaded chat model (slower when both don't fit).
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+REPO = "leejet/stable-diffusion.cpp"
+SERVER = "sd-server.exe" if sys.platform == "win32" else "sd-server"
+PORT = int(os.environ.get("HEARTH_SD_PORT") or 8189)
+CATEGORIES = ("checkpoints", "diffusion_models", "text_encoders", "vae", "loras", "clip_vision",
+              "controlnet", "recipes")
+
+_proc: Optional[subprocess.Popen] = None
+_lock = threading.Lock()
+_cancel = threading.Event()
+
+
+def _home() -> Path:
+    return Path(os.path.expanduser("~/.hearth"))
+
+
+def builds_dir() -> Path:
+    return _home() / "sdcpp"
+
+
+def models_dir() -> Path:
+    """Hearth's own model folder, with the engine's category folders in it."""
+    d = _home() / "image-models"
+    for c in CATEGORIES:
+        (d / c).mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def model_roots() -> List[str]:
+    """Hearth's folder first, then the person's own (settings image_model_dirs)."""
+    roots = [str(models_dir())]
+    try:
+        from .web import _load_settings
+        extra = _load_settings().get("image_model_dirs") or []
+    except Exception:
+        extra = []
+    for d in extra if isinstance(extra, list) else []:
+        d = os.path.expanduser(str(d))
+        if os.path.isdir(d) and d not in roots:
+            roots.append(d)
+    return roots
+
+
+# ---------------------------------------------------------------- the engine build
+
+def installed() -> List[Path]:
+    """Usable sd-server builds on disk, newest first."""
+    from .llmserver import _usable_server_exe
+    root = builds_dir()
+    if not root.is_dir():
+        return []
+    found = [p for p in root.glob(f"*/{SERVER}") if _usable_server_exe(p)]
+    return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def _backend() -> str:
+    from .llmserver import engine_backend
+    return engine_backend()
+
+
+def _latest_release(timeout: float = 20) -> Optional[Dict[str, Any]]:
+    from .release_files import for_this_system
+    req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases?per_page=10",
+                                 headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        rels = json.load(r)
+    return next((rel for rel in rels if isinstance(rels, list) and for_this_system(rel.get("assets"))), None)
+
+
+def install(on_progress: Optional[Callable[[int, int], None]] = None, force: bool = False) -> Dict[str, Any]:
+    """Fetch the newest build for this system and card. NVIDIA on Linux, where
+    no CUDA build is published, gets the Vulkan one, which its driver runs."""
+    from . import llmserver as L
+    from .release_files import for_this_system, pick
+    _cancel.clear()
+    try:
+        rel = _latest_release()
+    except Exception as e:
+        return {"ok": False, "error": f"couldn't reach GitHub releases: {e}"}
+    if not rel:
+        return {"ok": False, "error": "no image engine build for this system among the recent releases"}
+    tag = rel.get("tag_name") or "latest"
+    assets = rel.get("assets") or []
+    backend = _backend()
+    bins, runtime, _cuda = pick(assets, backend)
+    if not bins and backend == "cuda":
+        backend = "vulkan"
+        bins, runtime, _cuda = pick(assets, backend)
+    if not bins and backend != "cpu":
+        backend = "cpu"
+        bins, runtime, _cuda = pick(assets, backend)
+    if not bins:
+        have = sorted({p["backend"] for _a, p in for_this_system(assets)})
+        return {"ok": False, "error": f"no build for this system in {tag} (there are: {', '.join(have) or 'none'})"}
+    dest = builds_dir() / tag
+    exe = dest / SERVER
+    if not force and L._usable_server_exe(exe) and L.engine_build_of(exe) == backend:
+        return {"ok": True, "dir": str(dest), "tag": tag, "backend": backend, "already": True}
+    if dest.is_dir():
+        shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    cache = builds_dir() / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    total = int(bins.get("size") or 0) + int((runtime or {}).get("size") or 0)
+    done = [0]
+    try:
+        for asset in [a for a in (bins, runtime) if a]:
+            name = asset["name"]
+            path, part = cache / name, cache / (name + ".part")
+            base = done[0]
+            if path.exists() and not L._archive_ok(path):
+                path.unlink(missing_ok=True)
+            if not path.exists():
+                L._download_with_resume(asset["browser_download_url"], path, part,
+                                        (lambda d, t, b=base: on_progress and on_progress(b + d, total)),
+                                        ua="Hearth", cancel=_cancel.is_set)
+            done[0] = base + int(asset.get("size") or 0)
+            L._extract_archive(path, dest)
+            path.unlink(missing_ok=True)
+    except L.DownloadCancelled:
+        return {"ok": False, "cancelled": True, "error": "download cancelled (progress kept, it will resume)"}
+    except Exception as e:
+        return {"ok": False, "error": f"download/extract failed: {type(e).__name__}: {e}"}
+    if sys.platform != "win32":
+        for f in dest.iterdir():
+            if f.is_file() and (f.name == SERVER or f.name.startswith("sd-")):
+                os.chmod(f, f.stat().st_mode | 0o755)
+    if not L._usable_server_exe(exe):
+        size = exe.stat().st_size if exe.exists() else 0
+        return {"ok": False, "stub": True, "dir": str(dest), "tag": tag,
+                "error": (f"{SERVER} is unusable after extract ({size} bytes). Antivirus quarantine is the "
+                          f"usual cause: allow {builds_dir()} in it and install again.")}
+    for old in sorted((d for d in builds_dir().iterdir() if d.is_dir() and not d.name.startswith(".") and d != dest),
+                      key=lambda p: p.stat().st_mtime, reverse=True)[1:]:
+        shutil.rmtree(old, ignore_errors=True)
+    return {"ok": True, "dir": str(dest), "tag": tag, "backend": backend}
+
+
+def cancel_install() -> Dict[str, Any]:
+    _cancel.set()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- running it
+
+def base_url() -> str:
+    return f"http://127.0.0.1:{PORT}"
+
+
+def api(method: str, path: str, body: Optional[dict] = None, timeout: float = 30) -> Dict[str, Any]:
+    """Call the engine. A failed call comes back marked "failed" (with error,
+    code and the HTTP status) rather than raising. Successful replies can carry
+    an "error" field of their own (null), so callers test "failed", never "error"."""
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(base_url() + path, data=data, method=method,
+                                 headers={"Content-Type": "application/json"} if data else {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        try:
+            out = json.loads(e.read() or b"{}")
+        except ValueError:
+            out = {}
+        if not isinstance(out, dict):
+            out = {"error": str(out)}
+        if not out.get("error"):
+            out["error"] = f"HTTP {e.code}"
+        out.update(failed=True, http_status=e.code)
+        return out
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return {"failed": True, "error": f"the image engine isn't answering ({type(e).__name__})",
+                "code": "unreachable"}
+
+
+def running() -> bool:
+    st = api("GET", "/sdcpp/v1/models/status", timeout=2)
+    return not st.get("failed") and "state" in st
+
+
+def start(timeout: float = 60) -> Dict[str, Any]:
+    """Start the engine if it isn't answering already."""
+    global _proc
+    with _lock:
+        if running():
+            return {"ok": True, "already": True}
+        builds = installed()
+        if not builds:
+            return {"ok": False, "error": "the image engine isn't installed", "code": "not_installed"}
+        from . import llmserver as L
+        exe = builds[0]
+        cmd = [str(exe), "--listen-ip", "127.0.0.1", "--listen-port", str(PORT)]
+        for root in model_roots():
+            cmd += ["--model-dir", root]
+        try:
+            from .tools import WORKSPACE
+            logs = Path(WORKSPACE) / "logs"
+        except Exception:
+            logs = _home() / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        log = open(logs / "sdserver.log", "ab")
+        env = L._with_libs(dict(os.environ), [str(exe.parent)])
+        _proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=str(exe.parent), env=env,
+                                 creationflags=0x08000000 if sys.platform == "win32" else 0)
+        L._assign_to_job(_proc)
+    end = time.time() + timeout
+    while time.time() < end:
+        if _proc.poll() is not None:
+            return {"ok": False, "error": f"the image engine stopped as it started (code {_proc.returncode}); "
+                                          f"its log is logs/sdserver.log"}
+        if running():
+            return {"ok": True}
+        time.sleep(0.5)
+    return {"ok": False, "error": "the image engine didn't answer in time"}
+
+
+def stop() -> Dict[str, Any]:
+    global _proc
+    with _lock:
+        p, _proc = _proc, None
+    if p and p.poll() is None:
+        p.terminate()
+        try:
+            p.wait(10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- models
+
+def _words(s: str) -> set:
+    return {w for w in re.split(r"[^a-z0-9]+", (s or "").lower()) if len(w) > 1}
+
+
+# The slot that holds the model itself. Its file must be named like the recipe:
+# folders alone can't tell a Wan checkpoint from a Z-Image one.
+_MAIN_SLOTS = ("model", "diffusion_model")
+
+
+def _recipe_words(recipe: Dict[str, Any]) -> set:
+    return _words(str(recipe.get("id"))) | _words(str(recipe.get("name")))
+
+
+def _best_homes(recipes: List[dict], files: List[dict]) -> Dict[str, int]:
+    """For each file, how many words it shares with the recipe it fits best.
+    A model file belongs only to the recipes that fit it that well: sd_turbo
+    shares 'sd' with every SD recipe but 'sd turbo' only with SD-Turbo."""
+    best: Dict[str, int] = {}
+    for f in files:
+        w = _words(str(f.get("name") or f.get("id")))
+        best[f["id"]] = max((len(w & _recipe_words(r)) for r in recipes), default=0)
+    return best
+
+
+def _assign(recipe: Dict[str, Any], slots: Dict[str, List[dict]],
+            homes: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+    """A distinct file for each slot the recipe needs, or what is missing.
+    Slots with the fewest candidates choose first; a file named for the slot
+    (clip_l, t5xxl) wins it, then one sharing words with the recipe."""
+    want = _words(str(recipe.get("id"))) | _words(str(recipe.get("name")))
+    needed = [s for s in recipe.get("slots") or [] if s.get("required")]
+    for group in recipe.get("required_any") or []:
+        if not any(s["id"] in group for s in needed):
+            pick = next((g for g in group if slots.get(g)), group[0])
+            needed += [s for s in recipe.get("slots") or [] if s["id"] == pick]
+    used, picks, missing = set(), {}, []
+
+    def score(slot_id: str, f: dict) -> tuple:
+        name = str(f.get("name") or f.get("id") or "").lower()
+        return (slot_id.lower() in name.replace("-", "_"), len(_words(name) & want), -len(name))
+
+    for s in sorted(needed, key=lambda s: len(slots.get(s["id"]) or [])):
+        sid = s["id"]
+        options = [f for f in slots.get(sid) or [] if f["id"] not in used]
+        if sid in _MAIN_SLOTS:
+            options = [f for f in options
+                       if (len(_words(str(f.get("name") or f.get("id"))) & want) or -1)
+                       >= (homes or {}).get(f["id"], 0)]
+        if not options:
+            missing.append(s.get("label") or sid)
+            continue
+        best = max(options, key=lambda f: score(sid, f))
+        picks[sid] = best["id"]
+        used.add(best["id"])
+    return {"picks": picks, "missing": missing}
+
+
+def readiness(recipes: List[dict], files: List[dict]) -> List[Dict[str, Any]]:
+    """Each recipe with what the files on disk give it: per slot the files that
+    fit its folders, the file chosen for each, which needed slots have nothing,
+    and whether it can load as is."""
+    out = []
+    homes = _best_homes(recipes, files)
+    for r in recipes:
+        slots = {}
+        for s in r.get("slots") or []:
+            cats = {c.lower() for c in (s.get("categories") or [s.get("category") or ""])}
+            slots[s["id"]] = [f for f in files if str(f.get("category") or "").lower() in cats]
+        a = _assign(r, slots, homes)
+        defaults = r.get("defaults") or {}
+        out.append({"id": r.get("id"), "name": r.get("name") or r.get("id"), "description": r.get("description") or "",
+                    "url": r.get("model_url") or "", "video": "video_frames" in defaults,
+                    "slots": slots, "picks": a["picks"], "missing": a["missing"], "ready": not a["missing"]})
+    return out
+
+
+def choose_files(ready: Dict[str, Any], recipe: Dict[str, Any]) -> Dict[str, str]:
+    return dict(ready.get("picks") or _assign(recipe, ready["slots"])["picks"])
+
+
+def catalog() -> Dict[str, Any]:
+    """{recipes: readiness rows, status} from the running engine."""
+    recipes = api("GET", "/sdcpp/v1/recipes")
+    files = api("GET", "/sdcpp/v1/model-files")
+    if recipes.get("failed") or files.get("failed"):
+        return {"error": recipes.get("error") or files.get("error")}
+    rows = readiness(recipes.get("recipes") or [], files.get("files") or [])
+    return {"recipes": rows, "status": api("GET", "/sdcpp/v1/models/status"),
+            "raw": {r["id"]: r for r in recipes.get("recipes") or []}}
+
+
+def ensure_loaded(video: bool, recipe_id: str = "") -> Dict[str, Any]:
+    """Start the engine and have a model of the right kind loaded: the one asked
+    for, else the one loaded now if it fits, else the first that is ready."""
+    s = start()
+    if not s.get("ok"):
+        return s
+    api("POST", "/sdcpp/v1/models/refresh")
+    cat = catalog()
+    if "error" in cat:
+        return {"ok": False, "error": cat["error"]}
+    status = cat["status"]
+    rows = {r["id"]: r for r in cat["recipes"]}
+    current = rows.get(status.get("recipe") or "")
+    if status.get("state") == "ready" and (not recipe_id or recipe_id == status.get("recipe")) and (
+            current is None or current["video"] == video):
+        rid = status.get("recipe") or ""
+        return {"ok": True, "recipe": rid, "defaults": (cat["raw"].get(rid) or {}).get("defaults") or {}}
+    if recipe_id:
+        row = rows.get(recipe_id)
+        if not row:
+            return {"ok": False, "error": f"the engine has no recipe '{recipe_id}'"}
+    else:
+        row = next((r for r in cat["recipes"] if r["ready"] and r["video"] == video), None)
+    if not row:
+        kind = "video" if video else "image"
+        return {"ok": False, "code": "no_model",
+                "error": f"no {kind} model on this PC yet: add one under Models > Images & video"}
+    if not row["ready"]:
+        return {"ok": False, "code": "missing_files",
+                "error": f"{row['name']} still needs: {', '.join(row['missing'])}"}
+    body = {"recipe": row["id"], "models": choose_files(row, cat["raw"][row["id"]])}
+    out = api("POST", "/sdcpp/v1/models/load", body, timeout=900)
+    if out.get("failed") or out.get("state") != "ready":
+        return {"ok": False, "error": out.get("error") or "the model didn't load"}
+    return {"ok": True, "recipe": row["id"], "defaults": cat["raw"][row["id"]].get("defaults") or {}}
+
+
+# ---------------------------------------------------------------- generating
+
+def _out_dir() -> Path:
+    try:
+        from .tools import WORKSPACE
+        d = Path(WORKSPACE) / "generated"
+    except Exception:
+        d = _home() / "generated"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _name_for(prompt: str, ext: str) -> Path:
+    slug = "-".join(re.findall(r"[a-z0-9]+", (prompt or "image").lower())[:7]) or "image"
+    path = _out_dir() / f"{slug}.{ext}"
+    n = 2
+    while path.exists():
+        path = _out_dir() / f"{slug}-{n}.{ext}"
+        n += 1
+    return path
+
+
+def _image_b64(path: str) -> str:
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("ascii")
+
+
+def size_for(aspect: str, defaults: Dict[str, Any]) -> tuple:
+    """Width and height for an aspect ratio at the model's own size (its pixel
+    count), in steps of 64."""
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)\s*$", aspect or "")
+    if not m:
+        return 0, 0
+    a, b = float(m.group(1)), float(m.group(2))
+    area = int(defaults.get("width") or 1024) * int(defaults.get("height") or 1024)
+    w = (area * a / b) ** 0.5
+    return max(64, round(w / 64) * 64), max(64, round(w * b / a / 64) * 64)
+
+
+def generate(prompt: str, video: bool = False, width: int = 0, height: int = 0, steps: int = 0,
+             seed: int = -1, count: int = 1, negative: str = "", image: str = "", frames: int = 0,
+             recipe: str = "", aspect: str = "", on_progress: Optional[Callable[[int, int], None]] = None,
+             timeout: float = 3600) -> Dict[str, Any]:
+    """Make images or a video locally. Returns {ok, paths, recipe, seconds} or {ok: False, error}."""
+    ready = ensure_loaded(video, recipe)
+    if not ready.get("ok"):
+        return ready
+    body: Dict[str, Any] = {"prompt": prompt, "negative_prompt": negative or "", "seed": int(seed),
+                            "output_format": "webm" if video else "png"}
+    if not (width and height) and aspect:
+        width, height = size_for(aspect, ready.get("defaults") or {})
+    if width and height:
+        body["width"], body["height"] = int(width), int(height)
+    if steps:
+        body["sample_params"] = {"sample_steps": int(steps)}
+    if image:
+        body["init_image"] = _image_b64(image)
+    if video:
+        if frames:
+            body["video_frames"] = int(frames)
+    else:
+        body["batch_count"] = max(1, min(int(count or 1), 4))
+    job = api("POST", "/sdcpp/v1/vid_gen" if video else "/sdcpp/v1/img_gen", body)
+    if job.get("failed"):
+        return {"ok": False, "error": str(job.get("error"))}
+    jid = job["id"]
+    end = time.time() + timeout
+    while time.time() < end:
+        time.sleep(1.0)
+        j = api("GET", f"/sdcpp/v1/jobs/{jid}", timeout=10)
+        if j.get("failed"):
+            continue
+        pv = j.get("preview") or {}
+        if on_progress and pv.get("total_steps"):
+            try:
+                on_progress(int(pv.get("step") or 0), int(pv["total_steps"]))
+            except Exception:
+                pass
+        st = j.get("status")
+        if st in ("failed", "cancelled"):
+            return {"ok": False, "error": (j.get("error") or {}).get("message") or st}
+        if st == "completed":
+            res = j.get("result") or {}
+            paths = []
+            if video:
+                p = _name_for(prompt, res.get("output_format") or "webm")
+                p.write_bytes(base64.b64decode(res.get("b64_json") or ""))
+                paths.append(str(p))
+            else:
+                for im in res.get("images") or []:
+                    p = _name_for(prompt, res.get("output_format") or "png")
+                    p.write_bytes(base64.b64decode(im.get("b64_json") or ""))
+                    paths.append(str(p))
+            secs = ((j.get("completed") or 0) - (j.get("started") or 0)) / 1000
+            return {"ok": True, "paths": paths, "recipe": ready.get("recipe"), "seconds": round(secs, 1)}
+    api("POST", f"/sdcpp/v1/jobs/{jid}/cancel")
+    return {"ok": False, "error": "it took too long and was stopped"}
+
+
+def has_model(video: bool) -> bool:
+    """Whether a local model of this kind could run now, without starting anything
+    new when the engine isn't installed."""
+    if not installed():
+        return False
+    if not start().get("ok"):
+        return False
+    cat = catalog()
+    return any(r["ready"] and r["video"] == video for r in cat.get("recipes") or [])
+
+
+def overview(start_engine: bool = True) -> Dict[str, Any]:
+    """What the Models tab shows: the engine, the model folders, and each recipe
+    with whether the files on disk make it ready."""
+    builds = installed()
+    out: Dict[str, Any] = {"installed": bool(builds), "build": builds[0].parent.name if builds else "",
+                           "roots": model_roots(), "folder": str(models_dir()), "recipes": [], "status": {}}
+    if builds:
+        from .llmserver import engine_build_of
+        out["backend"] = engine_build_of(builds[0])
+    if not builds or not (running() or (start_engine and start().get("ok"))):
+        return out
+    api("POST", "/sdcpp/v1/models/refresh")
+    cat = catalog()
+    if "error" in cat:
+        out["error"] = cat["error"]
+        return out
+    out["status"] = cat["status"]
+    out["recipes"] = [{k: r[k] for k in ("id", "name", "description", "url", "video", "ready", "missing", "picks")}
+                      for r in cat["recipes"]]
+    return out
+
+
+def set_folder(path: str, add: bool = True) -> Dict[str, Any]:
+    """Add or remove a models folder of the person's own (a ComfyUI or WebUI one works)."""
+    from .web import _load_settings, _save_settings
+    p = os.path.abspath(os.path.expanduser((path or "").strip().strip('"')))
+    if add and not os.path.isdir(p):
+        return {"ok": False, "error": f"there is no folder {p}"}
+    s = _load_settings()
+    dirs = [d for d in (s.get("image_model_dirs") or []) if os.path.normcase(d) != os.path.normcase(p)]
+    if add:
+        dirs.append(p)
+    s["image_model_dirs"] = dirs
+    _save_settings(s)
+    if running():
+        stop()                 # the folders are given at start
+    return {"ok": True, "roots": model_roots()}
+
+
+import atexit as _atexit  # noqa: E402
+_atexit.register(stop)     # Windows' job object ends it with Hearth too; elsewhere this does

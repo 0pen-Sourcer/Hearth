@@ -1073,11 +1073,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "generate_image",
         "description": (
-            "Make an image (picture, photo, artwork, illustration) from a text prompt "
-            "with a cloud image model: xAI Grok, OpenAI or Google Gemini, whichever "
-            "has a key saved, the brain in use first. Works whatever brain you run "
-            "on. Saves it in the workspace's generated folder and shows it in the "
-            "chat. For the Stable Diffusion install on this PC, use forge_generate."
+            "Make an image (picture, photo, artwork, illustration) from a text prompt, "
+            "or change one (pass its path as image). On this PC when an image model "
+            "is set up under Models, else with a cloud model that has a key saved "
+            "(xAI Grok, OpenAI, Google Gemini). where='cloud' or 'local' picks one. "
+            "Saves it in the workspace's generated folder and shows it in the chat."
         ),
         "parameters": {
             "type": "object",
@@ -1086,6 +1086,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "n":            {"type": "integer", "description": "How many to generate (1-4). Default 1."},
                 "aspect_ratio": {"type": "string", "description": "1:1 | 16:9 | 9:16 | 4:3 | 3:4 | 3:2 | 2:3 etc. Default 1:1."},
                 "resolution":   {"type": "string", "description": "xAI: '1k' or '2k'. Default '1k'."},
+                "where":        {"type": "string", "enum": ["local", "cloud"], "description": "Only when asked for one: on this PC, or a cloud provider."},
+                "image":        {"type": "string", "description": "On this PC: a picture's path to change into what the prompt says."},
+                "negative_prompt": {"type": "string", "description": "On this PC: what to keep out of it."},
             },
             "required": ["prompt"],
         },
@@ -1093,11 +1096,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "generate_video",
         "description": (
-            "Start making a video with xAI Grok (needs a saved Grok key, whatever "
-            "brain is in use). Returns at once; it takes about a minute, and a "
-            "report arrives when it is ready, so carry on. To animate an image "
-            "made earlier, pass that image's path as image_url instead of making "
-            "the image again; leave it out for a video from text."
+            "Start making a video: on this PC when a video model is set up under "
+            "Models, else with xAI Grok (a saved Grok key). where='cloud' or "
+            "'local' picks one. Returns at once; a report arrives when it is ready, "
+            "so carry on. To animate an image made earlier, pass that image's path "
+            "as image_url instead of making the image again; leave it out for a "
+            "video from text."
         ),
         "parameters": {
             "type": "object",
@@ -1107,6 +1111,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "aspect_ratio": {"type": "string", "description": "16:9 | 9:16 | 1:1 | 4:3 | 3:4 | 3:2 | 2:3. Default 16:9."},
                 "resolution":   {"type": "string", "description": "'480p' or '720p'. Default 720p."},
                 "image_url":    {"type": "string", "description": "Optional, for image-to-video. A local image file PATH (e.g. exactly what generate_image returned) or a URL. Set this ONLY when the user wants THAT specific image animated; leave empty for a fresh text-to-video."},
+                "where":        {"type": "string", "enum": ["local", "cloud"], "description": "Only when asked for one: on this PC, or a cloud provider."},
             },
             "required": ["prompt"],
         },
@@ -1713,9 +1718,13 @@ def _filter_unavailable_tools() -> None:
     # tokens until the model calls load_tools('image').
 
     if drop:
+        NOT_ON_THIS_PC.update(drop)
         TOOL_DEFINITIONS[:] = [t for t in TOOL_DEFINITIONS if t["name"] not in drop]
 
 
+# Real tools left out on this machine (another system, a missing library or
+# install): lists that name them aren't naming something that doesn't exist.
+NOT_ON_THIS_PC: set = set()
 _filter_unavailable_tools()
 
 
@@ -5999,6 +6008,7 @@ FORGE_BOOT_TIMEOUT = int(_env.get("FORGE_BOOT_TIMEOUT", "180"))
 # flag, drop them so a normal user's toolset stays clean.
 if not (os.environ.get("HEARTH_ENABLE_FORGE", "0") == "1"
         or (FORGE_DIR and os.path.isdir(FORGE_DIR))):
+    NOT_ON_THIS_PC.update({"forge_generate", "forge_status", "forge_shutdown"})
     TOOL_DEFINITIONS[:] = [t for t in TOOL_DEFINITIONS
                            if t["name"] not in {"forge_generate", "forge_status", "forge_shutdown"}]
 
@@ -6498,8 +6508,48 @@ def _learn_environment(p: Dict) -> str:
 # up. CLI parses for the path and pops the OS default viewer.
 # ---------------------------------------------------------------------------
 
+def _local_media(video: bool, where: str) -> bool:
+    """Whether to make it on this PC: when asked to, or when not asked and a
+    local model of that kind is set up."""
+    if where == "cloud":
+        return False
+    try:
+        from . import sdserver
+        return where == "local" or sdserver.has_model(video)
+    except Exception:
+        return where == "local"
+
+
+def _media_lines(paths, how: str, prompt: str, video: bool = False) -> str:
+    kind = "video" if video else ("image" if len(paths) == 1 else "images")
+    lines = [f"Made {len(paths) if not video else 'a'} {kind} {how}: \"{prompt[:80]}\""]
+    for path in paths:
+        if video:
+            lines.append(f"__JARVIS_VIDEO__ {path}")
+            continue
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        lines.append(f"__JARVIS_IMAGE__ {path} ({size} bytes, {os.path.splitext(path)[1][1:] or 'png'})")
+    return "\n".join(lines)
+
+
+_LOCAL_VIDEOS: Dict[str, Dict[str, Any]] = {}
+
+
 def _generate_image(p: Dict) -> str:
     from . import imagine
+    where = (p.get("where") or "").strip().lower()
+    prompt = (p.get("prompt") or "").strip()
+    if _local_media(False, where):
+        from . import sdserver
+        r = sdserver.generate(prompt, count=_coerce_int(p.get("n"), 1), aspect=(p.get("aspect_ratio") or ""),
+                              image=(p.get("image") or "").strip(), negative=(p.get("negative_prompt") or ""))
+        if r.get("ok"):
+            return _media_lines(r["paths"], f"on this PC with {r.get('recipe')} in {r.get('seconds')}s", prompt)
+        if where == "local" or r.get("code") not in ("no_model", "not_installed"):
+            return f"Error (on this PC): {r.get('error')}"
     r = imagine.generate_image(
         prompt=(p.get("prompt") or "").strip(),
         n=_coerce_int(p.get("n"), 1),
@@ -6526,6 +6576,36 @@ def _generate_image(p: Dict) -> str:
 
 def _generate_video(p: Dict) -> str:
     from . import imagine
+    where = (p.get("where") or "").strip().lower()
+    prompt = (p.get("prompt") or "").strip()
+    if _local_media(True, where):
+        from . import sdserver
+        image = (p.get("image_url") or "").strip()
+        if image and not os.path.isfile(image):
+            return "Error: on this PC a video starts from a picture's path, not a link"
+        tid = f"local_{uuid.uuid4().hex[:8]}"
+        _LOCAL_VIDEOS[tid] = {"status": "pending", "prompt": prompt}
+
+        def _run():
+            from .subagents import enqueue_notification
+            start = time.time()
+            r = sdserver.generate(prompt, video=True, aspect=(p.get("aspect_ratio") or ""), image=image,
+                                  frames=_coerce_int(p.get("duration"), 0) * 16 + 1 if p.get("duration") else 0)
+            took = round(time.time() - start)
+            if r.get("ok"):
+                _LOCAL_VIDEOS[tid] = {"status": "done", "path": r["paths"][0], "prompt": prompt}
+                enqueue_notification(source="video", name=prompt[:60], status="completed",
+                                     result_text=f"The video is ready. check_video_task with task {tid} shows it in the chat.",
+                                     summary="Your video is ready", elapsed_s=took)
+            else:
+                _LOCAL_VIDEOS[tid] = {"status": "failed", "error": r.get("error"), "prompt": prompt}
+                enqueue_notification(source="video", name=prompt[:60], status="failed",
+                                     result_text=f"The video failed: {r.get('error')}",
+                                     summary="The video failed", elapsed_s=took)
+        import threading
+        threading.Thread(target=_run, daemon=True, name="local-video").start()
+        return (f"Video started on this PC (task {tid}). On a home graphics card this takes several "
+                f"minutes; a report arrives when it is ready, nothing to wait for.")
     r = imagine.start_video(
         prompt=(p.get("prompt") or "").strip(),
         duration=_coerce_int(p.get("duration"), 5),
@@ -6575,6 +6655,13 @@ def _check_video_task(p: Dict) -> str:
     # task_id is optional — empty string makes check_video_task fall back to the
     # most recent video task (so the agent can't fail by losing/faking the id).
     task_id = (p.get("task_id") or "").strip()
+    if task_id in _LOCAL_VIDEOS or (not task_id and _LOCAL_VIDEOS):
+        t = _LOCAL_VIDEOS.get(task_id) or list(_LOCAL_VIDEOS.values())[-1]
+        if t["status"] == "done":
+            return f"Video ready: {t['path']}\n__JARVIS_VIDEO__ {t['path']}"
+        if t["status"] == "pending":
+            return "The video is still being made on this PC. A report arrives when it is ready."
+        return f"The video failed: {t.get('error')}"
     r = imagine.check_video_task(task_id)
     if not r.get("ok"):
         return f"Error: {r.get('error')}"
@@ -9246,7 +9333,7 @@ _TOOL_CATEGORY = {
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
     "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps",
-    "learn_environment": "System & apps", "system_vibe": "System & apps",
+    "learn_environment": "System & apps",
     # Background jobs
     "start_job": "Background jobs", "job_status": "Background jobs", "job_wait": "Background jobs",
     "job_kill": "Background jobs", "list_jobs": "Background jobs", "get_job_result": "Background jobs",

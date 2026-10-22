@@ -315,6 +315,12 @@ jobs:
         run: |
           python tests/test_platform_standins.py
 
+      - name: The local image engine loads a model it can run, and the tools use it
+        # One SD-Turbo file once made every recipe naming 'sd' look ready, and
+        # the engine's status (which always carries an error field) read as down.
+        run: |
+          python tests/test_sdserver.py
+
       - name: A turn that uses the desktop shows it and gives the screen back
         run: |
           python tests/test_desktop_session.py
