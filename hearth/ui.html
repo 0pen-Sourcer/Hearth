@@ -2221,9 +2221,13 @@
   .src-list small { color: var(--fg-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-frame { width: min(82vw, 1100px); height: 68vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; display: block; }
   .file-text { white-space: pre-wrap; max-height: 62vh; overflow: auto; font: 12px/1.5 var(--mono); margin: 0; }
-  .file-open-btn { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--sans); }
+  .item .row-actions .file-open-btn { width: auto; display: inline-flex; align-items: center; gap: 6px;
+    padding: 0 7px 0 6px; white-space: nowrap; font: 500 11.5px var(--sans); color: var(--fg-dim); }
+  .file-open-btn .fob-ico { width: 16px; height: 16px; display: block; }
+  .file-open-btn .fob-chev { opacity: .7; }
   .file-open-menu { position: fixed; z-index: 500; }
-  .file-open-menu .mp-ico img { width: 18px; height: 18px; display: block; }
+  .file-open-menu .mp-ico.fo-app { background: transparent; }
+  .file-open-menu .mp-ico img { width: 22px; height: 22px; display: block; }
   .file-open-menu .fo-sep { height: 1px; background: var(--border); margin: 4px 6px; }
   .paste-view { white-space: pre-wrap; max-height: 60vh; overflow: auto; font: 12px/1.5 var(--mono); margin: 0; }
   .user-attach.is-paste { cursor: pointer; }
@@ -13049,9 +13053,11 @@ function renderFiles(entries) {
       const actions = div.querySelector('.row-actions');
       const openBtn = document.createElement('button');
       openBtn.className = 'file-open-btn';
-      openBtn.innerHTML = `Open <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`;
+      openBtn.innerHTML = `<span>Open</span><svg class="fob-chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`;
       openBtn.title = 'Open with';
       actions.append(openBtn);
+      // The default app's own icon on the button, asked for once per kind of file.
+      div.addEventListener('mouseenter', () => _fileOpenerIcon(openBtn, fullPath), { once: true });
       openBtn.addEventListener('click', (e) => { e.stopPropagation(); fileOpenMenu(openBtn, fullPath); });
       div.addEventListener('click', () => {
         const kind = /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name) ? 'image' : /\.(mp4|webm|mov|m4v)$/i.test(f.name) ? 'video' : '';
@@ -13085,6 +13091,24 @@ function showLately(anchor, rows) {
 
 // The Files tab's Open menu: the apps Windows offers for the file (its own
 // icons and names), the default app, and the folder it sits in.
+const _openersByExt = {};
+function _openersFor(path) {
+  const ext = (path.split('.').pop() || '').toLowerCase();
+  if (!_openersByExt[ext]) _openersByExt[ext] = api('/api/file/openers?path=' + encodeURIComponent(path))
+    .then(r => r.apps || []).catch(() => []);
+  return _openersByExt[ext];
+}
+async function _fileOpenerIcon(btn, path) {
+  const apps = await _openersFor(path);
+  const def = apps.find(a => a.default) || apps[0];
+  if (!def || btn.querySelector('.fob-ico')) return;
+  const img = document.createElement('img');
+  img.className = 'fob-ico'; img.alt = '';
+  img.src = '/api/file/opener-icon?exe=' + encodeURIComponent(def.exe);
+  img.onerror = () => img.remove();
+  btn.prepend(img);
+  btn.title = 'Open with ' + def.name + ', or another app';
+}
 async function fileOpenMenu(anchor, path) {
   document.querySelectorAll('.file-open-menu').forEach(m => m.remove());
   const menu = document.createElement('div');
@@ -13126,12 +13150,13 @@ async function fileOpenMenu(anchor, path) {
       input.focus();
     }
   });
-  let apps = [];
-  try { apps = (await api('/api/file/openers?path=' + encodeURIComponent(path))).apps || []; } catch {}
+  const apps = await _openersFor(path);
   const box = menu.querySelector('.fo-apps');
   if (!box) return;
+  // The default app is already in the list, marked; a second row for it says nothing new.
+  if (apps.length) menu.querySelector('[data-fo="default"]')?.remove();
   box.innerHTML = apps.length ? apps.map(a => `<button type="button" class="mp-row" data-fo="app" data-exe="${esc(a.exe)}">
-      <span class="mp-ico"><img src="/api/file/opener-icon?exe=${encodeURIComponent(a.exe)}" alt="" onerror="this.replaceWith(document.createTextNode('${esc((a.name || '?')[0])}'))"></span>
+      <span class="mp-ico fo-app"><img src="/api/file/opener-icon?exe=${encodeURIComponent(a.exe)}" alt="" onerror="this.replaceWith(document.createTextNode('${esc((a.name || '?')[0])}'))"></span>
       <span class="mp-txt"><span class="mp-t">${esc(a.name)}</span></span>${a.default ? '<span class="mp-badge">default</span>' : ''}</button>`).join('')
     : '<div class="mp-s" style="padding:6px 10px">No app is registered for this kind of file. Default app still works.</div>';
 }

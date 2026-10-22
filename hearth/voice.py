@@ -651,7 +651,14 @@ def voice_for(text: str, voice: str) -> str:
 SAMPLES = {
     "e": [("Caminante, no hay camino, se hace camino al andar.", "Antonio Machado")],
     "f": [("On ne voit bien qu'avec le cœur. L'essentiel est invisible pour les yeux.", "Saint-Exupéry")],
-    "h": [("काल करे सो आज कर, आज करे सो अब।", "Kabir")],
+    "h": [("काल करे सो आज कर, आज करे सो अब।", "Kabir"),
+          ("धीरे-धीरे रे मना, धीरे सब कुछ होय। माली सींचे सौ घड़ा, ऋतु आए फल होय।", "Kabir"),
+          ("बुरा जो देखन मैं चला, बुरा न मिलिया कोय। जो दिल खोजा आपना, मुझसा बुरा न कोय।", "Kabir"),
+          ("ऐसी बानी बोलिए, मन का आपा खोय। औरन को शीतल करे, आपहु शीतल होय।", "Kabir"),
+          ("मन के हारे हार है, मन के जीते जीत।", "Kabir"),
+          ("रहिमन धागा प्रेम का, मत तोड़ो चटकाय। टूटे से फिर ना मिले, मिले गाँठ परि जाय।", "Rahim"),
+          ("रहिमन देखि बड़ेन को, लघु न दीजिए डारि। जहाँ काम आवे सुई, कहा करे तरवारि।", "Rahim"),
+          ("तुलसी इस संसार में, भाँति भाँति के लोग। सबसे हिल मिल चालिए, नदी नाव संजोग।", "Tulsidas")],
     "i": [("Fatti non foste a viver come bruti, ma per seguir virtute e canoscenza.", "Dante")],
     "j": [("千里の道も一歩から。", "a Japanese proverb")],
     "p": [("Tudo vale a pena se a alma não é pequena.", "Fernando Pessoa")],
@@ -672,7 +679,7 @@ _sample_at = [int(time.time()) % 10]
 
 
 def sample_line(voice: str = "") -> Dict[str, str]:
-    """{"text", "by"}: a different line each time for English voices."""
+    """{"text", "by"}: a different line each time, in the voice's language."""
     lines = SAMPLES.get((voice or "")[:1].lower()) or SAMPLES[""]
     _sample_at[0] += 1
     text, by = lines[_sample_at[0] % len(lines)]

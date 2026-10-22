@@ -1920,7 +1920,8 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/file/opener-icon":
             from . import openers as _op
             exe = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("exe", [""])[0]
-            png = _op.icon_png(exe) if exe.lower().endswith(".exe") else None
+            # 48 px: shown at 16-22 px, sharp on a scaled display too.
+            png = _op.icon_png(exe, 48) if exe.lower().endswith((".exe", ".desktop")) else None
             if not png:
                 return self.send_error(404, "no icon")
             self.send_response(200)

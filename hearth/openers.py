@@ -151,34 +151,66 @@ def icon_png(exe: str, size: int = 32) -> Optional[bytes]:
     if sys.platform != "win32" or not os.path.isfile(exe):
         return None
     try:
-        import win32gui, win32ui, win32con  # type: ignore
-        from PIL import Image  # type: ignore
-        large, small = win32gui.ExtractIconEx(exe, 0, 1)
-        icons = large or small
-        if not icons:
-            return None
-        hicon = icons[0]
-        dc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
-        mem = dc.CreateCompatibleDC()
-        bmp = win32ui.CreateBitmap()
-        bmp.CreateCompatibleBitmap(dc, 32, 32)
-        mem.SelectObject(bmp)
-        mem.FillSolidRect((0, 0, 32, 32), 0x00FF00FF)
-        win32gui.DrawIconEx(mem.GetHandleOutput(), 0, 0, hicon, 32, 32, 0, None, win32con.DI_NORMAL)
-        raw = bmp.GetBitmapBits(True)
-        img = Image.frombuffer("RGBA", (32, 32), raw, "raw", "BGRA", 0, 1)
-        px = img.load()
-        for y in range(32):
-            for x in range(32):
-                r, g, b, a = px[x, y]
-                px[x, y] = (r, g, b, 0) if (r, g, b) == (255, 0, 255) else (r, g, b, 255)
-        for h in list(large) + list(small):
-            win32gui.DestroyIcon(h)
-        mem.DeleteDC()
-        if size != 32:
-            img = img.resize((size, size), Image.LANCZOS)
-        out = io.BytesIO()
-        img.save(out, format="PNG")
-        return out.getvalue()
+        return _win_icon_png(exe, size)
     except Exception:
         return None
+
+
+def _win_icon_png(exe: str, size: int) -> Optional[bytes]:
+    """The exe's icon, taken at 64 px and drawn once on black and once on
+    white: the difference is its real transparency, so soft edges stay soft
+    (keying out one colour left them jagged and fringed)."""
+    import ctypes
+    from ctypes import wintypes
+    from PIL import Image  # type: ignore
+    u, g = ctypes.windll.user32, ctypes.windll.gdi32
+    big = 64
+    hicon = wintypes.HICON()
+    got = u.PrivateExtractIconsW(exe, 0, big, big, ctypes.byref(hicon), None, 1, 0)
+    if got != 1 or not hicon:
+        return None
+
+    class BMI(ctypes.Structure):
+        _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
+                    ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                    ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+                    ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+
+    def draw(fill: int) -> bytes:
+        bmi = BMI()
+        bmi.biSize, bmi.biWidth, bmi.biHeight, bmi.biPlanes, bmi.biBitCount = ctypes.sizeof(BMI), big, -big, 1, 32
+        bits = ctypes.c_void_p()
+        sdc = u.GetDC(None)
+        mdc = g.CreateCompatibleDC(sdc)
+        dib = g.CreateDIBSection(sdc, ctypes.byref(bmi), 0, ctypes.byref(bits), None, 0)
+        old = g.SelectObject(mdc, dib)
+        ctypes.memset(bits, fill, big * big * 4)
+        u.DrawIconEx(mdc, 0, 0, hicon, big, big, 0, None, 3)          # DI_NORMAL
+        data = ctypes.string_at(bits, big * big * 4)
+        g.SelectObject(mdc, old)
+        g.DeleteObject(dib)
+        g.DeleteDC(mdc)
+        u.ReleaseDC(None, sdc)
+        return data
+
+    try:
+        on_black, on_white = draw(0), draw(255)
+    finally:
+        u.DestroyIcon(hicon)
+    img = Image.new("RGBA", (big, big))
+    px = []
+    for i in range(0, len(on_black), 4):
+        b0, g0, r0 = on_black[i], on_black[i + 1], on_black[i + 2]
+        b1, g1, r1 = on_white[i], on_white[i + 1], on_white[i + 2]
+        a = 255 - max(r1 - r0, g1 - g0, b1 - b0)
+        if a <= 0:
+            px.append((0, 0, 0, 0))
+        else:
+            k = 255.0 / a
+            px.append((min(255, int(r0 * k)), min(255, int(g0 * k)), min(255, int(b0 * k)), a))
+    img.putdata(px)
+    if size != big:
+        img = img.resize((size, size), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()

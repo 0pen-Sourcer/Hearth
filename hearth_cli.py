@@ -6962,6 +6962,11 @@ if __name__ == "__main__":
             return
         _orig_unraisable(args)
     sys.unraisablehook = _quiet_unraisable
+    try:
+        from hearth.crashlog import enable as _crashlog
+        _crashlog("terminal")
+    except Exception:
+        pass
     # Top-level exit handling: Ctrl-C anywhere (even mid-tool-call) should
     # surface as a clean exit, not the full asyncio traceback the user was
     # seeing when run_command got stuck on a daemon batch file.
