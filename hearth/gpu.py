@@ -88,14 +88,70 @@ def adapters() -> List[Dict[str, Any]]:
                 _vcall(factory, 2, ctypes.c_ulong)(factory)
         except Exception:
             out = []
-    if not out:
-        for g in _nvidia_smi():
+    if not out and sys.platform.startswith("linux"):
+        out = _linux_cards()
+    if not out and sys.platform == "darwin":
+        out = _apple_silicon()
+    if not out or (sys.platform.startswith("linux") and any(a["vendor"] == "NVIDIA" for a in out)):
+        named = _nvidia_smi()
+        if named:          # its rows carry the card's name and memory
+            out = [a for a in out if a["vendor"] != "NVIDIA"]
+        for g in named:
             out.append({"name": g["name"], "vendor": "NVIDIA", "mem_total_mb": g["mem_total_mb"],
                         "shared_mb": 0, "luid": ""})
     # A card with its own memory first: that is the one models run on.
     out.sort(key=lambda a: a["mem_total_mb"], reverse=True)
     _adapters_cache.append(out)
     return out
+
+
+_PCI_VENDORS = {"0x10de": "NVIDIA", "0x1002": "AMD", "0x8086": "Intel"}
+
+
+def _linux_cards(drm: str = "/sys/class/drm") -> List[Dict[str, Any]]:
+    """Cards the Linux kernel lists. AMD's driver reports its own memory; a card
+    without that number counts as having none of its own (an integrated one),
+    and NVIDIA's comes from nvidia-smi."""
+    out: List[Dict[str, Any]] = []
+    try:
+        names = sorted(n for n in os.listdir(drm) if n.startswith("card") and n[4:].isdigit())
+    except OSError:
+        return out
+    for n in names:
+        dev = os.path.join(drm, n, "device")
+        try:
+            with open(os.path.join(dev, "vendor")) as f:
+                vendor = _PCI_VENDORS.get(f.read().strip().lower())
+        except OSError:
+            continue
+        if not vendor:
+            continue
+        mem = 0
+        try:
+            with open(os.path.join(dev, "mem_info_vram_total")) as f:
+                mem = int(f.read().strip()) // (1024 * 1024)
+        except (OSError, ValueError):
+            pass
+        out.append({"name": f"{vendor} graphics", "vendor": vendor, "mem_total_mb": mem, "shared_mb": 0, "luid": ""})
+    return out
+
+
+def _apple_silicon() -> List[Dict[str, Any]]:
+    """A Mac with Apple's own chip shares its memory with the GPU; macOS lets
+    the GPU use about three quarters of it."""
+    import platform
+    if platform.machine().lower() != "arm64":
+        return []
+    try:
+        r = subprocess.run(["sysctl", "-n", "hw.memsize", "machdep.cpu.brand_string"],
+                           capture_output=True, text=True, timeout=5)
+        lines = (r.stdout or "").strip().splitlines()
+        total = int(lines[0])
+        name = lines[1].strip() if len(lines) > 1 else "Apple silicon"
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return []
+    return [{"name": name, "vendor": "Apple", "mem_total_mb": int(total * 0.75) // (1024 * 1024),
+             "shared_mb": 0, "luid": ""}]
 
 
 def primary() -> Optional[Dict[str, Any]]:
