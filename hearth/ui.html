@@ -2828,6 +2828,9 @@
   .srv-card .k { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; }
   .srv-card .k span:last-child { color: var(--fg); text-align: right; }
   .srv-probs { display: flex; flex-direction: column; gap: 4px; font: 12px var(--sans); max-width: 900px; }
+  .srv-notes { max-width: 900px; margin-top: 6px; }
+  .srv-notes > summary { cursor: pointer; color: var(--fg-dim); font: 12px var(--sans); padding: 4px 0; }
+  .srv-notes[open] > summary { margin-bottom: 6px; }
   .srv-probs > div { padding: 6px 10px; border-radius: 8px; background: var(--bg-1); border: 1px solid var(--border); color: var(--fg-dim); }
   .srv-probs .err { color: var(--err); }
   .srv-probs em { font-style: normal; color: var(--fg-faint); margin-left: 6px; }
@@ -14015,9 +14018,20 @@ function _srvWhatHTML(w, running) {
   const rows = [`<div class="k"><span>Model</span><span>${esc(w.model)}</span></div>`];
   if (w.ctx) rows.push(`<div class="k"><span>Context</span><span>${fmtCtxPill(w.ctx)} tokens</span></div>`);
   rows.push(`<div class="k"><span>State</span><span>${w.loading ? 'loading' : running ? 'ready' + (w.loadedIn ? `, loaded in ${Math.round(w.loadedIn)} s` : '') + (w.at ? ` · at ${esc(w.at)}` : '') : 'stopped'}</span></div>`);
-  const probs = [...w.problems.values()].sort((a, b) => (a.level === 'E' ? -1 : 1) - (b.level === 'E' ? -1 : 1));
-  const plist = probs.length ? `<div class="srv-probs">${probs.slice(0, 8).map(p => `<div class="${p.level === 'E' ? 'err' : 'warn'}">`
-    + `${esc(p.text.length > 160 ? p.text.slice(0, 160) + '…' : p.text)}${p.n > 1 ? ` <em>${p.n} times</em>` : ''}</div>`).join('')}</div>` : '';
+  // Errors are shown as they are. Warnings are the engine's own notes while it
+  // loads (most are advice or housekeeping), folded away and said to be
+  // harmless when the model loaded anyway.
+  const line = p => `<div class="${p.level === 'E' ? 'err' : 'warn'}">`
+    + `${esc(p.text.length > 160 ? p.text.slice(0, 160) + '…' : p.text)}${p.n > 1 ? ` <em>${p.n} times</em>` : ''}</div>`;
+  const all = [...w.problems.values()];
+  const errs = all.filter(p => p.level === 'E'), notes = all.filter(p => p.level !== 'E');
+  const loaded = !w.loading && (running || w.loadedIn > 0);
+  let plist = errs.length ? `<div class="srv-probs">${errs.slice(0, 6).map(line).join('')}</div>` : '';
+  if (notes.length) {
+    plist += `<details class="srv-notes"><summary>Notes from the engine while loading (${notes.length})`
+      + `${loaded && !errs.length ? ' · nothing here stopped the model' : ''}</summary>`
+      + `<div class="srv-probs">${notes.slice(0, 8).map(line).join('')}</div></details>`;
+  }
   return `<div class="srv-card">${rows.join('')}</div>${plist}`;
 }
 function _srvShowRaw(on) {
@@ -17885,9 +17899,19 @@ async function renderConnectorPeople() {
 const IMG_DL_ID = '__imgengine__';
 const _imgDl = { t0: 0, b0: 0 };
 
+// The Install button shows the download itself while it runs.
+function _imgInstallButton() {
+  const b = $('img-install'); if (!b) return;
+  const d = _dls[IMG_DL_ID];
+  const busy = d && d.status === 'downloading';
+  b.disabled = !!busy;
+  b.textContent = busy ? `Installing… ${d.pct || 0}%` + (d.total ? ` of ${(d.total / 1e9).toFixed(2)} GB` : '')
+    : (d && d.status === 'paused' ? 'Resume the install' : 'Install the engine');
+}
 async function imagesInstall() {
   dlToggle(true);
   dlUpsert(IMG_DL_ID, { name: 'Image engine', kind: 'imgengine', status: 'downloading', pct: 0 });
+  _imgInstallButton();
   try {
     const resp = await fetch('/api/images/install', { method: 'POST' });
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
@@ -17906,6 +17930,7 @@ async function imagesInstall() {
           const secs = (now - _imgDl.t0) / 1000, speed = secs > 1 ? (ev.done - _imgDl.b0) / secs : 0;
           dlUpsert(IMG_DL_ID, { status: 'downloading', pct: Math.round(ev.done / ev.total * 100),
             done: ev.done, total: ev.total, speed, eta: speed > 0 ? (ev.total - ev.done) / speed : 0 });
+          _imgInstallButton();
         } else if (ev.type === 'done') {
           _imgDl.t0 = 0;
           dlUpsert(IMG_DL_ID, { status: ev.ok ? 'done' : (ev.cancelled ? 'paused' : 'error'), pct: ev.ok ? 100 : undefined });
@@ -17950,11 +17975,13 @@ async function modelsRenderImages() {
   if (!o.installed) {
     html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3><span class="sub">not installed</span></div>
       <div class="sec-body"><div class="engine-note" style="margin-bottom:10px">Hearth makes pictures and short videos on this PC
-      with stable-diffusion.cpp. The engine is a small download built for your graphics card; models come after.
+      with stable-diffusion.cpp. The engine is a one-time download built for your graphics card (an NVIDIA card's
+      is the largest, about 0.9 GB with the runtime it needs); models come after.
       Without it, pictures are made with a cloud provider you have a key for.</div>
       <button class="model-action" id="img-install">Install the engine</button></div></div>`;
     pane.innerHTML = html;
     $('img-install').onclick = imagesInstall;
+    _imgInstallButton();
     return;
   }
   const st = o.status || {};
