@@ -57,18 +57,80 @@ def models_dir() -> Path:
 
 
 def model_roots() -> List[str]:
-    """Hearth's folder first, then the person's own (settings image_model_dirs)."""
+    """Hearth's folder first, then the person's own (settings image_model_dirs),
+    each followed by its view (below) when it has one."""
     roots = [str(models_dir())]
     try:
         from .web import _load_settings
-        extra = _load_settings().get("image_model_dirs") or []
+        s = _load_settings()
+        extra = s.get("image_model_dirs") or []
+        views = s.get("image_folder_views", True)
     except Exception:
-        extra = []
+        extra, views = [], True
     for d in extra if isinstance(extra, list) else []:
         d = os.path.expanduser(str(d))
         if os.path.isdir(d) and d not in roots:
             roots.append(d)
+            v = folder_view(d) if views else None
+            if v:
+                roots.append(v)
     return roots
+
+
+# The engine reads ComfyUI's folder names. Forge keeps diffusion-only models
+# (FLUX, Qwen Image, Z-Image) beside its checkpoints in Stable-diffusion and its
+# text encoders in text_encoder; older ComfyUI uses unet and clip. A folder like
+# that gets a view the engine can read: <folder>/.hearth-view/<category>/, made
+# of hard links to the files (no copy, no space, the other app keeps working).
+# Hard links stay on one drive, which the view always is.
+_OTHER_NAMES = {"stable-diffusion": "diffusion_models", "unet": "diffusion_models",
+                "text_encoder": "text_encoders", "clip": "text_encoders"}
+_MODEL_EXT = (".gguf", ".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".sft")
+VIEW = ".hearth-view"
+
+
+def folder_view(root: str) -> Optional[str]:
+    """Bring `root`'s view up to date; its path, or None when nothing needs one."""
+    try:
+        subs = [s for s in os.listdir(root) if s.lower() in _OTHER_NAMES and os.path.isdir(os.path.join(root, s))]
+    except OSError:
+        return None
+    view = os.path.join(root, VIEW)
+    if not subs and not os.path.isdir(view):
+        return None
+    wanted = set()
+    for sub in subs:
+        src_dir = os.path.join(root, sub)
+        for dirpath, _dirs, names in os.walk(src_dir):
+            for n in names:
+                if not n.lower().endswith(_MODEL_EXT):
+                    continue
+                src = os.path.join(dirpath, n)
+                dst = os.path.join(view, _OTHER_NAMES[sub.lower()], sub, os.path.relpath(src, src_dir))
+                wanted.add(os.path.normcase(dst))
+                try:
+                    if os.path.exists(dst) and os.path.samefile(src, dst):
+                        continue
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    if os.path.exists(dst):
+                        os.remove(dst)
+                    os.link(src, dst)
+                except OSError:
+                    continue            # a drive without hard links: the file stays where the engine can't see it
+    for dirpath, _dirs, names in os.walk(view, topdown=False):   # links whose file is gone or moved
+        for n in names:
+            p = os.path.join(dirpath, n)
+            if os.path.normcase(p) not in wanted:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        try:
+            if dirpath != view and not os.listdir(dirpath):
+                os.rmdir(dirpath)
+        except OSError:
+            pass
+    return view if wanted else None
 
 
 # ---------------------------------------------------------------- the engine build
@@ -265,7 +327,9 @@ def stop() -> Dict[str, Any]:
 # ---------------------------------------------------------------- models
 
 def _words(s: str) -> set:
-    return {w for w in re.split(r"[^a-z0-9]+", (s or "").lower()) if len(w) > 1}
+    # A version stays one word: "qwen-image-2.1" and "Qwen Image 2.1" both give "21".
+    s = re.sub(r"(\d)[._](?=\d)", r"\1", (s or "").lower())
+    return {w for w in re.split(r"[^a-z0-9]+", s) if len(w) > 1}
 
 
 # The slot that holds the model itself. Its file must be named like the recipe:
@@ -277,14 +341,21 @@ def _recipe_words(recipe: Dict[str, Any]) -> set:
     return _words(str(recipe.get("id"))) | _words(str(recipe.get("name")))
 
 
-def _best_homes(recipes: List[dict], files: List[dict]) -> Dict[str, int]:
-    """For each file, how many words it shares with the recipe it fits best.
-    A model file belongs only to the recipes that fit it that well: sd_turbo
-    shares 'sd' with every SD recipe but 'sd turbo' only with SD-Turbo."""
-    best: Dict[str, int] = {}
+def _fit(file_words: set, recipe: Dict[str, Any]) -> tuple:
+    """How well a file's name fits a recipe: words shared, then fewest words of
+    the recipe's the file lacks (qwen-image-2.1 is Qwen Image 2.1, not its Turbo)."""
+    rw = _recipe_words(recipe)
+    return (len(file_words & rw), -len(rw - file_words))
+
+
+def _best_homes(recipes: List[dict], files: List[dict]) -> Dict[str, tuple]:
+    """For each file, how well it fits the recipe it fits best. A model file
+    belongs only to the recipes that fit it that well: sd_turbo shares 'sd'
+    with every SD recipe but 'sd turbo' only with SD-Turbo."""
+    best: Dict[str, tuple] = {}
     for f in files:
         w = _words(str(f.get("name") or f.get("id")))
-        best[f["id"]] = max((len(w & _recipe_words(r)) for r in recipes), default=0)
+        best[f["id"]] = max((_fit(w, r) for r in recipes), default=(0, 0))
     return best
 
 
@@ -304,9 +375,10 @@ def known_kinds() -> Dict[str, Dict[str, Any]]:
         return {}
 
 
-def _remember_kind(f: dict, recipe: Optional[str], family: str, note: str = "") -> None:
+def _remember_kind(fs: List[dict], recipe: Optional[str], family: str, note: str = "") -> None:
     data = known_kinds()
-    data[f["id"]] = {"recipe": recipe, "family": family, "size": f.get("size"), "note": note}
+    for f in fs:
+        data[f["id"]] = {"recipe": recipe, "family": family, "size": f.get("size"), "note": note}
     tmp = _kinds_path().with_suffix(".tmp")
     _kinds_path().parent.mkdir(parents=True, exist_ok=True)
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -368,7 +440,7 @@ def recipe_for_family(family: str, candidates: List[dict], category: str = "") -
 
 
 def _assign(recipe: Dict[str, Any], slots: Dict[str, List[dict]],
-            homes: Optional[Dict[str, int]] = None,
+            homes: Optional[Dict[str, tuple]] = None,
             placed: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
     """A distinct file for each slot the recipe needs, or what is missing.
     Slots with the fewest candidates choose first; a file named for the slot
@@ -394,8 +466,8 @@ def _assign(recipe: Dict[str, Any], slots: Dict[str, List[dict]],
         if sid in _MAIN_SLOTS:
             options = [f for f in options
                        if (placed[f["id"]] == recipe.get("id") if f["id"] in placed else
-                           (len(_words(str(f.get("name") or f.get("id"))) & want) or -1)
-                           >= (homes or {}).get(f["id"], 0))]
+                           (fit := _fit(_words(str(f.get("name") or f.get("id"))), recipe))[0] > 0
+                           and fit >= (homes or {}).get(f["id"], (0, 0)))]
         if not options:
             missing.append(s.get("label") or sid)
             continue
@@ -441,8 +513,23 @@ def unnamed(recipes: List[dict], files: List[dict],
         if s:
             main_cats |= _slot_cats(s)
     homes = _best_homes(recipes, files)
-    return [f for f in files if str(f.get("category") or "").lower() in main_cats
-            and homes.get(f["id"], 0) == 0 and f["id"] not in placed]
+    out, seen = [], set()
+    for f in files:
+        if str(f.get("category") or "").lower() in main_cats and homes.get(f["id"], (0, 0))[0] == 0 \
+                and not any(c["id"] in placed for c in _copies(f, files)) and _base(f) not in seen:
+            seen.add(_base(f))
+            out.append(f)
+    return out
+
+
+def _base(f: dict) -> str:
+    return os.path.basename(str(f.get("name") or f["id"]).replace("\\", "/")).lower()
+
+
+def _copies(f: dict, files: List[dict]) -> List[dict]:
+    """The same file listed in more than one category (a folder and its view)."""
+    return [x for x in files if _base(x) == _base(f) and (x.get("size") is None or f.get("size") is None
+                                                          or x.get("size") == f.get("size"))]
 
 
 def _family_logged_since(offset: int) -> str:
@@ -458,6 +545,37 @@ def _family_logged_since(offset: int) -> str:
     return found[-1] if found else ""
 
 
+def load_failure(offset: int, picks: Dict[str, str], row: Dict[str, Any]) -> str:
+    """Why a load failed, in words, from what the engine logged after `offset`:
+    which of the picked files it refused. Its tensor names carry the slot
+    ("text_encoders.llm.model..." is the llm slot's file)."""
+    try:
+        with open(_log_path(), "rb") as fh:
+            fh.seek(offset)
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    errors = [l for l in text.splitlines() if l.startswith("[E]")]
+    if not errors:
+        return ""
+    name = row.get("name") or row.get("id")
+    for line in errors:
+        m = re.search(r"tensor '([^']+)'", line)
+        if not m:
+            continue
+        dotted = "." + m.group(1) + "."
+        slot = next((s for s in sorted(picks, key=len, reverse=True) if f".{s}." in dotted), None)
+        if slot:
+            file = picks[slot].replace("\\", "/").split("/")[-1]
+            label = next((s.get("label") for s in row.get("slots") or [] if s.get("id") == slot), "") or slot
+            if "wrong shape" in line:
+                return (f"{name} didn't load: the engine can't read {file} ({label}). Its weights are stored in a "
+                        f"form it doesn't know, like a 4-bit pack made for another app. A GGUF or a plain "
+                        f"safetensors (BF16, FP8) of the same model works.")
+            return f"{name} didn't load: the engine refused {file} ({label}): {line[3:].split(' --- ')[0].strip()}"
+    return f"{name} didn't load: {errors[-1][3:].split(' --- ')[0].strip()}"
+
+
 def identify(file_id: str) -> Dict[str, Any]:
     """Find out which family a model file is by loading it once: the engine reads
     the file's own tensors and logs the family, and the recipe with that name is
@@ -470,23 +588,26 @@ def identify(file_id: str) -> Dict[str, Any]:
     if recipes.get("failed") or files.get("failed"):
         return {"ok": False, "error": recipes.get("error") or files.get("error")}
     recipes, files = recipes.get("recipes") or [], files.get("files") or []
-    f = next((x for x in files if x["id"] == file_id), None)
-    if f is None:
+    first = next((x for x in files if x["id"] == file_id), None)
+    if first is None:
         return {"ok": False, "error": f"the engine doesn't list {file_id}"}
-    cat = str(f.get("category") or "").lower()
-    others = [x for x in files if x["id"] != file_id]
+    copies = _copies(first, files)
+    copy_ids = {c["id"] for c in copies}
+    others = [x for x in files if x["id"] not in copy_ids]
+    cat = str(first.get("category") or "").lower()
 
-    def fits(r: dict) -> Optional[Dict[str, str]]:
+    def fits(r: dict, f: dict) -> Optional[Dict[str, str]]:
         """The files to load `r` with `f` as its model, when the rest are on disk."""
         main = _main_slot(r)
-        if not main or cat not in _slot_cats(main):
+        if not main or str(f.get("category") or "").lower() not in _slot_cats(main):
             return None
         slots = _slots_of(r, others)
         slots[main["id"]] = [f]
         a = _assign(r, slots, None, {f["id"]: r.get("id")})
         return None if a["missing"] else a["picks"]
 
-    takers = [(r, p) for r in recipes for p in [fits(r)] if p]
+    takers = [(r, p) for r in recipes for f in copies for p in [fits(r, f)] if p]
+    f = first
     if not takers:
         return {"ok": False, "error": f"no recipe here can load a file from {cat} with what else is on disk"}
     takers.sort(key=lambda rp: (len(rp[1]), len(str(rp[0].get("id")))))
@@ -509,7 +630,7 @@ def identify(file_id: str) -> Dict[str, Any]:
             break
     if not family:
         note = str(out.get("error") or "the engine didn't say what it is")
-        _remember_kind(f, None, "", note)
+        _remember_kind(copies, None, "", note)
         return {"ok": False, "error": f"couldn't tell what {f.get('name')} is: {note}"}
     chosen = None
     for r in recipes_for_family(family, [r for r, _p in takers], cat)[:3]:
@@ -518,7 +639,7 @@ def identify(file_id: str) -> Dict[str, Any]:
         if tried[r["id"]]:
             chosen = r
             break
-    _remember_kind(f, chosen["id"] if chosen else None, family,
+    _remember_kind(copies, chosen["id"] if chosen else None, family,
                    "" if chosen else str(out.get("error") or ""))
     if not chosen:
         return {"ok": False, "family": family,
@@ -585,9 +706,14 @@ def ensure_loaded(video: bool, recipe_id: str = "") -> Dict[str, Any]:
         return {"ok": False, "code": "missing_files",
                 "error": f"{row['name']} still needs: {', '.join(row['missing'])}"}
     body = {"recipe": row["id"], "models": choose_files(row, cat["raw"][row["id"]])}
+    try:
+        offset = _log_path().stat().st_size
+    except OSError:
+        offset = 0
     out = api("POST", "/sdcpp/v1/models/load", body, timeout=900)
     if out.get("failed") or out.get("state") != "ready":
-        return {"ok": False, "error": out.get("error") or "the model didn't load"}
+        why = load_failure(offset, body["models"], cat["raw"][row["id"]])
+        return {"ok": False, "code": "load_failed", "error": why or out.get("error") or "the model didn't load"}
     return {"ok": True, "recipe": row["id"], "defaults": cat["raw"][row["id"]].get("defaults") or {}}
 
 
@@ -721,7 +847,8 @@ def overview(start_engine: bool = True) -> Dict[str, Any]:
         out["error"] = cat["error"]
         return out
     out["status"] = cat["status"]
-    out["recipes"] = [{k: r[k] for k in ("id", "name", "description", "url", "video", "ready", "missing", "picks")}
+    out["recipes"] = [{**{k: r[k] for k in ("id", "name", "description", "url", "video", "ready", "missing", "picks")},
+                       "has_model": any(s in (r["picks"] or {}) for s in _MAIN_SLOTS)}
                       for r in cat["recipes"]]
     kinds = known_kinds()
     by_id = {f["id"]: f for f in cat["files"]}
@@ -758,6 +885,9 @@ def set_folder(path: str, add: bool = True) -> Dict[str, Any]:
     dirs = [d for d in (s.get("image_model_dirs") or []) if os.path.normcase(d) != os.path.normcase(p)]
     if add:
         dirs.append(p)
+    else:
+        # The view only holds hard links; removing them leaves the files as they are.
+        shutil.rmtree(os.path.join(p, VIEW), ignore_errors=True)
     s["image_model_dirs"] = dirs
     _save_settings(s)
     if running():

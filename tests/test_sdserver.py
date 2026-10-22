@@ -287,6 +287,20 @@ def unreadable(method, path, body=None, timeout=30):
     return engine(method, path, body, timeout)
 
 
+qslots = [slot("diffusion_model", True, ["diffusion_models"]), slot("llm", True, ["text_encoders"]),
+          slot("vae", True, ["vae"])]
+qwens = [{"id": "qwen-image", "name": "Qwen Image", "slots": qslots},
+         {"id": "qwen-image-21", "name": "Qwen Image 2.1", "slots": qslots},
+         {"id": "qwen-image-21-turbo", "name": "Qwen Image 2.1 Turbo", "slots": qslots}]
+qfiles = [{"id": "@f/diffusion_models/qwen-image-2.1-UC-Q4_K_M.gguf", "name": "qwen-image-2.1-UC-Q4_K_M.gguf",
+           "category": "diffusion_models"},
+          {"id": "@f/text_encoders/qwen3vl_8b_w4a8_heretic.safetensors", "name": "qwen3vl_8b_w4a8_heretic.safetensors",
+           "category": "text_encoders"},
+          {"id": "@f/vae/qwen_image_2.1_vae_bf16.safetensors", "name": "qwen_image_2.1_vae_bf16.safetensors",
+           "category": "vae"}]
+check("a qwen-image-2.1 file is Qwen Image 2.1's, not 2.0's or the Turbo's",
+      [r["id"] for r in sdserver.readiness(qwens, qfiles, {}) if r["ready"]] == ["qwen-image-21"])
+
 odd = {"id": "checkpoints/mystery.safetensors", "name": "mystery.safetensors", "category": "checkpoints"}
 pony_files = [odd]
 sdserver.api = lambda m, p, b=None, timeout=30: {"files": pony_files} if p == "/sdcpp/v1/model-files" else unreadable(m, p, b, timeout)

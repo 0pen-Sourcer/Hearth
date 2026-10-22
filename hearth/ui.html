@@ -17987,7 +17987,8 @@ async function modelsRenderImages() {
   const st = o.status || {};
   const loaded = st.state === 'ready' ? (st.recipe || '') : '';
   const rows = o.recipes || [];
-  const ready = rows.filter(r => r.ready), more = rows.filter(r => !r.ready);
+  const ready = rows.filter(r => r.ready), started = rows.filter(r => !r.ready && r.has_model),
+        more = rows.filter(r => !r.ready && !r.has_model);
   html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3>
       <span class="sub">${esc(o.build || '')} &middot; ${esc(o.backend || '')}</span></div>
     <div class="sec-body"><div class="server-card">
@@ -18005,6 +18006,14 @@ async function modelsRenderImages() {
        (checkpoints, diffusion_models, text_encoders, vae), or add a ComfyUI or WebUI models folder you already have.
        The list under it says what each model needs.</div>`;
   html += '</div></div>';
+  // A model file is here but the family needs more files beside it.
+  if (started.length) {
+    html += `<div class="models-section"><div class="sec-head"><h3>Almost ready</h3><span class="sub">the model is here, a part is missing</span></div><div class="sec-body">` +
+      started.map(r => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}</div>
+        <div class="model-meta">${esc(Object.values(r.picks || {}).map(p => p.split('/').pop()).join(' · '))}</div>
+        <div class="model-meta">still needs ${esc(r.missing.join(', '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">where to get it &#8599;</a>` : ''}</div></div></div>`).join('') +
+      '</div></div>';
+  }
   // Files whose names don't say what they are: loading one once tells.
   const unnamed = o.unnamed || [], unsure = o.unsure || [];
   if (unnamed.length || unsure.length) {
