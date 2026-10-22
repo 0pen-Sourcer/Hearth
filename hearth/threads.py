@@ -121,7 +121,9 @@ def block(exclude: Optional[str] = None, now: Optional[float] = None) -> str:
     rows = recent(exclude, now)
     if not rows:
         return ""
-    lines = ["What has been going on lately, from their other chats (bring it up only when it fits):"]
+    lines = ["What has been going on lately, from their other chats. A message that points at "
+             "something without naming it (\"guess what\", \"it came\", \"I did it\") most likely means "
+             "one of these, so take a guess from them; otherwise bring them up only when it fits:"]
     for t in rows:
         line = f"- {t['topic']} ({t['ago']})"
         if t.get("where"):

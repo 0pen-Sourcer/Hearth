@@ -287,8 +287,20 @@ def extract_and_save(
     if not transcript.strip():
         return saved, ["no user/assistant content to scan"]
 
-    user_prompt = (EXTRACTION_PROMPT + (THREAD_PROMPT if chat_id else "") + _already_saved_block() + "\n"
-                   + transcript + "\n" + (_thread_block(chat_id) if chat_id else "") + "\nJSON:")
+    base = EXTRACTION_PROMPT
+    if chat_id:
+        # The facts go inside the object; a bare "[]" would drop where the chat
+        # stands, and a small model follows the first format it reads.
+        base = (base.replace("Return a JSON array. Each fact is an object",
+                             "Return ONE JSON object as described under \"Where this chat stands\" "
+                             "below; its \"facts\" is an array. Each fact is an object")
+                    .replace("If you find NOTHING worth saving, return: []",
+                             "No facts worth saving: \"facts\" is [], and you still give \"thread\".")
+                    .replace("remember things. Return [].",
+                             "remember things. Return {\"facts\": [], \"thread\": null}."))
+    user_prompt = (base + (THREAD_PROMPT if chat_id else "") + _already_saved_block() + "\n"
+                   + transcript + "\n" + (_thread_block(chat_id) if chat_id else "")
+                   + ("\nAnswer with the object {\"facts\": [...], \"thread\": {...}}.\nJSON:" if chat_id else "\nJSON:"))
     try:
         raw = llm_call(
             "You are a precise JSON-emitting fact extractor. Output ONLY JSON.",

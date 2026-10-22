@@ -1000,7 +1000,7 @@ def _compute_gen_stats(t0: float, first_tok: Optional[float], content_chars: int
     return out
 
 
-async def run_once(
+async def _run_once(
     prompt: str,
     *,
     emit,
@@ -1342,6 +1342,59 @@ async def run_once(
     # checks this so it never queues a second generation behind the user's.
     _TURN_ACTIVE.set()
     iterations = 0
+
+    # The memory pass after a turn, in the background (both ways a turn can end use it).
+    def _bg_fact_extract(_msgs):
+        # Single-flight: several quick turns must not stack up concurrent
+        # extractions (each is a full LLM call). Skip rather than queue.
+        if not _EXTRACT_LOCK.acquire(blocking=False):
+            return
+        try:
+            # Let a real turn win. Give the user a beat to start typing/sending,
+            # then bail if a new turn claimed the model — its facts get picked
+            # up by the next extraction anyway (it reads the last few turns).
+            time.sleep(1.5)
+            if _TURN_ACTIVE.is_set():
+                return
+            _run_extract(_msgs)
+        finally:
+            _EXTRACT_LOCK.release()
+
+    def _run_extract(_msgs):
+        try:
+            from . import memory_extract as _mx, anthropic_chat as _ac
+            if _ac.is_anthropic(LOCAL_API_BASE):
+                # Anthropic's compatible endpoint refuses what this call sends; its own API works.
+                _llm = _mx.make_brain_llm_call(model)
+            else:
+                import openai as _oai_module
+                _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
+                _llm = _mx.make_openai_llm_call(_sync, model)
+            _saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=4, chat_id=chat_id)
+            if _saved:
+                try:
+                    emit("facts_saved", count=len(_saved),
+                         titles=[f["title"] for f in _saved])
+                except Exception:
+                    pass
+            elif _warns:
+                # Surface WHY nothing was saved instead of swallowing it —
+                # goes to the log so a broken extractor is diagnosable.
+                print("[hearth.memory_extract] nothing saved: "
+                      + "; ".join(_warns)[:300], flush=True)
+        except Exception as _ee:
+            print(f"[hearth.memory_extract] extract failed: "
+                  f"{type(_ee).__name__}: {_ee}", flush=True)
+
+    def _memory_pass_async() -> None:
+        try:
+            import threading as _threading
+            from . import memory_extract as _mx_gate
+            if _mx_gate.enabled():
+                _threading.Thread(target=_bg_fact_extract, args=(list(messages),), daemon=True).start()
+        except Exception:
+            pass
+
     # No history means a fresh conversation. Deferred tools unlocked by an
     # earlier one are process-global, so a long-lived caller (the phone bridges
     # run for days) would keep carrying them into every later chat and the
@@ -2541,55 +2594,7 @@ async def run_once(
         # extractor below may use it, and so a NEW user turn can claim it.
         _TURN_ACTIVE.clear()
 
-        def _bg_fact_extract(_msgs):
-            # Single-flight: several quick turns must not stack up concurrent
-            # extractions (each is a full LLM call). Skip rather than queue.
-            if not _EXTRACT_LOCK.acquire(blocking=False):
-                return
-            try:
-                # Let a real turn win. Give the user a beat to start typing/sending,
-                # then bail if a new turn claimed the model — its facts get picked
-                # up by the next extraction anyway (it reads the last few turns).
-                time.sleep(1.5)
-                if _TURN_ACTIVE.is_set():
-                    return
-                _run_extract(_msgs)
-            finally:
-                _EXTRACT_LOCK.release()
-
-        def _run_extract(_msgs):
-            try:
-                from . import memory_extract as _mx, anthropic_chat as _ac
-                if _ac.is_anthropic(LOCAL_API_BASE):
-                    # Anthropic's compatible endpoint refuses what this call sends; its own API works.
-                    _llm = _mx.make_brain_llm_call(model)
-                else:
-                    import openai as _oai_module
-                    _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-                    _llm = _mx.make_openai_llm_call(_sync, model)
-                _saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=4, chat_id=chat_id)
-                if _saved:
-                    try:
-                        emit("facts_saved", count=len(_saved),
-                             titles=[f["title"] for f in _saved])
-                    except Exception:
-                        pass
-                elif _warns:
-                    # Surface WHY nothing was saved instead of swallowing it —
-                    # goes to the log so a broken extractor is diagnosable.
-                    print("[hearth.memory_extract] nothing saved: "
-                          + "; ".join(_warns)[:300], flush=True)
-            except Exception as _ee:
-                print(f"[hearth.memory_extract] extract failed: "
-                      f"{type(_ee).__name__}: {_ee}", flush=True)
-        try:
-            import threading as _threading
-            from . import memory_extract as _mx_gate
-            if _mx_gate.enabled():
-                _threading.Thread(target=_bg_fact_extract, args=(list(messages),),
-                                  daemon=True).start()
-        except Exception:
-            pass
+        _memory_pass_async()
         return 0
 
     # We hit the cap. The wrap-up nudge at 75% should have prompted the
@@ -2632,6 +2637,8 @@ async def run_once(
     except Exception:
         state_path = None
     emit("turn_messages", messages=_turn_tail())
+    _TURN_ACTIVE.clear()
+    _memory_pass_async()
     emit("done",
          duration_ms=int((time.time() - t_start) * 1000),
          iterations=iterations,
@@ -2649,6 +2656,16 @@ async def run_once(
          state_file=state_path if state_path else None)
     return 0
 
+
+
+async def run_once(prompt: str, **kw) -> int:
+    """One turn (see _run_once). However it ends, the model is released, so a
+    background memory pass or a waiting reminder isn't held up by a turn that
+    returned early or raised."""
+    try:
+        return await _run_once(prompt, **kw)
+    finally:
+        _TURN_ACTIVE.clear()
 
 # ---------------------------------------------------------------------------
 # Entry
