@@ -43,7 +43,9 @@ def ask(query):
     return [d["name"] for d in T.unlock_tools(query)]
 
 
-BUILTIN = {t["name"] for t in T.TOOL_DEFINITIONS}
+# Tools from this PC's own plugin files aren't Hearth's, wherever the test runs.
+from hearth import plugins as _plugins  # noqa: E402
+BUILTIN = {t["name"] for t in T.TOOL_DEFINITIONS} - _plugins._plugin_names(T.WORKSPACE)
 DEFERRED = sorted(T._DEFERRED_TOOLS & BUILTIN)
 MENU = T._LOAD_TOOLS_SCHEMA["function"]["description"]
 
@@ -59,7 +61,7 @@ check(f"and naming them all stays cheap ({len(MENU) // 4} tokens)", len(MENU) //
 uncategorised = sorted(n for n in BUILTIN if n not in T._TOOL_CATEGORY)
 check("every built-in tool has a group, none is filed as a plugin"
       + (f": {uncategorised}" if uncategorised else ""), not uncategorised)
-stale = sorted(k for k in T._TOOL_CATEGORY if k not in BUILTIN)
+stale = sorted(k for k in T._TOOL_CATEGORY if k not in BUILTIN and k not in T.NOT_ON_THIS_PC)
 check("and no group lists a tool that does not exist"
       + (f": {stale}" if stale else ""), not stale)
 check("desktop control is its own group",

@@ -539,13 +539,21 @@ def sign_in(aid: str) -> Dict[str, Any]:
             if sys.platform == "darwin":
                 subprocess.Popen(["osascript", "-e", f'tell app "Terminal" to do script "{shlex.join(argv)}"'])
             elif term:
-                subprocess.Popen([term, "-e", shlex.join(argv)])
+                # Kept like the Windows console, so the dialog sees it close.
+                # GNOME's terminal hands the window to its server unless told to wait.
+                wait = ["--wait"] if os.path.basename(os.path.realpath(shutil.which(term) or term)).startswith(
+                    "gnome-terminal") else []
+                _SIGNING[aid] = subprocess.Popen([term] + wait + ["-e", shlex.join(argv)])
             else:
                 return {"ok": False, "error": "run `" + shlex.join([os.path.basename(argv[0])] + how["login"]) + "` in a terminal"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
     _SIGNED.pop(aid, None)
-    return {"ok": True, "paste": "ctrl+v" if aid in _SIGNING_WT else "right-click"}
+    if sys.platform == "win32":
+        paste = "ctrl+v" if aid in _SIGNING_WT else "right-click"
+    else:
+        paste = "cmd+v" if sys.platform == "darwin" else "ctrl+shift+v"
+    return {"ok": True, "paste": paste}
 
 
 # Sign-in windows Hearth opened, so the dialog can tell when one is closed.
@@ -576,16 +584,25 @@ def stop(agent_id: str) -> bool:
     there is none by that id."""
     with _OPEN_LOCK:
         proc = _PROCS.get(agent_id)
-        if proc is None or proc.poll() is not None:
+        # A Codex helper is an asyncio process, which has a returncode but no poll().
+        done = proc is None or (proc.poll() if hasattr(proc, "poll") else proc.returncode) is not None
+        if done:
             return False
         _STOPPED.add(agent_id)
+    # The CLIs are launchers: the work runs in a child (node) process, which
+    # would keep the helper's output open and the helper running.
     if os.name == "nt":
-        # The CLIs are launchers: the work runs in a child node process.
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,
                        creationflags=_NO_WINDOW)
+    else:
+        try:
+            import signal
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)     # started in a group of its own
+        except (OSError, AttributeError):
+            pass
     try:
         proc.kill()
-    except OSError:
+    except (OSError, ProcessLookupError):
         pass
     return True
 
@@ -876,7 +893,7 @@ async def _codex_app(head: List[str], prompt: str, work: str, allow: str, emit, 
         proc = await asyncio.create_subprocess_exec(
             *head, "app-server", *flags, cwd=work, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL, limit=16 * 1024 * 1024, creationflags=_NO_WINDOW,
-            env=dict(os.environ, HEARTH_HELPER="1"))
+            start_new_session=os.name != "nt", env=dict(os.environ, HEARTH_HELPER="1"))
     except Exception:
         return False
     rpc = _Rpc(proc, who="Codex")
@@ -1037,7 +1054,7 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
             else:
                 proc = subprocess.Popen(argv, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                        creationflags=_NO_WINDOW,
+                                        creationflags=_NO_WINDOW, start_new_session=os.name != "nt",
                                         # A helper does its task; it doesn't send helpers of its own.
                                         # PWD too: some agents trust it over the folder they start in.
                                         env=dict(os.environ, HEARTH_HELPER="1", PWD=work))

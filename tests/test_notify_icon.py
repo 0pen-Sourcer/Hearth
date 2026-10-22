@@ -55,7 +55,8 @@ if "fn" in handed:
 check("the window's notice reached the notifier", len(shown) == 1)
 icon = shown[0].get("app_icon") if shown else None
 check(f"and carries Hearth's icon ({icon})",
-      bool(icon) and str(icon).lower().endswith(".ico") and os.path.isfile(icon))
+      bool(icon) and str(icon).lower().endswith(".ico" if sys.platform == "win32" else ".png")
+      and os.path.isfile(icon))
 
 shown.clear()
 reminders.desktop_notify("Hearth", "Water")

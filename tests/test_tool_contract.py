@@ -95,7 +95,7 @@ def check_name_lists() -> list:
     name in a risk list is the dangerous direction: the tool stops being gated
     and nothing says so."""
     hearth, tools = _reg()
-    known = {t["name"] for t in hearth.TOOL_DEFINITIONS}
+    known = {t["name"] for t in hearth.TOOL_DEFINITIONS} | getattr(tools, "NOT_ON_THIS_PC", set())
     out = []
     lists = [("tools." + label, getattr(tools, label, set()) or set())
              for label in ("_RISKY_TOOLS", "_DEFERRED_TOOLS", "_NEVER_PERM")]
@@ -167,7 +167,7 @@ def check_dryrun_covers_side_effects() -> list:
     rather than an action."""
     hearth, tools = _reg()
     guarded = getattr(tools, "_DRYRUN_GUARDED", set()) or set()
-    known = {t["name"] for t in hearth.TOOL_DEFINITIONS}
+    known = {t["name"] for t in hearth.TOOL_DEFINITIONS} | getattr(tools, "NOT_ON_THIS_PC", set())
     out = [f"_DRYRUN_GUARDED names '{n}', which is not a registered tool"
            for n in sorted(guarded) if n not in known]
     # Everything gated for permission acts on the machine by definition. The

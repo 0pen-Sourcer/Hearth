@@ -57,8 +57,10 @@ sage_tray = tray._icon_for_look("dark", "sage")
 check(f"the tray's flame takes the sage accent ({orange_share(sage_tray):.2f} orange)",
       orange_share(sage_tray) < 0.1)
 
+# Windows wants an .ico for a window and its notices; other desktops a .png.
+EXT = "ico" if sys.platform == "win32" else "png"
 win = desktop_attach._icon_file("dark", "sage")
-check(f"the window's icon for sage is an .ico ({win})", bool(win) and win.lower().endswith(".ico"))
+check(f"the window's icon for sage is an .{EXT} ({win})", bool(win) and win.lower().endswith("." + EXT))
 check(f"and so does its flame ({orange_share(Image.open(win)):.2f} orange)",
       bool(win) and orange_share(Image.open(win)) < 0.1)
 
@@ -71,9 +73,9 @@ check(f"notices use the saved look's icon ({note})", note == win)
 ember = desktop_attach._icon_file("dark", "ember")
 check(f"an ember flame reads as orange ({orange_share(Image.open(desktop_attach._icon_file('dark', 'ember'))):.2f})",
       orange_share(Image.open(desktop_attach._icon_file("dark", "ember"))) > 0.8)
-check("ember is the shipped icon", bool(ember) and os.path.basename(ember) == "icon.ico")
+check("ember is the shipped icon", bool(ember) and os.path.basename(ember) == f"icon.{EXT}")
 classic = desktop_attach._icon_file("classic", "sage")
-check("classic keeps the H whatever the accent", bool(classic) and os.path.basename(classic) == "icon_classic.ico")
+check("classic keeps the H whatever the accent", bool(classic) and os.path.basename(classic) == f"icon_classic.{EXT}")
 
 import http.client  # noqa: E402
 import threading  # noqa: E402

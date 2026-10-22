@@ -169,9 +169,16 @@ for n in range(3 if not slow else 40):
     time.sleep(0.3)
 print('added 3 packages in 1s', flush=True)
 """)
-fake_npm = os.path.join(work, "npm.cmd")
-with open(fake_npm, "w", encoding="utf-8") as f:
-    f.write(f'@echo off\r\n"{sys.executable}" "{fake_npm_py}" %*\r\n')
+# npm as each system starts it: a .cmd on Windows, a script elsewhere.
+if os.name == "nt":
+    fake_npm = os.path.join(work, "npm.cmd")
+    with open(fake_npm, "w", encoding="utf-8") as f:
+        f.write(f'@echo off\r\n"{sys.executable}" "{fake_npm_py}" %*\r\n')
+else:
+    fake_npm = os.path.join(work, "npm")
+    with open(fake_npm, "w", encoding="utf-8") as f:
+        f.write(f'#!/bin/sh\nexec "{sys.executable}" "{fake_npm_py}" "$@"\n')
+    os.chmod(fake_npm, 0o755)
 real_shutil_which = xa.shutil.which
 xa.shutil.which = lambda n: fake_npm if n in ("npm.cmd", "npm") else real_shutil_which(n)
 xa.NPM_PACKAGES["stand-in"] = "stand-in-pkg"
@@ -452,11 +459,23 @@ _find, _argv, _which = xa.find, xa._direct_argv, xa.shutil.which
 xa.find = lambda aid: "stand-in"
 xa._direct_argv = lambda exe: [sys.executable, "-c", "import time; time.sleep(1.5)"]
 xa.shutil.which = lambda name: None if name.startswith("wt") else _which(name)
+_paste = "right-click"
+if os.name != "nt":
+    # A Linux desktop's terminal, standing in: open for a moment, then closed.
+    _term = os.path.join(work, "x-terminal-emulator")
+    with open(_term, "w", encoding="utf-8") as f:
+        f.write("#!/bin/sh\nsleep 1.5\n")
+    os.chmod(_term, 0o755)
+    xa.shutil.which = lambda name: _term if name == "x-terminal-emulator" else None
+    _paste = "cmd+v" if sys.platform == "darwin" else "ctrl+shift+v"
 _r = xa.sign_in("claude-code")
 _open_now = xa.signing("claude-code")
 time.sleep(2.5)
-check(f"the sign-in window is known to be open, then known to be closed {_r}",
-      _r.get("ok") and _r.get("paste") == "right-click" and _open_now is True and xa.signing("claude-code") is False)
+if sys.platform == "darwin":
+    check(f"on a Mac the sign-in opens in Terminal and says how to paste {_r}", _r.get("ok") and _r.get("paste") == _paste)
+else:
+    check(f"the sign-in window is known to be open, then known to be closed {_r}",
+          _r.get("ok") and _r.get("paste") == _paste and _open_now is True and xa.signing("claude-code") is False)
 xa.find, xa._direct_argv, xa.shutil.which = _find, _argv, _which
 
 # An OpenCode helper's log was its console text: "% WebFetch ...", symbols and all,

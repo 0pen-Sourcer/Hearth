@@ -5315,7 +5315,13 @@ class JarvisCLI:
                 # _read_next races typed input vs STT (if listening) vs a
                 # background-subagent-done signal, so a finished subagent
                 # auto-continues the task without the user having to type.
-                _raw_input = await self._read_next()
+                # A command typed while the last reply ran goes first.
+                waiting = getattr(self, "_after_turn", None)
+                if waiting:
+                    _raw_input = waiting.pop(0)
+                    print(f"{C_USER}❯ {C_RESET}{_raw_input}")
+                else:
+                    _raw_input = await self._read_next()
             except KeyboardInterrupt:
                 # Two ctrl+c within 2s = exit. Single ctrl+c = abandon line.
                 now = time.time()
@@ -6039,6 +6045,9 @@ class JarvisCLI:
                                       else "nothing is running that can move") + f"{C_RESET}")
                 continue
             if text.startswith("/"):
+                if not hasattr(self, "_after_turn"):
+                    self._after_turn = []
+                self._after_turn.append(text)
                 print(f"{C_DIM}↳ {text.split()[0]} runs once this reply is finished (esc stops it){C_RESET}")
                 continue
             self._steer_q.append(text)

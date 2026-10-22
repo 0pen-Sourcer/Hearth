@@ -451,26 +451,29 @@ _identity_ready = False
 
 
 def _find_icon() -> Optional[str]:
-    """Hearth's .ico in the saved look, else the shipped one, both in a
-    PyInstaller bundle and from source."""
+    """Hearth's icon in the saved look, else the shipped one, both in a
+    PyInstaller bundle and from source: an .ico for Windows' notices, a .png
+    for the notices of Linux and macOS desktops, as the window uses."""
     import sys
+    ext = "ico" if sys.platform == "win32" else "png"
     try:
         from . import look_icon
-        f = look_icon.file(*look_icon.saved(), "ico")
+        f = look_icon.file(*look_icon.saved(), ext)
         if f:
             return f
     except Exception:
         pass
     cands = []
+    name = "icon." + ext
     if getattr(sys, "frozen", False):
         base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
         exe_dir = os.path.dirname(sys.executable)
-        cands += [os.path.join(base, "assets", "icon.ico"),
-                  os.path.join(exe_dir, "assets", "icon.ico"),
-                  os.path.join(exe_dir, "_internal", "assets", "icon.ico")]
+        cands += [os.path.join(base, "assets", name),
+                  os.path.join(exe_dir, "assets", name),
+                  os.path.join(exe_dir, "_internal", "assets", name)]
     here = os.path.dirname(os.path.abspath(__file__))
-    cands += [os.path.join(os.path.dirname(here), "assets", "icon.ico"),
-              os.path.join(here, "assets", "icon.ico")]
+    cands += [os.path.join(os.path.dirname(here), "assets", name),
+              os.path.join(here, "assets", name)]
     for c in cands:
         if os.path.isfile(c):
             return c

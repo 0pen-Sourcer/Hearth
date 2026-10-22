@@ -93,16 +93,19 @@ def footer(events, max_tools: int = 8) -> str:
 # A path is either quoted or backticked, where it may contain spaces, or bare,
 # where it ends at the first space. Only names of real files survive, so a
 # span that merely looks like a path is dropped.
+# A drive path (C:\...), or on Linux and macOS one from the root or home
+# (/home/..., ~/...); quoted it may hold spaces. A slash inside a web link
+# (after a letter, dot, colon or slash) doesn't start a path.
 _PATH_IN_TEXT = re.compile(
-    r"[`\"'“‘]([A-Za-z]:[\\/][^`\"'”’<>|\r\n]+)"
-    r"|([A-Za-z]:[\\/][^\s`\"'<>|]+\.[A-Za-z0-9]{1,5})")
+    r"[`\"'“‘]((?:[A-Za-z]:[\\/]|/|~/)[^`\"'”’<>|\r\n]+)"
+    r"|((?:(?<!\w)[A-Za-z]:[\\/]|(?<![\w.:/])/|(?<![\w.:/])~/)[^\s`\"'<>|]+\.[A-Za-z0-9]{1,5})")
 
 
 def files_in(text: str, max_bytes: int, limit: int = 4) -> list:
     """Existing local files named in `text`, in order, under `max_bytes` each."""
     seen, out = set(), []
     for m in _PATH_IN_TEXT.finditer(text or ""):
-        p = (m.group(1) or m.group(2)).strip().rstrip(".,;:)")
+        p = os.path.expanduser((m.group(1) or m.group(2)).strip().rstrip(".,;:)"))
         key = os.path.normcase(os.path.abspath(p)) if p else ""
         if not p or key in seen:
             continue

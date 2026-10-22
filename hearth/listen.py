@@ -646,7 +646,7 @@ def is_available() -> bool:
         import sounddevice    # type: ignore  # noqa: F401
         import numpy          # type: ignore  # noqa: F401
         return True
-    except ImportError:
+    except (ImportError, OSError):            # OSError: no PortAudio library on this system
         return False
 
 
@@ -662,7 +662,7 @@ def status() -> dict:
     try:
         import sounddevice  # type: ignore  # noqa: F401
         have_sd = True
-    except ImportError:
+    except (ImportError, OSError):
         pass
     try:
         import numpy  # type: ignore  # noqa: F401
@@ -693,7 +693,7 @@ def _record_until_silence(max_seconds: float = MAX_UTTERANCE_S):
     try:
         import sounddevice as sd  # type: ignore
         import numpy as np         # type: ignore
-    except ImportError:
+    except (ImportError, OSError):
         return None
 
     block_s = 0.05  # 50ms blocks
@@ -815,7 +815,7 @@ def _continuous_loop(on_utterance: Callable[[str], None]):
     try:
         import sounddevice as sd  # type: ignore
         import numpy as np         # type: ignore
-    except ImportError:
+    except (ImportError, OSError):
         _listening = False
         return
 

@@ -797,7 +797,7 @@ def _play(audio_bytes_or_array, sample_rate: int) -> None:
     try:
         import sounddevice as sd  # type: ignore
         import numpy as np  # type: ignore
-    except ImportError:
+    except (ImportError, OSError):            # OSError: no PortAudio library on this system
         return
     if isinstance(audio_bytes_or_array, (bytes, bytearray)):
         arr = np.frombuffer(audio_bytes_or_array, dtype=np.int16)
@@ -1021,7 +1021,7 @@ def _synth_loop() -> None:
 def _play_loop() -> None:
     try:
         import sounddevice as sd  # type: ignore
-    except ImportError as e:
+    except (ImportError, OSError) as e:
         note_speak_error("playback device", e)
         return
     stream = None
@@ -1193,7 +1193,7 @@ def status() -> dict:
     try:
         import sounddevice  # type: ignore  # noqa: F401
         have_sd = True
-    except ImportError:
+    except (ImportError, OSError):
         pass
     engine = _load_engine()
     files = sorted(os.listdir(VOICES_DIR)) if os.path.isdir(VOICES_DIR) else []

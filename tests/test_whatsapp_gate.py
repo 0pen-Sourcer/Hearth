@@ -180,6 +180,11 @@ text = (f"Saved to \u201c{REPORT}\u201d, again `{REPORT}`, the chart at {CHART}.
 check("a quoted path with spaces is found, once, in order",
       B.files_in(text, 10**6) == [REPORT, CHART])
 check("a file over the size cap is skipped", B.files_in(text, 0) == [])
+_posix = "/".join(["", "tmp", "x"])
+check("a link's path is not taken for a file", B._PATH_IN_TEXT.search("see https://example.com/files/a.pdf") is None)
+check("a path from the root is found, as on Linux and macOS",
+      [m.group(2) for m in B._PATH_IN_TEXT.finditer(f"saved to {_posix}/report.pdf now")] == [f"{_posix}/report.pdf"])
+check("and one from home", [m.group(2) for m in B._PATH_IN_TEXT.finditer("at ~/Jarvis/out.png.")] == ["~/Jarvis/out.png"])
 
 print()
 if FAILS:

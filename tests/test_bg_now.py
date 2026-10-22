@@ -30,10 +30,13 @@ def check(label, cond):
         FAILS.append(label)
 
 
+from hearth import shells  # noqa: E402
+
+SHELL = "cmd" if sys.platform == "win32" else shells.normalize_shell(None)[0]
 got = {}
 t0 = time.time()
 cmd = f'"{sys.executable}" -c "import time; time.sleep(20)"'
-runner = threading.Thread(target=lambda: got.update(jobs.run_or_background(cmd, WS, "cmd", 60)), daemon=True)
+runner = threading.Thread(target=lambda: got.update(jobs.run_or_background(cmd, WS, SHELL, 60)), daemon=True)
 runner.start()
 time.sleep(1.5)
 moved = jobs.background_now()
@@ -50,7 +53,7 @@ except Exception:
     pass
 
 # Without asking, a quick command still comes back with its output.
-r = jobs.run_or_background(f'"{sys.executable}" -c "print(42)"', WS, "cmd", 30)
+r = jobs.run_or_background(f'"{sys.executable}" -c "print(42)"', WS, SHELL, 30)
 check("a quick command still answers in place", not r.get("background") and "42" in (r.get("output") or ""))
 
 print()

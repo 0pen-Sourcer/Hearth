@@ -56,11 +56,12 @@ fine.events.loaded.fire()
 time.sleep(0.5)
 check(f"a page that arrived is left alone ({len(fine.asked)})", fine.asked == [])
 
+# Half a wait either side of the first reload, so a busy machine can't move it.
 late = _Win()
-reload_if_stalled(late, "http://127.0.0.1:1/", wait_s=0.2, tries=2)
-time.sleep(0.3)
+reload_if_stalled(late, "http://127.0.0.1:1/", wait_s=1.0, tries=2)
+time.sleep(1.5)
 late.events.loaded.fire()
-time.sleep(0.4)
+time.sleep(1.5)
 check(f"once the second try arrives there is no third ({len(late.asked)})", late.asked == ["http://127.0.0.1:1/"])
 
 print()

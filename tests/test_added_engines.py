@@ -41,7 +41,7 @@ def check(label, cond):
 def engine(folder):
     d = Path(folder)
     d.mkdir(parents=True, exist_ok=True)
-    (d / "llama-server.exe").write_bytes(b"MZ" + b"\0" * (L._MIN_SERVER_EXE_BYTES + 10))
+    (d / L.SERVER_EXE).write_bytes(b"MZ" + b"\0" * (L._MIN_SERVER_EXE_BYTES + 10))
     return d
 
 
@@ -51,7 +51,7 @@ mine = engine(Path(HOME, "my-builds", "other-llama"))
 L.reset_native_cache()
 check("an added build never becomes the engine for every model",
       L.find_native_llama_server()["label"] == "b10488" and L.installed_llama_tags() == ["b10488"])
-check("a folder without llama-server.exe is refused", not L.add_engine_folder(os.path.join(HOME, "nothing"))["ok"])
+check("a folder without the server is refused", not L.add_engine_folder(os.path.join(HOME, "nothing"))["ok"])
 added = L.add_engine_folder(str(mine))
 check(f"a folder with one is added {added}", added["ok"] and added["name"] == "other-llama")
 check(f"both added builds are listed {[e['label'] for e in L.added_engines()]}",
@@ -99,16 +99,16 @@ check("a GitHub page or owner/name is read as a repository",
 class _Alive:
     def poll(self):
         return None
-L._proc, L._proc_info = _Alive(), {"exe": str(mine / "llama-server.exe"), "model_path": MODEL}
+L._proc, L._proc_info = _Alive(), {"exe": str(mine / L.SERVER_EXE), "model_path": MODEL}
 info = L.llama_runtime_info()
 L._proc, L._proc_info = None, {}
 check(f"the engine card names the added build when it's the one running {info.get('running')}",
       (info.get("running") or {}).get("label") == "other-llama" and info["running"]["model"] == "fork-only.gguf")
 check("and names none when the official engine runs", L.llama_runtime_info().get("running") is None)
 
-removed = L.remove_added_engine(str(mine / "llama-server.exe"))
+removed = L.remove_added_engine(str(mine / L.SERVER_EXE))
 check("removing a folder build takes it off the list and leaves the folder alone",
-      removed["ok"] and (mine / "llama-server.exe").is_file()
+      removed["ok"] and (mine / L.SERVER_EXE).is_file()
       and [e["source"] for e in L.added_engines()] == ["github"])
 
 print()

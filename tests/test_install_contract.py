@@ -19,6 +19,9 @@ if ROOT not in sys.path:
 FAILS: list = []
 
 
+# Release files as llama.cpp names them for the system the test runs on.
+_OSW = {"win": "win", "linux": "ubuntu", "mac": "macos"}[__import__("hearth.release_files", fromlist=["x"]).this_os()]
+
 def check(label, cond):
     print(("ok    " if cond else "FAIL  ") + label)
     if not cond:
@@ -81,9 +84,9 @@ import urllib.request as _ur                                        # noqa: E402
 from hearth import llmserver as _ls, gpu as _gpu                    # noqa: E402
 
 _rels = [{"tag_name": "v0.5.0", "assets": [{"name": "something.tar.gz"}]},
-         {"tag_name": "b11307", "assets": [{"name": "llama-b11307-bin-win-vulkan-x64.zip"},
-                                            {"name": "llama-b11307-bin-win-cuda-12.4-x64.zip"}]},
-         {"tag_name": "b11306", "assets": [{"name": "llama-b11306-bin-win-cpu-x64.zip"}]}]
+         {"tag_name": "b11307", "assets": [{"name": f"llama-b11307-bin-{_OSW}-vulkan-x64.zip"},
+                                            {"name": f"llama-b11307-bin-{_OSW}-cuda-12.4-x64.zip"}]},
+         {"tag_name": "b11306", "assets": [{"name": f"llama-b11306-bin-{_OSW}-cpu-x64.zip"}]}]
 _real_open = _ur.urlopen
 _ur.urlopen = lambda req, timeout=0: _io.BytesIO(_json.dumps(_rels).encode())
 try:
@@ -106,25 +109,25 @@ import tempfile as _tf                                                # noqa: E4
 from pathlib import Path as _Path                                     # noqa: E402
 _eng = _Path(_tf.mkdtemp(prefix="hearth-engine-")) / "b99999"
 _eng.mkdir(parents=True)
-(_eng / "llama-server.exe").write_bytes(b"MZ" + b"0" * (_ls._MIN_SERVER_EXE_BYTES + 8))
-(_eng / "ggml-cuda.dll").write_bytes(b"x")
-check("an engine with CUDA libraries beside it is an NVIDIA build", _ls.engine_build_of(_eng / "llama-server.exe") == "cuda")
+(_eng / _ls.SERVER_EXE).write_bytes(b"MZ" + b"0" * (_ls._MIN_SERVER_EXE_BYTES + 8))
+(_eng / _ls._lib_name("ggml-cuda")).write_bytes(b"x")
+check("an engine with CUDA libraries beside it is an NVIDIA build", _ls.engine_build_of(_eng / _ls.SERVER_EXE) == "cuda")
 _gpu.primary = lambda: {"vendor": "AMD", "mem_total_mb": 8192, "name": "AMD"}
-check("it doesn't fit a PC with an AMD card", not _ls.engine_fits(_eng / "llama-server.exe"))
+check("it doesn't fit a PC with an AMD card", not _ls.engine_fits(_eng / _ls.SERVER_EXE))
 _gpu.primary = lambda: {"vendor": "NVIDIA", "mem_total_mb": 8192, "name": "NVIDIA"}
-check("it fits one with an NVIDIA card", _ls.engine_fits(_eng / "llama-server.exe"))
-(_eng / "ggml-cuda.dll").unlink()
-(_eng / "ggml-vulkan.dll").write_bytes(b"x")
+check("it fits one with an NVIDIA card", _ls.engine_fits(_eng / _ls.SERVER_EXE))
+(_eng / _ls._lib_name("ggml-cuda")).unlink()
+(_eng / _ls._lib_name("ggml-vulkan")).write_bytes(b"x")
 _gpu.primary = lambda: {"vendor": "AMD", "mem_total_mb": 8192, "name": "AMD"}
-check("a Vulkan build fits any card", _ls.engine_build_of(_eng / "llama-server.exe") == "vulkan"
-      and _ls.engine_fits(_eng / "llama-server.exe"))
+check("a Vulkan build fits any card", _ls.engine_build_of(_eng / _ls.SERVER_EXE) == "vulkan"
+      and _ls.engine_fits(_eng / _ls.SERVER_EXE))
 _real_home = os.environ.get("USERPROFILE"), os.environ.get("HOME")
 _home = _tf.mkdtemp(prefix="hearth-home-")
 os.environ["USERPROFILE"] = os.environ["HOME"] = _home
 _mine = _Path(_home) / ".hearth" / "llamacpp" / "b99999"
 _mine.mkdir(parents=True)
-(_mine / "llama-server.exe").write_bytes(b"MZ" + b"0" * (_ls._MIN_SERVER_EXE_BYTES + 8))
-(_mine / "ggml-cuda.dll").write_bytes(b"x")
+(_mine / _ls.SERVER_EXE).write_bytes(b"MZ" + b"0" * (_ls._MIN_SERVER_EXE_BYTES + 8))
+(_mine / _ls._lib_name("ggml-cuda")).write_bytes(b"x")
 _ls.reset_native_cache()
 _real_pref = _ls.get_engine_preference
 _ls.get_engine_preference = lambda: "hearth"

@@ -171,8 +171,9 @@ try:
     tail = rb.fp.readline()
 except socket.timeout:
     tail = b"(still open)"
+# Still open: a heartbeat, or on a fresh install the speech model still warming.
 check(f"and the second stream is still open, not told it stopped: {tail[:60]!r}",
-      tail == b"(still open)" or json.loads(tail).get("type") == "heartbeat")
+      tail == b"(still open)" or json.loads(tail).get("type") in ("heartbeat", "warming"))
 built = len(Recorder.built)
 c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
 c.request("POST", "/api/voice/realtime/stop", body=b"{}",

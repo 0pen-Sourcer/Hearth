@@ -88,7 +88,9 @@ check(f"no copies are left behind {left}", len(left) == 1)
 # A race: the same task to two agents, each on its own copy, then one comparison.
 from hearth import team, subagents   # noqa: E402
 subagents.drain_pending_notifications()
-check_cmd = f'& "{sys.executable}" -c "import os,sys; sys.exit(0 if os.path.exists(\'new.py\') else 1)"'
+# PowerShell runs a quoted program with &; bash runs it as is.
+check_cmd = ("& " if sys.platform == "win32" else "") + \
+    f'"{sys.executable}" -c "import os,sys; sys.exit(0 if os.path.exists(\'new.py\') else 1)"'
 r = team.race("edit app.py", ["stand-in-coder", "stand-in-coder"], repo, check_cmd)
 check(f"a race starts each agent on its own copy {r}", r.get("ok") and [x["name"] for x in r["racing"]] == ["Coder 1", "Coder 2"])
 report = ""

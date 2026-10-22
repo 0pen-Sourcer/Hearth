@@ -172,7 +172,7 @@ res = team.launch_team([
 subagents.spawn_subagent = _spawn
 # Started from the window, terminal panes opened over it although the Team room shows the team.
 opened = []
-team._open_wt = lambda s: opened.append(len(s)) or True
+team._open_wt = team._open_tmux = lambda s: opened.append(len(s)) or True
 subagents.spawn_subagent = lambda **kw: {"ok": True, "agent_id": kw["name"], "transcript_path": ""}
 team.PANES = False
 team.launch_team([{"name": "W", "prompt": "w"}])
@@ -181,7 +181,7 @@ team.PANES = True
 team.launch_team([{"name": "T", "prompt": "t"}])
 team.PANES = False
 subagents.spawn_subagent = _spawn
-team._open_wt = lambda _s: False
+team._open_wt = team._open_tmux = lambda _s: False
 check(f"a team opens terminal panes only when started from the terminal {from_window} {opened}",
       from_window == [] and opened == [1])
 team._C = {k: "" for k in team._C}
