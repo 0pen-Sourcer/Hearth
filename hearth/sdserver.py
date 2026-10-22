@@ -204,6 +204,16 @@ def api(method: str, path: str, body: Optional[dict] = None, timeout: float = 30
                 "code": "unreachable"}
 
 
+def _log_path() -> Path:
+    try:
+        from .tools import WORKSPACE
+        logs = Path(WORKSPACE) / "logs"
+    except Exception:
+        logs = _home() / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    return logs / "sdserver.log"
+
+
 def running() -> bool:
     st = api("GET", "/sdcpp/v1/models/status", timeout=2)
     return not st.get("failed") and "state" in st
@@ -223,13 +233,7 @@ def start(timeout: float = 60) -> Dict[str, Any]:
         cmd = [str(exe), "--listen-ip", "127.0.0.1", "--listen-port", str(PORT)]
         for root in model_roots():
             cmd += ["--model-dir", root]
-        try:
-            from .tools import WORKSPACE
-            logs = Path(WORKSPACE) / "logs"
-        except Exception:
-            logs = _home() / "logs"
-        logs.mkdir(parents=True, exist_ok=True)
-        log = open(logs / "sdserver.log", "ab")
+        log = open(_log_path(), "ab")
         env = L._with_libs(dict(os.environ), [str(exe.parent)])
         _proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=str(exe.parent), env=env,
                                  creationflags=0x08000000 if sys.platform == "win32" else 0)
@@ -284,11 +288,93 @@ def _best_homes(recipes: List[dict], files: List[dict]) -> Dict[str, int]:
     return best
 
 
+# A model file named for no recipe (a fine-tune called "ponyDiffusionV6XL", say)
+# is loaded once and the family the engine reports for it is kept here, so the
+# file joins that family's recipe from then on: {file id: {recipe, family, size}}.
+def _kinds_path() -> Path:
+    return _home() / "image_model_kinds.json"
+
+
+def known_kinds() -> Dict[str, Dict[str, Any]]:
+    try:
+        with open(_kinds_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember_kind(f: dict, recipe: Optional[str], family: str, note: str = "") -> None:
+    data = known_kinds()
+    data[f["id"]] = {"recipe": recipe, "family": family, "size": f.get("size"), "note": note}
+    tmp = _kinds_path().with_suffix(".tmp")
+    _kinds_path().parent.mkdir(parents=True, exist_ok=True)
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=1)
+    os.replace(tmp, _kinds_path())
+
+
+def _placed(files: List[dict]) -> Dict[str, Optional[str]]:
+    """File id -> the recipe it was found to be, for files still as they were then."""
+    by_id = {f["id"]: f for f in files}
+    out: Dict[str, Optional[str]] = {}
+    for fid, k in known_kinds().items():
+        f = by_id.get(fid)
+        if f is not None and (k.get("size") is None or f.get("size") is None or k.get("size") == f.get("size")):
+            out[fid] = k.get("recipe")
+    return out
+
+
+def _main_slot(recipe: Dict[str, Any]) -> Optional[dict]:
+    return next((s for s in recipe.get("slots") or [] if s["id"] in _MAIN_SLOTS), None)
+
+
+def _slot_cats(s: dict) -> set:
+    return {c.lower() for c in (s.get("categories") or [s.get("category") or ""])}
+
+
+def _compact(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def recipes_for_family(family: str, candidates: List[dict], category: str = "") -> List[dict]:
+    """The recipes the engine's own name for a family points at, likeliest
+    first: one named the same ("SDXL", "SD 1.x"), then those whose id or name
+    starts with it ("SD 2.x" -> sd2-..., "Flux" -> flux1-..., flux2-...), the
+    ones named for the file's folder (a checkpoint recipe for a file in
+    checkpoints) and the plainest before the rest. Which of them really runs
+    the file is for loading it to settle."""
+    fam = _compact(family)
+    if not fam:
+        return []
+    stem = fam[:-1] if fam.endswith("x") and fam[-2:-1].isdigit() else fam
+    folder = _compact(category).rstrip("s")
+
+    def rank(r: dict) -> Optional[tuple]:
+        rid, name = _compact(r.get("id")), _compact(r.get("name"))
+        if fam in (rid, name):
+            return (0,)
+        if not (rid.startswith(stem) or name.startswith(stem)):
+            return None
+        return (1, 0 if folder and folder in rid else 1,
+                sum(1 for s in r.get("slots") or [] if s.get("required")), len(rid))
+    ranked = [(k, r) for r in candidates for k in [rank(r)] if k is not None]
+    return [r for _k, r in sorted(ranked, key=lambda kr: kr[0])]
+
+
+def recipe_for_family(family: str, candidates: List[dict], category: str = "") -> Optional[dict]:
+    found = recipes_for_family(family, candidates, category)
+    return found[0] if found else None
+
+
 def _assign(recipe: Dict[str, Any], slots: Dict[str, List[dict]],
-            homes: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+            homes: Optional[Dict[str, int]] = None,
+            placed: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
     """A distinct file for each slot the recipe needs, or what is missing.
     Slots with the fewest candidates choose first; a file named for the slot
-    (clip_l, t5xxl) wins it, then one sharing words with the recipe."""
+    (clip_l, t5xxl) wins it, then one sharing words with the recipe. A model
+    file found to be one family's (`placed`) goes only to that family's recipe."""
+    placed = placed or {}
     want = _words(str(recipe.get("id"))) | _words(str(recipe.get("name")))
     needed = [s for s in recipe.get("slots") or [] if s.get("required")]
     for group in recipe.get("required_any") or []:
@@ -299,15 +385,17 @@ def _assign(recipe: Dict[str, Any], slots: Dict[str, List[dict]],
 
     def score(slot_id: str, f: dict) -> tuple:
         name = str(f.get("name") or f.get("id") or "").lower()
-        return (slot_id.lower() in name.replace("-", "_"), len(_words(name) & want), -len(name))
+        return (placed.get(f["id"]) == recipe.get("id"), slot_id.lower() in name.replace("-", "_"),
+                len(_words(name) & want), -len(name))
 
     for s in sorted(needed, key=lambda s: len(slots.get(s["id"]) or [])):
         sid = s["id"]
         options = [f for f in slots.get(sid) or [] if f["id"] not in used]
         if sid in _MAIN_SLOTS:
             options = [f for f in options
-                       if (len(_words(str(f.get("name") or f.get("id"))) & want) or -1)
-                       >= (homes or {}).get(f["id"], 0)]
+                       if (placed[f["id"]] == recipe.get("id") if f["id"] in placed else
+                           (len(_words(str(f.get("name") or f.get("id"))) & want) or -1)
+                           >= (homes or {}).get(f["id"], 0))]
         if not options:
             missing.append(s.get("label") or sid)
             continue
@@ -317,18 +405,21 @@ def _assign(recipe: Dict[str, Any], slots: Dict[str, List[dict]],
     return {"picks": picks, "missing": missing}
 
 
-def readiness(recipes: List[dict], files: List[dict]) -> List[Dict[str, Any]]:
+def _slots_of(r: Dict[str, Any], files: List[dict]) -> Dict[str, List[dict]]:
+    return {s["id"]: [f for f in files if str(f.get("category") or "").lower() in _slot_cats(s)]
+            for s in r.get("slots") or []}
+
+
+def readiness(recipes: List[dict], files: List[dict],
+              placed: Optional[Dict[str, Optional[str]]] = None) -> List[Dict[str, Any]]:
     """Each recipe with what the files on disk give it: per slot the files that
     fit its folders, the file chosen for each, which needed slots have nothing,
     and whether it can load as is."""
     out = []
     homes = _best_homes(recipes, files)
     for r in recipes:
-        slots = {}
-        for s in r.get("slots") or []:
-            cats = {c.lower() for c in (s.get("categories") or [s.get("category") or ""])}
-            slots[s["id"]] = [f for f in files if str(f.get("category") or "").lower() in cats]
-        a = _assign(r, slots, homes)
+        slots = _slots_of(r, files)
+        a = _assign(r, slots, homes, placed)
         defaults = r.get("defaults") or {}
         out.append({"id": r.get("id"), "name": r.get("name") or r.get("id"), "description": r.get("description") or "",
                     "url": r.get("model_url") or "", "video": "video_frames" in defaults,
@@ -340,15 +431,115 @@ def choose_files(ready: Dict[str, Any], recipe: Dict[str, Any]) -> Dict[str, str
     return dict(ready.get("picks") or _assign(recipe, ready["slots"])["picks"])
 
 
+def unnamed(recipes: List[dict], files: List[dict],
+            placed: Optional[Dict[str, Optional[str]]] = None) -> List[dict]:
+    """Model files whose names fit no recipe and that haven't been tried yet."""
+    placed = placed if placed is not None else _placed(files)
+    main_cats = set()
+    for r in recipes:
+        s = _main_slot(r)
+        if s:
+            main_cats |= _slot_cats(s)
+    homes = _best_homes(recipes, files)
+    return [f for f in files if str(f.get("category") or "").lower() in main_cats
+            and homes.get(f["id"], 0) == 0 and f["id"] not in placed]
+
+
+def _family_logged_since(offset: int) -> str:
+    """The family the engine named ("Version: SDXL") in its log after `offset`."""
+    try:
+        with open(_log_path(), "rb") as fh:
+            fh.seek(offset)
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    # "[I] Version: SD 2.x  --- diffusion_engine.cpp:1017": the source place follows.
+    found = re.findall(r"Version:\s*(.+?)\s*(?:---.*)?$", text, re.M)
+    return found[-1] if found else ""
+
+
+def identify(file_id: str) -> Dict[str, Any]:
+    """Find out which family a model file is by loading it once: the engine reads
+    the file's own tensors and logs the family, and the recipe with that name is
+    remembered for the file. Returns {ok, recipe, family, loaded} or {ok: False, error}."""
+    s = start()
+    if not s.get("ok"):
+        return s
+    recipes = api("GET", "/sdcpp/v1/recipes")
+    files = api("GET", "/sdcpp/v1/model-files")
+    if recipes.get("failed") or files.get("failed"):
+        return {"ok": False, "error": recipes.get("error") or files.get("error")}
+    recipes, files = recipes.get("recipes") or [], files.get("files") or []
+    f = next((x for x in files if x["id"] == file_id), None)
+    if f is None:
+        return {"ok": False, "error": f"the engine doesn't list {file_id}"}
+    cat = str(f.get("category") or "").lower()
+    others = [x for x in files if x["id"] != file_id]
+
+    def fits(r: dict) -> Optional[Dict[str, str]]:
+        """The files to load `r` with `f` as its model, when the rest are on disk."""
+        main = _main_slot(r)
+        if not main or cat not in _slot_cats(main):
+            return None
+        slots = _slots_of(r, others)
+        slots[main["id"]] = [f]
+        a = _assign(r, slots, None, {f["id"]: r.get("id")})
+        return None if a["missing"] else a["picks"]
+
+    takers = [(r, p) for r in recipes for p in [fits(r)] if p]
+    if not takers:
+        return {"ok": False, "error": f"no recipe here can load a file from {cat} with what else is on disk"}
+    takers.sort(key=lambda rp: (len(rp[1]), len(str(rp[0].get("id")))))
+    picks_for = {r["id"]: p for r, p in takers}
+    tried: Dict[str, bool] = {}          # recipe id -> loaded
+
+    def load(r: dict) -> tuple:
+        try:
+            offset = _log_path().stat().st_size
+        except OSError:
+            offset = 0
+        out = api("POST", "/sdcpp/v1/models/load", {"recipe": r["id"], "models": picks_for[r["id"]]}, timeout=900)
+        tried[r["id"]] = not out.get("failed") and out.get("state") == "ready"
+        return _family_logged_since(offset), out
+
+    family, out = "", {}
+    for probe, _picks in takers[:2]:
+        family, out = load(probe)
+        if family:
+            break
+    if not family:
+        note = str(out.get("error") or "the engine didn't say what it is")
+        _remember_kind(f, None, "", note)
+        return {"ok": False, "error": f"couldn't tell what {f.get('name')} is: {note}"}
+    chosen = None
+    for r in recipes_for_family(family, [r for r, _p in takers], cat)[:3]:
+        if r["id"] not in tried:
+            load(r)
+        if tried[r["id"]]:
+            chosen = r
+            break
+    _remember_kind(f, chosen["id"] if chosen else None, family,
+                   "" if chosen else str(out.get("error") or ""))
+    if not chosen:
+        return {"ok": False, "family": family,
+                "error": f"{f.get('name')} is {family}, and no recipe here loads it with the files on disk"}
+    status = api("GET", "/sdcpp/v1/models/status", timeout=5)
+    return {"ok": True, "recipe": chosen["id"], "name": chosen.get("name"), "family": family,
+            "loaded": status.get("state") == "ready" and status.get("recipe") == chosen["id"]}
+
+
 def catalog() -> Dict[str, Any]:
     """{recipes: readiness rows, status} from the running engine."""
     recipes = api("GET", "/sdcpp/v1/recipes")
     files = api("GET", "/sdcpp/v1/model-files")
     if recipes.get("failed") or files.get("failed"):
         return {"error": recipes.get("error") or files.get("error")}
-    rows = readiness(recipes.get("recipes") or [], files.get("files") or [])
+    recipes, files = recipes.get("recipes") or [], files.get("files") or []
+    placed = _placed(files)
+    rows = readiness(recipes, files, placed)
     return {"recipes": rows, "status": api("GET", "/sdcpp/v1/models/status"),
-            "raw": {r["id"]: r for r in recipes.get("recipes") or []}}
+            "raw": {r["id"]: r for r in recipes}, "unnamed": unnamed(recipes, files, placed),
+            "placed": placed, "files": files}
 
 
 def ensure_loaded(video: bool, recipe_id: str = "") -> Dict[str, Any]:
@@ -374,6 +565,18 @@ def ensure_loaded(video: bool, recipe_id: str = "") -> Dict[str, Any]:
             return {"ok": False, "error": f"the engine has no recipe '{recipe_id}'"}
     else:
         row = next((r for r in cat["recipes"] if r["ready"] and r["video"] == video), None)
+        for f in ([] if row else cat["unnamed"][:3]):
+            found = identify(f["id"])
+            if found.get("ok") and rows.get(found["recipe"], {}).get("video", video) == video:
+                if found.get("loaded"):
+                    rid = found["recipe"]
+                    return {"ok": True, "recipe": rid, "defaults": (cat["raw"].get(rid) or {}).get("defaults") or {}}
+                cat = catalog()
+                if "error" in cat:
+                    return {"ok": False, "error": cat["error"]}
+                row = next((r for r in cat["recipes"] if r["ready"] and r["video"] == video), None)
+                if row:
+                    break
     if not row:
         kind = "video" if video else "image"
         return {"ok": False, "code": "no_model",
@@ -495,7 +698,9 @@ def has_model(video: bool) -> bool:
     if not start().get("ok"):
         return False
     cat = catalog()
-    return any(r["ready"] and r["video"] == video for r in cat.get("recipes") or [])
+    # A file named for no family yet is worth a try: the first request finds out
+    # what it is, and one that turns out not to load falls back as "no_model".
+    return any(r["ready"] and r["video"] == video for r in cat.get("recipes") or []) or bool(cat.get("unnamed"))
 
 
 def overview(start_engine: bool = True) -> Dict[str, Any]:
@@ -518,6 +723,13 @@ def overview(start_engine: bool = True) -> Dict[str, Any]:
     out["status"] = cat["status"]
     out["recipes"] = [{k: r[k] for k in ("id", "name", "description", "url", "video", "ready", "missing", "picks")}
                       for r in cat["recipes"]]
+    kinds = known_kinds()
+    by_id = {f["id"]: f for f in cat["files"]}
+    out["unnamed"] = [{"id": f["id"], "name": f.get("name") or f["id"], "category": f.get("category")}
+                      for f in cat["unnamed"]]
+    out["unsure"] = [{"id": fid, "name": by_id[fid].get("name") or fid, "family": kinds.get(fid, {}).get("family") or "",
+                      "note": kinds.get(fid, {}).get("note") or ""}
+                     for fid, rid in cat["placed"].items() if rid is None and fid in by_id]
     return out
 
 

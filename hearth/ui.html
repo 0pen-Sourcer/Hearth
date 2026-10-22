@@ -18005,6 +18005,17 @@ async function modelsRenderImages() {
        (checkpoints, diffusion_models, text_encoders, vae), or add a ComfyUI or WebUI models folder you already have.
        The list under it says what each model needs.</div>`;
   html += '</div></div>';
+  // Files whose names don't say what they are: loading one once tells.
+  const unnamed = o.unnamed || [], unsure = o.unsure || [];
+  if (unnamed.length || unsure.length) {
+    html += `<div class="models-section"><div class="sec-head"><h3>Not placed yet</h3><span class="sub">${unnamed.length + unsure.length} file${unnamed.length + unsure.length === 1 ? '' : 's'}</span></div><div class="sec-body">` +
+      unnamed.map(f => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(f.name)}</div>
+        <div class="model-meta">Its name doesn't say which kind of model it is. Loading it once tells, and it's remembered.</div></div>
+        <button class="model-action" data-img-identify="${esc(f.id)}">Find out</button></div>`).join('') +
+      unsure.map(f => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(f.name)}</div>
+        <div class="model-meta">${f.family ? `${esc(f.family)}, which nothing here runs with the files on disk` : esc(f.note || "the engine couldn't read it")}</div></div></div>`).join('') +
+      '</div></div>';
+  }
   html += `<div class="models-section"><div class="sec-head"><h3>Model folders</h3></div><div class="sec-body">` +
     (o.forge ? `<div class="model-row"><div class="model-info"><div class="model-name">Forge is on this PC</div>
       <div class="model-meta">Its checkpoints, VAEs and LoRAs in ${esc(o.forge)} can be used here, read where they are.</div></div>
@@ -18027,6 +18038,14 @@ async function modelsRenderImages() {
     const r = await api('/api/images/load', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipe: b.dataset.imgLoad, video: b.dataset.imgVideo === '1' }) }).catch(e => ({ ok: false, error: e.message }));
     if (!r.ok) toast("It didn't load", r.error || '', 'err', 9000);
+    modelsRenderImages();
+  });
+  pane.querySelectorAll('[data-img-identify]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Loading it…';
+    const r = await api('/api/images/identify', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: b.dataset.imgIdentify }) }).catch(e => ({ ok: false, error: e.message }));
+    if (r.ok) toast(`It's ${r.family}`, `Ready as ${r.name || r.recipe}.`, 'ok');
+    else toast("Couldn't place it", r.error || '', 'err', 9000);
     modelsRenderImages();
   });
   pane.querySelectorAll('[data-img-unload]').forEach(b => b.onclick = async () => {

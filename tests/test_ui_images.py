@@ -58,7 +58,16 @@ OVERVIEW = {
          "picks": {"model": "checkpoints/sd_turbo-f16-q8_0.gguf"}},
         {"id": "wan21-t2v", "name": "Wan 2.1 T2V", "video": True, "ready": False, "missing": ["T5-XXL"],
          "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B", "picks": {}},
-    ]}
+    ],
+    "unnamed": [{"id": "checkpoints/ponyDiffusionV6XL.safetensors", "name": "ponyDiffusionV6XL.safetensors",
+                 "category": "checkpoints"}],
+    "unsure": [{"id": "checkpoints/odd.safetensors", "name": "odd.safetensors", "family": "Hunyuan Video", "note": ""}]}
+identifies: list = []
+
+
+def identify(route):
+    identifies.append(json.loads(route.request.post_data or "{}"))
+    route.fulfill(json={"ok": True, "recipe": "sdxl-checkpoint", "name": "SDXL", "family": "SDXL"})
 
 
 def images(route):
@@ -91,6 +100,7 @@ with sync_playwright() as pw:
     pg.route("**/api/images", images)
     pg.route("**/api/images?*", images)
     pg.route("**/api/images/load", load)
+    pg.route("**/api/images/identify", identify)
     errors: list = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
     for _ in range(4):
@@ -121,6 +131,15 @@ with sync_playwright() as pw:
     pg.click("[data-img-load=sd-turbo]")
     pg.wait_for_timeout(800)
     check(f"Load asks for that model {loads}", loads and loads[0].get("recipe") == "sd-turbo")
+    flat = b["text"].replace("\n", " ")
+    check("a file named for no family is listed with a way to find out what it is",
+          "ponyDiffusionV6XL.safetensors" in flat and "Not placed yet" in b["text"]
+          and pg.locator("[data-img-identify]").count() == 1)
+    check("one found to be a family nothing here runs says so", "Hunyuan Video, which nothing here runs" in flat)
+    pg.click("[data-img-identify]")
+    pg.wait_for_timeout(800)
+    check(f"Find out asks the engine about that file {identifies}",
+          identifies and identifies[0].get("file") == "checkpoints/ponyDiffusionV6XL.safetensors")
     check(f"no script errors {errors[:2]}", not errors)
     print("screenshot:", os.path.join(work, "images_pane.png"))
     browser.close()

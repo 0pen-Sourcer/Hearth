@@ -150,6 +150,7 @@ check("an aspect ratio is sized at the model's own pixel count",
 # The tools: on this PC when a model is set up, else the cloud; `where` decides when given.
 from hearth import imagine, tools  # noqa: E402
 
+real_has_model = sdserver.has_model
 made = []
 sdserver.has_model = lambda video: True
 sdserver.generate = lambda prompt, **k: made.append(("local", k.get("video", False))) or {
@@ -166,6 +167,136 @@ made.clear()
 sdserver.has_model = lambda video: False
 tools._generate_image({"prompt": "a fox"})
 check("without a local model it goes to the cloud", made == [("cloud", False)])
+
+# A checkpoint named for no family ("ponyDiffusionV6XL...") is loaded once; the
+# engine logs the family it read from the file's tensors, and the recipe with
+# that name takes the file from then on.
+from pathlib import Path  # noqa: E402
+
+sdserver.has_model = real_has_model
+sdserver.installed = lambda: [Path("sd-server")]
+work = tempfile.mkdtemp(prefix="hearth-kinds-")
+sdserver._kinds_path = lambda: Path(work) / "image_model_kinds.json"
+log = Path(work) / "sdserver.log"
+log.write_text("[I] earlier run\n[I] Version: SD 1.x  --- diffusion_engine.cpp:1017\n", encoding="utf-8")
+sdserver._log_path = lambda: log
+
+checkpoints = [
+    {"id": "sd-turbo", "name": "SD-Turbo", "slots": [slot("model", True, ["checkpoints"])], "defaults": {"steps": 1}},
+    {"id": "sdxl-turbo", "name": "SDXL Turbo", "slots": [slot("model", True, ["checkpoints"])], "defaults": {"steps": 1}},
+    {"id": "sd1-checkpoint", "name": "SD 1.x", "slots": [slot("model", True, ["checkpoints"])], "defaults": {"width": 512}},
+    {"id": "sdxl-checkpoint", "name": "SDXL", "slots": [slot("model", True, ["checkpoints"])], "defaults": {"width": 1024}},
+]
+pony = {"id": "checkpoints/ponyDiffusionV6XL_v6StartWithThisOne.safetensors",
+        "name": "ponyDiffusionV6XL_v6StartWithThisOne.safetensors", "category": "checkpoints", "size": 6938040682}
+check("the engine's own family names point at their recipes",
+      sdserver.recipe_for_family("SDXL", checkpoints)["id"] == "sdxl-checkpoint"
+      and sdserver.recipe_for_family("SD 1.x", checkpoints)["id"] == "sd1-checkpoint"
+      and sdserver.recipe_for_family("Wan 2.x", RECIPES)["id"] == "wan21-t2v"
+      and sdserver.recipe_for_family("Flux", RECIPES)["id"] == "flux1-dev"
+      and sdserver.recipe_for_family("Hunyuan Video", checkpoints) is None)
+check("a checkpoint named for no family makes nothing ready by itself",
+      not any(r["ready"] for r in sdserver.readiness(checkpoints, [pony], {})))
+check("and is listed as not placed yet", [f["id"] for f in sdserver.unnamed(checkpoints, [pony], {})] == [pony["id"]])
+
+loads = []
+state = {"recipe": None}
+
+
+def engine(method, path, body=None, timeout=30):
+    if path == "/sdcpp/v1/models/status":
+        return {"state": "ready" if state["recipe"] else "empty", "recipe": state["recipe"], "error": None}
+    if path == "/sdcpp/v1/recipes":
+        return {"recipes": checkpoints}
+    if path == "/sdcpp/v1/model-files":
+        return {"files": [pony]}
+    if path == "/sdcpp/v1/models/load":
+        loads.append(body["recipe"])
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write("[I] Version: SDXL  --- diffusion_engine.cpp:1017\n")
+        state["recipe"] = body["recipe"]
+        return {"state": "ready", "recipe": body["recipe"], "error": None}
+    return {}
+
+
+sdserver.api = engine
+sdserver.start = lambda timeout=60: {"ok": True}
+check("with only that file, a picture is still worth trying on this PC", sdserver.has_model(False))
+got = sdserver.ensure_loaded(False)
+check(f"asking for a picture finds out what it is and loads it as SDXL ({loads})",
+      got.get("ok") and got.get("recipe") == "sdxl-checkpoint" and loads[-1] == "sdxl-checkpoint")
+check("an older 'Version' line in the log isn't taken for this file's",
+      sdserver.known_kinds()[pony["id"]]["family"] == "SDXL")
+rows = {r["id"]: r for r in sdserver.catalog()["recipes"]}
+check("from then on SDXL is ready with it, and no other recipe claims it",
+      rows["sdxl-checkpoint"]["ready"] and not rows["sd1-checkpoint"]["ready"] and not rows["sd-turbo"]["ready"])
+loads.clear()
+sdserver.ensure_loaded(False)
+check("and it isn't loaded a second time to be asked again", loads == [])
+
+sd2 = [{"id": "sd2-inpainting", "name": "SD 2 Inpainting", "slots": [slot("model", True, ["checkpoints"])]},
+       {"id": "sd2-512-checkpoint", "name": "SD 2.1 512", "slots": [slot("model", True, ["checkpoints"])]}]
+check("for a file in checkpoints, the family's checkpoint recipe comes before its inpainting one",
+      sdserver.recipe_for_family("SD 2.x", sd2, "checkpoints")["id"] == "sd2-512-checkpoint")
+
+# A FLUX.1 file whose likeliest-looking recipe can't load it: the next one that does is kept.
+flux_recipes = [
+    {"id": "flux2-dev", "name": "FLUX.2 dev",
+     "slots": [slot("diffusion_model", True, ["diffusion_models"]), slot("llm", True, ["text_encoders"])]},
+    {"id": "flux1-dev", "name": "FLUX.1 dev",
+     "slots": [slot("diffusion_model", True, ["diffusion_models"]), slot("clip_l", True, ["text_encoders"]),
+               slot("t5xxl", True, ["text_encoders"])]},
+]
+dreamy = {"id": "diffusion_models/dreamy_v3.gguf", "name": "dreamy_v3.gguf", "category": "diffusion_models"}
+flux_disk = [dreamy, {"id": "text_encoders/qwen3_4b.gguf", "name": "qwen3_4b.gguf", "category": "text_encoders"},
+             {"id": "text_encoders/clip_l.safetensors", "name": "clip_l.safetensors", "category": "text_encoders"},
+             {"id": "text_encoders/t5xxl_fp8.safetensors", "name": "t5xxl_fp8.safetensors", "category": "text_encoders"}]
+loads.clear()
+state["recipe"] = None
+
+
+def flux_engine(method, path, body=None, timeout=30):
+    if path == "/sdcpp/v1/recipes":
+        return {"recipes": flux_recipes}
+    if path == "/sdcpp/v1/model-files":
+        return {"files": flux_disk}
+    if path == "/sdcpp/v1/models/load":
+        loads.append(body["recipe"])
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write("[I] Version: Flux  --- diffusion_engine.cpp:1017\n")
+        if body["recipe"] != "flux1-dev":
+            state["recipe"] = None
+            return {"failed": True, "error": "Model initialization failed", "http_status": 422}
+        state["recipe"] = "flux1-dev"
+        return {"state": "ready", "recipe": "flux1-dev", "error": None}
+    return engine(method, path, body, timeout)
+
+
+sdserver.api = flux_engine
+found = sdserver.identify(dreamy["id"])
+check(f"the recipe that fails to load it is passed over for the one that does ({loads})",
+      found.get("recipe") == "flux1-dev" and found.get("loaded") and loads == ["flux2-dev", "flux1-dev"])
+
+
+def unreadable(method, path, body=None, timeout=30):
+    if path == "/sdcpp/v1/models/load":
+        loads.append(body["recipe"])
+        return {"failed": True, "error": "Model initialization failed", "http_status": 422}
+    if path == "/sdcpp/v1/models/status":
+        return {"state": "empty", "recipe": None, "error": None}
+    return engine(method, path, body, timeout)
+
+
+odd = {"id": "checkpoints/mystery.safetensors", "name": "mystery.safetensors", "category": "checkpoints"}
+pony_files = [odd]
+sdserver.api = lambda m, p, b=None, timeout=30: {"files": pony_files} if p == "/sdcpp/v1/model-files" else unreadable(m, p, b, timeout)
+loads.clear()
+miss = sdserver.ensure_loaded(False)
+check("a file the engine can't read says there's no model, so the picture goes to the cloud",
+      not miss["ok"] and miss.get("code") == "no_model")
+tries = len(loads)
+sdserver.ensure_loaded(False)
+check(f"and it isn't tried again on the next picture ({tries} then {len(loads)})", tries > 0 and len(loads) == tries)
 
 print()
 if FAILS:

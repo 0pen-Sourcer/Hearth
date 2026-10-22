@@ -4341,6 +4341,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             if not rid:
                 return self._send_json(200, {"ok": True, **sdserver.api("POST", "/sdcpp/v1/models/unload")})
             return self._send_json(200, sdserver.ensure_loaded(bool(body.get("video")), rid))
+        if path == "/api/images/identify":
+            from . import sdserver
+            body = self._read_json()
+            return self._send_json(200, sdserver.identify(str(body.get("file") or "")))
         if path == "/api/runtime/install":
             # Download Hearth's own llama.cpp runtime (the native llama-server.exe
             # + CUDA DLLs). Streams NDJSON progress like the model download. The
