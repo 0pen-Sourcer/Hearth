@@ -49,13 +49,14 @@ from __future__ import annotations
 import argparse
 from . import env as _env
 import asyncio
+import io
 import json
 import os
 import re
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import system_prompt, execute_tool, to_openai_tools, TOOL_DEFINITIONS
 from .loop_guard import ToolLoopGuard, MAX_TURNS
@@ -169,6 +170,37 @@ _EXTRACT_LOCK = threading.Lock()
 def turn_is_active() -> bool:
     """True while a user-facing generation is running."""
     return _TURN_ACTIVE.is_set()
+
+
+# The longest side a picture is sent at. What a vision model pays scales with
+# the pixels: a 2560x1440 screenshot is about 3,400 tokens and took a 9B on an
+# 8 GB card minutes to read, where 1280 wide reads the same text in a fraction.
+IMAGE_MAX_SIDE = 1280
+
+
+def image_for_model(path: str) -> Tuple[str, str]:
+    """A picture as a data URL for the model, no longer than IMAGE_MAX_SIDE,
+    and a note with the scale when it was shrunk, so positions read off it can
+    be turned back into screen positions. The file on disk is left as it is."""
+    import base64 as _b64, mimetypes as _mt
+    note = ""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            w, h = im.size
+            if max(w, h) > IMAGE_MAX_SIDE:
+                k = IMAGE_MAX_SIDE / float(max(w, h))
+                small = im.convert("RGB").resize((max(1, int(w * k)), max(1, int(h * k))), Image.LANCZOS)
+                buf = io.BytesIO()
+                small.save(buf, format="PNG", optimize=True)
+                note = (f" Shown at {small.size[0]}x{small.size[1]}; the original is {w}x{h}, "
+                        f"so multiply positions read off it by {1 / k:.2f}.")
+                return "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode("ascii"), note
+    except Exception:
+        pass
+    with open(path, "rb") as f:
+        data = _b64.b64encode(f.read()).decode("ascii")
+    return f"data:{_mt.guess_type(path)[0] or 'image/png'};base64,{data}", note
 
 
 def lately_block(chat_id: Optional[str], emit=None) -> str:
@@ -2286,18 +2318,14 @@ async def run_once(
                     _ip = _im.group(1).strip() if _im else ""
                     if _ip and os.path.isfile(_ip):
                         try:
-                            import base64 as _b64, mimetypes as _mt
-                            with open(_ip, "rb") as _f:
-                                _data = _b64.b64encode(_f.read()).decode("ascii")
-                            _mime = _mt.guess_type(_ip)[0] or "image/png"
-                            _block = {"type": "image_url",
-                                      "image_url": {"url": f"data:{_mime};base64,{_data}"}}
+                            _url, _scale = image_for_model(_ip)
+                            _block = {"type": "image_url", "image_url": {"url": _url}}
                             if _is_local_endpoint(LOCAL_API_BASE) and not _use_manual_tools:
                                 # LM Studio / llama.cpp VLMs accept the image inline
                                 # in the tool result (OpenAI tool-calling path).
                                 _tool_content = [
                                     {"type": "text", "text":
-                                     f"image loaded: {os.path.basename(_ip)} — look at it before describing"},
+                                     f"image loaded: {os.path.basename(_ip)} — look at it before describing.{_scale}"},
                                     _block,
                                 ]
                             else:
@@ -2306,7 +2334,7 @@ async def run_once(
                                 # list content and loses it. Either way, ack here
                                 # and ride the image on a user turn after the loop.
                                 _tool_content = (f"Image captured ({os.path.basename(_ip)}). "
-                                                 f"It's attached in the next message — look and answer.")
+                                                 f"It's attached in the next message — look and answer.{_scale}")
                                 _pending_image_block = _block
                         except OSError:
                             pass

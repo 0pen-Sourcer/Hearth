@@ -4527,15 +4527,13 @@ class JarvisCLI:
             ext = os.path.splitext(cand)[1].lower()
             if ext in IMAGE_EXTS:
                 try:
-                    with open(cand, "rb") as f:
-                        data = f.read()
-                    mime = mimetypes.guess_type(cand)[0] or "image/png"
-                    b64 = base64.b64encode(data).decode("ascii")
+                    from hearth.headless import image_for_model
+                    url, scale = image_for_model(cand)
                     images.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:{mime};base64,{b64}"},
+                        "image_url": {"url": url},
                     })
-                    text_parts.append(f"\n[attached image: {cand}]")
+                    text_parts.append(f"\n[attached image: {cand}]{scale}")
                 except OSError:
                     text_parts.append(f"\n[could not read image {cand}]")
             elif force_image:
@@ -6806,13 +6804,11 @@ class JarvisCLI:
                         is_vision = self._is_vision_capable()
                         if is_vision:
                             try:
-                                import base64, mimetypes
-                                with open(img_path, "rb") as f:
-                                    b64 = base64.b64encode(f.read()).decode("ascii")
-                                mime = mimetypes.guess_type(img_path)[0] or "image/png"
+                                from hearth.headless import image_for_model
+                                _url, _scale = image_for_model(img_path)
                                 image_block = {
                                     "type": "image_url",
-                                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                                    "image_url": {"url": _url},
                                 }
                                 if _is_local_endpoint(LOCAL_API_BASE):
                                     # LM Studio VLMs accept the image inline in
