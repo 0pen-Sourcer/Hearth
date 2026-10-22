@@ -232,6 +232,9 @@ HIDDEN = [
     # (comtypes.gen is generated at runtime — collect_all("comtypes") below
     # pulls what's needed; don't list it here or PyInstaller warns.)
     "uiautomation", "comtypes", "comtypes.client",
+    # The terminal (hearth_cli.py ships as a file, so nothing analyses its
+    # imports): its input line and its pickers.
+    "prompt_toolkit", "prompt_toolkit.shortcuts.choice_input",
     # RealtimeSTT + silero VAD for streaming voice mode. RealtimeSTT's recorder
     # imports torch at module load, so torch must be present (it's no longer in
     # excludes); list it so the tree-shaker never drops it and the contrib hook

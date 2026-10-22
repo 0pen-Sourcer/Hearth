@@ -3,19 +3,39 @@ from __future__ import annotations
 
 from typing import Any, List, Optional, Sequence, Tuple
 
-from prompt_toolkit.formatted_text import ANSI
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.shortcuts.choice_input import ChoiceInput
-from prompt_toolkit.styles import Style
+# Without prompt_toolkit (a build that doesn't carry it, or an older one
+# without ChoiceInput) the picker is a numbered list and a typed number.
+try:
+    from prompt_toolkit.formatted_text import ANSI
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.shortcuts.choice_input import ChoiceInput
+    from prompt_toolkit.styles import Style
+    HAVE_PT = True
+except Exception:
+    HAVE_PT = False
 
 STYLE = Style.from_dict({
     "selected-option": "fg:#ffaf00 bold",
     "number": "fg:#808080",
     "bottom-toolbar": "noreverse fg:#808080",
-})
+}) if HAVE_PT else None
 
 
-def _escape_leaves() -> KeyBindings:
+async def _numbered(message: str, options: Sequence[Tuple[Any, str]], default: Any) -> Optional[Any]:
+    import asyncio
+    print(message)
+    for i, (v, label) in enumerate(options, 1):
+        print(f"  {i:>2}. {label}" + ("   (now)" if default is not None and v == default else ""))
+    try:
+        got = (await asyncio.to_thread(input, "  number, or Enter to leave: ")).strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if got.isdigit() and 1 <= int(got) <= len(options):
+        return options[int(got) - 1][0]
+    return None
+
+
+def _escape_leaves():
     kb = KeyBindings()
 
     @kb.add("escape", eager=True)
@@ -27,10 +47,17 @@ def _escape_leaves() -> KeyBindings:
 async def pick(message: str, options: Sequence[Tuple[Any, str]], default: Any = None,
                hint: str = "↑↓ enter · esc leaves") -> Optional[Any]:
     """The value picked, or None when left with Esc."""
-    opts: List[Tuple[Any, Any]] = [(v, ANSI(label)) for v, label in options]
-    if not opts:
+    if not options:
         return None
     import sys
+    if not HAVE_PT and sys.stdin.isatty():
+        return await _numbered(message, options, default)
+    if not HAVE_PT:
+        print(message)
+        for i, (_v, label) in enumerate(options, 1):
+            print(f"  {i:>2}. {label}")
+        return None
+    opts: List[Tuple[Any, Any]] = [(v, ANSI(label)) for v, label in options]
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         # Piped or scripted: no screen to pick on, so the list is printed.
         print(message)
