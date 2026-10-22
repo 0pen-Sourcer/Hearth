@@ -301,6 +301,22 @@ qfiles = [{"id": "@f/diffusion_models/qwen-image-2.1-UC-Q4_K_M.gguf", "name": "q
 check("a qwen-image-2.1 file is Qwen Image 2.1's, not 2.0's or the Turbo's",
       [r["id"] for r in sdserver.readiness(qwens, qfiles, {}) if r["ready"]] == ["qwen-image-21"])
 
+# Downloads from Discover: Hugging Face's own pipeline tag says chat, image or
+# video, and an image file goes to the folder of the recipe its name fits.
+from hearth import llmserver  # noqa: E402
+
+check("Hugging Face's pipeline tag says what a repo is",
+      llmserver.model_kind({"pipeline_tag": "text-to-image"}) == "image"
+      and llmserver.model_kind({"pipeline_tag": "image-to-video"}) == "video"
+      and llmserver.model_kind({"pipeline_tag": "text-generation"}) == "chat"
+      and llmserver.model_kind({"tags": ["gguf", "text-to-video"]}) == "video")
+sdserver.api = lambda m, p, b=None, timeout=30: {"recipes": checkpoints + qwens} if p == "/sdcpp/v1/recipes" else {}
+sdserver.running = lambda: True
+check("a whole checkpoint goes to checkpoints, a diffusion model to diffusion_models, a VAE to vae",
+      sdserver.folder_for("sdxl-turbo-q8.gguf") == "checkpoints"
+      and sdserver.folder_for("qwen-image-2.1-UC-Q4_K_M.gguf") == "diffusion_models"
+      and sdserver.folder_for("qwen_image_2.1_vae_bf16.safetensors") == "vae")
+
 odd = {"id": "checkpoints/mystery.safetensors", "name": "mystery.safetensors", "category": "checkpoints"}
 pony_files = [odd]
 sdserver.api = lambda m, p, b=None, timeout=30: {"files": pony_files} if p == "/sdcpp/v1/model-files" else unreadable(m, p, b, timeout)

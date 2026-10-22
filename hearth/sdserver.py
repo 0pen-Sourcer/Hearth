@@ -545,6 +545,27 @@ def _family_logged_since(offset: int) -> str:
     return found[-1] if found else ""
 
 
+def folder_for(filename: str) -> str:
+    """The category folder a downloaded image or video file goes in: a VAE or a
+    LoRA by its name, else the folder of the main slot of the recipe its name
+    fits best (a whole checkpoint or a diffusion model). Without the engine to
+    ask, diffusion_models, where most single-file GGUFs belong."""
+    w = _words(filename)
+    if "vae" in w:
+        return "vae"
+    if "lora" in w:
+        return "loras"
+    up = running() or (bool(installed()) and start().get("ok"))
+    recipes = api("GET", "/sdcpp/v1/recipes", timeout=5) if up else {"failed": True}
+    best, cat = (0, 0), "diffusion_models"
+    for r in recipes.get("recipes") or []:
+        s = _main_slot(r)
+        f = _fit(w, r)
+        if s and f[0] > 0 and f > best:
+            best, cat = f, sorted(_slot_cats(s))[0]
+    return cat if cat in CATEGORIES else "diffusion_models"
+
+
 def load_failure(offset: int, picks: Dict[str, str], row: Dict[str, Any]) -> str:
     """Why a load failed, in words, from what the engine logged after `offset`:
     which of the picked files it refused. Its tensor names carry the slot

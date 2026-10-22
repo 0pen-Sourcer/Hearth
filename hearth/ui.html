@@ -18306,10 +18306,11 @@ async function modelsRenderDiscover() {
     const caps = modelsCapTags(it.hf_repo, it.tags || []);
     const params = it.params_b ? it.params_b + 'B' : modelParamsLabel(it.hf_repo);
     const rowId = 'hf-' + i;
+    const media = it.kind === 'image' || it.kind === 'video';
     html += `
       <div class="model-row is-expandable" data-row="${rowId}" data-hf-repo="${esc(it.hf_repo)}">
         <div class="model-info">
-          <div class="model-name">${esc(it.hf_repo)}${it.makers ? ' <span class="model-maker" title="Published by the people who made this model, not a copy or a remix">' + _ICON_MAKER + '</span>' : ''}</div>
+          <div class="model-name">${esc(it.hf_repo)}${media ? ` <span class="model-badge badge-src">${it.kind}</span>` : ''}${it.makers ? ' <span class="model-maker" title="Published by the people who made this model, not a copy or a remix">' + _ICON_MAKER + '</span>' : ''}</div>
           <div class="model-meta">${params ? params + ' · ' : ''}${(it.downloads || 0).toLocaleString()} downloads${it.likes ? ' · ' + it.likes.toLocaleString() + ' likes' : ''} · ${(it.tags || []).slice(0, 4).map(esc).join(' · ') || '-'}</div>
           ${modelsCapTagsHTML(caps)}
         </div>
@@ -18320,14 +18321,16 @@ async function modelsRenderDiscover() {
           <div class="ex-head">Choose a quantization</div>
           <div class="ex-desc">Bigger Q = better quality but slower + more VRAM. Q4_K_M is the usual sweet spot.</div>
           <div class="ex-files" data-hf-files="${rowId}">Loading files…</div>
-          <div class="ex-desc" style="margin-top:12px">Pick a quant, download, and it loads with sensible defaults. Tune context and GPU layers in <b>My Models</b>, set once, right where you load it.</div>
+          <div class="ex-desc" style="margin-top:12px">${media
+            ? `${it.kind === 'video' ? 'A video' : 'An image'} model. It goes with your image models, and <b>Images &amp; video</b> shows it with anything else it needs, like a text encoder or VAE.`
+            : 'Pick a quant, download, and it loads with sensible defaults. Tune context and GPU layers in <b>My Models</b>, set once, right where you load it.'}</div>
           <div class="ex-desc" style="margin-top:8px">
             <a href="https://huggingface.co/${esc(it.hf_repo)}" target="_blank" rel="noopener" style="color:var(--accent-2)">View ${esc(it.hf_repo)} on Hugging Face &#8599;</a>
             <span style="color:var(--fg-faint)"> &middot; licence, benchmarks and what it was trained for</span>
           </div>
           <div class="ex-actions">
             <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
-            <button class="model-action" data-apply-hf-repo="${esc(it.hf_repo)}" data-apply-id="${rowId}" disabled>Download</button>
+            <button class="model-action" data-apply-hf-repo="${esc(it.hf_repo)}" data-apply-id="${rowId}" data-kind="${esc(it.kind || 'chat')}" disabled>Download</button>
           </div>
         </div>
       </div>`;
@@ -18499,7 +18502,7 @@ function modelsWireRowClicks(pane) {
       if (!selected) { toast('Pick a quant file first', '', 'warn'); return; }
       const filename = selected.dataset.fn;
       const cfg = modelsReadLoadConfig(expand);
-      modelsDownloadHF(b.dataset.applyHfRepo, filename, cfg);
+      modelsDownloadHF(b.dataset.applyHfRepo, filename, cfg, b.dataset.kind);
     });
   });
   // Wire load-config sliders/switches
@@ -18893,7 +18896,7 @@ function dlToggle(force) {
           else if (kind === 'update') downloadUpdate();
           else if (kind === 'voice') _obFetchVoiceModels(null);
           else if (d.vision) modelsAddVision(d.vision, false);
-          else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {});
+          else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {}, d.kind);
         } else if (ds.dlact === 'cancel') {
           if (kind === 'agent') api('/api/agents/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                            body: JSON.stringify({ id: d.agent }) }).catch(() => {});
@@ -19022,11 +19025,14 @@ async function modelsLoadHFFiles(repo, idx) {
   }
 }
 
-async function modelsDownloadHF(repo, filename, loadCfg) {
+// `kind` is what Hugging Face says the repo does: an image or video model goes
+// to the image engine's folders and isn't loaded as a chat model afterwards.
+async function modelsDownloadHF(repo, filename, loadCfg, kind) {
+  const media = kind === 'image' || kind === 'video';
   const dl = $('models-dl');
   dlToggle(true);  // progress shows in the downloads overlay, not the model list
   // Remember repo/filename so a restart can offer Resume.
-  try { localStorage.setItem('hearth_pending_dl', JSON.stringify({ repo, filename })); } catch {}
+  if (!media) try { localStorage.setItem('hearth_pending_dl', JSON.stringify({ repo, filename })); } catch {}
   const rb = $('models-dl-resume'); if (rb) rb.hidden = true;
   const bar = $('models-dl-bar'), label = $('models-dl-label'), detail = $('models-dl-detail');
   bar.style.width = '0%';
@@ -19034,12 +19040,12 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
   detail.textContent = repo;
   // Per-download abort handle + repo, so the overlay Pause/Resume can act on it.
   const ctrl = new AbortController();
-  dlUpsert(filename, { name: filename, status: 'downloading', pct: 0, abort: ctrl, repo, filename });
+  dlUpsert(filename, { name: filename, status: 'downloading', pct: 0, abort: ctrl, repo, filename, kind });
   let modelPath = null;
   try {
     const res = await fetch('/api/llmserver/download-hf', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repo, filename }), signal: ctrl.signal,
+      body: JSON.stringify(media ? { repo, filename, category: 'auto' } : { repo, filename }), signal: ctrl.signal,
     });
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
     modelPath = await streamDownload(res, bar, label, detail, filename);
@@ -19047,6 +19053,11 @@ async function modelsDownloadHF(repo, filename, loadCfg) {
     if (e && e.name === 'AbortError') { dlUpsert(filename, { status: 'paused' }); return; }  // paused from the overlay; .part kept
     if (e && e.name === 'TypeError') { dlUpsert(filename, { status: 'paused' }); return; }   // connection lost; the backend keeps going
     label.textContent = 'Error'; detail.textContent = e.message; dlUpsert(filename, { status: 'error' }); return;
+  }
+  if (modelPath && media) {
+    toast(`${kind === 'video' ? 'Video' : 'Image'} model saved`, filename + ' is with your image models; Images & video says if it needs anything else.', 'ok', 6000);
+    if (_modelsState.tab === 'images') modelsRenderImages();
+    return;
   }
   if (modelPath) {
     try { localStorage.removeItem('hearth_pending_dl'); } catch {}  // done — nothing to resume

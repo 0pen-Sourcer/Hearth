@@ -2959,8 +2959,21 @@ def search_huggingface(query: str, limit: int = 12) -> List[Dict[str, Any]]:
             "downloads": m.get("downloads", 0),
             "likes": m.get("likes", 0),
             "tags": (m.get("tags") or [])[:6],
+            "kind": model_kind(m),
         })
     return out
+
+
+def model_kind(m: Dict[str, Any]) -> str:
+    """chat, image or video, from what Hugging Face says the repo does (its
+    pipeline tag, else a tag of the same form)."""
+    tags = [str(m.get("pipeline_tag") or "")] + [str(t) for t in m.get("tags") or []]
+    for t in tags:
+        if t.endswith("-to-video"):
+            return "video"
+        if t.endswith("-to-image"):
+            return "image"
+    return "chat"
 
 
 def _estimate_gguf_size_gb(filename: str) -> Optional[float]:

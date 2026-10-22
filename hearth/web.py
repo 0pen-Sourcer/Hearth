@@ -4278,6 +4278,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             if category:
                 # An image or video model file goes in the image engine's folder for its kind.
                 from . import sdserver
+                if category == "auto":
+                    category = sdserver.folder_for(os.path.basename(filename))
                 if category not in sdserver.CATEGORIES or category == "recipes":
                     return self._stream_model_download("", "", error=f"no such model folder '{category}'")
                 return self._stream_model_download(repo, filename, dest_dir=str(sdserver.models_dir() / category),
