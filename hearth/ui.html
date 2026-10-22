@@ -4285,7 +4285,7 @@
     <section class="view" id="view-team">
       <div class="view-head">
         <h2>Team</h2>
-        <span class="sub" id="team-sub">helpers JARVIS starts for bigger jobs</span>
+        <span class="sub" id="team-sub">helpers <span data-agent-name>JARVIS</span> starts for bigger jobs</span>
         <div class="grow"></div>
         <button class="tm-new" id="tm-new" title="Start a helper on a task yourself">+ New helper</button>
         <div class="logs-tabs" id="tm-tabs" hidden>
@@ -4320,7 +4320,7 @@
     <section class="view" id="view-reminders">
       <div class="view-head">
         <h2>Reminders</h2>
-        <span class="sub">what JARVIS will remind you of, or do for you, and when</span>
+        <span class="sub">what <span data-agent-name>JARVIS</span> will remind you of, or do for you, and when</span>
       </div>
       <div class="rm-page">
         <div class="rm-tabs">
@@ -4342,7 +4342,7 @@
     <section class="view" id="view-skills">
       <div class="view-head">
         <h2>Skills</h2>
-        <span class="sub">know-how JARVIS follows when a job calls for it</span>
+        <span class="sub">know-how <span data-agent-name>JARVIS</span> follows when a job calls for it</span>
       </div>
       <div class="rm-page">
         <form class="rm-compose" id="sk-compose" autocomplete="off">
@@ -4350,7 +4350,7 @@
           <input type="text" id="skill-install-src" placeholder="Add a skill: a GitHub link or owner/repo">
           <button type="submit" class="send-btn" id="btn-skill-install" title="Look at it first" aria-label="Add"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg></button>
         </form>
-        <p class="sk-note">Skills use the Agent Skills format, the same one Claude and Codex read, so most skills on GitHub work here. You see what one does before it's added, and anything it runs still asks first. Switch one off to keep it out of JARVIS's way without removing it.</p>
+        <p class="sk-note">Skills use the Agent Skills format, the same one Claude and Codex read, so most skills on GitHub work here. You see what one does before it's added, and anything it runs still asks first. Switch one off to keep it out of <span data-agent-name>JARVIS</span>'s way without removing it.</p>
         <div class="rm-list" id="skills-box"><div class="lg-empty">Loading&hellip;</div></div>
       </div>
     </section>
@@ -4371,7 +4371,7 @@
     <section class="view" id="view-logs">
       <div class="view-head">
         <h2>Logs</h2>
-        <span class="sub" id="logs-sub">every tool JARVIS used, with what came back</span>
+        <span class="sub" id="logs-sub">every tool <span data-agent-name>JARVIS</span> used, with what came back</span>
         <div class="grow"></div>
         <!-- Source toggle: Agent log (Hearth tool calls) or Server log
              (llama_cpp.server stdout). The Server pill turns green when the
@@ -4511,7 +4511,7 @@
           <div class="settings-side-footer">
             <div class="avatar"></div>
             <div>
-              <div class="who">JARVIS</div>
+              <div class="who"><span data-agent-name>JARVIS</span></div>
               <div class="who-sub">__HEARTH_EDITION__</div>
             </div>
           </div>
@@ -4521,7 +4521,7 @@
         <div class="settings-pane" data-st="brain">
         <h3>Chat brain</h3>
         <div class="ap-block">
-          <div class="ap-title">What JARVIS thinks with</div>
+          <div class="ap-title">What <span data-agent-name>JARVIS</span> thinks with</div>
           <div class="ap-hint" id="brain-where-hint">A model on this PC, an agent you already pay for, or a cloud provider with your own key.</div>
           <div class="brain-cards" id="brain-cards"></div>
         </div>
@@ -4845,7 +4845,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Remember things on its own</div>
-            <div class="hint">After a reply, JARVIS notes lasting facts from the chat into memory. Off, it only saves when you ask.</div>
+            <div class="hint">After a reply, <span data-agent-name>JARVIS</span> notes lasting facts from the chat into memory. Off, it only saves when you ask.</div>
           </div>
           <div class="switch" data-key="auto_memory"></div>
         </div>
@@ -5204,7 +5204,7 @@
         <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">Email <span style="color:var(--fg-faint);font-size:11px;font-weight:400">· read + send</span></div>
-            <div class="hint">Let JARVIS read your inbox and send replies when you ask. Use an <b>app password</b>, not your login one (Gmail: Account, Security, App passwords, needs 2-step on). Servers auto-detect for Gmail, Outlook, Yahoo, iCloud and Fastmail. Stays on this PC, and nothing is read until you ask.</div>
+            <div class="hint">Let <span data-agent-name>JARVIS</span> read your inbox and send replies when you ask. Use an <b>app password</b>, not your login one (Gmail: Account, Security, App passwords, needs 2-step on). Servers auto-detect for Gmail, Outlook, Yahoo, iCloud and Fastmail. Stays on this PC, and nothing is read until you ask.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
             <input type="email" id="email-address" placeholder="you@gmail.com" spellcheck="false" autocomplete="off" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
@@ -5294,7 +5294,7 @@
         <div class="settings-pane" data-st="plus" hidden>
         <h3>Plus</h3>
         <p class="settings-sub" style="color:var(--fg-faint);font-size:12px;margin:-4px 0 14px;">
-          JARVIS on your phone through Hearth's relay: an app on your home screen, no bot to set up, risky steps
+          <span data-agent-name>JARVIS</span> on your phone through Hearth's relay: an app on your home screen, no bot to set up, risky steps
           asked with Allow and Deny. Everything between this PC and the phone is end to end encrypted; the relay
           only passes it along.
         </p>
@@ -6617,7 +6617,7 @@ function showPermissionModal(reqId, toolName, argsStr) {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ id: reqId, decision }),
       });
-    } catch (e) { toast("Your answer didn't reach JARVIS", e.message, 'err'); }
+    } catch (e) { toast("Your answer didn't reach " + _agentName(), e.message, 'err'); }
     $('modal').classList.remove('open');
   };
   $('modal-title').textContent = `Allow ${toolName}?`;
@@ -6781,7 +6781,7 @@ async function sendPermDecision(decision, reason) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reason ? { id, decision, reason } : { id, decision }),
     });
-  } catch (e) { toast("Your answer didn't reach JARVIS", e.message, 'err'); }
+  } catch (e) { toast("Your answer didn't reach " + _agentName(), e.message, 'err'); }
 }
 
 // ----- ask_user inline strip -----
@@ -6839,7 +6839,7 @@ async function sendAskAnswer(choice, isOther) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, choice, other: !!isOther }),
     });
-  } catch (e) { toast("Your answer didn't reach JARVIS", e.message, 'err'); }
+  } catch (e) { toast("Your answer didn't reach " + _agentName(), e.message, 'err'); }
 }
 
 $('ask-close').addEventListener('click', () => {
@@ -7026,7 +7026,7 @@ function applyBrainState() {
       mark.dataset.id = sig;
       mark.innerHTML = brainMarkHTML(key, off);
       const h = HARNESS[key] || BRAIN_MARKS[key];
-      mark.title = h ? `${AGENT_BRAINS[key] || h.maker} is thinking for JARVIS` : off ? 'No model loaded' : 'A model on this PC';
+      mark.title = h ? `${AGENT_BRAINS[key] || h.maker} is thinking for ${_agentName()}` : off ? 'No model loaded' : 'A model on this PC';
     }
   }
   const sel = $$id('model-select');
@@ -10367,7 +10367,7 @@ function renderBrainCards() {
   const more = STATE.moreAgents || 0;
   const names = here.length > 3 ? here.slice(0, 3).join(', ') + ` and ${here.length - 3} more` : here.join(' and ');
   const note = (here.length ? `${esc(names)} ${here.length === 1 ? 'is' : 'are'} on this PC too. ` : '')
-    + `Other agents can't be JARVIS's brain, but they take tasks as helpers${more ? `, with ${more} more you can add` : ''}. `
+    + `Other agents can't be ${_agentName()}'s brain, but they take tasks as helpers${more ? `, with ${more} more you can add` : ''}. `
     + `<a href="#" class="brain-helpers">New helper</a>`;
   box.innerHTML = groups.map(([title, ids], i) => `<div class="brain-group">${title}</div><div class="brain-grid">${ids.map(card).join('')}</div>`
     + (i === 1 ? `<div class="brain-note">${note}</div>` : '')).join('');
@@ -10663,7 +10663,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
   if (STATE.streaming && !forced && !_silent && !_notify && STATE.streamingConvo
       && STATE.streamingConvo !== (activeConvo() || {}).id) {
     const other = (STATE.conversations || []).find(c => c.id === STATE.streamingConvo);
-    toast('JARVIS is still answering in another chat',
+    toast(_agentName() + ' is still answering in another chat',
           `${other && other.title ? '"' + other.title + '"' : 'That chat'} has to finish first. Your message is still in the box; send it then, or stop that reply.`, 'warn', 7000);
     return;
   }
@@ -11178,7 +11178,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // the loop didn't hang - it's a slow tool. They can hit Stop or wait.
       if (pendingTool && pendingTool.div) {
         pendingTool.div.classList.add('t-slow');
-        pendingTool.ms.title = 'Still running. Stop ends it; Run in background lets it finish while JARVIS carries on.';
+        pendingTool.ms.title = 'Still running. Stop ends it; Run in background lets it finish while ' + _agentName() + ' carries on.';
         // A command can carry on as a background job; the reply goes on without it.
         if (ev.name === 'run_command' && !pendingTool.div.querySelector('.t-bg')) {
           const b = document.createElement('button');
@@ -13475,7 +13475,7 @@ async function _rmAsk(text) {
   text = String(text || '').trim();
   if (!text || _rmPending) return false;
   if (STATE.streaming) {
-    toast('JARVIS is answering in another chat', 'Set this once that reply is done, or stop it. What you typed is still in the box.', 'warn', 6000);
+    toast(_agentName() + ' is answering in another chat', 'Set this once that reply is done, or stop it. What you typed is still in the box.', 'warn', 6000);
     return false;
   }
   if (!STATE.loadedModel) { toast('No model loaded', 'Pick one from the top bar', 'warn'); return false; }
@@ -13551,7 +13551,7 @@ function _rmIdeasDraw() {
   const list = RM_IDEAS.list || [];
   if (RM_FILTER === 'done' || !RM_IDEAS.list) { box.innerHTML = ''; return; }
   if (!list.length) {
-    box.innerHTML = '<h3>For you</h3><div class="rm-learn">Ideas show up here as JARVIS learns how you work: what you ask for, '
+    box.innerHTML = '<h3>For you</h3><div class="rm-learn">Ideas show up here as ' + _agentName() + ' learns how you work: what you ask for, '
       + 'what you keep coming back to, and what it remembers about you.</div>';
     return;
   }
@@ -13585,7 +13585,7 @@ async function refreshReminders() {
     ? items.filter(x => x.fired).sort((a, b) => String(b.fired_at || b.due_iso).localeCompare(String(a.fired_at || a.due_iso)))
     : (RM_FILTER === 'repeating' ? rep : live).slice().sort((a, b) => String(a.due_iso).localeCompare(String(b.due_iso)));
   let html = _rmPending && RM_FILTER !== 'done'
-    ? `<div class="rm-row pending"><span class="rm-ico">${_rmIco('wait')}</span><span class="what">${esc(_rmPending)}<small>JARVIS is setting it&hellip;</small></span></div>` : '';
+    ? `<div class="rm-row pending"><span class="rm-ico">${_rmIco('wait')}</span><span class="what">${esc(_rmPending)}<small>${_agentName()} is setting it&hellip;</small></span></div>` : '';
   for (const it of shown) {
     const done = RM_FILTER === 'done', at = done ? (it.fired_at || it.due_iso) : it.due_iso;
     const time = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -13689,7 +13689,7 @@ async function refreshSkills() {
       const rm = mine ? `<span class="rm-act"><button class="danger" data-skrm="${esc(s.name)}" title="Remove it" aria-label="Remove">${_rmIco('cancel')}</button></span>` : '';
       return `<div class="rm-row sk-row${on ? '' : ' off'}" data-sk="${esc(s.name)}"><span class="rm-ico">${SK_ICO}</span>`
         + `<span class="what">${esc(s.name)}<small>${esc(skillSummary(s.description))}</small><small>${esc(meta)}</small></span>`
-        + `${rm}<div class="switch${on ? ' on' : ''}" data-skon="${esc(s.name)}" role="switch" aria-checked="${on}" title="${on ? 'On: JARVIS can use it' : 'Off: JARVIS leaves it alone'}"></div></div>`;
+        + `${rm}<div class="switch${on ? ' on' : ''}" data-skon="${esc(s.name)}" role="switch" aria-checked="${on}" title="${on ? 'On: ' + _agentName() + ' can use it' : 'Off: ' + _agentName() + ' leaves it alone'}"></div></div>`;
     }).join('');
   } catch (e) {
     box.innerHTML = '<div class="rm-empty">Couldn\'t read your skills: ' + esc(e.message) + '</div>';
@@ -13735,7 +13735,7 @@ document.addEventListener('click', async e => {
       .map(k => `<span>${esc(k[0].toUpperCase() + k.slice(1))}: ${esc(s[k].join(', '))}</span>`).join('');
     showModal(s.name, `<div class="mem-fact"><div class="mf-text">${esc(s.description || '')}</div>`
       + `<div class="mf-meta"><span>${s.source === 'user' ? 'Added by you' : 'Comes with Hearth'}${s.version ? ' · v' + esc(s.version) : ''}</span>${files}<span>${esc(s.folder || '')}</span></div>`
-      + `<details class="sk-body"><summary>What JARVIS reads when it uses this</summary><pre>${esc(s.body || '')}</pre></details></div>`,
+      + `<details class="sk-body"><summary>What ${_agentName()} reads when it uses this</summary><pre>${esc(s.body || '')}</pre></details></div>`,
       [{ label: 'Close' }]);
   }
 });
@@ -13953,7 +13953,7 @@ async function refreshAgentLog() {
   const shown = items.filter(it => (LG_FILTER !== 'errors' || it.state === 'err')
     && (!q || JSON.stringify(it).toLowerCase().includes(q))).reverse();
   if (!shown.length) {
-    list.innerHTML = `<div class="lg-empty">${items.length ? 'Nothing matches.' : 'Nothing has run yet. Every tool JARVIS uses shows here as it happens.'}</div>`;
+    list.innerHTML = `<div class="lg-empty">${items.length ? 'Nothing matches.' : 'Nothing has run yet. Every tool ' + _agentName() + ' uses shows here as it happens.'}</div>`;
     return;
   }
   let html = '', day = '';
@@ -14173,7 +14173,7 @@ function setLogsSource(src) {
     ? "the model server on this PC: what it loaded, what went wrong, recent requests"
     : src === 'phone'
     ? 'Telegram, Discord and WhatsApp: messages in and what ran'
-    : 'every tool JARVIS used, with what came back';
+    : 'every tool ' + _agentName() + ' used, with what came back';
   refreshLogs();
 }
 
@@ -14401,6 +14401,9 @@ async function refreshSettings() {
     const _memSub = document.getElementById('mem-sub');
     if (_memSub) _memSub.textContent = `facts ${_nm} remembers across sessions`;
     document.querySelectorAll('[data-agent-name]').forEach(el => { el.textContent = _nm; });
+    document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _nm; });
+    const _tmIn = document.getElementById('tm-input');
+    if (_tmIn) _tmIn.placeholder = `Talk to ${_nm}…`;
     // Sync the sticker tooltip with the actual brain. "LM Studio model"
     // hardcoded was misleading on cloud - switched users away from
     // clicking the sticker thinking it'd swap their Grok model.
@@ -14742,9 +14745,9 @@ async function refreshSettings() {
       // Which models a provider has is read from the provider, not written down here.
       const PICK_HINT = 'Once the key is saved, every model this key can use is in the model menu at the top.';
       const PRESETS = {
-        'claude-code': { url: 'claude-code://local', hint: 'JARVIS thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Hearth\'s tools through it. It counts toward the plan’s usage limits. Helpers keep using your local model.', modelHint: '', sample: '' },
-        'cursor-agent': { url: 'cursor://local', hint: 'JARVIS thinks with Cursor\'s agent on this PC, signed in to your Cursor plan, and uses Hearth\'s tools through it. It needs Cursor\'s command-line agent (cursor.com/cli), not just the editor. Its own shell is turned off, so commands go through Hearth and ask you first.', modelHint: '', sample: '' },
-        'codex':       { url: 'codex://local', hint: 'JARVIS thinks with Codex on this PC, signed in to your ChatGPT plan, and uses Hearth\'s tools through it. The Codex app is enough; it carries the command-line part. Its usage counts toward your plan\'s Codex limit. Helpers keep using your local model.', modelHint: '', sample: '' },
+        'claude-code': { url: 'claude-code://local', hint: _agentName() + ' thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Hearth\'s tools through it. It counts toward the plan’s usage limits. Helpers keep using your local model.', modelHint: '', sample: '' },
+        'cursor-agent': { url: 'cursor://local', hint: _agentName() + ' thinks with Cursor\'s agent on this PC, signed in to your Cursor plan, and uses Hearth\'s tools through it. It needs Cursor\'s command-line agent (cursor.com/cli), not just the editor. Its own shell is turned off, so commands go through Hearth and ask you first.', modelHint: '', sample: '' },
+        'codex':       { url: 'codex://local', hint: _agentName() + ' thinks with Codex on this PC, signed in to your ChatGPT plan, and uses Hearth\'s tools through it. The Codex app is enough; it carries the command-line part. Its usage counts toward your plan\'s Codex limit. Helpers keep using your local model.', modelHint: '', sample: '' },
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },
         gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: PICK_HINT, sample: 'gemini-3-flash' },
         anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint.', modelHint: PICK_HINT, sample: 'claude-sonnet-5-5' },
@@ -17107,7 +17110,7 @@ async function modelsAddVision(path, ask = true) {
                                                                  body: JSON.stringify({ path }) });
       if (!res.ok || !res.body) throw new Error(res.status === 404 ? 'this copy of Hearth needs a restart to add vision' : 'the request failed (' + res.status + ')');
       const got = await streamDownload(res, null, null, null, v.save_as);
-      if (got) { toast('Vision added', 'Load the model again and JARVIS can see images with it.', 'ok', 6000); MODEL_VISION.delete(path); }
+      if (got) { toast('Vision added', 'Load the model again and ' + _agentName() + ' can see images with it.', 'ok', 6000); MODEL_VISION.delete(path); }
     } catch (e) {
       // A dropped connection leaves the download running in the backend; anything else failed.
       if (e && e.name === 'TypeError') dlUpsert(v.save_as, { status: 'paused' });
@@ -17960,7 +17963,7 @@ async function renderPlus() {
   if (confirm) confirm.onclick = async () => {
     const r = await post('confirm', { name: ($('plus-phone-name')?.value || '').trim() });
     _plusQR = null;
-    if (r.ok) toast('Phone paired', 'It reaches JARVIS on this PC from anywhere now.', 'ok');
+    if (r.ok) toast('Phone paired', 'It reaches ' + _agentName() + ' on this PC from anywhere now.', 'ok');
     else toast("It didn't pair", r.error || '', 'err', 8000);
     renderPlus();
   };
@@ -21137,7 +21140,7 @@ function teamActivity(a) {
   if (a.status === 'failed') return "Didn't finish: " + (a.preview || 'no reason given');
   if (a.status === 'stopped') return 'Stopped when Hearth closed';
   if (a.status === 'done') return a.preview ? 'Finished: ' + a.preview : 'Finished';
-  if (a.blocked) return 'Wanted to use ' + a.blocked + ' and needs your OK. JARVIS will ask you.';
+  if (a.blocked) return 'Wanted to use ' + a.blocked + ' and needs your OK. ' + _agentName() + ' will ask you.';
   if (a.activity === 'tool') return 'Using ' + a.tool;
   return 'Thinking';
 }
@@ -21189,7 +21192,7 @@ function teamRender() {
   const n = list.length, w = list.filter(a => a.status === 'working').length;
   const d = list.filter(a => a.status === 'done').length, f = n - w - d;
   const needs = list.filter(teamNeedsYou).length;
-  $('team-sub').textContent = n ? `${n} helper${n === 1 ? '' : 's'} · ${w} working · ${d} done` : 'helpers JARVIS starts for bigger jobs';
+  $('team-sub').textContent = n ? `${n} helper${n === 1 ? '' : 's'} · ${w} working · ${d} done` : 'helpers ' + _agentName() + ' starts for bigger jobs';
   const bar = $('tm-bar');
   bar.querySelector('.w').style.width = (n ? w / n * 100 : 0) + '%';
   bar.querySelector('.d').style.width = (n ? d / n * 100 : 0) + '%';
@@ -21205,7 +21208,7 @@ function teamRender() {
   if (!shown.length) {
     box.innerHTML = n
       ? `<div class="tm-empty">Nothing here right now.</div>`
-      : `<div class="tm-empty"><h3>No helpers yet</h3>For a big job, JARVIS can split the work across a few helpers that run side by side, like "research these three tools and compare them". They show up here while they work.</div>`;
+      : `<div class="tm-empty"><h3>No helpers yet</h3>For a big job, ${_agentName()} can split the work across a few helpers that run side by side, like "research these three tools and compare them". They show up here while they work.</div>`;
     return;
   }
   box.innerHTML = '';
@@ -21282,7 +21285,7 @@ $('tm-new').addEventListener('click', async () => {
     <div class="ob-seg nh-seg" id="nh-jobs">${(c.roles || []).map(jobBtn).join('')}</div>
     <div class="nh-runs" id="nh-runs">
       <span class="nh-runs-label">Runs on</span>
-      <select id="nh-on"><option value="">${esc(c.helper_brain ? c.helper_brain : 'The same as JARVIS')}</option>
+      <select id="nh-on"><option value="">${esc(c.helper_brain ? c.helper_brain : 'The same as ' + _agentName())}</option>
         <option value="local">This PC</option>
         ${(STATE.providers || []).filter(p => p.id !== 'custom').map(p => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('')}
       </select>
