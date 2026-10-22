@@ -1,8 +1,8 @@
 # Tools
 
-Hearth gives the model **113 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
+Hearth gives the model **114 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
-To keep the prompt small, **36** core tools load with their full description and **77** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **36** core tools load with their full description and **78** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -83,7 +83,6 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `run_command` | Run a shell command |
 | `screenshot` | Capture the whole screen and return the saved path; follow with view_image to see it |
 | `system_info` | Machine snapshot in one call: OS, CPU, GPUs with VRAM, temperature and load, RAM, disks, hostname, user, uptime, battery |
-| `system_vibe` † | Quick PC health snapshot: CPU %, RAM, top processes, GPU VRAM, and a vibe-check verdict |
 | `view_image` | Load an image file so you can see it (png, jpg, gif, webp, bmp) |
 | `whoami` † | Introspect your own runtime config |
 
@@ -132,10 +131,11 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | Tool | What it does |
 |---|---|
 | `cancel_reminder` † | Cancel a scheduled reminder by id |
+| `connectors` † | The chat apps people reach this PC from: Telegram, Discord, WhatsApp |
 | `list_reminders` | List all upcoming (un-fired) reminders |
 | `notify` † | Pop a desktop notification (Windows toast) RIGHT NOW |
 | `pause_reminder` † | Pause a reminder so it stops firing without deleting it, or resume it (paused=false) |
-| `send_to_phone` † | Push a message FROM this PC TO the user's phone on a connected channel |
+| `send_to_phone` † | Send a message FROM this PC TO the user's phone, on a chat app they connected (Telegram, or Discord as a DM) |
 | `set_reminder` | Schedule a desktop notification, optionally running a tool at the same moment (action_tool with action_args) |
 | `snooze_reminder` † | Push a reminder's due time forward by N minutes (default 10) |
 
@@ -173,8 +173,8 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `forge_generate` † | Make an image on this PC with the local Stable Diffusion install (Forge WebUI) |
 | `forge_shutdown` † | Kill the Forge process to free VRAM back to the LLM |
 | `forge_status` † | Check if Forge WebUI is running and reachable |
-| `generate_image` † | Make an image (picture, photo, artwork, illustration) from a text prompt with a cloud image model: xAI Grok, OpenAI or Google Gemini, whichever has a key saved… |
-| `generate_video` † | Start making a video with xAI Grok (needs a saved Grok key, whatever brain is in use) |
+| `generate_image` † | Make an image (picture, photo, artwork, illustration) from a text prompt, or change one (pass its path as image) |
+| `generate_video` † | Start making a video: on this PC when a video model is set up under Models, else with xAI Grok (a saved Grok key) |
 | `list_generations` † | List the 10 most recent image/video generation tasks (live + finished) |
 
 ## Session
@@ -184,3 +184,9 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `ask_user` † | Ask the user a multi-choice question when you genuinely need a decision before continuing, picking between two valid approaches, clarifying an ambiguous file/f… |
 | `end_session` † | Call this when the user is clearly wrapping up the conversation (says bye, goodbye, see you, thanks that's all, etc.) |
 | `worklog` † | Your scratch pad for a long task: note findings as you go and read them back instead of re-reading the sources |
+
+## Other
+
+| Tool | What it does |
+|---|---|
+| `system_vibe` † | Quick PC health snapshot: CPU %, RAM, top processes, GPU VRAM, and a vibe-check verdict |
