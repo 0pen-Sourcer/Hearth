@@ -335,6 +335,8 @@ class Hub:
             for piece in split(final, self.a.max_len):
                 self.a.send(chat, piece, reply_to)
             for f in bridge_status.files_in(reply, 45_000_000):
+                if f in text:            # what they just sent, named in the reply: not sent back
+                    continue
                 self.a.send_file(chat, f)
         except Exception as e:
             print(f"[{self.a.name}] couldn't send the reply: {type(e).__name__}: {e}")

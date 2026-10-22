@@ -142,6 +142,49 @@ def forget_phone(pid: str) -> Dict[str, Any]:
     return {"ok": gone}
 
 
+# ---------------------------------------------------------------- big messages
+
+# The relay passes frames of up to 256 KB. A message bigger than PART (a photo,
+# a file, a voice note) goes as parts {type: part, pid, i, n, s} of its JSON,
+# joined again on the other side before it is read.
+PART = 150_000
+
+
+def split_message(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
+    text = json.dumps(obj, separators=(",", ":"))
+    if len(text) <= PART:
+        return [obj]
+    pid = secrets.token_hex(6)
+    chunks = [text[i:i + PART] for i in range(0, len(text), PART)]
+    return [{"type": "part", "pid": pid, "i": i, "n": len(chunks), "s": c} for i, c in enumerate(chunks)]
+
+
+class Joiner:
+    """Puts parts back together; whole messages pass straight through."""
+
+    def __init__(self, max_bytes: int = 40_000_000):
+        self.parts: Dict[str, Dict[int, str]] = {}
+        self.max_bytes = max_bytes
+
+    def add(self, m: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if m.get("type") != "part":
+            return m
+        pid, n = str(m.get("pid") or ""), int(m.get("n") or 0)
+        got = self.parts.setdefault(pid, {})
+        got[int(m.get("i") or 0)] = str(m.get("s") or "")
+        if n * PART > self.max_bytes or len(self.parts) > 8:
+            self.parts.pop(pid, None)
+            return None
+        if len(got) < n:
+            return None
+        del self.parts[pid]
+        try:
+            whole = json.loads("".join(got[i] for i in range(n)))
+        except (KeyError, ValueError):
+            return None
+        return whole if isinstance(whole, dict) and whole.get("type") != "part" else None
+
+
 # ---------------------------------------------------------------- the adapter
 
 class Relay(cc.Adapter):
@@ -199,6 +242,7 @@ class Room:
         self.chan: Optional[R.Channel] = None
         self.peer_up = False
         self.pc = bridge.pc
+        self.joiner = Joiner()
 
     @property
     def chat(self) -> str:
@@ -210,10 +254,11 @@ class Room:
     async def deliver(self, obj: Dict[str, Any]) -> None:
         if self.ws is None:
             return
-        if self.chan is not None and self.peer_up:
-            await self.ws.send(json.dumps(self.chan.seal(obj)))
-        elif self.phone:
-            await self.ws.send(json.dumps(R.seal_box(self.box_key(), obj)))
+        for piece in split_message(obj):
+            if self.chan is not None and self.peer_up:
+                await self.ws.send(json.dumps(self.chan.seal(piece)))
+            elif self.phone:
+                await self.ws.send(json.dumps(R.seal_box(self.box_key(), piece)))
 
     async def run(self) -> None:
         import websockets
@@ -267,9 +312,12 @@ class Room:
             self.peer_up = True
             self.bridge.adapter.rooms[self.chat] = self
             await self.ws.send(json.dumps({"t": "hello", "eph": R.b64(R.raw_public(eph))}))
+            from . import persona
+            await self.deliver({"type": "hi", "name": persona.NAME})
             return
         if t == "msg" and self.chan is not None:
             m = self.chan.open(f)
+            m = self.joiner.add(m) if m else None
             if m:
                 await asyncio.to_thread(self.bridge.on_message, self, m)
 
@@ -310,7 +358,8 @@ class Bridge:
                 continue
         voice = ""
         if m.get("voice"):
-            voice = cc.save_upload(R.unb64(m["voice"]), "voice-note.webm")
+            ext = str(m.get("voice_ext") or "webm").strip(".").lower()
+            voice = cc.save_upload(R.unb64(m["voice"]), "voice-note." + (ext if ext in ("webm", "mp4", "ogg", "m4a", "wav") else "webm"))
         self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files)
 
     async def keep_rooms(self) -> None:
