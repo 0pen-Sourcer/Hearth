@@ -50,10 +50,16 @@ def _clean(items: Any, limit: int = 4) -> List[str]:
     return out[:limit]
 
 
+def _not_theirs(chat_id: str) -> bool:
+    # A reminder's own chat is Hearth saying the reminder, not something going on
+    # in their life; it would only fill the list with "Reminder: stand up".
+    return str(chat_id or "").startswith("rem_")
+
+
 def note(chat_id: str, thread: Dict[str, Any], now: Optional[float] = None) -> bool:
     """Record where a chat stands. `thread` is what the memory pass returned:
     topic, where (one line), open (list), closed (list of open items now done)."""
-    if not chat_id or not isinstance(thread, dict):
+    if not chat_id or not isinstance(thread, dict) or _not_theirs(chat_id):
         return False
     topic = " ".join(str(thread.get("topic") or "").split())[:80]
     where = " ".join(str(thread.get("where") or "").split())[:200]
@@ -98,7 +104,7 @@ def recent(exclude: Optional[str] = None, now: Optional[float] = None, limit: in
     now = now if now is not None else time.time()
     rows = []
     for cid, t in _load()["threads"].items():
-        if cid == exclude:
+        if cid == exclude or _not_theirs(cid):
             continue
         age = now - float(t.get("updated") or 0)
         if age > MAX_AGE_DAYS * 86400:

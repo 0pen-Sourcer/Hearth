@@ -152,6 +152,14 @@ check(f"an agent brain is handed the same lines {str(seen.get('context'))[:60]!r
 check(f"and its turn runs the memory pass, with the reply and the chat {noted}",
       noted == [("The CBSE fee?", "c_here")])
 
+# A reminder's own chat isn't something going on in their life.
+check("a reminder's chat leaves no thread", threads.note("rem_42", {"topic": "Reminder: stand up", "where": "Said it."}) is False
+      and "Reminder" not in threads.block(now=time.time()))
+# Phone chats count: each bridge passes its own chat id.
+for _b in ("telegram", "discord", "whatsapp"):
+    _src = open(os.path.join(ROOT, "hearth", f"{_b}_bridge.py"), encoding="utf-8").read()
+    check(f"the {_b} bridge says which chat its turns are in", f'chat_id="{_b}"' in _src)
+
 # The terminal says it too, in one quiet line.
 from hearth import term_render  # noqa: E402
 lines = []

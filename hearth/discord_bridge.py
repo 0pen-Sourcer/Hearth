@@ -95,6 +95,7 @@ async def _run(prompt: str, history: list, on_tool=None) -> str:
     try:
         await headless.run_once(prompt, emit=emit,
                                 history=[_CHANNEL_PRIMER] + (history or []),
+                                chat_id="discord",   # one ongoing conversation per bridge
                                 permission_check=lambda _n, _a: "allow",
                                 supervised=False)  # phone: destructive guard still fires
     except Exception as e:
