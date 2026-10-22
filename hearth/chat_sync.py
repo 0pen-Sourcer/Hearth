@@ -192,6 +192,22 @@ def post(cid: str, title: str, source: str, messages: List[Dict[str, Any]], unre
     atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
 
 
+def drop_last_turn(cid: str) -> bool:
+    """Take a chat's last question and its answer off the end, for the question
+    to be asked again (Regenerate from a phone)."""
+    d = load(cid)
+    msgs = list((d or {}).get("messages") or [])
+    if not msgs or msgs[-1].get("role") != "assistant":
+        return False
+    while msgs and msgs[-1].get("role") == "assistant":
+        msgs.pop()
+    if msgs and msgs[-1].get("role") == "user":
+        msgs.pop()
+    d["messages"], d["msg_count"] = msgs, len(msgs)
+    atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
+    return True
+
+
 def newer(cid: str, seen: int) -> List[Dict[str, Any]]:
     """Turns added to a chat file elsewhere since `seen` of them were known."""
     d = load(cid) or {}

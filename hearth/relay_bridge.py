@@ -217,7 +217,9 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                           lambda g: "Sent " + g.group(1), text, flags=re.S)
             if text or steps:
                 msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps,
-                             "via": x.get("via") or ""})
+                             "via": x.get("via") or "", "stats": x.get("stats") or None,
+                             "context": [{"topic": t.get("topic") or "", "ago": t.get("ago") or ""}
+                                         for t in (x.get("context") or []) if isinstance(t, dict)]})
         keep = int(m.get("last") or 60)
         return {"chat": cid, "title": d.get("title") or "", "source": d.get("source") or "",
                 "messages": msgs[-keep:], "more": max(0, len(msgs) - keep)}
@@ -228,6 +230,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                           "task": str(a.get("prompt") or "")[:300], "on": a.get("on") or a.get("runtime") or "",
                           "steps": a.get("tools_used") or 0, "blocked": a.get("blocked") or ""}
                          for a in subagents.team_state()]}
+    if what == "ideas":
+        return ideas()
+    if what in ("brain", "agent_models", "use", "set"):
+        return brain_request(what, m)
     if what == "look":
         try:
             from .web import _load_settings
@@ -236,6 +242,102 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             s = {}
         return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or ""}
     return {"error": f"unknown request {what!r}"}
+
+
+def ideas() -> Dict[str, Any]:
+    """What a new chat on the phone offers: the threads going on lately (each
+    opens its chat) and the reminder ideas Hearth already wrote, from its cache."""
+    out: Dict[str, Any] = {"threads": [], "ideas": []}
+    try:
+        from . import threads
+        out["threads"] = [{"topic": t.get("topic") or "", "chat": t.get("chat") or "", "ago": t.get("ago") or "",
+                           "open": (t.get("open") or [])[:2]} for t in threads.recent(limit=3) if t.get("chat")]
+    except Exception:
+        pass
+    try:
+        from .tools import WORKSPACE
+        with open(os.path.join(WORKSPACE, "logs", "reminder_ideas.json"), encoding="utf-8") as f:
+            cached = json.load(f)
+        out["ideas"] = [{"title": i.get("title") or "", "ask": i.get("ask") or ""}
+                        for i in (cached.get("ideas") or [])[:3] if i.get("ask")]
+    except Exception:
+        pass
+    return out
+
+
+# The brain and the settings the phone can change go through the window's own
+# routes (its address is handed to this bridge when the window starts it), so a
+# switch from the phone is the same switch as one made in the window.
+WINDOW_URL = os.environ.get("HEARTH_WINDOW_URL", "").rstrip("/")
+_SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, False), "think_level": None}
+
+
+def _window(method: str, path: str, body: Optional[Dict[str, Any]] = None, timeout: float = 30) -> Dict[str, Any]:
+    import urllib.error
+    import urllib.request
+    if not WINDOW_URL:
+        return {"ok": False, "error": "the Hearth window isn't running on the PC"}
+    req = urllib.request.Request(WINDOW_URL + path, method=method,
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json"} if body is not None else {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return {"ok": False, **json.loads(e.read() or b"{}")}
+        except ValueError:
+            return {"ok": False, "error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
+    if what == "brain":
+        models = _window("GET", "/api/models")
+        state = _window("GET", "/api/state")
+        settings = _window("GET", "/api/settings")
+        disk = (_window("GET", "/api/llmserver/status").get("disk_models") or [])
+        if models.get("ok") is False and not models.get("agent_brains"):
+            return {"error": models.get("error") or "the window didn't answer"}
+        agents = [{"id": a["id"], "label": a.get("label") or a["id"], "plan": a.get("plan") or ""}
+                  for a in models.get("agent_brains") or [] if a.get("installed")]
+        provider = str(state.get("provider") or settings.get("llm_provider") or "")
+        return {"provider": provider, "model": state.get("picked_model") or settings.get("llm_model") or "",
+                "agents": agents,
+                "providers": [{"id": p["id"], "label": p.get("label") or p["id"], "model": p.get("model") or "",
+                               "active": bool(p.get("active"))} for p in models.get("providers") or []],
+                "local": [{"path": d.get("path"), "name": str(d.get("filename") or "").replace(".gguf", ""),
+                           "size_gb": d.get("size_gb")} for d in disk if not (d.get("not_chat") or d.get("incomplete"))],
+                "loaded": [x.get("id") for x in models.get("models") or [] if x.get("state") == "loaded"],
+                "approval_mode": settings.get("approval_mode") or "ask",
+                "think_default": bool(settings.get("think_default")), "think_level": settings.get("think_level") or ""}
+    if what == "agent_models":
+        return _window("GET", "/api/brain/agent/models?id=" + re.sub(r"[^a-z0-9_-]", "", str(m.get("id") or "")))
+    if what == "use":
+        kind = m.get("kind")
+        if kind == "agent":
+            body: Dict[str, Any] = {"provider": str(m.get("id") or "")}
+            if m.get("model") is not None:
+                body["model"] = str(m.get("model") or "")
+            return _window("POST", "/api/brain/agent", body)
+        if kind == "provider":
+            models = _window("GET", "/api/models")
+            p = next((x for x in models.get("providers") or [] if x.get("id") == m.get("id")), None)
+            if not p:
+                return {"ok": False, "error": "that provider isn't set up on the PC"}
+            return _window("POST", "/api/llm-endpoint", {"provider": p["id"], "url": p.get("url") or "", "key": "",
+                                                          "model": str(m.get("model") or p.get("model") or "")})
+        if kind == "local":
+            return _window("POST", "/api/llmserver/start", {"model_path": str(m.get("path") or "")}, timeout=600)
+        return {"ok": False, "error": "unknown kind"}
+    if what == "set":
+        key, value = str(m.get("key") or ""), m.get("value")
+        allowed = _SETTABLE.get(key, ())
+        if key not in _SETTABLE or (allowed is not None and value not in allowed):
+            return {"ok": False, "error": f"{key} can't be changed from a phone"}
+        return _window("POST", "/api/settings", {key: value})
+    return {"error": "unknown"}
 
 
 # ---------------------------------------------------------------- the adapter
@@ -442,7 +544,7 @@ class Bridge:
             ext = str(m.get("voice_ext") or "webm").strip(".").lower()
             voice = cc.save_upload(R.unb64(m["voice"]), "voice-note." + (ext if ext in ("webm", "mp4", "ogg", "m4a", "wav") else "webm"))
         self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files,
-                         cid=str(m.get("chat") or ""))
+                         cid=str(m.get("chat") or ""), regen=bool(m.get("regen")))
 
     async def keep_rooms(self) -> None:
         """Join new rooms (a pairing started, a phone confirmed), leave dropped ones."""

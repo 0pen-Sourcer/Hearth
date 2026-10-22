@@ -294,6 +294,14 @@ def _spawn_bridge(ch: str) -> Tuple[bool, Optional[str]]:
     # what explains a bridge that died on start.
     log_path = _bridge_log_path(ch)
     env["PYTHONUNBUFFERED"] = "1"
+    # Where this window answers, for a bridge that changes the brain or settings
+    # on someone's behalf (the phone app) through the window's own routes.
+    try:
+        from . import claude_brain as _cb
+        if _cb._bridge_url:
+            env["HEARTH_WINDOW_URL"] = _cb._bridge_url
+    except Exception:
+        pass
     # It ends when this process does (bridge_status.follow_parent).
     env["HEARTH_PARENT_PID"] = str(os.getpid())
     # The log is read as UTF-8; Windows would otherwise write its own code page.
@@ -4151,22 +4159,11 @@ class HearthHandler(BaseHTTPRequestHandler):
                         local_probe = {"reachable": False, "kind": "none"}
                 except Exception:
                     pass
-            # Respawn any running phone bridge so it adopts the new brain — a
-            # bridge inherits the endpoint at spawn time, so without this a
-            # Telegram/Discord bot keeps hitting the old provider (and 401s if
-            # that provider was ejected or out of credits).
-            restarted_bridges = []
-            for _ch in list(_BRIDGE_PROCS.keys()):
-                if _bridge_running(_ch):
-                    try:
-                        _p = _BRIDGE_PROCS.get(_ch)
-                        if _p and _p.poll() is None:
-                            _p.terminate()
-                        _BRIDGE_PROCS.pop(_ch, None)
-                        _spawn_bridge(_ch)
-                        restarted_bridges.append(_ch)
-                    except Exception:
-                        pass
+            # Running bridges read the saved brain before each message
+            # (channel_core.follow_saved_brain), so they switch with it from the
+            # next one; restarting them dropped any reply in progress, and a
+            # switch made from the phone took down the bridge answering it.
+            restarted_bridges = [_ch for _ch in list(_BRIDGE_PROCS.keys()) if _bridge_running(_ch)]
             return self._send_json(200, {
                 "ok": True, "url": url, "provider": provider,
                 "stopped_builtin": stopped_builtin,

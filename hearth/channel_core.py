@@ -223,7 +223,7 @@ class Hub:
 
     # Called by the adapter, from whatever thread it receives on.
     def receive(self, chat: str, sender: str, text: str = "", name: str = "", reply_to: Any = None,
-                voice: str = "", files: Optional[List[str]] = None, cid: str = "") -> str:
+                voice: str = "", files: Optional[List[str]] = None, cid: str = "", regen: bool = False) -> str:
         """What became of the message: 'ran', 'answered', 'joined', 'pairing',
         'ignored' or 'empty'. `cid` puts it in a Hearth chat of the sender's
         choosing (an app that lists every chat); otherwise it goes in the
@@ -258,7 +258,7 @@ class Hub:
                     return "answered"
                 run["steer"].append(text)
                 return "joined"
-            run = {"steer": [], "question": None, "answer": None, "key": key}
+            run = {"steer": [], "question": None, "answer": None, "key": key, "regen": regen}
             self._busy[key] = run
         t = threading.Thread(target=self._turn, args=(chat, text, reply_to, run, cid), daemon=True,
                              name=f"{self.a.name}-turn")
@@ -290,6 +290,9 @@ class Hub:
         from .term_render import tool_words
         chosen = bool(cid)
         cid = cid or chat_id_for(self.a.name, chat)
+        settings = follow_saved_brain()
+        if run.get("regen"):
+            chat_sync.drop_last_turn(cid)             # the answer asked for again replaces the last one
         _TURN.ctx = {"c": cid, "t": secrets.token_hex(5)}
         steps = callable(getattr(self.a, "step", None))     # an app that shows each step itself
         live = callable(getattr(self.a, "live", None))      # and the reply as it is written
@@ -306,8 +309,16 @@ class Hub:
             pass
 
         written: List[str] = []
+        stats: Dict[str, Any] = {}
+        context: List[Any] = []
 
         def emit(kind, **kw):
+            if kind == "done":
+                stats.update(kw.get("stats") or {})
+                if kw.get("duration_ms") is not None:
+                    stats["duration_ms"] = kw["duration_ms"]
+            elif kind == "context_used":
+                context[:] = list(kw.get("threads") or [])
             if kind == "assistant_chunk" and live and kw.get("content"):
                 written.append(kw["content"])
                 try:
@@ -349,7 +360,8 @@ class Hub:
                 loop.run_until_complete(headless.run_once(
                     text, emit=emit, history=[primer] + history, chat_id=cid,
                     permission_check=lambda n, a: self._ask(chat, run, n, a),
-                    drain_steer=steer, supervised=False))
+                    drain_steer=steer, supervised=False,
+                    think=bool(settings.get("think_default")), think_level=str(settings.get("think_level") or "")))
             finally:
                 loop.close()
         except Exception as e:
@@ -362,6 +374,8 @@ class Hub:
             if foot:
                 reply = (reply + "\n\n" + foot).strip()
         final = redact_secrets_only(reply or "(no output)")[0]
+        stats = {k: v for k, v in stats.items() if v is not None}
+        _TURN.ctx = dict(_TURN.ctx or {}, stats=stats, context=context)   # the finished reply carries them
         try:
             if status["id"] is not None and tools_used:
                 self.a.edit(chat, status["id"], bridge_status.format_done(tools_used))
@@ -377,7 +391,8 @@ class Hub:
         events = [{"kind": "tool", "name": n, "args": a or {}, "result": "", "ms": 0, "pos": 0} for n, a in tools_used]
         chat_sync.post(cid, " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}", self.a.name, [
             {"role": "user", "content": text, "via": self.a.name, "at": now},
-            {"role": "assistant", "content": final, "via": self.a.name, "at": now, **({"events": events} if events else {})}])
+            {"role": "assistant", "content": final, "via": self.a.name, "at": now, **({"events": events} if events else {}),
+             **({"stats": stats} if stats else {}), **({"context": context} if context else {})}])
         with self._lock:
             self._busy.pop(run.get("key", chat), None)
         _TURN.ctx = None
@@ -467,6 +482,36 @@ def use_saved_brain(log: Callable[[str], None] = print) -> None:
         if s.get(key):
             os.environ[env] = str(s[key])
     log(f"thinking with the saved brain: {s.get('llm_model') or s.get('llm_url') or 'the default'}")
+
+
+def follow_saved_brain() -> Dict[str, Any]:
+    """Think with the brain saved in settings right now. Called before each turn,
+    so a bridge follows a switch made in the window or from the phone instead of
+    keeping the one it started with. An agent brain is read from settings by the
+    engine itself; a model server's address, key and name are set here."""
+    try:
+        from .tools import WORKSPACE
+        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
+            s = json.load(f)
+    except Exception:
+        return {}
+    url = str(s.get("llm_url") or "").strip()
+    if not url:
+        return s
+    from . import headless
+    key = str(s.get("llm_key") or "").strip()
+    headless.LOCAL_API_BASE = url
+    headless.LOCAL_API_KEY = key or "hearth-builtin"
+    os.environ["LOCAL_API_BASE"] = url
+    if key:
+        os.environ["LOCAL_API_KEY"] = key
+    else:
+        os.environ.pop("LOCAL_API_KEY", None)
+    if s.get("llm_model"):
+        os.environ["LOCAL_MODEL"] = str(s["llm_model"])
+    else:
+        os.environ.pop("LOCAL_MODEL", None)
+    return s
 
 
 def _persona_name() -> str:
