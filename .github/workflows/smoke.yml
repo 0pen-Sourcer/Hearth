@@ -301,6 +301,23 @@ jobs:
       - name: Graphics card readings without NVIDIA's tool
         run: |
           python tests/test_gpu.py
+          python tests/test_gpu_platforms.py
+
+      - name: The engine download for each system and card
+        # Only Windows zips were ever picked, so a Linux or Mac install had no
+        # engine at all. Runs the real archive layout: one top folder, links.
+        run: |
+          python tests/test_engine_platforms.py
+
+      - name: Apps, files, links and away time on Linux and macOS
+        # os.startfile exists only on Windows, and Linux apps were found only
+        # by command name, so most desktop apps could not be opened by name.
+        run: |
+          python tests/test_platform_standins.py
+
+      - name: A turn that uses the desktop shows it and gives the screen back
+        run: |
+          python tests/test_desktop_session.py
 
       - name: First-run answers reach the model, from the window and the terminal
         run: |
