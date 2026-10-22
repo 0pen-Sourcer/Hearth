@@ -1,6 +1,6 @@
 ; Inno Setup script for Hearth — packages dist\Hearth\ into a single Setup.exe.
 ;
-; Build first:  build.bat   (produces dist\Hearth\)
+; Built by build_release.ps1 (both editions); build.bat makes dist\Hearth\ alone
 ; Then open this in Inno Setup Compiler and hit Compile (or: iscc Hearth.iss).
 ; Output: Output\Hearth-Setup-v0.7.0-preview.exe
 ;

@@ -1,14 +1,13 @@
 @echo off
-REM Kill every running Hearth process. Useful when an old tray instance
-REM is holding port 8765 and the new build can't bind, or when something
-REM stuck in the system tray won't quit cleanly.
+REM Close every running Hearth process: the tray, the window, the terminal app,
+REM and the model and image servers they started. Useful when an old instance
+REM holds port 8765 and a new one can't start.
 
-echo Killing any running Hearth processes...
-taskkill /F /IM Hearth.exe         2>nul
-taskkill /F /IM Hearth-window.exe  2>nul
-taskkill /F /IM Hearth-cli.exe     2>nul
-REM Also nuke any leftover pythonw running our tray module
-taskkill /F /IM pythonw.exe /FI "WINDOWTITLE eq Hearth*" 2>nul
+echo Closing Hearth...
+REM /T takes each process's children with it (llama-server, sd-server, bridges).
+taskkill /F /T /IM Hearth.exe        2>nul
+taskkill /F /T /IM _HearthWindow.exe 2>nul
+taskkill /F /T /IM Hearth-cli.exe    2>nul
 echo Done.
 echo.
 pause

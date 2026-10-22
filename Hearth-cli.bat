@@ -5,7 +5,7 @@ REM (portable, bundled in the same dist/) for a tabbed experience.
 setlocal
 set "HERE=%~dp0"
 
-REM Where is the CLI exe? Two possibilities:
+REM Where is the CLI exe?
 REM   - "release" tree:  HERE\dist\Hearth\Hearth-cli.exe   (when run from repo root)
 REM   - "release" tree:  HERE\Hearth-cli.exe                (when run from dist/Hearth)
 REM   - "dev" tree:      no exe - fall through to hearth.bat (which uses venv python)

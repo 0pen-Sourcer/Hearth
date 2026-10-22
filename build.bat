@@ -1,7 +1,8 @@
 @echo off
 REM Build the Hearth desktop release bundle.
-REM Output lands in dist\Hearth\ - drop the whole folder into a zip and
-REM upload to GitHub Releases.
+REM One Full build into dist\Hearth\, for trying a build locally.
+REM Releases use build_release.ps1, which builds Full and Lite, checks both
+REM with scripts\verify_build.py and makes the installers.
 
 setlocal
 set "HERE=%~dp0"

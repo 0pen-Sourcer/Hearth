@@ -49,11 +49,10 @@ dist_*/
 Output/
 *.exe
 build_log.txt
+build_*log*.txt
 build_release_log.txt
 
-# ---- Local reference material kept beside the project (not ours to ship) ----
-*-main/
-*-dev/
+# ---- The portable Windows Terminal the build bundles (not ours to ship) ----
 Windows Terminal/
 Terminal/
 
