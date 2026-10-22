@@ -259,7 +259,11 @@ class Hub:
         ev = threading.Event()
         with self._lock:
             run["question"], run["answer"] = ev, None
-        self.a.send(chat, f"Before I go on: may I {_what(name, args)}? Reply yes to let me, anything else to stop.")
+        question = f"Before I go on: may I {_what(name, args)}?"
+        if callable(getattr(self.a, "ask", None)):
+            self.a.ask(chat, question)                 # shown with Allow / Deny where the app can
+        else:
+            self.a.send(chat, question + " Reply yes to let me, anything else to stop.")
         ev.wait(ASK_TIMEOUT_S)
         with self._lock:
             run["question"] = None
