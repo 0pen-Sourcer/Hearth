@@ -17,6 +17,7 @@ import json
 from . import env as _env
 import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -757,6 +758,45 @@ def chat_id_for(r: Dict) -> str:
     return "rem_" + str(r.get("id") or "")
 
 
+def idle_seconds() -> Optional[float]:
+    """How long since the last key press or mouse move on this PC. None where
+    that can't be read."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        class _LII(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        lii = _LII()
+        lii.cbSize = ctypes.sizeof(_LII)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            return None
+        return max(0.0, (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000.0)
+    except Exception:
+        return None
+
+
+# Repeating reminders that came due while the person was away, by id: they are
+# said once, when one comes due with them back, instead of one each time.
+_AWAY: Dict[str, int] = {}
+
+
+def held_while_away(r: Dict) -> bool:
+    """A repeating reminder with nothing to run, due while nobody has touched
+    the PC for at least its own interval, waits for them instead of speaking to
+    an empty room. Counted, so the next one says how many came by."""
+    every = r.get("recurring_seconds")
+    if not every or r.get("action_tool"):
+        return False
+    idle = idle_seconds()
+    if idle is None or idle < float(every):
+        return False
+    rid = str(r.get("id") or "")
+    _AWAY[rid] = _AWAY.get(rid, 0) + 1
+    return True
+
+
 def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
     """JARVIS says a due reminder in that reminder's own chat, never in the chat
     someone has open. Written to the chat file by whichever process fired it, so
@@ -781,7 +821,9 @@ def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
         try:
             import asyncio
             # Nobody is there to approve anything, so nothing that asks gets run.
-            asyncio.run(headless.run_once(note, emit=emit, history=prior[-20:],
+            # Only its last exchange: with all the earlier ones each reminder
+            # echoed the one before ("your back's been waiting on this one").
+            asyncio.run(headless.run_once(note, emit=emit, history=prior[-2:],
                                           permission_check=lambda *_a: "deny", chat_id=cid))
         except Exception:
             pass
@@ -815,6 +857,9 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
     _watcher_stop.clear()
 
     def _fire(r: Dict, missed: bool = False) -> None:
+        if not missed and held_while_away(r):
+            return
+        away = _AWAY.pop(str(r.get("id") or ""), 0)
         body = r.get("what", "(empty)")
         action_tool = r.get("action_tool", "")
         action_args = r.get("action_args") or {}
@@ -863,7 +908,9 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
                 note = (f'Reminder they set{late}: "{what}". It ran {action_tool}, which '
                         f'returned:\n{full_result}\nTell them what came of it.')
             else:
-                note = (f'Reminder they set{late}: "{what}". Remind them in a line or two, '
+                came = (f" It also came due {away} time{'s' if away != 1 else ''} while they were away "
+                        f"from the PC; this is the one they see." if away else "")
+                note = (f'Reminder they set{late}: "{what}".{came} Remind them in a line or two, '
                         f'in your own words.')
             deliver(r, note)
         except Exception:
