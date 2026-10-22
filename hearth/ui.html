@@ -2297,6 +2297,15 @@
      MEMORY view
      ============================================================ */
   .list-pane { flex: 1; overflow-y: auto; padding: 12px 20px; }
+  .mem-share-btn { margin-left: 8px; background: var(--bg-2); border: 1px solid var(--border); color: var(--fg-dim);
+    border-radius: var(--r-sm); padding: 5px 10px; font: 12px var(--sans); cursor: pointer; white-space: nowrap; }
+  .mem-share-btn:hover { color: var(--fg); border-color: var(--border-strong); }
+  .mem-share-pop { position: fixed; z-index: 500; width: 300px; }
+  .mem-share-pop .ms-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px;
+    font-size: 13px; color: var(--fg); cursor: pointer; border-radius: 6px; }
+  .mem-share-pop .ms-row:hover { background: var(--hover); }
+  .mem-share-pop .ms-sw { accent-color: var(--accent); width: 16px; height: 16px; }
+  .mem-share-pop .ms-foot { padding: 8px 10px; font-size: 11.5px; color: var(--fg-faint); border-top: 1px solid var(--border); line-height: 1.4; }
   .mem-lately { flex: none; max-height: 34vh; overflow-y: auto; margin: 10px 20px 0; border: 1px solid var(--border);
     border-radius: var(--r); background: var(--bg-1); }
   .mem-lately .ml-head { padding: 9px 12px; font: 600 12.5px var(--sans); color: var(--fg); border-bottom: 1px solid var(--border); }
@@ -4250,6 +4259,7 @@
           <button class="mem-view-btn active" data-mem-view="list" title="Flat searchable list">List</button>
         </div>
         <input type="text" id="mem-search" placeholder="Search…">
+        <button class="mem-share-btn" id="mem-share" title="Let your coding agents use this memory too">Share with agents</button>
       </div>
       <!-- What's going on lately: kept for the next messages; each can be removed. -->
       <div class="mem-lately" id="mem-lately" hidden></div>
@@ -12435,6 +12445,41 @@ async function refreshLately() {
   });
 }
 const _ICON_TRASH_SM = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+
+// Claude Code, Codex, Cursor and OpenCode can read and write this memory too,
+// so a thing told to one is known to all. Each switch adds or removes Hearth's
+// memory server in that program's own settings.
+async function showMemoryShare(anchor) {
+  document.querySelectorAll('.mem-share-pop').forEach(x => x.remove());
+  const pop = document.createElement('div');
+  pop.className = 'mem-share-pop mp-menu';
+  pop.innerHTML = '<div class="mp-sec">Share this memory with</div><div class="ms-rows"><div class="mp-s" style="padding:6px 10px">Checking your agents…</div></div>'
+    + '<div class="ms-foot">They can read what you\'ve saved, search your past chats, and save new facts, nothing else of Hearth\'s.</div>';
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.top = (r.bottom + 6) + 'px';
+  pop.style.left = Math.max(8, r.right - 300) + 'px';
+  const away = (e) => { if (!pop.contains(e.target) && e.target !== anchor) { pop.remove(); document.removeEventListener('mousedown', away, true); } };
+  setTimeout(() => document.addEventListener('mousedown', away, true), 0);
+  let agents = [];
+  try { agents = (await api('/api/memory-share')).agents || []; } catch (e) { toast("Couldn't check your agents", e.message, 'err'); }
+  const rows = pop.querySelector('.ms-rows');
+  const installed = agents.filter(a => a.installed);
+  if (!installed.length) { rows.innerHTML = '<div class="mp-s" style="padding:6px 10px">None of Claude Code, Codex, Cursor or OpenCode is installed.</div>'; return; }
+  rows.innerHTML = installed.map(a => `<label class="ms-row"><span>${esc(a.label)}</span>
+      <input type="checkbox" class="ms-sw" data-agent="${esc(a.id)}" ${a.on ? 'checked' : ''}></label>`).join('');
+  rows.querySelectorAll('.ms-sw').forEach(sw => sw.onchange = async () => {
+    sw.disabled = true;
+    try {
+      await api('/api/memory-share', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: sw.dataset.agent, on: sw.checked }) });
+      toast(sw.checked ? 'Memory shared' : 'Memory no longer shared',
+        sw.checked ? 'It\'s there the next time you start it.' : '', 'ok', 2500);
+    } catch (e) { sw.checked = !sw.checked; toast("Couldn't change it", e.message, 'err'); }
+    sw.disabled = false;
+  });
+}
+if ($('mem-share')) $('mem-share').addEventListener('click', (e) => showMemoryShare(e.currentTarget));
 
 async function refreshMemory() {
   refreshLately();

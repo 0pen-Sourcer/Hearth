@@ -2162,6 +2162,10 @@ class HearthHandler(BaseHTTPRequestHandler):
                                   "error": f"{type(e).__name__}: {e}"}]})
         if path == "/api/memory":
             return self._send_json(200, {"memories": _memory_index()})
+        if path == "/api/memory-share":
+            # Which coding agents read and write this memory too.
+            from . import shared_memory as _sm
+            return self._send_json(200, {"agents": _sm.status()})
         if path == "/api/threads":
             # What's going on lately, as kept for the next messages.
             from . import threads as _threads
@@ -2806,6 +2810,11 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {
                 "ok": rc == 0, "rc": rc, "log": buf.getvalue(),
             })
+        if path == "/api/memory-share":
+            from . import shared_memory as _sm
+            ob = self._read_json() or {}
+            r = _sm.set_shared(str(ob.get("agent") or ""), bool(ob.get("on")))
+            return self._send_json(200 if r.get("ok") else 400, r)
         if path == "/api/memory/import":
             # Paste a memory dump from ChatGPT/Claude/any AI → run it through the
             # same fact extractor (with dedup) the CLI's /import-memory uses, so

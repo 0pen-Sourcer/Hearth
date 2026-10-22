@@ -1476,6 +1476,34 @@ with sync_playwright() as pw:
     check(f"the Memory tab shows what's going on lately, and one can be forgotten {seen_lately}",
           seen_lately["shown"] and seen_lately["rows"] == ["Phone hunt"] and "Hasn't bought it" in (seen_lately["open"] or "")
           and seen_lately["after"] is False and _threads.get("c_phone") is None)
+    # Each coding agent kept its own memory; Hearth's can be shared with them.
+    shared_posts = []
+
+    def _share(r):
+        if r.request.method == "POST":
+            shared_posts.append(json.loads(r.request.post_data or "{}"))
+            r.fulfill(status=200, content_type="application/json", body='{"ok": true}')
+        else:
+            r.fulfill(status=200, content_type="application/json", body=json.dumps({"agents": [
+                {"id": "claude-code", "label": "Claude Code", "installed": True, "on": False},
+                {"id": "codex", "label": "Codex", "installed": True, "on": True},
+                {"id": "cursor-agent", "label": "Cursor", "installed": False, "on": False}]}))
+    pg.route("**/api/memory-share", _share)
+    share = pg.evaluate("""async () => {
+      showView('memory');
+      $('mem-share').click();
+      for (let i = 0; i < 40 && !document.querySelector('.mem-share-pop .ms-sw'); i++) await new Promise(r => setTimeout(r, 50));
+      const pop = document.querySelector('.mem-share-pop');
+      const rows = [...pop.querySelectorAll('.ms-row')].map(r => [r.textContent.trim(), r.querySelector('input').checked]);
+      const cc = pop.querySelector('.ms-sw[data-agent="claude-code"]');
+      cc.click();
+      await new Promise(r => setTimeout(r, 300));
+      pop.remove(); showView('chat');
+      return rows;
+    }""")
+    pg.unroute("**/api/memory-share")
+    check(f"the Memory tab shares it with the agents that are installed, each with a switch {share} {shared_posts}",
+          share == [["Claude Code", False], ["Codex", True]] and shared_posts == [{"agent": "claude-code", "on": True}])
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([
