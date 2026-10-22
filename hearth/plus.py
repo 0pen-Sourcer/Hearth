@@ -27,8 +27,21 @@ GRACE_S = 7 * 24 * 3600
 CHECKOUT_URL = os.environ.get("HEARTH_PLUS_CHECKOUT") or ""
 
 
+def _setting(key: str) -> str:
+    try:
+        from .web import _load_settings
+        return str((_load_settings() or {}).get(key) or "").strip()
+    except Exception:
+        return ""
+
+
 def _base() -> str:
-    return (os.environ.get("HEARTH_DODO_BASE") or LIVE).rstrip("/")
+    """Dodo's licence server: live, or test mode while trying Plus out (settings dodo_base)."""
+    return (os.environ.get("HEARTH_DODO_BASE") or _setting("dodo_base") or LIVE).rstrip("/")
+
+
+def checkout_url() -> str:
+    return CHECKOUT_URL or _setting("plus_checkout")
 
 
 def _file() -> str:
@@ -133,7 +146,7 @@ def status() -> Dict[str, Any]:
     on = has and bool(d.get("valid")) and fresh
     key = str(d.get("key") or "")
     return {"plus": on, "has_key": has, "key_hint": ("…" + key[-4:]) if key else "",
-            "lapsed": has and not on, "checked": d.get("checked"), "checkout": CHECKOUT_URL}
+            "lapsed": has and not on, "checked": d.get("checked"), "checkout": checkout_url()}
 
 
 def active() -> bool:
