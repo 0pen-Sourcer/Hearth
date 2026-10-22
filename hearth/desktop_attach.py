@@ -258,6 +258,7 @@ def main(argv: Optional[list] = None) -> int:
     _win_holder["win"] = webview.create_window(
         "Hearth", url=args.url, js_api=_WinApi(), **kwargs)
     reload_if_stalled(_win_holder["win"], args.url)
+    revive_backend(_win_holder["win"], args.url)
     # Keep the window's storage between launches; the default private window
     # forgets every remembered choice each time Hearth starts.
     keep = {}
@@ -282,6 +283,94 @@ def main(argv: Optional[list] = None) -> int:
         return _browser_fallback(e)
     return 0
 
+
+
+def _answers(url: str, timeout: float = 2.0) -> bool:
+    import socket
+    import urllib.parse
+    u = urllib.parse.urlparse(url)
+    try:
+        with socket.create_connection((u.hostname or "127.0.0.1", u.port or 80), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _alive(pid: int) -> bool:
+    try:
+        from .bridge_status import _alive as alive
+        return alive(pid)
+    except Exception:
+        return True
+
+
+def revive_backend(win, url: str, every: float = 2.0, misses: int = 3, limit: int = 3,
+                   answers=None, launch=None, sleep=None) -> threading.Thread:
+    """Start Hearth's backend again when it stops. The window outlives the
+    process that serves it; when native code (an audio driver, a model runtime)
+    takes that process down, the window was left showing "Failed to fetch"
+    until Hearth was restarted by hand. When the backend stops answering and
+    its process is gone, start it again the way the tray started it, say so in
+    the window, and reload the page once it answers. At most `limit` times."""
+    import json as _json
+    import subprocess
+    import threading
+    import time
+    answers = answers or _answers
+    sleep = sleep or time.sleep
+    try:
+        cmd = _json.loads(os.environ.get("HEARTH_BACKEND_CMD") or "null")
+        pid = int(os.environ.get("HEARTH_BACKEND_PID") or 0)
+    except (ValueError, TypeError):
+        cmd, pid = None, 0
+
+    def _say(text: str) -> None:
+        try:
+            win.evaluate_js("try{toast('Hearth', %s, 'warn', 9000)}catch(e){}" % _json.dumps(text))
+        except Exception:
+            pass
+
+    def _start() -> bool:
+        if launch:
+            return bool(launch(cmd))
+        try:
+            subprocess.Popen(cmd, close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             creationflags=0x08000000 | 0x00000200 if sys.platform == "win32" else 0,
+                             start_new_session=sys.platform != "win32")
+            return True
+        except OSError:
+            return False
+
+    def _watch() -> None:
+        nonlocal pid
+        down, revived = 0, 0
+        while revived < limit:
+            sleep(every)
+            if answers(url):
+                down = 0
+                continue
+            down += 1
+            if down < misses or not cmd or (pid and _alive(pid)):
+                continue
+            _say("Hearth stopped unexpectedly. Starting it again...")
+            if not _start():
+                return
+            revived += 1
+            pid = 0
+            for _ in range(60):
+                sleep(1.0)
+                if answers(url):
+                    break
+            try:
+                win.load_url(url)
+            except Exception:
+                pass
+            down = 0
+
+    t = threading.Thread(target=_watch, daemon=True, name="hearth-revive")
+    t.start()
+    return t
 
 
 def reload_if_stalled(win, url: str, wait_s: float = 15.0, tries: int = 2) -> None:

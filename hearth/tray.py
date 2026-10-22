@@ -143,7 +143,7 @@ def _open_desktop_window(voice: bool = False):
             try:
                 _desktop_proc = subprocess.Popen(
                     [window_exe, "--url", url],
-                    creationflags=_spawn_flags,
+                    creationflags=_spawn_flags, env=_revive_env([sys.executable]),
                 )
                 return
             except Exception as e:
@@ -161,11 +161,21 @@ def _open_desktop_window(voice: bool = False):
     try:
         _desktop_proc = subprocess.Popen(
             [py, "-m", "hearth.desktop_attach", "--url", url],
-            creationflags=_spawn_flags,
+            creationflags=_spawn_flags, env=_revive_env([py, "-m", "hearth.tray"]),
         )
     except Exception as e:
         print(f"[hearth.tray] could not spawn desktop window: {e}", file=sys.stderr)
         webbrowser.open(url)
+
+
+def _revive_env(cmd: list) -> dict:
+    """What the window needs to start this backend again if it stops: how it
+    was started (no window, the same default port) and its process id."""
+    import json as _json
+    env = dict(os.environ)
+    env["HEARTH_BACKEND_CMD"] = _json.dumps(cmd)
+    env["HEARTH_BACKEND_PID"] = str(os.getpid())
+    return env
 
 
 def _open_browser():

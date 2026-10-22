@@ -4848,17 +4848,6 @@
           </div>
           <button class="btn-mini" id="btn-edit-rules">Open rules.md</button>
         </div>
-        <div class="field">
-          <div class="label">
-            <div class="name">Forge / SD-WebUI folder</div>
-            <div class="hint">For making images on this PC with Stable Diffusion: the Forge folder that has webui.bat in it. Found by itself in the usual places. <span id="forge-detect-hint" style="color:var(--fg-faint)">scanning…</span></div>
-          </div>
-          <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
-            <input type="text" id="setting-forge-dir" placeholder="e.g. D:\AI\sd-webui-forge" style="flex:1; min-width:220px;"/>
-            <button type="button" class="btn-mini" id="btn-forge-detect" title="Re-scan common install paths">Detect</button>
-          </div>
-        </div>
-
         <div class="field" data-adv style="align-items:flex-start;">
           <div class="label">
             <div class="name">Migrate from another agent</div>
@@ -14423,42 +14412,6 @@ async function refreshSettings() {
       wakeInput.value = s.wake_phrases || '';
       wakeInput.onchange = (e) => saveSetting('wake_phrases', e.target.value.trim());
     }
-    const forgeInput = document.getElementById('setting-forge-dir');
-    if (forgeInput) {
-      forgeInput.value = s.forge_dir || '';
-      forgeInput.onchange = (e) => saveSetting('forge_dir', e.target.value.trim());
-      const hint = document.getElementById('forge-detect-hint');
-      if (hint) {
-        hint.textContent = s.forge_dir
-          ? `· using ${s.forge_dir}`
-          : '· not configured';
-      }
-    }
-    const forgeDetectBtn = document.getElementById('btn-forge-detect');
-    if (forgeDetectBtn) forgeDetectBtn.onclick = async () => {
-      forgeDetectBtn.disabled = true;
-      forgeDetectBtn.textContent = 'Scanning…';
-      try {
-        const r = await api('/api/forge/detect');
-        if (r && r.path) {
-          forgeInput.value = r.path;
-          await saveSetting('forge_dir', r.path);
-          toast('Forge found', r.path, 'ok', 4500);
-        } else if ((forgeInput.value || '').trim()) {
-          // Auto-scan found nothing new, but a path is already configured -
-          // don't alarm the user into thinking Forge is missing.
-          toast('Keeping your Forge path', forgeInput.value.trim(), 'info', 4500);
-        } else {
-          toast('No Forge auto-detected',
-            'Paste the full path to your sd-webui-forge folder (the one with webui.bat + a modules/ subfolder).',
-            'warn', 7000);
-        }
-      } catch (e) { toast("Couldn't check this PC", e.message, 'err'); }
-      finally {
-        forgeDetectBtn.disabled = false;
-        forgeDetectBtn.textContent = 'Detect';
-      }
-    };
     // Device selectors. TTS + STT share ONE flow: a "(not installed)" GPU option
     // is still selectable — picking it downloads its runtime right here (spinner
     // ring + status under the dropdown) and then selects it. No separate install
@@ -18026,6 +17979,9 @@ async function modelsRenderImages() {
        The list under it says what each model needs.</div>`;
   html += '</div></div>';
   html += `<div class="models-section"><div class="sec-head"><h3>Model folders</h3></div><div class="sec-body">` +
+    (o.forge ? `<div class="model-row"><div class="model-info"><div class="model-name">Forge is on this PC</div>
+      <div class="model-meta">Its checkpoints, VAEs and LoRAs in ${esc(o.forge)} can be used here, read where they are.</div></div>
+      <button class="model-action" data-img-forge="${esc(o.forge)}">Use them</button></div>` : '') +
     (o.roots || []).map((d, i) => `<div class="model-row"><div class="model-info"><div class="model-name" style="font-family:var(--mono);font-size:12px">${esc(d)}</div>
       <div class="model-meta">${i === 0 ? "Hearth's own" : 'yours, read in place'}</div></div>
       ${i === 0 ? '<button class="model-action is-secondary" data-img-open="1">Open</button>'
@@ -18053,6 +18009,12 @@ async function modelsRenderImages() {
   pane.querySelectorAll('[data-img-remove]').forEach(b => b.onclick = async () => {
     await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: b.dataset.imgRemove, remove: true }) }).catch(() => {});
+    modelsRenderImages();
+  });
+  pane.querySelectorAll('[data-img-forge]').forEach(b => b.onclick = async () => {
+    const r = await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: b.dataset.imgForge }) }).catch(e => ({ ok: false, error: e.message }));
+    if (!r.ok) toast("That folder didn't work", r.error || '', 'err', 8000);
     modelsRenderImages();
   });
   pane.querySelectorAll('[data-img-open]').forEach(b => b.onclick = () =>

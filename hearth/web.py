@@ -357,6 +357,8 @@ def _autostart_bridges() -> None:
     flip a Start toggle each session. A bridge is auto-started when it has a
     saved config AND `autostart` isn't explicitly turned off. Best-effort and
     silent — a bad token just leaves that one channel offline."""
+    if os.environ.get("HEARTH_NO_BRIDGES") == "1":
+        return                          # a test instance must not answer the real bots
     for ch in _BRIDGE_MODULES:
         try:
             cfg = _bridge_config(ch)

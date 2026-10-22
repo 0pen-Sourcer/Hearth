@@ -503,7 +503,8 @@ def overview(start_engine: bool = True) -> Dict[str, Any]:
     with whether the files on disk make it ready."""
     builds = installed()
     out: Dict[str, Any] = {"installed": bool(builds), "build": builds[0].parent.name if builds else "",
-                           "roots": model_roots(), "folder": str(models_dir()), "recipes": [], "status": {}}
+                           "roots": model_roots(), "folder": str(models_dir()), "recipes": [], "status": {},
+                           "forge": forge_models()}
     if builds:
         from .llmserver import engine_build_of
         out["backend"] = engine_build_of(builds[0])
@@ -518,6 +519,21 @@ def overview(start_engine: bool = True) -> Dict[str, Any]:
     out["recipes"] = [{k: r[k] for k in ("id", "name", "description", "url", "video", "ready", "missing", "picks")}
                       for r in cat["recipes"]]
     return out
+
+
+def forge_models() -> str:
+    """A Forge / Stable Diffusion WebUI install's models folder, when there is
+    one and it isn't read already. The engine reads its Stable-diffusion, VAE
+    and Lora folders as they are."""
+    try:
+        from .tools import FORGE_DIR
+    except Exception:
+        return ""
+    d = os.path.join(FORGE_DIR or "", "models")
+    if not FORGE_DIR or not os.path.isdir(d):
+        return ""
+    known = {os.path.normcase(os.path.abspath(r)) for r in model_roots()}
+    return "" if os.path.normcase(os.path.abspath(d)) in known else d
 
 
 def set_folder(path: str, add: bool = True) -> Dict[str, Any]:
