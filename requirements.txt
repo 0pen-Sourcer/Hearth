@@ -9,6 +9,9 @@
 #   - llama-cpp-python  (built-in LLM server; needs --extra-index-url for CUDA/CPU wheels)
 #   - playwright browsers (after installing playwright, run: python -m playwright install chromium)
 
+# Keep within the versions Hearth is tested on (see the file for why each bound).
+-c constraints.txt
+
 # ---- Core (required) ----
 openai>=1.0
 anthropic>=1.13          # Anthropic as a brain: its own API takes effort and thinking

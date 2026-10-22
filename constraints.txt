@@ -1,0 +1,11 @@
+# Upper bounds for libraries whose next major version changed APIs Hearth uses,
+# or that Hearth hasn't been tested against yet. Used by requirements.txt and
+# install.ps1 / install.sh. Raise a bound only after the test suite passes on it.
+mcp<2                  # 2.x renamed FastMCP, which Hearth's MCP servers are built on
+openai>=1.0,<3
+anthropic>=1.13,<2
+huggingface-hub<2
+pymupdf<2
+pillow<13
+reportlab<5
+av<18

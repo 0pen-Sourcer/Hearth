@@ -119,6 +119,8 @@ if (Test-Path $venvPython) {
 }
 
 # ----- 3. Install dependencies ---------------------------------------------
+# Every pip install below stays within the versions Hearth is tested on.
+$env:PIP_CONSTRAINT = Join-Path $root "constraints.txt"
 Write-Step "Upgrading pip"
 & $venvPython -m pip install --quiet --upgrade pip
 if ($LASTEXITCODE -ne 0) { Write-WarnX "pip self-upgrade failed; continuing" }
