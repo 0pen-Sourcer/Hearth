@@ -77,7 +77,7 @@ Every fact JARVIS learns is a small markdown file in your workspace that you can
 
 ### Everywhere else
 
-The terminal app (`hearth.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp bridge ([docs/PHONE.md](docs/PHONE.md)); reminders can also push to your phone through ntfy. It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
+The terminal app (`hearth.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
 
 ### Safety
 
@@ -211,7 +211,6 @@ Hearth has over a hundred tools, but only a core set goes to the model in full e
 | `HEARTH_PERSONA_NAME` | `JARVIS` | The assistant's name |
 | `HEARTH_PERSONA` | none | Tone: `bro`, `chill`, `professional` or `formal` |
 | `HEARTH_ALL_TOOLS` | `0` | `1` loads every tool up front |
-| `HEARTH_NTFY_TOPIC` | none | [ntfy](https://ntfy.sh) topic for reminders on your phone |
 
 `JARVIS_*` names work too.
 
@@ -246,7 +245,7 @@ Good first pull requests are macOS and Linux versions of the Windows-only tools 
 
 ## Privacy
 
-Hearth runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), ntfy, the phone bridges or email. With a local model and none of those set up, Hearth is fully offline. The [MIT license](LICENSE) is the whole agreement.
+Hearth runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Hearth is fully offline. The [MIT license](LICENSE) is the whole agreement.
 
 ## Support
 

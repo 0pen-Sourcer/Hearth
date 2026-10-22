@@ -245,15 +245,23 @@ def _bridge_configured(ch: str, cfg: Optional[dict] = None) -> bool:
 def _spawn_bridge(ch: str) -> Tuple[bool, Optional[str]]:
     """Launch a bridge as its own process. Returns (running, error)."""
     mod = _BRIDGE_MODULES.get(ch)
+    extra: list = []
+    if not mod and ch.startswith("custom:"):
+        # A connector of the person's own, from <workspace>/connectors/<name>.py.
+        from . import custom_connector as _cust
+        name = ch.split(":", 1)[1]
+        if name not in _cust.available():
+            return False, f"no connector called {name}"
+        mod, extra = "hearth.custom_connector", [name]
     if not mod:
         return False, "unknown channel"
     if _bridge_running(ch):
         return True, None
-    args = [sys.executable, "-m", mod]
+    args = [sys.executable, "-m", mod] + extra
     if getattr(sys, "frozen", False):
         # In the packaged app sys.executable is Hearth.exe; the sentinel
         # runs the bundled interpreter against the module.
-        args = [sys.executable, "--hearth-run-python", "-m", mod]
+        args = [sys.executable, "--hearth-run-python", "-m", mod] + extra
     # Pin the bridge to the CURRENT brain from settings, overriding any launch
     # env (e.g. grok.ps1). Otherwise a bridge stays on the old provider after a
     # GUI brain switch — the "auth failed on Telegram after switching" bug.
@@ -301,7 +309,7 @@ _BRIDGE_LOG_KEEP = 512 * 1024
 def _bridge_log_path(ch: str) -> str:
     """<workspace>/logs/<channel>_bridge.log, trimmed to its newest part."""
     os.makedirs(LOGS_DIR, exist_ok=True)
-    path = os.path.join(LOGS_DIR, f"{ch}_bridge.log")
+    path = os.path.join(LOGS_DIR, f"{ch.replace(':', '_')}_bridge.log")
     try:
         if os.path.getsize(path) > 2 * _BRIDGE_LOG_KEEP:
             with open(path, "rb") as f:
@@ -2125,7 +2133,20 @@ class HearthHandler(BaseHTTPRequestHandler):
                     configured = bool(cfg.get("allowed_numbers") or cfg.get("allow_self_chat"))
                 else:
                     configured = bool((cfg.get("bot_token") or "").strip())
+                # Ids go to the page as text: a Discord id is longer than a
+                # JavaScript number holds, so it came back rounded and a Save
+                # wrote the wrong person in.
+                for key in ("allowed_chat_ids", "allowed_user_ids", "allowed_numbers"):
+                    if isinstance(cfg.get(key), list):
+                        cfg[key] = [str(x) for x in cfg[key]]
                 out[ch] = {"configured": configured, "config": cfg, "running": _bridge_running(ch)}
+            try:
+                from . import custom_connector as _cust
+                for name in _cust.available():
+                    out["custom:" + name] = {"configured": True, "custom": True, "config": {},
+                                             "running": _bridge_running("custom:" + name)}
+            except Exception:
+                pass
             return self._send_json(200, {"bridges": out})
         if path == "/api/migrate/probe":
             # Report which sources have data on disk so the UI can grey out
@@ -2170,6 +2191,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             # The image and video engine, its model folders and which models are ready.
             from . import sdserver
             return self._send_json(200, sdserver.overview(start_engine=self._query().get("start", ["1"])[0] != "0"))
+        if path == "/api/connectors/access":
+            # Who asked to talk on a chat app, and who is let in.
+            from . import channel_core as _cc
+            return self._send_json(200, {"pending": _cc.pending(), "approved": _cc.approved()})
         if path == "/api/threads":
             # What's going on lately, as kept for the next messages.
             from . import threads as _threads
@@ -3213,12 +3238,24 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, _si.uninstall_skill((body.get("name") or "").strip()))
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path == "/api/connectors/access":
+            # Approve, dismiss or remove someone on a chat app.
+            from . import channel_core as _cc
+            body = self._read_json()
+            ch, act = str(body.get("channel") or ""), str(body.get("action") or "")
+            if act == "approve":
+                return self._send_json(200, _cc.approve(ch, str(body.get("code") or "")))
+            if act == "dismiss":
+                return self._send_json(200, _cc.dismiss(ch, str(body.get("code") or "")))
+            if act == "revoke":
+                return self._send_json(200, _cc.revoke(ch, str(body.get("sender") or "")))
+            return self._send_json(400, {"ok": False, "error": "action is approve, dismiss or revoke"})
         if path == "/api/bridges/start":
             # Launch a configured bridge as its own process so the bot comes
             # ONLINE without the user running a terminal command.
             body = self._read_json()
             ch = (body.get("channel") or "").strip().lower()
-            if ch not in _BRIDGE_MODULES:
+            if ch not in _BRIDGE_MODULES and not ch.startswith("custom:"):
                 return self._send_json(400, {"ok": False, "error": "unknown channel"})
             if _bridge_running(ch):
                 return self._send_json(200, {"ok": True, "running": True, "note": "already running"})

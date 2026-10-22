@@ -342,7 +342,7 @@ SLASH_COMMANDS = {
     "/mode": "what runs without asking: ask, edits, auto", "/perms": "saved permissions",
     "/allow": "let me write under a folder", "/disallow": "take that back", "/allowed": "folders I may write in",
     "/lockdown": "keep reads inside the workspace", "/about": "version and stats", "/update": "get a newer version",
-    "/repair": "restore damaged files", "/phone": "reach me from Telegram, Discord or WhatsApp", "/exit": "quit",
+    "/repair": "restore damaged files", "/phone": "reach me from Telegram, Discord or WhatsApp", "/pair": "let someone in with their code", "/exit": "quit",
     # Other names for the same commands.
     "/endpoint": "same as /brain", "/provider": "same as /brain", "/load": "same as /model",
     "/usage": "same as /status", "/import": "same as /import-memory", "/skills": "same as /skill",
@@ -430,7 +430,7 @@ HELP_GROUPS = [
     ("Helpers", ["/team", "/agents", "/agent", "/jobs"]),
     ("Voice", ["/voice", "/listen", "/stt", "/sleep", "/wake"]),
     ("This PC", ["/allow", "/disallow", "/allowed", "/lockdown", "/perms", "/workspace", "/tools", "/mcp", "/skill", "/log"]),
-    ("Hearth", ["/about", "/update", "/repair", "/phone", "/exit"]),
+    ("Hearth", ["/about", "/update", "/repair", "/phone", "/pair", "/exit"]),
 ]
 
 
@@ -2683,55 +2683,31 @@ class JarvisCLI:
                 print(f"{C_ERR}repair unavailable: {type(e).__name__}: {e}{C_RESET}")
             return True
         if low == "/phone":
-            # Discoverability for the two opt-in phone features. Full setup in
-            # docs/PHONE.md; here we just report config status + next steps.
-            import json as _json
-            cfg_path = os.path.join(os.path.expanduser("~"), ".hearth", "phone_bridge.json")
-            cfg = {}
-            try:
-                with open(cfg_path, "r", encoding="utf-8") as _f:
-                    cfg = _json.load(_f) or {}
-            except Exception:
-                cfg = {}
-            tok = bool((cfg.get("bot_token") or "").strip())
-            ids = cfg.get("allowed_chat_ids") or []
-            ntfy = (cfg.get("ntfy_topic") or os.environ.get("HEARTH_NTFY_TOPIC")
-                    or _env.get("NTFY_TOPIC") or "").strip()
-            print(f"\n{C_BRAND}Reach Hearth from your phone{C_RESET}  {C_DIM}(all of these are opt-in, no OAuth){C_RESET}")
-            print(f"  {C_BOT}Telegram bridge{C_RESET} (two-way): "
-                  + (f"{C_OK}configured{C_RESET} {C_DIM}({len(ids)} allowed chat id"
-                     f"{'s' if len(ids) != 1 else ''}){C_RESET}" if tok
-                     else f"{C_DIM}not set up{C_RESET}"))
-            print(f"  {C_BOT}ntfy push{C_RESET} (reminders): "
-                  + (f"{C_OK}topic set{C_RESET}" if ntfy else f"{C_DIM}not set up{C_RESET}"))
-            wa_cfg = {}
-            try:
-                with open(os.path.join(os.path.expanduser("~"), ".hearth", "whatsapp_bridge.json"), encoding="utf-8") as _wf:
-                    wa_cfg = _json.load(_wf) or {}
-            except Exception:
-                wa_cfg = {}
-            wa_on = bool(wa_cfg.get("allowed_numbers") or wa_cfg.get("allow_self_chat"))
-            dc_cfg = {}
-            try:
-                with open(os.path.join(os.path.expanduser("~"), ".hearth", "discord_bridge.json"), encoding="utf-8") as _df:
-                    dc_cfg = _json.load(_df) or {}
-            except Exception:
-                dc_cfg = {}
-            dc_on = bool((dc_cfg.get("bot_token") or "").strip())
-            print(f"  {C_BOT}Discord bridge{C_RESET} (two-way, official): "
-                  + (f"{C_OK}configured{C_RESET}" if dc_on else f"{C_DIM}not set up{C_RESET}"))
-            print(f"  {C_BOT}WhatsApp bridge{C_RESET} (two-way, {C_WARN}experimental{C_RESET}): "
-                  + (f"{C_OK}configured{C_RESET}" if wa_on else f"{C_DIM}not set up{C_RESET}")
-                  + f"  {C_DIM}- unofficial; use a spare number{C_RESET}")
-            if tok:
-                print(f"\n  {C_DIM}start Telegram:{C_RESET} python -m hearth.telegram_bridge")
-            else:
-                print(f"\n  {C_DIM}Telegram config:{C_RESET} {cfg_path}")
-            if dc_on:
-                print(f"  {C_DIM}start Discord:{C_RESET}  python -m hearth.discord_bridge")
-            if wa_on:
-                print(f"  {C_DIM}start WhatsApp:{C_RESET} python -m hearth.whatsapp_bridge")
-            print(f"  {C_DIM}full setup guide:{C_RESET} docs/PHONE.md")
+            # The chat apps: what is set up, who is let in, codes waiting.
+            from hearth import tools as _tools
+            print(f"\n{C_BRAND}Reach Hearth from your phone{C_RESET}  {C_DIM}(Telegram, Discord, WhatsApp){C_RESET}")
+            for line in _tools._connectors({"action": "status"}).splitlines():
+                print(f"  {line}")
+            print(f"\n  {C_DIM}set up an app in the window (Settings > Connectors), or ask: \"connect my Telegram\"")
+            print(f"  someone gave you a code? /pair <code>{C_RESET}")
+            return True
+        if low.startswith("/pair"):
+            from hearth import channel_core as _cc
+            code = cmd.split(None, 1)[1].strip().upper() if len(cmd.split(None, 1)) > 1 else ""
+            waiting = _cc.pending()
+            if not code:
+                if not waiting:
+                    print(f"{C_DIM}Nobody is waiting with a code.{C_RESET}")
+                for w in waiting:
+                    print(f"  {w['channel']}: {w['name'] or w['sender']}  code {w['code']}")
+                return True
+            hit = next((w for w in waiting if w["code"] == code), None)
+            if not hit:
+                print(f"{C_ERR}No code {code} is waiting (they last an hour).{C_RESET}")
+                return True
+            r = _cc.approve(hit["channel"], code)
+            print(f"{C_OK}Let in {r.get('name') or r.get('sender')} on {hit['channel'].title()}.{C_RESET}" if r.get("ok")
+                  else f"{C_ERR}{r.get('error')}{C_RESET}")
             return True
         if low == "/skill" or low.startswith("/skill ") or low == "/skills" or low.startswith("/skills "):
             from hearth import skills_loader as _sl

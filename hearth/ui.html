@@ -5197,6 +5197,7 @@
           full agent on this PC and replies. Set it up once and Hearth keeps it running,
           starting automatically every launch. Everything below is optional.
         </p>
+        <div id="conn-people" style="margin:0 0 16px"></div>
 
         <!-- Email -->
         <div class="field" style="align-items:flex-start;">
@@ -5220,11 +5221,11 @@
         <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">Telegram <span style="color:var(--ok);font-size:11px;font-weight:400">· recommended</span></div>
-            <div class="hint">@BotFather → /newbot → copy the token. Then message the bot once and find your chat id (or just run it - it logs incoming ids).</div>
+            <div class="hint">In Telegram, message @BotFather, send /newbot and paste the token here. Then message your bot: it gives you a code, and you let yourself in below.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
             <input type="password" id="bridge-tg-token" placeholder="bot token (123456:ABC…)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;" autocomplete="off" data-1p-ignore data-lpignore="true"/>
-            <input type="text" id="bridge-tg-ids" placeholder="allowed chat ids (comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="text" id="bridge-tg-ids" placeholder="chat ids let in without a code (optional)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bridge-tg-save">Save</button>
               <button class="btn-mini" id="bridge-tg-toggle">Start</button>
@@ -5238,11 +5239,11 @@
         <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">Discord <span style="color:var(--ok);font-size:11px;font-weight:400">· recommended</span></div>
-            <div class="hint">discord.com/developers, New Application, Bot, copy token and enable MESSAGE CONTENT INTENT. Your user id: Discord, Advanced, Developer Mode on, right-click your name, Copy User ID.</div>
+            <div class="hint">discord.com/developers, New Application, Bot, copy the token. DM the bot: it gives you a code to let yourself in below. In a server it answers when @mentioned.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
             <input type="password" id="bridge-dc-token" placeholder="bot token" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;" autocomplete="off" data-1p-ignore data-lpignore="true"/>
-            <input type="text" id="bridge-dc-ids" placeholder="allowed user ids (comma-separated)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
+            <input type="text" id="bridge-dc-ids" placeholder="user ids let in without a code (optional)" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn-mini" id="bridge-dc-save">Save</button>
               <button class="btn-mini" id="bridge-dc-toggle">Start</button>
@@ -5252,19 +5253,13 @@
           </div>
         </div>
 
-        <!-- ntfy push -->
-        <div class="field" style="align-items:flex-start;">
+        <!-- Reminders to the phone -->
+        <div class="field">
           <div class="label">
-            <div class="name">ntfy push (reminders)</div>
-            <div class="hint">One-way: reminders push to your phone via <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color:var(--accent-2)">ntfy</a>. Pick a long, random topic, subscribe to it in the ntfy app, and put it here.</div>
+            <div class="name">Send reminders to my phone too</div>
+            <div class="hint">Each reminder also goes to the Telegram or Discord above, to whoever is let in there first.</div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
-            <input type="text" id="bridge-ntfy-topic" placeholder="topic, e.g. hearth-7f3a9c2" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <button class="btn-mini" id="bridge-ntfy-save">Save</button>
-              <span id="bridge-ntfy-status" style="font-size:11px;color:var(--fg-faint)"></span>
-            </div>
-          </div>
+          <div class="switch" data-key="phone_reminders"></div>
         </div>
 
         <!-- WhatsApp (experimental) -->
@@ -5283,6 +5278,15 @@
             </div>
             <div style="font-size:11px;color:var(--fg-faint)">Saved bots start automatically on launch. Use Start to show the pairing QR now.</div>
           </div>
+        </div>
+
+        <!-- Their own connectors -->
+        <div class="field" style="align-items:flex-start;">
+          <div class="label">
+            <div class="name">Your own connectors</div>
+            <div class="hint">Any other chat app, from a small Python file in your workspace's <code>connectors</code> folder. Hearth adds who may talk, the questions before risky steps, voice notes and files.</div>
+          </div>
+          <div id="conn-own" style="display:flex;flex-direction:column;gap:6px;min-width:300px;"></div>
         </div>
         </div><!-- /pane connect -->
 
@@ -15180,8 +15184,15 @@ async function refreshSettings() {
       if (dcTok && b.discord) { dcTok.value = b.discord.config.bot_token || ''; dcIds.value = (b.discord.config.allowed_user_ids || []).join(', '); }
       const waN = $('bridge-wa-nums'), waS = $('bridge-wa-self');
       if (waN && b.whatsapp) { waN.value = (b.whatsapp.config.allowed_numbers || []).join(', '); if (waS) waS.checked = !!b.whatsapp.config.allow_self_chat; }
-      const ntT = $('bridge-ntfy-topic');
-      if (ntT) ntT.value = (s.ntfy_topic || '');
+      // Connectors of their own, from the workspace's connectors folder.
+      const own = Object.keys(b).filter(k => k.startsWith('custom:'));
+      const ownBox = $('conn-own');
+      if (ownBox) ownBox.innerHTML = own.length ? own.map(k => `<div class="model-row"><div class="model-info">
+          <div class="model-name">${esc(k.slice(7))} <span class="model-badge badge-src">your connector</span></div>
+          <div class="model-meta" id="bridge-${esc(k)}-status"></div></div>
+          <button class="model-action is-secondary" data-own-conn="${esc(k)}">Start</button></div>`).join('')
+        : '<div style="font-size:11px;color:var(--fg-faint)">None yet. A Python file in your workspace\'s connectors folder adds one; docs/CONNECTORS.md shows how.</div>';
+      if (ownBox) ownBox.querySelectorAll('[data-own-conn]').forEach(btn => _paintBridgeToggle(btn, btn.dataset.ownConn, !!(b[btn.dataset.ownConn] || {}).running));
       // Reflect running state on the Start/Stop toggles.
       for (const ch of ['telegram', 'discord', 'whatsapp']) {
         const short = ch === 'telegram' ? 'tg' : ch === 'discord' ? 'dc' : 'wa';
@@ -15194,7 +15205,7 @@ async function refreshSettings() {
       btn.style.color = running ? 'var(--ok)' : '';
       btn.onclick = async () => {
         btn.disabled = true;
-        const stEl = $('bridge-' + (ch === 'telegram' ? 'tg' : ch === 'discord' ? 'dc' : 'wa') + '-status');
+        const stEl = $('bridge-' + (ch === 'telegram' ? 'tg' : ch === 'discord' ? 'dc' : ch === 'whatsapp' ? 'wa' : ch) + '-status');
         try {
           const r = await api('/api/bridges/' + (running ? 'stop' : 'start'),
             { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: ch }) });
@@ -15225,7 +15236,8 @@ async function refreshSettings() {
     const _saveBridge = async (channel, tokenEl, idsEl, idsKey, statusEl) => {
       const token = (tokenEl.value || '').trim();
       if (!token) { if (statusEl) statusEl.textContent = 'token required'; return; }
-      const ids = (idsEl.value || '').split(',').map(x => parseInt(x.trim(), 10)).filter(n => !isNaN(n));
+      // Kept as digits: a Discord id is longer than a JavaScript number holds exactly.
+      const ids = (idsEl.value || '').split(',').map(x => x.trim()).filter(x => /^-?\d+$/.test(x));
       const config = { bot_token: token, [idsKey]: ids };
       try {
         const r = await api('/api/bridges/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel, config }) });
@@ -15252,15 +15264,7 @@ async function refreshSettings() {
         _afterBridgeStart('whatsapp', sr);
       } catch (e) { if (st) st.textContent = 'failed: ' + (e.message || e); }
     };
-    const ntSave = $('bridge-ntfy-save');
-    if (ntSave) ntSave.onclick = async () => {
-      const topic = ($('bridge-ntfy-topic').value || '').trim();
-      const st = $('bridge-ntfy-status');
-      try {
-        await saveSetting('ntfy_topic', topic);
-        if (st) { st.style.color = 'var(--ok)'; st.textContent = topic ? '✓ saved - reminders will push to this topic' : 'cleared'; }
-      } catch (e) { if (st) st.textContent = 'failed: ' + (e.message || e); }
-    };
+    renderConnectorPeople();
     $$('[data-copycmd]').forEach(btn => {
       btn.onclick = async () => {
         try { await navigator.clipboard.writeText(btn.dataset.copycmd); } catch {}
@@ -17865,6 +17869,35 @@ function modelsRenderMine() {
          } }]);
     });
   });
+}
+
+// Who asked to talk on a chat app (a pairing code), and who is let in.
+async function renderConnectorPeople() {
+  const box = $('conn-people'); if (!box) return;
+  let a = {};
+  try { a = await api('/api/connectors/access'); } catch { return; }
+  const app = (c) => ({ telegram: 'Telegram', discord: 'Discord', whatsapp: 'WhatsApp' }[c] || c);
+  const pending = a.pending || [], inn = a.approved || [];
+  if (!pending.length && !inn.length) { box.innerHTML = ''; return; }
+  const row = (title, sub, btns) => `<div class="model-row"><div class="model-info"><div class="model-name">${title}</div>
+    <div class="model-meta">${sub}</div></div>${btns}</div>`;
+  box.innerHTML =
+    (pending.length ? `<div class="name" style="margin:4px 0 6px">Asking to talk</div>` + pending.map(p =>
+      row(`${esc(p.name || p.sender)} <span class="model-badge badge-src">${esc(app(p.channel))}</span>`,
+          `code ${esc(p.code)} &middot; ${esc(String(p.sender))}`,
+          `<button class="model-action" data-conn-approve="${esc(p.channel)}|${esc(p.code)}">Let in</button>
+           <button class="model-action is-secondary" data-conn-dismiss="${esc(p.channel)}|${esc(p.code)}">Dismiss</button>`)).join('') : '') +
+    (inn.length ? `<div class="name" style="margin:12px 0 6px">Let in</div>` + inn.map(p =>
+      row(`${esc(p.name || p.sender)} <span class="model-badge badge-src">${esc(app(p.channel))}</span>`, esc(String(p.sender)),
+          `<button class="model-action is-secondary" data-conn-revoke="${esc(p.channel)}|${esc(String(p.sender))}">Remove</button>`)).join('') : '');
+  const post = (body) => api('/api/connectors/access', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) }).then(r => { if (r && r.ok === false) toast("That didn't work", r.error || '', 'err'); renderConnectorPeople(); });
+  box.querySelectorAll('[data-conn-approve]').forEach(b => b.onclick = () => {
+    const [channel, code] = b.dataset.connApprove.split('|'); post({ action: 'approve', channel, code }); });
+  box.querySelectorAll('[data-conn-dismiss]').forEach(b => b.onclick = () => {
+    const [channel, code] = b.dataset.connDismiss.split('|'); post({ action: 'dismiss', channel, code }); });
+  box.querySelectorAll('[data-conn-revoke]').forEach(b => b.onclick = () => {
+    const [channel, sender] = b.dataset.connRevoke.split('|'); post({ action: 'revoke', channel, sender }); });
 }
 
 // Images & video: Hearth's own engine for pictures and short videos

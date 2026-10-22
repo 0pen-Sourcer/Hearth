@@ -1,48 +1,39 @@
-"""Reach Hearth from WhatsApp — pure-Python, no Node, no Chromium.
+"""Talk to Hearth from WhatsApp, pure Python (no Node, no browser).
 
-EXPERIMENTAL. This links a WhatsApp account as a companion device (the same
-"Linked Devices" mechanism as WhatsApp Web) via `neonize` — Python bindings over
-the `whatsmeow` Go engine, shipped compiled inside the wheel, so there's no Node
-runtime and no headless browser. You scan a QR once; the session persists.
+EXPERIMENTAL. It links a WhatsApp account as a companion device, the way
+WhatsApp Web does, through `neonize` (bindings over the whatsmeow engine, built
+into the wheel). You scan a QR once; the session is kept.
 
-⚠ READ THIS FIRST — it is unofficial:
-  - WhatsApp does not offer a bot API for personal accounts, so this drives a
-    real account. Meta CAN flag/ban a number for automation. For occasional
-    personal use behind an allowlist the risk is low, but it is NOT zero —
-    **use a spare / secondary number, not your primary.**
-  - It can break when WhatsApp changes their protocol (then: `pip install -U
-    neonize` and re-pair). Telegram (hearth.telegram_bridge) is the official,
-    zero-ban-risk option — prefer it unless you specifically need WhatsApp.
+It is unofficial: WhatsApp has no bot API for personal accounts, so this drives
+a real account and Meta can flag a number for automation. Use a spare number.
+Telegram is the official, no-risk option.
 
-Setup:
-  1. pip install neonize     (already a Hearth dependency)
-  2. Create ~/.hearth/whatsapp_bridge.json:
-       {"allowed_numbers": ["<your number, digits only, country code, no +>"],
-        "allow_self_chat": true,
-        "ntfy_topic": ""}
-     allowed_numbers = who may talk to it (you). allow_self_chat lets you message
-     the linked number's own "you" chat; what that number sends to anyone else
-     is left alone.
-  3. Point it at a brain via the same env vars the CLI uses (LOCAL_API_BASE /
-     LOCAL_API_KEY / LOCAL_MODEL), then run:
-       python -m hearth.whatsapp_bridge
-  4. Scan the QR it prints (WhatsApp → Settings → Linked Devices → Link a Device).
+Who may talk: the numbers in ~/.hearth/whatsapp_bridge.json ("allowed_numbers"),
+and with "allow_self_chat" the linked number's own "you" chat (what it sends to
+anyone else is left alone). Anyone else gets no reply, which on a personal
+number would look like spam; their request waits in Settings > Connectors.
 
-Like the Telegram bridge, this is a single-owner relay: the allowlist is the gate
-and messages auto-approve tool calls (you're the owner). Keep the allowlist tight.
+Everything else is shared with the other apps (hearth/channel_core.py).
+
+    python -m hearth.whatsapp_bridge
 """
 from __future__ import annotations
 
-import asyncio
 import json
-from . import bridge_status as _bridge_status
 import os
 from collections import deque
 from pathlib import Path
 
+from . import channel_core as cc
+from . import env as _env
+
+_env.setdefault("NO_GUI", "1")
+
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "whatsapp_bridge.json")
 _SESSION_DB = os.path.join(os.path.expanduser("~"), ".hearth", "whatsapp", "session.sqlite3")
-_WA_MAX = 4000  # WhatsApp text cap is generous; chunk well under it
+_WA_MAX = 4000
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+_HUB = None
 
 
 def _load_config() -> dict:
@@ -53,33 +44,21 @@ def _load_config() -> dict:
         return {}
 
 
-def _split(s: str, n: int = _WA_MAX):
-    s = s or "(no output)"
-    out = []
-    while s:
-        if len(s) <= n:
-            out.append(s); break
-        cut = s.rfind("\n", 0, n)
-        if cut < n // 2:
-            cut = s.rfind(" ", 0, n)
-        if cut <= 0:
-            cut = n
-        out.append(s[:cut]); s = s[cut:].lstrip("\n")
-    return out
-
-
 def _msg_text(message) -> str:
-    """Pull plain text out of a neonize MessageEv (conversation or extended)."""
+    """The text of a message: plain, extended, or a photo's / file's caption."""
     try:
         m = message.Message
-        return (getattr(m, "conversation", "") or
-                getattr(getattr(m, "extendedTextMessage", None), "text", "") or "")
+        for part in ("extendedTextMessage", "imageMessage", "videoMessage", "documentMessage"):
+            inner = getattr(m, part, None)
+            t = getattr(inner, "text", "") or getattr(inner, "caption", "") if inner is not None else ""
+            if t:
+                return t
+        return getattr(m, "conversation", "") or ""
     except Exception:
         return ""
 
 
 def _sender_number(message) -> str:
-    """Sender's phone number (JID user part), digits only."""
     try:
         return str(message.Info.MessageSource.Sender.User)
     except Exception:
@@ -103,105 +82,132 @@ def _own_ids(client, src) -> set:
 
 
 def _is_own_chat(src, own: set) -> bool:
-    """The account's own "you" chat. A message the account itself sent anywhere
-    else is a conversation with someone else and never an instruction."""
+    """The account's own "you" chat. A message it sent anywhere else is a
+    conversation with someone else and never an instruction."""
     return str(getattr(getattr(src, "Chat", None), "User", "") or "") in own
 
 
-_IMAGE_EXTS = (".png", ".jpg", ".jpeg")
-
-
-# System message injected every bridge turn (not persisted): teaches the model
-# it CAN send files here by naming their path.
-_CHANNEL_PRIMER = _bridge_status.channel_primer("WhatsApp")
-
-
-async def _run(prompt: str, history: list) -> str:
-    """One agent turn through the shared loop; collect the final reply."""
-    from . import headless
-    parts = []
-
-    events = []
-    err = {"cat": None, "msg": None}
-
-    def emit(kind, **kw):
-        if kind == "assistant":
-            parts.append(kw.get("content") or "")
-        elif kind == "error":
-            err["cat"] = kw.get("category") or "error"
-            err["msg"] = str(kw.get("message", ""))
-        elif kind == "tool_call":
-            nm = kw.get("name")
-            if nm:
-                events.append((nm, kw.get("args")))
-
+def _has(m, part: str) -> bool:
     try:
-        await headless.run_once(prompt, emit=emit,
-                                history=[_CHANNEL_PRIMER] + (history or []),
-                                chat_id="whatsapp",   # one ongoing conversation per bridge
-                                permission_check=lambda _n, _a: "allow",
-                                supervised=False)  # phone: destructive guard still fires
-    except Exception as e:
-        from .errors import classify_api_error
-        info = classify_api_error(e, headless._is_local_endpoint(headless.LOCAL_API_BASE))
-        err["cat"], err["msg"] = info.category, info.hint
-    reply = headless.bridge_reply_or_reason("".join(parts), err["cat"], err["msg"])
-    # WhatsApp can't reliably edit a sent message, so no live tool feed — append a
-    # one-line "used: ..." footer instead so the user still sees what ran.
-    if events:
-        from . import bridge_status
-        foot = bridge_status.footer(events)
-        if foot:
-            reply = (reply + "\n\n" + foot).strip()
-    return reply
+        return m.HasField(part)
+    except Exception:
+        return getattr(m, part, None) is not None
+
+
+class WhatsApp(cc.Adapter):
+    name, label, max_len = "whatsapp", "WhatsApp", _WA_MAX
+    replies_to_strangers = False
+    can_edit = False
+
+    def __init__(self, client):
+        self.client = client
+        self.chats = {}
+        self.sent_ids: deque = deque(maxlen=256)
+
+    def _remember(self, resp):
+        mid = getattr(resp, "ID", "")
+        if mid:
+            self.sent_ids.append(str(mid))
+        return mid or None
+
+    def send(self, chat, text, reply_to=None):
+        jid = self.chats.get(str(chat))
+        if jid is None:
+            return None
+        try:
+            return self._remember(self.client.send_message(jid, text))
+        except Exception as e:
+            print(f"[whatsapp] couldn't send: {type(e).__name__}: {e}")
+            return None
+
+    def send_file(self, chat, path):
+        jid = self.chats.get(str(chat))
+        if jid is None:
+            return
+        try:
+            if path.lower().endswith(_IMAGE_EXTS):
+                self._remember(self.client.send_image(jid, path))
+            else:
+                self._remember(self.client.send_document(jid, path, filename=os.path.basename(path)))
+        except Exception as e:
+            print(f"[whatsapp] could not send {os.path.basename(path)}: {type(e).__name__}: {e}")
+
+
+def handle(hub: cc.Hub, wa: WhatsApp, allowed: set, allow_self: bool, message) -> str:
+    """One WhatsApp message, given to the shared hub."""
+    src = message.Info.MessageSource
+    if getattr(src, "IsGroup", False):
+        return "ignored"
+    if str(getattr(message.Info, "ID", "")) in wa.sent_ids:
+        return "ignored"                         # a reply this bridge sent
+    number = _sender_number(message)
+    if getattr(src, "IsFromMe", False):
+        if not (allow_self and _is_own_chat(src, _own_ids(wa.client, src))):
+            return "ignored"
+        sender = "self"
+    else:
+        sender = number
+        if number in allowed:
+            hub.configured.add(number)
+    m = message.Message
+    files, voice = [], ""
+    for part, name in (("imageMessage", "photo.jpg"), ("documentMessage", ""), ("videoMessage", "video.mp4"),
+                       ("audioMessage", "voice.ogg")):
+        if not _has(m, part):
+            continue
+        inner = getattr(m, part)
+        fname = getattr(inner, "fileName", "") or name or "file"
+        try:
+            data = wa.client.download_any(m)
+        except Exception:
+            data = None
+        if not data:
+            continue
+        path = cc.save_upload(data, fname)
+        if part == "audioMessage":
+            voice = path
+        else:
+            files.append(path)
+    chat = str(getattr(src.Chat, "User", "") or number)
+    wa.chats[chat] = src.Chat
+    if sender == "self":
+        hub.configured.add("self")
+    return hub.receive(chat, sender, _msg_text(message).strip(), voice=voice, files=files)
 
 
 def run() -> None:
+    global _HUB
     try:
         from neonize.client import NewClient
         from neonize.events import MessageEv, ConnectedEv, QREv, PairStatusEv, LoggedOutEv
     except Exception as e:
-        print(f"[whatsapp] neonize not available: {e}\n  pip install neonize")
+        print(f"[whatsapp] neonize isn't available ({e}); Settings > Connectors installs it")
         return
-
     cfg = _load_config()
     allowed = {str(x).lstrip("+").strip() for x in (cfg.get("allowed_numbers") or [])}
     allow_self = bool(cfg.get("allow_self_chat"))
-    if not allowed and not allow_self:
-        print(f"[whatsapp] WARNING: no allowed_numbers in {CONFIG_PATH} — I'll log "
-              f"incoming numbers but answer nobody. Add yours to the config.")
-    if cfg.get("ntfy_topic"):
-        os.environ.setdefault("HEARTH_NTFY_TOPIC", cfg["ntfy_topic"])
-
+    cc.use_saved_brain(lambda s: print("[whatsapp] " + s))
     Path(os.path.dirname(_SESSION_DB)).mkdir(parents=True, exist_ok=True)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    histories: dict = {}
-    sent_ids: deque = deque(maxlen=256)
-
-    def _remember(resp):
-        mid = getattr(resp, "ID", "")
-        if mid:
-            sent_ids.append(str(mid))
-
     client = NewClient(_SESSION_DB)
+    wa = WhatsApp(client)
+    _HUB = hub = cc.Hub(wa, configured_senders=allowed)
 
     @client.event(QREv)
-    def _on_qr(_c, qr: QREv):
+    def _on_qr(_c, qr):
         code = getattr(qr, "Codes", None) or getattr(qr, "codes", None) or getattr(qr, "Code", "")
         if isinstance(code, (list, tuple)):
             code = code[0] if code else ""
-        print("\n[whatsapp] Scan this in WhatsApp → Settings → Linked Devices → Link a Device:\n")
+        print("\n[whatsapp] Scan this in WhatsApp, Settings, Linked Devices, Link a Device:\n")
         try:
             import segno
             segno.make(str(code)).terminal(compact=True)
         except Exception:
             print(str(code))
-        print("\n[whatsapp] (QR refreshes periodically; rescan if it expires)\n")
+        print("\n[whatsapp] (the QR refreshes now and then; scan the newest)\n")
 
     @client.event(ConnectedEv)
     def _on_connected(_c, _e):
-        print("[whatsapp] connected — linked and listening.")
+        print("[whatsapp] connected, linked and listening.")
 
     @client.event(PairStatusEv)
     def _on_pair(_c, e):
@@ -209,58 +215,21 @@ def run() -> None:
 
     @client.event(LoggedOutEv)
     def _on_logout(_c, _e):
-        print("[whatsapp] logged out — delete the session + re-pair to reconnect.")
+        print("[whatsapp] logged out: unlink in Settings > Connectors and link again.")
 
     @client.event(MessageEv)
     def _on_message(_c, message):
         try:
             src = message.Info.MessageSource
-            if getattr(src, "IsGroup", False):
-                return  # single-owner relay; ignore groups
-            if str(getattr(message.Info, "ID", "")) in sent_ids:
-                return  # a reply this bridge sent
-            from_me = bool(getattr(src, "IsFromMe", False))
-            number = _sender_number(message)
-            if from_me:
-                if not (allow_self and _is_own_chat(src, _own_ids(client, src))):
-                    return
-            elif number not in allowed:
-                print(f"[whatsapp] ignored message from {number} "
-                      f"(add it to allowed_numbers to enable).")
-                return
-            text = _msg_text(message).strip()
-            if not text:
-                return
-            chat = src.Chat
-            hist = histories.setdefault(number or "self", [])
-            reply = loop.run_until_complete(_run(text, hist))
-            hist.append({"role": "user", "content": text})
-            hist.append({"role": "assistant", "content": reply})
-            del hist[:-16]
-            # Scrub any API key/token before it leaves the machine over WhatsApp
-            # (secrets-only — a legit email/path the user is discussing stays).
-            from .redact import redact_secrets_only
-            _safe = redact_secrets_only(reply or "(no output)")[0]
-            for chunk in _split(_safe):
-                _remember(client.send_message(chat, chunk))
-            from . import bridge_status
-            for f in bridge_status.files_in(reply, 60_000_000):
-                try:
-                    if f.lower().endswith(_IMAGE_EXTS):
-                        _remember(client.send_image(chat, f))
-                    else:
-                        _remember(client.send_document(
-                            chat, f, filename=os.path.basename(f)))
-                except Exception as e:
-                    print(f"[whatsapp] could not send {os.path.basename(f)}: "
-                          f"{type(e).__name__}: {e}")
+            if handle(hub, wa, allowed, allow_self, message) == "ignored" and not getattr(src, "IsFromMe", False) \
+                    and not getattr(src, "IsGroup", False) and str(getattr(message.Info, "ID", "")) not in wa.sent_ids:
+                print(f"[whatsapp] {_sender_number(message)} isn't let in; their request waits in Settings > Connectors.")
         except Exception as e:
-            print(f"[whatsapp] handler error: {type(e).__name__}: {e}")
+            print(f"[whatsapp] a message failed: {type(e).__name__}: {e}")
 
-    print("[whatsapp] starting — Ctrl-C to stop. First run shows a QR to scan.")
-    print("[whatsapp] reminder: use a SPARE number; this is an unofficial, "
-          "experimental bridge (ban risk on automation).")
-    client.connect()  # blocks; runs neonize's own loop
+    print("[whatsapp] starting. Ctrl-C to stop. The first run shows a QR to scan.")
+    print("[whatsapp] use a spare number: this is unofficial and experimental.")
+    client.connect()
 
 
 if __name__ == "__main__":

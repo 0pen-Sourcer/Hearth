@@ -1,97 +1,88 @@
 # Reach Hearth from your phone
 
-Message Hearth from anywhere and it runs the full agent on your PC, then replies,
-files included. Only the chat or user IDs you allow are answered; everyone else is
-ignored. No OAuth, no public server, no port forwarding. Nothing leaves your
-machine except through the service you set up yourself.
+Message Hearth from Telegram, Discord or WhatsApp and it runs the full agent on your PC, then
+replies, with files, pictures and voice notes going both ways. There is no OAuth, no public server
+and no port forwarding. Nothing leaves your machine except through the app you connect.
 
-The channels:
-- **Telegram** (recommended). The official bot API, nothing to break.
-- **Discord**. Also official and safe for your account; good if you live in Discord.
-- **ntfy push**. One-way reminders to your phone, even when the PC is asleep.
-- **WhatsApp** (experimental). An unofficial link to a real account, with a ban
-  risk, so use a spare number only.
+- **Telegram** is the one to start with. It uses the official bot API, so there is nothing to break.
+- **Discord** is also official and safe for your account, and good if you live in Discord.
+- **WhatsApp** is experimental. It links a real account through an unofficial library, which
+  carries a ban risk, so use a spare number only.
 
-A bridge runs alongside Hearth and stops when Hearth closes.
+A connected app runs alongside Hearth, starts again on every launch, and stops when Hearth closes.
 
----
+## Connect an app
 
-## The easy way: Settings, Connectors
+Open **Settings, Connectors**, or just ask JARVIS to "connect my Telegram" and it walks you through
+it in the chat.
 
-No files to edit, no commands to run. Paste a token and your ID, press **Save**, done.
-Hearth keeps the bot running and **starts it again on every launch**.
+**Telegram.** Message **@BotFather** in Telegram, send `/newbot`, follow the prompts and copy the
+bot token (it looks like `123456789:ABCdef…`). Paste it in Connectors and press **Save**.
 
-### Telegram (about 2 minutes)
+**Discord.** At **discord.com/developers** choose **New Application**, then **Bot**, and copy the
+token. No special permissions are needed. Paste it in Connectors and press **Save**, then DM the
+bot. In a server you share with it, it answers when you @mention it.
 
-1. In Telegram, message **@BotFather**, send `/newbot`, follow the prompts and copy
-   the **bot token** (it looks like `123456789:ABCdef…`).
-2. Get **your chat ID**. Message **@userinfobot** in Telegram and it replies with
-   your numeric ID. Or paste the token, press **Start**, message your bot once, and
-   the status line shows the incoming ID.
-3. In Hearth, open **Settings, Connectors, Telegram**. Paste the token and your
-   chat ID, press **Save**, then **Start**.
-4. Text your bot. It runs the agent on your PC and replies, with any file it made.
+**WhatsApp.** Press **Start** under WhatsApp in Connectors and scan the QR code with WhatsApp
+(Settings, Linked Devices, Link a Device). With "also answer my own self-chat" on, you can message
+yourself on that number to reach Hearth.
 
-### Discord (about 3 minutes)
+## Letting people in
 
-1. Go to **discord.com/developers**, choose **New Application**, then **Bot**, copy
-   the **token**, and turn on **MESSAGE CONTENT INTENT**.
-2. Get **your user ID**. In Discord, open Settings, Advanced, turn on **Developer
-   Mode**, then right-click your name and choose **Copy User ID**.
-3. Invite the bot to a server you own, or just DM it.
-4. In Hearth, open **Settings, Connectors, Discord**. Paste the token and your
-   user ID, press **Save** and **Start**. DM it or @mention it in a channel.
+The first time you message your bot, it replies with an 8-character code. Let yourself in with
+that code under **Settings, Connectors** (it lists everyone asking), with `/pair <code>` in the
+terminal, or by telling JARVIS on the PC. A code lasts an hour. Anyone else who finds your bot gets
+a code too, and nothing runs for them unless you let them in. You can remove anyone later from
+the same list.
 
-### ntfy push (reminders on your phone)
+On WhatsApp the bot never replies to people it doesn't know, since that would look like spam on a
+personal number. Their request still shows up in Connectors for you to approve.
 
-Install the **ntfy** app (iOS or Android), subscribe to a topic you pick (for
-example `hearth-<something-random>`), and set the same topic in **Settings,
-Connectors, ntfy**. Reminders now buzz your phone even when the PC is asleep.
+Letting people in and connecting apps only works from the PC itself, never from a chat app, so
+someone you let in can't let in others.
 
----
+## What it can do from the phone
 
-## Advanced: run a bridge from the terminal or headless
+Anything Hearth can do on the PC. It reads and writes files, runs commands, searches the web,
+drives apps, makes images, sets reminders and starts helpers. On Telegram and Discord you watch
+the tools run in a message that updates as it works, then get the answer. On WhatsApp the answer
+ends with a line saying what was used.
 
-If you run Hearth headless (no desktop app), configure a bridge by hand.
+Send a **voice note** and it is written down by the speech model on your PC. Send a **photo or a
+file** and Hearth keeps it in your workspace's uploads folder and looks at it. When the reply names
+a file, the file is sent back to you.
 
-**Telegram**: create `~/.hearth/phone_bridge.json`
-```json
-{ "bot_token": "123456:ABC…", "allowed_chat_ids": [<your id>], "ntfy_topic": "" }
+If a step would ask for your OK on the PC (deleting something, running a command, sending an
+email), it asks in the chat instead. Reply **yes** to let it go on, anything else to stop. On the
+Auto approval mode it asks only what Auto always asks. Messages you send while it is still working
+are handed to the reply in progress.
+
+Each person's conversation is one of your Hearth chats, marked with the app, so you can carry it on
+in the window.
+
+## Reminders on your phone
+
+Turn on **Send reminders to my phone too** in Connectors and every reminder also goes to the
+Telegram or Discord you connected. JARVIS can also send you something on request ("send this to my
+Telegram").
+
+## Running a bot without the window
+
+Each app has a small settings file in `~/.hearth` that Connectors writes for you, so on a server
+you can write it by hand and start the bot from a terminal.
+
 ```
-point it at a brain (the same `LOCAL_API_BASE`, `LOCAL_API_KEY` and `LOCAL_MODEL`
-environment the terminal uses) and run
+~/.hearth/phone_bridge.json      {"bot_token": "123456:ABC…"}
+~/.hearth/discord_bridge.json    {"bot_token": "…"}
+~/.hearth/whatsapp_bridge.json   {"allow_self_chat": true}
+```
+
 ```
 python -m hearth.telegram_bridge
+python -m hearth.discord_bridge
+python -m hearth.whatsapp_bridge
 ```
 
-**Discord**: create `~/.hearth/discord_bridge.json`
-```json
-{ "bot_token": "…", "allowed_user_ids": [<your id>], "ntfy_topic": "" }
-```
-then run `python -m hearth.discord_bridge`.
-
-The desktop app's **Connectors** panel writes these same files for you, so you only
-need this route for a server or headless setup.
-
----
-
-## WhatsApp (experimental)
-
-WhatsApp has **no official bot API for personal accounts**, so this uses an
-unofficial library that logs in as a real account, which carries a **ban risk**.
-Use a **spare number**, never your main one, and don't spam it. Set it up under
-**Settings, Connectors, WhatsApp** (scan the QR code to link) or run
-`python -m hearth.whatsapp_bridge`. Editing a sent message isn't reliable on
-WhatsApp, so unlike Telegram and Discord it can't show live tool progress; it
-sends the final reply with a short "used: …" footer.
-
----
-
-## What the bot can do
-
-Anything Hearth can: read and write files, run the shell, search the web, drive
-apps, generate images, set reminders, run helpers. On Telegram and Discord it shows
-**live tool calls** as it works, then the answer. To send you a file it names the
-path, and the bridge attaches it. Tool calls are approved on these channels without
-asking (you're the owner, gated by the allow list), though a destructive command is
-still refused, so keep your allowed IDs tight and your tokens out of any repo.
+A bot started this way thinks with the brain saved in your settings. To skip the code for people
+you already know, add their ids to the file (`allowed_chat_ids` for Telegram, `allowed_user_ids`
+for Discord, `allowed_numbers` for WhatsApp, written as text).

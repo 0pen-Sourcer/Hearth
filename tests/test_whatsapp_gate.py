@@ -105,19 +105,23 @@ for _c in (MessageEv, ConnectedEv, QREv, PairStatusEv, LoggedOutEv):
     setattr(_events_mod, _c.__name__, _c)
 sys.modules["neonize.client"], sys.modules["neonize.events"] = _client_mod, _events_mod
 
-from hearth import whatsapp_bridge as W                               # noqa: E402
+os.environ["HEARTH_WORKSPACE"] = os.environ["JARVIS_WORKSPACE"] = TMP
+from hearth import channel_core as cc, headless, whatsapp_bridge as W  # noqa: E402
 
+cc.ACCESS_FILE = os.path.join(TMP, "channel_access.json")
 W._SESSION_DB = os.path.join(TMP, "session", "s.sqlite3")
 W._load_config = lambda: {"allowed_numbers": [FRIEND], "allow_self_chat": True}
 PROMPTS: list = []
+REPLY = {"fn": lambda prompt: f"done: {prompt}"}
 
 
-async def fake_run(prompt, history):
+async def fake_run(prompt, *, emit, **k):
     PROMPTS.append(prompt)
-    return f"done: {prompt}"
+    emit("assistant", content=REPLY["fn"](prompt))
+    return 0
 
 
-W._run = fake_run
+headless.run_once = fake_run
 W.run()
 C = Client.instance
 handle = C.handlers[MessageEv]
@@ -126,6 +130,8 @@ handle = C.handlers[MessageEv]
 def deliver(**kw):
     before_p, before_s = len(PROMPTS), len(C.sent)
     handle(C, Event(**kw))
+    for t in list(W._HUB.threads):
+        t.join(5)
     return len(PROMPTS) > before_p, [t for _u, t in C.sent[before_s:]]
 
 
@@ -143,8 +149,10 @@ check("including when WhatsApp addresses that chat by its LID", ran)
 ran, _ = deliver(chat=FRIEND, sender=FRIEND, from_me=False, text="hello", mid="A4")
 check("an allowlisted number is answered", ran)
 
-ran, _ = deliver(chat=STRANGER, sender=STRANGER, from_me=False, text="hello", mid="A5")
+ran, out = deliver(chat=STRANGER, sender=STRANGER, from_me=False, text="hello", mid="A5")
 check("a number not on the allowlist is not", not ran)
+check("and isn't replied to (spam on a personal number), but its request waits for the owner",
+      out == [] and [p["sender"] for p in cc.pending("whatsapp")] == [STRANGER])
 
 ran, _ = deliver(chat=OWN_PHONE, sender=OWN_PHONE, from_me=True, text="done: hi", mid="SENT1")
 check("a reply the bridge sent itself is never read back as a new message", not ran)
@@ -163,11 +171,19 @@ C = Client.instance
 handle = C.handlers[MessageEv]
 
 
-async def reply_with_files(prompt, history):
-    return f"Here you go: `{REPORT}` and the chart {CHART}."
+async def with_a_tool(prompt, *, emit, **k):
+    PROMPTS.append(prompt)
+    emit("tool_call", name="read_file", args={"path": "notes.txt"})
+    emit("assistant", content="It says hello.")
+    return 0
 
-
-W._run = reply_with_files
+headless.run_once = with_a_tool
+_, out = deliver(chat=OWN_PHONE, sender=OWN_PHONE, from_me=True, text="read my notes", mid="T1")
+check(f"WhatsApp can't edit, so no 'working' message is left behind; the reply says what was used {out}",
+      len(out) == 1 and out[0].startswith("It says hello.") and "read_file" in out[0].lower().replace(" ", "_")
+      or (len(out) == 1 and out[0].startswith("It says hello.") and len(out[0]) > len("It says hello.")))
+headless.run_once = fake_run
+REPLY["fn"] = lambda prompt: f"Here you go: `{REPORT}` and the chart {CHART}."
 deliver(chat=OWN_PHONE, sender=OWN_PHONE, from_me=True, text="send me the report", mid="C1")
 check(f"a file the reply names is sent back: {C.files}",
       (OWN_PHONE, "document", REPORT) in C.files)

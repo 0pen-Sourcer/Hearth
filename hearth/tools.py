@@ -7640,100 +7640,120 @@ def _focus_window(p: Dict) -> str:
 
 
 def _send_to_phone(p: Dict) -> str:
-    """Push a message FROM this PC TO one of the user's connected channels
-    (Discord DM / Telegram / ntfy). Outbound counterpart to the bridges, which
-    only reply to incoming messages. Reads the saved bridge config in ~/.hearth."""
-    import json as _j
-    import urllib.request as _u
-    import urllib.parse as _up
+    """Send a message from this PC to the owner on a connected chat app (the
+    outbound side; the apps answer incoming messages by themselves)."""
+    from . import channel_core
     channel = (p.get("channel") or "").strip().lower()
     message = (p.get("message") or "").strip()
     if not message:
         return "Error: message is required."
-    base = os.path.join(os.path.expanduser("~"), ".hearth")
-
-    def _cfg(fn):
-        try:
-            with open(os.path.join(base, fn), encoding="utf-8") as f:
-                return _j.load(f) or {}
-        except Exception:
-            return {}
-
-    if channel == "telegram":
-        c = _cfg("phone_bridge.json")
-        tok = (c.get("bot_token") or "").strip()
-        ids = c.get("allowed_chat_ids") or []
-        if not tok or not ids:
-            return "Error: Telegram isn't set up (need a bot token + your chat id in Settings - Reach from phone)."
-        try:
-            data = _up.urlencode({"chat_id": ids[0], "text": message}).encode()
-            req = _u.Request(f"https://api.telegram.org/bot{tok}/sendMessage", data=data,
-                             headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Hearth"})
-            _u.urlopen(req, timeout=12)
-            return "Sent to your Telegram."
-        except Exception as e:
-            return f"Error sending to Telegram: {type(e).__name__}: {e}"
-
-    if channel == "discord":
-        c = _cfg("discord_bridge.json")
-        tok = (c.get("bot_token") or "").strip()
-        uids = c.get("allowed_user_ids") or []
-        if not tok or not uids:
-            return "Error: Discord isn't set up (need a bot token + your user id in Settings - Reach from phone)."
-        try:
-            h = {"Authorization": f"Bot {tok}", "Content-Type": "application/json", "User-Agent": "Hearth (https://github.com/0pen-sourcer/hearth, 0.7)"}
-            # Open (or reuse) a DM channel with the owner, then post.
-            dm_req = _u.Request("https://discord.com/api/v10/users/@me/channels",
-                                data=_j.dumps({"recipient_id": str(uids[0])}).encode(), headers=h)
-            chan = _j.loads(_u.urlopen(dm_req, timeout=12).read().decode())
-            msg_req = _u.Request(f"https://discord.com/api/v10/channels/{chan['id']}/messages",
-                                 data=_j.dumps({"content": message[:1900]}).encode(), headers=h)
-            _u.urlopen(msg_req, timeout=12)
-            return "Sent to your Discord (DM)."
-        except Exception as e:
-            return f"Error sending to Discord: {type(e).__name__}: {e}"
-
-    if channel == "ntfy":
-        topic = ""
-        try:
-            from . import reminders as _r  # reuses the configured ntfy topic
-            topic = _r._ntfy_topic() if hasattr(_r, "_ntfy_topic") else ""
-        except Exception:
-            topic = ""
-        topic = topic or os.environ.get("HEARTH_NTFY_TOPIC", "") or (_cfg("discord_bridge.json").get("ntfy_topic") or "")
-        if not topic:
-            return "Error: no ntfy topic set (Settings - Reach from phone - ntfy)."
-        try:
-            req = _u.Request(f"https://ntfy.sh/{topic}", data=message.encode("utf-8"),
-                             headers={"Title": "Hearth", "User-Agent": "Hearth"})
-            _u.urlopen(req, timeout=12)
-            return "Pushed to your phone via ntfy."
-        except Exception as e:
-            return f"Error pushing via ntfy: {type(e).__name__}: {e}"
-
-    return "Error: channel must be one of: discord, telegram, ntfy."
+    if not channel:
+        return "Sent." if channel_core.push_any(message) else \
+            "Error: no chat app is connected and paired (Settings > Connectors)."
+    return channel_core.push(channel, message)
 
 
 _HANDLERS["send_to_phone"] = _send_to_phone
 
+
+def _connectors(p: Dict) -> str:
+    """The chat apps (Telegram, Discord, WhatsApp): what is set up, who asked
+    to talk, letting them in, and connecting an app with its token."""
+    from . import channel_core as cc
+    act = (p.get("action") or "status").strip().lower()
+    ch = (p.get("channel") or "").strip().lower()
+    if act != "status" and cc.IN_A_CHAT_APP:
+        return "Error: who may talk, and which apps are connected, is changed on the PC itself, not from a chat app."
+    if act == "status":
+        lines = []
+        try:
+            from . import web as _w
+            running = {c: _w._bridge_running(c) for c in cc.CONFIG_FILES}
+        except Exception:
+            running = {}
+        for c in cc.CONFIG_FILES:
+            cfg = cc.config_of(c)
+            set_up = bool(cfg.get("bot_token")) if c != "whatsapp" else bool(cfg)
+            people = [a["name"] or a["sender"] for a in cc.approved(c)]
+            lines.append(f"{c}: {'set up' if set_up else 'not set up'}"
+                         + (", running" if running.get(c) else "") + (f"; let in: {', '.join(people)}" if people else ""))
+        waiting = cc.pending()
+        lines += [f"waiting: {w['channel']} code {w['code']} from {w['name'] or w['sender']}" for w in waiting]
+        return "\n".join(lines) if lines else "No chat app is set up."
+    if ch not in cc.CONFIG_FILES:
+        return "Error: channel is telegram, discord or whatsapp."
+    if act == "approve":
+        r = cc.approve(ch, p.get("code") or "")
+        return f"Let in {r['name'] or r['sender']} on {ch}." if r.get("ok") else f"Error: {r.get('error')}"
+    if act == "dismiss":
+        return "Dismissed." if cc.dismiss(ch, p.get("code") or "").get("ok") else "Error: no such code is waiting."
+    if act == "revoke":
+        return "Removed." if cc.revoke(ch, p.get("sender") or "").get("ok") else "Error: they weren't let in."
+    if act == "connect":
+        token = (p.get("token") or "").strip()
+        if ch != "whatsapp" and not token:
+            return "Error: a bot token is needed (Telegram: @BotFather, /newbot; Discord: the developer portal, Bot)."
+        path = os.path.join(os.path.expanduser("~"), ".hearth", cc.CONFIG_FILES[ch])
+        cfg = cc.config_of(ch)
+        if token:
+            cfg["bot_token"] = token
+        if ch == "whatsapp":
+            cfg.setdefault("allow_self_chat", True)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        try:
+            from . import web as _w
+            ok, err = _w._spawn_bridge(ch)
+        except Exception as e:
+            ok, err = False, f"{type(e).__name__}: {e}"
+        if not ok:
+            return f"Saved, but it didn't start: {err}"
+        how = ("Scan the QR in Settings > Connectors (WhatsApp, Settings, Linked Devices)." if ch == "whatsapp"
+               else "Now message the bot from your phone; it gives a code, and I can let you in with it.")
+        return f"{ch.title()} is connected and running. {how}"
+    return "Error: action is status, approve, dismiss, revoke or connect."
+
+
+_HANDLERS["connectors"] = _connectors
 TOOL_DEFINITIONS.append({
-    "name": "send_to_phone",
+    "name": "connectors",
     "description": (
-        "Push a message FROM this PC TO the user's phone on a connected channel. "
-        "Use when the user says 'send this to my Discord / Telegram', 'text me this', "
-        "'ping my phone', or wants a result delivered off the PC. Channels: 'discord' "
-        "(DMs the owner via the bot), 'telegram' (messages the owner), 'ntfy' (push "
-        "notification). The bridges must be set up in Settings - Reach from phone; if a "
-        "channel isn't configured this returns a clear error. This is OUTBOUND - the "
-        "bridges already handle INCOMING messages and reply on their own."
+        "The chat apps people reach this PC from: Telegram, Discord, WhatsApp. status: what is set up "
+        "and running, who is let in, which pairing codes wait. connect: save a bot token and start it "
+        "(for 'connect my Telegram'; ask them for the token). approve: let in whoever was given a code. "
+        "dismiss a code; revoke someone. Changes only work from the PC, not from a chat app."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "channel": {"type": "string", "description": "discord | telegram | ntfy"},
+            "action": {"type": "string", "enum": ["status", "connect", "approve", "dismiss", "revoke"],
+                       "description": "status to look; the others change who or what is connected."},
+            "channel": {"type": "string", "enum": ["telegram", "discord", "whatsapp"]},
+            "token": {"type": "string", "description": "connect: the bot token they gave."},
+            "code": {"type": "string", "description": "approve / dismiss: the 8-character code."},
+            "sender": {"type": "string", "description": "revoke: their id, as status lists it."},
+        },
+        "required": ["action"],
+    },
+})
+
+TOOL_DEFINITIONS.append({
+    "name": "send_to_phone",
+    "description": (
+        "Send a message FROM this PC TO the user's phone, on a chat app they connected "
+        "(Telegram, or Discord as a DM). Use for 'send this to my Telegram', 'text me "
+        "this', 'ping my phone'. Leave channel out to use whichever is connected. "
+        "Messages they send come in and are answered by themselves; this is only for "
+        "starting one from here."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "channel": {"type": "string", "enum": ["telegram", "discord"], "description": "Leave out for whichever is connected."},
             "message": {"type": "string", "description": "The text to send."},
         },
-        "required": ["channel", "message"],
+        "required": ["message"],
     },
 })
 
@@ -8491,6 +8511,7 @@ _DRYRUN_GUARDED = {
     "extract_archive_file",              # writes files out of an archive
     "start_job",                         # a shell command, in the background
     "send_to_phone",                     # a real message to a real phone
+    "connectors",                        # connects an app, lets someone in
     "helper_changes",                    # brings a helper's changes into real folders
     "race_helpers",                      # starts agent programs and runs a command
     "forge_generate", "forge_shutdown",  # drive an external image server
@@ -8821,7 +8842,8 @@ _DEFERRED_TOOLS = {
     "message_helper",      # helpers use it among themselves
     "race_helpers",        # comparing agents is an occasional ask
     "list_jobs",           # start_job/get_job_result stay core
-    "send_to_phone",       # ntfy push is opt-in / rare
+    "send_to_phone",       # starting a message to the phone is rare
+    "connectors",          # setting up a chat app is occasional
     "focus_window",        # niche window management
     "glob_files",          # find_file already accepts glob patterns + is fuzzier
     "clipboard_read", "clipboard_write",  # niche; rarely needed as a tool call
@@ -9090,7 +9112,7 @@ _RISKY_TOOLS: set = {
     "launch_team", "delegate",
     # These act outside the machine: one sends a message to a phone, the other
     # downloads and installs code.
-    "send_to_phone", "install_skill",
+    "send_to_phone", "install_skill", "connectors",
     "memory_forget", "extract_archive_file", "create_plugin", "delete_plugin",
     "read_inbox", "send_email",
     "computer_click", "computer_type", "computer_key", "computer_scroll", "computer_drag",
@@ -9205,6 +9227,8 @@ def mode_allows(name: str, args=None) -> bool:
         act = str((args or {}).get("action") or "show")
         # Looking changes nothing; throwing a helper's work away always asks.
         return act == "show" or (m == "auto" and act != "discard")
+    if name == "connectors" and str((args or {}).get("action") or "status") == "status":
+        return True                     # looking at what's connected changes nothing
     if m == "auto":
         if name in _ALWAYS_ASK_IN_AUTO:
             return False
@@ -9351,7 +9375,7 @@ _TOOL_CATEGORY = {
     # Reminders & alerts
     "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
     "cancel_reminder": "Reminders & alerts", "snooze_reminder": "Reminders & alerts", "pause_reminder": "Reminders & alerts",
-    "notify": "Reminders & alerts", "send_to_phone": "Reminders & alerts",
+    "notify": "Reminders & alerts", "send_to_phone": "Reminders & alerts", "connectors": "Reminders & alerts",
     # Email
     "read_inbox": "Email", "send_email": "Email",
     # Voice

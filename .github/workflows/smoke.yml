@@ -164,6 +164,15 @@ jobs:
         run: |
           python tests/test_memory_store.py
 
+      - name: Chat apps share pairing, the conversation and questions before risky steps
+        # Every tool was approved from the phone, history was lost on restart,
+        # photos and voice notes were ignored, and access meant typing ids by hand.
+        run: |
+          python tests/test_channel_core.py
+          python tests/test_telegram_bridge.py
+          python tests/test_discord_bridge.py
+          python tests/test_custom_connector.py
+
       - name: Who the WhatsApp bridge answers
         # The linked number's messages to anyone ran as instructions, and the
         # reply landed in that chat. Files the reply named were never sent.
@@ -390,6 +399,8 @@ jobs:
           python tests/test_ui_boot.py
           python tests/test_ui_chat.py
           python tests/test_ui_model_menu.py
+          python tests/test_ui_images.py
+          python tests/test_ui_connectors.py
 
       - name: The public tool reference matches the code
         # docs/TOOLS.md is generated; it said 93 tools long after there were more.

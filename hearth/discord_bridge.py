@@ -1,46 +1,38 @@
-"""Reach Hearth from Discord — bot token only, official API, no ban risk.
+"""Talk to Hearth from Discord, through a bot of your own (official API).
 
-The clean two-way phone/desktop channel: a Discord bot you DM (or @mention),
-relayed to Hearth on your PC, which replies with the answer and any file it made.
-Unlike WhatsApp this is an official, supported bot API — nothing to get banned
-for, nothing that breaks on a protocol change.
+Setup: discord.com/developers/applications, New Application, Bot, copy the
+token and give it to Hearth (Settings > Connectors, or tell JARVIS "connect my
+Discord"). DM the bot: you get a pairing code to approve in Hearth, once. In a
+server it answers only when @mentioned, and only people already let in.
+User ids in ~/.hearth/discord_bridge.json ("allowed_user_ids") are answered
+without a code. No privileged intents are needed: Discord delivers the text of
+DMs and of messages that mention the bot without them.
 
-Setup (~3 minutes):
-  1. https://discord.com/developers/applications -> New Application -> Bot.
-     Copy the bot token. Under "Privileged Gateway Intents", turn ON
-     "MESSAGE CONTENT INTENT" (required to read message text).
-  2. Invite the bot to a server you own, OR just DM it (enable DMs).
-     To find your own user id: Discord Settings -> Advanced -> Developer Mode on,
-     then right-click your name -> Copy User ID.
-  3. Create ~/.hearth/discord_bridge.json:
-       {"bot_token": "...", "allowed_user_ids": [<your id>], "ntfy_topic": ""}
-  4. Point it at a brain (same LOCAL_API_BASE / LOCAL_API_KEY / LOCAL_MODEL env
-     the CLI uses), then run:  python -m hearth.discord_bridge
+Everything else is shared with the other apps (hearth/channel_core.py).
 
-Single-owner: only allowed_user_ids are answered; messages auto-approve tool
-calls (you're the owner). Keep the allowlist tight and the token out of any repo.
+    python -m hearth.discord_bridge
 """
 from __future__ import annotations
 
+import asyncio
 import json
-from . import bridge_status as _bridge_status
-from . import env as _env
 import os
+import time
 
-# A remote chat message has no one at this screen following along — keep the
-# desktop-activity overlay off for bridge-driven runs.
+from . import channel_core as cc
+from . import env as _env
+
 _env.setdefault("NO_GUI", "1")
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "discord_bridge.json")
-_DISCORD_MAX = 2000  # Discord's hard per-message character cap
+_DISCORD_MAX = 2000
+_FILE_MAX = 24_000_000
 
 
 def _log(msg: str) -> None:
-    """One timestamped line. Started from the window, output goes to
-    <workspace>/logs/discord_bridge.log, which the log view shows."""
-    import time as _t
+    """One timestamped line; started from the window it goes to logs/discord_bridge.log."""
     try:
-        print(_t.strftime("%H:%M:%S ") + "[discord] " + msg, flush=True)
+        print(time.strftime("%H:%M:%S ") + "[discord] " + msg, flush=True)
     except Exception:
         pass
 
@@ -53,207 +45,128 @@ def _load_config() -> dict:
         return {}
 
 
-def _split(s: str, n: int = _DISCORD_MAX):
-    s = s or "(no output)"
-    out = []
-    while s:
-        if len(s) <= n:
-            out.append(s); break
-        cut = s.rfind("\n", 0, n)
-        if cut < n // 2:
-            sp = s.rfind(" ", 0, n)
-            cut = sp if sp > 0 else n
-        out.append(s[:cut]); s = s[cut:].lstrip("\n")
-    return out
+class Discord(cc.Adapter):
+    """The hub works from its own threads; Discord's client lives on its event
+    loop, so every call is handed over to that loop."""
+    name, label, max_len = "discord", "Discord", _DISCORD_MAX
+
+    def __init__(self, client, loop):
+        self.client, self.loop = client, loop
+        self.channels, self.sent = {}, {}
+
+    def _do(self, coro, wait: float = 30):
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(wait)
+
+    def send(self, chat, text, reply_to=None):
+        ch = self.channels.get(str(chat))
+        if ch is None:
+            return None
+        try:
+            m = self._do(ch.send((text or "")[:_DISCORD_MAX]))
+            self.sent[m.id] = m
+            return m.id
+        except Exception:
+            return None
+
+    def edit(self, chat, msg_id, text):
+        m = self.sent.get(msg_id)
+        if m is None:
+            return False
+        try:
+            self._do(m.edit(content=(text or "")[:_DISCORD_MAX]))
+            return True
+        except Exception:
+            return False
+
+    def typing(self, chat):
+        ch = self.channels.get(str(chat))
+        if ch is not None:
+            async def once():
+                await ch.typing()                 # one "typing…" that Discord clears by itself
+            try:
+                self._do(once(), wait=5)
+            except Exception:
+                pass
+
+    def send_file(self, chat, path):
+        import discord
+        ch = self.channels.get(str(chat))
+        if ch is None or os.path.getsize(path) > _FILE_MAX:
+            return
+        try:
+            self._do(ch.send(file=discord.File(path)), wait=120)
+        except Exception:
+            pass
 
 
-# Injected as a system message every bridge turn (not persisted to history, so
-# the rolling-history cap can't drop it). Teaches the model the channel's one
-# non-obvious affordance: it CAN send files here by naming their path.
-_CHANNEL_PRIMER = _bridge_status.channel_primer("Discord")
-
-
-async def _run(prompt: str, history: list, on_tool=None) -> str:
-    from . import headless
-    parts = []
-    events = []
-    err = {"cat": None, "msg": None}
-
-    def emit(kind, **kw):
-        if kind == "assistant":
-            parts.append(kw.get("content") or "")
-        elif kind == "error":
-            err["cat"] = kw.get("category") or "error"
-            err["msg"] = str(kw.get("message", ""))
-        elif kind == "tool_call":
-            nm = kw.get("name")
-            if nm:
-                events.append((nm, kw.get("args")))
-                if on_tool:
-                    on_tool(list(events))  # live "which tool is firing" feed
-
-    try:
-        await headless.run_once(prompt, emit=emit,
-                                history=[_CHANNEL_PRIMER] + (history or []),
-                                chat_id="discord",   # one ongoing conversation per bridge
-                                permission_check=lambda _n, _a: "allow",
-                                supervised=False)  # phone: destructive guard still fires
-    except Exception as e:
-        from .errors import classify_api_error
-        info = classify_api_error(e, headless._is_local_endpoint(headless.LOCAL_API_BASE))
-        err["cat"], err["msg"] = info.category, info.hint
-    return headless.bridge_reply_or_reason("".join(parts), err["cat"], err["msg"])
+async def handle(hub: cc.Hub, dc: Discord, me_id: int, message) -> str:
+    """One Discord message, given to the shared hub."""
+    if message.author.bot or message.author.id == me_id:
+        return "ignored"                          # never itself, never another bot
+    is_dm = message.guild is None
+    mentioned = any(getattr(u, "id", None) == me_id for u in message.mentions)
+    sender = str(message.author.id)
+    if not is_dm:
+        # In a server: only when mentioned, and no pairing codes in public.
+        if not mentioned or not cc.is_allowed(dc.name, sender, hub.configured):
+            return "ignored"
+    text = (message.content or "").replace(f"<@{me_id}>", "").replace(f"<@!{me_id}>", "").strip()
+    files, voice = [], ""
+    for att in message.attachments or []:
+        if (att.size or 0) > _FILE_MAX:
+            continue
+        try:
+            path = cc.save_upload(await att.read(), att.filename or "file")
+        except Exception:
+            continue
+        is_voice = getattr(att, "is_voice_message", lambda: False)()
+        if is_voice or (att.content_type or "").startswith("audio/"):
+            voice = voice or path
+        else:
+            files.append(path)
+    chat = str(message.channel.id)
+    dc.channels[chat] = message.channel
+    return await asyncio.to_thread(hub.receive, chat, sender, text, name=str(message.author.display_name or ""),
+                                   voice=voice, files=files)
 
 
 def run() -> None:
     try:
         import discord
     except Exception as e:
-        _log(f"discord.py not available: {e} (pip install discord.py)")
+        _log(f"discord.py isn't installed ({e}); Settings > Connectors installs it")
         return
     cfg = _load_config()
     token = (cfg.get("bot_token") or "").strip()
     if not token:
-        _log(f"no bot_token in {CONFIG_PATH}")
+        _log(f"no bot token yet: add one in Settings > Connectors ({CONFIG_PATH})")
         return
-    allowed = set(int(x) for x in (cfg.get("allowed_user_ids") or []))
-    if not allowed:
-        _log("WARNING: allowed_user_ids is empty - I'll log incoming ids but answer nobody.")
-    if cfg.get("ntfy_topic"):
-        os.environ.setdefault("HEARTH_NTFY_TOPIC", cfg["ntfy_topic"])
-    # Brain: the GUI sets LOCAL_API_BASE in the env it spawns us with. If we were
-    # started directly (no env), load the saved brain from settings.json so the
-    # bridge talks to the same model the app does (e.g. Grok), not the localhost
-    # default. Without this a directly-run bridge answered from the wrong brain.
-    if not os.environ.get("LOCAL_API_BASE"):
-        try:
-            from .tools import WORKSPACE
-            with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
-                _s = json.load(f)
-            if _s.get("llm_url"):
-                os.environ["LOCAL_API_BASE"] = _s["llm_url"]
-            if _s.get("llm_key"):
-                os.environ["LOCAL_API_KEY"] = _s["llm_key"]
-            if _s.get("llm_model"):
-                os.environ["LOCAL_MODEL"] = _s["llm_model"]
-            _log(f"brain from settings: {_s.get('llm_url') or 'localhost default'} model={_s.get('llm_model') or '?'}")
-        except Exception as e:
-            _log(f"no saved brain loaded ({type(e).__name__}); using localhost default")
-
-    # IMPORTANT: do NOT request the privileged message_content intent. Discord
-    # delivers message text for DMs and for messages that @mention the bot even
-    # without it - which are exactly our two response cases - so the bridge works
-    # with ZERO dev-portal setup. Requesting it while it's OFF in the portal
-    # instead crashes the bot on connect (PrivilegedIntentsRequired), which is
-    # what made "@mention does nothing" happen.
-    intents = discord.Intents.default()
-    client = discord.Client(intents=intents)
-    histories: dict = {}
+    cc.use_saved_brain(_log)
+    client = discord.Client(intents=discord.Intents.default())
+    box = {}
 
     @client.event
     async def on_ready():
-        _log(f"bridge ONLINE as {client.user}. DM it or @mention it.")
+        box["dc"] = Discord(client, asyncio.get_running_loop())
+        box["hub"] = cc.Hub(box["dc"], configured_senders=cfg.get("allowed_user_ids") or [])
+        _log(f"bridge up as {client.user}. DM it or @mention it.")
 
     @client.event
     async def on_message(message):
-        if message.author == client.user:
+        if "hub" not in box:
             return
-        uid = message.author.id
-        is_dm = message.guild is None
-        mentioned = client.user in message.mentions
-        # Diagnostic line — visible when the bridge runs in a terminal. Makes
-        # "it just doesn't respond" debuggable (who messaged, did we get text).
-        _log(f"msg uid={uid} dm={is_dm} mentioned={mentioned} content_len={len(message.content or '')}")
-        if uid not in allowed:
-            _log(f"ignored: uid {uid} not in allowed_user_ids {sorted(allowed)}")
-            return
-        # In a guild channel, only respond when mentioned; in a DM, always.
-        if not is_dm and not mentioned:
-            return
-        text = message.content or ""
-        if mentioned:
-            text = text.replace(f"<@{client.user.id}>", "").replace(f"<@!{client.user.id}>", "").strip()
-        if not text:
-            # Mentions and DMs deliver text without any intent, so an empty body
-            # here is rare (an attachment-only message, say). Nudge gently.
-            _log("empty body after mention strip - nothing to act on")
-            try:
-                await message.channel.send("Got your ping, but no text to act on. Type your request right after the mention.")
-            except Exception:
-                pass
-            return
-        hist = histories.setdefault(uid, [])
-        # Live tool feed: one status message that edits itself as tools fire, so
-        # the user watches the work instead of a silent pause then a wall of text.
-        # Created lazily on the first tool call (a pure-chat reply shows none).
-        import asyncio
-        from . import bridge_status
-        state = {"events": [], "dirty": False, "msg": None}
-
-        def on_tool(events):
-            state["events"] = events
-            state["dirty"] = True
-
-        stop = asyncio.Event()
-
-        async def _updater():
-            while not stop.is_set():
-                await asyncio.sleep(0.6)
-                if not state["dirty"]:
-                    continue
-                state["dirty"] = False
-                body = bridge_status.format_status(state["events"], working=True, rich=True)[:_DISCORD_MAX]
-                try:
-                    if state["msg"] is None:
-                        state["msg"] = await message.channel.send(body)
-                    else:
-                        await state["msg"].edit(content=body)
-                except Exception:
-                    pass
-
-        updater = asyncio.create_task(_updater())
         try:
-            reply = await _run(text, hist, on_tool=on_tool)
+            what = await handle(box["hub"], box["dc"], client.user.id, message)
+            if what == "pairing":
+                _log("someone new asked to talk; their code is waiting in Settings > Connectors.")
         except Exception as e:
-            reply = f"(error: {type(e).__name__}: {e})"
-        stop.set()
-        try:
-            await updater
-        except Exception:
-            pass
-        hist.append({"role": "user", "content": text})
-        hist.append({"role": "assistant", "content": reply})
-        del hist[:-16]
-        # Finalize the tool status into a "Tools used" list that STAYS (its own
-        # message), then send the answer as separate message(s) below it — so the
-        # channel reads "tools used X" then the reply, never one edited into the
-        # other (which mashed two turns' replies together before).
-        if state["msg"] is not None and state["events"]:
-            try:
-                done = bridge_status.format_done(state["events"], rich=True)[:_DISCORD_MAX]
-                await state["msg"].edit(content=done)
-            except Exception:
-                pass
-        # Scrub any API key/token before it leaves the machine over Discord
-        # (secrets-only — a legit email/path the user is discussing stays).
-        from .redact import redact_secrets_only
-        _safe = redact_secrets_only(reply or "(no output)")[0]
-        for chunk in _split(_safe):
-            try:
-                await message.channel.send(chunk)
-            except Exception:
-                pass
-        for f in bridge_status.files_in(reply, 24_000_000):
-            try:
-                await message.channel.send(file=discord.File(f))
-            except Exception:
-                pass
+            _log(f"a message failed: {type(e).__name__}: {e}")
 
-    _log("starting - connecting to Discord gateway")
+    _log("connecting to Discord")
     try:
-        client.run(token)
+        client.run(token, log_handler=None)
     except Exception as e:
-        _log(f"failed to connect: {type(e).__name__}: {e} (is the bot token valid? is another copy already using it?)")
+        _log(f"failed to connect: {type(e).__name__}: {e} (is the bot token right? is another copy using it?)")
 
 
 if __name__ == "__main__":

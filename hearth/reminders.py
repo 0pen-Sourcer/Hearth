@@ -406,42 +406,15 @@ _watcher_stop = threading.Event()
 
 
 def _push_phone(title: str, body: str) -> bool:
-    """Best-effort phone push via ntfy.sh (zero-auth, free, open-source). Fires
-    only if HEARTH_NTFY_TOPIC (or JARVIS_NTFY_TOPIC) is set — pick a hard-to-
-    guess topic, install the ntfy app, subscribe to it. Override the server with
-    HEARTH_NTFY_SERVER (default https://ntfy.sh) for a self-hosted instance.
-    This is what makes reminders reach you when the PC is asleep/closed; never
-    raises."""
-    import os as _os
-    topic = (_os.environ.get("HEARTH_NTFY_TOPIC")
-             or _env.get("NTFY_TOPIC") or "").strip()
-    if not topic:
-        # Fall back to the topic saved from the GUI (Settings -> Reach from phone),
-        # which writes settings.json rather than an env var.
-        try:
-            import json as _json
-            from .tools import WORKSPACE as _WS
-            with open(_os.path.join(_WS, "settings.json"), encoding="utf-8") as _sf:
-                topic = (_json.load(_sf).get("ntfy_topic") or "").strip()
-        except Exception:
-            topic = ""
-    if not topic:
-        return False
-    server = (_os.environ.get("HEARTH_NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
+    """With "send reminders to my phone too" on (Settings > Connectors), the
+    reminder also goes to the chat app they connected. Never raises."""
     try:
-        import urllib.request
-        req = urllib.request.Request(
-            f"{server}/{topic}",
-            data=(body or "").encode("utf-8"),
-            headers={
-                "Title": (title or "Hearth").encode("utf-8").decode("latin-1", "replace"),
-                "Tags": "fire",
-                "User-Agent": "Hearth/0.7",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=5):
-            return True
+        from .tools import WORKSPACE as _WS
+        with open(os.path.join(_WS, "settings.json"), encoding="utf-8") as _sf:
+            if not json.load(_sf).get("phone_reminders"):
+                return False
+        from . import channel_core
+        return channel_core.push_any(f"{title}: {body}" if title and title != "Hearth" else body)
     except Exception:
         return False
 
@@ -596,9 +569,9 @@ _atexit.register(_take_down_all)
 
 def desktop_notify(title: str, body: str) -> bool:
     """Pop a desktop notification now. Tries plyer (cross-platform) then
-    win10toast (Windows), falling back to stdout + TTS. Also pushes to the
-    phone via ntfy if HEARTH_NTFY_TOPIC is set (so reminders reach you even when
-    the PC is off). Returns True if a real DESKTOP toast fired. Shared by the
+    win10toast (Windows), falling back to stdout + TTS. Also sends it to the
+    phone app they connected when they asked for that. Returns True if a real
+    DESKTOP toast fired. Shared by the
     reminder watcher AND the `notify` tool."""
     _push_phone(title, body)  # phone push gets the full text, it has no limit
     # The Windows tray-balloon struct caps the body at 256 chars and the title

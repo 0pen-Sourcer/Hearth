@@ -104,7 +104,7 @@ Say it however you like. Hearth works out the exact time and reads back the day 
 | `next monday at 10am` | the coming Monday, 10:00 |
 | `every weekday at 9am` | a recurring reminder |
 
-When it's time you get a Windows notification, and JARVIS says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With an [ntfy](https://ntfy.sh) topic set, it reaches your phone too. All of them are listed in the Reminders tab, where you can change one (what it says, when, how often and until when), pause one without losing it (a repeating one picks up at its next time when you resume it), type a new one, and pick from ideas based on what JARVIS knows about you.
+When it's time you get a Windows notification, and JARVIS says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With **Send reminders to my phone too** on (Settings, Connectors), it reaches your Telegram or Discord as well. All of them are listed in the Reminders tab, where you can change one (what it says, when, how often and until when), pause one without losing it (a repeating one picks up at its next time when you resume it), type a new one, and pick from ideas based on what JARVIS knows about you.
 
 ---
 
@@ -198,7 +198,7 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 - **Voice**: voice, speed, microphone, speakers or headphones, the listening model.
 - **Behavior**: the agent's name, reasoning, house rules, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
 - **Appearance**: Classic, Light, Dark or System, Simple or Advanced, the accent, the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups), with the switch for saving memories on its own.
-- **Connectors**: phone bridges, ntfy and email.
+- **Connectors**: Telegram, Discord, WhatsApp, who is let in, and email.
 - **About**: version, updates, repair, start at login, and the tour.
 
 Everything saves as you change it, with no restart.

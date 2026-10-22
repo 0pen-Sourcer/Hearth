@@ -155,10 +155,14 @@ check(f"and its turn runs the memory pass, with the reply and the chat {noted}",
 # A reminder's own chat isn't something going on in their life.
 check("a reminder's chat leaves no thread", threads.note("rem_42", {"topic": "Reminder: stand up", "where": "Said it."}) is False
       and "Reminder" not in threads.block(now=time.time()))
-# Phone chats count: each bridge passes its own chat id.
+# Phone chats count: each bridge runs its turns through the shared hub, which
+# gives every person's chat its own id (tests/test_channel_core.py runs it).
+from hearth import channel_core as _cc  # noqa: E402
+_core = open(os.path.join(ROOT, "hearth", "channel_core.py"), encoding="utf-8").read()
 for _b in ("telegram", "discord", "whatsapp"):
     _src = open(os.path.join(ROOT, "hearth", f"{_b}_bridge.py"), encoding="utf-8").read()
-    check(f"the {_b} bridge says which chat its turns are in", f'chat_id="{_b}"' in _src)
+    check(f"the {_b} bridge says which chat its turns are in",
+          "cc.Hub(" in _src and "chat_id=cid" in _core and _cc.chat_id_for(_b, "42") == f"{_b}_42")
 
 # The terminal says it too, in one quiet line.
 from hearth import term_render  # noqa: E402
