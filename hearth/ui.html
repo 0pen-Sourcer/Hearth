@@ -2297,6 +2297,19 @@
      MEMORY view
      ============================================================ */
   .list-pane { flex: 1; overflow-y: auto; padding: 12px 20px; }
+  .mem-lately { flex: none; max-height: 34vh; overflow-y: auto; margin: 10px 20px 0; border: 1px solid var(--border);
+    border-radius: var(--r); background: var(--bg-1); }
+  .mem-lately .ml-head { padding: 9px 12px; font: 600 12.5px var(--sans); color: var(--fg); border-bottom: 1px solid var(--border); }
+  .mem-lately .ml-head span { font-weight: 400; color: var(--fg-faint); margin-left: 6px; }
+  .mem-lately .ml-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-top: 1px solid var(--border); }
+  .mem-lately .ml-row:first-of-type { border-top: 0; }
+  .mem-lately .ml-body { flex: 1; min-width: 0; }
+  .mem-lately .ml-top { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; color: var(--fg); }
+  .mem-lately .ml-top em { font-style: normal; color: var(--fg-faint); font-size: 11.5px; }
+  .mem-lately .ml-where { font-size: 12px; color: var(--fg-dim); margin-top: 2px; line-height: 1.4; }
+  .mem-lately .ml-open { font-size: 11.5px; color: var(--fg-faint); margin-top: 2px; }
+  .mem-lately .ml-del { flex: none; background: none; border: 0; color: var(--fg-faint); cursor: pointer; padding: 4px; border-radius: 6px; }
+  .mem-lately .ml-del:hover { color: var(--err); background: var(--hover); }
 
   /* Shared list-card used by Reminders + Skills. Matched 1:1 to .model-row so
      these panes read identically to the (polished) Models pane. */
@@ -4238,6 +4251,8 @@
         </div>
         <input type="text" id="mem-search" placeholder="Search…">
       </div>
+      <!-- What's going on lately: kept for the next messages; each can be removed. -->
+      <div class="mem-lately" id="mem-lately" hidden></div>
       <!-- Graph default-visible; List/Tree start hidden. Matches the toggle. -->
       <div class="list-pane" id="mem-list"></div>
       <div class="tree-pane" id="mem-tree" hidden></div>
@@ -12397,7 +12412,32 @@ function memFactHTML(raw) {
   meta.push(`<span>${n ? `Recalled ${n === 1 ? 'once' : n + ' times'}` : 'Not recalled yet'}${n && when(fm.last_recalled_at) ? `, last ${esc(when(fm.last_recalled_at))}` : ''}</span>`);
   return `<div class="mem-fact"><div class="mf-text">${renderMD(text || '(empty)')}</div><div class="mf-meta">${meta.join('')}</div></div>`;
 }
+// The "going on lately" notes, above the facts: what comes along with each new
+// message. Each one can be removed; a chat talked in again starts a new one.
+async function refreshLately() {
+  const box = $('mem-lately');
+  if (!box) return;
+  let rows = [];
+  try { rows = (await api('/api/threads')).threads || []; } catch {}
+  box.hidden = !rows.length;
+  if (!rows.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="ml-head">Going on lately <span>comes along with your next messages, from your recent chats</span></div>`
+    + rows.map(t => `<div class="ml-row" data-chat="${esc(t.chat)}">
+        <div class="ml-body"><div class="ml-top"><b>${esc(t.topic || '')}</b><em>${esc(t.ago || '')}</em></div>
+          ${t.where ? `<div class="ml-where">${esc(t.where)}</div>` : ''}
+          ${(t.open || []).length ? `<div class="ml-open">Still open: ${esc(t.open.join('; '))}</div>` : ''}</div>
+        <button class="ml-del" title="Forget this">${_ICON_TRASH_SM}</button></div>`).join('');
+  box.querySelectorAll('.ml-del').forEach(b => b.onclick = async () => {
+    const row = b.closest('.ml-row');
+    try { await api('/api/threads/' + encodeURIComponent(row.dataset.chat), { method: 'DELETE' }); } catch (e) { toast("Couldn't forget it", e.message, 'err'); return; }
+    row.remove();
+    if (!box.querySelector('.ml-row')) box.hidden = true;
+  });
+}
+const _ICON_TRASH_SM = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+
 async function refreshMemory() {
+  refreshLately();
   try {
     const { memories } = await api('/api/memory');
     memCache = memories;

@@ -2162,6 +2162,10 @@ class HearthHandler(BaseHTTPRequestHandler):
                                   "error": f"{type(e).__name__}: {e}"}]})
         if path == "/api/memory":
             return self._send_json(200, {"memories": _memory_index()})
+        if path == "/api/threads":
+            # What's going on lately, as kept for the next messages.
+            from . import threads as _threads
+            return self._send_json(200, {"threads": _threads.everything()})
         if path.startswith("/api/memory/"):
             name = urllib.parse.unquote(path[len("/api/memory/"):])
             return self._send_memory_one(name)
@@ -2587,6 +2591,10 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/memory/"):
             name = urllib.parse.unquote(path[len("/api/memory/"):])
             return self._delete_memory(name)
+        if path.startswith("/api/threads/"):
+            from . import threads as _threads
+            _threads.forget(urllib.parse.unquote(path[len("/api/threads/"):]))
+            return self._send_json(200, {"ok": True})
         if path.startswith("/api/conversations/"):
             cid = urllib.parse.unquote(path[len("/api/conversations/"):])
             ok = _delete_convo(cid)

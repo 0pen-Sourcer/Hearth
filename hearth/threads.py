@@ -115,6 +115,13 @@ def recent(exclude: Optional[str] = None, now: Optional[float] = None, limit: in
     return [dict(t, chat=cid, ago=_ago(now - float(t.get("updated") or 0))) for _, cid, t in rows[:limit]]
 
 
+def everything(now: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Every thread kept, newest first, for the Memory tab to show and delete."""
+    now = now if now is not None else time.time()
+    rows = sorted(_load()["threads"].items(), key=lambda kv: kv[1].get("updated", 0), reverse=True)
+    return [dict(t, chat=cid, ago=_ago(now - float(t.get("updated") or 0))) for cid, t in rows if not _not_theirs(cid)]
+
+
 def block(exclude: Optional[str] = None, now: Optional[float] = None) -> str:
     """A few lines for the model, in front of the message. Empty when nothing
     has been going on."""

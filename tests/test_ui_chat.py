@@ -1458,6 +1458,24 @@ with sync_playwright() as pw:
     check(f"a reply that had other chats in mind shows what, and the turn says which chat it is in {lately}",
           lately["chat"] and lately["btn"] and lately["rows"] == ["CBSE private form"]
           and "Fee payment" in (lately["open"] or "") and lately["kept"] == 1)
+    # What's going on lately went along with messages but showed nowhere.
+    from hearth import threads as _threads
+    _threads.note("c_phone", {"topic": "Phone hunt", "where": "Still after the Edge 60 Pro.", "open": ["Hasn't bought it"]})
+    seen_lately = pg.evaluate("""async () => {
+      showView('memory');
+      await refreshLately();
+      const box = $('mem-lately');
+      const out = { shown: !box.hidden, rows: [...box.querySelectorAll('.ml-row b')].map(b => b.textContent),
+                    open: (box.querySelector('.ml-open') || {}).textContent };
+      box.querySelector('.ml-del').click();
+      await new Promise(r => setTimeout(r, 400));
+      out.after = !box.hidden;
+      showView('chat');
+      return out;
+    }""")
+    check(f"the Memory tab shows what's going on lately, and one can be forgotten {seen_lately}",
+          seen_lately["shown"] and seen_lately["rows"] == ["Phone hunt"] and "Hasn't bought it" in (seen_lately["open"] or "")
+          and seen_lately["after"] is False and _threads.get("c_phone") is None)
     # A helper's full log was tool names in mono, raw JSON, and check-mark glyphs.
     tx = pg.evaluate("""() => {
       const m = helperAsMessage([
