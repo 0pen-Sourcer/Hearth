@@ -48,7 +48,7 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 LEFT = """() => {
   const out = [];
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-    acceptNode: n => n.parentElement && n.parentElement.closest('script, style, template, .ob, #onboarding')
+    acceptNode: n => n.parentElement && n.parentElement.closest('script, style, template, .ob-agent-name')
       ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
   while (walk.nextNode()) if (/\\bJARVIS\\b/.test(walk.currentNode.textContent)) out.push(walk.currentNode.parentElement.outerHTML.slice(0, 160));
   return out;

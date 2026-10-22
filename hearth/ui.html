@@ -3832,7 +3832,6 @@
   }
   .ob-tipline {
     background: var(--bg-2); border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
     border-radius: var(--r); padding: 10px 14px;
     font-size: 12px; color: var(--fg-dim); line-height: 1.5;
     margin: 16px 0 0 0;
@@ -3866,13 +3865,21 @@
     border-radius: var(--r); margin: 8px 0;
     font-size: 13px; color: var(--fg-dim);
   }
+  /* What a status row says, as a line icon: a quiet ring while it looks, then a
+     tick, a warning or a cross. */
   .ob-status-row .ob-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--fg-faint);
+    width: 14px; height: 14px; flex: none; box-sizing: border-box;
+    border: 1.6px solid var(--border-strong); border-top-color: var(--fg-dim); border-radius: 50%;
+    animation: ob-spin 0.9s linear infinite;
   }
-  .ob-status-row.is-good .ob-dot { background: var(--ok); }
-  .ob-status-row.is-warn .ob-dot { background: var(--accent-2); }
-  .ob-status-row.is-bad  .ob-dot { background: var(--err); }
+  @keyframes ob-spin { to { transform: rotate(360deg); } }
+  .ob-status-row:is(.is-good, .is-warn, .is-bad) .ob-dot {
+    border: 0; border-radius: 0; animation: none; background: var(--fg-dim);
+    -webkit-mask: var(--ob-ico) center / contain no-repeat; mask: var(--ob-ico) center / contain no-repeat;
+  }
+  .ob-status-row.is-good .ob-dot { --ob-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E"); }
+  .ob-status-row.is-warn .ob-dot { --ob-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5M12 16.5v.01'/%3E%3C/svg%3E"); background: var(--accent-2); }
+  .ob-status-row.is-bad  .ob-dot { --ob-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M7 7l10 10M17 7L7 17'/%3E%3C/svg%3E"); background: var(--err); }
   .ob-disk-list {
     max-height: 160px; overflow-y: auto;
     border: 1px solid var(--border); border-radius: var(--r);
@@ -4883,7 +4890,7 @@
             <div class="hint">Paste what another AI knows about you - Hearth saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
           </div>
           <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;">
-            <div id="set-import-prompt" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points - name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
+            <div id="set-import-prompt" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points, one fact per line, with no introduction: my name, work, preferences, projects, important dates and the people in my life.</div>
             <button type="button" class="btn-mini" id="set-import-copy">Copy</button>
           </div>
           <textarea id="set-import-text" rows="4" placeholder="Paste the AI's reply here…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12px;resize:vertical;outline:none;"></textarea>
@@ -5493,8 +5500,8 @@
         <div class="ob-choices" id="ob-brain-choices" style="margin-top:18px"></div>
 
         <div class="ob-tipline" id="ob-brain-tip">
-          Don't have a model yet? Don't worry - the <b>Models</b> tab inside the app lets you download
-          one with a single click. You can skip this step and do it from there.
+          No model yet? Continue, and a later step offers one that fits your graphics card. The
+          <b>Models</b> tab has every other one.
         </div>
       </div>
 
@@ -5505,24 +5512,23 @@
             <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
           </svg>
         </div>
-        <h1 class="ob-title">Or use your favorite cloud brain.</h1>
-        <p class="ob-sub">Hearth is <b>local-first</b> - your PC stays the default. But if your
-          machine isn't powerful enough, or you'd rather pay for a smarter brain, or you just
-          want a backup when something breaks - <b>we've got you covered.</b> The same tools
-          work pointed at <b>Gemini, OpenAI, Grok, OpenRouter</b> or any OpenAI-compatible URL.
-          Bring your key, switch in one click. Nothing else changes.</p>
+        <h1 class="ob-title">Or think with a cloud model.</h1>
+        <p class="ob-sub">This PC stays the default. If it isn't strong enough, or you want a
+          cleverer brain for some jobs, I can think with a cloud model on your own key, from
+          Anthropic, Google, OpenAI, xAI, OpenRouter, Groq or any OpenAI-compatible address.
+          My tools, memory and voice stay the same, and you switch in one click.</p>
 
         <div class="ob-section">
           <div class="ob-label">Pick a path</div>
           <select id="ob-brain-where" class="ob-select">
-            <option value="local">Local-first - stay on this PC (default)</option>
-            <option value="anthropic">Cloud - Anthropic Claude</option>
-            <option value="gemini">Cloud - Google Gemini</option>
-            <option value="openai">Cloud - OpenAI GPT</option>
-            <option value="grok">Cloud - xAI Grok</option>
-            <option value="openrouter">Cloud - OpenRouter (100+ models)</option>
-            <option value="groq">Cloud - Groq (very fast, paid tier)</option>
-            <option value="custom">Cloud - Custom / OpenAI-compatible (Together, …)</option>
+            <option value="local">Stay on this PC</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="gemini">Google (Gemini)</option>
+            <option value="openai">OpenAI (GPT)</option>
+            <option value="grok">xAI (Grok)</option>
+            <option value="openrouter">OpenRouter (hundreds of models)</option>
+            <option value="groq">Groq</option>
+            <option value="custom">Another OpenAI-compatible address</option>
           </select>
         </div>
         <div class="ob-section" id="ob-cloud-key-row" hidden>
@@ -5538,7 +5544,7 @@
           </div>
         </div>
 
-        <div class="ob-tipline">You can always change this later - Settings → Chat brain has the same dropdown.</div>
+        <div class="ob-tipline">Settings, Chat brain changes this any time.</div>
       </div>
 
       <!-- ---- step 4: voice ---- -->
@@ -5749,18 +5755,18 @@
           </svg>
         </div>
         <h1 class="ob-title">Bring your old agent's memory along?</h1>
-        <p class="ob-sub" id="ob-migrate-sub">Looking for Hermes / OpenClaw installs…</p>
+        <p class="ob-sub" id="ob-migrate-sub">Looking for Hermes or OpenClaw on this PC…</p>
         <div class="ob-choices" id="ob-migrate-choices" style="margin-top:18px"></div>
         <details class="ob-import-ai" style="margin-top:16px">
           <summary style="cursor:pointer;font-size:13px;color:var(--accent-2);font-weight:600">
-            …or paste your memory from ChatGPT / Claude</summary>
+            Bring over what ChatGPT or Claude knows about you</summary>
           <div style="margin-top:10px">
-            <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>Step 1.</b> Copy this and send it to ChatGPT / Claude:</p>
+            <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>1.</b> Copy this and send it to ChatGPT or Claude.</p>
             <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:12px">
-              <div id="ob-import-prompt" style="flex:1;background:var(--bg-0);border:1px solid var(--bg-3);border-radius:8px;padding:9px 11px;font-size:12px;color:var(--fg-dim);font-style:italic;line-height:1.5">List everything you know or remember about me as plain bullet points - name, work, preferences, projects, important dates, people. One fact per line, no preamble.</div>
+              <div id="ob-import-prompt" style="flex:1;background:var(--bg-0);border:1px solid var(--bg-3);border-radius:8px;padding:9px 11px;font-size:12px;color:var(--fg-dim);font-style:italic;line-height:1.5">List everything you know or remember about me as plain bullet points, one fact per line, with no introduction: my name, work, preferences, projects, important dates and the people in my life.</div>
               <button class="ob-btn" id="ob-import-copy" type="button" style="white-space:nowrap">Copy</button>
             </div>
-            <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>Step 2.</b> Paste its reply here and click Import:</p>
+            <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>2.</b> Paste its reply here.</p>
             <textarea id="ob-import-text" rows="6"
               placeholder="Paste the bullet list here…"
               style="width:100%;box-sizing:border-box;resize:vertical;background:var(--bg-0);
@@ -5771,13 +5777,12 @@
               <span id="ob-import-status" style="font-size:12px;color:var(--fg-faint)"></span>
             </div>
             <p class="ob-sub" style="font-size:11px;margin-top:8px;color:var(--fg-faint)">
-              Importing is optional - if you'd rather skip it, just hit <b>Continue</b> below.</p>
+              This is optional. <b>Continue</b> skips it.</p>
           </div>
         </details>
         <div class="ob-tipline">
-          API keys are <b>never</b> copied. Memory files import as Hearth memories;
-          skills get parked under <code>~/Jarvis/imported_skills/</code> for later.
-          You can do this any time from Settings → Behavior.
+          Keys are never copied. What I learn comes in as my own memories, and skills wait in
+          <code>imported_skills</code> in my folder. Settings, Behavior does this again any time.
         </div>
       </div>
 
@@ -5796,7 +5801,7 @@
           <button class="ob-choice ob-try" data-try="Find the biggest files in my Downloads folder"><div class="ob-choice-title">Find the biggest files in my Downloads folder</div></button>
           <button class="ob-choice ob-try" data-try="Open Notepad and write me a short to-do list for today"><div class="ob-choice-title">Open Notepad and write me a short to-do list for today</div></button>
         </div>
-        <div class="ob-tipline">Type <code>/help</code> for commands. Your phone and email connect from <b>Settings → Connectors</b>.</div>
+        <div class="ob-tipline">Type <code>/help</code> for commands. Your phone and email connect from <b>Settings, Connectors</b>.</div>
       </div>
     </div>
 
@@ -14401,7 +14406,6 @@ async function refreshSettings() {
     const _memSub = document.getElementById('mem-sub');
     if (_memSub) _memSub.textContent = `facts ${_nm} remembers across sessions`;
     document.querySelectorAll('[data-agent-name]').forEach(el => { el.textContent = _nm; });
-    document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _nm; });
     const _tmIn = document.getElementById('tm-input');
     if (_tmIn) _tmIn.placeholder = `Talk to ${_nm}…`;
     // Sync the sticker tooltip with the actual brain. "LM Studio model"
@@ -19422,7 +19426,7 @@ async function _obProbeMigrate() {
       // No Hermes/OpenClaw install - but the ChatGPT/Claude paste import below
       // is still useful, so stay on this step instead of auto-advancing.
       _obSkipMigrate = false;
-      if (sub) sub.textContent = "No prior agent install found - but you can still paste your memory from ChatGPT or Claude below.";
+      if (sub) sub.textContent = "I didn't find Hermes or OpenClaw on this PC. You can still bring over what ChatGPT or Claude knows about you.";
       return;
     }
     if (sub) sub.textContent = 'Found a prior agent install. Want me to pull its memory into Hearth?';
@@ -19442,7 +19446,7 @@ async function _obProbeMigrate() {
       skipBtn.className = 'ob-choice';
       skipBtn.innerHTML = `
         <div class="ob-choice-title">Skip for now</div>
-        <div class="ob-choice-sub">You can run this any time via Settings → Behavior → Migrate.</div>
+        <div class="ob-choice-sub">Settings, Behavior does this again any time.</div>
       `;
       skipBtn.onclick = () => { _obMigrateChoice = 'skip'; _obPickChoice(box, skipBtn); };
       box.appendChild(skipBtn);
@@ -20051,7 +20055,7 @@ function _obWireImport() {
       const r = await api('/api/memory/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: body }) });
       if (r && r.ok) {
         if (r.count > 0) {
-          if (status) { status.style.color = 'var(--ok)'; status.textContent = `✓ saved ${r.count} memor${r.count === 1 ? 'y' : 'ies'} - click Continue →`; }
+          if (status) { status.style.color = 'var(--ok)'; status.textContent = `Saved ${r.count} memor${r.count === 1 ? 'y' : 'ies'}.`; }
           txt.value = '';
         } else {
           if (status) status.textContent = 'nothing new saved (already known, or no durable facts found). You can Continue.';
@@ -20341,7 +20345,7 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
       if (r.ok) {
         if (testMsg) testMsg.textContent = `✓ ${window._obQuote.by}. Press again for another.`;
       } else {
-        if (testMsg) testMsg.textContent = '✗ playback failed - see Settings → Voice for details.';
+        if (testMsg) testMsg.textContent = 'Playback failed. Settings, Voice says why.';
       }
     } catch (e) {
       if (testMsg) testMsg.textContent = '✗ error: ' + (e.message || 'network');
@@ -20608,7 +20612,7 @@ document.addEventListener('keydown', (e) => {
   if (!$('onboard').classList.contains('open')) return;
   if (e.key === 'Escape') {
     e.preventDefault();
-    showModal('Skip setup?', 'You can finish it later from Settings → About → Replay setup.',
+    showModal('Skip setup?', 'You can finish it later from Settings, About, Replay setup.',
       [{ label: 'Keep setting up' }, { label: 'Skip for now', onclick: () => obFinish(true) }]);
     return;
   }
