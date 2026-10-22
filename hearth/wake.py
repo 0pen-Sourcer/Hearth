@@ -234,8 +234,10 @@ class WakeListener:
             cfg = _load_settings() or {}
         except Exception:
             cfg = {}
-        rows, default = _ll.device_rows()
         name = str(cfg.get("voice_input_name", "") or "").strip()
+        if name and not cfg.get("wake_on_bluetooth") and _ll.named_handsfree(name):
+            return None, self._bluetooth_why(name)
+        rows, default = _ll.device_rows()
         if not name:
             legacy, why = _ll.name_for_numbered_pick(cfg.get("voice_input_device", -1))
             if why:
@@ -255,12 +257,29 @@ class WakeListener:
         if not cfg.get("wake_on_bluetooth") and _ll.is_bluetooth_handsfree(name, rows):
             # Holding a Bluetooth headset's mic keeps it in hands-free mode (call-quality
             # sound) for as long as Hearth runs. Voice mode still uses it when asked.
-            return None, (f"'{name}' is a Bluetooth headset; the wake word leaves its mic alone so it keeps "
-                          f"full-quality sound (Settings > Voice can let it listen)")
+            return None, self._bluetooth_why(name)
         try:
             return _ll.MicInput(dev, self.sample_rate, int(self.sample_rate * BLOCK_S)), ""
         except Exception as e:
             return None, f"'{name}' would not open ({type(e).__name__})"
+
+    @staticmethod
+    def _bluetooth_why(name: str) -> str:
+        return (f"'{name}' is a Bluetooth headset; the wake word leaves its mic alone so it keeps "
+                f"full-quality sound (Settings > Voice can let it listen)")
+
+    @staticmethod
+    def _waiting_on() -> str:
+        """What a paused wake word waits to change before it tries again: the
+        input devices (listed without starting PortAudio) and the voice settings."""
+        from . import listen as _ll
+        try:
+            from .web import _load_settings
+            cfg = _load_settings() or {}
+        except Exception:
+            cfg = {}
+        return "%s|%s|%s|%s" % (_ll.input_fingerprint(), cfg.get("voice_input_name", ""),
+                                cfg.get("voice_input_device", ""), cfg.get("wake_on_bluetooth", ""))
 
     @staticmethod
     def _close(stream) -> None:
@@ -275,7 +294,7 @@ class WakeListener:
         from . import listen as _ll
         block_n = int(self.sample_rate * BLOCK_S)
         seg = _Segmenter()
-        stream, said = None, ""
+        stream, said, waited = None, "", ""
         try:
             while not self._stop.is_set():
                 if _ll.mic_claimed():
@@ -288,11 +307,17 @@ class WakeListener:
                     self._stop.wait(0.2)
                     continue
                 if stream is None:
+                    if said and self._waiting_on() == waited:
+                        # Nothing changed since the mic couldn't be used: don't start
+                        # PortAudio again (its start pokes every device; see input_fingerprint).
+                        self._stop.wait(3.0)
+                        continue
+                    waited = self._waiting_on()
                     stream, why = self._open_mic()
                     if stream is None:
                         if why != said:
                             print(f"[hearth.wake] {why}", flush=True)
-                            said = why
+                        said = why
                         self._stop.wait(3.0)
                         continue
                     said = ""

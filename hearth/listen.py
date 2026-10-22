@@ -116,6 +116,38 @@ def device_rows() -> tuple:
         return [], None
 
 
+def named_handsfree(name: str) -> bool:
+    """A mic whose own name says it is a Bluetooth headset's hands-free side
+    ("Headset (boAt Rockerz Hands-Free AG Audio)"): Windows names it so."""
+    return "hands-free" in (name or "").lower()
+
+
+def input_fingerprint() -> str:
+    """What the input devices are, cheaply, to notice one come or go without
+    starting PortAudio: its start looks at every device on Windows, and looking
+    at a Bluetooth headset's hands-free side switches the headset to it, cutting
+    its high-quality sound. Windows' old wave API lists without opening anything."""
+    if sys.platform != "win32":
+        return str(int(time.time() // 30))           # elsewhere: look again every half minute
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class WAVEINCAPSW(ctypes.Structure):
+            _fields_ = [("wMid", wintypes.WORD), ("wPid", wintypes.WORD), ("vDriverVersion", wintypes.UINT),
+                        ("szPname", wintypes.WCHAR * 32), ("dwFormats", wintypes.DWORD),
+                        ("wChannels", wintypes.WORD), ("wReserved1", wintypes.WORD)]
+        winmm = ctypes.windll.winmm
+        names = []
+        for i in range(winmm.waveInGetNumDevs()):
+            caps = WAVEINCAPSW()
+            if winmm.waveInGetDevCapsW(i, ctypes.byref(caps), ctypes.sizeof(caps)) == 0:
+                names.append(caps.szPname)
+        return "|".join(names)
+    except Exception:
+        return str(int(time.time() // 30))
+
+
 def is_bluetooth_handsfree(name: str, rows: Optional[list] = None) -> bool:
     """Whether a mic is a Bluetooth headset's hands-free mic. Windows lists such a
     mic, raw, under its Bluetooth hands-free driver (bthhfenum.sys) with the

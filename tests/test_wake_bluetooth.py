@@ -64,6 +64,39 @@ opened.clear()
 stream, why = w._open_mic()
 check("a wired mic is opened as before", stream is not None and opened == [1])
 
+# Starting PortAudio looks at every device, and looking at a Bluetooth headset's
+# hands-free side switches the headset to it: a wake word retrying every few
+# seconds kept a headset's high-quality sound cut for as long as Hearth ran.
+listed = []
+listen.device_rows = lambda: listed.append(1) or (ROWS, 1)
+settings.clear()
+settings["voice_input_name"] = "Headset (boAt Rockerz Hands-Free AG Audio)"
+stream, why = w._open_mic()
+check("a mic named as a headset's hands-free side is left alone without listing the devices",
+      stream is None and "Bluetooth" in why and listed == [])
+
+fingerprint = ["A"]
+listen.input_fingerprint = lambda: fingerprint[0]
+settings["voice_input_name"] = "USB Microphone (gone)"
+waits = []
+
+
+def wait(seconds):
+    waits.append(seconds)
+    if len(waits) == 6:
+        fingerprint[0] = "B"                      # a device came or went
+    if len(waits) >= 10:
+        w._stop.set()
+    return w._stop.is_set()
+
+
+w._stop.clear()
+w._stop.wait = wait
+listen.mic_claimed = lambda: False
+w._loop()
+check(f"a mic that isn't there is looked for again only when the devices change ({len(listed)} looks in 10 waits)",
+      len(listed) == 2)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
