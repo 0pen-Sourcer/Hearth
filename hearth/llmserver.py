@@ -1044,6 +1044,73 @@ def server_extras_missing() -> Optional[str]:
 _native_server_cache: List[Optional[Dict[str, Any]]] = []
 
 
+# The server's file name, and how its libraries are named, on this system.
+SERVER_EXE = "llama-server.exe" if sys.platform == "win32" else "llama-server"
+# Executable headers: Windows (MZ), Linux (ELF), macOS (Mach-O 64/32, universal).
+_EXEC_MAGIC = (b"MZ", b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
+
+
+def _lib_name(stem: str) -> str:
+    """ggml-cuda -> ggml-cuda.dll / libggml-cuda.so / libggml-cuda.dylib."""
+    if sys.platform == "win32":
+        return stem + ".dll"
+    return "lib" + stem + (".dylib" if sys.platform == "darwin" else ".so")
+
+
+def asset_os() -> str:
+    """How llama.cpp's release files name this system."""
+    return "win" if sys.platform == "win32" else "macos" if sys.platform == "darwin" else "ubuntu"
+
+
+def asset_arch() -> str:
+    import platform
+    return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
+
+
+_ASSET = re.compile(r"^(cudart-)?llama-(?:[^-]+-)?bin-(win|ubuntu|macos)-(?:(.+)-)?(x64|arm64)\.(zip|tar\.gz)$")
+
+
+def parse_asset(name: str) -> Optional[Dict[str, Any]]:
+    """What a release file is: llama-<tag>-bin-<os>-<kind>-<arch>.<zip|tar.gz>,
+    or the CUDA runtime beside it (cudart-...). macOS builds name no kind: Metal
+    is built in. A plain Linux build is the CPU one."""
+    m = _ASSET.match(name or "")
+    if not m:
+        return None
+    cudart, os_, kind, arch, _ext = m.groups()
+    kind = kind or ("metal" if os_ == "macos" else "cpu")
+    backend, _, ver = kind.partition("-")
+    return {"os": os_, "arch": arch, "backend": backend, "cuda": ver if backend == "cuda" else "",
+            "cudart": bool(cudart)}
+
+
+def _assets_here(assets) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """(asset, what it is) for the release files built for this system."""
+    out = []
+    for a in assets or []:
+        p = parse_asset(a.get("name") or "")
+        if p and p["os"] == asset_os() and p["arch"] == asset_arch():
+            out.append((a, p))
+    return out
+
+
+def _system_name() -> str:
+    return {"win": "Windows", "macos": "macOS", "ubuntu": "Linux"}[asset_os()]
+
+
+def _with_libs(env: Dict[str, str], dirs: List[str]) -> Dict[str, str]:
+    """Let the engine find the libraries beside it."""
+    if not dirs:
+        return env
+    join = os.pathsep.join(dirs)
+    env["PATH"] = join + os.pathsep + env.get("PATH", "")
+    if sys.platform.startswith("linux"):
+        env["LD_LIBRARY_PATH"] = join + os.pathsep + env.get("LD_LIBRARY_PATH", "")
+    elif sys.platform == "darwin":
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = join + os.pathsep + env.get("DYLD_FALLBACK_LIBRARY_PATH", "")
+    return env
+
+
 # Size below which an exe carries no code of its own. Current upstream builds
 # ship every tool as a ~9 KB launcher next to a heavy <name>-impl.dll, so size
 # alone rejects them; older builds (and LM Studio's) put the code in the exe.
@@ -1051,18 +1118,18 @@ _MIN_SERVER_EXE_BYTES = 15_000
 
 
 def _usable_server_exe(exe: Path) -> bool:
-    """True for a llama-server.exe that can actually run. Requires a PE header
-    (an AV-truncated file loses it), then accepts either a self-contained exe or
-    a thin launcher whose -impl.dll sits beside it."""
+    """True for a llama-server that can actually run. Requires an executable
+    header (an AV-truncated file loses it), then accepts either a self-contained
+    exe or a thin launcher whose -impl library sits beside it."""
     try:
         if not exe.is_file():
             return False
         with open(exe, "rb") as f:
-            if f.read(2) != b"MZ":
+            if not f.read(4).startswith(_EXEC_MAGIC):
                 return False
         if exe.stat().st_size >= _MIN_SERVER_EXE_BYTES:
             return True
-        impl = exe.with_name(exe.stem + "-impl.dll")
+        impl = exe.with_name(_lib_name(exe.stem.replace(".exe", "") + "-impl"))
         return impl.is_file() and impl.stat().st_size >= _MIN_SERVER_EXE_BYTES
     except OSError:
         return False
@@ -1216,21 +1283,26 @@ def build_rank(tag: str) -> tuple:
 
 def engine_build_of(exe) -> str:
     """What an engine was built for, told by the libraries that sit beside it:
-    "cuda" (NVIDIA only), "vulkan" (any card) or "cpu"."""
+    "cuda" (NVIDIA only), "vulkan" (any card), "metal" (a Mac) or "cpu"."""
     d = Path(exe).parent
     try:
-        if (d / "ggml-cuda.dll").is_file() or any(d.glob("cudart64_*.dll")) or "cuda" in d.name.lower():
+        if ((d / _lib_name("ggml-cuda")).exists() or any(d.glob("cudart64_*.dll"))
+                or any(d.glob("libcudart.so*")) or "cuda" in d.name.lower()):
             return "cuda"
-        if (d / "ggml-vulkan.dll").is_file():
+        if (d / _lib_name("ggml-vulkan")).exists():
             return "vulkan"
+        if (d / _lib_name("ggml-metal")).exists():
+            return "metal"
     except OSError:
         pass
     return "cpu"
 
 
 def engine_fits(exe) -> bool:
-    """A CUDA build only runs on an NVIDIA card. The others run anywhere."""
-    return engine_build_of(exe) != "cuda" or engine_backend() == "cuda"
+    """A CUDA build only runs on an NVIDIA card, a Metal one only on a Mac.
+    The others run anywhere."""
+    built = engine_build_of(exe)
+    return built not in ("cuda", "metal") or engine_backend() == built
 
 
 def unfit_engine() -> Optional[str]:
@@ -1245,7 +1317,7 @@ def unfit_engine() -> Optional[str]:
         pass
     for root in roots:
         if root.is_dir():
-            for exe in root.glob("*/llama-server.exe"):
+            for exe in root.glob(f"*/{SERVER_EXE}"):
                 if _usable_server_exe(exe) and not engine_fits(exe):
                     return engine_build_of(exe)
     return None
@@ -1266,7 +1338,7 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
     # 1) Hearth-managed runtime (download target — newest version dir wins)
     hearth_rt = Path(os.path.expanduser("~/.hearth/llamacpp"))
     if hearth_rt.is_dir():
-        candidates += sorted(hearth_rt.glob("*/llama-server.exe"),
+        candidates += sorted(hearth_rt.glob(f"*/{SERVER_EXE}"),
                              key=lambda p: build_rank(p.parent.name), reverse=True)
     # 2) Engine shipped INSIDE the app (Full edition). A packaged build carries a
     # current standalone llama-server so a fresh install has a working engine with
@@ -1278,14 +1350,14 @@ def find_native_llama_server() -> Optional[Dict[str, Any]]:
             else Path(__file__).resolve().parent.parent
         _bundled = _app / "llamacpp"
         if _bundled.is_dir():
-            candidates += sorted(_bundled.glob("*/llama-server.exe"),
+            candidates += sorted(_bundled.glob(f"*/{SERVER_EXE}"),
                                  key=lambda p: build_rank(p.parent.name), reverse=True)
     except Exception:
         pass
     # 3) Reuse LM Studio's CUDA-12 backend if the user has it (zero download)
     lms = Path(os.path.expanduser("~/.lmstudio/extensions/backends"))
     if lms.is_dir():
-        candidates += sorted(lms.glob("*nvidia-cuda12*/llama-server.exe"),
+        candidates += sorted(lms.glob(f"*nvidia-cuda12*/{SERVER_EXE}"),
                              key=lambda p: build_rank(p.parent.name), reverse=True)
     # One built for another maker's card is not an engine on this PC, and an
     # added build only runs the models the official one can't read.
@@ -1384,7 +1456,7 @@ def added_engines() -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     root = Path(os.path.expanduser("~/.hearth/llamacpp"))
     if root.is_dir():
-        for exe in sorted(root.glob("*@*/llama-server.exe"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for exe in sorted(root.glob(f"*@*/{SERVER_EXE}"), key=lambda p: p.stat().st_mtime, reverse=True):
             owner, _, tag = exe.parent.name.partition("@")
             out.append({"id": exe.parent.name, "exe": str(exe), "dll_dirs": [str(exe.parent)],
                         "label": f"{owner} {tag}", "source": "github"})
@@ -1421,14 +1493,14 @@ def _remember_engine(model_path: str, exe: Optional[str]) -> None:
 def add_engine_folder(path: str) -> Dict[str, Any]:
     """Add a build of llama.cpp that is already on disk (its folder or its exe)."""
     p = Path(os.path.expanduser((path or "").strip().strip('"')))
-    if p.is_file() and p.name.lower() == "llama-server.exe":
+    if p.is_file() and p.name.lower() == SERVER_EXE:
         exe = p
     elif p.is_dir():
-        exe = next(iter(sorted(p.glob("llama-server.exe")) + sorted(p.glob("*/llama-server.exe"))), None)
+        exe = next(iter(sorted(p.glob(SERVER_EXE)) + sorted(p.glob(f"*/{SERVER_EXE}"))), None)
     else:
         return {"ok": False, "error": f"there is no folder {p}"}
     if not exe or not _usable_server_exe(exe):
-        return {"ok": False, "error": f"no working llama-server.exe in {p}"}
+        return {"ok": False, "error": f"no working {SERVER_EXE} in {p}"}
     if not engine_fits(exe):
         return {"ok": False, "error": "that build is for an NVIDIA card, and this PC doesn't have one"}
     name = (p if p.is_dir() else exe.parent).name
@@ -1466,9 +1538,9 @@ def llama_runtime_info() -> Dict[str, Any]:
     # Same size floor as the picker — an AV-truncated stub on disk is not a
     # usable install, and reporting it as one offers "update" instead of a redo.
     have_managed = managed.is_dir() and any(
-        _usable_server_exe(p) for p in managed.glob("*/llama-server.exe"))
+        _usable_server_exe(p) for p in managed.glob(f"*/{SERVER_EXE}"))
     stub_managed = (managed.is_dir()
-                    and any(managed.glob("*/llama-server.exe")) and not have_managed)
+                    and any(managed.glob(f"*/{SERVER_EXE}")) and not have_managed)
     if not n:
         source = "wheel"      # falling back to the bundled llama-cpp-python
     elif ".hearth" in exe:
@@ -1595,7 +1667,7 @@ def _latest_build_release(timeout: float = 12, repo: str = _LLAMA_CPP_REPO) -> O
     shape = r"^b\d+$" if repo == _LLAMA_CPP_REPO else r"."
     for rel in rels if isinstance(rels, list) else []:
         tag = (rel.get("tag_name") or "").strip()
-        if re.match(shape, tag) and any("bin-win-" in (a.get("name") or "") for a in rel.get("assets") or []):
+        if re.match(shape, tag) and _assets_here(rel.get("assets")):
             return rel
     return None
 
@@ -1603,7 +1675,10 @@ def _latest_build_release(timeout: float = 12, repo: str = _LLAMA_CPP_REPO) -> O
 def engine_backend() -> str:
     """Which llama.cpp build fits this machine's graphics card: CUDA for
     NVIDIA, Vulkan for AMD and Intel cards with their own memory (it runs on
-    any vendor's driver), and the plain CPU build otherwise."""
+    any vendor's driver), and the plain CPU build otherwise. A Mac's build always
+    uses Metal."""
+    if sys.platform == "darwin":
+        return "metal"
     try:
         from . import gpu as _gpu
         p = _gpu.primary()
@@ -1646,7 +1721,7 @@ def installed_llama_tags() -> List[str]:
     root = Path(os.path.expanduser("~/.hearth/llamacpp"))
     if not root.is_dir():
         return []
-    out = [p.parent.name for p in root.glob("*/llama-server.exe")
+    out = [p.parent.name for p in root.glob(f"*/{SERVER_EXE}")
            if _usable_server_exe(p) and not is_added_build(p.parent.name)]
     return sorted(out, key=build_rank, reverse=True)
 
@@ -1760,17 +1835,17 @@ def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
         if not tag:
             continue
         cudas, bins_size, cudart_size = [], 0, 0
-        for a in rel.get("assets") or []:
-            nm = a.get("name", "")
-            m = re.search(r"bin-win-cuda-([\d.]+)-x64\.zip$", nm)
-            if not m:
+        want = engine_backend()
+        for a, p in _assets_here(rel.get("assets")):
+            if p["backend"] != want:
                 continue
-            if "cudart" in nm:
+            if p["cudart"]:
                 cudart_size = max(cudart_size, int(a.get("size") or 0))
             else:
-                cudas.append(m.group(1))
+                if p["cuda"]:
+                    cudas.append(p["cuda"])
                 bins_size = max(bins_size, int(a.get("size") or 0))
-        if not cudas:
+        if not bins_size or (want == "cuda" and not cudas):
             continue
         # The install pulls BOTH the binaries AND the CUDA runtime (cudart), so the
         # honest download size is their sum — counting only the bins made the
@@ -1820,12 +1895,49 @@ def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
             "gpu_compute_cap": detect_gpu_compute_cap()}
 
 
+def _archive_ok(path: Path) -> bool:
+    import tarfile
+    import zipfile
+    try:
+        return zipfile.is_zipfile(path) if path.name.endswith(".zip") else tarfile.is_tarfile(path)
+    except OSError:
+        return False
+
+
+def _extract_archive(archive: Path, dest: Path) -> None:
+    """Unpack a release file into dest. The Linux and macOS ones keep everything
+    in one llama-<tag>/ folder; it is dropped so the server sits in dest itself,
+    beside its libraries (some of them links to others)."""
+    import zipfile
+    if archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(dest)
+        return
+    import tarfile
+    with tarfile.open(archive) as t:
+        members = t.getmembers()
+        tops = {m.name.split("/", 1)[0] for m in members}
+        strip = len(tops) == 1 and any("/" in m.name for m in members)
+        keep = []
+        for m in members:
+            if strip:
+                if "/" not in m.name:
+                    continue
+                m.name = m.name.split("/", 1)[1]
+            keep.append(m)
+        try:
+            t.extractall(dest, members=keep, filter="data")
+        except TypeError:                     # Python without extraction filters
+            t.extractall(dest, members=keep)
+
+
 def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                            on_progress: Optional[Callable[[int, int], None]] = None,
                            force: bool = False, backend: Optional[str] = None,
                            repo: str = "") -> Dict[str, Any]:
-    """Download the official ggml-org llama.cpp Windows CUDA build (llama-server
-    .exe + ggml DLLs) and its CUDA runtime into ~/.hearth/llamacpp/<tag>/. This
+    """Download the official ggml-org llama.cpp build for this system and card
+    (llama-server + ggml libraries, and the CUDA runtime for NVIDIA) into
+    ~/.hearth/llamacpp/<tag>/. This
     is what lets Hearth's builtin run on any GPU without bundling a giant wheel
     and without depending on LM Studio — the 'updatable runtime'. Also serves as
     the Lite->Full upgrade (pull the runtime, not the whole app).
@@ -1833,7 +1945,6 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     same way, kept apart as <owner>@<tag>.
     Returns {ok, dir, tag} or {ok: False, error}."""
     import urllib.request
-    import zipfile
     import shutil
     # A previous cancel must not kill this run — the flag is sticky otherwise
     # and every later install aborts instantly.
@@ -1853,7 +1964,7 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         else:
             rel = _latest_build_release(timeout=20, repo=repo)
             if not rel:
-                return {"ok": False, "error": f"no build with Windows files among the recent releases of {repo}"}
+                return {"ok": False, "error": f"no build for {_system_name()} among the recent releases of {repo}"}
     except Exception as e:
         return {"ok": False, "error": f"couldn't reach GitHub releases: {e}"}
     tagname = rel.get("tag_name") or tag or "latest"
@@ -1863,8 +1974,8 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     # Already have this exact build — re-pulling 640 MB to land on the same
     # files is pure waste. `force` is the explicit repair path.
     _have = Path(os.path.expanduser(f"~/.hearth/llamacpp/{dirname}"))
-    _same_build = _have.is_dir() and engine_build_of(_have / "llama-server.exe") == backend
-    if not force and _same_build and _usable_server_exe(_have / "llama-server.exe"):
+    _same_build = _have.is_dir() and engine_build_of(_have / SERVER_EXE) == backend
+    if not force and _same_build and _usable_server_exe(_have / SERVER_EXE):
         reset_native_cache()
         return {"ok": True, "dir": str(_have), "tag": tagname, "already": True}
     if _have.is_dir() and not _same_build:
@@ -1872,32 +1983,24 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         # must not be left mixed in with the new ones.
         shutil.rmtree(_have, ignore_errors=True)
 
-    # NB: both "llama-<tag>-bin-win-cuda-X-x64.zip" (the binaries) and
-    # "cudart-llama-bin-win-cuda-X-x64.zip" (the CUDA runtime) contain the
-    # substring "bin-win-cuda-X-x64.zip" — so the binaries matcher must exclude
-    # "cudart" or it grabs the runtime zip twice and misses llama-server.exe.
+    here = _assets_here(assets)
     if backend == "cuda":
         # Builds differ in which CUDA versions they ship; take the one asked
         # for when it is there, else the oldest, which the most drivers run.
-        _cudas = sorted({m.group(1) for a in assets if "cudart" not in a.get("name", "")
-                         for m in [re.search(r"bin-win-cuda-([\d.]+)-x64\.zip$", a.get("name", ""))] if m},
+        _cudas = sorted({p["cuda"] for _a, p in here if p["backend"] == "cuda" and not p["cudart"]},
                         key=lambda v: [int(x) for x in v.split(".") if x.isdigit()])
         if _cudas and cuda not in _cudas:
             cuda = _cudas[0]
-        _tail = f"bin-win-cuda-{cuda}-x64.zip"
-        bins = next((a for a in assets
-                     if _tail in a.get("name", "") and "cudart" not in a.get("name", "")), None)
-        runtime = next((a for a in assets
-                        if f"cudart-llama-{_tail}" in a.get("name", "")), None)
+        bins = next((a for a, p in here if p["backend"] == "cuda" and p["cuda"] == cuda and not p["cudart"]), None)
+        runtime = next((a for a, p in here if p["backend"] == "cuda" and p["cuda"] == cuda and p["cudart"]), None)
         if not bins or (not runtime and not added):
-            return {"ok": False, "error": f"no cuda-{cuda} Windows assets in release {tagname}"}
+            return {"ok": False, "error": f"no CUDA {cuda} build for {_system_name()} in release {tagname}"}
     else:
-        # Vulkan and CPU builds are one archive each, with no separate runtime.
-        _tail = f"bin-win-{backend}-x64.zip"
-        bins = next((a for a in assets if a.get("name", "").endswith(_tail)), None)
+        # Vulkan, CPU and Metal builds are one archive each, with no separate runtime.
+        bins = next((a for a, p in here if p["backend"] == backend and not p["cudart"]), None)
         runtime = None
         if not bins:
-            return {"ok": False, "error": f"no {backend} Windows build in release {tagname}"}
+            return {"ok": False, "error": f"no {backend} build for {_system_name()} in release {tagname}"}
 
     dest = Path(os.path.expanduser(f"~/.hearth/llamacpp/{dirname}"))
     dest.mkdir(parents=True, exist_ok=True)
@@ -1931,11 +2034,10 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                 except Exception:
                     pass
 
-        # A stale/corrupt zip in cache (a truncated promotion, an AV-gutted file)
-        # would otherwise skip the download and then blow up in extractall with
-        # BadZipFile. Trust an existing zip only if it's a valid archive; else
-        # drop it (and any stale .part) and pull fresh.
-        if zip_path.exists() and not zipfile.is_zipfile(zip_path):
+        # A stale/corrupt archive in cache (a truncated promotion, an AV-gutted
+        # file) would otherwise skip the download and then fail to extract.
+        # Trust one only if it opens; else drop it (and any stale .part).
+        if zip_path.exists() and not _archive_ok(zip_path):
             zip_path.unlink(missing_ok=True)
             part.unlink(missing_ok=True)
         if not zip_path.exists():
@@ -1944,9 +2046,8 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
                                   cancel=_llama_dl_cancel.is_set)
         done[0] = base + int(asset.get("size", 0))
         try:
-            with zipfile.ZipFile(zip_path) as z:
-                z.extractall(dest)   # exe + ggml DLLs + cudart all land together
-        except zipfile.BadZipFile:
+            _extract_archive(zip_path, dest)   # exe + ggml libraries + cudart all land together
+        except Exception:
             # Corrupt archive slipped through — nuke it + any .part so the NEXT
             # attempt starts clean instead of re-failing on the same bad bytes.
             zip_path.unlink(missing_ok=True)
@@ -1980,9 +2081,14 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
     except OSError:
         pass
     reset_native_cache()
-    exe = next(iter(dest.rglob("llama-server.exe")), None)
+    exe = next(iter(dest.rglob(SERVER_EXE)), None)
+    if exe and sys.platform != "win32":
+        try:
+            os.chmod(exe, os.stat(exe).st_mode | 0o755)
+        except OSError:
+            pass
     if not exe:
-        return {"ok": False, "error": "llama-server.exe not found after extract"}
+        return {"ok": False, "error": f"{SERVER_EXE} not found after extract"}
     if not _usable_server_exe(exe):
         # Extracted but truncated: AVs flag the unsigned binary as IDP.generic
         # and gut it. Reporting ok here leaves a stub that silently loses to the
@@ -1992,8 +2098,8 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         except OSError:
             size = 0
         return {"ok": False, "stub": True, "dir": str(dest), "tag": tagname,
-                "error": (f"llama-server.exe is unusable after extract ({size} "
-                          f"bytes, no llama-server-impl.dll beside it). Antivirus "
+                "error": (f"{SERVER_EXE} is unusable after extract ({size} "
+                          f"bytes, no {_lib_name('llama-server-impl')} beside it). Antivirus "
                           f"quarantine is the usual cause - allow {dest.parent} "
                           f"and install again.")}
     return {"ok": True, "dir": str(dest), "tag": tagname, "backend": backend,
@@ -2579,9 +2685,9 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
         _log_fh = log_fh
         child_env = dict(os.environ)
         if _use_native and _native.get("dll_dirs"):
-            # ggml-cuda.dll + the CUDA runtime (cudart/cublas) live next to the
-            # native exe / in its vendor dir — put them on PATH so it loads.
-            child_env["PATH"] = os.pathsep.join(_native["dll_dirs"]) + os.pathsep + child_env.get("PATH", "")
+            # ggml-cuda + the CUDA runtime (cudart/cublas) live next to the
+            # native exe / in its vendor dir: make them findable so it loads.
+            child_env = _with_libs(child_env, _native["dll_dirs"])
         spawned = subprocess.Popen(
             cmd, stdout=log_fh, stderr=subprocess.STDOUT,
             creationflags=_NO_WINDOW, env=child_env,
@@ -4048,8 +4154,7 @@ def start_helper(model_path: str, ctx: int = 16384, n_gpu_layers: int = -1,
     cmd += (["--flash-attn", "off"] if blackwell else
             ["--flash-attn", "on", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"])
     env = dict(os.environ)
-    if native.get("dll_dirs"):
-        env["PATH"] = os.pathsep.join(native["dll_dirs"]) + os.pathsep + env.get("PATH", "")
+    env = _with_libs(env, native.get("dll_dirs") or [])
     logs_dir = WORKSPACE / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / "llama_helper.log"
