@@ -3709,6 +3709,70 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
     return None
 
 
+
+# A program Hearth starts for the person (an app, a browser window, a launcher)
+# must outlive the turn. With an agent program as the brain, Hearth's tools run
+# in a process that program starts inside a Windows job, and anything started
+# from there was closed with it when the turn ended: Notepad opened, typed into,
+# gone. Breaking away from the job keeps it; a job that forbids that falls back
+# to Explorer, which starts things from the desktop's own process.
+_BREAKAWAY = 0x01000000          # CREATE_BREAKAWAY_FROM_JOB
+
+
+def popen_outside(args, console: bool = False, **kw) -> "subprocess.Popen":
+    """subprocess.Popen for a program the person keeps using after this turn."""
+    if sys.platform != "win32":
+        return subprocess.Popen(args, start_new_session=True, **kw)
+    base = (getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10) if console
+            else getattr(subprocess, "DETACHED_PROCESS", 0x8)) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
+    try:
+        return subprocess.Popen(args, creationflags=base | _BREAKAWAY, **kw)
+    except OSError:
+        return subprocess.Popen(args, creationflags=base, **kw)
+
+
+def start_app(args, cwd: Optional[str] = None) -> Optional[int]:
+    """Start a program for the person so that nothing of Hearth's owns it. With an
+    agent program as the brain, the process running Hearth's tools is stopped at
+    the end of each turn together with what it started, breaking away from its job
+    or not: Notepad opened, typed into, and closed with the turn. Windows' own WMI
+    host starts it instead, in the person's session, and the pid comes back.
+    Falls back to a detached start where WMI isn't there."""
+    if sys.platform == "win32":
+        try:
+            import pythoncom  # type: ignore
+            import win32com.client  # type: ignore
+            pythoncom.CoInitialize()
+            try:
+                proc = win32com.client.GetObject("winmgmts:root\\cimv2").Get("Win32_Process")
+                req = proc.Methods_("Create").InParameters.SpawnInstance_()
+                req.CommandLine = subprocess.list2cmdline(list(args))
+                if cwd:
+                    req.CurrentDirectory = cwd
+                out = proc.ExecMethod_("Create", req)
+                if int(out.ReturnValue) == 0:
+                    return int(out.ProcessId)
+            finally:
+                pythoncom.CoUninitialize()
+        except Exception:
+            pass
+    try:
+        return popen_outside(list(args), close_fds=True, cwd=cwd).pid
+    except OSError:
+        return None
+
+
+def open_outside(target: str) -> None:
+    """Open a file, folder, link or shortcut with its default app, from the
+    desktop's own process so it outlives this turn (os.startfile's child would
+    share this process's job)."""
+    if sys.platform != "win32":
+        os.startfile(target)  # type: ignore[attr-defined]
+        return
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    subprocess.Popen([os.path.join(windir, "explorer.exe"), target], close_fds=True,
+                     creationflags=getattr(subprocess, "DETACHED_PROCESS", 0x8))
+
 def _job_controls_in() -> None:
     # There is a job now: what checks on it and stops it comes with it.
     for n in ("job_status", "job_wait", "job_kill", "get_job_result"):
@@ -3750,10 +3814,7 @@ def _run_command(p: Dict) -> str:
         try:
             # A launcher that prints wants its own console window.
             args, use_shell = _shells.argv(cmd, shell)
-            proc = subprocess.Popen(
-                args, cwd=cwd, shell=use_shell, env=_shells.child_env(),
-                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-                if sys.platform == "win32" else 0)
+            proc = popen_outside(args, console=True, cwd=cwd, shell=use_shell, env=_shells.child_env())
         except Exception as e:
             return f"Error launching detached: {e}"
         return (
@@ -4721,13 +4782,13 @@ def _open_app(p: Dict) -> str:
         # Check this BEFORE PATH lookup so 'G:\foo.rar' isn't mistaken for an exe.
         cand_path = os.path.expanduser(canonical)
         if os.path.exists(cand_path):
-            os.startfile(cand_path)  # type: ignore[attr-defined]
+            open_outside(cand_path)
             _bring_newest_to_front(_before)
             return f"opened: {cand_path}"
 
         # 2. URL-shaped → open in default browser via os.startfile
         if canonical.startswith(("http://", "https://", "file://")):
-            os.startfile(canonical)  # type: ignore[attr-defined]
+            open_outside(canonical)
             _bring_newest_to_front(_before)
             return f"opened url: {canonical}"
 
@@ -4735,8 +4796,8 @@ def _open_app(p: Dict) -> str:
         for cand in (canonical, canonical + ".exe"):
             full = shutil.which(cand)
             if full:
-                subprocess.Popen([full], shell=False, close_fds=True,
-                                 creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+                if start_app([full]) is None:
+                    return f"Error: couldn't start {full}"
                 _bring_newest_to_front(_before)
                 return f"launched: {full}"
 
@@ -4753,7 +4814,7 @@ def _open_app(p: Dict) -> str:
         # 5. Start Menu shortcut search
         lnk = _find_start_menu_lnk(canonical)
         if lnk:
-            os.startfile(lnk)  # type: ignore[attr-defined]
+            open_outside(lnk)
             _bring_newest_to_front(_before)
             return f"launched: {os.path.basename(lnk)[:-4]} (via Start Menu shortcut)"
 
@@ -5108,8 +5169,7 @@ def _open_in_browser(p: Dict) -> str:
                     # fall back to Default), but warn so model + user know.
                     args.append(url)
                     try:
-                        subprocess.Popen(args, shell=False, close_fds=True,
-                                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+                        start_app(args)
                     except Exception as e:
                         return f"Error launching {browser}: {e}"
                     return (
@@ -5118,8 +5178,8 @@ def _open_in_browser(p: Dict) -> str:
                     )
     args.append(url)
     try:
-        subprocess.Popen(args, shell=False, close_fds=True,
-                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+        if start_app(args) is None:
+            return f"Error launching {browser}"
     except Exception as e:
         return f"Error launching {browser}: {e}"
     pretty = browser + (f" / {profile}" if profile else "")
@@ -6040,12 +6100,7 @@ def _boot_forge() -> str:
     if _fu.hostname and _fu.hostname not in ("127.0.0.1", "localhost"):
         forge_args += ["--server-name", _fu.hostname]
     try:
-        _forge_proc = subprocess.Popen(
-            forge_args,
-            cwd=FORGE_DIR,
-            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
-            stdin=subprocess.DEVNULL,
-        )
+        _forge_proc = popen_outside(forge_args, console=True, cwd=FORGE_DIR, stdin=subprocess.DEVNULL)
     except Exception as e:
         return f"Error launching Forge: {e}"
     # Poll until the API answers
@@ -7975,8 +8030,9 @@ def _desktop_type(p: Dict) -> str:
     from . import desktop_a11y as _a
     if not _a.available():
         return f"Error: desktop control unavailable — {_a.unsupported_reason()}."
-    ok = _a.focus_and_type(idx=p.get("idx"), name=p.get("name"), text=p.get("text", ""))
-    return "typed into the element" if ok else \
+    mode = p.get("mode") if p.get("mode") in ("replace", "append") else None
+    ok = _a.focus_and_type(idx=p.get("idx"), name=p.get("name"), text=p.get("text", ""), mode=mode)
+    return (f"typed into the element ({ok})" if isinstance(ok, str) else "typed into the element") if ok else \
         "Error: couldn't focus that element — call desktop_snapshot first, then type by its idx."
 
 
@@ -8010,10 +8066,14 @@ for _cd in (
         "Write text into a UI element from the last desktop_snapshot (by idx or "
         "name). Sets the value DIRECTLY where the control supports it — no focus "
         "change, works even if the window is in the background (paste-equivalent); "
-        "falls back to click-to-focus + keystrokes for fields that don't.",
+        "falls back to click-to-focus + keystrokes for fields that don't. "
+        "mode 'replace' sets the whole field (a search box, a form field); 'append' adds "
+        "to the end (start the text with a newline for a new line). Left out, a field "
+        "that already holds more than a short line is added to, never wiped.",
      "parameters": {"type": "object", "properties": {
         "idx": {"type": "integer"}, "name": {"type": "string"},
-        "text": {"type": "string"}}, "required": ["text"]}},
+        "text": {"type": "string"},
+        "mode": {"type": "string", "enum": ["replace", "append"]}}, "required": ["text"]}},
 ):
     TOOL_DEFINITIONS.append(_cd)
 

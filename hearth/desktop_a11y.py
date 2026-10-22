@@ -21,6 +21,7 @@ Best-effort throughout — a flaky a11y call must never crash a turn.
 from __future__ import annotations
 
 import sys
+from typing import Optional, Tuple
 
 _WIN = sys.platform == "win32"
 _LINUX = sys.platform.startswith("linux")
@@ -574,7 +575,20 @@ def click(idx=None, name=None, double=False, button="left"):
         return None
 
 
-def focus_and_type(idx=None, name=None, text="") -> bool:
+def _typed_value(current: str, text: str, mode: Optional[str]) -> Tuple[str, str]:
+    """What the control should hold, and whether that replaced or added to it.
+    Setting the value replaces everything in the control: right for a search box,
+    a disaster for a document. Unless told, a control already holding more than a
+    short single line is added to, never wiped."""
+    current = current or ""
+    if mode == "replace":
+        return text, "replaced"
+    if mode == "append" or (mode is None and ("\n" in current or "\r" in current or len(current) > 120)):
+        return current + text, "added to the end"
+    return text, "replaced"
+
+
+def focus_and_type(idx=None, name=None, text="", mode=None):
     """Put `text` into an element. Prefers UIA ValuePattern.SetValue, which writes
     DIRECTLY into the control with no focus change and no need for the window to be
     foreground (paste-equivalent) — so a backgrounded editor field or message box
@@ -588,8 +602,9 @@ def focus_and_type(idx=None, name=None, text="") -> bool:
         try:
             vp = target["ctrl"].GetValuePattern()
             if vp is not None and not getattr(vp, "IsReadOnly", False):
-                vp.SetValue(text)
-                return True
+                value, how = _typed_value(getattr(vp, "Value", "") or "", text, mode)
+                vp.SetValue(value)
+                return how
         except Exception:
             pass   # no value pattern (contenteditable/canvas) — fall back below
     # 2) Fallback: click to focus, then type real keystrokes.
@@ -599,7 +614,9 @@ def focus_and_type(idx=None, name=None, text="") -> bool:
         import time
         from . import computer
         time.sleep(0.12)
+        if mode == "append":
+            computer.hotkey("ctrl+end")
         computer.type_text(text)
-        return True
+        return "typed"
     except Exception:
         return False
