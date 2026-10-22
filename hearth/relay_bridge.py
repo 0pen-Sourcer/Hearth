@@ -20,6 +20,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -188,6 +189,55 @@ class Joiner:
         return whole if isinstance(whole, dict) and whole.get("type") != "part" else None
 
 
+# ---------------------------------------------------------------- what the phone asks for
+
+def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
+    """The phone's question about this PC, answered: the chat list ("chats"), one
+    chat's messages ("open"), the helpers ("team"), or the look ("look")."""
+    from . import chat_sync
+    what = str(m.get("what") or "")
+    if what == "chats":
+        rows = chat_sync.listing(int(m.get("limit") or 80))
+        return {"chats": [{"id": r["id"], "title": r["title"], "at": r["updated"], "source": r["source"],
+                           "count": r["count"]} for r in rows], "own": own_chat}
+    if what == "open":
+        from .term_render import tool_words
+        cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
+        d = chat_sync.load(cid) or {}
+        msgs = []
+        for x in d.get("messages") or []:
+            role = x.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            steps = [tool_words(e.get("name") or "", e.get("args")) for e in x.get("events") or []
+                     if isinstance(e, dict) and e.get("kind") == "tool"]
+            text = chat_sync._text(x.get("content"))
+            # A file sent from a phone is kept as a note for the model; the person sent the file.
+            text = re.sub(r"\[They sent (.+?), saved at .+?before answering about it\.\]",
+                          lambda g: "Sent " + g.group(1), text, flags=re.S)
+            if text or steps:
+                msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps,
+                             "via": x.get("via") or ""})
+        keep = int(m.get("last") or 60)
+        return {"chat": cid, "title": d.get("title") or "", "source": d.get("source") or "",
+                "messages": msgs[-keep:], "more": max(0, len(msgs) - keep)}
+    if what == "team":
+        from . import subagents
+        return {"team": [{"id": a.get("id"), "name": a.get("name") or a.get("persona") or "Helper",
+                          "role": a.get("persona") or "", "status": a.get("status"), "what": a.get("what") or "",
+                          "task": str(a.get("prompt") or "")[:300], "on": a.get("on") or a.get("runtime") or "",
+                          "steps": a.get("tools_used") or 0, "blocked": a.get("blocked") or ""}
+                         for a in subagents.team_state()]}
+    if what == "look":
+        try:
+            from .web import _load_settings
+            s = _load_settings() or {}
+        except Exception:
+            s = {}
+        return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or ""}
+    return {"error": f"unknown request {what!r}"}
+
+
 # ---------------------------------------------------------------- the adapter
 
 class Relay(cc.Adapter):
@@ -198,13 +248,15 @@ class Relay(cc.Adapter):
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
         self.rooms: Dict[str, "Room"] = {}     # chat (phone id) -> room
+        self._live_at: Dict[str, float] = {}   # turn -> when its live text last went out
 
     def _push(self, chat: str, obj: Dict[str, Any]) -> Optional[str]:
         room = self.rooms.get(str(chat))
         if room is None:
             return None
         mid = secrets.token_hex(6)
-        obj = dict(obj, id=mid)
+        # The Hearth chat and the turn it belongs to, so the app files it there.
+        obj = dict(obj, id=mid, **cc.turn_context())
         fut = asyncio.run_coroutine_threadsafe(room.deliver(obj), self.loop)
         try:
             fut.result(15)
@@ -233,6 +285,21 @@ class Relay(cc.Adapter):
 
     def typing(self, chat):
         self._push(chat, {"type": "typing"})
+
+    def step(self, chat, words):
+        """One step of the reply as it happens ("Read notes.txt")."""
+        self._push(chat, {"type": "step", "words": words})
+
+    def live(self, chat, text):
+        """The reply so far, a few times a second; the finished one follows as text."""
+        t = cc.turn_context().get("t", "")
+        now = time.time()
+        if now - self._live_at.get(t, 0) < 0.35:
+            return
+        self._live_at[t] = now
+        if len(self._live_at) > 50:
+            self._live_at = {t: now}
+        self._push(chat, {"type": "live", "text": text})
 
 
 class Room:
@@ -351,6 +418,17 @@ class Bridge:
         return out
 
     def on_message(self, room: Room, m: Dict[str, Any]) -> None:
+        if m.get("type") == "req":
+            try:
+                out = answer(m, cc.chat_id_for(self.adapter.name, room.chat))
+            except Exception as e:
+                out = {"error": f"{type(e).__name__}: {e}"}
+            fut = asyncio.run_coroutine_threadsafe(room.deliver({"type": "res", "re": m.get("id"), **out}), self.loop)
+            try:
+                fut.result(30)
+            except Exception:
+                pass
+            return
         if m.get("type") != "user":
             return
         files = []
@@ -363,7 +441,8 @@ class Bridge:
         if m.get("voice"):
             ext = str(m.get("voice_ext") or "webm").strip(".").lower()
             voice = cc.save_upload(R.unb64(m["voice"]), "voice-note." + (ext if ext in ("webm", "mp4", "ogg", "m4a", "wav") else "webm"))
-        self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files)
+        self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files,
+                         cid=str(m.get("chat") or ""))
 
     async def keep_rooms(self) -> None:
         """Join new rooms (a pairing started, a phone confirmed), leave dropped ones."""

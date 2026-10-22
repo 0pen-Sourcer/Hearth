@@ -189,6 +189,16 @@ def chat_id_for(channel: str, chat: str) -> str:
     return f"{channel}_" + re.sub(r"[^A-Za-z0-9_-]", "_", str(chat))[:60]
 
 
+# The turn being answered on this thread: the Hearth chat it belongs to ("c") and
+# an id for the turn ("t"), so an app that shows several chats can put what it is
+# sent in the right one.
+_TURN = threading.local()
+
+
+def turn_context() -> Dict[str, str]:
+    return dict(getattr(_TURN, "ctx", None) or {})
+
+
 # True in a process answering a chat app. Who may talk is changed only from the
 # PC itself: from a phone, someone already let in could let in others, and the
 # "may I" question would go to that same person.
@@ -213,9 +223,11 @@ class Hub:
 
     # Called by the adapter, from whatever thread it receives on.
     def receive(self, chat: str, sender: str, text: str = "", name: str = "", reply_to: Any = None,
-                voice: str = "", files: Optional[List[str]] = None) -> str:
+                voice: str = "", files: Optional[List[str]] = None, cid: str = "") -> str:
         """What became of the message: 'ran', 'answered', 'joined', 'pairing',
-        'ignored' or 'empty'."""
+        'ignored' or 'empty'. `cid` puts it in a Hearth chat of the sender's
+        choosing (an app that lists every chat); otherwise it goes in the
+        conversation kept for that person."""
         chat, sender = str(chat), str(sender)
         if not is_allowed(self.a.name, sender, self.configured):
             code = request_code(self.a.name, sender, name)
@@ -234,8 +246,10 @@ class Hub:
         text = text.strip()
         if not text:
             return "empty"
+        cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(cid or ""))[:80]
+        key = cid or chat
         with self._lock:
-            run = self._busy.get(chat)
+            run = self._busy.get(key)
             if run is not None:
                 q = run.get("question")
                 if q is not None and not q.is_set():
@@ -244,9 +258,9 @@ class Hub:
                     return "answered"
                 run["steer"].append(text)
                 return "joined"
-            run = {"steer": [], "question": None, "answer": None}
-            self._busy[chat] = run
-        t = threading.Thread(target=self._turn, args=(chat, text, reply_to, run), daemon=True,
+            run = {"steer": [], "question": None, "answer": None, "key": key}
+            self._busy[key] = run
+        t = threading.Thread(target=self._turn, args=(chat, text, reply_to, run, cid), daemon=True,
                              name=f"{self.a.name}-turn")
         self.threads.append(t)
         t.start()
@@ -270,10 +284,15 @@ class Hub:
             ok = bool(run.get("answer"))
         return "allow" if ok else "deny"
 
-    def _turn(self, chat: str, text: str, reply_to: Any, run: Dict[str, Any]) -> None:
+    def _turn(self, chat: str, text: str, reply_to: Any, run: Dict[str, Any], cid: str = "") -> None:
         from . import bridge_status, chat_sync, headless
         from .redact import redact_secrets_only
-        cid = chat_id_for(self.a.name, chat)
+        from .term_render import tool_words
+        chosen = bool(cid)
+        cid = cid or chat_id_for(self.a.name, chat)
+        _TURN.ctx = {"c": cid, "t": secrets.token_hex(5)}
+        steps = callable(getattr(self.a, "step", None))     # an app that shows each step itself
+        live = callable(getattr(self.a, "live", None))      # and the reply as it is written
         saved = chat_sync.load(cid) or {}
         history = chat_sync.from_chat(saved.get("messages") or [])[-16:]
         primer = bridge_status.channel_primer(self.a.label)
@@ -286,15 +305,29 @@ class Hub:
         except Exception:
             pass
 
+        written: List[str] = []
+
         def emit(kind, **kw):
+            if kind == "assistant_chunk" and live and kw.get("content"):
+                written.append(kw["content"])
+                try:
+                    self.a.live(chat, "".join(parts) + "".join(written))
+                except Exception:
+                    pass
             if kind == "assistant":
                 parts.append(kw.get("content") or "")
+                written.clear()
             elif kind == "error":
                 err["cat"], err["msg"] = kw.get("category") or "error", str(kw.get("message", ""))
             elif kind == "tool_call" and kw.get("name"):
                 tools_used.append((kw["name"], kw.get("args")))
+                if steps:
+                    try:
+                        self.a.step(chat, tool_words(kw["name"], kw.get("args")))
+                    except Exception:
+                        pass
                 now = time.time()
-                if self.a.can_edit and now - status["last"] >= 1.0:
+                if self.a.can_edit and not steps and now - status["last"] >= 1.0:
                     status["last"] = now
                     body = bridge_status.format_status(tools_used, working=True)
                     try:
@@ -324,7 +357,7 @@ class Hub:
             info = classify_api_error(e, headless._is_local_endpoint(headless.LOCAL_API_BASE))
             err["cat"], err["msg"] = info.category, info.hint
         reply = headless.bridge_reply_or_reason("".join(parts), err["cat"], err["msg"])
-        if tools_used and not self.a.can_edit:
+        if tools_used and not self.a.can_edit and not steps:
             foot = bridge_status.footer(tools_used)
             if foot:
                 reply = (reply + "\n\n" + foot).strip()
@@ -342,11 +375,12 @@ class Hub:
             print(f"[{self.a.name}] couldn't send the reply: {type(e).__name__}: {e}")
         now = int(time.time() * 1000)
         events = [{"kind": "tool", "name": n, "args": a or {}, "result": "", "ms": 0, "pos": 0} for n, a in tools_used]
-        chat_sync.post(cid, f"{self.a.label}: {text[:50]}", self.a.name, [
+        chat_sync.post(cid, " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}", self.a.name, [
             {"role": "user", "content": text, "via": self.a.name, "at": now},
             {"role": "assistant", "content": final, "via": self.a.name, "at": now, **({"events": events} if events else {})}])
         with self._lock:
-            self._busy.pop(chat, None)
+            self._busy.pop(run.get("key", chat), None)
+        _TURN.ctx = None
         return None
 
 
