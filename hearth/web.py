@@ -3499,6 +3499,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import claude_brain
             return self._send_json(200, claude_brain.decide(
                 str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
+        if path == "/api/brain/desktop":
+            # The brain's tool server acting on the desktop: the glow and pill live here.
+            body = self._read_json() or {}
+            from . import claude_brain
+            return self._send_json(200, claude_brain.desktop(
+                str(body.get("token") or ""), str(body.get("tool") or ""), body.get("input") or {}))
         if path == "/api/brain/tool":
             # A helper tool the brain called: run here, where helpers live.
             body = self._read_json() or {}

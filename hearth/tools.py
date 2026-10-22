@@ -4706,6 +4706,20 @@ def _snapshot_windows() -> set:
     return set()
 
 
+def _desktop_to_hearth(tool: str, args: Dict[str, Any]) -> None:
+    """Tell the Hearth that started this tool server about a desktop action."""
+    url, token = os.environ.get("HEARTH_BRAIN_URL", "").rstrip("/"), os.environ.get("HEARTH_BRAIN_TOKEN", "")
+    if not url or not token:
+        return
+    try:
+        import urllib.request
+        body = json.dumps({"token": token, "tool": tool, "input": args}, default=str).encode("utf-8")
+        urllib.request.urlopen(urllib.request.Request(url + "/api/brain/desktop", data=body,
+                               headers={"Content-Type": "application/json"}), timeout=3).read()
+    except Exception:
+        pass
+
+
 def _bring_newest_to_front(before: set) -> None:
     """After launching something, raise the newly-appeared window to the front —
     Windows AND Linux open launched windows behind the active one. macOS `open`
@@ -4722,23 +4736,12 @@ def _bring_newest_to_front(before: set) -> None:
         return
     target = new[-1]
     if sys.platform == "win32":
-        try:
-            import win32con
-            import win32gui
-        except Exception:
-            return
-        try:
-            win32gui.ShowWindow(target, win32con.SW_RESTORE)
-            win32gui.SetForegroundWindow(target)
-        except Exception:
-            try:
-                win32gui.SetWindowPos(target, win32con.HWND_TOPMOST, 0, 0, 0, 0,
-                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
-                win32gui.SetWindowPos(target, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
-                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE)
-                win32gui.BringWindowToTop(target)
-            except Exception:
-                pass
+        from . import desktop_session
+        desktop_session.bring_to_front(target)
+        if os.environ.get("HEARTH_BRAIN_URL"):
+            _desktop_to_hearth("_raised", {"hwnd": int(target)})
+        else:
+            desktop_session.raised(target)
     elif sys.platform.startswith("linux"):
         wm = shutil.which("wmctrl")
         if wm:
@@ -8476,10 +8479,19 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
     _log_activity("call", tool=name, args=args, id=_cid)
     # Surface the desktop-activity overlay for computer-use tools, so the user
     # can see what JARVIS is doing while it drives another (focused) window.
-    if name in _HUD_TOOLS:
+    from . import desktop_session as _ds
+    if name in _HUD_TOOLS or name in _ds.DESKTOP_TOOLS:
         try:
-            from . import activity_hud
-            activity_hud.for_tool(name, args)
+            if os.environ.get("HEARTH_BRAIN_URL"):
+                # Running inside an agent brain's tool server, which ends with the
+                # turn: the Hearth that started it shows the session instead.
+                if name in _ds.DESKTOP_TOOLS:
+                    _desktop_to_hearth(name, args)
+            elif name in _ds.DESKTOP_TOOLS:
+                _ds.begin(name, args)
+            else:
+                from . import activity_hud
+                activity_hud.for_tool(name, args)
         except Exception:
             pass
     # Check the call against the tool's own schema before running it. A missing

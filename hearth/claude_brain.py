@@ -88,14 +88,14 @@ def ensure_bridge() -> None:
 
     class _Ask(BaseHTTPRequestHandler):
         def do_POST(self):
-            if self.path not in ("/api/brain/permission", "/api/brain/tool"):
+            if self.path not in ("/api/brain/permission", "/api/brain/tool", "/api/brain/desktop"):
                 self.send_error(404)
                 return
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             except ValueError:
                 body = {}
-            answer = decide if self.path.endswith("permission") else run_tool
+            answer = {"/api/brain/permission": decide, "/api/brain/tool": run_tool}.get(self.path, desktop)
             out = json.dumps(answer(str(body.get("token") or ""), str(body.get("tool") or ""),
                                     body.get("input") or {})).encode("utf-8")
             self.send_response(200)
@@ -564,6 +564,18 @@ HEARTH_SIDE = ("spawn_subagent", "tell_subagent", "get_subagent_result", "launch
 _sent: Dict[str, int] = {}     # helpers this turn sent -> checks since one was last seen running
 
 
+def desktop(token: str, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """A desktop action from the brain's tool server: shown here, where it outlives the turn."""
+    if token != _TOKEN:
+        return {"ok": False}
+    from . import desktop_session
+    if tool == "_raised":
+        desktop_session.raised(int((args or {}).get("hwnd") or 0))
+    else:
+        desktop_session.begin(tool, args or {})
+    return {"ok": True}
+
+
 def run_tool(token: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if token != _TOKEN or name not in HEARTH_SIDE:
         return {"result": "Error: not a Hearth session"}
@@ -714,6 +726,8 @@ def persona_text(voice: bool, host: str = "Claude Code", tools: str = "mcp__hear
         f"assistant, under the name and persona below. Hearth's own tools are available "
         f"as {tools}: use them for the desktop, apps, windows, screenshots, "
         f"memory, reminders, the phone and anything outside a code folder. {own_tools} "
+        f"Never drive the screen from a shell (sent keys, Alt+Tab, killing a window's program): "
+        f"Hearth shows the user what its desktop tools do and gives them the screen back after. "
         f"To hand work to helpers, use Hearth's spawn_subagent, not {host}'s own sub-agents: "
         f"Hearth's helpers appear in the user's Team view, and each one's report is given to you "
         f"when it finishes, so after sending them you can simply end your message. "

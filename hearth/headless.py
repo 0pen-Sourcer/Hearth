@@ -2563,8 +2563,9 @@ async def _run_once(
         # if it was actually up this turn), so a computer-use task ends cleanly
         # instead of the last click just lingering.
         try:
-            from . import activity_hud
-            activity_hud.done()
+            from . import activity_hud, desktop_session
+            if not desktop_session.end():
+                activity_hud.done()
         except Exception:
             pass
 
@@ -2666,6 +2667,11 @@ async def run_once(prompt: str, **kw) -> int:
         return await _run_once(prompt, **kw)
     finally:
         _TURN_ACTIVE.clear()
+        try:
+            from . import desktop_session
+            desktop_session.end()      # the screen goes back to them, however the turn ended
+        except Exception:
+            pass
 
 # ---------------------------------------------------------------------------
 # Entry

@@ -546,6 +546,21 @@ def _find(idx=None, name=None):
     return None
 
 
+def _raise_owner(ctrl) -> None:
+    """A UIA click is a real mouse click at the control's position, so it lands on
+    whatever window is on top there. Its own window comes to the front first."""
+    try:
+        h = int(ctrl.GetTopLevelControl().NativeWindowHandle or 0)
+    except Exception:
+        return
+    from . import desktop_session
+    if not h or desktop_session._foreground() == h:
+        return
+    if desktop_session.bring_to_front(h):
+        import time
+        time.sleep(0.15)
+
+
 def click(idx=None, name=None, double=False, button="left"):
     """Click a cached element by idx or name. Returns its (x,y) or None.
 
@@ -557,6 +572,7 @@ def click(idx=None, name=None, double=False, button="left"):
         return None
     if target.get("backend") == "uia":
         ctrl = target["ctrl"]
+        _raise_owner(ctrl)
         try:
             if double:
                 ctrl.DoubleClick(simulateMove=True)
