@@ -867,7 +867,7 @@ def _run_maintenance_async(mtype: str, sub_category: str, protect_slug: str = ""
         finally:
             _maint_lock.release()
     try:
-        threading.Thread(target=_work, daemon=True).start()
+        threading.Thread(target=_work, daemon=True, name="memory-maintenance").start()
     except Exception:
         pass
 

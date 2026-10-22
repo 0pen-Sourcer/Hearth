@@ -114,6 +114,10 @@ for t in threads:
     t.start()
 for t in threads:
     t.join()
+# Archiving runs in the background after a save; counting the store and the
+# archive while it moves files would see a moving file in neither.
+for t in [t for t in threading.enumerate() if t.name == "memory-maintenance"]:
+    t.join(30)
 # Past a bucket's size the save archives its coldest facts, by design, so not
 # all 80 stay in the hot store. What must hold is that nothing is lost and the
 # index matches the files exactly.

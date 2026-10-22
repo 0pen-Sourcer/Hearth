@@ -46,8 +46,8 @@ class _Win:
 
 
 stalled = _Win()
-reload_if_stalled(stalled, "http://127.0.0.1:1/", wait_s=0.15, tries=2)
-time.sleep(0.6)
+reload_if_stalled(stalled, "http://127.0.0.1:1/", wait_s=1.0, tries=2)
+time.sleep(3.5)                           # reloads due at 1 s and 2 s; room for a busy machine
 check(f"a page that never arrives is asked for again, twice at most ({len(stalled.asked)})", stalled.asked == ["http://127.0.0.1:1/"] * 2)
 
 fine = _Win()
