@@ -110,16 +110,17 @@ When it's time you get a Windows notification, and JARVIS says it in a chat of i
 
 ## Your phone
 
-Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs on your PC and replies, files included. Set it up in **Settings, Connectors**. Full steps in [PHONE.md](PHONE.md).
+Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs on your PC and replies, with voice notes, photos and files going both ways. Set it up in **Settings, Connectors**, or ask JARVIS to connect it. Someone new who messages your bot gets a short code, and nothing runs for them until you approve it in Connectors or with `/pair`. A step that would ask for your OK on the PC asks in the chat, and each phone conversation shows in the window's chat list. Full steps in [PHONE.md](PHONE.md); writing your own connector is in [CONNECTORS.md](CONNECTORS.md).
 
 ---
 
 ## Memory and chats
 
 - **Memory.** Every fact JARVIS learns is a small file in `~/Jarvis/memory`. It keeps an index of them in view and looks up what a message needs, and ones never used are archived rather than deleted. Read, change or delete them in the Memory tab.
-- **Saving on its own.** After a reply JARVIS notes lasting facts from the chat. Turn that off in Settings, Appearance, Remember things on its own, and it saves only when you ask. Telling it in a chat not to save something works too.
+- **Saving on its own.** After a reply JARVIS notes lasting facts from the chat. Turn that off in Settings, Behavior, Remember things on its own, and it saves only when you ask. Telling it in a chat not to save something works too.
 - **What's going on lately.** JARVIS also notes where each chat stands and what's still open: the phone you're still hunting for, the form waiting on a payment. A few lines of that come along with each new message, so "guess what, I got it" gets a real guess. The small icon under a reply shows what it had in mind. The same switch turns this off.
 - **Past chats.** Every chat is searchable, so "what did we decide about X last week" works.
+- **Shared with your coding agents.** The Memory tab's **Share with agents** has a switch for each of Claude Code, Codex, Cursor and OpenCode that you have installed. One that's on can use your memory as a tool, with your facts, past chats and what's going on lately, and nothing else of Hearth's.
 - **One set of chats.** A chat from the terminal shows in the window and can be carried on there, and `/chats` and `/chat <n>` open any chat in the terminal.
 
 ---
@@ -127,6 +128,20 @@ Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs 
 ## Dropping files
 
 Drag files onto the window. Hearth reads PDF, Word, Excel, PowerPoint, EPUB, notebooks, RTF, CSV, JSON, HTML and compressed files; it looks inside zip and tar archives without unpacking them; and with a model that can see, it reads images.
+
+Type `@` in the message box to pick a past chat by its title or a file or folder by its name; it goes along with the message. The Files tab previews a file in place, and its **Open** menu lists the apps that can open it.
+
+---
+
+## Images and video
+
+Ask for a picture or a short video in plain words. **Models, Images & video** installs Hearth's image engine (stable-diffusion.cpp) for your graphics card and lists the image models it finds, in `~/.hearth/image-models` or in a ComfyUI or WebUI models folder you add there. A ready model on your PC is used first; with a key for xAI Grok, OpenAI or Google Gemini saved, the cloud works too, whatever the brain. Say "on my PC" or "in the cloud" to choose. A model is recognised by its file name for now, so one with a name all its own isn't listed yet.
+
+---
+
+## Watching it use your desktop
+
+When JARVIS clicks and types in your apps, a soft edge in your accent colour breathes round the screen and a small pill says what it's doing. Move the mouse or type and it stops to let you have the screen. When it's done the edge fades, a short chime plays, and the window you were in comes back to the front.
 
 ---
 
@@ -187,6 +202,7 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 /update          get a newer version
 /repair          restore damaged files
 /phone           reach me from your phone
+/pair            let someone in with their code
 /exit            quit
 ```
 
@@ -196,8 +212,8 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 
 - **Chat brain**: what JARVIS thinks with, as cards grouped by where it runs.
 - **Voice**: voice, speed, microphone, speakers or headphones, the listening model.
-- **Behavior**: the agent's name, reasoning, house rules, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
-- **Appearance**: Classic, Light, Dark or System, Simple or Advanced, the accent, the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups), with the switch for saving memories on its own.
+- **Behavior**: the agent's name, reasoning, house rules, saving memories on its own, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
+- **Appearance**: Classic, Light, Dark or System, Simple or Advanced, the accent, the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups).
 - **Connectors**: Telegram, Discord, WhatsApp, who is let in, and email.
 - **About**: version, updates, repair, start at login, and the tour.
 

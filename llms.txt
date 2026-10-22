@@ -4,15 +4,17 @@
 
 Key facts:
 
-- Platform: Windows installer (Full, with the GPU engine; Lite, for people already running Ollama or LM Studio). macOS and Linux run from source; desktop control is Windows only.
+- Platform: Windows installer (Full, with the GPU engine; Lite, for people already running Ollama or LM Studio). Linux runs from source and downloads the model and image engines itself; macOS runs the same code but is less tested; desktop control is Windows only.
 - Graphics: reads NVIDIA, AMD and Intel cards; the built-in engine uses CUDA on NVIDIA and Vulkan on AMD and Intel.
-- Surfaces: desktop app, terminal CLI, a headless bridge, Telegram, Discord and WhatsApp bridges, and an MCP server.
-- Tools: 107 built in, 43 loaded by default and the rest pulled in by name when needed. It can write new tools for itself (plugins) and install shareable skills.
+- Surfaces: desktop app, terminal CLI, a headless bridge, Telegram, Discord and WhatsApp (new senders need a pairing code the owner approves; custom connectors are one Python file), and an MCP server.
+- Tools: 114 built in, 36 loaded by default and the rest pulled in by name when needed. It can write new tools for itself (plugins) and install shareable skills.
 - Voice: speaks and listens in eight languages (English, Hindi, Spanish, French, Italian, Portuguese, Japanese, Mandarin), with a wake word.
 - Agent brains: JARVIS can think with Claude Code, Codex or Cursor's agent installed on the user's PC, on their own Claude, ChatGPT or Cursor plan, with a choice of that agent's models and no local model needed, while keeping Hearth's tools, memory, voice and permission prompts.
 - Other agents: JARVIS can hand a task to coding agent CLIs the user has installed, such as Claude Code, Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Aider and Goose, and relay the answer. A Team view shows every helper at work, as a list or as a room by a fire.
 - Safety: writes are confined to a workspace folder; an approval switch (Ask, Auto-edit, Auto) decides what runs without asking, and destructive commands always ask.
-- Memory: remembers facts about the user across sessions, in plain Markdown files on their own disk.
+- Memory: remembers facts about the user across sessions, in plain Markdown files on their own disk, and keeps track of what is going on across chats. It can be shared with Claude Code, Codex, Cursor and OpenCode as an MCP server.
+- Images and video: made on the user's own graphics card with stable-diffusion.cpp, which Hearth installs and runs, or with a cloud key for xAI Grok, OpenAI or Google Gemini.
+- Desktop control: clicks and types through the accessibility tree; while it acts, a breathing accent edge round the screen shows it, and the user's window is handed back at the end.
 
 ## Docs
 
@@ -21,6 +23,7 @@ Key facts:
 - [Tool reference](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/TOOLS.md): every tool, generated from the code
 - [Skills](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/SKILLS.md): writing and installing shareable skills
 - [Phone bridges](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/PHONE.md): Telegram, Discord and WhatsApp
+- [Connectors](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/CONNECTORS.md): writing your own chat connector
 - [macOS and Linux](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/INSTALL_LINUX_MAC.md): running from source
 
 ## Releases

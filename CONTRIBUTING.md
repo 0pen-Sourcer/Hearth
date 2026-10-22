@@ -16,7 +16,7 @@ These are the items that genuinely change the experience for everyone. Pick one 
 
 ### 1. Mac / Linux ports
 
-Most of [`hearth/tools.py`](hearth/tools.py) already runs on Linux and macOS: files, shell, screenshots, app launching, windows, the clipboard, web, reminders and notifications. What's still Windows-only is the desktop-control layer (reading a window's controls and clicking them by name), the one-click installer and the packaged build. A macOS version of the desktop layer on the Accessibility API, or a Linux one on AT-SPI, would be the biggest single contribution. Search for `sys.platform` to find the Windows branches.
+Most of [`hearth/tools.py`](hearth/tools.py) already runs on Linux and macOS: files, shell, screenshots, app launching, windows, the clipboard, web, reminders and notifications. What's still Windows-only is the desktop-control layer (reading a window's controls and clicking them by name), the one-click installer and the packaged build. [`hearth/desktop_a11y.py`](hearth/desktop_a11y.py) already has experimental backends for macOS (the Accessibility API) and Linux (AT-SPI) that haven't been run on real hardware; testing and finishing either would be the biggest single contribution. Search for `sys.platform` to find the Windows branches.
 
 ### 2. More personas
 

@@ -32,13 +32,18 @@ The core is stable and I use it every day.
 - Voice in eight languages, local listen (Whisper) and speak (Kokoro), hands-free,
   with a wake word. Interrupting by voice works on headphones, and on speakers by
   starting with its name ("Jarvis, stop").
-- Your phone through Telegram, Discord or WhatsApp, running the full agent on your PC.
+- Your phone through Telegram, Discord or WhatsApp, running the full agent on your PC,
+  with pairing codes for anyone new and approvals asked in the chat.
 - An optional bundled llama.cpp engine. If you already run LM Studio or Ollama,
   point Hearth at that instead.
+- Pictures and short videos made on your own graphics card with stable-diffusion.cpp,
+  which Hearth installs and runs itself, reading a ComfyUI or WebUI models folder in
+  place. Cloud image models work from any brain too.
+- Desktop actions you can watch, with an edge round the screen while JARVIS works and
+  your window handed back when it's done.
 
 There are over a hundred tools, and they aren't equal. About forty are core. The rest
-are specialized (image and video generation, local Stable Diffusion via Forge,
-email, some desktop-control cases) and depend on setup you may not have. Those stay
+are specialized (image and video generation, email, some desktop-control cases) and depend on setup you may not have. Those stay
 held back until the model actually needs one, so you don't trip over them.
 
 ## What I'm working on next
@@ -46,8 +51,8 @@ held back until the model actually needs one, so you don't trip over them.
 - Talking over it on speakers without saying its name first, with echo cancellation
   on the microphone.
 - A signed installer, so Windows stops warning about an unknown app.
-- Images and video made on this PC by an engine Hearth runs itself, the way it runs
-  llama.cpp for chat, with ComfyUI as a bring-your-own option.
+- Image models with names of their own, picked up by trying them rather than by
+  their file names.
 
 ## Further out
 
@@ -58,9 +63,10 @@ held back until the model actually needs one, so you don't trip over them.
   accessibility tree is sparse, and multi-monitor and fullscreen awareness.
 - A guided mode. Instead of doing a task silently, it walks you through an app step
   by step, narrating and handing you the wheel at each point.
-- Mac and Linux. The CLI, the web UI, and most tools already run from source on
-  Linux today (files, shell, screenshots, app launching, web, reminders). What's
-  still Windows-only is the desktop-control layer and the one-click installer.
+- Mac and Linux. The CLI, the web UI, most tools and both engines already run from
+  source on Linux today, and the whole test suite passes there. What's still
+  Windows-only is the desktop-control layer and the one-click installer, and macOS
+  hasn't been tried on a real Mac yet.
 - A bigger skills ecosystem, with easier discovery of what other people have shared, and
   an idle curator that refines and prunes the skills the agent writes for itself.
 

@@ -57,7 +57,7 @@ Hearth is the framework. JARVIS is the assistant it comes with, and you can rena
 
 ### Your PC
 
-Hearth reads and writes files, including PDF, Word, Excel, PowerPoint, EPUB and archives, and it can work through a PDF hundreds of pages long. It runs PowerShell commands, opens any app, file, folder or link, and drives a real Chrome, Edge or Brave window you can watch while it clicks and types. Beyond the browser it reads a window's buttons and fields by name and operates the desktop itself, with the real cursor moving. It takes screenshots and, with a model that can see, tells you what is on them. It searches the web without an API key, sets reminders in plain words ("every weekday at 9am"), sends email if you set it up, and runs long jobs like a whole-drive search in the background while you keep talking.
+Hearth reads and writes files, including PDF, Word, Excel, PowerPoint, EPUB and archives, and it can work through a PDF hundreds of pages long. It runs PowerShell commands, opens any app, file, folder or link, and drives a real Chrome, Edge or Brave window you can watch while it clicks and types. Beyond the browser it reads a window's buttons and fields by name and operates the desktop itself, with the real cursor moving, a soft edge in your accent colour round the screen while it works, and your own window handed back when it's done. It takes screenshots and, with a model that can see, tells you what is on them. It searches the web without an API key, sets reminders in plain words ("every weekday at 9am"), sends email if you set it up, and runs long jobs like a whole-drive search in the background while you keep talking. It makes pictures and short videos on your own graphics card with an engine it installs itself, reading a ComfyUI or WebUI models folder in place, or with a cloud key.
 
 ### Brains
 
@@ -73,11 +73,11 @@ Press the mic and talk. Speech-to-text (faster-whisper) and text-to-speech (Koko
 
 ### Memory and skills
 
-Every fact JARVIS learns is a small markdown file in your workspace that you can read, edit or delete. JARVIS keeps an index of them in view and looks up the ones a message needs. It notes lasting facts on its own unless you turn that off, ones that are never used are archived rather than deleted, and a new fact that overlaps an old one updates it. It also keeps track of what's going on in your other chats and what's still open, so a new chat that starts with "guess what" gets a real guess, and each reply can show what it had in mind. Every past chat is searchable. A skill is a folder that teaches a workflow, like making a PDF, a slide deck or a spreadsheet, and it uses the Agent Skills format Claude and Codex read too, so most skills on GitHub install here in one line, `/skill install owner/repo`, and each can be switched off without removing it. See [docs/SKILLS.md](docs/SKILLS.md) and [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
+Every fact JARVIS learns is a small markdown file in your workspace that you can read, edit or delete. JARVIS keeps an index of them in view and looks up the ones a message needs. It notes lasting facts on its own unless you turn that off, ones that are never used are archived rather than deleted, and a new fact that overlaps an old one updates it. It also keeps track of what's going on in your other chats and what's still open, so a new chat that starts with "guess what" gets a real guess, and each reply can show what it had in mind. Every past chat is searchable, and one switch shares your memory with Claude Code, Codex, Cursor or OpenCode so they know you too. A skill is a folder that teaches a workflow, like making a PDF, a slide deck or a spreadsheet, and it uses the Agent Skills format Claude and Codex read too, so most skills on GitHub install here in one line, `/skill install owner/repo`, and each can be switched off without removing it. See [docs/SKILLS.md](docs/SKILLS.md) and [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
 
 ### Everywhere else
 
-The terminal app (`hearth.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
+The terminal app (`hearth.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. Anyone new needs a pairing code you approve, and you can write a connector for another app in one Python file ([docs/CONNECTORS.md](docs/CONNECTORS.md)). It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
 
 ### Safety
 
@@ -101,11 +101,11 @@ OpenClaw and Hermes are agents that go wide, across many messaging channels. Ope
 
 **Will it mess with my files?** Writes, moves and deletes stay inside the workspace folder (`~/Jarvis`) unless you allow another folder, and the approval switch decides what asks first. Set `HEARTH_LOCKDOWN=1` to keep reads inside the workspace too.
 
-**What do I need?** Windows 10 or 11. For local models, an NVIDIA card with 8 GB of memory runs a 7B to 9B model well; less works on the CPU, slowly. With a cloud key or an agent brain, any PC that runs a browser is enough.
+**What do I need?** Windows 10 or 11. For local models, a graphics card with 8 GB of memory runs a 7B to 9B model well, NVIDIA through CUDA and AMD or Intel through Vulkan; less works on the CPU, slowly. With a cloud key or an agent brain, any PC that runs a browser is enough.
 
 **Can it replace ChatGPT?** For talking, looking things up and working on your own files and apps, on a good brain, yes. On a small local model it is quicker to set up than it is clever, so pick the brain to match the job.
 
-**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. There is no telemetry. Hearth also asks GitHub for its own updates, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
+**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. There is no telemetry. Hearth also asks GitHub for its own updates and for the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
 
 **Why "Hearth"?** It's the warm center of the house. JARVIS lives there.
 
@@ -126,9 +126,11 @@ cd Hearth
 python -m hearth.tray --open       # start the window
 ```
 
+In the window, Models, Engine downloads the official llama.cpp build for your card at any time, the same engine the Full installer brings.
+
 The installer is safe to run again and can skip optional parts (voice, speech-to-text, the MCP SDK, file readers, the window, browser control); `Get-Help .\install.ps1 -Detailed` lists them. Started on Lite and want the built-in server later? Run the Full installer over it and your settings, memory and chats stay where they are.
 
-On macOS and Linux the terminal app and the web window work, and most tools (shell, files, screenshots, apps, windows, clipboard, web, reminders, notifications) have native paths there. Linux is tested on Mint 22 and Ubuntu 24.04; macOS has had less testing. Desktop control and the installer are Windows only for now. Steps are in [docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md).
+On macOS and Linux the terminal app and the web window work, and most tools (shell, files, screenshots, apps, windows, clipboard, web, reminders, notifications) have native paths there. Linux is tested on Mint 22 and Ubuntu 24.04, where Hearth also downloads its model and image engines for itself; macOS runs the same code but hasn't been tried on a real Mac yet. Desktop control and the installer are Windows only for now. Steps are in [docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md).
 
 Hearth finds a running LM Studio (port 1234), Ollama (11434) or llama.cpp server (8080) on its own. For anything else, set `LOCAL_API_BASE` to an OpenAI-compatible address.
 

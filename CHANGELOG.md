@@ -31,6 +31,17 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - `auto_memory` setting (Remember things on its own) for the background fact saver, which also saves nothing from a chat that asked it not to.
 - A GGUF without a tokenizer (an image or video model) or cut short is marked in Models and left out of the model menu.
 - The Team room's fire is animated.
+- Images and video on this PC (`hearth/sdserver.py`): stable-diffusion.cpp's sd-server fetched for the system and card and run like the chat engine. Models in `~/.hearth/image-models` or a ComfyUI/WebUI folder read in place, matched to the engine's own recipes; Models > Images & video installs, loads and lists what each family still needs. `generate_image` / `generate_video` use a ready local model first (`where=local|cloud`), else a saved Grok, OpenAI or Gemini key from any brain.
+- Computer use you can watch (`hearth/desktop_session.py`): a breathing accent edge round the screen (click-through, excluded from capture) and a pill naming the action; the turn's end fades it, chimes, restores the window that was in front and stops taskbar flashing. Agent brains' tool servers report through `/api/brain/desktop`. A click raises the target window first; apps JARVIS opens outlive the turn; `desktop_type` appends to a filled field unless told to replace.
+- Connectors on one core (`hearth/channel_core.py`): Telegram, Discord and WhatsApp with pairing codes for new senders (approved in Settings > Connectors, `/pair`, or the `connectors` tool), approvals asked in the chat, voice notes, photos and files both ways, each conversation a Hearth chat. Custom connectors are one Python file in `<workspace>/connectors` ([docs/CONNECTORS.md](docs/CONNECTORS.md)).
+- Memory shared with coding agents (`hearth/memory_mcp.py`): the Memory tab's Share with agents adds Hearth's memory to Claude Code, Codex, Cursor and OpenCode as an MCP server.
+- What's going on lately (`hearth/threads.py`): the memory pass notes where each chat stands; the newest few go with the next message for the engine and agent brains alike, shown on the reply and listed in the Memory tab. `read_chat` reads one earlier chat in order.
+- @ in the message box picks chats, files and folders; long pastes go as a chip; web sources show as one chip; `ask_user` questions stay in the chat as a card.
+- Files tab: sandboxed preview, an Open menu of the apps the system lists for a file type with their icons (`hearth/openers.py`).
+- Linux and macOS: the llama.cpp and stable-diffusion.cpp downloads read release file names for any system (`hearth/release_files.py`); Linux apps from `.desktop` entries (`hearth/desktop_entries.py`); card detection from the kernel's device files and Apple silicon. Whole suite passes on Ubuntu.
+- Setup plays a sample task beside the approval choices; a What to get step lists the model, engine and voice the choices need.
+- Discover opens on the month's most downloaded chat models; load estimates give the share that runs on the CPU; Add vision asks first and downloads in Downloads.
+- `crash.log` (faulthandler) records every thread's stack when native code takes a process down; the window restarts a backend that died.
 - A turn on a provider brain shows what it cost: every call's tokens added up (cached input apart) and priced from the model catalog, or the provider's own figure when it gives one (`model_facts.turn_cost`). Every agent brain ends a turn the same way: its own figure, else its tokens at catalog prices (`claude_brain.priced`), marked as plan usage when Codex is signed in with ChatGPT, for Cursor, and for Claude Code on a Claude plan.
 - Run in background on a slow command's card (`/bg` in the terminal): the wait ends at once and the command carries on as a job that reports when it ends (`jobs.background_now`).
 - Skills page redone: a switch per skill (`skills_off` setting; a switched-off skill is left out of the prompt and `load_skill` refuses it), a readable detail view, and the add box takes any Agent Skills folder on GitHub.
@@ -50,6 +61,18 @@ Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 - Chat bubbles take the theme's accent instead of a fixed blue.
 - An opened memory shows the fact, when it was saved and how often it was recalled, not the raw file with its header; graph labels no longer overlap.
 - The terminal's `/help` lists `/context` and `/tokens` again.
+- PortAudio start and stop are serialized (`listen._PA_LOCK`): the wake word retrying a missing mic while the window listed devices crashed the app.
+- Fresh installs from source pulled mcp 2, which removed FastMCP; major versions are capped in `constraints.txt`.
+- Provider limits: Retry-After and Gemini's retryDelay are honoured, a spent quota or a 402 is said once in the provider's words, an agent out of plan usage gets no turns until it resets.
+- Pictures go to the model at most 1280 px on the long side (a 2560x1440 screenshot on a 9B: 195 s to 6 s).
+- An agent brain's session restarts from the chat as it reads when an earlier message was edited or a reply regenerated.
+- The saved voice and speed are read when speaking, not at import.
+- A turn that hit the step limit or ended on an error no longer leaves the turn flag set (memory passes and reminders waited forever).
+- Repeating reminders hold while nobody is at the PC and say how many came by.
+- The terminal's pickers fall back to a numbered list without prompt_toolkit.
+
+### Removed
+- ntfy. Reminders go to the connected Telegram or Discord (`phone_reminders`).
 
 ### Security
 - The local API refuses requests from other sites; a page in any browser tab could read stored keys and call tools.

@@ -6,10 +6,11 @@ way they do on Windows. A few Windows-specific conveniences (desktop shortcuts,
 Start-Menu app launching, the registry app list) either fall back to a POSIX
 equivalent or are skipped; nothing crashes when they're unavailable.
 
-> Status: the CLI, web UI, tools, and skills are verified running on Linux
-> (Mint 22 / Ubuntu 24.04). macOS shares the same POSIX code paths but has had
-> less testing. If something breaks, please open an issue with the error and
-> your OS/distro.
+> Status: the CLI, web UI, tools, skills, the model engine and the image engine
+> are verified running on Linux (Mint 22 / Ubuntu 24.04), and the whole test suite
+> passes there. macOS runs the same code and the tests on every change, but hasn't
+> been tried on a real Mac yet. If something breaks, please open an issue with the
+> error and your OS/distro.
 
 ## Requirements
 
@@ -50,23 +51,25 @@ These are only needed for specific features:
 | Bring-a-window-to-front (`focus_window`) on Linux | `sudo apt install wmctrl` (or `xdotool`). X11 only, not Wayland. |
 | Screenshots on Linux | `sudo apt install scrot` (or `gnome-screenshot` / `spectacle`). |
 | Native desktop window instead of the browser, on Linux | `pip install pyqtwebengine` (uncomment it in `requirements.txt`). Otherwise the UI opens in your default browser, which works fine. |
-| Discord bridge | `pip install discord.py`, then configure it in the window under **Settings, Connectors**. |
+| Telegram, Discord or WhatsApp | Set it up in the window under **Settings, Connectors**, which installs what that app needs. See [PHONE.md](PHONE.md). |
 | Browser automation | `python -m playwright install chromium` |
 
 ## The built-in model server
 
-The bundled llama.cpp server installs via pip:
-
-```bash
-# CPU (works everywhere)
-pip install llama-cpp-python
-
-# NVIDIA / CUDA on Linux: see the project's install matrix for the right wheel
-# Apple Silicon (Metal) builds with Metal support automatically
-```
+Open **Models, Engine** in the window and install the engine. Hearth downloads
+the official llama.cpp build for your system and card from its releases: CUDA for
+an NVIDIA card, Vulkan for AMD and Intel, Metal on Apple silicon, and the CPU
+build otherwise. Nothing needs compiling.
 
 If you'd rather not run the built-in server, just point Hearth at LM Studio or
 Ollama in **Settings, Chat brain**. That path is identical on every OS.
+
+## Images and video
+
+**Models, Images & video** installs stable-diffusion.cpp the same way and lists
+the image models it finds, in `~/.hearth/image-models` or in a ComfyUI or WebUI
+models folder you add. Without a local model, images come from a cloud provider
+when you have a key for one.
 
 ## Notes
 

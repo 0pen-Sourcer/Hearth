@@ -77,12 +77,12 @@ pyobjc-framework-Cocoa; sys_platform == "darwin"                 # macOS: frontm
 # can't install:  sudo apt install python3-gi gir1.2-atspi-2.0 at-spi2-core
 
 # ---- Discord bridge (optional) ----
-# Two-way chat via a Discord bot (official API, no ban risk). Off by default;
-# `pip install discord.py` to enable, then `python -m hearth.discord_bridge`.
+# Two-way chat via a Discord bot (official API). Off by default; turning it
+# on in Settings, Connectors installs it.
 # discord.py
 
 # ---- WhatsApp bridge (optional, experimental) ----
 # Pure-Python WhatsApp-Web link (no Node/Chromium), pulls in segno for the QR.
-# Unofficial protocol — use a spare number (see docs/PHONE.md). Off by default;
-# `pip install neonize` to enable, then `python -m hearth.whatsapp_bridge`.
+# Unofficial protocol, so use a spare number (see docs/PHONE.md). Off by default;
+# turning it on in Settings, Connectors installs it.
 # neonize
