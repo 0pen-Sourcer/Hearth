@@ -91,9 +91,12 @@ def start_pairing(name: str = "") -> Dict[str, Any]:
         d["pending"] = {"ps": R.b64(ps), "room": payload["room"], "at": time.time(), "name": name or "",
                         "phone": "", "digits": ""}
         _write(d)
-    frag = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
-    # The pairing goes after #: a browser never sends that part to the server.
-    return {"ok": True, "link": f"{url}/#pair={frag}", "room": payload["room"]}
+    # Only the PC's key and the secret go in the link: the phone app is served by
+    # the relay, so it knows the relay's address, and works the room out from the
+    # two. A short link is a QR code with big squares that old cameras read.
+    # It goes after #: a browser never sends that part to the server.
+    frag = R.b64(R.raw_public(pc) + ps)
+    return {"ok": True, "link": f"{url}/#p={frag}", "room": payload["room"]}
 
 
 def pairing_status() -> Dict[str, Any]:
