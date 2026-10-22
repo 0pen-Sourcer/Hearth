@@ -71,6 +71,7 @@ with open(os.path.join(home, "auth.json"), "w", encoding="utf-8") as f:
 C.current = lambda: "codex"
 C.helper_news = lambda emit: []
 C.helpers_out = lambda: False
+C.used_up = lambda agent: None   # the PC's real Codex plan may be out of usage; not what this checks
 
 
 async def _codex_turn(prompt, emit, **kw):
