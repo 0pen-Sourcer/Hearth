@@ -1951,7 +1951,15 @@ def _loaded_model_is_vision(model: Optional[str] = None, base: Optional[str] = N
     # the caller's key, then the builtin's, then unauthed.
     try:
         import urllib.request, urllib.error
-        for _k in (os.environ.get("LOCAL_API_KEY") or "", "hearth-builtin", ""):
+        # Hearth's own server takes its own key; trying another first only
+        # leaves "Invalid API Key" lines in its log.
+        try:
+            from . import llmserver as _lsk
+            _ours = bool(_lsk.ours_at(host))
+        except Exception:
+            _ours = False
+        _keys = ("hearth-builtin",) if _ours else (os.environ.get("LOCAL_API_KEY") or "", "hearth-builtin", "")
+        for _k in _keys:
             try:
                 _h = {"Authorization": f"Bearer {_k}"} if _k else {}
                 _rq = urllib.request.Request(f"{host}/props", headers=_h)
