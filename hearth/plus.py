@@ -109,8 +109,8 @@ def deactivate() -> Dict[str, Any]:
 def check(force: bool = False) -> Dict[str, Any]:
     """Ask Dodo whether the key still holds, at most once a day unless forced."""
     d = _read()
-    if not d.get("key"):
-        return d
+    if not d.get("key") or d.get("owner"):
+        return d                # an owner key is the relay's to check, not Dodo's
     if not force and time.time() - float(d.get("checked") or 0) < CHECK_EVERY_S:
         return d
     body: Dict[str, Any] = {"license_key": d["key"]}
@@ -129,7 +129,7 @@ def status() -> Dict[str, Any]:
     """{plus: bool, key_hint, checked, offline_grace, checkout} for the app."""
     d = check()
     has = bool(d.get("key"))
-    fresh = time.time() - float(d.get("checked") or 0) < GRACE_S
+    fresh = bool(d.get("owner")) or time.time() - float(d.get("checked") or 0) < GRACE_S
     on = has and bool(d.get("valid")) and fresh
     key = str(d.get("key") or "")
     return {"plus": on, "has_key": has, "key_hint": ("…" + key[-4:]) if key else "",
