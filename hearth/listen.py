@@ -56,6 +56,25 @@ COMPUTE_TYPE = _env.get("STT_COMPUTE", "int8")  # CPU-friendly
 LANGUAGE = _env.get("STT_LANGUAGE", "").strip()
 
 
+# PortAudio is started and stopped process-wide, and doing either on two
+# threads at once crashes the process (an access violation, no Python error):
+# the wake word retrying a mic that isn't plugged in while the window asked for
+# the device list took Hearth down. Every PyAudio start and stop goes through
+# here, one at a time.
+_PA_LOCK = threading.RLock()
+
+
+def pa_new():
+    import pyaudio  # type: ignore
+    with _PA_LOCK:
+        return pyaudio.PyAudio()
+
+
+def pa_end(pa) -> None:
+    with _PA_LOCK:
+        pa.terminate()
+
+
 def device_rows() -> tuple:
     """([(index, name, input_channels, hostapi)], default_input_index) from a
     fresh PyAudio instance. PyAudio enumerates devices each time it is created,
@@ -63,8 +82,7 @@ def device_rows() -> tuple:
     snapshot from startup that cannot be refreshed while a stream is open.
     Falls back to sounddevice when PyAudio is not installed."""
     try:
-        import pyaudio  # type: ignore
-        pa = pyaudio.PyAudio()
+        pa = pa_new()
         try:
             rows = []
             for i in range(pa.get_device_count()):
@@ -80,7 +98,7 @@ def device_rows() -> tuple:
                 default = None
             return rows, default
         finally:
-            pa.terminate()
+            pa_end(pa)
     except Exception:
         pass
     try:
@@ -146,12 +164,12 @@ class MicInput:
 
     def __init__(self, index, rate: int, block: int):
         import pyaudio  # type: ignore
-        self._pa = pyaudio.PyAudio()
+        self._pa = pa_new()
         try:
             self._st = self._pa.open(format=pyaudio.paInt16, channels=1, rate=rate, input=True,
                                      input_device_index=index, frames_per_buffer=block)
         except Exception:
-            self._pa.terminate()
+            pa_end(self._pa)
             raise
 
     def read(self, n: int):
@@ -169,7 +187,7 @@ class MicInput:
         try:
             self._st.close()
         finally:
-            self._pa.terminate()
+            pa_end(self._pa)
 
 
 def rescan_devices() -> list:

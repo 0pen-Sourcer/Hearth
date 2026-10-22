@@ -605,8 +605,8 @@ def _mic_index():
     global _mic_warning
     _mic_warning = ""
     import pyaudio  # type: ignore
-    from .listen import is_system_audio_device, selected_input_name
-    pa = pyaudio.PyAudio()
+    from .listen import is_system_audio_device, pa_end, pa_new, selected_input_name
+    pa = pa_new()
     try:
         table = _pyaudio_inputs(pa)
         by_idx = {d[0]: d for d in table}
@@ -660,7 +660,7 @@ def _mic_index():
                 if mics else " Connect one and try again.")
         raise NoUsableMic(lead + tail)
     finally:
-        pa.terminate()
+        pa_end(pa)
 
 
 def mic_warning() -> str:
