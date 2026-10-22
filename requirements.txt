@@ -20,6 +20,9 @@ psutil
 pillow
 truststore
 plyer
+cryptography           # Plus: the relay's end-to-end encryption (also signs broadcasts)
+websockets             # Plus: the PC's connection to the relay
+segno                  # QR codes (pairing a phone, linking WhatsApp)
 
 # ---- File readers (read_file extracts text from these formats) ----
 pypdf
