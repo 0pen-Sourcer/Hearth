@@ -13109,7 +13109,8 @@ async function fileOpenMenu(anchor, path) {
     else if (b.dataset.fo === 'attach') {
       const name = path.split(/[\\/]/).pop();
       // The model is given the whole path, not one from the workspace down.
-      const full = STATE.filePathAbs ? STATE.filePathAbs.replace(/[\\/]+$/, '') + '\\' + name : path;
+      const abs = STATE.filePathAbs || '';
+      const full = abs ? abs.replace(/[\\/]+$/, '') + (abs.includes('\\') ? '\\' : '/') + name : path;
       if (!_pendingAttachments.some(x => x.path === full)) {
         _pendingAttachments.push({ name, path: full, isImage: IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()) });
         _renderAttachTray();
@@ -13125,7 +13126,7 @@ async function fileOpenMenu(anchor, path) {
   box.innerHTML = apps.length ? apps.map(a => `<button type="button" class="mp-row" data-fo="app" data-exe="${esc(a.exe)}">
       <span class="mp-ico"><img src="/api/file/opener-icon?exe=${encodeURIComponent(a.exe)}" alt="" onerror="this.replaceWith(document.createTextNode('${esc((a.name || '?')[0])}'))"></span>
       <span class="mp-txt"><span class="mp-t">${esc(a.name)}</span></span>${a.default ? '<span class="mp-badge">default</span>' : ''}</button>`).join('')
-    : '<div class="mp-s" style="padding:6px 10px">Windows names no app for this kind of file.</div>';
+    : '<div class="mp-s" style="padding:6px 10px">No app is registered for this kind of file. Default app still works.</div>';
 }
 // A file opened from the Files tab looks like itself where the window can draw
 // it (a web page or PDF, in a sandbox that runs nothing), and as its text

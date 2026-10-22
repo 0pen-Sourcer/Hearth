@@ -3765,9 +3765,11 @@ def start_app(args, cwd: Optional[str] = None) -> Optional[int]:
 def open_outside(target: str) -> None:
     """Open a file, folder, link or shortcut with its default app, from the
     desktop's own process so it outlives this turn (os.startfile's child would
-    share this process's job)."""
+    share this process's job). A Mac's `open` and a Linux desktop's `xdg-open`
+    elsewhere."""
     if sys.platform != "win32":
-        os.startfile(target)  # type: ignore[attr-defined]
+        tool = "open" if sys.platform == "darwin" else (shutil.which("xdg-open") or "xdg-open")
+        popen_outside([tool, target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
         return
     windir = os.environ.get("WINDIR", r"C:\Windows")
     subprocess.Popen([os.path.join(windir, "explorer.exe"), target], close_fds=True,
@@ -4914,7 +4916,19 @@ def _open_app(p: Dict) -> str:
             except Exception as e:
                 return f"Error: xdg-open failed: {e}"
         # No xdg-open and it's a real file we can't hand off — fall through.
-    # Named app → try the binary on PATH and detach it.
+    # Named app → the desktop's own app list, then a program on PATH.
+    try:
+        from . import desktop_entries as _de
+        entry = _de.find_app(canonical) or (_de.find_app(name) if name != canonical else None)
+    except Exception:
+        entry = None
+    if entry:
+        try:
+            _de.launch(entry)
+            _bring_newest_to_front(_before)
+            return f"launched: {entry['name']}"
+        except Exception as e:
+            return f"Error: couldn't start {entry['name']}: {e}"
     full = shutil.which(canonical)
     if full:
         try:
@@ -5134,7 +5148,7 @@ def _open_in_browser(p: Dict) -> str:
     if not browser:
         # No browser specified — fall through to system default
         try:
-            os.startfile(url)  # type: ignore[attr-defined]
+            open_outside(url)
             return f"opened in default browser: {url}"
         except Exception as e:
             return f"Error: could not open {url}: {e}"

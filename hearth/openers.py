@@ -1,8 +1,9 @@
-"""The apps a file can be opened with, as Windows itself offers them.
+"""The apps a file can be opened with, as the system itself offers them.
 
 The Files tab's Open menu lists them: the default app first, then what the
 file type's own Open-with lists name. Nothing here names an app; the lists are
-the ones Windows keeps for each file type.
+the ones Windows keeps for each file type, or a Linux desktop's app entries.
+On Linux an app is named by its .desktop file where Windows gives an exe.
 """
 from __future__ import annotations
 
@@ -83,6 +84,12 @@ def _subkeys(root, sub: str) -> List[str]:
 
 def openers(path: str) -> List[Dict[str, str]]:
     """[{exe, name, default}] for this file, the default app first."""
+    if sys.platform.startswith("linux"):
+        from . import desktop_entries as _de
+        apps = _de.apps_for(path)
+        default = _de.default_for(_de.mime_of(path))
+        return [{"exe": str(e["path"]), "name": str(e["name"]), "default": e["id"] == default}
+                for e in apps[:12]]
     if sys.platform != "win32":
         return []
     import winreg
@@ -117,11 +124,30 @@ def open_with(path: str, exe: str) -> None:
     """Open the file in one of the apps openers() named for it."""
     if not any(o["exe"].lower() == (exe or "").lower() for o in openers(path)):
         raise ValueError("not an app this file opens with")
+    if exe.endswith(".desktop"):
+        from . import desktop_entries as _de
+        entry = next(e for e in _de.entries() if e["path"] == exe)
+        _de.launch(entry, [path])
+        return
     subprocess.Popen([exe, path], close_fds=True)
 
 
 def icon_png(exe: str, size: int = 32) -> Optional[bytes]:
     """The app's own icon as PNG bytes, or None."""
+    if exe.endswith(".desktop"):
+        try:
+            from PIL import Image  # type: ignore
+            from . import desktop_entries as _de
+            entry = next((e for e in _de.entries() if e["path"] == exe), None)
+            src = _de.icon_file(entry, size) if entry else None
+            if not src:
+                return None
+            img = Image.open(src).convert("RGBA").resize((size, size), Image.LANCZOS)
+            out = io.BytesIO()
+            img.save(out, format="PNG")
+            return out.getvalue()
+        except Exception:
+            return None
     if sys.platform != "win32" or not os.path.isfile(exe):
         return None
     try:

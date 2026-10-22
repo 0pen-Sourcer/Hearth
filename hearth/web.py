@@ -3753,7 +3753,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                             "This file is re-read every turn. Add anything the assistant should always do\n"
                             "or never do.\n"
                         )
-                os.startfile(rules_path)  # type: ignore[attr-defined]
+                from .tools import open_outside
+                open_outside(rules_path)
                 return self._send_json(200, {"ok": True, "path": rules_path})
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})

@@ -758,11 +758,38 @@ def chat_id_for(r: Dict) -> str:
     return "rem_" + str(r.get("id") or "")
 
 
+def _idle_elsewhere() -> Optional[float]:
+    """A Mac's input idle time from IOKit; on Linux, GNOME's idle monitor, then
+    xprintidle for X11 desktops."""
+    import re
+    import shutil
+    import subprocess
+    runs = []
+    if sys.platform == "darwin":
+        runs.append((["ioreg", "-c", "IOHIDSystem", "-d", "4"], r'"HIDIdleTime"\s*=\s*(\d+)', 1e9))
+    else:
+        runs.append((["gdbus", "call", "--session", "--dest", "org.gnome.Mutter.IdleMonitor",
+                      "--object-path", "/org/gnome/Mutter/IdleMonitor/Core",
+                      "--method", "org.gnome.Mutter.IdleMonitor.GetIdletime"], r"uint64 (\d+)", 1e3))
+        runs.append((["xprintidle"], r"(\d+)", 1e3))
+    for cmd, pattern, per_second in runs:
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        m = re.search(pattern, r.stdout or "")
+        if r.returncode == 0 and m:
+            return int(m.group(1)) / per_second
+    return None
+
+
 def idle_seconds() -> Optional[float]:
     """How long since the last key press or mouse move on this PC. None where
     that can't be read."""
     if sys.platform != "win32":
-        return None
+        return _idle_elsewhere()
     try:
         import ctypes
 
