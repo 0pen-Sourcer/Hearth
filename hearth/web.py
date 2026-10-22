@@ -33,6 +33,7 @@ import argparse
 from . import env as _env
 import asyncio
 import base64
+import io
 import json
 import os
 import re
@@ -214,12 +215,22 @@ _BRIDGE_MODULES = {
     "telegram": "hearth.telegram_bridge",
     "discord": "hearth.discord_bridge",
     "whatsapp": "hearth.whatsapp_bridge",
+    "relay": "hearth.relay_bridge",          # Plus: the phone app, through Hearth's relay
 }
 
 
 def _bridge_running(ch: str) -> bool:
     p = _BRIDGE_PROCS.get(ch)
     return bool(p and p.poll() is None)
+
+
+def _stop_bridge(ch: str) -> None:
+    p = _BRIDGE_PROCS.pop(ch, None)
+    try:
+        if p and p.poll() is None:
+            p.terminate()
+    except Exception:
+        pass
 
 
 def _bridge_config(ch: str) -> dict:
@@ -236,6 +247,10 @@ def _bridge_config(ch: str) -> dict:
 
 
 def _bridge_configured(ch: str, cfg: Optional[dict] = None) -> bool:
+    if ch == "relay":
+        # Plus on this PC and a phone paired (or being paired) with it.
+        from . import plus as _plus, relay_bridge as _rb
+        return bool(_rb.relay_url() and _plus.active() and (_rb.phones() or _rb.pairing_status()["state"] != "none"))
     cfg = cfg if cfg is not None else _bridge_config(ch)
     if ch == "whatsapp":
         return bool(cfg.get("allowed_numbers") or cfg.get("allow_self_chat"))
@@ -2198,6 +2213,11 @@ class HearthHandler(BaseHTTPRequestHandler):
             # Who asked to talk on a chat app, and who is let in.
             from . import channel_core as _cc
             return self._send_json(200, {"pending": _cc.pending(), "approved": _cc.approved()})
+        if path == "/api/plus":
+            # Plus: the licence, the relay, paired phones and a pairing in progress.
+            from . import plus as _plus, relay_bridge as _rb
+            return self._send_json(200, {**_plus.status(), "relay": bool(_rb.relay_url()), "phones": _rb.phones(),
+                                         "pairing": _rb.pairing_status(), "bridge": _bridge_running("relay")})
         if path == "/api/threads":
             # What's going on lately, as kept for the next messages.
             from . import threads as _threads
@@ -3241,6 +3261,38 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, _si.uninstall_skill((body.get("name") or "").strip()))
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if path.startswith("/api/plus/"):
+            from . import plus as _plus, relay_bridge as _rb
+            body = self._read_json()
+            act = path.rsplit("/", 1)[1]
+            if act == "activate":
+                r = _plus.activate(str(body.get("key") or ""))
+                if r.get("ok") and _bridge_configured("relay"):
+                    _spawn_bridge("relay")
+                return self._send_json(200, r)
+            if act == "deactivate":
+                _stop_bridge("relay")
+                return self._send_json(200, _plus.deactivate())
+            if act == "pair":
+                if not _plus.active():
+                    return self._send_json(200, {"ok": False, "error": "pairing a phone needs Hearth Plus on this PC"})
+                r = _rb.start_pairing(str(body.get("name") or ""))
+                if r.get("ok"):
+                    import segno
+                    buf = io.BytesIO()
+                    segno.make(r["link"], error="m").save(buf, kind="svg", scale=5, border=2, dark="#111", light="#fff")
+                    r["qr"] = buf.getvalue().decode("utf-8")
+                    running, err = _spawn_bridge("relay")
+                    if not running:
+                        r = {"ok": False, "error": err or "the relay bridge didn't start"}
+                return self._send_json(200, r)
+            if act == "confirm":
+                return self._send_json(200, _rb.confirm_pairing(str(body.get("name") or "")))
+            if act == "cancel":
+                return self._send_json(200, _rb.cancel_pairing())
+            if act == "forget":
+                return self._send_json(200, _rb.forget_phone(str(body.get("id") or "")))
+            return self._send_json(404, {"ok": False, "error": "unknown Plus action"})
         if path == "/api/connectors/access":
             # Approve, dismiss or remove someone on a chat app.
             from . import channel_core as _cc
@@ -3269,14 +3321,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         if path == "/api/bridges/stop":
             body = self._read_json()
-            ch = (body.get("channel") or "").strip().lower()
-            p = _BRIDGE_PROCS.get(ch)
-            try:
-                if p and p.poll() is None:
-                    p.terminate()
-            except Exception:
-                pass
-            _BRIDGE_PROCS.pop(ch, None)
+            _stop_bridge((body.get("channel") or "").strip().lower())
             return self._send_json(200, {"ok": True, "running": False})
         if path == "/api/bridges/config":
             # Save a phone-bridge config (~/.hearth/<file>.json) from the GUI so
