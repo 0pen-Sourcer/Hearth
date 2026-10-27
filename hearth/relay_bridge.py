@@ -249,7 +249,8 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         return cached_brain(what, m)
     if what in ("use", "set"):
         out = brain_request(what, m)
-        _BRAIN_CACHE.pop("brain", None)
+        if out.get("ok") is not False:
+            _settle_brain(what, m)
         warm_brain()
         return out
     if what == "look":
@@ -317,23 +318,62 @@ def _window(method: str, path: str, body: Optional[Dict[str, Any]] = None, timeo
 # and anything older than a minute is read again behind it.
 _BRAIN_CACHE: Dict[str, Any] = {}       # "brain" -> (at, answer); ("agent", id) -> (at, answer)
 _WARMING = threading.Lock()
+_CHANGED = [0]                          # bumped by each switch or setting from the phone
+_AGAIN = threading.Event()
 
 
 def warm_brain() -> None:
+    """Re-read the brain list in the background. A read that started before a
+    switch is thrown away, and one more read follows it."""
     def run():
         if not _WARMING.acquire(blocking=False):
+            _AGAIN.set()
             return
         try:
-            b = brain_request("brain", {})
-            if not b.get("error"):
-                _BRAIN_CACHE["brain"] = (time.time(), b)
-            for a in b.get("agents") or []:
-                info = brain_request("agent_models", {"id": a["id"]})
-                if info.get("models"):
-                    _BRAIN_CACHE[("agent", a["id"])] = (time.time(), info)
+            while True:
+                _AGAIN.clear()
+                seen = _CHANGED[0]
+                b = brain_request("brain", {})
+                if not b.get("error") and seen == _CHANGED[0]:
+                    _BRAIN_CACHE["brain"] = (time.time(), b)
+                for a in b.get("agents") or []:
+                    info = brain_request("agent_models", {"id": a["id"]})
+                    if info.get("models") and seen == _CHANGED[0]:
+                        _BRAIN_CACHE[("agent", a["id"])] = (time.time(), info)
+                if not _AGAIN.is_set() and seen == _CHANGED[0]:
+                    break
         finally:
             _WARMING.release()
     threading.Thread(target=run, daemon=True, name="relay-brain-warm").start()
+
+
+def _settle_brain(what: str, m: Dict[str, Any]) -> None:
+    """Write what the phone just changed into the saved list, so the next look
+    at it answers at once instead of waiting for the whole re-read."""
+    _CHANGED[0] += 1
+    hit = _BRAIN_CACHE.get("brain")
+    if not hit:
+        return
+    b = dict(hit[1])
+    if what == "set":
+        key = str(m.get("key") or "")
+        if key in ("approval_mode", "think_level", "think_default"):
+            b[key] = m.get("value")
+    elif m.get("kind") == "agent":
+        b["provider"] = str(m.get("id") or "")
+        if m.get("model") is not None:
+            info = _BRAIN_CACHE.get(("agent", b["provider"]))
+            if info:
+                _BRAIN_CACHE[("agent", b["provider"])] = (time.time(), dict(info[1], model=str(m.get("model") or "")))
+    elif m.get("kind") == "provider":
+        b["provider"] = str(m.get("id") or "")
+        p = next((x for x in b.get("providers") or [] if x.get("id") == b["provider"]), None)
+        b["model"] = (p or {}).get("model") or ""
+    else:
+        # A model loading on the PC: what's loaded changes as it goes, so read it fresh.
+        _BRAIN_CACHE.pop("brain", None)
+        return
+    _BRAIN_CACHE["brain"] = (time.time(), b)
 
 
 def cached_brain(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
@@ -476,6 +516,7 @@ class Room:
         self.peer_up = False
         self.pc = bridge.pc
         self.joiner = Joiner()
+        self.lookups: set = set()
 
     @property
     def chat(self) -> str:
@@ -552,7 +593,13 @@ class Room:
         if t == "msg" and self.chan is not None:
             m = self.chan.open(f)
             m = self.joiner.add(m) if m else None
-            if m:
+            if m and m.get("type") == "req":
+                # Lookups run side by side, so a slow one (icons from the web)
+                # never holds up a switch the person is waiting on.
+                task = asyncio.ensure_future(asyncio.to_thread(self.bridge.on_message, self, m))
+                self.lookups.add(task)
+                task.add_done_callback(self.lookups.discard)
+            elif m:
                 await asyncio.to_thread(self.bridge.on_message, self, m)
 
     async def tell_paired(self) -> None:
@@ -587,7 +634,10 @@ class Bridge:
                 out = answer(m, cc.chat_id_for(self.adapter.name, room.chat))
             except Exception as e:
                 out = {"error": f"{type(e).__name__}: {e}"}
-            fut = asyncio.run_coroutine_threadsafe(room.deliver({"type": "res", "re": m.get("id"), **out}), self.loop)
+            # "rid" names the request; "id" is left to the request itself (an agent's id).
+            # Older phone apps sent only "id".
+            re_id = m.get("rid") or m.get("id")
+            fut = asyncio.run_coroutine_threadsafe(room.deliver({**out, "type": "res", "re": re_id}), self.loop)
             try:
                 fut.result(30)
             except Exception:
