@@ -862,6 +862,45 @@ def priced(agent: str, stats: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
     return out
 
 
+def reached_tool(kind: str, fields: Dict[str, Any], reached: Dict[str, Optional[str]]) -> Optional[Dict[str, Any]]:
+    """An agent brain reaches most of Hearth's tools through find_tools and
+    use_tool. Shown as what they amount to: use_tool as the tool it ran, with
+    that tool's arguments, and find_tools (a lookup, not work) not at all.
+    Returns the fields to show, or None to show nothing."""
+    name = str(fields.get("name") or "")
+    for pre in ("mcp__hearth__", "mcp__hearth_brain__", "hearth_brain_", "hearth_brain/", "hearth_brain."):
+        if name.startswith(pre):
+            name = name[len(pre):]
+    cid = str(fields.get("id") or "")
+    if kind == "tool_result":
+        if cid in reached:
+            inner = reached[cid]
+            return None if inner is None else {**fields, "name": inner}
+        if name == "find_tools":
+            return None
+        return fields
+    if name == "find_tools":
+        if cid:
+            reached[cid] = None
+        return None
+    if name != "use_tool":
+        return fields
+    args = fields.get("args") if isinstance(fields.get("args"), dict) else {}
+    inner = str(args.get("name") or "")
+    if not inner:
+        # Still being written: shown once the call names its tool.
+        return None if kind == "tool_call_partial" else fields
+    inner_args = args.get("arguments")
+    if isinstance(inner_args, str):
+        try:
+            inner_args = json.loads(inner_args)
+        except ValueError:
+            inner_args = {"input": inner_args}
+    if cid:
+        reached[cid] = inner
+    return {**fields, "name": inner, "args": inner_args if isinstance(inner_args, dict) else {}}
+
+
 async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
                    permission_check=None, should_cancel=None, voice: bool = False,
                    model: Optional[str] = None, drain_steer=None, context: str = "") -> int:
@@ -873,8 +912,13 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     _sent.clear()
     # Every agent's turn ends with what it cost, by one rule for all of them.
     _emit, agent = emit, current() or ""
+    reached: Dict[str, Optional[str]] = {}      # call id -> the tool use_tool ran (None: a lookup)
 
     def emit(kind: str, **fields) -> None:
+        if kind in ("tool_call", "tool_call_partial", "tool_result"):
+            fields = reached_tool(kind, fields, reached)
+            if fields is None:
+                return
         if kind == "done":
             fields["stats"] = priced(agent, fields.get("stats"))
         elif kind == "error":

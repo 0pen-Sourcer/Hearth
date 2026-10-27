@@ -260,7 +260,6 @@ async def _run_exec(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]
                     emit("tool_call", name=item.get("tool", ""), args=item.get("arguments") or {}, id=iid)
                 elif kind == "web_search":
                     started[iid] = time.time()
-                    emit("tool_call", name="web_search", args={"query": item.get("query", "")}, id=iid)
             elif t == "item.completed":
                 t_start = started.pop(iid, None)
                 ms = int((time.time() - t_start) * 1000) if t_start else 0
@@ -293,7 +292,9 @@ async def _run_exec(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]
                         body = "Error: " + str((item.get("error") or {}).get("message") or item.get("error"))
                     emit("tool_result", name=item.get("tool", ""), content=body[:20000], ms=ms, id=iid)
                 elif kind == "web_search":
-                    emit("tool_result", name="web_search", content=item.get("query", ""), ms=ms, id=iid)
+                    name, args = _search_call(item)
+                    emit("tool_call", name=name, args=args, id=iid)
+                    emit("tool_result", name=name, content="", ms=ms, id=iid)
             elif t == "turn.completed":
                 usage = ev.get("usage") or {}
             elif t == "turn.failed":
@@ -366,6 +367,17 @@ def _shown_command(params: Dict[str, Any]) -> str:
     shell call, and says what is inside separately."""
     acts = [a.get("command") for a in params.get("commandActions") or [] if isinstance(a, dict) and a.get("command")]
     return " && ".join(acts) if acts else str(params.get("command") or "")
+
+
+def _search_call(item: Dict[str, Any]):
+    """(tool, args) a Codex web search step amounts to: opening or searching a
+    page is reading that page, the rest is a search for its query."""
+    act = item.get("action") if isinstance(item.get("action"), dict) else {}
+    kind = str(act.get("type") or "")
+    if kind in ("openPage", "open_page", "findInPage", "find_in_page") and act.get("url"):
+        return "web_fetch", {"url": str(act.get("url"))}
+    query = act.get("query") or next(iter(act.get("queries") or []), "") or item.get("query") or ""
+    return "web_search", {"query": str(query)}
 
 
 def _change_call(c: Dict[str, Any]):
@@ -581,7 +593,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
                 elif kind == "mcpToolCall":
                     emit("tool_call", name=item.get("tool", ""), args=item.get("arguments") or {}, id=iid)
                 elif kind == "webSearch":
-                    emit("tool_call", name="web_search", args={"query": item.get("query", "")}, id=iid)
+                    pass                      # what it searched or opened is known when it's done
                 elif kind == "fileChange":
                     for n, c in enumerate(item.get("changes") or []):
                         name, args = _change_call(c)
@@ -616,7 +628,9 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
                         body = "Error: " + str((item.get("error") or {}).get("message") or item.get("error"))
                     emit("tool_result", name=item.get("tool", ""), content=body[:20000], ms=ms, id=iid)
                 elif kind == "webSearch":
-                    emit("tool_result", name="web_search", content=item.get("query", ""), ms=ms, id=iid)
+                    name, args = _search_call(item)
+                    emit("tool_call", name=name, args=args, id=iid)
+                    emit("tool_result", name=name, content="", ms=ms, id=iid)
             elif meth == "thread/tokenUsage/updated":
                 usage = ((prm.get("tokenUsage") or {}).get("last") or {})
             elif meth == "error":
