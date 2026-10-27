@@ -1630,6 +1630,8 @@ def _icon_mime(data: bytes) -> str:
         return "image/gif"
     if data[:2] == b"\xff\xd8":
         return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
     head = data[:200].lstrip().lower()
     if head.startswith(b"<svg") or (head.startswith(b"<?xml") and b"<svg" in data[:600].lower()):
         return "image/svg+xml"
@@ -2619,9 +2621,13 @@ class HearthHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 return self._send_json(500, {"error": str(e)})
-        if path == "/api/favicon":
-            d = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("d", [""])[0]
-            icon = _favicon(d)
+        if path in ("/api/favicon", "/api/brand-icon"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if path == "/api/brand-icon":
+                from .brand_icons import brand_icon
+                icon = brand_icon(q.get("k", [""])[0])
+            else:
+                icon = _favicon(q.get("d", [""])[0])
             if not icon:
                 return self.send_error(404, "no icon")
             data, mime = icon

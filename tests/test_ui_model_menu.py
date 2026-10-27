@@ -423,10 +423,14 @@ with sync_playwright() as pw:
       openrouter: harnessMark(BRAIN_MARKS.openrouter), goose: harnessMark(HARNESS.goose),
       aider: harnessMark(HARNESS.aider), claude: harnessMark(HARNESS['claude-code']),
       prov: provIco('openrouter'), unknown: provIco('custom') })""")
-    check("a badge with no drawn logo shows its site's own icon",
-          "/api/favicon?d=openrouter.ai" in marks["openrouter"] and "/api/favicon?d=goose-docs.ai" in marks["goose"])
-    check("a drawn logo stays, and a maker with no icon keeps its letter",
-          marks["claude"].startswith("<svg") and marks["aider"] == "A")
+    check("a badge shows the brand's own app icon, fetched by the PC",
+          "/api/brand-icon?k=openrouter" in marks["openrouter"] and "/api/brand-icon?k=goose" in marks["goose"]
+          and "/api/brand-icon?k=claude-code" in marks["claude"])
+    plain = pg.evaluate("""() => ({ claude: harnessPlain(HARNESS['claude-code']), aider: harnessPlain(HARNESS.aider),
+      goose: harnessPlain(HARNESS.goose), nokey: harnessMark({ label: 'Zed' }) })""")
+    check("if that fails, the drawn logo, the site's icon or the letter stands in",
+          plain["claude"].startswith("<svg") and plain["aider"] == "A" and "/api/favicon?d=goose-docs.ai" in plain["goose"]
+          and plain["nokey"] == "Z" and "data-fb=" in marks["claude"])
     check("a saved provider in the menu carries its own mark, an unknown one the cloud",
           "openrouter.ai" in marks["prov"] and "<svg" in marks["unknown"] and "favicon" not in marks["unknown"])
 
