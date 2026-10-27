@@ -231,7 +231,6 @@ Everything saves as you change it, with no restart.
 ├── settings.json          settings
 ├── profile.md             who you are and how you like replies
 ├── rules.md               your house rules, read every turn
-├── soul.md                who it is, written by itself
 ├── logs/                  what it did, by day, and each part's log
 ├── subagents/             each helper's transcript
 ├── skills/                skills you installed or wrote

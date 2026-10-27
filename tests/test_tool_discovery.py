@@ -84,7 +84,7 @@ check("a name is not outranked by a description that mentions its words",
 for q, want in (("image generation", "generate_image"), ("images", "generate_image"),
                 ("make a picture", "generate_image"), ("zip archive", "extract_archive_file"),
                 ("network", "network_info"), ("send an email", "send_email"),
-                ("summarize a huge pdf", "read_pdf_large"), ("soul", "edit_soul")):
+                ("summarize a huge pdf", "read_pdf_large")):
     got = ask(q)
     check(f"{q!r} finds {want}", want in got)
 check("a keyword never floods the context", len(ask("file")) <= 10)

@@ -1,8 +1,8 @@
 # Tools
 
-Hearth gives the model **114 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
+Hearth gives the model **110 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
-To keep the prompt small, **36** core tools load with their full description and **78** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **36** core tools load with their full description and **74** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -115,15 +115,11 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 
 | Tool | What it does |
 |---|---|
-| `append_soul` † | Add ONE line to your soul.md without rewriting the whole file |
-| `draft_soul` † | Propose a starter soul.md when soul.md is empty or sparse |
-| `edit_soul` † | Write your own identity to ~/Jarvis/soul.md |
 | `memory_forget` | Delete a memory by title |
 | `memory_list` † | Show the full memory index (all titles and one-line hooks) |
 | `memory_recall` | Search saved memories |
 | `memory_save` | Save a lasting fact about the user or their world (preferences, hardware, projects, people, setups) |
 | `read_chat` † | Read one earlier chat in order, by its title or id: what it was about, and the latest turns in full |
-| `read_soul` † | Read back your current soul.md content |
 | `search_chats` | Full-text search over every past conversation |
 
 ## Reminders & alerts

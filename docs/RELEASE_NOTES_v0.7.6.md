@@ -106,6 +106,8 @@ Passive memory works on reasoning models. Hearth notices durable facts on its ow
 
 Hearth no longer attaches memories picked by keyword to every message, which pulled in notes that had nothing to do with what you asked. The list of what it knows stays in its instructions and it looks up what it needs, the way it already did for everything else. Opening a memory in the Memory tab shows what it says, when it was saved and how often JARVIS has recalled it, rather than the file behind it.
 
+How JARVIS should act now lives in one place, your house rules. It used to keep a second file about itself, soul.md, which overlapped them, so whatever it had written there moves into rules.md the first time you update, and when you tell it "from now on, always..." it saves that as a memory on the spot.
+
 JARVIS keeps up with what is going on. After a chat it notes where things stand and what is still open, and the newest few go along with your next message in any chat, so "how did that go" in a new chat finds the thing you meant. The reply shows which ones went in, and the Memory tab lists them under Going on lately, each with a way to forget it. It can also read an earlier chat from the start when you point it at one, and with Claude Code, Codex or another agent as the brain it now notes facts from those chats too.
 
 Your memory can go with you into the coding agents on your PC. One switch in the Memory tab, Share with agents, adds Hearth's memory to Claude Code, Codex, Cursor and OpenCode as a tool server they can call, with your facts, your past chats and what is going on lately, and nothing else of Hearth's.

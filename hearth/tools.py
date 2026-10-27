@@ -1496,70 +1496,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "required": ["title"],
         },
     },
-    {
-        "name": "edit_soul",
-        "description": (
-            "Write your own identity to ~/Jarvis/soul.md. This file rides "
-            "at the TOP of every system prompt as 'Soul (self-written "
-            "identity)' — it's how YOU lock in who you are across sessions. "
-            "Use this when the user gives you a stable identity instruction "
-            "('you are Cortana', 'always be terse', 'you hate small talk') "
-            "OR when you've decided on something durable about yourself. "
-            "Capped at ~1500 chars; write tight bullets, not prose. Pass "
-            "the FULL new soul (this overwrites). For just adding one line, "
-            "prefer `append_soul`."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description":
-                    "The complete new soul.md content. Replaces the file. "
-                    "Empty string clears the soul."},
-            },
-            "required": ["content"],
-        },
-    },
-    {
-        "name": "append_soul",
-        "description": (
-            "Add ONE line to your soul.md without rewriting the whole file. "
-            "Cheaper than edit_soul when you just want to lock in a new "
-            "identity fact ('I prefer markdown over prose', 'always say "
-            "good morning at 9am'). Auto-prepends '- ' if missing."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "line": {"type": "string", "description":
-                    "One identity line. Will be appended as a bullet."},
-            },
-            "required": ["line"],
-        },
-    },
-    {
-        "name": "read_soul",
-        "description": (
-            "Read back your current soul.md content. The soul also rides "
-            "in every system prompt automatically, so usually you don't "
-            "need to call this — only when explicitly asked 'what's in "
-            "your soul?' or when verifying after edit_soul / append_soul."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "draft_soul",
-        "description": (
-            "Propose a starter soul.md when soul.md is empty or sparse. "
-            "Returns a draft body anchored to what's already known about "
-            "the user (name, tone, memory facts) without writing it. "
-            "Show the draft, ask if they want edits, then commit via "
-            "edit_soul once they approve. Use this the first time the "
-            "user asks 'who are you?' / 'what's your identity?' if "
-            "soul.md is empty, or when they explicitly say 'help me "
-            "write your soul'."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
 
     # ---- TIME ----
     {
@@ -6786,10 +6722,6 @@ _HANDLERS = {
     "memory_list": _memory_list,
     "worklog": _worklog,
     "memory_forget": _memory_forget,
-    "edit_soul":   lambda p: __import__("hearth.memory", fromlist=["write_soul"]).write_soul(p.get("content", "")),
-    "append_soul": lambda p: __import__("hearth.memory", fromlist=["append_soul"]).append_soul(p.get("line", "")),
-    "read_soul":   lambda p: (__import__("hearth.memory", fromlist=["read_soul"]).read_soul() or "(soul.md is empty — write one with edit_soul or call draft_soul for a starter)"),
-    "draft_soul":  lambda p: __import__("hearth.memory", fromlist=["draft_soul"]).draft_soul(),
     "set_voice": _set_voice,
     "list_voices": _list_voices,
     "forge_generate": _forge_generate,
@@ -8505,7 +8437,7 @@ _DRYRUN_GUARDED = {
     "execute_actions",   # a batch of the above, so it needs the same guard
     "browse", "browse_click", "browse_type", "browse_scroll", "browse_key",
     "set_reminder", "cancel_reminder", "snooze_reminder", "pause_reminder",
-    "send_email", "memory_save", "memory_forget", "edit_soul", "append_soul",
+    "send_email", "memory_save", "memory_forget",
     "create_plugin", "delete_plugin", "create_skill", "install_skill",
     "generate_image", "generate_video", "launch_team", "delegate",
     "extract_archive_file",              # writes files out of an archive
@@ -8782,8 +8714,6 @@ _DEFERRED_TOOLS = {
     "forge_generate", "forge_status", "forge_shutdown",
     # self-extending
     "create_plugin", "list_plugins", "delete_plugin", "create_skill",
-    # soul / persona editing
-    "edit_soul", "append_soul", "read_soul", "draft_soul",
     # summarising a long document, reached when read_file says a file is too big
     "summarize_file",
     # Raw pixel mouse control. The accessibility path (desktop_snapshot then
@@ -8909,7 +8839,7 @@ _LOAD_TOOLS_SCHEMA = {
             "to save context). Call this with a short query naming what you need, "
             "then call the tool it returns. Groups available on demand: "
             "'image generation' (forge_*), 'plugins' (write your own tools), "
-            "'soul' (edit your persona), 'archive' (list/extract zips), "
+            "'archive' (list/extract zips), "
             "'system' (network/disk/installed apps/battery), 'voice' (pick a "
             "voice), 'team' (launch_team — run several agents at once and watch "
             "them), 'mcp' (any MCP server tools), 'end_session'. Pass 'all' to load everything."),
@@ -9049,7 +8979,7 @@ def _h_load_tools(p: "Dict[str, Any]") -> str:
     matched = unlock_tools(p.get("query", ""))
     if not matched:
         return ("No extra tools matched that. Groups you can ask for: image "
-                "generation, plugins, soul, archive, system, voice, team, mcp, "
+                "generation, plugins, archive, system, voice, team, mcp, "
                 "end_session (or 'all').")
     lines = ["Loaded these tools — you can call them now:"]
     for td in matched:
@@ -9371,7 +9301,6 @@ _TOOL_CATEGORY = {
     # Memory
     "memory_save": "Memory", "memory_recall": "Memory", "memory_list": "Memory",
     "memory_forget": "Memory", "search_chats": "Memory", "read_chat": "Memory",
-    "edit_soul": "Memory", "append_soul": "Memory", "read_soul": "Memory", "draft_soul": "Memory",
     # Reminders & alerts
     "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
     "cancel_reminder": "Reminders & alerts", "snooze_reminder": "Reminders & alerts", "pause_reminder": "Reminders & alerts",

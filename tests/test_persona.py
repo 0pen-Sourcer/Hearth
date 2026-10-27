@@ -9,7 +9,7 @@ about twelve thousand tokens, which with the tool schemas used 64% of a 32K
 window before anyone typed.
 
 This holds the shipped part to a size and to the facts. The user's own layers
-(soul, profile, memories, house rules) are theirs and are not measured here.
+(profile, memories, house rules) are theirs and are not measured here.
 
     .\\.venv\\Scripts\\python.exe tests\\test_persona.py
 """
@@ -35,8 +35,8 @@ def check(label, cond):
         FAILS.append(label)
 
 
-# Render the shipped part alone: no soul, profile, memories, rules or skills.
-for fn in ("read_rules", "read_soul", "read_profile", "index_for_prompt",
+# Render the shipped part alone: no profile, memories, rules or skills.
+for fn in ("read_rules", "read_profile", "index_for_prompt",
            "skills_for_prompt"):
     setattr(P, fn, lambda *a, **k: "")
 os.environ.pop("HEARTH_PERSONA", None)

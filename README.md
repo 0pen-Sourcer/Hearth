@@ -178,7 +178,6 @@ Hearth has over a hundred tools, but only a core set goes to the model in full e
 
 ```
 ~/Jarvis/                  the assistant's home (HEARTH_WORKSPACE moves it)
-├── soul.md                who it is, written by itself, read every turn
 ├── profile.md             who you are and how you like replies, read every turn
 ├── rules.md               your house rules, read every turn
 ├── memory/                one markdown file per fact, MEMORY.md as the index, _archive/ for cold ones

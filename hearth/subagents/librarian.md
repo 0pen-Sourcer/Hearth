@@ -1,7 +1,7 @@
 ---
 name: librarian
 description: Memory + chat-history curation. Use when the user asks "what do you remember about me", to consolidate duplicate memories, find conflicting facts, or surface forgotten context from past chats.
-allowed_tools: [memory_recall, memory_save, memory_forget, memory_list, search_chats, list_directory, read_file, read_soul]
+allowed_tools: [memory_recall, memory_save, memory_forget, memory_list, search_chats, list_directory, read_file]
 cost_class: cheap
 max_turns: 20
 ---

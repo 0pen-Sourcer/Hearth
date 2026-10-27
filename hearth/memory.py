@@ -1338,6 +1338,7 @@ def ensure_rules_exist() -> None:
 
 def read_rules() -> str:
     ensure_rules_exist()
+    fold_old_soul()
     try:
         with open(RULES_PATH, "r", encoding="utf-8") as f:
             return f.read().strip()
@@ -1346,88 +1347,48 @@ def read_rules() -> str:
 
 
 # ---------------------------------------------------------------------------
-# soul.md — the agent's self-written identity layer. Read-only persona.py
-# carries the BASE prompt; soul.md is the agent's editable identity that
-# survives across sessions and that the agent can update itself with the
-# `edit_soul` tool. Hard-capped to keep the system prompt tight.
+# soul.md was a second, agent-written identity file. It overlapped house rules
+# (how to behave) and the persona name setting, so its lines now move into
+# rules.md the first time rules are read, and the file is kept as soul.md.old.
 # ---------------------------------------------------------------------------
 
 SOUL_PATH = os.path.join(WORKSPACE, "soul.md")
-SOUL_MAX_CHARS = int(_env.get("SOUL_MAX_CHARS", "1500"))
-# Per-call write cap: forces the model to be deliberate. Stops it from
-# slamming a 1500-char essay into soul.md in one go. Multi-call edits
-# still allowed (model can append in steps), just no single dump.
-SOUL_PER_WRITE_CAP = int(_env.get("SOUL_PER_WRITE_CAP", "400"))
-
-DEFAULT_SOUL = """\
-# Soul
-
-Things I've locked in about myself — written by me, for me, persisted
-across every session and restart. Anything in here is treated as part
-of my identity. Use `edit_soul` to add / refine / drop entries.
-
-Keep this file short. ~1.5K chars max. If it gets long, distill.
-"""
+_SOUL_TEMPLATE = ("# Soul", "Things I've locked in about myself", "across every session and restart",
+                  "of my identity. Use `edit_soul`", "Keep this file short.")
 
 
-def read_soul() -> str:
-    """Return soul.md content (stripped) or empty string if missing.
-    No auto-create — the file appears only after `edit_soul` writes to it
-    so a fresh user with no soul gets ZERO bonus prompt overhead."""
+def fold_old_soul() -> str:
+    """Move an old soul.md's own lines into rules.md. Returns what happened."""
+    if not os.path.isfile(SOUL_PATH):
+        return ""
     try:
-        if not os.path.isfile(SOUL_PATH):
-            return ""
         with open(SOUL_PATH, "r", encoding="utf-8") as f:
-            text = f.read().strip()
-        return text
+            text = f.read()
     except OSError:
         return ""
-
-
-def write_soul(content: str) -> str:
-    """Replace the entire soul.md with `content`. Caps at SOUL_MAX_CHARS
-    to keep the system prompt bounded. Returns a confirmation string the
-    `edit_soul` tool relays to the model."""
-    if not isinstance(content, str):
-        return "Error: soul content must be a string"
-    text = content.strip()
-    if not text:
-        # Empty write = clear the soul. Allowed (lets the agent reset).
-        try:
-            if os.path.isfile(SOUL_PATH):
-                os.remove(SOUL_PATH)
-        except OSError:
-            pass
-        return "soul cleared (file removed)"
-    truncated = False
-    if len(text) > SOUL_MAX_CHARS:
-        text = text[:SOUL_MAX_CHARS].rstrip() + "\n\n[truncated to fit cap]"
-        truncated = True
+    lines = [ln.strip() for ln in text.splitlines()]
+    own = [ln for ln in lines if ln and not ln.startswith(_SOUL_TEMPLATE) and ln != "[truncated to fit cap]"]
     try:
-        os.makedirs(os.path.dirname(SOUL_PATH) or WORKSPACE, exist_ok=True)
-        with open(SOUL_PATH, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
-    except OSError as e:
-        return f"Error: could not write soul.md: {e}"
-    return (f"soul updated ({len(text)} chars)"
-            + (" [truncated to cap]" if truncated else ""))
-
-
-def append_soul(line: str) -> str:
-    """Append one line to soul.md without rewriting the whole file. Used
-    by the model when it wants to LOCK IN a small fact about itself
-    (\"I'm Cortana, I prefer terse replies\") without re-emitting the
-    whole soul. Returns a confirmation string."""
-    if not isinstance(line, str) or not line.strip():
-        return "Error: line cannot be empty"
-    existing = read_soul()
-    base = existing if existing else DEFAULT_SOUL.strip()
-    new = base + "\n\n- " + line.strip()
-    return write_soul(new)
+        if own:
+            if not os.path.exists(RULES_PATH):
+                with open(RULES_PATH, "w", encoding="utf-8") as f:
+                    f.write(DEFAULT_RULES)
+            with open(RULES_PATH, "r", encoding="utf-8") as f:
+                existing = f.read()
+            new = [ln if ln.startswith("-") else "- " + ln for ln in own
+                   if ln.lstrip("- ").strip().lower() not in existing.lower()]
+            if new:
+                sep = "" if existing.endswith("\n") else "\n"
+                with open(RULES_PATH, "a", encoding="utf-8") as f:
+                    f.write(sep + "# From the old soul.md\n" + "\n".join(new) + "\n")
+        os.replace(SOUL_PATH, SOUL_PATH + ".old")
+    except OSError:
+        return ""
+    return f"moved {len(own)} line(s) from soul.md into rules.md"
 
 
 # ---------------------------------------------------------------------------
-# profile.md — the USER-model layer (distinct from soul = the AGENT's identity).
+# profile.md — the USER-model layer.
 # Small, always-on "who this user is + how they want replies". Auto-filled by
 # the extractor (preferences route here), so a fresh user gets the good default
 # persona and per-user tone/format prefs live HERE, not baked into the base.
@@ -1527,47 +1488,3 @@ def append_rule(line: str) -> str:
         return f"Error: could not write rules.md: {e}"
     return "rule added"
 
-
-def draft_soul() -> str:
-    """Propose a starter soul.md by reading what's already known about the
-    user from memory + house rules. Does NOT write — returns the draft as
-    a string for the user to review. The model presents it, asks for
-    edits, then commits via write_soul/edit_soul once approved.
-
-    Why: soul.md is supposed to be the agent's CORE identity layer, but
-    starting from a blank page is hostile UX. This drafts a 6-10 bullet
-    skeleton anchored to facts that already exist (user name, tone
-    preference, key projects from memory), so the user has something to
-    react to instead of staring at an empty editor.
-    """
-    # Pull tone / name / known facts from index for context.
-    bullets: list[str] = []
-    try:
-        idx_lines = (index_for_prompt() or "").strip().splitlines()
-    except Exception:
-        idx_lines = []
-    bullets.append("I run on this person's machine. They are the only "
-                    "user. I optimize for them, not a generic audience.")
-    if idx_lines:
-        bullets.append("I keep working memory of what we've worked on "
-                        "together in ~/Jarvis/memory; I recall it via "
-                        "memory_recall rather than guessing.")
-    bullets.append("I match their tone. Casual when they're casual, "
-                    "efficient when they're heads-down, brief when "
-                    "they're typing fast.")
-    bullets.append("I take initiative. If the next step is obvious, I do "
-                    "it instead of asking. I don't end on \"want me to...?\"")
-    bullets.append("I don't moralize, lecture, or refuse the kind of "
-                    "edgy request a friend would say yes to. Public-AI "
-                    "deployment rules don't apply here.")
-    bullets.append("I tell the truth about what I can and can't do. If "
-                    "I'm guessing, I say so. If I tried something and it "
-                    "failed, I say that, not \"done!\".")
-    bullets.append("I notice patterns. When I find myself doing the same "
-                    "workflow twice, I crystallize it as a skill so "
-                    "future-me runs it from a single call.")
-    body = "\n".join(f"- {b}" for b in bullets)
-    return (
-        "Draft soul.md (NOT saved yet — review then call write_soul to "
-        "commit, or tell me what to change):\n\n" + body
-    )
