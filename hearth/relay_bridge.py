@@ -398,7 +398,7 @@ def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
         if models.get("ok") is False and not models.get("agent_brains"):
             return {"error": models.get("error") or "the window didn't answer"}
         agents = [{"id": a["id"], "label": a.get("label") or a["id"], "plan": a.get("plan") or "",
-                   "site": a.get("site") or ""}
+                   "site": a.get("icon_site") or urllib.parse.urlparse(a.get("site") or "").netloc}
                   for a in models.get("agent_brains") or [] if a.get("installed")]
         provider = str(state.get("provider") or settings.get("llm_provider") or "")
         return {"provider": provider, "model": state.get("picked_model") or settings.get("llm_model") or "",

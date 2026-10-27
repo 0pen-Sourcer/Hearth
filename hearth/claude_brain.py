@@ -159,7 +159,8 @@ def choices() -> List[Dict[str, Any]]:
     for k, v in BRAINS.items():
         here = bool(exe_for(k))
         if k in CORE or here:
-            out.append({"id": k, "label": v, "installed": here, "site": SITES.get(k, ""),
+            from .external_agents import icon_site
+            out.append({"id": k, "label": v, "installed": here, "site": SITES.get(k, ""), "icon_site": icon_site(k),
                         "plan": PLANS.get(k, ""), "core": k in CORE})
     return out
 

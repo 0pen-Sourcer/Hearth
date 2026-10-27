@@ -142,6 +142,20 @@ SITES = {"claude-code": "https://claude.com/claude-code", "codex": "https://chat
          "continue": "https://continue.dev", "amazon-q": "https://aws.amazon.com/q/developer/",
          "kiro": "https://kiro.dev", "kilo": "https://kilo.ai", "augment": "https://www.augmentcode.com",
          "openhands": "https://all-hands.dev"}
+# Where an agent's own icon is, when its page above is a repository page.
+_ICON_SITE = {"gemini-cli": "gemini.google.com", "qwen-code": "qwen.ai", "kimi": "kimi.com",
+              "crush": "charm.sh", "grok": "x.ai", "amazon-q": "aws.amazon.com"}
+
+
+def icon_site(agent: str) -> str:
+    """The domain whose icon stands for an agent program."""
+    if agent in _ICON_SITE:
+        return _ICON_SITE[agent]
+    from urllib.parse import urlparse
+    host = urlparse(SITES.get(agent, "")).netloc.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 # Only these have been run end to end from Hearth; the rest follow their docs.
 VERIFIED = {"claude-code"}
 

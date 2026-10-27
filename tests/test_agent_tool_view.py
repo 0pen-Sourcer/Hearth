@@ -87,6 +87,16 @@ check("as is a search inside a page",
 check("an older step without an action keeps its query",
       X._search_call({"query": "selfie"}) == ("web_search", {"query": "selfie"}))
 
+# Each agent's icon comes from a site's own icon: a bare domain, its maker's, not a repository page.
+from hearth import external_agents as XA  # noqa: E402
+domains = {a: XA.icon_site(a) for a in XA.SITES}
+check(f"every agent program has an icon domain ({len(domains)})",
+      all(d and "/" not in d and ":" not in d for d in domains.values()))
+check("one hosted on GitHub uses its maker's site, not GitHub's",
+      domains["gemini-cli"] == "gemini.google.com" and domains["copilot"] == "github.com")
+check("and the brain list hands that domain on", all(c.get("icon_site") == domains.get(c["id"], c.get("icon_site"))
+                                                     for c in B.choices()))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
