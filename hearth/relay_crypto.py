@@ -17,7 +17,7 @@ are AES-256-GCM with a random 96-bit nonce and a per-direction counter inside,
 so a replayed or reordered frame is refused.
 
 The phone does the same with the browser's Web Crypto (X25519, HKDF-SHA256,
-AES-GCM); relay/app/crypto.js is the other half and the tests run both.
+AES-GCM), so both sides derive the same keys.
 """
 from __future__ import annotations
 

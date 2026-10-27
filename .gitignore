@@ -63,7 +63,5 @@ site/
 # not here, so this file stays free of private filenames.
 promo_shots/
 
-# Plus relay (Cloudflare Worker)
-relay/node_modules/
-relay/.wrangler/
-relay/package-lock.json
+# Plus relay server and phone app (kept in their own repo)
+relay/
