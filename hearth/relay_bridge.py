@@ -21,6 +21,7 @@ import hashlib
 import json
 import os
 import re
+import urllib.parse
 import secrets
 import threading
 import time
@@ -232,8 +233,25 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                          for a in subagents.team_state()]}
     if what == "ideas":
         return ideas()
-    if what in ("brain", "agent_models", "use", "set"):
-        return brain_request(what, m)
+    if what == "icons":
+        # Each agent's and provider's own mark, from its site, as the window shows them.
+        from .web import _favicon
+        out = {}
+        for site in [str(x) for x in (m.get("sites") or [])][:24]:
+            try:
+                icon = _favicon(site)
+            except Exception:
+                icon = None
+            if icon:
+                out[site] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
+        return {"icons": out}
+    if what in ("brain", "agent_models"):
+        return cached_brain(what, m)
+    if what in ("use", "set"):
+        out = brain_request(what, m)
+        _BRAIN_CACHE.pop("brain", None)
+        warm_brain()
+        return out
     if what == "look":
         try:
             from .web import _load_settings
@@ -292,6 +310,45 @@ def _window(method: str, path: str, body: Optional[Dict[str, Any]] = None, timeo
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+# What the phone's picker shows is read ahead: asking an agent for its models
+# can mean starting that agent (Claude Code took 20-30 seconds the first time),
+# far too long for a phone waiting on a tap. When a phone connects, the brain and
+# every agent's models are read in the background; the phone gets what is kept,
+# and anything older than a minute is read again behind it.
+_BRAIN_CACHE: Dict[str, Any] = {}       # "brain" -> (at, answer); ("agent", id) -> (at, answer)
+_WARMING = threading.Lock()
+
+
+def warm_brain() -> None:
+    def run():
+        if not _WARMING.acquire(blocking=False):
+            return
+        try:
+            b = brain_request("brain", {})
+            if not b.get("error"):
+                _BRAIN_CACHE["brain"] = (time.time(), b)
+            for a in b.get("agents") or []:
+                info = brain_request("agent_models", {"id": a["id"]})
+                if info.get("models"):
+                    _BRAIN_CACHE[("agent", a["id"])] = (time.time(), info)
+        finally:
+            _WARMING.release()
+    threading.Thread(target=run, daemon=True, name="relay-brain-warm").start()
+
+
+def cached_brain(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
+    key = "brain" if what == "brain" else ("agent", str(m.get("id") or ""))
+    hit = _BRAIN_CACHE.get(key)
+    if hit:
+        if time.time() - hit[0] > 60:
+            warm_brain()
+        return hit[1]
+    out = brain_request(what, m)
+    if not out.get("error") and (what == "brain" or out.get("models")):
+        _BRAIN_CACHE[key] = (time.time(), out)
+    return out
+
+
 def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
     if what == "brain":
         models = _window("GET", "/api/models")
@@ -300,13 +357,17 @@ def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
         disk = (_window("GET", "/api/llmserver/status").get("disk_models") or [])
         if models.get("ok") is False and not models.get("agent_brains"):
             return {"error": models.get("error") or "the window didn't answer"}
-        agents = [{"id": a["id"], "label": a.get("label") or a["id"], "plan": a.get("plan") or ""}
+        agents = [{"id": a["id"], "label": a.get("label") or a["id"], "plan": a.get("plan") or "",
+                   "site": a.get("site") or ""}
                   for a in models.get("agent_brains") or [] if a.get("installed")]
         provider = str(state.get("provider") or settings.get("llm_provider") or "")
         return {"provider": provider, "model": state.get("picked_model") or settings.get("llm_model") or "",
                 "agents": agents,
                 "providers": [{"id": p["id"], "label": p.get("label") or p["id"], "model": p.get("model") or "",
-                               "active": bool(p.get("active"))} for p in models.get("providers") or []],
+                               "active": bool(p.get("active")),
+                               "site": re.sub(r"^api\.|^generativelanguage\.", "",
+                                              urllib.parse.urlparse(p.get("url") or "").netloc)}
+                              for p in models.get("providers") or []],
                 "local": [{"path": d.get("path"), "name": str(d.get("filename") or "").replace(".gguf", ""),
                            "size_gb": d.get("size_gb")} for d in disk if not (d.get("not_chat") or d.get("incomplete"))],
                 "loaded": [x.get("id") for x in models.get("models") or [] if x.get("state") == "loaded"],
@@ -486,6 +547,7 @@ class Room:
             await self.ws.send(json.dumps({"t": "hello", "eph": R.b64(R.raw_public(eph))}))
             from . import persona
             await self.deliver({"type": "hi", "name": persona.NAME})
+            warm_brain()                      # the picker's answers, ready before it's opened
             return
         if t == "msg" and self.chan is not None:
             m = self.chan.open(f)
