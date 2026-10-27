@@ -727,6 +727,103 @@ def _resolve_ask_user(req_id: str, answer: Dict[str, Any]) -> bool:
         return False
 
 
+def load_local_brain(model_path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Load a model file on the built-in engine and make it the brain, with the
+    settings the person tuned for it last time (body overrides any of them).
+    The Models tab's Use this and the load_model tool both come here."""
+    global LOCAL_API_BASE
+    from . import llmserver
+    body = body or {}
+    model_path = (model_path or body.get("model_path") or "").strip()
+    # Start from the saved per-model config the user tuned last time, so a
+    # plain "Use this" honors their saved 32/32 / context / quant instead of
+    # silently dropping to Auto. The request body still wins per field (the
+    # Models tab expansion can override any of these for this one load);
+    # then Settings → Default context window; then 32K as the final floor.
+    saved = llmserver.get_model_config(model_path) or {}
+    def _cfg(k, d=None):
+        v = body.get(k)
+        return v if v is not None else saved.get(k, d)
+    ctx        = int(_cfg("ctx") or _load_settings().get("server_default_ctx") or 32768)
+    _ng        = _cfg("n_gpu_layers", -1)
+    n_gpu      = int(_ng if _ng is not None else -1)
+    n_threads  = _cfg("n_threads")
+    n_threads  = int(n_threads) if n_threads not in (None, "", "auto") else None
+    ck         = (_cfg("cache_type_k") or "").strip() or None
+    cv         = (_cfg("cache_type_v") or "").strip() or None
+    flash      = bool(_cfg("flash_attn", True))
+    extra_args = (_cfg("extra_args") or "").strip() or None
+    # `force=true` from the GUI bypasses the VRAM guardrail — opt-in
+    # only, after the user clicks "Force load anyway" in the modal.
+    # llama.cpp will spill weights to system RAM (slow but boots).
+    force      = bool(body.get("force", False))
+    result = llmserver.start_builtin(
+        model_path, ctx=ctx, n_gpu_layers=n_gpu,
+        n_threads=n_threads, cache_type_k=ck, cache_type_v=cv,
+        flash_attn=flash, force=force, extra_args=extra_args,
+    )
+    # On successful start, retarget the GLOBAL LLM endpoint to the
+    # builtin URL so the topbar dropdown + /api/models + chat all
+    # talk to it. Without this, the topbar keeps showing "no model
+    # loaded" because it still queries LM Studio's port.
+    if result.get("ok") and result.get("url"):
+        # `_hl` (hearth.headless) is imported lazily inside the
+        # /api/llm-endpoint branch above, so it's not visible to us
+        # here. Import locally so the chat client picks up the new
+        # base. Cheap — Python caches.
+        from . import headless as _hl
+        LOCAL_API_BASE = result["url"]
+        _hl.LOCAL_API_BASE = LOCAL_API_BASE
+        # Drop the model-list cache so the sticker reflects the model
+        # that just loaded instead of serving the previous one until
+        # the TTL lapses.
+        _models_cache["ts"] = 0
+        _models_cache["data"] = None
+        _hl.LOCAL_API_KEY  = "hearth-builtin"
+        os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
+        # Builtin uses a fixed key; bake it in so chat works without
+        # the user touching settings.
+        os.environ["LOCAL_API_KEY"] = "hearth-builtin"
+        # Pop LOCAL_MODEL so chat falls back to probing the
+        # builtin's /v1/models for the loaded id. Without this,
+        # switching from a cloud brain to the builtin would
+        # forward the cloud model id to the new server and the
+        # server would 404 it, producing empty completions.
+        # Mirrored in /api/llm-endpoint for the case where the
+        # provider switches without an explicit model body.
+        os.environ.pop("LOCAL_MODEL", None)
+        # Mirror the brain change into settings so the GUI's
+        # llm_provider pill + Chat brain dropdown reflect reality
+        # — otherwise the GUI keeps showing "Grok" after the
+        # retarget to the builtin.
+        try:
+            _s = _load_settings()
+            _s["llm_provider"] = "local"
+            _s["llm_url"]      = LOCAL_API_BASE
+            _s["llm_key"]      = ""  # builtin key isn't user-facing
+            _s["llm_model"]    = ""  # let probe pick it
+            _save_settings(_s)
+        except Exception:
+            pass
+        _models_cache["ts"] = 0  # force /api/models to repopulate
+        llmserver.invalidate_status_cache()  # instant-fresh status/state
+        # Sticky default: remember the model the user just picked so
+        # the NEXT launch auto-boots it (see _auto_boot_preferred_model_async).
+        # Setting persists in ~/Jarvis/settings.json as preferred_model.
+        try:
+            saved = _load_settings()
+            if saved.get("preferred_model") != model_path or saved.get("last_local_model") != model_path:
+                saved["preferred_model"] = model_path
+                # Kept through an eject: what to start when voice or
+                # chat needs a model and none is set to autoboot.
+                saved["last_local_model"] = model_path
+                os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
+                _atomic_write_json(SETTINGS_PATH, saved, indent=2)
+        except Exception:
+            pass  # best-effort — preference is a nice-to-have
+    return result
+
+
 def _local_kept() -> str:
     try:
         from . import llmserver as _ls
@@ -4176,98 +4273,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             # picked model file + load config. The GUI surfaces every llama.cpp
             # knob (n_gpu_layers, ctx, KV cache quant, threads, flash attn)
             # — see the Models tab inline expansion.
-            from . import llmserver
-            body = self._read_json()
-            model_path = (body.get("model_path") or "").strip()
-            # Start from the saved per-model config the user tuned last time, so a
-            # plain "Use this" honors their saved 32/32 / context / quant instead of
-            # silently dropping to Auto. The request body still wins per field (the
-            # Models tab expansion can override any of these for this one load);
-            # then Settings → Default context window; then 32K as the final floor.
-            saved = llmserver.get_model_config(model_path) or {}
-            def _cfg(k, d=None):
-                v = body.get(k)
-                return v if v is not None else saved.get(k, d)
-            ctx        = int(_cfg("ctx") or _load_settings().get("server_default_ctx") or 32768)
-            _ng        = _cfg("n_gpu_layers", -1)
-            n_gpu      = int(_ng if _ng is not None else -1)
-            n_threads  = _cfg("n_threads")
-            n_threads  = int(n_threads) if n_threads not in (None, "", "auto") else None
-            ck         = (_cfg("cache_type_k") or "").strip() or None
-            cv         = (_cfg("cache_type_v") or "").strip() or None
-            flash      = bool(_cfg("flash_attn", True))
-            extra_args = (_cfg("extra_args") or "").strip() or None
-            # `force=true` from the GUI bypasses the VRAM guardrail — opt-in
-            # only, after the user clicks "Force load anyway" in the modal.
-            # llama.cpp will spill weights to system RAM (slow but boots).
-            force      = bool(body.get("force", False))
-            result = llmserver.start_builtin(
-                model_path, ctx=ctx, n_gpu_layers=n_gpu,
-                n_threads=n_threads, cache_type_k=ck, cache_type_v=cv,
-                flash_attn=flash, force=force, extra_args=extra_args,
-            )
-            # On successful start, retarget the GLOBAL LLM endpoint to the
-            # builtin URL so the topbar dropdown + /api/models + chat all
-            # talk to it. Without this, the topbar keeps showing "no model
-            # loaded" because it still queries LM Studio's port.
-            # `global LOCAL_API_BASE` is already declared earlier in this
-            # do_POST (under /api/llm-endpoint) so we don't redeclare it.
-            if result.get("ok") and result.get("url"):
-                # `_hl` (hearth.headless) is imported lazily inside the
-                # /api/llm-endpoint branch above, so it's not visible to us
-                # here. Import locally so the chat client picks up the new
-                # base. Cheap — Python caches.
-                from . import headless as _hl
-                LOCAL_API_BASE = result["url"]
-                _hl.LOCAL_API_BASE = LOCAL_API_BASE
-                # Drop the model-list cache so the sticker reflects the model
-                # that just loaded instead of serving the previous one until
-                # the TTL lapses.
-                _models_cache["ts"] = 0
-                _models_cache["data"] = None
-                _hl.LOCAL_API_KEY  = "hearth-builtin"
-                os.environ["LOCAL_API_BASE"] = LOCAL_API_BASE
-                # Builtin uses a fixed key; bake it in so chat works without
-                # the user touching settings.
-                os.environ["LOCAL_API_KEY"] = "hearth-builtin"
-                # Pop LOCAL_MODEL so chat falls back to probing the
-                # builtin's /v1/models for the loaded id. Without this,
-                # switching from a cloud brain to the builtin would
-                # forward the cloud model id to the new server and the
-                # server would 404 it, producing empty completions.
-                # Mirrored in /api/llm-endpoint for the case where the
-                # provider switches without an explicit model body.
-                os.environ.pop("LOCAL_MODEL", None)
-                # Mirror the brain change into settings so the GUI's
-                # llm_provider pill + Chat brain dropdown reflect reality
-                # — otherwise the GUI keeps showing "Grok" after the
-                # retarget to the builtin.
-                try:
-                    _s = _load_settings()
-                    _s["llm_provider"] = "local"
-                    _s["llm_url"]      = LOCAL_API_BASE
-                    _s["llm_key"]      = ""  # builtin key isn't user-facing
-                    _s["llm_model"]    = ""  # let probe pick it
-                    _save_settings(_s)
-                except Exception:
-                    pass
-                _models_cache["ts"] = 0  # force /api/models to repopulate
-                llmserver.invalidate_status_cache()  # instant-fresh status/state
-                # Sticky default: remember the model the user just picked so
-                # the NEXT launch auto-boots it (see _auto_boot_preferred_model_async).
-                # Setting persists in ~/Jarvis/settings.json as preferred_model.
-                try:
-                    saved = _load_settings()
-                    if saved.get("preferred_model") != model_path or saved.get("last_local_model") != model_path:
-                        saved["preferred_model"] = model_path
-                        # Kept through an eject: what to start when voice or
-                        # chat needs a model and none is set to autoboot.
-                        saved["last_local_model"] = model_path
-                        os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
-                        _atomic_write_json(SETTINGS_PATH, saved, indent=2)
-                except Exception:
-                    pass  # best-effort — preference is a nice-to-have
-            return self._send_json(200, result)
+            return self._send_json(200, load_local_brain("", self._read_json()))
         if path == "/api/llmserver/helper":
             # A second, smaller model for helpers and sub-agents. An empty
             # model_path stops it and forgets the choice.

@@ -927,7 +927,8 @@ async def _run_subagent_async(
         except Exception:
             pass
     if not model:
-        out = {"ok": False, "error": f"no model loaded at {base}"}
+        out = {"ok": False, "error": f"no model loaded at {base}. Load one first with load_model "
+                                     f"(list_models names the files on this PC)."}
         _append_transcript(tpath, {"kind": "end", **out})
         await _close(client)
         return out

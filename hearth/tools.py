@@ -1543,6 +1543,25 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {}},
     },
     {
+        "name": "load_model",
+        "description": (
+            "Load a model file from this PC on Hearth's built-in engine. for='helpers' "
+            "runs it beside the current brain for helpers you start with runs_on='local' "
+            "(the brain stays as it is); for='chat' makes it your own brain. Leave for "
+            "out to get helpers when you think on a cloud model or an agent program, "
+            "chat otherwise. list_models shows the files there are. Loading takes a "
+            "moment and uses the graphics card."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "model": {"type": "string", "description": "The model's file name, part of it, or its full path."},
+                "for": {"type": "string", "enum": ["helpers", "chat"]},
+            },
+            "required": ["model"],
+        },
+    },
+    {
         "name": "learn_environment",
         "description": (
             "Re-scan this machine (GPU/VRAM, RAM, installed models, top-level drive map) "
@@ -6371,7 +6390,52 @@ def _disk_models_lines(loaded_ids=()) -> list:
         rows.append(f"  - {fn}  ({m.get('size_gb')} GB, not loaded)  {path}")
     if not rows:
         return []
-    return ["", f"Also on disk ({len(rows)}, load it in the Models tab or /models use):"] + rows[:12]
+    return ["", f"Also on disk ({len(rows)}, load one with load_model):"] + rows[:12]
+
+
+def _load_model(p: Dict) -> str:
+    from . import llmserver
+    want = str(p.get("model") or "").strip()
+    if not want:
+        return "Error: say which model to load (list_models shows them)."
+    disk = [m for m in (llmserver.scan_disk_for_models() or [])
+            if not (m.get("not_chat") or m.get("incomplete"))]
+    if os.path.isfile(want) and want.lower().endswith(".gguf"):
+        path = want
+    else:
+        words = [w for w in re.split(r"[^a-z0-9.]+", want.lower()) if w and w != "gguf"]
+        hits = [m for m in disk if all(w in (m.get("filename") or "").lower() for w in words)]
+        if len(hits) > 1:
+            exact = [m for m in hits if (m.get("filename") or "").lower().startswith(want.lower())]
+            hits = exact or hits
+        if not hits:
+            names = ", ".join((m.get("filename") or "") for m in disk[:12]) or "none"
+            return f"Error: no model on this PC matches '{want}'. There are: {names}."
+        if len(hits) > 1:
+            return ("Error: several models match '" + want + "': "
+                    + ", ".join(m.get("filename") or "" for m in hits[:8]) + ". Say which one.")
+        path = hits[0]["path"]
+    name = os.path.splitext(os.path.basename(path))[0]
+    use = str(p.get("for") or "").strip().lower()
+    if use not in ("helpers", "chat"):
+        from .web import _load_settings
+        prov = str(_load_settings().get("llm_provider") or "")
+        use = "chat" if prov in ("", "local", "builtin", "lmstudio", "ollama") else "helpers"
+    if use == "helpers":
+        from .web import _load_settings, _save_settings
+        ctx = int(_load_settings().get("helper_ctx") or 16384)
+        r = llmserver.start_helper(path, ctx=ctx)
+        if not r.get("ok"):
+            return "Error: " + str(r.get("error") or r.get("message") or "the model didn't load")
+        _save_settings({"helper_model": path, "helper_ctx": ctx})
+        llmserver.invalidate_status_cache()
+        return (f"{name} is loaded for helpers at {r.get('url') or 'the helper port'}. "
+                "Start one with spawn_subagent runs_on='local'. Your own brain is unchanged.")
+    from .web import load_local_brain
+    r = load_local_brain(path)
+    if not r.get("ok"):
+        return "Error: " + str(r.get("error") or r.get("message") or "the model didn't load")
+    return f"{name} is loaded and is now the brain (from the next message)."
 
 
 def _list_models(p: Dict) -> str:
@@ -6731,6 +6795,7 @@ _HANDLERS = {
     "get_time": _get_time,
     "whoami": _whoami,
     "list_models": _list_models,
+    "load_model": _load_model,
     "learn_environment": _learn_environment,
     "notify": _notify,
 }
@@ -8705,6 +8770,8 @@ for _cd in (
 _DEFERRED_TOOLS = {
     # reading one chat whole: searching chats brings it in (see search_chats)
     "read_chat",
+    # loading a model file: list_models points at it
+    "load_model",
     # image / video generation. All deferred, including forge_generate: local
     # Forge image-gen is niche (most turns aren't image gen), and its schema is
     # one of the heavier ones, so it shouldn't sit in every prompt just because
@@ -9054,6 +9121,8 @@ _RISKY_TOOLS: set = {
     "helper_changes",
     # Starts agent programs and runs a check command in their copies.
     "race_helpers",
+    # Takes the graphics card, and can change what the brain is.
+    "load_model",
 }
 _NEVER_PERM: set = {"ask_user", "spawn_subagent"}
 
@@ -9286,7 +9355,7 @@ _TOOL_CATEGORY = {
     "network_info": "System & apps", "list_installed_apps": "System & apps",
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
-    "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps",
+    "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps", "load_model": "System & apps",
     "learn_environment": "System & apps",
     # Background jobs
     "start_job": "Background jobs", "job_status": "Background jobs", "job_wait": "Background jobs",
