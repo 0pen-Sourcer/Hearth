@@ -24,9 +24,9 @@ from mcp.server.fastmcp import FastMCP  # type: ignore  # noqa: E402
 from hearth import tools as _tools  # noqa: E402
 
 mcp = FastMCP(
-    "Hearth memory",
+    "Inglen memory",
     instructions=(
-        "The person's own memory, shared by Hearth and every agent they use on this PC. "
+        "The person's own memory, shared by Inglen and every agent they use on this PC. "
         "Before asking them something about themselves, their setup or their work, look here "
         "(memory_recall, search_chats). When they tell you something lasting about themselves "
         "or their work, save it (memory_save) so their other agents know it too. "

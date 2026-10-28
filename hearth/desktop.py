@@ -56,7 +56,7 @@ def _free_port(start: int = 8765, tries: int = 12) -> int:
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m hearth.desktop",
-        description="Hearth desktop app (native window via PyWebView).",
+        description="Inglen desktop app (native window via PyWebView).",
     )
     parser.add_argument("--port", type=int, default=0,
                         help="HTTP backend port. 0 = auto-pick (default).")
@@ -80,7 +80,7 @@ def main(argv: Optional[list] = None) -> int:
     server = web_backend.serve(host="127.0.0.1", port=port)
     url = f"http://127.0.0.1:{port}/"
 
-    print(f"\n  Hearth desktop")
+    print(f"\n  Inglen desktop")
     print(f"  Backend:  {url}")
     print(f"  LM Studio: {web_backend.LOCAL_API_BASE}")
     print(f"  Workspace: {web_backend.WORKSPACE}")
@@ -125,7 +125,7 @@ def main(argv: Optional[list] = None) -> int:
 
     # Window background — matches the UI's --bg-0 (cool dark)
     win = webview.create_window(
-        "Hearth",
+        "Inglen",
         url=url,
         width=args.width,
         height=args.height,

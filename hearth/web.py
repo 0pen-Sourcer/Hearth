@@ -1108,7 +1108,7 @@ def _list_models() -> List[Dict]:
                 "id": mid,
                 "type": "llm",
                 "arch": "gguf",
-                "publisher": "llama.cpp (Hearth built-in)",
+                "publisher": "llama.cpp (Inglen built-in)",
                 "state": "loaded",
                 "loaded_context_length": builtin_ctx,
                 "max_context_length": builtin_ctx,
@@ -1612,7 +1612,7 @@ def _favicon(domain: str):
     for url in (f"https://{d}/favicon.ico", f"https://www.{d}/favicon.ico",
                 f"https://{d}/apple-touch-icon.png"):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Hearth"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Inglen"})
             with urllib.request.urlopen(req, timeout=4) as r:
                 data = r.read(_ICON_MAX + 1)
             if 64 < len(data) <= _ICON_MAX and _icon_mime(data) != "application/octet-stream":
@@ -1623,7 +1623,7 @@ def _favicon(domain: str):
             continue
     # Many sites keep their icon elsewhere and say so in the page itself.
     try:
-        req = urllib.request.Request(f"https://{d}/", headers={"User-Agent": "Mozilla/5.0 Hearth"})
+        req = urllib.request.Request(f"https://{d}/", headers={"User-Agent": "Mozilla/5.0 Inglen"})
         with urllib.request.urlopen(req, timeout=5) as r:
             page = r.read(200_000).decode("utf-8", "replace")
             base = r.geturl()
@@ -1637,7 +1637,7 @@ def _favicon(domain: str):
             url = urllib.parse.urljoin(base, m.group(1) or m.group(2))
             if not url.startswith("https://"):
                 continue
-            ireq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Hearth"})
+            ireq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Inglen"})
             with urllib.request.urlopen(ireq, timeout=4) as r:
                 data = r.read(_ICON_MAX + 1)
             if 64 < len(data) <= _ICON_MAX and _icon_mime(data) != "application/octet-stream":
@@ -3427,7 +3427,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, _plus.deactivate())
             if act == "pair":
                 if not _plus.active():
-                    return self._send_json(200, {"ok": False, "error": "pairing a phone needs Hearth Plus on this PC"})
+                    return self._send_json(200, {"ok": False, "error": "pairing a phone needs Inglen Plus on this PC"})
                 r = _rb.start_pairing(str(body.get("name") or ""))
                 if r.get("ok"):
                     import segno
@@ -4864,7 +4864,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         cur_ws = os.path.realpath(WORKSPACE)
         new_ws = os.path.abspath(os.path.expanduser(raw))
         if os.path.realpath(new_ws) == cur_ws:
-            return self._send_json(400, {"error": "that's already where Hearth lives"})
+            return self._send_json(400, {"error": "that's already where Inglen lives"})
         # Moving INTO the target: it must not be an existing non-empty folder.
         if os.path.isdir(new_ws) and os.listdir(new_ws):
             return self._send_json(409, {"error": f"target exists and isn't empty: {new_ws}"})
@@ -5470,9 +5470,9 @@ class HearthHandler(BaseHTTPRequestHandler):
         from .updater import HEARTH_VERSION as _ver  
         try:
             from hearth import edition as _ed
-            tag = f"Hearth {_ed.label()} · v{_ver}"
+            tag = f"Inglen {_ed.label()} · v{_ver}"
         except Exception:
-            tag = f"Hearth · v{_ver}"
+            tag = f"Inglen · v{_ver}"
         payload = payload.replace(b"__HEARTH_EDITION__", tag.encode("utf-8"))
         payload = payload.replace(b"/*__HEARTH_LOOK__*/{}", _saved_look().encode("utf-8"), 1)
         self.send_response(200)
@@ -6000,7 +6000,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m hearth.web",
-        description="Hearth desktop UI — runs in your browser.",
+        description="Inglen desktop UI — runs in your browser.",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
@@ -6013,7 +6013,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     server = ThreadingHTTPServer((args.host, args.port), HearthHandler)
     url = f"http://{args.host}:{args.port}/"
-    print(f"\n  Hearth UI on {url}")
+    print(f"\n  Inglen UI on {url}")
     print(f"  Model endpoint: {LOCAL_API_BASE}  (default; point it at a real brain in Settings)")
     print(f"  Workspace: {WORKSPACE}")
     print(f"  Ctrl-C to stop.\n")

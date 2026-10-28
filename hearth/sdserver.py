@@ -153,7 +153,7 @@ def _backend() -> str:
 def _latest_release(timeout: float = 20) -> Optional[Dict[str, Any]]:
     from .release_files import for_this_system
     req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases?per_page=10",
-                                 headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+                                 headers={"User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         rels = json.load(r)
     return next((rel for rel in rels if isinstance(rels, list) and for_this_system(rel.get("assets"))), None)
@@ -205,7 +205,7 @@ def install(on_progress: Optional[Callable[[int, int], None]] = None, force: boo
             if not path.exists():
                 L._download_with_resume(asset["browser_download_url"], path, part,
                                         (lambda d, t, b=base: on_progress and on_progress(b + d, total)),
-                                        ua="Hearth", cancel=_cancel.is_set)
+                                        ua="Inglen", cancel=_cancel.is_set)
             done[0] = base + int(asset.get("size") or 0)
             L._extract_archive(path, dest)
             path.unlink(missing_ok=True)

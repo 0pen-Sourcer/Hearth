@@ -49,7 +49,7 @@ def _save_seen(seen: set) -> None:
 
 
 def _fetch(url: str, timeout: float = 6.0):
-    req = Request(url, headers={"User-Agent": "Hearth-Announce"})
+    req = Request(url, headers={"User-Agent": "Inglen-Announce"})
     try:
         with urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
@@ -190,7 +190,7 @@ def publish(title: str, body: str, kind: str = "info") -> dict:
         os.path.expanduser("~"), ".hearth", "announce_private.key")
     if not os.path.isfile(key):
         return {"ok": False,
-                "error": "no signing key at " + key + ", and every Hearth build "
+                "error": "no signing key at " + key + ", and every Inglen build "
                          "ignores an unsigned announcement, so nothing was written"}
     entry = sign_entry(entry, key)
     if not _verify(entry):
@@ -205,7 +205,7 @@ def publish(title: str, body: str, kind: str = "info") -> dict:
         "ok": True,
         "entry": entry,
         "path": _LOCAL_FEED,
-        "next": "commit + push announcements.json, then every Hearth build sees it on next open",
+        "next": "commit + push announcements.json, then every Inglen build sees it on next open",
     }
     if scrubbed:
         kinds = ", ".join(sorted({f["type"] for f in scrubbed}))

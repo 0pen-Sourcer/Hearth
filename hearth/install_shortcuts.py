@@ -142,7 +142,7 @@ def install(no_autostart: bool = False) -> int:
         args=(t_args + " --open").strip() if t_args else "",
         lnk_path=desktop_lnk,
         icon_path=icon_path,
-        description="Hearth — local AI for your machine",
+        description="Inglen — local AI for your machine",
         working_dir=t_wd,
         pythonw=t_pythonw,
     )
@@ -157,7 +157,7 @@ def install(no_autostart: bool = False) -> int:
             args=t_args,
             lnk_path=startup_lnk,
             icon_path=icon_path,
-            description="Hearth — auto-starts at login",
+            description="Inglen — auto-starts at login",
             working_dir=t_wd,
             pythonw=t_pythonw,
         )
@@ -166,7 +166,7 @@ def install(no_autostart: bool = False) -> int:
     else:
         print(f"[shortcuts] skip Startup (--no-autostart)")
 
-    print("\n[shortcuts] Done. Hearth is on your desktop. The tray app will")
+    print("\n[shortcuts] Done. Inglen is on your desktop. The tray app will")
     print("[shortcuts] start automatically next time you log in.")
     return 0
 
@@ -245,7 +245,7 @@ def set_autostart(enabled: bool) -> bool:
         target, t_args, t_wd, t_pythonw = pythonw, "-m hearth.tray", repo_root, True
     _make_shortcut(
         target_path=target, args=t_args, lnk_path=p, icon_path=icon_path,
-        description="Hearth -- auto-starts at login", working_dir=t_wd,
+        description="Inglen -- auto-starts at login", working_dir=t_wd,
         pythonw=t_pythonw,
     )
     return is_autostart_enabled()
@@ -254,7 +254,7 @@ def set_autostart(enabled: bool) -> bool:
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m hearth.install_shortcuts",
-        description="Create Hearth Desktop + Startup shortcuts (Windows).",
+        description="Create Inglen Desktop + Startup shortcuts (Windows).",
     )
     parser.add_argument("--no-autostart", action="store_true",
                         help="Skip the Startup-folder shortcut.")

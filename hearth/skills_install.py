@@ -80,7 +80,7 @@ def _download_github(owner: str, repo: str, ref: Optional[str]) -> Path:
         # tags live under refs/tags — fall back to that if a branch 404s
         for u in (url, f"https://codeload.github.com/{owner}/{repo}/zip/refs/tags/{r}"):
             try:
-                req = urllib.request.Request(u, headers={"User-Agent": "Hearth-skill-install"})
+                req = urllib.request.Request(u, headers={"User-Agent": "Inglen-skill-install"})
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     data = resp.read()
                 zf = zipfile.ZipFile(io.BytesIO(data))

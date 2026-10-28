@@ -259,7 +259,7 @@ class Hub:
             code = request_code(self.a.name, sender, name)
             if code and self.a.replies_to_strangers:
                 self.a.send(chat, f"Hi! I'm {self.persona}, and I only answer people my owner lets in. "
-                                  f"Ask them to approve code {code} in Hearth (it lasts an hour).")
+                                  f"Ask them to approve code {code} in Inglen (it lasts an hour).")
                 return "pairing"
             return "ignored"
         if voice:
@@ -501,7 +501,7 @@ def push(channel: str, text: str) -> str:
             data = urllib.parse.urlencode({"chat_id": who, "text": text[:4000]}).encode()
             urllib.request.urlopen(urllib.request.Request(
                 f"https://api.telegram.org/bot{token}/sendMessage", data=data,
-                headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Hearth"}), timeout=12)
+                headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Inglen"}), timeout=12)
             return "Sent to your Telegram."
         h = {"Authorization": f"Bot {token}", "Content-Type": "application/json",
              "User-Agent": "Hearth (https://github.com/0pen-sourcer/hearth, 0.7)"}

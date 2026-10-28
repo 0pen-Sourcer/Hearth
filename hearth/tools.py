@@ -499,8 +499,8 @@ def _resolve_write(p: str) -> str:
         f"Extra allowed paths:\n  {extras}\n"
         f"To allow it: in the CLI/GUI run /allow <path>. From an MCP client or "
         f"headless, add the folder to HEARTH_EXTRA_WORKSPACES (semicolon- or "
-        f"comma-separated) in the Hearth server's env, or set "
-        f"HEARTH_AUTO_APPROVE=1 to trust the whole session, then restart Hearth."
+        f"comma-separated) in the Inglen server's env, or set "
+        f"HEARTH_AUTO_APPROVE=1 to trust the whole session, then restart Inglen."
     )
 
 
@@ -800,8 +800,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "Give a helper that is still working a message: a correction, an "
             "extra detail, a change of direction. It reads it before its next "
             "step. Pass the 'sub_...' agent_id from spawn_subagent. Works for "
-            "Hearth's own helpers and for Claude Code; other agents' programs "
-            "run a task to the end and can't take one. A helper of Hearth's that "
+            "Inglen's own helpers and for Claude Code; other agents' programs "
+            "run a task to the end and can't take one. A helper of Inglen's that "
             "has finished takes it as a follow-up: it starts again, knowing what "
             "it did, and reports again.",
         "parameters": {
@@ -856,7 +856,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "description":
             "See or act on what a finished helper changed on disk. An agent program "
             "working in a git repository works on its own copy, so its changes wait "
-            "until they are brought in; Hearth's own helpers write directly, and what "
+            "until they are brought in; Inglen's own helpers write directly, and what "
             "they changed can be undone. action 'show' lists the files and the diff; "
             "'bring_in' applies a waiting copy's changes to the folder; 'discard' "
             "throws a waiting copy away; 'undo' takes back changes already made.",
@@ -1002,7 +1002,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "run_command",
         "description": (
             "Run a shell command. " + _shells.describe() + " python and pip "
-            "run in Hearth's own environment. Times out after 120s by default, up to "
+            "run in Inglen's own environment. Times out after 120s by default, up to "
             "300 (use 180 or more for pip installs). Set detached=true for anything "
             "that does not exit on its own, like a server or a launcher. Destructive "
             "commands are refused until the user says yes; do not reword one to get "
@@ -1332,9 +1332,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "screenshot",
         "description": (
             "Capture the whole screen and return the saved path; follow with view_image"
-            " to see it. Hearth's own windows are left out, so you see what is behind "
+            " to see it. Inglen's own windows are left out, so you see what is behind "
             "them. For one app, capture_active_window is tighter. When the question is "
-            "about Hearth itself, pass include_hearth: true."
+            "about Inglen itself, pass include_hearth: true."
         ),
         "parameters": {
             "type": "object",
@@ -1344,8 +1344,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "when the user wants a different app captured so "
                     "they can switch to it. Default 0 (immediate)."},
                 "include_hearth": {"type": "boolean", "description":
-                    "Keep Hearth's own windows in the image. Default false. "
-                    "Set true to inspect Hearth itself, which is the only way "
+                    "Keep Inglen's own windows in the image. Default false. "
+                    "Set true to inspect Inglen itself, which is the only way "
                     "to answer a question about its own interface."},
             },
         },
@@ -1376,7 +1376,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "smart_click",
         "description": (
             "Click something you located in a captured image: pass the pixel (x, y) at "
-            "the target's centre, in that image's own coordinates. Hearth maps it to "
+            "the target's centre, in that image's own coordinates. Inglen maps it to "
             "the screen, snaps it to the nearest real control, clicks, and re-captures "
             "to verify. After a marked capture, pass mark=N instead. Pass text to type "
             "into the control in the same call. Prefer this to computer_click."
@@ -1548,7 +1548,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "load_model",
         "description": (
-            "Load a model file from this PC on Hearth's built-in engine. for='helpers' "
+            "Load a model file from this PC on Inglen's built-in engine. for='helpers' "
             "runs it beside the current brain for helpers you start with runs_on='local' "
             "(the brain stays as it is); for='chat' makes it your own brain. Leave for "
             "out to get helpers when you think on a cloud model or an agent program, "
@@ -3244,7 +3244,7 @@ class _HTMLText(HTMLParser):
 
 def _http_get(url: str, timeout: int = 15) -> Tuple[int, str, bytes]:
     req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Hearth-Local)",
+        "User-Agent": "Mozilla/5.0 (Inglen-Local)",
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5",
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -3666,7 +3666,7 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
             else:
                 where = ("Nobody approved it where they can see it, so it can't run from "
                          "here even if they say yes in this chat. Say what it would do and "
-                         "what it would touch; it runs from the Hearth window or terminal "
+                         "what it would touch; it runs from the Inglen window or terminal "
                          "once they approve it there.")
             return (
                 f"Error ({tool}): refused to run a destructive command ('{bad}').\n"
@@ -4985,14 +4985,14 @@ def _validate_url(p: Dict) -> str:
     try:
         # Try HEAD first (cheap), fall back to GET if server doesn't allow it
         req = urllib.request.Request(raw_url, method="HEAD", headers={
-            "User-Agent": "Mozilla/5.0 (Hearth-Local)",
+            "User-Agent": "Mozilla/5.0 (Inglen-Local)",
         })
         try:
             r = urllib.request.urlopen(req, timeout=10)
         except urllib.error.HTTPError as he:
             if he.code in (405, 400):
                 req = urllib.request.Request(raw_url, headers={
-                    "User-Agent": "Mozilla/5.0 (Hearth-Local)",
+                    "User-Agent": "Mozilla/5.0 (Inglen-Local)",
                 })
                 r = urllib.request.urlopen(req, timeout=10)
             else:
@@ -5502,7 +5502,7 @@ def _capture_active_window(p: Dict) -> str:
         f"Any pixel you read off it is in THIS space.\n"
         f"NEXT STEP: view_image path='{out}' to see it. To CLICK something, then "
         f"call smart_click(x, y, label=<what it is>) with the pixel at the target's "
-        f"CENTER in this {img_w}x{img_h} image — Hearth snaps it to the real UI "
+        f"CENTER in this {img_w}x{img_h} image — Inglen snaps it to the real UI "
         f"control and verifies."
     )
 
@@ -6336,7 +6336,7 @@ def _notify(p: Dict) -> str:
     msg = (p.get("message") or "").strip()
     if not msg:
         return "Error: notify needs a 'message'."
-    title = (p.get("title") or "Hearth").strip()
+    title = (p.get("title") or "Inglen").strip()
     from . import reminders
     fired = reminders.desktop_notify(title, msg)
     return f"Notification shown: {title} — {msg}" + ("" if fired else " (toast lib missing; logged/spoken instead)")
@@ -6361,7 +6361,7 @@ def _whoami(p: Dict) -> str:
         _persona_name = "JARVIS"
     info = {
         "agent": _persona_name,
-        "framework": "Hearth",
+        "framework": "Inglen",
         "model": model,
         "endpoint": base,
         "location": "local (this machine / LAN)" if is_local else "cloud",
@@ -6483,7 +6483,7 @@ def _list_models(p: Dict) -> str:
                     f"Don't scan the disk for model files.")
         if is_cloud:
             return (f"Cloud endpoint {base} unreachable ({err_kind}: {e}). "
-                    f"Hearth's /v1/models proxy isn't responding. If the user wants "
+                    f"Inglen's /v1/models proxy isn't responding. If the user wants "
                     f"local models, suggest `/brain local`. Don't scan the disk.")
         # No local server answering is exactly when the user's own models matter
         # most, so list them rather than saying there is nothing. (The old text
@@ -7979,7 +7979,7 @@ def _foreground_guard():
         return None   # can't tell — don't block a legitimate action
     tl = title.lower()
     if "hearth" in tl or "127.0.0.1:8765" in tl or "localhost:8765" in tl:
-        return ("Refused: the foreground is Hearth's OWN window, so keystrokes "
+        return ("Refused: the foreground is Inglen's OWN window, so keystrokes "
                 "would go into the chat, not the target app. Focus the target "
                 "first: focus_window(name='<part of its title>'), then type.")
     if _LAST_FOCUS_HWND and fg != _LAST_FOCUS_HWND:
@@ -8015,7 +8015,7 @@ def _computer_key(p: Dict) -> str:
         # alt+tab from a background app is unreliable (the OS often swallows the
         # synthetic hold), which is why window switching kept "doing nothing".
         # Point at the tool that actually works.
-        return ("Note: alt+tab injected from Hearth is unreliable for switching "
+        return ("Note: alt+tab injected from Inglen is unreliable for switching "
                 "windows. To bring a specific window forward, use "
                 "focus_window(name='<part of its title>') instead — it uses the "
                 "reliable foreground path. (list_windows shows open titles.)")
@@ -8399,10 +8399,10 @@ TOOL_DEFINITIONS.append({
             "persona": {"type": "string", "enum": ["coder", "researcher", "archivist", "summarizer", "general"],
                         "description": "Helper role. Default 'general', which can do any of it; pick another for a task that is clearly one kind."},
             "prompt": {"type": "string", "description": "The scoped task for this member."},
-            "agent": {"type": "string", "description": "Leave out for a Hearth helper. Or an agent program "
+            "agent": {"type": "string", "description": "Leave out for an Inglen helper. Or an agent program "
                       "installed here, by id: " + ", ".join(__import__("hearth.external_agents", fromlist=["AGENTS"]).AGENTS)
                       + ". Several members can use the same one."},
-            "runs_on": {"type": "string", "description": "For a Hearth helper: where it thinks. Leave out for "
+            "runs_on": {"type": "string", "description": "For an Inglen helper: where it thinks. Leave out for "
                         "your own brain, 'local' for this PC's model, or a provider a key is saved for "
                         "(anthropic, openai, gemini, openrouter, groq, grok)."},
             "model": {"type": "string", "description": "With runs_on a provider: the model, as named "
@@ -8442,7 +8442,7 @@ def _delegate(p: Dict) -> str:
     if not r.get("ok"):
         return f"Error: {r.get('error')}. " + _xa.describe()
     label = r.get("label") or agent
-    note = "" if r.get("tested") else f" {label} support is new in Hearth, so check its answer."
+    note = "" if r.get("tested") else f" {label} support is new in Inglen, so check its answer."
     return (f"Handed to {label} ({r.get('agent_id')}). It works on its own; its answer will reach you "
             f"as a report when it finishes, so tell the user it's on it and carry on.{note}")
 

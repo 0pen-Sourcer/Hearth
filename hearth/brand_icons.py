@@ -74,7 +74,7 @@ def brand_icon(name: str) -> Optional[Tuple[bytes, str]]:
         return data, _icon_mime(data)
     if url and not (os.path.isfile(miss) and time.time() - os.path.getmtime(miss) < 86400):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Hearth"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Inglen"})
             with urllib.request.urlopen(req, timeout=5) as r:
                 data = r.read(_ICON_MAX + 1)
             if 64 < len(data) <= _ICON_MAX and _icon_mime(data) != "application/octet-stream":

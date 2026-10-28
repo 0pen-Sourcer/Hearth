@@ -98,5 +98,5 @@ def acquire_or_defer(preferred_port: int = DEFAULT_PORT) -> Tuple[bool, int]:
 
 def announce_secondary_and_exit() -> None:
     """Standard one-liner for a deferred secondary instance."""
-    print("Hearth is already running. Surfacing the existing window.")
+    print("Inglen is already running. Surfacing the existing window.")
     sys.exit(0)

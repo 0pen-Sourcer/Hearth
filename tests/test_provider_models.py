@@ -210,7 +210,7 @@ if far:
           _sa.route_for("local")[0][0].startswith("http://localhost:") and _sa.route_for("")[0] is None)
     from hearth import tools as _tools
     said = _tools.execute_tool("spawn_subagent", {"persona": "researcher", "prompt": "x", "runs_on": "nowhere"})
-    check(f"the spawn tool passes the refusal on ({str(said)[:80]})", "isn't a provider Hearth knows" in str(said))
+    check(f"the spawn tool passes the refusal on ({str(said)[:80]})", "isn't a provider Inglen knows" in str(said))
 
     # A model on this PC kept loaded beside a cloud brain is the second brain:
     # ordinary helpers run on it.

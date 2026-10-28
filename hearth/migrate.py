@@ -340,7 +340,7 @@ def main() -> int:
                     help="Write to ~/Jarvis/memory. Without this, dry-run.")
     ap.add_argument("--include-skills", action="store_true",
                     help="Copy SKILL.md dirs into ~/Jarvis/imported_skills/ "
-                         "for later review. Hearth has no skill loader yet.")
+                         "for later review. Inglen has no skill loader yet.")
     ap.add_argument("--include-config", action="store_true",
                     help="Pull the source agent's chosen model/provider into "
                          "~/Jarvis/settings.json. API keys are NOT copied.")

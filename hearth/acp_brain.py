@@ -66,7 +66,7 @@ async def _hello(rpc: _Rpc) -> Dict[str, Any]:
     return await rpc.call("initialize", {
         "protocolVersion": 1,
         "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
-        "clientInfo": {"name": "hearth", "title": "Hearth", "version": "0.7.6"}}, 60)
+        "clientInfo": {"name": "hearth", "title": "Inglen", "version": "0.7.6"}}, 60)
 
 
 def _choices(opt: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -408,7 +408,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
             sid = opened.get("sessionId")
             persona = _base.persona_text(
                 voice, host=name, tools=f"the {SERVER} MCP tools",
-                own_tools=("Use your own shell and file tools as usual: Hearth sees each command and change "
+                own_tools=("Use your own shell and file tools as usual: Inglen sees each command and change "
                            "before it happens and asks the user when that is needed."))
             earlier = _base._transcript(history) if history else ""
             text_in = (persona + "\n\n---\n\n"
@@ -479,7 +479,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                     rpc.send({"id": msg["id"], "result": {"outcome": {"outcome": "selected", "optionId": pick["optionId"]}}
                               if pick else {"outcome": {"outcome": "cancelled"}}})
                 else:
-                    rpc.send({"id": msg["id"], "error": {"code": -32601, "message": "Hearth doesn't offer this"}})
+                    rpc.send({"id": msg["id"], "error": {"code": -32601, "message": "Inglen doesn't offer this"}})
                 await proc.stdin.drain()
                 continue
             if meth != "session/update":

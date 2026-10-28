@@ -473,7 +473,7 @@ def _window(method: str, path: str, body: Optional[Dict[str, Any]] = None, timeo
     import urllib.error
     import urllib.request
     if not WINDOW_URL:
-        return {"ok": False, "error": "the Hearth window isn't running on the PC"}
+        return {"ok": False, "error": "the Inglen window isn't running on the PC"}
     req = urllib.request.Request(WINDOW_URL + path, method=method,
                                  data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Content-Type": "application/json"} if body is not None else {})
@@ -768,7 +768,7 @@ class Room:
                         await self.on_frame(json.loads(raw))
             except Exception as e:
                 if "402" in str(e):
-                    print("[relay] the relay needs Hearth Plus for this PC; stopping.", flush=True)
+                    print("[relay] the relay needs Inglen Plus for this PC; stopping.", flush=True)
                     self.bridge.stopping = True
                     return
             self.ws, self.chan, self.peer_up = None, None, False

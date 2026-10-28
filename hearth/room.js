@@ -700,9 +700,11 @@ function roomTick(t) {
 // The name carved into the mantel, so a picture of the room says where it is from.
 const ROOM_LETTERS = { H: ['10001', '10001', '10001', '11111', '10001', '10001', '10001'],
   E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'], A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
-  R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'], T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'] };
+  R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'], T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
+  I: ['11111', '00100', '00100', '00100', '00100', '00100', '11111'], N: ['10001', '11001', '10101', '10101', '10011', '10001', '10001'],
+  G: ['01110', '10001', '10000', '10111', '10001', '10001', '01110'], L: ['10000', '10000', '10000', '10000', '10000', '10000', '11111'] };
 function roomCarve(ctx, kx, ky) {
-  const word = 'HEARTH', u = 3, gap = 2;
+  const word = 'INGLEN', u = 3, gap = 2;
   const x0 = 767 - (word.length * (5 + gap) - gap) * u / 2, y0 = 157;
   // Lit edge first, a step down and right, then the cut itself.
   for (const [dx, dy, ink] of [[1, 1, 'rgba(255,196,128,0.30)'], [0, 0, 'rgba(58,26,10,0.72)']]) {
@@ -1042,7 +1044,7 @@ function roomPoke(p) {
   else if (a.status === 'working') line = a.activity === 'tool' ? `Busy with ${a.tool}. ${short(a.prompt, 60)}` : `On it: ${short(a.prompt, 70)}`;
   else if (a.status === 'done') line = a.preview ? `Done. ${short(a.preview)}` : 'All done.';
   else if (a.status === 'failed') line = `Didn't make it. ${short(a.preview, 70)}`;
-  else line = 'Stopped when Hearth closed.';
+  else line = 'Stopped when Inglen closed.';
   roomSay(p.id, line, 4200);
   ROOM_HOST.select(p.id, true);
 }

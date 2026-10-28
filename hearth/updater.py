@@ -71,7 +71,7 @@ def patch_asset(tag: str = "") -> dict:
            + (f"tags/{tag}" if tag else "latest"))
     try:
         req = urllib.request.Request(api, headers={
-            "User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+            "User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=20) as r:
             rel = json.load(r)
     except Exception as e:
@@ -104,7 +104,7 @@ def download_patch(on_progress=None, tag: str = "") -> dict:
     if not (dest.exists() and dest.stat().st_size == asset["size"]):
         try:
             _download_with_resume(asset["url"], dest, tmp, on_progress,
-                                  ua="Hearth-updater", cancel=lambda: _dl_cancel)
+                                  ua="Inglen-updater", cancel=lambda: _dl_cancel)
         except DownloadCancelled:
             return {"ok": False, "cancelled": True,
                     "error": "cancelled (progress kept, it will resume)"}
@@ -119,7 +119,7 @@ def download_patch(on_progress=None, tag: str = "") -> dict:
 # Checked file by file: a folder that exists can still be missing the one file
 # that starts the app.
 _REPAIRABLE = [
-    ("Hearth code", ["hearth/__init__.py", "hearth/web.py", "hearth/tools.py",
+    ("Inglen code", ["hearth/__init__.py", "hearth/web.py", "hearth/tools.py",
                      "hearth/headless.py", "hearth/ui.html", "hearth/room.js", "hearth_cli.py"],
      "the app itself"),
     ("Skills and helpers", ["hearth/skills", "hearth/subagents"],
@@ -230,7 +230,7 @@ def repair(on_progress=None) -> dict:
     if not r.get("ok"):
         return r
     out = {"ok": True, "restored": r.get("files", 0),
-           "note": "restored the app, art and voice files; restart Hearth to load them"}
+           "note": "restored the app, art and voice files; restart Inglen to load them"}
     if _needs_engine() and not _engine_ok():
         try:
             from . import llmserver
@@ -239,7 +239,7 @@ def repair(on_progress=None) -> dict:
             e = {"ok": False, "error": f"{type(ex).__name__}: {ex}"}
         if e.get("ok"):
             out["engine"] = e.get("tag")
-            out["note"] = "restored the app and the model engine; restart Hearth to load them"
+            out["note"] = "restored the app and the model engine; restart Inglen to load them"
         else:
             out["engine_error"] = e.get("error") or "engine download failed"
             out["note"] = ("restored the app, but the model engine could not be "
@@ -395,7 +395,7 @@ def _sync_registry_version() -> None:
                 # Inno bakes the version into the display NAME too ("Hearth version
                 # 0.7.2-preview"), so sync it or Control Panel still reads old.
                 winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ,
-                                  f"Hearth version {HEARTH_VERSION}")
+                                  f"Inglen version {HEARTH_VERSION}")
                 winreg.CloseKey(k)
                 return
             except FileNotFoundError:
@@ -568,7 +568,7 @@ def installer_asset(tag: str = "") -> dict:
            + (f"tags/{tag}" if tag else "latest"))
     try:
         req = urllib.request.Request(api, headers={
-            "User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+            "User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=20) as r:
             rel = json.load(r)
     except Exception as e:
@@ -610,7 +610,7 @@ def download_installer(on_progress=None, tag: str = "") -> dict:
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
         _download_with_resume(asset["url"], dest, tmp, on_progress,
-                              ua="Hearth-updater",
+                              ua="Inglen-updater",
                               cancel=lambda: _dl_cancel)
     except DownloadCancelled:
         return {"ok": False, "cancelled": True,
@@ -680,7 +680,7 @@ def apply_update() -> str:
             tail = (out.stdout or "").strip()
             if "Already up to date" in tail:
                 return "Already up to date."
-            return "Updated. Restart Hearth to load the new version.\n" + tail
+            return "Updated. Restart Inglen to load the new version.\n" + tail
         return ("git pull failed (local changes? not a clean checkout?):\n"
                 + (out.stderr or out.stdout or "").strip())
     except Exception as e:

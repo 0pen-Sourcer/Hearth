@@ -169,7 +169,7 @@ def _open_wt(spawned: List[Dict[str, Any]]) -> bool:
     wt = _find_wt()
     if not wt:
         return False
-    args = [wt, "new-tab", "--title", "Hearth Team", "-d", _REPO_ROOT, "--"] + _watch_cmd(spawned[0])
+    args = [wt, "new-tab", "--title", "Inglen Team", "-d", _REPO_ROOT, "--"] + _watch_cmd(spawned[0])
     for m in spawned[1:]:
         args += [";", "split-pane", "-d", _REPO_ROOT, "--"] + _watch_cmd(m)
     # Even out the layout after the splits.

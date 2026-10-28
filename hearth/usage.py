@@ -60,7 +60,7 @@ def everything(provider_key) -> List[Dict[str, Any]]:
                 wins.append(w)
             entry.update(at=got.get("at"), windows=wins)
         elif aid in _REPORTS:
-            entry["note"] = f"{label} hasn't been used from Hearth yet; its usage shows here after the first run."
+            entry["note"] = f"{label} hasn't been used from Inglen yet; its usage shows here after the first run."
         else:
             refused, when = _logged_refusal(aid)
             if refused:

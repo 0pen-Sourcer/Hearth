@@ -64,7 +64,7 @@ claude_brain.current = lambda: "codex"
 check("on an agent program it is told which, and whose plan",
       "runs through Codex on the user's ChatGPT plan" in P.system_prompt())
 claude_brain.current = lambda: None
-check("it is told its name is not the app's", "never call yourself Hearth" in here)
+check("it is told its name is not the app's", "never call yourself Inglen" in here)
 
 # ------------------------------------------------------------------- size
 tokens = len(BASE) // 4

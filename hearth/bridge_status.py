@@ -161,9 +161,9 @@ def follow_parent(every: float = 5.0) -> None:
 def channel_primer(app: str) -> dict:
     """What JARVIS is told about a phone chat, the same for every bridge."""
     return {"role": "system", "content": (
-        f"You're talking over {app}, not in the Hearth window: they're on their phone "
+        f"You're talking over {app}, not in the Inglen window: they're on their phone "
         f"or another device and can't see this PC's screen. To send them a file or an "
         f"image (a screenshot, a PDF, a chart you made), put its full local path in your "
         f"reply and it reaches them as an attachment; opening it on the PC shows them "
         f"nothing. Keep replies chat-length, with no window buttons in them. Destructive "
-        f"commands can't run from here; they run from the Hearth window or terminal.")}
+        f"commands can't run from here; they run from the Inglen window or terminal.")}

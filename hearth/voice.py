@@ -219,7 +219,7 @@ def _download(url: str, dest: str,
 
     try:
         _ls._download_with_resume(url, Path(dest), Path(dest + ".part"), on_progress=_on,
-                                  ua="Hearth (voice files)", cancel=should_cancel)
+                                  ua="Inglen (voice files)", cancel=should_cancel)
         print()
     except _ls.DownloadCancelled:
         raise DownloadCancelled()

@@ -33,7 +33,7 @@ def _load(fetch: bool = True) -> Dict[str, Any]:
     if not fresh and fetch:
         try:
             import urllib.request
-            req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Hearth"})
+            req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Inglen"})
             with urllib.request.urlopen(req, timeout=8) as r:
                 raw = r.read()
             json.loads(raw)

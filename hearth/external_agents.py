@@ -451,7 +451,7 @@ def update(aid: str) -> Dict[str, Any]:
     """Update one agent CLI through npm. Returns {ok, version} or {ok: False, error}."""
     package = NPM_PACKAGES.get(aid)
     if not package or aid not in AGENTS or not find(aid):
-        return {"ok": False, "error": "that agent isn't one Hearth can update"}
+        return {"ok": False, "error": "that agent isn't one Inglen can update"}
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     if not npm:
         return {"ok": False, "error": "npm isn't on this PC, so the update can't run"}
@@ -545,7 +545,7 @@ def install(aid: str) -> Dict[str, Any]:
     from the setup dialog; never on its own."""
     how = SETUP.get(aid) or ({"npm": NPM_PACKAGES[aid]} if aid in NPM_PACKAGES and aid in AGENTS else None)
     if not how:
-        return {"ok": False, "error": "that isn't an agent Hearth can install"}
+        return {"ok": False, "error": "that isn't an agent Inglen can install"}
     if find(aid):
         return {"ok": True, "already": True}
     line = how.get("win" if sys.platform == "win32" else "sh")
@@ -961,7 +961,7 @@ async def _codex_app(head: List[str], prompt: str, work: str, allow: str, emit, 
     loop = asyncio.get_running_loop()
     try:
         try:
-            await rpc.call("initialize", {"clientInfo": {"name": "hearth", "title": "Hearth", "version": "0.7.6"}}, 30)
+            await rpc.call("initialize", {"clientInfo": {"name": "hearth", "title": "Inglen", "version": "0.7.6"}}, 30)
         except Exception:
             return False
         rpc.send({"method": "initialized"})
@@ -1084,7 +1084,7 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
             args = args[:after] + [flag, model] + args[after:]
     head = _direct_argv(exe)
     if spec.get("prompt_arg") and head[0].lower().endswith((".cmd", ".bat")):
-        return {"ok": False, "error": f"{spec['label']} is installed as a script Hearth can't start safely "
+        return {"ok": False, "error": f"{spec['label']} is installed as a script Inglen can't start safely "
                                       "with a prompt; reinstall it from npm or its own installer"}
     agent_id = f"sub_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     tpath = _sa._transcript_path(agent_id)

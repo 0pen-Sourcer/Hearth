@@ -167,7 +167,7 @@ R.stop_watcher()
 R.deliver = _real_deliver
 _late = _notes.get("r_late", "")
 check(f"a missed reminder says when it was due ({_late[:90]})",
-      "while Hearth was closed" in _late and R._when_said(_due.isoformat()) in _late)
+      "while Inglen was closed" in _late and R._when_said(_due.isoformat()) in _late)
 _act = _notes.get("r_act", "")
 check(f"a reminder that wants a risky tool asks first, without shouting ({_act[:70]})",
       "has not run" in _act and "ask whether to go ahead" in _act

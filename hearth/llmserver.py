@@ -628,7 +628,7 @@ def list_local_models() -> List[Dict[str, Any]]:
         if "mmproj" in p.name.lower():
             continue
         try:
-            out.append(_model_entry(p, "Hearth"))
+            out.append(_model_entry(p, "Inglen"))
         except OSError:
             continue
     return out
@@ -664,7 +664,7 @@ def _source_label(p: Path) -> str:
     if "nomic.ai" in s or "gpt4all" in s:    return "GPT4All"
     if "huggingface" in s or "/hub" in s:    return "HuggingFace cache"
     if "downloads" in s:                     return "Downloads"
-    if "/jarvis/" in s.replace("\\", "/"):   return "Hearth"
+    if "/jarvis/" in s.replace("\\", "/"):   return "Inglen"
     return "Disk"
 
 
@@ -1577,12 +1577,12 @@ def runtime_advice() -> Dict[str, Any]:
         "level": "recommended",
         "short": (f"Your GPU (compute {cap:g}) is newer than the bundled "
                   "engine's kernels, so past ~30K context it runs slower than "
-                  "CPU. Installing Hearth's own llama.cpp fixes that."),
+                  "CPU. Installing Inglen's own llama.cpp fixes that."),
         "reason": (f"The bundled engine has no kernels for your GPU (compute "
                    f"{cap:g}), so every op goes through driver JIT, measured "
                    "slower than plain CPU past ~30K context. Flash attention is "
                    "also forced off to stay correct, which costs extra VRAM. "
-                   "Installing Hearth's own llama.cpp fixes both."),
+                   "Installing Inglen's own llama.cpp fixes both."),
         "action": "install_runtime",
     }
 
@@ -1628,7 +1628,7 @@ def _latest_build_release(timeout: float = 12, repo: str = _LLAMA_CPP_REPO) -> O
     import urllib.request
     req = urllib.request.Request(
         f"https://api.github.com/repos/{repo}/releases?per_page=15",
-        headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+        headers={"User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         rels = json.load(r)
     shape = r"^b\d+$" if repo == _LLAMA_CPP_REPO else r"."
@@ -1788,7 +1788,7 @@ def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
     try:
         req = urllib.request.Request(
             f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases?per_page={max(1, min(limit, 30))}",
-            headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+            headers={"User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=12) as r:
             rels = json.load(r)
     except Exception as e:
@@ -1925,7 +1925,7 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         if tag:
             req = urllib.request.Request(
                 f"https://api.github.com/repos/{repo}/releases/tags/{tag}",
-                headers={"User-Agent": "Hearth", "Accept": "application/vnd.github+json"})
+                headers={"User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
             with urllib.request.urlopen(req, timeout=20) as r:
                 rel = json.load(r)
         else:
@@ -2001,7 +2001,7 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
             part.unlink(missing_ok=True)
         if not zip_path.exists():
             _download_with_resume(asset["browser_download_url"], zip_path, part,
-                                  _prog, ua="Hearth",
+                                  _prog, ua="Inglen",
                                   cancel=_llama_dl_cancel.is_set)
         done[0] = base + int(asset.get("size", 0))
         try:
@@ -2195,7 +2195,7 @@ def load_failure_hint(tail: str) -> str:
     elif "could not load model" in tail.lower():
         hint = ". The model file couldn't be read; it may be damaged or not a model"
     elif "could not find module" in tail.lower():
-        hint = ". The engine's CUDA files are missing; repair Hearth in Settings, About, or re-run install.ps1 -BuiltinLLM cuda"
+        hint = ". The engine's CUDA files are missing; repair Inglen in Settings, About, or re-run install.ps1 -BuiltinLLM cuda"
     return hint
 
 
@@ -2234,7 +2234,7 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
     if ctx and ctx < MIN_USABLE_CTX:
         try:
             print(f"  [hearth.llmserver] raising ctx {ctx} -> {MIN_USABLE_CTX} "
-                  f"(Hearth's prompt needs ~20K; below ~24K overflows instantly)",
+                  f"(Inglen's prompt needs ~20K; below ~24K overflows instantly)",
                   flush=True)
         except Exception:
             pass
@@ -2508,7 +2508,7 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
             "error": (
                 f"Another program is already serving models on port {port} (LM Studio, "
                 f"Ollama or similar). Close it and load again, or keep using what it serves "
-                f"by pointing Hearth at http://localhost:{port}/v1 in Settings > Chat brain."
+                f"by pointing Inglen at http://localhost:{port}/v1 in Settings > Chat brain."
             ),
             "conflict_port": port,
         }
@@ -3879,7 +3879,7 @@ def delete_model(path: str) -> Dict[str, Any]:
         target.relative_to(MODELS_DIR.resolve())
     except ValueError:
         return {"ok": False, "error":
-                "This model lives outside Hearth's models folder (LM Studio / "
+                "This model lives outside Inglen's models folder (LM Studio / "
                 "Ollama / HF cache). Remove it from that app instead."}
     if target.suffix.lower() != ".gguf" or not target.is_file():
         return {"ok": False, "error": "not a .gguf on disk"}

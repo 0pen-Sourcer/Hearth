@@ -124,7 +124,7 @@ with sync_playwright() as pw:
     check(f"ready models are listed, the loaded one marked {b['ready'][:3]}",
           any("Z-Image Turbo" in r and "loaded" in r for r in b["ready"]) and any("SD-Turbo" in r for r in b["ready"]))
     check("the loaded one can be unloaded, the other loaded", b["unload"] == 1 and b["load"] == ["sd-turbo"])
-    check("the folders are shown, the person's own one too", "ComfyUI" in b["text"] and "Hearth's own" in b["text"])
+    check("the folders are shown, the person's own one too", "ComfyUI" in b["text"] and "Inglen's own" in b["text"])
     check("a family still missing a file says which", "needs T5-XXL" in b["text"].replace("\n", " ") or
           "needs T5-XXL" in pg.evaluate("document.getElementById('models-pane-images').innerHTML"))
     pg.screenshot(path=os.path.join(work, "images_pane.png"))

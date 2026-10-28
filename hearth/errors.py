@@ -88,7 +88,7 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
             # telling someone to "start LM Studio" when they don't have it
             # installed sends them looking for a program that isn't the problem.
             return ApiErrorInfo("unreachable",
-                "No model server is answering. Pick a model in Models and Hearth "
+                "No model server is answering. Pick a model in Models and Inglen "
                 "will start its own, or start LM Studio or Ollama if you use one.",
                 retryable=True)
         return ApiErrorInfo("unreachable",
@@ -99,8 +99,8 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
     if code in (401, 403) or "api key" in text or "unauthorized" in text or "invalid_api_key" in text:
         return ApiErrorInfo("auth",
             "Authentication failed. Check LOCAL_API_KEY for this endpoint." if not is_local
-            else "The local server rejected the API key. If Hearth started it, "
-                 "restart Hearth to reconnect. If you started it yourself, check "
+            else "The local server rejected the API key. If Inglen started it, "
+                 "restart Inglen to reconnect. If you started it yourself, check "
                  "whether it was launched with an API key set.",
             retryable=False)
 
@@ -112,7 +112,7 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
         n = [int(g.replace(",", "")) for g in m.groups()] if m else []
         sizes = (f" It allows {n[0]:,} tokens a minute and one request here is {n[1]:,}." if n else "")
         return ApiErrorInfo("too_big_for_plan",
-            "This provider's plan is too small for Hearth." + sizes +
+            "This provider's plan is too small for Inglen." + sizes +
             " Use a paid tier with this provider, or pick another one.",
             retryable=False)
 
@@ -171,7 +171,7 @@ def classify_api_error(exc: object, is_local: bool) -> ApiErrorInfo:
         return ApiErrorInfo("no_model",
             "The server is running but doesn't have that model. It may be a "
             "leftover saved name. Pick the model again in Models, or /models "
-            "in the CLI, to point Hearth at what's actually loaded." if is_local
+            "in the CLI, to point Inglen at what's actually loaded." if is_local
             else "Model id not found for this provider. Check LOCAL_MODEL or use /model.",
             retryable=False)
 

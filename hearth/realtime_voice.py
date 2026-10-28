@@ -843,7 +843,7 @@ def _run_session(sess: _Session) -> None:
                         except Exception: pass
                         _call(sess.on_barge)
                     else:
-                        print(f"[hearth.realtime_voice] dropped (speakers mode, Hearth was talking): {text!r}", flush=True)
+                        print(f"[hearth.realtime_voice] dropped (speakers mode, Inglen was talking): {text!r}", flush=True)
                         try: rec.clear_audio_queue()
                         except Exception: pass
                         continue
@@ -856,7 +856,7 @@ def _run_session(sess: _Session) -> None:
                 _barge_grace_until = 0.0
                 if _looks_like_echo(text, sp):
                     _heard_own_voice(sess)
-                    print(f"[hearth.realtime_voice] dropped (repeat of Hearth's own words): {text!r}", flush=True)
+                    print(f"[hearth.realtime_voice] dropped (repeat of Inglen's own words): {text!r}", flush=True)
                     try: rec.clear_audio_queue()
                     except Exception: pass
                     continue
@@ -872,7 +872,7 @@ def _run_session(sess: _Session) -> None:
             # headset user's words don't overlap, so they pass straight through.
             if sp.seconds_since_spoke() < 6.0 and _looks_like_echo(text, sp):
                 _heard_own_voice(sess)
-                print(f"[hearth.realtime_voice] dropped (repeat of Hearth's own words): {text!r}", flush=True)
+                print(f"[hearth.realtime_voice] dropped (repeat of Inglen's own words): {text!r}", flush=True)
                 try: rec.clear_audio_queue()
                 except Exception: pass
                 continue

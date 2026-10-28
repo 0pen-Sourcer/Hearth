@@ -256,7 +256,7 @@ def main(argv: Optional[list] = None) -> int:
             return False
 
     _win_holder["win"] = webview.create_window(
-        "Hearth", url=args.url, js_api=_WinApi(), **kwargs)
+        "Inglen", url=args.url, js_api=_WinApi(), **kwargs)
     reload_if_stalled(_win_holder["win"], args.url)
     revive_backend(_win_holder["win"], args.url)
     # Keep the window's storage between launches; the default private window
@@ -326,7 +326,7 @@ def revive_backend(win, url: str, every: float = 2.0, misses: int = 3, limit: in
 
     def _say(text: str) -> None:
         try:
-            win.evaluate_js("try{toast('Hearth', %s, 'warn', 9000)}catch(e){}" % _json.dumps(text))
+            win.evaluate_js("try{toast('Inglen', %s, 'warn', 9000)}catch(e){}" % _json.dumps(text))
         except Exception:
             pass
 
@@ -353,7 +353,7 @@ def revive_backend(win, url: str, every: float = 2.0, misses: int = 3, limit: in
             down += 1
             if down < misses or not cmd or (pid and _alive(pid)):
                 continue
-            _say("Hearth stopped unexpectedly. Starting it again...")
+            _say("Inglen stopped unexpectedly. Starting it again...")
             if not _start():
                 return
             revived += 1

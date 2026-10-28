@@ -97,7 +97,7 @@ if os.name == "nt":
                 return
             except OSError:
                 if time.monotonic() > deadline:
-                    raise TimeoutError("the reminders file is locked by another Hearth process")
+                    raise TimeoutError("the reminders file is locked by another Inglen process")
                 time.sleep(0.05)
 
     def _unlock_file(fd: int) -> None:
@@ -414,7 +414,7 @@ def _push_phone(title: str, body: str) -> bool:
             if not json.load(_sf).get("phone_reminders"):
                 return False
         from . import channel_core
-        return channel_core.push_any(f"{title}: {body}" if title and title != "Hearth" else body)
+        return channel_core.push_any(f"{title}: {body}" if title and title != "Inglen" else body)
     except Exception:
         return False
 
@@ -476,7 +476,7 @@ def _ensure_app_identity() -> Optional[str]:
         import winreg
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER,
                               r"Software\Classes\AppUserModelId\\" + _APP_ID) as k:
-            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "Hearth")
+            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "Inglen")
             # The notification header takes an image file; an .ico shows as the
             # default window icon, so the PNG beside it is named here.
             png = icon[:-4] + ".png" if icon and icon.lower().endswith(".ico") else icon
@@ -535,7 +535,7 @@ def _balloon(title: str, body: str, icon: Optional[str]) -> bool:
         try:
             tip = WindowsBalloonTip.__new__(WindowsBalloonTip)
             _balloons.append(tip)
-            tip.__init__(title=title, message=body, app_name="Hearth", app_icon=icon or "", timeout=10)
+            tip.__init__(title=title, message=body, app_name="Inglen", app_icon=icon or "", timeout=10)
         except Exception:
             pass
         finally:
@@ -602,7 +602,7 @@ def desktop_notify(title: str, body: str) -> bool:
         return True
     try:
         from plyer import notification  # type: ignore
-        kw = {"title": title, "message": body, "app_name": "Hearth", "timeout": 10}
+        kw = {"title": title, "message": body, "app_name": "Inglen", "timeout": 10}
         if icon:
             kw["app_icon"] = icon
         notification.notify(**kw)
@@ -884,10 +884,10 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
                 if len(full_result) > 240:
                     tail += "..."
                 body = f"{body}\n> {tail}"
-        title = "Hearth - while you were away" if missed else "Hearth reminder"
+        title = "Inglen - while you were away" if missed else "Inglen reminder"
         toast_body = body
         if needs_confirm:
-            toast_body = f"{body}\n(wants to run {action_tool} — open Hearth to confirm)"
+            toast_body = f"{body}\n(wants to run {action_tool} — open Inglen to confirm)"
         try:
             notify(title, toast_body)
         except Exception:
@@ -897,7 +897,7 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
         try:
             what = r.get("what", "")
             due = _when_said(r.get("due_iso", ""))
-            late = f", due {due} while Hearth was closed" if missed and due else ""
+            late = f", due {due} while Inglen was closed" if missed and due else ""
             if needs_confirm:
                 try:
                     args_str = json.dumps(action_args, ensure_ascii=False)[:300]

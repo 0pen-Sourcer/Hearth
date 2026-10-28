@@ -196,12 +196,12 @@ async def _run_exec(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]
     persona = _base.persona_text(
         voice, host="Codex", tools=f"the {SERVER} MCP tools",
         own_tools=("Your own shell is fine for reading and running things; to change files outside "
-                   "the workspace or do anything the sandbox blocks, use Hearth's tools, which ask the user."
+                   "the workspace or do anything the sandbox blocks, use Inglen's tools, which ask the user."
                    if _mode() == "auto" else
-                   "You have no shell of your own here: run every command with Hearth's run_command, which "
-                   "asks the user first. Read files with Hearth's read_file."
+                   "You have no shell of your own here: run every command with Inglen's run_command, which "
+                   "asks the user first. Read files with Inglen's read_file."
                    + (" Your own file edits stay in the workspace." if _mode() == "edits" else
-                      " Change files with Hearth's write_file or edit_file, which ask the user.")))
+                      " Change files with Inglen's write_file or edit_file, which ask the user.")))
     if len(persona) > _MAX_INLINE:
         text_in = persona + "\n\n---\n\n" + text_in
         persona = ""
@@ -455,7 +455,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
     text_in = prompt
     persona = _base.persona_text(
         voice, host="Codex", tools=f"the {SERVER} MCP tools",
-        own_tools=("Use your own shell and file edits as usual: Hearth sees each command and change "
+        own_tools=("Use your own shell and file edits as usual: Inglen sees each command and change "
                    "before it happens and asks the user when that is needed."))
     model = _base.chosen_model(PROVIDER)
     effort = _base.chosen_effort()
@@ -480,7 +480,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
     failure, tid, turn_id = "", None, None
     try:
         try:
-            await rpc.call("initialize", {"clientInfo": {"name": "hearth", "title": "Hearth", "version": "0.7.6"}}, 30)
+            await rpc.call("initialize", {"clientInfo": {"name": "hearth", "title": "Inglen", "version": "0.7.6"}}, 30)
         except Exception:
             return _NO_APP_SERVER
         rpc.send({"method": "initialized"})
@@ -560,7 +560,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
                             break
                     rpc.send({"id": msg["id"], "result": {"decision": "accept" if ok else "decline"}})
                 else:
-                    rpc.send({"id": msg["id"], "error": {"code": -32601, "message": "Hearth doesn't answer this"}})
+                    rpc.send({"id": msg["id"], "error": {"code": -32601, "message": "Inglen doesn't answer this"}})
                 await proc.stdin.drain()
                 continue
             item = prm.get("item") or {}

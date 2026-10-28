@@ -68,7 +68,7 @@ def _write(d: Dict[str, Any]) -> None:
 def _post(path: str, body: Dict[str, Any], timeout: float = 15) -> Dict[str, Any]:
     """{'status': http code, 'json': body} ; status 0 when Dodo couldn't be reached."""
     req = urllib.request.Request(_base() + path, data=json.dumps(body).encode("utf-8"), method="POST",
-                                 headers={"Content-Type": "application/json", "User-Agent": "Hearth"})
+                                 headers={"Content-Type": "application/json", "User-Agent": "Inglen"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read()

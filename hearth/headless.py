@@ -124,13 +124,13 @@ def bridge_reply_or_reason(reply_text: str, err_category=None, err_message=None)
         return reply
     if err_category == "unreachable":
         return ("I'm not up yet — there's no model loaded on the computer. Load one "
-                "in Hearth (or point it at a cloud brain) and message me again.")
+                "in Inglen (or point it at a cloud brain) and message me again.")
     if err_category == "rate_limit":
         return "I'm rate-limited right now. Give it a moment and try me again."
     if err_category == "quota":
         return ("The model I think with is out of usage for now. " + (err_message or "")).strip()
     if err_category == "auth":
-        return "My model connection isn't authorized at the moment. Ping whoever runs Hearth."
+        return "My model connection isn't authorized at the moment. Ping whoever runs Inglen."
     if err_message:
         return err_message
     return "I couldn't get a response that time. Try me again in a moment."
@@ -1354,7 +1354,7 @@ async def _run_once(
              estimated_overhead=_est_overhead,
              hint=(
                  f"Loaded model context ({context_tokens}) is smaller than "
-                 f"Hearth's prompt overhead ({_est_overhead} = persona "
+                 f"Inglen's prompt overhead ({_est_overhead} = persona "
                  f"{_sys_tok}t + tools {_tool_tokens}t + reserved {RESERVED_OUTPUT}t). "
                  f"Chats will 500. Reload the model at >={_est_overhead + 4096} "
                  f"context (Models tab → expand model → ctx slider)."
@@ -2646,7 +2646,7 @@ async def run_once(prompt: str, **kw) -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m hearth.headless",
-        description="Run a single prompt against Hearth, emit JSONL events to stdout.",
+        description="Run a single prompt against Inglen, emit JSONL events to stdout.",
     )
     parser.add_argument("--prompt", "-p", required=True,
                         help="The user message to send.")

@@ -126,7 +126,7 @@ check("Hearth's tools are attached as an MCP server", new["params"]["mcpServers"
 check("the chosen model is set on the session",
       any(m.get("method") == "session/set_config_option" and m["params"]["value"] == "smart" for m in sent))
 check("the persona goes in front of a new chat's first message",
-      "brain of Hearth" in next(m for m in sent if m.get("method") == "session/prompt")["params"]["prompt"][0]["text"])
+      "brain of Inglen" in next(m for m in sent if m.get("method") == "session/prompt")["params"]["prompt"][0]["text"])
 
 # The next message in the same chat goes on with the same session.
 events.clear(); asked.clear()

@@ -68,7 +68,7 @@ from hearth.tools import (
     _DEFERRED_TOOLS,
 )
 
-mcp = FastMCP("Hearth")
+mcp = FastMCP("Inglen")
 
 
 # ----------------------------------------------------------------------------
@@ -173,7 +173,7 @@ def _ask_hearth(tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
     try:
         return _post_hearth("/api/brain/permission", tool, inp)
     except Exception as e:
-        return {"behavior": "deny", "message": f"Couldn't reach Hearth to ask: {e}"}
+        return {"behavior": "deny", "message": f"Couldn't reach Inglen to ask: {e}"}
 
 
 # Helpers live in the Hearth that started this server, so their tools run there.
@@ -201,7 +201,7 @@ def _run(name: str, args: Dict[str, Any]):
         try:
             return str(_post_hearth("/api/brain/tool", name, args).get("result") or "")
         except Exception as e:
-            return f"Error: couldn't reach Hearth: {e}"
+            return f"Error: couldn't reach Inglen: {e}"
     return execute_tool(name, args)
 
 
@@ -307,7 +307,7 @@ if _BRAIN_URL and _BRAIN_TOKEN and not _MCP_ALL_TOOLS:
         return name in _DEFERRED_TOOLS and name not in _MCP_NEVER and name not in _IN_HEARTH
 
     @mcp.tool(name="find_tools", structured_output=False,
-              description="Find more of Hearth's tools (they aren't all listed, to save room): "
+              description="Find more of Inglen's tools (they aren't all listed, to save room): "
                           "archives, images, plugins, system details, voice, MCP servers and more. "
                           "Give a word for what you need, or 'all'. Run one with use_tool.")
     def find_tools(query: str) -> str:
@@ -329,7 +329,7 @@ if _BRAIN_URL and _BRAIN_TOKEN and not _MCP_ALL_TOOLS:
 
 
 if _BRAIN_URL and _BRAIN_TOKEN and not _BRAIN_GATE:
-    @mcp.tool(name="approve", description="Hearth's permission check. Not for direct use.",
+    @mcp.tool(name="approve", description="Inglen's permission check. Not for direct use.",
               structured_output=False)
     def approve(tool_name: str, input: dict, tool_use_id: str = "") -> str:
         verdict = _ask_hearth(tool_name, input)
@@ -347,7 +347,7 @@ if _BRAIN_URL and _BRAIN_TOKEN and not _BRAIN_GATE:
 def _status() -> str:
     """Live status of the Hearth brain."""
     return json.dumps({
-        "name": "Hearth",
+        "name": "Inglen",
         "workspace": WORKSPACE,
         "tools": _mcp_exposed,
         "started": datetime.now().isoformat(timespec="seconds"),
@@ -361,9 +361,9 @@ def _status() -> str:
 
 if __name__ == "__main__":
     _diet = "" if _MCP_ALL_TOOLS else f" (core diet; {len(TOOL_DEFINITIONS)} available — set HEARTH_MCP_ALL_TOOLS=1 for all)"
-    print(f"[Hearth MCP] {_mcp_exposed} tools registered{_diet}", file=sys.stderr)
-    print(f"[Hearth MCP] workspace: {WORKSPACE}", file=sys.stderr)
-    print(f"[Hearth MCP] activity log: {ACTIVITY_LOG}", file=sys.stderr)
+    print(f"[Inglen MCP] {_mcp_exposed} tools registered{_diet}", file=sys.stderr)
+    print(f"[Inglen MCP] workspace: {WORKSPACE}", file=sys.stderr)
+    print(f"[Inglen MCP] activity log: {ACTIVITY_LOG}", file=sys.stderr)
     _log_activity("server_start", tools=_mcp_exposed, workspace=WORKSPACE)
     # Register this inbound connection so the Hearth GUI's MCP tab can show WHO'S
     # connected. stdio spawns one server process per client, so our pid + the
@@ -387,7 +387,7 @@ if __name__ == "__main__":
             _client = _pn
             for _k, _label in (("claude", "Claude Desktop"), ("lmstudio", "LM Studio"),
                                ("lm studio", "LM Studio"), ("cursor", "Cursor"), ("codex", "Codex"),
-                               ("opencode", "OpenCode"), ("hearth", "Hearth"),
+                               ("opencode", "OpenCode"), ("hearth", "Inglen"),
                                ("code", "VS Code"), ("ollama", "Ollama")):
                 if _k in _pn:
                     _client = _label

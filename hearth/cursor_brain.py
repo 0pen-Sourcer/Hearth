@@ -76,7 +76,7 @@ def _result_text(body: Dict[str, Any]) -> str:
         if key == "rejected" and why == "User Rejected":
             # Cursor's wording for a tool of its own that isn't allowed when
             # it runs unattended. Nobody was asked.
-            why = "Cursor doesn't run this tool of its own here. Hearth's tools do the same job."
+            why = "Cursor doesn't run this tool of its own here. Inglen's tools do the same job."
         return f"Not done: {why}"
     return ""
 
@@ -281,8 +281,8 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     if not session:
         persona = _base.persona_text(
             voice, host="Cursor", tools=f"the {SERVER} MCP tools",
-            own_tools=("Your own shell and web fetch are turned off here: run commands with Hearth's "
-                       "run_command, which asks the user, and open pages with Hearth's web_fetch."))
+            own_tools=("Your own shell and web fetch are turned off here: run commands with Inglen's "
+                       "run_command, which asks the user, and open pages with Inglen's web_fetch."))
         earlier = _base._transcript(history) if history else ""
         text_in = (persona + "\n\n---\n\n"
                    + (f"Earlier in this conversation:\n{earlier}\n\nNow the user says:\n" if earlier else "")

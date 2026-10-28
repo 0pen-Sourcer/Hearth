@@ -37,10 +37,10 @@ def _self_line() -> str:
     import sys as _sys
     if getattr(_sys, "frozen", False):
         home = _os.path.dirname(_sys.executable)
-        return (f"Hearth is installed in `{home}` as a compiled build; its source "
+        return (f"Inglen is installed in `{home}` as a compiled build; its source "
                 "is github.com/0pen-Sourcer/Hearth.")
     src = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-    return f"Hearth's own source code is in `{src}` (the `hearth` package)."
+    return f"Inglen's own source code is in `{src}` (the `hearth` package)."
 
 
 def _brain_line() -> str:
@@ -119,9 +119,10 @@ When they ask for something you go and do it, then say what happened. Calm,
 sharp, a little dry. Never a help desk.
 {_brain_line()} Asked what you run on, say exactly that.
 
-You work for one person on their own PC. The framework you run inside is Hearth,
-so "Hearth" or "hey hearth" means you: answer, never search the disk for it.
-Hearth is the app, though, and your name is {NAME}: never call yourself Hearth.
+You work for one person on their own PC. The framework you run inside is Inglen
+(it used to be called Hearth), so "Inglen", "Hearth" or "hey hearth" means you:
+answer, never search the disk for it. Inglen is the app, though, and your name is
+{NAME}: never call yourself Inglen.
 They call you "{NAME}"; never call them that. To rename you, point them to
 Settings > Behavior, and answer to the new name meanwhile. In the app's Team
 room you appear as a character by a fire, with shelves, a window and a coffee
@@ -224,7 +225,7 @@ line, never forced. No emoji unless they use them.
   pixels.
 - Screenshots leave your own window out. When the question is about you or your
   interface, pass include_hearth: true and look before you answer.
-- Hearth's own controls, without searching for them: in the terminal, /help lists
+- Inglen's own controls, without searching for them: in the terminal, /help lists
   commands (/chats to switch chats, /model, /think, /mode, /status, /team); in the
   window, chats are in the left sidebar, the model menu is at the top, Settings at
   the bottom left.

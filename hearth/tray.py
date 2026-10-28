@@ -197,7 +197,7 @@ def main(argv: Optional[list] = None) -> int:
     _crashlog("tray")                 # the window's server runs in this process
     parser = argparse.ArgumentParser(
         prog="python -m hearth.tray",
-        description="Hearth system tray app.",
+        description="Inglen system tray app.",
     )
     parser.add_argument("--port", type=int, default=0,
                         help="HTTP backend port. 0 = auto-pick (default).")
@@ -233,7 +233,7 @@ def main(argv: Optional[list] = None) -> int:
         except OSError:
             # Race-lost. The other instance won; ask it to surface, exit clean.
             print(
-                f"Hearth is already on port {port} (race-condition during boot — "
+                f"Inglen is already on port {port} (race-condition during boot — "
                 f"another instance won). Surfacing the existing window.",
                 flush=True,
             )
@@ -392,7 +392,7 @@ def main(argv: Optional[list] = None) -> int:
         os._exit(0)
 
     menu = pystray.Menu(
-        pystray.MenuItem("Open Hearth", on_open, default=True),
+        pystray.MenuItem("Open Inglen", on_open, default=True),
         pystray.MenuItem("Voice mode", on_voice),
         pystray.MenuItem("Open in browser", on_browser),
         pystray.MenuItem("Open workspace folder", on_workspace),
@@ -410,7 +410,7 @@ def main(argv: Optional[list] = None) -> int:
     # (via Xlib set_wm_name), and a U+2014 here crashes the tray on Linux
     # before it ever appears. Windows uses a different pystray backend so it
     # never surfaced there.
-    icon = pystray.Icon("hearth", img, "Hearth - local AI", menu)
+    icon = pystray.Icon("hearth", img, "Inglen - local AI", menu)
     # Notices from this process go through this icon instead of adding one each.
     try:
         from . import reminders as _rem

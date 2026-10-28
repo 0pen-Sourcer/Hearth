@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 # and sat at a prompt, which is not what either flag is asking for.
 _HELP = """usage: hearth-cli [--help] [--version]
 
-Hearth in the terminal. Runs against the server Hearth manages, or any
+Inglen in the terminal. Runs against the server Inglen manages, or any
 OpenAI-compatible one (LM Studio, Ollama, llama.cpp, vLLM, a cloud provider).
 
 Everything else is set from inside the session. Type /help once it starts.
@@ -379,7 +379,7 @@ _team_panes()
 def _brain_choices():
     from hearth.headless import PROVIDERS
     out = [("local", "whatever serves on localhost:1234"), ("lmstudio", "LM Studio"),
-           ("builtin", "Hearth's own llama.cpp")]
+           ("builtin", "Inglen's own llama.cpp")]
     out += [(pid, label) for pid, (label, _url) in PROVIDERS.items()]
     out += [("custom", "any OpenAI-compatible address"), ("claude-code", "your Claude plan"),
             ("codex", "your ChatGPT plan"), ("cursor", "your Cursor plan")]
@@ -430,7 +430,7 @@ HELP_GROUPS = [
     ("Helpers", ["/team", "/agents", "/agent", "/jobs"]),
     ("Voice", ["/voice", "/listen", "/stt", "/sleep", "/wake"]),
     ("This PC", ["/allow", "/disallow", "/allowed", "/lockdown", "/perms", "/workspace", "/tools", "/mcp", "/skill", "/log"]),
-    ("Hearth", ["/about", "/update", "/repair", "/phone", "/pair", "/exit"]),
+    ("Inglen", ["/about", "/update", "/repair", "/phone", "/pair", "/exit"]),
 ]
 
 
@@ -1648,7 +1648,7 @@ class JarvisCLI:
                 })
                 i += 1
             data = {
-                "name": "Hearth CLI",
+                "name": "Inglen CLI",
                 "pinned": True,
                 "createdAt": now_ms,
                 "messages": lm_messages,
@@ -1705,7 +1705,7 @@ class JarvisCLI:
                 try:
                     from hearth import llmserver as _ls
                     if _ls._is_lite_edition():
-                        print(f"{C_DIM}  Hearth Lite has no built-in engine yet — bring LM Studio/Ollama or a cloud key, or get the engine: {_ls.FULL_DOWNLOAD_URL}{C_RESET}")
+                        print(f"{C_DIM}  Inglen Lite has no built-in engine yet — bring LM Studio/Ollama or a cloud key, or get the engine: {_ls.FULL_DOWNLOAD_URL}{C_RESET}")
                 except Exception:
                     pass
                 print()
@@ -1904,7 +1904,7 @@ class JarvisCLI:
               f"  {C_DIM}· approval{C_RESET} {st['mode']}"
               f"  {C_DIM}· helpers working{C_RESET} {st['helpers']['working']}"
               f"  {C_DIM}· memories{C_RESET} {st['memories']}")
-        print(f"{C_DIM}Hearth {st['version']}{C_RESET}\n")
+        print(f"{C_DIM}Inglen {st['version']}{C_RESET}\n")
 
     def _keep_model(self, model: str) -> None:
         """The model picked here is the one chats use and the one the window
@@ -1975,7 +1975,7 @@ class JarvisCLI:
         try:
             from hearth import llmserver as _ls
             if _ls._is_lite_edition():
-                print(f"  {C_DIM}Hearth Lite: after setup, run {C_RESET}{C_TOOL}/models engine install{C_RESET}"
+                print(f"  {C_DIM}Inglen Lite: after setup, run {C_RESET}{C_TOOL}/models engine install{C_RESET}"
                       f"{C_DIM} to grab the GPU engine, or {C_RESET}{C_TOOL}/brain{C_RESET}{C_DIM} a cloud model.{C_RESET}\n")
                 return
             # Full edition, but on a GPU the bundled engine has no kernels for.
@@ -2191,8 +2191,8 @@ class JarvisCLI:
         if sub == "engine":
             info = llmserver.llama_runtime_info()
             adv = llmserver.runtime_advice()
-            src = {"hearth": "Hearth's own", "lmstudio": "LM Studio's (signed)",
-                   "other": "detected copy", "wheel": "bundled with Hearth"}.get(
+            src = {"hearth": "Inglen's own", "lmstudio": "LM Studio's (signed)",
+                   "other": "detected copy", "wheel": "bundled with Inglen"}.get(
                        info.get("source"), info.get("source") or "")
             print(f"\n{C_BRAND}Inference engine{C_RESET}  {C_TOOL}{info.get('engine')}{C_RESET}"
                   f"  {C_DIM}{info.get('version') or ''} · {src}{C_RESET}")
@@ -2243,7 +2243,7 @@ class JarvisCLI:
                 if new.get("source") != "hearth":
                     # Extracted, but the picker still prefers something else -
                     # don't report another engine's version as "installed".
-                    print(f"{C_WARN}Extracted to {r.get('dir')}, but Hearth is still "
+                    print(f"{C_WARN}Extracted to {r.get('dir')}, but Inglen is still "
                           f"using {new.get('source')} ({new.get('version')}).{C_RESET}")
                     return
                 print(f"{C_OK}Engine installed: {new.get('version')}{C_RESET}")
@@ -2463,7 +2463,7 @@ class JarvisCLI:
             _pid = _pf(LOCAL_API_BASE)
             where = _pv[_pid][0] if _pid in _pv else "your provider"
         elif status and status.get("builtin_running"):
-            where = "Hearth's engine"
+            where = "Inglen's engine"
         elif ids:
             where = "the server on this PC"
         else:
@@ -2676,7 +2676,7 @@ class JarvisCLI:
                 if r.get("ok") and r.get("engine_error"):
                     print(f"{C_OK}Repaired {r.get('restored', 0)} files.{C_RESET} {C_ERR}{r.get('note')}{C_RESET}")
                 elif r.get("ok"):
-                    print(f"{C_OK}Repaired {r.get('restored', 0)} files.{C_RESET} {C_DIM}Restart Hearth to load them.{C_RESET}")
+                    print(f"{C_OK}Repaired {r.get('restored', 0)} files.{C_RESET} {C_DIM}Restart Inglen to load them.{C_RESET}")
                 else:
                     print(f"{C_ERR}Repair failed: {r.get('error')}{C_RESET}")
             except Exception as e:
@@ -2685,7 +2685,7 @@ class JarvisCLI:
         if low == "/phone":
             # The chat apps: what is set up, who is let in, codes waiting.
             from hearth import tools as _tools
-            print(f"\n{C_BRAND}Reach Hearth from your phone{C_RESET}  {C_DIM}(Telegram, Discord, WhatsApp){C_RESET}")
+            print(f"\n{C_BRAND}Reach Inglen from your phone{C_RESET}  {C_DIM}(Telegram, Discord, WhatsApp){C_RESET}")
             for line in _tools._connectors({"action": "status"}).splitlines():
                 print(f"  {line}")
             print(f"\n  {C_DIM}set up an app in the window (Settings > Connectors), or ask: \"connect my Telegram\"")
@@ -2799,7 +2799,7 @@ class JarvisCLI:
                 mem_lines = 0 if memory.list_index().startswith("(no") else memory.list_index().count("\n") + 1
             except Exception:
                 mem_lines = 0
-            print(f"\n{C_BRAND}Hearth v{HEARTH_VERSION}{C_RESET}  {C_DIM}local-first personal AI{C_RESET}")
+            print(f"\n{C_BRAND}Inglen v{HEARTH_VERSION}{C_RESET}  {C_DIM}local-first personal AI{C_RESET}")
             print(f"  {C_TOOL}model{C_RESET}       {self.current_model}  {C_DIM}({kind}){C_RESET}")
             print(f"  {C_TOOL}endpoint{C_RESET}    {LOCAL_API_BASE}")
             print(f"  {C_TOOL}context{C_RESET}     {self.context_tokens:,} tokens")
@@ -2943,7 +2943,7 @@ class JarvisCLI:
                 print(f"\n{C_BOT}Switch with:{C_RESET}")
                 print(f"  {C_TOOL}/brain local{C_RESET}                     auto: whatever's at localhost:1234")
                 print(f"  {C_TOOL}/brain lmstudio{C_RESET}                  use LM Studio (download.lmstudio.ai)")
-                print(f"  {C_TOOL}/brain builtin{C_RESET}                   use Hearth's bundled llama.cpp server")
+                print(f"  {C_TOOL}/brain builtin{C_RESET}                   use Inglen's bundled llama.cpp server")
                 print(f"  {C_TOOL}/brain grok [api-key]{C_RESET}            xAI Grok       (key optional if saved)")
                 print(f"  {C_TOOL}/brain gemini [api-key]{C_RESET}          Google Gemini  (key optional if saved)")
                 print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")
@@ -3216,14 +3216,14 @@ class JarvisCLI:
             if provider == "lmstudio":
                 print(f"{C_DIM}  Expecting LM Studio at {url}. If you don't have LM Studio:{C_RESET}")
                 print(f"{C_DIM}    • Download from https://lmstudio.ai (free)  · OR{C_RESET}")
-                print(f"{C_DIM}    • Use Hearth's built-in server: /brain builtin then /models use <n>{C_RESET}")
+                print(f"{C_DIM}    • Use Inglen's built-in server: /brain builtin then /models use <n>{C_RESET}")
             elif provider == "builtin":
                 print(f"{C_DIM}  Built-in mode picked. To load a model:{C_RESET}")
                 print(f"{C_DIM}    1. /models           → see what's on disk{C_RESET}")
-                print(f"{C_DIM}    2. /models use <n>   → boot Hearth's llama.cpp server with that model{C_RESET}")
+                print(f"{C_DIM}    2. /models use <n>   → boot Inglen's llama.cpp server with that model{C_RESET}")
                 print(f"{C_DIM}    Notes:{C_RESET}")
                 print(f"{C_DIM}      • If LM Studio is running on port 1234, stop it first.{C_RESET}")
-                print(f"{C_DIM}      • Hearth re-uses any GGUFs you have in LM Studio's cache - no double-download.{C_RESET}")
+                print(f"{C_DIM}      • Inglen re-uses any GGUFs you have in LM Studio's cache - no double-download.{C_RESET}")
             elif provider not in _LOCAL and provider != "custom" and given_key:
                 print(f"{C_DIM}(key saved - next time just type /brain {provider}){C_RESET}")
             return True
@@ -3483,7 +3483,7 @@ class JarvisCLI:
                 self._context_pinned = True
                 print(f"{C_OK}context window → {self.context_tokens:,} tokens (pinned){C_RESET}")
                 if requested < MIN_USABLE_CTX:
-                    print(f"{C_WARN}  heads up: Hearth's persona + tools are ~20K tokens, so under "
+                    print(f"{C_WARN}  heads up: Inglen's persona + tools are ~20K tokens, so under "
                           f"~{MIN_USABLE_CTX//1024}K leaves almost no room for chat and the model "
                           f"will overflow fast. 24K+ is comfortable.{C_RESET}")
             else:
@@ -3501,7 +3501,7 @@ class JarvisCLI:
                 print(f"  used:    {used:,} in messages + ~{tool_tok:,} tools = ~{used+tool_tok:,} ({pct}%)")
                 print(f"  free:    ~{free:,} tokens for more conversation  {C_DIM}{bar}{C_RESET}")
                 if self.context_tokens < MIN_USABLE_CTX:
-                    print(f"{C_WARN}  window is below ~{MIN_USABLE_CTX//1024}K — tight for Hearth's ~20K prompt; 24K+ recommended.{C_RESET}")
+                    print(f"{C_WARN}  window is below ~{MIN_USABLE_CTX//1024}K — tight for Inglen's ~20K prompt; 24K+ recommended.{C_RESET}")
                 print(f"{C_DIM}  set: /context <number> (20480, 32k, 1M)  ·  /context auto (re-detect){C_RESET}")
             return True
         if low == "/listen" or low.startswith("/listen "):
@@ -3923,7 +3923,7 @@ class JarvisCLI:
                 # Status: count Hearth's exported tools + show client-config file location
                 try:
                     from hearth import TOOL_DEFINITIONS as _td
-                    print(f"  {C_OK}Hearth is an MCP server{C_RESET}  "
+                    print(f"  {C_OK}Inglen is an MCP server{C_RESET}  "
                           f"{C_DIM}({len(_td)} tools exported via hearth.mcp_server){C_RESET}")
                 except Exception:
                     pass
@@ -3942,7 +3942,7 @@ class JarvisCLI:
                     bridges = []
                 if bridges:
                     print()
-                    print(f"  {C_DIM}outbound bridges (Hearth USING other MCP servers):{C_RESET}")
+                    print(f"  {C_DIM}outbound bridges (Inglen USING other MCP servers):{C_RESET}")
                     for b in bridges:
                         color = (C_OK if b.get("state") == "connected"
                                  else C_WARN if b.get("state") in ("starting", "pending")
@@ -4361,7 +4361,7 @@ class JarvisCLI:
             pinned = os.environ.get("HEARTH_VOICE_HALF_DUPLEX") is not None
             print(f"{C_DIM}half-duplex is {'ON' if cur else 'off'}"
                   f"{' (pinned by the environment)' if pinned else ''}.  "
-                  f"ON holds the mic closed while Hearth speaks, which stops a "
+                  f"ON holds the mic closed while Inglen speaks, which stops a "
                   f"speaker setup answering itself; saying the name first still cuts in. Off lets you interrupt by "
                   f"voice, which is what you want on a headset.  "
                   f"usage: /voice duplex on|off{C_RESET}")
@@ -4369,7 +4369,7 @@ class JarvisCLI:
         os.environ["HEARTH_VOICE_HALF_DUPLEX"] = "1" if want else "0"
         saved = _save_setting("voice_half_duplex", want)
         print(f"{C_OK}half-duplex: {'ON' if want else 'off'}{C_RESET}  "
-              + (f"{C_DIM}{'mic stays closed while Hearth speaks' if want else 'you can interrupt by voice'}"
+              + (f"{C_DIM}{'mic stays closed while Inglen speaks' if want else 'you can interrupt by voice'}"
                  f"{', saved' if saved else ''}{C_RESET}"))
 
     # -- Status footer ------------------------------------------------------
@@ -4916,7 +4916,7 @@ class JarvisCLI:
                 if loc and os.path.abspath(os.path.expanduser(loc)) != os.path.abspath(_CUR_WS):
                     new = set_workspace_location(loc)
                     print(f"\n  {C_OK}Workspace set to {new}.{C_RESET}")
-                    print(f"  {C_DIM}Close and reopen Hearth once to use it - then we'll "
+                    print(f"  {C_DIM}Close and reopen Inglen once to use it - then we'll "
                           f"finish setup there. (Move that folder anytime; just update "
                           f"this location to match.){C_RESET}\n")
                     raise SystemExit(0)
@@ -5036,7 +5036,7 @@ class JarvisCLI:
                 print(f"  {C_TOOL}Found a prior agent install:{C_RESET}")
                 for i, (src, path) in enumerate(sources_found, 1):
                     print(f"  {C_DIM}  [{i}] {src} ({path}){C_RESET}")
-                print(f"  {C_DIM}Import its memory into Hearth? "
+                print(f"  {C_DIM}Import its memory into Inglen? "
                       f"(API keys never copied){C_RESET}")
                 pick = ask("Pick 1-N or press Enter to skip")
                 if pick.isdigit():

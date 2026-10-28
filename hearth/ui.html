@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Hearth</title>
+<title>Inglen</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="/assets/icon.png">
 <script>
@@ -853,7 +853,7 @@
   .chat-day { display: flex; align-items: center; gap: 12px; margin: 18px 0 4px; font: 500 11.5px var(--sans); color: var(--fg-faint); }
   .chat-day::before, .chat-day::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
   .msg.assistant .role-name { color: var(--accent-2); }
-  /* Chat-bubble mode — OPT-IN via Settings, default OFF (Hearth's own look:
+  /* Chat-bubble mode — OPT-IN via Settings, default OFF (Inglen's own look:
      user turns left-aligned like everything else, no tint). When on, user turns
      right-align into a capped bubble tinted with the theme's accent. */
   .chat-bubbles .msg.user { flex-direction: row-reverse; }
@@ -898,7 +898,7 @@
   }
 
   /* Fenced code block chrome: a thin bar with the language + a copy button that
-     surfaces on hover. Sits flush on top of the <pre>, matching Hearth's card
+     surfaces on hover. Sits flush on top of the <pre>, matching Inglen's card
      borders so it reads as one block, not a bolted-on widget. */
   .msg .content .code-wrap { margin: 8px 0; }
   .msg .content .code-wrap pre { margin: 0; border-top-left-radius: 0; border-top-right-radius: 0; border-top: none; }
@@ -3579,7 +3579,7 @@
      ============================================================ */
   /* Composer add-menu. Skills, MCP and connectors used to live four clicks deep
      in Settings, which is a strange place for the things that extend what
-     Hearth can do. The plus sits where people already reach to add something. */
+     Inglen can do. The plus sits where people already reach to add something. */
   /* Reasoning menu. Cycling a button through five states to reach "high" meant
      four clicks and no way to see the options, so the levels open as a list. */
   .think-menu {
@@ -4045,7 +4045,7 @@
     </button>
     <div class="brand">
       <div class="brand-mark" id="brand-mark"><span class="hm-h">H</span><svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path class="hm-arch" d="M15 53V31a17 17 0 0 1 34 0v22M9 53h46" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><path class="hm-flame" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z" fill="currentColor"/></svg></div>
-      <span>Hearth</span>
+      <span>Inglen</span>
       <span class="brand-sub" id="brand-sub">· local</span>
     </div>
 
@@ -4184,7 +4184,7 @@
 
       <!-- Inline ask-user strip - appears above the input when the assistant fires
            an ask_user tool call. Same surface as the permission strip so the
-           user always looks in one place when Hearth needs input. Reuses the
+           user always looks in one place when Inglen needs input. Reuses the
            perm-strip CSS for visual continuity. -->
       <div class="perm-strip" id="ask-strip" hidden>
         <div class="perm-line">
@@ -4388,7 +4388,7 @@
         <h2>Logs</h2>
         <span class="sub" id="logs-sub">every tool <span data-agent-name>JARVIS</span> used, with what came back</span>
         <div class="grow"></div>
-        <!-- Source toggle: Agent log (Hearth tool calls) or Server log
+        <!-- Source toggle: Agent log (Inglen tool calls) or Server log
              (llama_cpp.server stdout). The Server pill turns green when the
              builtin process is alive, neutral when it's not. -->
         <div class="logs-tabs">
@@ -4587,7 +4587,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Pick or download a local model</div>
-            <div class="hint">See every model on your disk + browse Hugging Face. Hearth boots them automatically.</div>
+            <div class="hint">See every model on your disk + browse Hugging Face. Inglen boots them automatically.</div>
           </div>
           <button class="btn-mini" id="btn-go-models">Open Models tab</button>
         </div>
@@ -4607,7 +4607,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Listen for my voice (auto)</div>
-            <div class="hint">Just talk, no buttons: Hearth notices when you start and stop speaking. Off means press-to-talk.</div>
+            <div class="hint">Just talk, no buttons: Inglen notices when you start and stop speaking. Off means press-to-talk.</div>
             <div class="voice-status" id="stt-status">checking…</div>
           </div>
           <div class="switch" data-key="voice_stt"></div>
@@ -4615,7 +4615,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Wake word</div>
-            <div class="hint">Say this to start talking to Hearth, even while it sits in the tray. It follows the assistant's name. Separate phrases with commas. It keeps the microphone open while it listens.</div>
+            <div class="hint">Say this to start talking to Inglen, even while it sits in the tray. It follows the assistant's name. Separate phrases with commas. It keeps the microphone open while it listens.</div>
             <div class="voice-status" id="wake-status">checking…</div>
           </div>
           <div class="switch" data-key="tray_wake_on"></div>
@@ -4637,7 +4637,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Speakers mode</div>
-            <div class="hint">Turn this on if you use speakers and Hearth hears itself talking. It stops listening while it speaks. To cut in anyway, start with its name, like "Jarvis, stop". Leave it off with headphones.</div>
+            <div class="hint">Turn this on if you use speakers and Inglen hears itself talking. It stops listening while it speaks. To cut in anyway, start with its name, like "Jarvis, stop". Leave it off with headphones.</div>
           </div>
           <div class="switch" data-key="voice_half_duplex"></div>
         </div>
@@ -4732,7 +4732,7 @@
         <div class="field" style="flex-direction:column; align-items:stretch; gap:6px;">
           <div class="label">
             <div class="name">Microphone</div>
-            <div class="hint">Which microphone Hearth listens through. Plugged one in just now? Press Refresh.</div>
+            <div class="hint">Which microphone Inglen listens through. Plugged one in just now? Press Refresh.</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <select id="setting-mic-device" style="flex:1; min-width:200px;">
@@ -4774,7 +4774,7 @@
         <div class="field" id="field-stt-language">
           <div class="label">
             <div class="name">Spoken language</div>
-            <div class="hint">On detect, Hearth listens in the language of the voice you picked, and with an English voice works out the language from what you say. Naming one is a little faster and more accurate when you always speak it.</div>
+            <div class="hint">On detect, Inglen listens in the language of the voice you picked, and with an English voice works out the language from what you say. Naming one is a little faster and more accurate when you always speak it.</div>
           </div>
           <select id="setting-stt-language">
             <option value="">Detect it</option>
@@ -4803,7 +4803,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Listening runs on</div>
-            <div class="hint">The graphics card is much faster. The first time, Hearth asks, then downloads what it needs (about 500 MB, once) and shows it in Downloads.</div>
+            <div class="hint">The graphics card is much faster. The first time, Inglen asks, then downloads what it needs (about 500 MB, once) and shows it in Downloads.</div>
           </div>
           <select id="setting-stt-device" data-gpu="1">
             <option value="cpu">CPU</option>
@@ -4858,7 +4858,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Lock reads to workspace</div>
-            <div class="hint">Hearth can read files anywhere on this PC and only ever writes inside its workspace. Turn this on to keep reading inside the workspace too.</div>
+            <div class="hint">Inglen can read files anywhere on this PC and only ever writes inside its workspace. Turn this on to keep reading inside the workspace too.</div>
           </div>
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" class="switch-box" id="setting-lockdown"/>
@@ -4902,7 +4902,7 @@
         <div class="field" style="flex-direction:column;align-items:stretch;">
           <div class="label" style="margin-bottom:8px;">
             <div class="name">Import memory from ChatGPT / Claude</div>
-            <div class="hint">Paste what another AI knows about you - Hearth saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
+            <div class="hint">Paste what another AI knows about you - Inglen saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
           </div>
           <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;">
             <div id="set-import-prompt" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points, one fact per line, with no introduction: my name, work, preferences, projects, important dates and the people in my life.</div>
@@ -4946,7 +4946,7 @@
         </div>
         <div class="ap-block">
           <div class="ap-title">Interface</div>
-          <div class="ap-hint">How much of the machinery shows while Hearth works.</div>
+          <div class="ap-hint">How much of the machinery shows while Inglen works.</div>
           <div class="ap-modes ap-two" id="ap-ui">
             <button type="button" class="ap-mode" data-ui="simple"><b>Simple</b><small>For everyday use. Tool steps fold into one line, and engine flags and per-tool permissions stay out of the way.</small></button>
             <button type="button" class="ap-mode" data-ui="advanced"><b>Advanced</b><small>Everything: each tool call as its own card, every counter, MCP servers and the built-in server's settings.</small></button>
@@ -4994,7 +4994,7 @@
         <div class="field">
           <div class="label">
             <div class="name">File-change diffs</div>
-            <div class="hint">Show what changed, in green and red, when Hearth edits a file.</div>
+            <div class="hint">Show what changed, in green and red, when Inglen edits a file.</div>
           </div>
           <div class="switch" data-key="show_diffs"></div>
         </div>
@@ -5008,7 +5008,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Show memory tool cards</div>
-            <div class="hint">Hearth saves and looks up facts on most turns. Turn this off to hide those steps in the chat; what it remembers doesn't change.</div>
+            <div class="hint">Inglen saves and looks up facts on most turns. Turn this off to hide those steps in the chat; what it remembers doesn't change.</div>
           </div>
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" class="switch-box" id="setting-show-memory-tools"/>
@@ -5024,7 +5024,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Activity overlay</div>
-            <div class="hint">While Hearth works the desktop, a small label at the top of the screen says what it is doing. It never takes focus or blocks a click.</div>
+            <div class="hint">While Inglen works the desktop, a small label at the top of the screen says what it is doing. It never takes focus or blocks a click.</div>
           </div>
           <div class="switch" data-key="activity_hud"></div>
         </div>
@@ -5041,7 +5041,7 @@
         <div class="settings-pane" data-st="server" hidden>
         <h3>Built-in server</h3>
         <div class="hint" style="margin-bottom:14px">
-          Hearth ships its own llama-cpp-python OpenAI-compatible server so you don't have to install LM Studio. These settings control how it boots and stays alive between model swaps.
+          Inglen ships its own llama-cpp-python OpenAI-compatible server so you don't have to install LM Studio. These settings control how it boots and stays alive between model swaps.
         </div>
 
         <!-- Live status card: shows whether the builtin is running right now,
@@ -5092,7 +5092,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Load my last model at start</div>
-            <div class="hint">When Hearth starts, it loads the last local model you used.</div>
+            <div class="hint">When Inglen starts, it loads the last local model you used.</div>
           </div>
           <div class="switch" data-key="server_autoboot"></div>
         </div>
@@ -5100,9 +5100,9 @@
         <div class="field">
           <div class="label">
             <div class="name">Default context window <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
-            <div class="hint">Only applies when Hearth runs its <strong>own</strong> llama.cpp server and loads a GGUF that has no saved config yet. LM Studio / Ollama / cloud brains set their own context - this is ignored for them. Higher = more headroom but more KV-cache VRAM.</div>
+            <div class="hint">Only applies when Inglen runs its <strong>own</strong> llama.cpp server and loads a GGUF that has no saved config yet. LM Studio / Ollama / cloud brains set their own context - this is ignored for them. Higher = more headroom but more KV-cache VRAM.</div>
           </div>
-          <!-- Floored at 24K: Hearth's persona + tools are ~20K, so anything
+          <!-- Floored at 24K: Inglen's persona + tools are ~20K, so anything
                smaller overflows almost immediately with no room for chat. -->
           <select id="setting-server-ctx">
             <option value="24576">24K (minimum - tight)</option>
@@ -5115,7 +5115,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Concurrent agents <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
-            <div class="hint">How many requests the server handles at once. At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Hearth steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Hearth); changing it mid-session does not touch the running server.</div>
+            <div class="hint">How many requests the server handles at once. At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Inglen steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Inglen); changing it mid-session does not touch the running server.</div>
           </div>
           <select id="setting-server-slots">
             <option value="1" selected>1 · agents queue (lowest VRAM)</option>
@@ -5153,7 +5153,7 @@
             <div class="hint">Where models are downloaded and scanned. Point it at a drive with space if your C is full, and your chats and memory stay where they are. Applies on the next launch; move existing models there or drop new ones in.</div>
           </div>
           <div style="display:flex; gap:8px;">
-            <input type="text" id="setting-models-dir" placeholder="e.g. D:\Hearth\models" spellcheck="false" style="flex:1"/>
+            <input type="text" id="setting-models-dir" placeholder="e.g. D:\Inglen\models" spellcheck="false" style="flex:1"/>
             <button class="btn-mini" id="btn-models-dir-save">Save</button>
           </div>
         </div>
@@ -5167,19 +5167,19 @@
         <div class="settings-pane" data-st="mcp" hidden>
         <h3>MCP servers</h3>
         <p style="color:var(--fg-dim);font-size:13px;line-height:1.55;margin:0 0 18px 0">
-          Hearth speaks the <b>Model Context Protocol</b> - the open standard for letting one
-          AI client talk to many tool servers. <b>Hearth itself is an MCP server</b> (point any
-          MCP-compatible client at <code>hearth/mcp_server.py</code> to use Hearth's tools elsewhere).
-          And below, you can wire <em>other</em> MCP servers <em>into</em> Hearth so their tools
+          Inglen speaks the <b>Model Context Protocol</b> - the open standard for letting one
+          AI client talk to many tool servers. <b>Inglen itself is an MCP server</b> (point any
+          MCP-compatible client at <code>hearth/mcp_server.py</code> to use Inglen's tools elsewhere).
+          And below, you can wire <em>other</em> MCP servers <em>into</em> Inglen so their tools
           show up alongside the built-in ones.
         </p>
 
         <div class="field">
           <div class="label">
-            <div class="name">Outbound - Hearth as a CLIENT</div>
+            <div class="name">Outbound - Inglen as a CLIENT</div>
             <div class="hint">
               Paste a standard mcp.json config. Each server runs as a subprocess; its tools join the
-              Hearth tool list and are usable by every chat brain (local / cloud).
+              Inglen tool list and are usable by every chat brain (local / cloud).
               Saving reconnects the servers right away, no restart needed.
             </div>
           </div>
@@ -5190,7 +5190,7 @@
           <div class="label">
             <div class="name">Active MCP bridges</div>
             <div class="hint">
-              Live list of MCP servers Hearth has connected to. Each row shows the server name,
+              Live list of MCP servers Inglen has connected to. Each row shows the server name,
               transport (stdio / sse), and how many tools it contributed. Errors surface here so a
               broken config is visible instead of silently dropped.
             </div>
@@ -5202,10 +5202,10 @@
 
         <div class="field">
           <div class="label">
-            <div class="name">Inbound - Hearth as a SERVER</div>
+            <div class="name">Inbound - Inglen as a SERVER</div>
             <div class="hint">
               Other MCP clients (LM Studio chat UI, Claude Desktop, Cursor, your own scripts) can
-              call into Hearth's full tool set. The snippet below goes in their mcp.json.
+              call into Inglen's full tool set. The snippet below goes in their mcp.json.
             </div>
             <div id="mcp-inbound-clients" style="margin-top:8px;font-size:12px;color:var(--fg-dim);">no clients connected right now</div>
           </div>
@@ -5216,8 +5216,8 @@
         <div class="settings-pane" data-st="connect" hidden>
         <h3>Connectors</h3>
         <p class="settings-sub" style="color:var(--fg-faint);font-size:12px;margin:-4px 0 14px;">
-          Reach Hearth from your phone, or give it your inbox. A phone message runs the
-          full agent on this PC and replies. Set it up once and Hearth keeps it running,
+          Reach Inglen from your phone, or give it your inbox. A phone message runs the
+          full agent on this PC and replies. Set it up once and Inglen keeps it running,
           starting automatically every launch. Everything below is optional.
         </p>
         <div id="conn-people" style="margin:0 0 16px"></div>
@@ -5307,7 +5307,7 @@
         <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">Your own connectors</div>
-            <div class="hint">Any other chat app, from a small Python file in your workspace's <code>connectors</code> folder. Hearth adds who may talk, the questions before risky steps, voice notes and files.</div>
+            <div class="hint">Any other chat app, from a small Python file in your workspace's <code>connectors</code> folder. Inglen adds who may talk, the questions before risky steps, voice notes and files.</div>
           </div>
           <div id="conn-own" style="display:flex;flex-direction:column;gap:6px;min-width:300px;"></div>
         </div>
@@ -5316,7 +5316,7 @@
         <div class="settings-pane" data-st="plus" hidden>
         <h3>Plus</h3>
         <p class="settings-sub" style="color:var(--fg-faint);font-size:12px;margin:-4px 0 14px;">
-          <span data-agent-name>JARVIS</span> on your phone through Hearth's relay: an app on your home screen, no bot to set up, risky steps
+          <span data-agent-name>JARVIS</span> on your phone through Inglen's relay: an app on your home screen, no bot to set up, risky steps
           asked with Allow and Deny. Everything between this PC and the phone is end to end encrypted; the relay
           only passes it along.
         </p>
@@ -5349,14 +5349,14 @@
         <div class="field">
           <div class="label">
             <div class="name">Repair install</div>
-            <div class="hint">Checks every part of Hearth and puts back whatever is missing or broken: the app, its art, voice, and the model engine. Your chats, memories and files are not touched. <span id="repair-status"></span></div>
+            <div class="hint">Checks every part of Inglen and puts back whatever is missing or broken: the app, its art, voice, and the model engine. Your chats, memories and files are not touched. <span id="repair-status"></span></div>
           </div>
           <button class="btn-mini" id="btn-repair">Repair</button>
         </div>
         <div class="field" id="broadcast-field" style="display:none; align-items:flex-start;">
           <div class="label">
             <div class="name">Broadcast to all builds <span style="color:var(--accent-2);font-size:11px;font-weight:400">· author</span></div>
-            <div class="hint">Writes an entry to announcements.json. Commit + push it and every Hearth build toasts it on next open.</div>
+            <div class="hint">Writes an entry to announcements.json. Commit + push it and every Inglen build toasts it on next open.</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;min-width:300px;">
             <input type="text" id="bc-title" placeholder="title, e.g. v0.8 is out" style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;"/>
@@ -5369,8 +5369,8 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Start Hearth at login</div>
-            <div class="hint">Auto-launch the tray when you sign in to Windows, so reminders fire even before you open Hearth. <span id="autostart-status"></span></div>
+            <div class="name">Start Inglen at login</div>
+            <div class="hint">Auto-launch the tray when you sign in to Windows, so reminders fire even before you open Inglen. <span id="autostart-status"></span></div>
           </div>
           <button class="btn-mini" id="btn-autostart-toggle">…</button>
         </div>
@@ -5381,7 +5381,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Project</div>
-            <div class="hint">Source, releases and issues. Hearth is free and open source, and a star helps other people find it.</div>
+            <div class="hint">Source, releases and issues. Inglen is free and open source, and a star helps other people find it.</div>
           </div>
           <div style="display:flex; gap:6px; align-items:center;">
             <a class="btn-mini" href="https://github.com/0pen-Sourcer/Hearth" target="_blank" rel="noopener" style="text-decoration:none">GitHub</a>
@@ -5391,12 +5391,12 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Hearth lives at</div>
+            <div class="name">Inglen lives at</div>
             <div class="hint" id="setting-workspace">…</div>
-            <div class="hint" style="margin-top:2px">Move everything - memory, chats, models - to another folder or drive (e.g. if C: is full). Restarts Hearth.</div>
+            <div class="hint" style="margin-top:2px">Move everything - memory, chats, models - to another folder or drive (e.g. if C: is full). Restarts Inglen.</div>
           </div>
           <div style="display:flex; gap:6px; align-items:center; min-width:260px;">
-            <input type="text" id="setting-ws-path" placeholder="D:\Hearth" style="flex:1; min-width:160px;"/>
+            <input type="text" id="setting-ws-path" placeholder="D:\Inglen" style="flex:1; min-width:160px;"/>
             <button type="button" class="btn-mini" id="btn-ws-relocate" title="Move the whole workspace to this path + restart">
               Move
             </button>
@@ -6329,7 +6329,7 @@ function showRepairPlanModal(plan) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
-    showModal('Repair Hearth', html, [
+    showModal('Repair Inglen', html, [
       { label: 'Cancel', onclick: () => { finish(false); } },
       { label: broken.length ? 'Restore these' : 'Re-apply anyway',
         kind: 'primary', onclick: () => { finish(true); } },
@@ -6383,13 +6383,13 @@ async function showMcpJsonModal() {
                     try {
                       const rl = await api('/api/mcp/reload', { method: 'POST' });
                       if (rl && rl.ok === false) {
-                        toast("Saved, but not in use yet", rl.error || 'Restart Hearth to use the new settings.', 'warn', 8000);
+                        toast("Saved, but not in use yet", rl.error || 'Restart Inglen to use the new settings.', 'warn', 8000);
                       } else {
                         const n = (rl && rl.servers) || 0;
                         toast('MCP reloaded', n ? `${n} server${n === 1 ? '' : 's'} reconnecting` : 'no servers configured', 'ok', 5000);
                       }
                     } catch (e) {
-                      toast("Saved, but not in use yet", 'Restart Hearth to use the new settings.', 'warn', 8000);
+                      toast("Saved, but not in use yet", 'Restart Inglen to use the new settings.', 'warn', 8000);
                     }
                     try { refreshMcpStatus(); } catch {}
                   } else {
@@ -6440,7 +6440,7 @@ async function _mcpSaveAndReload(cfg) {
       const rl = await api('/api/mcp/reload', { method: 'POST' });
       const n = (rl && rl.servers) || 0;
       toast('Tool servers saved', n ? (n + (n === 1 ? ' server' : ' servers') + ' connecting') : 'none configured', 'ok', 5000);
-    } catch { toast("Saved, but not in use yet", 'Restart Hearth to use the new settings.', 'warn', 8000); }
+    } catch { toast("Saved, but not in use yet", 'Restart Inglen to use the new settings.', 'warn', 8000); }
     try { refreshMcpStatus(); } catch {}
   } catch (e) { toast("Couldn't save", e.message, 'err'); }
 }
@@ -7651,7 +7651,7 @@ let _appBooting = true;        // true during the first drive-scan after launch;
 // (_refreshEmptyIfShown) mutate the SAME node instead of re-mounting.
 function _computeEmptyState() {
   const ready = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
-  // "Warming up" covers the app-startup window (Hearth scanning your drives for
+  // "Warming up" covers the app-startup window (Inglen scanning your drives for
   // models right after launch, GPU still "-"), plus any active model load. Both
   // are genuinely "getting ready". Only say "no model" once we're truly idle.
   const scanning = !ready && _appBooting;   // app-startup drive scan (just finding models)
@@ -7668,14 +7668,14 @@ function _computeEmptyState() {
   const cls = 'empty' + (ready ? '' : (loading ? ' booting loading' : (busy ? ' booting' : ' idle-nomodel')));
   let title, sub;
   if (ready) {
-    title = 'Hearth is ready.';
+    title = 'Inglen is ready.';
     sub = 'Local AI that talks, listens, and actually does things on your machine.';
   } else if (busy) {
-    title = 'Getting Hearth ready…';
+    title = 'Getting Inglen ready…';
     sub = 'Starting up and finding your models. Just a moment.';
   } else {
     title = 'No model loaded';
-    sub = 'Open <b>Models</b> to load one, or point Hearth at a cloud brain in <b>Settings</b>.';
+    sub = 'Open <b>Models</b> to load one, or point Inglen at a cloud brain in <b>Settings</b>.';
   }
   return { cls, title, sub };
 }
@@ -7984,7 +7984,7 @@ function _foldsIntoRun(el) {
     && !el.classList.contains('ask-card')
     && !el.classList.contains('open'));
 }
-// The agent CLIs Hearth can hand work to, each in its maker's colour with its
+// The agent CLIs Inglen can hand work to, each in its maker's colour with its
 // mark where Simple Icons (CC0) has one, and a monogram otherwise.
 const HARNESS_ICONS = {
   claude: "m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z", openai: "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z", google: "M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z", gemini: "M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81",
@@ -8026,7 +8026,7 @@ function harnessMark(h) {
     + `onload="this.parentNode.classList.add('has-fav')" onerror="this.replaceWith(this.alt)">`;
   return letter;
 }
-// A saved provider's badge: its own mark where Hearth knows one, else a cloud.
+// A saved provider's badge: its own mark where Inglen knows one, else a cloud.
 function provIco(id) {
   const h = BRAIN_MARKS[id];
   return h ? `<span class="mp-ico ag" style="--hx:${h.c}">${harnessMark(h)}</span>` : `<span class="mp-ico">${MP_CLOUD}</span>`;
@@ -8052,7 +8052,7 @@ function _cardDomain(card) {
   const d = _domainsIn(u)[0];
   return d || '';
 }
-// What a set of tool cards reached outside Hearth, as chips for a summary line.
+// What a set of tool cards reached outside Inglen, as chips for a summary line.
 function _integrationChips(cards) {
   const out = [], agents = new Set(), skills = new Set(), sites = [];
   for (const c of cards) {
@@ -8883,7 +8883,7 @@ async function refreshModels() {
         opt.value = 'agent::' + a.id;
         opt.textContent = a.label;
         opt.dataset.agent = a.id;
-        opt.dataset.sub = `Your ${AGENT_PLANS[a.id] || a.label} plan · keeps Hearth's tools`;
+        opt.dataset.sub = `Your ${AGENT_PLANS[a.id] || a.label} plan · keeps Inglen's tools`;
         if (!a.installed) { opt.disabled = true; opt.dataset.site = a.site || ''; opt.dataset.sub = 'Not installed on this PC'; }
         grp.appendChild(opt);
       }
@@ -8935,7 +8935,7 @@ async function refreshModels() {
     // Repaint dropdown selection + sticker + eject + ctx from the brain that
     // refreshState owns.
     applyBrainState();
-    // If the empty ("Getting Hearth ready…") screen is up, refresh it when the
+    // If the empty ("Getting Inglen ready…") screen is up, refresh it when the
     // model finishes loading so it flips to "ready" — only on CHANGE, so the
     // fade/breathe animation doesn't restart every poll.
     const _nowReady = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
@@ -9003,7 +9003,7 @@ function _mpRow(o, cur, prov) {
   const ico = h ? `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>`
                : (STATE.brain && STATE.brain.kind === 'cloud' && cur) ? provIco(STATE.brain.providerKey) : `<span class="mp-ico">${MP_CHIP}</span>`;
   const t = agent && cur ? agentModelLabel(agent) : (o.dataset.name || _mpClean(o.textContent).replace(/\.gguf$/i, ''));
-  const sub = (agent && cur ? _agentSub(agent) : o.dataset.sub) || (agent ? `Your ${AGENT_PLANS[agent] || ''} plan · keeps Hearth's tools` : '')
+  const sub = (agent && cur ? _agentSub(agent) : o.dataset.sub) || (agent ? `Your ${AGENT_PLANS[agent] || ''} plan · keeps Inglen's tools` : '')
     || (cur ? (STATE.brain && STATE.brain.kind === 'cloud' ? (STATE.brain.providerLabel || 'Online') : 'Running on this PC') : '');
   // The model in use opens the rest of what its agent or provider has.
   const more = agent && !o.disabled ? _mpChev('agent::' + agent) : cur && prov ? _mpChev('prov::' + prov.id) : '';
@@ -9028,7 +9028,7 @@ async function agentSetup(id, done) {
       ${row(1, s1, st.installed ? `${label} is on this PC` : `Install ${label}`,
             st.installed ? '' : `Uses ${AGENT_MAKERS[id] || 'its maker'}'s own installer. Takes a minute or two.`, ['install', 'Install', 'Installing…'])}
       ${row(2, s2, st.signed_in ? 'Signed in' : 'Sign in',
-            st.signed_in ? '' : `A window opens with ${label}'s own sign-in and your browser. Hearth never sees your password.`, ['signin', 'Sign in', 'Waiting for you…'])}
+            st.signed_in ? '' : `A window opens with ${label}'s own sign-in and your browser. Inglen never sees your password.`, ['signin', 'Sign in', 'Waiting for you…'])}
       ${row(3, s3, `Use it as the brain`, `Runs on your ${plan} plan. My tools, memory and voice stay the same.`, ['use', `Use ${label}`, 'Switching…'])}
       ${note ? `<p class="as-note">${esc(note)}</p>` : ''}</div>`;
   };
@@ -9492,7 +9492,7 @@ async function switchEndpoint(body) {
     brainToast('this PC', 'Nothing is serving on ' + body.url + ' yet. Load a model in Models & engine.' + bridges, 'warn');
   } else if (body.provider === 'local') {
     brainToast(probe === 'other' ? 'the server on ' + body.url : 'the model on this PC',
-               (probe === 'other' ? 'Another program serves it, not Hearth.' : 'Hearth\'s own engine.') + bridges);
+               (probe === 'other' ? 'Another program serves it, not Inglen.' : 'Inglen\'s own engine.') + bridges);
   } else {
     const _p = (STATE.providers || []).find(x => x.id === body.provider);
     const kept = !r.stopped_builtin && (STATE.settings || {}).keep_local_warm && STATE.brain && STATE.brain.kind === 'local' && STATE.brain.loaded;
@@ -9531,7 +9531,7 @@ async function switchEndpoint(body) {
   if (_rw) { _rw.hidden = true; _rw.classList.remove('hot','warn','compacting'); }
   applyBrainState();
   refreshModels(); refreshState(); refreshCtxBudget().catch(() => {});
-  // Refresh brand-sub label so the "Hearth · local" / "· Grok"
+  // Refresh brand-sub label so the "Inglen · local" / "· Grok"
   // header updates immediately without waiting for next settings poll.
   refreshSettings().catch(() => {});
   renderBrainCards();
@@ -9700,7 +9700,7 @@ $('model-select').addEventListener('change', async (e) => {
       // multi-turn chat. The "8K stays sticky in saved per-model cfg" bug.
       if (plannedCtx && plannedCtx < 16384) {
         toast('Too little memory for a chat',
-          `This model has room for ${(plannedCtx/1024).toFixed(0)}K, and Hearth's own instructions already take about 18K. In Models, open this model, raise its context size and load it again.`,
+          `This model has room for ${(plannedCtx/1024).toFixed(0)}K, and Inglen's own instructions already take about 18K. In Models, open this model, raise its context size and load it again.`,
           'warn', 12000);
       }
       // Surface a non-blocking VRAM warning (model loaded but the math says
@@ -9918,7 +9918,7 @@ async function refreshState() {
     if (typeof s.picked_model === 'string' && STATE.settings && !STATE.brain.busy && !_stale
         && s.picked_model !== (STATE.settings.llm_model || '')) STATE.settings.llm_model = s.picked_model;
     // Stash the MCP launcher the backend computed for this build (source vs
-    // packaged), used by the "Hearth as MCP server" snippet.
+    // packaged), used by the "Inglen as MCP server" snippet.
     if (s.mcp_launch) STATE.mcp_launch = s.mcp_launch;
     if (s.python_exe) STATE.python_exe = s.python_exe;
     if (s.mcp_server_path) STATE.mcp_server_path = s.mcp_server_path;
@@ -11407,7 +11407,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // cloud providers (Grok / OpenAI / Gemini) return the finished image
       // in ONE shot, no intermediate frames. So instead of faking
       // progress we just keep the user company with motion that matches
-      // the Hearth palette. Forge could show real diffusion steps in v0.7.
+      // the Inglen palette. Forge could show real diffusion steps in v0.7.
       if (ev.name === 'generate_image' || ev.name === 'generate_video' || ev.name === 'forge_generate') {
         const isVid = ev.name === 'generate_video';
         const beats = isVid
@@ -11514,7 +11514,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
           const kind = m[1].toLowerCase();
           const path = m[2].trim();
           // False positive: the marker appears INSIDE grepped/read source code
-          // (reading Hearth's own files, where "__JARVIS_IMAGE__ {path} (...)" is a
+          // (reading Inglen's own files, where "__JARVIS_IMAGE__ {path} (...)" is a
           // literal code string) — that's not a real image. A real path has a
           // separator and no template braces or a "file.py:12:" grep prefix.
           if (/[{}]/.test(path) || !/[\\/]/.test(path) || /^[^\\/]*\.\w+:\d+:/.test(path)) continue;
@@ -11639,7 +11639,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     if (ev.type === 'ask_user_request') {
       // Model paused mid-turn to ask the user something. Show an inline
       // choice strip above the input (same surface as permission so the
-      // user always looks in one place for "Hearth needs something").
+      // user always looks in one place for "Inglen needs something").
       showAskUser(ev.id, ev.question, ev.options || [], ev.allow_other !== false);
       return;
     }
@@ -11691,7 +11691,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
         // there's nothing to close, so it's a clean no-op (no error banner).
         if (voiceModeOn) exitVoiceMode();
       } else if (ev.reason === 'stopped_early') {
-        // Hearth ended its own turn because a tool kept returning the same
+        // Inglen ended its own turn because a tool kept returning the same
         // thing or kept failing. Say so plainly. Without this the turn simply
         // stops mid-task and looks like it quit for no reason.
         const _why = (ev.note || '').trim();
@@ -11705,7 +11705,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     }
 
     if (ev.type === 'context_warning') {
-      // Loud warning when the loaded model's ctx is too small for Hearth's
+      // Loud warning when the loaded model's ctx is too small for Inglen's
       // prompt overhead. Otherwise chats silently 500 with "Requested
       // tokens exceed context window" - and the user has no idea why.
       // Stays as an error toast (longer-lived than a regular toast).
@@ -11766,7 +11766,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'facts_saved') {
       // Passive fact-extraction hook landed a memory. Surface it briefly so
-      // the user knows Hearth "got something" from the turn without spamming.
+      // the user knows Inglen "got something" from the turn without spamming.
       // Gated by Settings → toast_facts_saved (user can mute this category).
       if (STATE.settings && STATE.settings.toast_facts_saved === false) return;
       const n = ev.count || 0;
@@ -11965,7 +11965,7 @@ async function renderStatus(fresh, again) {
       <span>Workspace</span><em>${esc(st.workspace)}</em></div></div>`;
   const scroll = box.scrollTop;
   box.innerHTML = `<div class="st-top"><b>Status</b><button type="button" class="st-close" title="Close (Esc)">${_ICON_X}</button></div>`
-    + `<div class="st-panel">${brain}${ctx}${plans}${pc}<div class="st-foot"><span>Updates while open</span><span>Hearth ${esc(st.version)}</span></div></div>`;
+    + `<div class="st-panel">${brain}${ctx}${plans}${pc}<div class="st-foot"><span>Updates while open</span><span>Inglen ${esc(st.version)}</span></div></div>`;
   box.scrollTop = scroll;
   box.querySelector('.st-close').onclick = hideStatus;
   $('st-refresh').onclick = async (e) => {
@@ -12314,7 +12314,7 @@ let _pendingAttachments = [];
 if (_attachBtn && _fileInput) {
   // The plus opens a small menu instead of going straight to the file picker.
   // Attaching is still the first item, so the old habit costs one extra click,
-  // and the things that extend Hearth stop being buried in Settings.
+  // and the things that extend Inglen stop being buried in Settings.
   const _addMenu = document.getElementById('add-menu');
   const _closeAddMenu = () => { if (_addMenu) _addMenu.classList.remove('open'); };
   _attachBtn.addEventListener('click', (e) => {
@@ -12347,7 +12347,7 @@ if (_attachBtn && _fileInput) {
 
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','bmp','tiff']);
 
-// Inline SVGs - keeping these out of the emoji set on purpose. Hearth's
+// Inline SVGs - keeping these out of the emoji set on purpose. Inglen's
 // UI uses no emojis anywhere; chips get small icon glyphs instead.
 const _ICON_FILE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 const _ICON_TEXT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h6"/></svg>';
@@ -12550,14 +12550,14 @@ function _openChatById(id) {
 const _ICON_TRASH_SM = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 
 // Claude Code, Codex, Cursor and OpenCode can read and write this memory too,
-// so a thing told to one is known to all. Each switch adds or removes Hearth's
+// so a thing told to one is known to all. Each switch adds or removes Inglen's
 // memory server in that program's own settings.
 async function showMemoryShare(anchor) {
   document.querySelectorAll('.mem-share-pop').forEach(x => x.remove());
   const pop = document.createElement('div');
   pop.className = 'mem-share-pop mp-menu';
   pop.innerHTML = '<div class="mp-sec">Share this memory with</div><div class="ms-rows"><div class="mp-s" style="padding:6px 10px">Checking your agents…</div></div>'
-    + '<div class="ms-foot">They can read what you\'ve saved, search your past chats, and save new facts, nothing else of Hearth\'s.</div>';
+    + '<div class="ms-foot">They can read what you\'ve saved, search your past chats, and save new facts, nothing else of Inglen\'s.</div>';
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   pop.style.top = (r.bottom + 6) + 'px';
@@ -13408,7 +13408,7 @@ async function tickLoadProgress() {
     if (r.phase === 'ready') {
       showLoadProgress(r.phase, 100, r.marker);
       // Model just landed — refresh state now so STATE.loadedModel updates and the
-      // empty screen flips to "Hearth is ready" on its own (no click needed); the
+      // empty screen flips to "Inglen is ready" on its own (no click needed); the
       // empty's fade animation makes the swap smooth instead of an abrupt cut.
       if (typeof refreshModels === 'function') refreshModels();
       // Brief beat at 100% so the user sees it land before we hide.
@@ -13786,7 +13786,7 @@ async function refreshSkills() {
     if (!SK_ITEMS.length) { box.innerHTML = '<div class="rm-empty">No skills yet. Paste one above.</div>'; return; }
     box.innerHTML = SK_ITEMS.map(s => {
       const mine = s.source === 'user', on = s.enabled !== false;
-      const meta = [mine ? 'Added by you' : 'Comes with Hearth', s.version ? 'v' + s.version : '', on ? '' : 'Off'].filter(Boolean).join(' · ');
+      const meta = [mine ? 'Added by you' : 'Comes with Inglen', s.version ? 'v' + s.version : '', on ? '' : 'Off'].filter(Boolean).join(' · ');
       const rm = mine ? `<span class="rm-act"><button class="danger" data-skrm="${esc(s.name)}" title="Remove it" aria-label="Remove">${_rmIco('cancel')}</button></span>` : '';
       return `<div class="rm-row sk-row${on ? '' : ' off'}" data-sk="${esc(s.name)}"><span class="rm-ico">${SK_ICO}</span>`
         + `<span class="what">${esc(s.name)}<small>${esc(skillSummary(s.description))}</small><small>${esc(meta)}</small></span>`
@@ -13835,7 +13835,7 @@ document.addEventListener('click', async e => {
     const files = ['scripts', 'references', 'assets'].filter(k => (s[k] || []).length)
       .map(k => `<span>${esc(k[0].toUpperCase() + k.slice(1))}: ${esc(s[k].join(', '))}</span>`).join('');
     showModal(s.name, `<div class="mem-fact"><div class="mf-text">${esc(s.description || '')}</div>`
-      + `<div class="mf-meta"><span>${s.source === 'user' ? 'Added by you' : 'Comes with Hearth'}${s.version ? ' · v' + esc(s.version) : ''}</span>${files}<span>${esc(s.folder || '')}</span></div>`
+      + `<div class="mf-meta"><span>${s.source === 'user' ? 'Added by you' : 'Comes with Inglen'}${s.version ? ' · v' + esc(s.version) : ''}</span>${files}<span>${esc(s.folder || '')}</span></div>`
       + `<details class="sk-body"><summary>What ${_agentName()} reads when it uses this</summary><pre>${esc(s.body || '')}</pre></details></div>`,
       [{ label: 'Close' }]);
   }
@@ -13863,7 +13863,7 @@ async function refreshMcpStatus() {
         // Provide actionable hint for common errors
         let hint = '';
         const err = (b.error || '').toLowerCase();
-        if (err.includes('npx') || err.includes('winerror 2') || err.includes('not found')) hint = '<br><span style="font-size:11px;color:var(--fg-dim)">It needs Node.js. Install it from nodejs.org, then restart Hearth</span>';
+        if (err.includes('npx') || err.includes('winerror 2') || err.includes('not found')) hint = '<br><span style="font-size:11px;color:var(--fg-dim)">It needs Node.js. Install it from nodejs.org, then restart Inglen</span>';
         else if (err.includes('command') && err.includes('missing')) hint = '<br><span style="font-size:11px;color:var(--fg-dim)">Hint: check "command" in mcp.json</span>';
         meta = `<span style="color:${stateColor}">${esc(b.error || b.state)}${hint}</span>`;
       }
@@ -13918,7 +13918,7 @@ async function refreshServerCard() {
         let txt, cls = 'v', tip = '';
         if (on === 0)                 { txt = tot ? `CPU-only (0/${tot} on GPU)` : 'CPU-only'; cls = 'v stopped'; tip = 'The whole model runs on the CPU, no GPU acceleration. Load with GPU layers for speed.'; }
         else if (tot && on >= tot)    { txt = `Full GPU (${tot}/${tot} layers)`; cls = 'v running'; }
-        else if (tot)                 { txt = `${on}/${tot} on GPU, rest on CPU (slower)`; tip = `${tot - on} layer(s) run on the CPU. In Auto, Hearth fits layers to your free VRAM so it won't spill into slow shared RAM. Want all ${tot} on the GPU? Set GPU layers explicitly in the model's config (respected as-is), or close other GPU apps.`; }
+        else if (tot)                 { txt = `${on}/${tot} on GPU, rest on CPU (slower)`; tip = `${tot - on} layer(s) run on the CPU. In Auto, Inglen fits layers to your free VRAM so it won't spill into slow shared RAM. Want all ${tot} on the GPU? Set GPU layers explicitly in the model's config (respected as-is), or close other GPU apps.`; }
         else                          { txt = `${on} layers on GPU`; }
         // Persist the reason on the row itself (tooltip) so it survives muted
         // toasts — the load-time "why" shouldn't live only in a toast.
@@ -13984,7 +13984,7 @@ document.getElementById('btn-server-logs-tab')?.addEventListener('click', () => 
 });
 
 // ============================================================
-// LOGS view - Agent (Hearth tool calls) + Server (llama_cpp.server stdout)
+// LOGS view - Agent (Inglen tool calls) + Server (llama_cpp.server stdout)
 // ============================================================
 let LOGS_SOURCE = 'agent';        // 'agent' | 'server'
 let LOGS_TIMER = null;             // setInterval id while view is open
@@ -13993,7 +13993,7 @@ let LOGS_SERVER_LAST_LEN = 0;      // for scroll-only-when-content-grew
 let LOGS_PHONE_LAST_LEN = 0;       // same, for the phone-log tab
 
 // The agent log: each tool call with what came back, said the way the room's
-// step list says it, newest first and grouped by day. Starts of Hearth's tool
+// step list says it, newest first and grouped by day. Starts of Inglen's tool
 // server for an agent brain are noise there, so they are only counted.
 let LG_FILTER = 'all';
 const LG_OPEN = new Set();
@@ -14028,7 +14028,7 @@ function _lgItems(events) {
   for (const it of items) if (it.state === 'run' && Date.parse(it.ts) < hour) it.state = 'gone';
   return { items, starts, lastStart };
 }
-// A step said in words when Hearth has the verb for it and the thing it was
+// A step said in words when Inglen has the verb for it and the thing it was
 // pointed at; otherwise the tool's own name, said plainly.
 function _lgLine(tool, args, done) {
   const what = _stepWhat(args), kind = _toolKind(tool || '');
@@ -14059,7 +14059,7 @@ async function refreshAgentLog() {
   }
   let html = '', day = '';
   if (starts && LG_FILTER === 'all' && !q)
-    html += `<div class="lg-sys">Hearth's tools were started for an agent brain ${starts} time${starts === 1 ? '' : 's'}, last at ${esc(lastStart.slice(11, 16))}.</div>`;
+    html += `<div class="lg-sys">Inglen's tools were started for an agent brain ${starts} time${starts === 1 ? '' : 's'}, last at ${esc(lastStart.slice(11, 16))}.</div>`;
   shown.slice(0, 250).forEach((it, n) => {
     const d = _lgDay(it.ts);
     if (d !== day) { day = d; html += `<div class="lg-day">${esc(d)}</div>`; }
@@ -14581,7 +14581,7 @@ async function refreshSettings() {
           // replaces the CUDA runtime, so warn before someone trades down.
           const isDml = opt.value === 'dml';
           const msg = (isDml ? 'DirectML is for AMD / Intel GPUs. On an Nvidia card, GPU (CUDA) is faster and DirectML replaces it.\n\n' : '')
-            + 'This downloads a one-time GPU runtime (about 500MB). The download is safe to interrupt, but keep Hearth open during the final "swapping runtime" step.\n\nContinue?';
+            + 'This downloads a one-time GPU runtime (about 500MB). The download is safe to interrupt, but keep Inglen open during the final "swapping runtime" step.\n\nContinue?';
           if (!(await askConfirm(isDml ? 'Use DirectML?' : 'Get the GPU runtime?', msg, 'Download'))) { sel.value = prev; return; }
           sel.value = prev; sel.disabled = true;           // hold until installed
           inst.hidden = false; inst.className = 'gpu-installer';
@@ -14777,7 +14777,7 @@ async function refreshSettings() {
       if (hint) hint.textContent = m.endsWith('.en') && lang && lang !== 'en'
         ? `Listens with the multilingual ${m.slice(0, -3)} model for this, since ${m} only knows English. It downloads once.`
         : m.endsWith('.en') && !lang ? `${m} only knows English. Pick a language to listen in another one.`
-        : 'Leave it on detect and Hearth works out each utterance on its own. Naming the language is a little faster and a little more accurate when you always speak the same one.';
+        : 'Leave it on detect and Inglen works out each utterance on its own. Naming the language is a little faster and a little more accurate when you always speak the same one.';
     }
     if (sttLang) {
       sttLang.value = s.stt_language || '';
@@ -14805,7 +14805,7 @@ async function refreshSettings() {
         // minute for small.en), and a vanished toast made it look frozen.
         sttMdl.disabled = true;
         setDlDot($('stt-dl-dot'), 'active');
-        toast('Getting the listening model', mdl + ', first time only. Bigger ones take a minute or two, and Hearth stays usable meanwhile.', 'info', 90000);
+        toast('Getting the listening model', mdl + ', first time only. Bigger ones take a minute or two, and Inglen stays usable meanwhile.', 'info', 90000);
         try {
           await api('/api/voice/reload', { method: 'POST' });
           setDlDot($('stt-dl-dot'), 'done');
@@ -14845,15 +14845,15 @@ async function refreshSettings() {
       // Which models a provider has is read from the provider, not written down here.
       const PICK_HINT = 'Once the key is saved, every model this key can use is in the model menu at the top.';
       const PRESETS = {
-        'claude-code': { url: 'claude-code://local', hint: _agentName() + ' thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Hearth\'s tools through it. It counts toward the plan’s usage limits. Helpers keep using your local model.', modelHint: '', sample: '' },
-        'cursor-agent': { url: 'cursor://local', hint: _agentName() + ' thinks with Cursor\'s agent on this PC, signed in to your Cursor plan, and uses Hearth\'s tools through it. It needs Cursor\'s command-line agent (cursor.com/cli), not just the editor. Its own shell is turned off, so commands go through Hearth and ask you first.', modelHint: '', sample: '' },
-        'codex':       { url: 'codex://local', hint: _agentName() + ' thinks with Codex on this PC, signed in to your ChatGPT plan, and uses Hearth\'s tools through it. The Codex app is enough; it carries the command-line part. Its usage counts toward your plan\'s Codex limit. Helpers keep using your local model.', modelHint: '', sample: '' },
+        'claude-code': { url: 'claude-code://local', hint: _agentName() + ' thinks with Claude Code installed on this PC, signed in to your Claude plan, and uses Inglen\'s tools through it. It counts toward the plan’s usage limits. Helpers keep using your local model.', modelHint: '', sample: '' },
+        'cursor-agent': { url: 'cursor://local', hint: _agentName() + ' thinks with Cursor\'s agent on this PC, signed in to your Cursor plan, and uses Inglen\'s tools through it. It needs Cursor\'s command-line agent (cursor.com/cli), not just the editor. Its own shell is turned off, so commands go through Inglen and ask you first.', modelHint: '', sample: '' },
+        'codex':       { url: 'codex://local', hint: _agentName() + ' thinks with Codex on this PC, signed in to your ChatGPT plan, and uses Inglen\'s tools through it. The Codex app is enough; it carries the command-line part. Its usage counts toward your plan\'s Codex limit. Helpers keep using your local model.', modelHint: '', sample: '' },
         local:      { url: 'http://localhost:1234/v1', hint: 'Local server (LM Studio / Ollama / built-in). For changes open the Models tab.', modelHint: '', sample: '' },
         gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Google Gemini via OpenAI-compatible bridge.', modelHint: PICK_HINT, sample: 'gemini-3-flash' },
         anthropic:  { url: 'https://api.anthropic.com/v1/', hint: 'Anthropic Claude via its OpenAI-compatible endpoint.', modelHint: PICK_HINT, sample: 'claude-sonnet-5-5' },
         openai:     { url: 'https://api.openai.com/v1', hint: 'OpenAI GPT models.', modelHint: PICK_HINT, sample: 'gpt-5.1' },
         grok:       { url: 'https://api.x.ai/v1', hint: 'xAI Grok models.', modelHint: PICK_HINT, sample: 'grok-4.5' },
-        groq:       { url: 'https://api.groq.com/openai/v1', hint: 'Groq runs open models very fast. Its free tier allows fewer tokens a minute than one Hearth request, so it needs a paid tier. Keys are at console.groq.com.', modelHint: 'Use a Groq model id. <code>openai/gpt-oss-120b</code> handles tools well.', sample: 'openai/gpt-oss-120b' },
+        groq:       { url: 'https://api.groq.com/openai/v1', hint: 'Groq runs open models very fast. Its free tier allows fewer tokens a minute than one Inglen request, so it needs a paid tier. Keys are at console.groq.com.', modelHint: 'Use a Groq model id. <code>openai/gpt-oss-120b</code> handles tools well.', sample: 'openai/gpt-oss-120b' },
         openrouter: { url: 'https://openrouter.ai/api/v1', hint: 'OpenRouter aggregator - gives you 100+ models.', modelHint: 'Use the exact OpenRouter model id, e.g. <code>anthropic/claude-4.6-sonnet</code>.', sample: 'anthropic/claude-4.6-sonnet' },
         custom:     { url: '', hint: 'Any OpenAI-compatible server. You set the URL.', modelHint: 'Use whatever model id your server exposes.', sample: '' },
       };
@@ -14918,7 +14918,7 @@ async function refreshSettings() {
         // whatever the user typed. (applyMode on first LOAD must NOT do this -
         // it would clobber a saved custom-local URL like Ollama on :11434.)
         if (v !== 'custom') llmUrl.value = (PRESETS[v] || PRESETS.local).url;
-        // An agent brain's address is Hearth's own name for it, not a server.
+        // An agent brain's address is Inglen's own name for it, not a server.
         else if (!/^https?:\/\//i.test(llmUrl.value.trim())) llmUrl.value = '';
         // Switch the model to the new provider's default. Keeping grok-4.3 when
         // moving to Gemini would send an invalid model to the new endpoint.
@@ -14946,7 +14946,7 @@ async function refreshSettings() {
         // Disable the button + state pill spinner + brand-sub status carry
         // the truth while it's happening.
         const provLabel = body.provider === 'local' ? 'local' : body.provider;
-        // The name Hearth filled in is a suggestion: the provider's own list decides.
+        // The name Inglen filled in is a suggestion: the provider's own list decides.
         body.settle = !body.model || body.model === ((PRESETS[body.provider] || {}).sample || null);
         llmApply.disabled = true;
         llmApply.textContent = 'Switching…';
@@ -15033,8 +15033,8 @@ async function refreshSettings() {
       const input = document.getElementById('setting-ws-path');
       if (!input) return;
       const newPath = (input.value || '').trim();
-      if (!newPath) { toast('Pick a path', 'Enter a folder like D:\\Hearth', 'warn'); return; }
-      showModal(`Move Hearth to ${newPath}?`,
+      if (!newPath) { toast('Pick a path', 'Enter a folder like D:\\Inglen', 'warn'); return; }
+      showModal(`Move Inglen to ${newPath}?`,
         `This will:\n` +
         `  • Move the entire workspace (memory, chats, models, files) there\n` +
         `  • Remember the new location for future launches\n` +
@@ -15076,7 +15076,7 @@ async function refreshSettings() {
       try { plan = await api('/api/update/repair-plan'); } catch {}
       if (plan && plan.can_patch === false) {
         if (st) st.textContent = '';
-        toast("This copy can't be repaired", plan.error || 'Reinstall Hearth to put it right.', 'warn', 9000);
+        toast("This copy can't be repaired", plan.error || 'Reinstall Inglen to put it right.', 'warn', 9000);
         return;
       }
       if (plan && Array.isArray(plan.items)) {
@@ -15106,7 +15106,7 @@ async function refreshSettings() {
               if (!_repairT0) _repairT0 = { t: Date.now(), b: ev.done || 0 };
               const _s = Math.max(0.001, (Date.now() - _repairT0.t) / 1000);
               dlUpsert(REPAIR_DL_ID, {
-                name: 'Hearth repair', kind: 'update', status: 'downloading',
+                name: 'Inglen repair', kind: 'update', status: 'downloading',
                 pct: Math.round(ev.done / ev.total * 100),
                 done: ev.done, total: ev.total,
                 speed: (ev.done - _repairT0.b) / _s,
@@ -15118,7 +15118,7 @@ async function refreshSettings() {
                 dlUpsert(REPAIR_DL_ID, { status: 'done', pct: 100 });
                 if (st) st.textContent = 'restored ' + (ev.restored || 0) + ' files';
                 if (ev.engine_error) toast('Repaired, except the model engine', ev.note || ev.engine_error, 'warn', 12000);
-                else toast('Repaired', 'Restart Hearth to load the restored files.', 'ok', 8000);
+                else toast('Repaired', 'Restart Inglen to load the restored files.', 'ok', 8000);
               } else {
                 dlUpsert(REPAIR_DL_ID, { status: 'error' });
                 if (st) st.textContent = '';
@@ -15185,7 +15185,7 @@ async function refreshSettings() {
 
     // Start-at-login toggle - flips the Startup-folder shortcut (same entry as
     // Task Manager > Startup). Keeps the tray (and its reminder watcher) alive
-    // across reboots so reminders fire even before you open Hearth.
+    // across reboots so reminders fire even before you open Inglen.
     const autostartBtn = $('btn-autostart-toggle');
     function paintAutostart(on) {
       if (!autostartBtn) return;
@@ -15202,7 +15202,7 @@ async function refreshSettings() {
         const want = autostartBtn.textContent.indexOf('turn on') >= 0; // "Off - turn on" => enabling
         try {
           const r = await api('/api/autostart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ enabled: want }) });
-          if (r && r.ok) { paintAutostart(!!r.enabled); toast('Start at login', r.enabled ? 'Hearth will launch when you sign in.' : 'Auto-launch turned off.', 'ok', 5000); }
+          if (r && r.ok) { paintAutostart(!!r.enabled); toast('Start at login', r.enabled ? 'Inglen will launch when you sign in.' : 'Auto-launch turned off.', 'ok', 5000); }
           else { toast("Couldn't change start at login", (r && r.error) || "It didn't say why.", 'err', 6000); }
         } catch (e) { toast('Start at login', e.message || e, 'err', 6000); }
         finally { autostartBtn.disabled = false; }
@@ -15215,7 +15215,7 @@ async function refreshSettings() {
     if (mcpEditBtn) mcpEditBtn.onclick = () => showMcpServersModal();
     const mcpSnippetBtn = $('btn-mcp-snippet');
     if (mcpSnippetBtn) mcpSnippetBtn.onclick = () => {
-      // The backend computes the correct launcher for how Hearth is actually
+      // The backend computes the correct launcher for how Inglen is actually
       // running (packaged exe + sentinel, or venv python + absolute script
       // path). Falling back to `python -m hearth.mcp_server` here would fail
       // from a source checkout, so prefer the backend's mcp_launch.
@@ -15223,7 +15223,7 @@ async function refreshSettings() {
         || { command: STATE.python_exe || 'python',
              args: STATE.mcp_server_path ? [STATE.mcp_server_path] : ['-m', 'hearth.mcp_server'] };
       // Include the env block: an MCP client (Claude Desktop, LM Studio, Cursor)
-      // has no way to show Hearth's approval prompt, so a write or a guarded
+      // has no way to show Inglen's approval prompt, so a write or a guarded
       // command would just come back refused with no button to press. Setting
       // JARVIS_AUTO_APPROVE lets those go through for that trusted session.
       // Ship it as "1" so it works out of the box; the note says how to gate it.
@@ -15234,13 +15234,13 @@ async function refreshSettings() {
           env: { JARVIS_AUTO_APPROVE: '1' },
         } }
       }, null, 2);
-      showModal('Hearth as MCP server',
+      showModal('Inglen as MCP server',
         `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
         `Paste this into the OTHER tool's mcp.json (LM Studio, Claude Desktop, Cursor, etc.). ` +
-        `Hearth's full tool set becomes available there.</div>` +
+        `Inglen's full tool set becomes available there.</div>` +
         `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:auto;max-height:360px">${esc(snippet)}</pre>` +
         `<div style="color:var(--fg-dim);font-size:11px;margin-top:8px;line-height:1.5">` +
-        `The <b>env</b> line matters: an MCP client can't pop Hearth's approval prompt, ` +
+        `The <b>env</b> line matters: an MCP client can't pop Inglen's approval prompt, ` +
         `so without it any write or guarded command comes back blocked with nothing to click. ` +
         `<code>JARVIS_AUTO_APPROVE: "1"</code> trusts that session to run them, and to edit ` +
         `files outside the default workspace. Set it to <code>"0"</code> to keep writes and ` +
@@ -15437,7 +15437,7 @@ async function refreshSettings() {
       migrateDryBtn.onclick = () => runMigrate(false);
       migrateApplyBtn.onclick = () => {
         showModal('Run import?',
-          `This will read from <b>${migrateSource.value}</b> and write Hearth memories to ~/Jarvis/memory/. ` +
+          `This will read from <b>${migrateSource.value}</b> and write Inglen memories to ~/Jarvis/memory/. ` +
           `Existing memories with the same slug update in place (no dupes). API keys are never copied.`,
           [
             { label: 'Cancel' },
@@ -15455,10 +15455,10 @@ async function refreshSettings() {
         ? (b.model ? `${b.model}, on this PC` : 'A model on this PC, none loaded yet')
         : [b.label, b.model].filter(Boolean).join(' · ') + (b.where ? ', through ' + b.where : '');
     } catch { $('setting-endpoint').textContent = st.endpoint; }
-    // Only worth a line when LM Studio is around: it lets Hearth load its models.
+    // Only worth a line when LM Studio is around: it lets Inglen load its models.
     const _lmsUsed = /:1234\b/.test(st.endpoint || '') || (st.provider || '') === 'lmstudio';
     $('field-lms').hidden = !(st.lms_cli || _lmsUsed);
-    $('setting-lms').textContent = st.lms_cli ? 'Found its lms command, so Hearth can load LM Studio models for you.'
+    $('setting-lms').textContent = st.lms_cli ? 'Found its lms command, so Inglen can load LM Studio models for you.'
       : 'Its lms command is not on this PC, so pick models in LM Studio itself.';
 
     // Models folder (relocatable to a drive with space). Loads the current path;
@@ -15471,7 +15471,7 @@ async function refreshSettings() {
         mdBtn._wired = true;
         mdBtn.addEventListener('click', async () => {
           const p = (mdInput.value || '').trim();
-          if (!p) { toast('Enter a folder path', 'e.g. D:\\Hearth\\models', 'warn'); return; }
+          if (!p) { toast('Enter a folder path', 'e.g. D:\\Inglen\\models', 'warn'); return; }
           const r = await api('/api/models/set-dir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
           if (r.ok) toast('Models folder set', 'Applies on the next launch: ' + r.path, 'ok', 7000);
           else toast("Couldn't use that folder", r.error || "It didn't say why.", 'err', 7000);
@@ -15504,7 +15504,7 @@ async function refreshSettings() {
       const tts = v.tts || {}; const stt = v.stt || {};
       const ttsOK = tts.engine && tts.engine !== null;
       // Not-installed reads as reassuring, not broken: voice is OPTIONAL and
-      // Hearth is fully usable by text. (A real load error still shows verbatim
+      // Inglen is fully usable by text. (A real load error still shows verbatim
       // so it's debuggable.) The voice packages ship with the Full edition.
       // When the packages are present and only the weights are missing, this is
       // a one-click fix, not a dead end. Saying it ships with the Full edition
@@ -15524,12 +15524,12 @@ async function refreshSettings() {
         };
       } else {
         $('tts-status').textContent = ttsOK ? `ready (${tts.engine})`
-          : (tts.last_load_error || 'Not set up. Spoken replies are optional; Hearth works fully by text.');
+          : (tts.last_load_error || 'Not set up. Spoken replies are optional; Inglen works fully by text.');
         $('tts-status').className = 'voice-status ' + (ttsOK ? 'ok' : 'bad');
       }
       const sttOK = stt.ready;
       $('stt-status').textContent = sttOK ? `ready (whisper ${stt.model_size}, ${stt.device})`
-        : (stt.last_load_error || 'Not set up. Talking to Hearth is optional; you can always type. The speech model downloads by itself the first time you use the mic.');
+        : (stt.last_load_error || 'Not set up. Talking to Inglen is optional; you can always type. The speech model downloads by itself the first time you use the mic.');
       $('stt-status').className = 'voice-status ' + (sttOK ? 'ok' : 'bad');
       const wk = v.wake || {};
       const wkEl = $('wake-status');
@@ -15749,7 +15749,7 @@ async function startBargeIn(callback) {
       if (rms > MIC_BARGE_THRESHOLD) {
         highStreak++;
         // 2 frames (~0.26s) instead of 3 (~0.38s): cut TTS sooner when you
-        // start talking. Echo cancellation on the barge stream keeps Hearth's
+        // start talking. Echo cancellation on the barge stream keeps Inglen's
         // own voice from self-triggering, so a shorter streak is safe.
         if (highStreak >= 2) {
           highStreak = 0;
@@ -16194,7 +16194,7 @@ async function enterVoiceMode() {
       }
     };
     showModal('Quick voice tip',
-      '<div style="line-height:1.55">If Hearth never picks up your voice, it is almost always the '
+      '<div style="line-height:1.55">If Inglen never picks up your voice, it is almost always the '
       + '<b>mic device</b>. The system default is often not the mic you are actually using.'
       + '<br><br>Pick the right one in <b>Settings &rarr; Voice &rarr; Microphone</b>.'
       + '<label style="display:flex;align-items:center;gap:8px;margin-top:16px;font-size:13px;color:var(--fg-dim);cursor:pointer">'
@@ -16262,7 +16262,7 @@ function exitVoiceMode() {
 // you talk, the same way it reacts to the AI's voice while it speaks.
 function voiceUpdate(level) { voiceMicLevel = level || 0; }
 
-// Wake word + tray "Voice mode" open Hearth with ?voice=1 — auto-enter voice
+// Wake word + tray "Voice mode" open Inglen with ?voice=1 — auto-enter voice
 // mode AND start listening, so saying the wake word lands you already talking
 // (with the desktop HUD up) instead of in a window you still have to click.
 window.addEventListener('load', () => {
@@ -16800,7 +16800,7 @@ function handleRealtimeEvent(ev) {
     _voiceReady = true;
     _voiceFillPct = null;
     setVoiceStatus('listening');
-    // The chosen mic wouldn't open (common on Bluetooth) and Hearth fell back to
+    // The chosen mic wouldn't open (common on Bluetooth) and Inglen fell back to
     // the system default — say so, otherwise the grid reads "listening" while
     // the mic they picked is dead.
     if (ev.warning) toast('Mic fell back to default', ev.warning, 'warn', 8000);
@@ -17138,7 +17138,7 @@ function modelParamsLabel(name) {
 // it; otherwise fall back to a search for the filename. Either way the user can
 // see the licence and what the model is actually for, which the row cannot show.
 function hfLinkForModel(m) {
-  // Hearth records the repo when IT downloaded the file, so use that rather than
+  // Inglen records the repo when IT downloaded the file, so use that rather than
   // inferring anything. Only models that arrived some other way need the guess.
   if (m && m.hf_repo) return `https://huggingface.co/${m.hf_repo}`;
   const parts = String((m && m.path) || '').split(/[\\/]/).filter(Boolean);
@@ -17208,7 +17208,7 @@ async function modelsAddVision(path, ask = true) {
     try {
       const res = await fetch('/api/llmserver/vision-download', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                                  body: JSON.stringify({ path }) });
-      if (!res.ok || !res.body) throw new Error(res.status === 404 ? 'this copy of Hearth needs a restart to add vision' : 'the request failed (' + res.status + ')');
+      if (!res.ok || !res.body) throw new Error(res.status === 404 ? 'this copy of Inglen needs a restart to add vision' : 'the request failed (' + res.status + ')');
       const got = await streamDownload(res, null, null, null, v.save_as);
       if (got) { toast('Vision added', 'Load the model again and ' + _agentName() + ' can see images with it.', 'ok', 6000); MODEL_VISION.delete(path); }
     } catch (e) {
@@ -17254,7 +17254,7 @@ function modelsLoadConfigHTML(opts) {
           <input type="range" min="-1" max="${sliderMax}" value="-1" data-cfg="n_gpu_layers" />
           <span class="v">Auto</span>
         </div>
-        <div class="ex-hint">Auto = Hearth fits as many layers as your VRAM holds. 0 = CPU-only. ${layerNote} <b class="ex-vram-est"></b></div>
+        <div class="ex-hint">Auto = Inglen fits as many layers as your VRAM holds. 0 = CPU-only. ${layerNote} <b class="ex-vram-est"></b></div>
       </div>
       <div class="ex-row">
         <label>Context length</label>
@@ -17388,7 +17388,7 @@ function modelsUpdateVramEstimate(cfgEl) {
   const footprint = sizeGb + kv;
   // fraction of the model on GPU: Auto(-1) estimates a VRAM-fit; explicit N uses N/layers.
   let frac;
-  // Hearth loads ONE model at a time, so booting a model first ejects whatever
+  // Inglen loads ONE model at a time, so booting a model first ejects whatever
   // is running. Estimating against CURRENT free VRAM therefore cried "won't
   // fit" for every model whenever one was already loaded (its own VRAM made the
   // free number tiny). When a local model is loaded, estimate against
@@ -17524,7 +17524,7 @@ function markLoadedOption(sel, value) {
 }
 
 // Inference engine (llama.cpp runtime) bar: show what's running + let the user
-// download Hearth's own copy or update it.
+// download Inglen's own copy or update it.
 async function refreshRuntimeBar() {
   const statusEl = $('runtime-status'), btn = $('btn-runtime-update'),
         hintEl = $('runtime-hint');
@@ -17533,7 +17533,7 @@ async function refreshRuntimeBar() {
     const r = await api('/api/runtime/info');
     const adv = r.advice || {}, nudgeEl = $('runtime-nudge');
     if (r.engine === 'native') {
-      const src = { hearth: "Hearth's own", lmstudio: "LM Studio's (signed)", other: 'detected copy' }[r.source] || r.source;
+      const src = { hearth: "Inglen's own", lmstudio: "LM Studio's (signed)", other: 'detected copy' }[r.source] || r.source;
       statusEl.innerHTML = r.running
         ? `${esc(r.running.label)} <span style="color:var(--fg-faint)">\u00b7 running ${esc(r.running.model)}; others use llama.cpp ${esc(r.version || '')}</span>`
         : `native llama.cpp <span style="color:var(--fg-faint)">${esc(r.version || '')} \u00b7 ${esc(src)}</span>`;
@@ -17551,7 +17551,7 @@ async function refreshRuntimeBar() {
         } else {
           // Using LM Studio's or bundled copy — offer to install our own.
           btn.style.display = '';
-          btn.textContent = "Install Hearth's own copy";
+          btn.textContent = "Install Inglen's own copy";
           btn.disabled = false;
           if (hintEl) hintEl.textContent = "Downloads llama.cpp to ~/.hearth/llamacpp so you don't depend on LM Studio being installed.";
         }
@@ -17606,8 +17606,8 @@ async function refreshRuntimeBar() {
 function engineAddDialog() {
   showModal('Add an engine',
     '<div style="line-height:1.55">Some models are made for a build of llama.cpp other than the official one, and their page says which. ' +
-    "Paste that build's GitHub page and Hearth downloads its version for this computer and card, or give a folder with " +
-    "<code>llama-server</code> in it. Hearth uses it only for models the official build can't read, and remembers which one each model needs.</div>" +
+    "Paste that build's GitHub page and Inglen downloads its version for this computer and card, or give a folder with " +
+    "<code>llama-server</code> in it. Inglen uses it only for models the official build can't read, and remembers which one each model needs.</div>" +
     '<input id="engine-add-src" type="text" placeholder="github.com/owner/llama.cpp or a folder" ' +
     'style="width:100%;margin-top:12px;box-sizing:border-box">',
     [ { label: 'Cancel' },
@@ -17619,7 +17619,7 @@ function engineAddDialog() {
         const r = await api('/api/runtime/add-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: v }) });
         if (!r.ok) { toast("That folder didn't work", r.error || '', 'err', 8000); return false; }
-        toast('Engine added', "Hearth uses it for models the official build can't read.", 'ok');
+        toast('Engine added', "Inglen uses it for models the official build can't read.", 'ok');
         refreshRuntimeBar();
       } } ]);
   setTimeout(() => $('engine-add-src')?.focus(), 50);
@@ -17670,7 +17670,7 @@ async function runtimeInstall(tag, repo) {
           _engDl.t0 = 0;
           dlUpsert(ENGINE_DL_ID, { status: ev.ok ? 'done' : (ev.cancelled ? 'paused' : 'error'), pct: ev.ok ? 100 : undefined });
           const errEl = $('runtime-err');
-          if (ev.ok) { if (errEl) errEl.style.display = 'none'; toast(repo ? 'Engine added' : 'Engine ready', repo ? "Hearth uses it for models the official build can't read." : 'llama.cpp ' + (ev.tag || ''), 'ok'); }
+          if (ev.ok) { if (errEl) errEl.style.display = 'none'; toast(repo ? 'Engine added' : 'Engine ready', repo ? "Inglen uses it for models the official build can't read." : 'llama.cpp ' + (ev.tag || ''), 'ok'); }
           else if (ev.cancelled) { if (errEl) errEl.style.display = 'none'; toast('Engine download cancelled', 'Progress kept, installing again resumes.', 'ok', 7000); }
           else {
             const msg = ev.error || 'unknown error';
@@ -17705,8 +17705,8 @@ async function runtimeInstall(tag, repo) {
 }
 $('btn-runtime-update')?.addEventListener('click', () => {
   showModal('Download the inference engine?',
-    'Hearth downloads the official <b>llama.cpp</b> runtime (~800 MB) so the built-in server runs on your GPU. Its own copy, no LM Studio needed.<br><br>' +
-    '<b>Heads-up:</b> some antivirus (AVG, Avast, Defender) may flag it as <code>IDP.generic</code>, a <b>known false positive</b> for open-source AI runtimes (llama.cpp, koboldcpp, ollama all trip it) because the binary is unsigned. If it gets quarantined, restore it + add an exclusion for <code>~/.hearth/llamacpp</code>. Hearth falls back to a signed copy if you have LM Studio.',
+    'Inglen downloads the official <b>llama.cpp</b> runtime (~800 MB) so the built-in server runs on your GPU. Its own copy, no LM Studio needed.<br><br>' +
+    '<b>Heads-up:</b> some antivirus (AVG, Avast, Defender) may flag it as <code>IDP.generic</code>, a <b>known false positive</b> for open-source AI runtimes (llama.cpp, koboldcpp, ollama all trip it) because the binary is unsigned. If it gets quarantined, restore it + add an exclusion for <code>~/.hearth/llamacpp</code>. Inglen falls back to a signed copy if you have LM Studio.',
     [ { label: 'Cancel' }, { label: 'Download', onclick: runtimeInstall } ]);
 });
 
@@ -17754,7 +17754,7 @@ async function refreshModelsView() {
 
   // Lite build has no built-in server — steer to cloud/LM Studio or Full.
   if (s.is_lite) {
-    head.innerHTML += '<div style="margin-top:10px;padding:10px 12px;background:color-mix(in srgb, var(--accent) 8%, transparent);border:1px solid var(--accent-line);border-radius:8px;font-size:12.5px;color:var(--fg-dim)">You\'re on <b>Hearth Lite</b>, no built-in engine yet. Use a cloud brain (Settings → Chat brain) or LM Studio / Ollama, or <a href="#" onclick="document.getElementById(\'btn-runtime-update\').click();return false;" style="color:var(--accent-2)">download the GPU engine here ↓</a> to run local models in Hearth (just the engine, no app reinstall).</div>';
+    head.innerHTML += '<div style="margin-top:10px;padding:10px 12px;background:color-mix(in srgb, var(--accent) 8%, transparent);border:1px solid var(--accent-line);border-radius:8px;font-size:12.5px;color:var(--fg-dim)">You\'re on <b>Inglen Lite</b>, no built-in engine yet. Use a cloud brain (Settings → Chat brain) or LM Studio / Ollama, or <a href="#" onclick="document.getElementById(\'btn-runtime-update\').click();return false;" style="color:var(--accent-2)">download the GPU engine here ↓</a> to run local models in Inglen (just the engine, no app reinstall).</div>';
   }
 
   // Disk-count badge on the "My Models" tab
@@ -17821,7 +17821,7 @@ function modelsRenderMine() {
     pane.innerHTML = scanBanner + `
       <div class="models-empty">
         <div class="big">${s.scanning ? 'Scanning local model catalog…' : 'No models on this PC yet'}</div>
-        <div>${s.scanning ? 'One sec - Hearth is checking LM Studio, Ollama, HF cache, and Downloads.' : 'Use the <b>Discover</b> tab to search Hugging Face, or grab a <b>Quick pick</b>.<br>Hearth auto-detects models from LM Studio, Ollama, HF cache, and Downloads.'}</div>
+        <div>${s.scanning ? 'One sec - Inglen is checking LM Studio, Ollama, HF cache, and Downloads.' : 'Use the <b>Discover</b> tab to search Hugging Face, or grab a <b>Quick pick</b>.<br>Inglen auto-detects models from LM Studio, Ollama, HF cache, and Downloads.'}</div>
       </div>`;
     return;
   }
@@ -17881,7 +17881,7 @@ function modelsRenderMine() {
     // (Qwen 2.5/3, Hermes, Mistral/Mixtral, Llama 3) train at 32K+, so they must
     // NOT be capped at 8192 — that silently clamped the user's saved 24K/32K down
     // (the demo model's filename contains "hermes"). Gemma 2 is genuinely 8K.
-    // Hearth's own prompt (persona + tool schemas) is ~16-17K tokens, so NEVER
+    // Inglen's own prompt (persona + tool schemas) is ~16-17K tokens, so NEVER
     // offer a load context below 24K or the user can't chat before compaction.
     // Known 32K+ families go to 32K; everything else floors at 24K.
     const _fn = m.filename.toLowerCase();
@@ -17908,9 +17908,9 @@ function modelsRenderMine() {
         ${loaded
           ? (loadedVia === 'builtin'
               ? '<button class="model-action is-secondary" data-stop="1">Eject</button>'
-              : '<button class="model-action is-secondary" disabled title="Eject from LM Studio itself - Hearth doesn\'t own this server">In use (LM Studio)</button>')
+              : '<button class="model-action is-secondary" disabled title="Eject from LM Studio itself - Inglen doesn\'t own this server">In use (LM Studio)</button>')
           : (m.incomplete || m.not_chat)
-            ? `<span class="model-badge" title="${m.incomplete ? 'The file is shorter than its own header says: the download stopped part-way.' : 'No tokenizer inside: an image or video model, not one Hearth can chat with.'}">${m.incomplete ? 'incomplete download' : 'not a chat model'}</span>`
+            ? `<span class="model-badge" title="${m.incomplete ? 'The file is shorter than its own header says: the download stopped part-way.' : 'No tokenizer inside: an image or video model, not one Inglen can chat with.'}">${m.incomplete ? 'incomplete download' : 'not a chat model'}</span>`
             : '<button class="model-action" data-use-path="' + esc(m.path) + '">Use this</button>'
         }
         <div class="model-expand" data-expand="${filenameId}">
@@ -17960,7 +17960,7 @@ function modelsRenderMine() {
     });
   });
   // Delete lives inside the expanded panel so it can't be hit by accident, and
-  // only for files in Hearth's own models folder (see llmserver.delete_model).
+  // only for files in Inglen's own models folder (see llmserver.delete_model).
   pane.querySelectorAll('[data-del-path]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -18020,7 +18020,7 @@ async function renderPlus() {
         <input type="text" id="plus-phone-name" placeholder="name this phone (optional)" autocomplete="off"
           style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;width:240px;margin-bottom:12px">
         <div style="display:flex;gap:8px;justify-content:center">
-          <button class="model-action is-secondary" id="plus-cancel">No, cancel</button>
+          <button class="model-action is-secondary" data-plus-cancel>No, cancel</button>
           <button class="model-action" id="plus-confirm">Yes, confirm</button></div></div>`;
     } else if (p.state === 'waiting' && _plusQR) {
       html += `<div class="server-card" style="display:flex;gap:18px;align-items:center;padding:16px">
@@ -18029,7 +18029,7 @@ async function renderPlus() {
           <div style="color:var(--fg-dim);font-size:12.5px;line-height:1.5">The page that opens pairs your phone with this PC. Then both screens
           show six numbers to compare. Add it to your home screen to keep it like an app.</div>
           <div style="margin-top:10px;display:flex;gap:8px"><button class="btn-mini" id="plus-copy">Copy the link</button>
-          <button class="btn-mini" id="plus-cancel">Cancel</button></div></div></div>`;
+          <button class="btn-mini" data-plus-cancel>Cancel</button></div></div></div>`;
     } else if (s.relay) {
       html += `<button class="btn-mini" id="plus-pair" style="margin-top:6px;width:auto;display:inline-flex">Pair a phone</button>`;
     }
@@ -18057,8 +18057,7 @@ async function renderPlus() {
   };
   const copy = $('plus-copy');
   if (copy) copy.onclick = () => navigator.clipboard.writeText(_plusQR.link).then(() => toast('Copied', 'Open it on your phone.', 'ok', 2500));
-  const cancel = $('plus-cancel');
-  if (cancel) cancel.onclick = async () => { await post('cancel'); _plusQR = null; renderPlus(); };
+  box.querySelectorAll('[data-plus-cancel]').forEach(b => b.onclick = async () => { await post('cancel'); _plusQR = null; renderPlus(); });
   const confirm = $('plus-confirm');
   if (confirm) confirm.onclick = async () => {
     const r = await post('confirm', { name: ($('plus-phone-name')?.value || '').trim() });
@@ -18112,7 +18111,7 @@ async function renderConnectorPeople() {
     const [channel, sender] = b.dataset.connRevoke.split('|'); post({ action: 'revoke', channel, sender }); });
 }
 
-// Images & video: Hearth's own engine for pictures and short videos
+// Images & video: Inglen's own engine for pictures and short videos
 // (stable-diffusion.cpp), the folders it reads models from, and which models
 // the files there make ready. What each model family needs comes from the
 // engine's own recipes; nothing here names a model.
@@ -18169,7 +18168,7 @@ async function imagesInstall() {
 function imagesFolderDialog() {
   showModal('Add a models folder',
     '<div style="line-height:1.55">A folder of image or video models you already have, such as a ComfyUI or ' +
-    'Stable Diffusion WebUI <code>models</code> folder. Hearth reads it where it is; nothing is copied.</div>' +
+    'Stable Diffusion WebUI <code>models</code> folder. Inglen reads it where it is; nothing is copied.</div>' +
     '<input id="img-folder-src" type="text" placeholder="the folder\'s path" ' +
     'style="width:100%;margin-top:12px;box-sizing:border-box">',
     [ { label: 'Cancel' },
@@ -18194,7 +18193,7 @@ async function modelsRenderImages() {
   let html = '';
   if (!o.installed) {
     html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3><span class="sub">not installed</span></div>
-      <div class="sec-body"><div class="engine-note" style="margin-bottom:10px">Hearth makes pictures and short videos on this PC
+      <div class="sec-body"><div class="engine-note" style="margin-bottom:10px">Inglen makes pictures and short videos on this PC
       with stable-diffusion.cpp. The engine is a one-time download built for your graphics card (an NVIDIA card's
       is the largest, about 0.9 GB with the runtime it needs); models come after.
       Without it, pictures are made with a cloud provider you have a key for.</div>
@@ -18250,7 +18249,7 @@ async function modelsRenderImages() {
       <div class="model-meta">Its checkpoints, VAEs and LoRAs in ${esc(o.forge)} can be used here, read where they are.</div></div>
       <button class="model-action" data-img-forge="${esc(o.forge)}">Use them</button></div>` : '') +
     (o.roots || []).map((d, i) => `<div class="model-row"><div class="model-info"><div class="model-name" style="font-family:var(--mono);font-size:12px">${esc(d)}</div>
-      <div class="model-meta">${i === 0 ? "Hearth's own" : 'yours, read in place'}</div></div>
+      <div class="model-meta">${i === 0 ? "Inglen's own" : 'yours, read in place'}</div></div>
       ${i === 0 ? '<button class="model-action is-secondary" data-img-open="1">Open</button>'
         : `<button class="model-action is-secondary" data-img-remove="${esc(d)}">Remove</button>`}</div>`).join('') +
     `<button class="btn-mini" id="img-add-folder" style="margin-top:8px;width:auto;display:inline-flex">Add a folder</button></div></div>`;
@@ -18308,7 +18307,7 @@ async function modelsRenderEngine() {
   try { bl = await api('/api/runtime/builds'); } catch {}
   const adv = rt.advice || {}, upd = rt.update || {};
   const srcLabel = { hearth: 'downloaded llama.cpp', lmstudio: "LM Studio's build (signed)",
-                     wheel: 'built-in, ships with Hearth', other: 'detected copy' }[rt.source] || (rt.source || 'unknown');
+                     wheel: 'built-in, ships with Inglen', other: 'detected copy' }[rt.source] || (rt.source || 'unknown');
   const pref = rt.preference || '';
   // A pinned build ("hearth:b10067") still lights the Downloaded pill.
   const prefBase = pref.split(':')[0];
@@ -19009,7 +19008,7 @@ function dlSyncBadge() {
   const n = $('nav-dl-dot'); if (n) n.hidden = active;
 }
 // Every voice-related transfer (GPU runtime, voice files, speech model) mirrors
-// into the shared Downloads overlay, so one place shows every download Hearth is
+// into the shared Downloads overlay, so one place shows every download Inglen is
 // doing rather than a progress line buried in whichever pane started it.
 const VOICE_DL_ID = '__voice__';
 const _voiceDl = { t0: 0, b0: 0 };
@@ -19188,7 +19187,7 @@ function dlRender() {
     const icon = isAgent && (HARNESS[d.agent])
       ? `<span class="hx-mini" style="--hx:${HARNESS[d.agent].c};margin-right:6px">${harnessMark(HARNESS[d.agent])}</span>`
       : isUpdate
-      ? '<span title="Hearth update" style="opacity:.85;margin-right:6px">⬆</span>'
+      ? '<span title="Inglen update" style="opacity:.85;margin-right:6px">⬆</span>'
       : isEngine
       ? '<span title="inference engine" style="opacity:.85;margin-right:6px">⚙</span>'
       : '<span title="model" style="opacity:.85;margin-right:6px">◆</span>';
@@ -19215,7 +19214,7 @@ function dlRender() {
     : '';
   const _repairing = list.some(([id]) => id === REPAIR_DL_ID);
   const _title = (list.length && !_modelish && !list.some(([, d]) => d.kind === 'agent'))
-    ? (_repairing ? 'Repairing Hearth' : 'Updating Hearth') : 'Downloads';
+    ? (_repairing ? 'Repairing Inglen' : 'Updating Inglen') : 'Downloads';
   ov.innerHTML = `<div style="font-weight:700;font-size:15px;color:var(--fg);margin-bottom:12px">${_title}</div>${rows}${_browse}`;
 }
 
@@ -19525,7 +19524,7 @@ async function _obProbeMigrate() {
       if (sub) sub.textContent = "I didn't find Hermes or OpenClaw on this PC. You can still bring over what ChatGPT or Claude knows about you.";
       return;
     }
-    if (sub) sub.textContent = 'Found a prior agent install. Want me to pull its memory into Hearth?';
+    if (sub) sub.textContent = 'Found a prior agent install. Want me to pull its memory into Inglen?';
     if (box) {
       box.innerHTML = '';
       for (const c of choices) {
@@ -20191,7 +20190,7 @@ async function obLoadBrains() {
   status.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>Scanning…</span></div>';
   let s;
   try { s = await api('/api/llmserver/status'); }
-  catch { status.innerHTML = '<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>Could not reach Hearth backend</span></div>'; return; }
+  catch { status.innerHTML = '<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>Could not reach Inglen backend</span></div>'; return; }
 
   const disk = s.disk_models || [];
   const builtin = s.builtin_running;
@@ -20216,9 +20215,9 @@ async function obLoadBrains() {
   let banner = '';
   if (s.is_lite) {
     // Lite has no engine of its own, so a model on disk can't be run by it yet.
-    banner = row('is-warn', `You're on <b>Hearth Lite</b>, which has no engine of its own for local models. ${here.length ? 'Pick an agent below' : 'Set up an agent below'}, use LM Studio or Ollama, or add a cloud brain on the next step. The engine can be added later from Settings.`);
+    banner = row('is-warn', `You're on <b>Inglen Lite</b>, which has no engine of its own for local models. ${here.length ? 'Pick an agent below' : 'Set up an agent below'}, use LM Studio or Ollama, or add a cloud brain on the next step. The engine can be added later from Settings.`);
   } else if (builtin) {
-    banner = row('is-good', "Hearth's built-in engine is already running a model. You're set.");
+    banner = row('is-good', "Inglen's built-in engine is already running a model. You're set.");
   } else if (external) {
     banner = row('is-good', 'LM Studio or Ollama is running on this PC. You can use it as it is, or pick something else below.');
   } else if (found) {
@@ -20767,7 +20766,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach((btn, i) => {
 });
 
 // On-open update prompt. Returning users see "Update available - install?" the
-// moment they open Hearth, not only if they dig into Settings. Fail-silent (no
+// moment they open Inglen, not only if they dig into Settings. Fail-silent (no
 // network / GitHub down shows nothing). Skipped while first-run onboarding is up.
 // The update installer downloads through the SAME Downloads overlay as models
 // and engines — real bar, speed, ETA, cancel — instead of handing the user off
@@ -20809,7 +20808,7 @@ async function downloadUpdate() {
           const secs = (now - _updDl.t0) / 1000;
           const speed = secs > 1 ? (ev.done - _updDl.b0) / secs : 0;
           dlUpsert(UPDATE_DL_ID, {
-            name: usePatch ? 'Hearth update (patch)' : 'Hearth update',
+            name: usePatch ? 'Inglen update (patch)' : 'Inglen update',
             kind: 'update', status: 'downloading',
             pct: Math.round(ev.done / ev.total * 100),
             done: ev.done, total: ev.total, speed,
@@ -20821,7 +20820,7 @@ async function downloadUpdate() {
             // Patch is already applied on disk; a restart is all that's left.
             dlUpsert(UPDATE_DL_ID, { status: 'done', pct: 100 });
             showModal('Update installed',
-              'Hearth will restart to load it.\n\nYour chats, memory and models are untouched.',
+              'Inglen will restart to load it.\n\nYour chats, memory and models are untouched.',
               [{ label: 'Later' },
                { label: 'Restart now', kind: 'primary', onclick: async () => {
                  await api('/api/update/restart', { method: 'POST',
@@ -20830,7 +20829,7 @@ async function downloadUpdate() {
           } else if (ev.ok) {
             dlUpsert(UPDATE_DL_ID, { status: 'done', pct: 100 });
             showModal('Update downloaded',
-              'Hearth will close so the installer can replace the running files.\n\nYour chats, memory and models are untouched.',
+              'Inglen will close so the installer can replace the running files.\n\nYour chats, memory and models are untouched.',
               [{ label: 'Not now' },
                { label: 'Run installer', kind: 'primary', onclick: async () => {
                  await api('/api/update/launch', { method: 'POST',
@@ -20860,7 +20859,7 @@ async function promptUpdateIfAvailable() {
     const ob = $('onboard');
     if (ob && ob.classList.contains('open')) return; // don't stack on the onboarding modal
     showModal('Update available: ' + (r.latest || ''),
-      "You're on v" + (r.current || '') + '. A newer Hearth (' + (r.latest || '') + ') is out.\n\n' +
+      "You're on v" + (r.current || '') + '. A newer Inglen (' + (r.latest || '') + ') is out.\n\n' +
       (r.notes ? r.notes.slice(0, 360) + '\n\n' : '') +
       'Downloading shows in Downloads (top right) and can be paused or cancelled.', [
       { label: 'Later' },
@@ -20903,7 +20902,7 @@ function showBroadcast(items) {
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
         <div style="display:flex;gap:8px;align-items:center;min-width:0">
           <span style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0"></span>
-          <span style="font-weight:700;font-size:13.5px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((a.title || 'Hearth').slice(0, 90))}</span>
+          <span style="font-weight:700;font-size:13.5px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((a.title || 'Inglen').slice(0, 90))}</span>
         </div>
         <button data-bcdismiss="1" title="Dismiss" style="background:none;border:none;color:var(--fg-dim);font-size:18px;line-height:1;cursor:pointer;flex-shrink:0;padding:0 2px">&times;</button>
       </div>
@@ -20932,13 +20931,13 @@ function showBroadcast(items) {
                 // started from a broadcast card is visible in the one place
                 // every download is listed.
                 dlUpsert(REPAIR_DL_ID, {
-                  name: 'Hearth repair', kind: 'update', status: 'downloading',
+                  name: 'Inglen repair', kind: 'update', status: 'downloading',
                   pct: Math.round(ev.done / ev.total * 100),
                   done: ev.done, total: ev.total,
                 });
               }
               if (ev.error) { dlUpsert(REPAIR_DL_ID, { status: 'error' }); ab.textContent = 'Repair failed'; ab.disabled = false; }
-              if (ev.done) { dlUpsert(REPAIR_DL_ID, { status: 'done', pct: 100 }); ab.textContent = 'Repaired. Restart Hearth'; }
+              if (ev.done) { dlUpsert(REPAIR_DL_ID, { status: 'done', pct: 100 }); ab.textContent = 'Repaired. Restart Inglen'; }
             }
           }
         } catch (e) { ab.textContent = 'Repair failed'; ab.disabled = false; }
@@ -21005,12 +21004,12 @@ window.addEventListener('load', function initSidebarDrawer() {
   // fall through to "External / Built-in / No brain". Without this, opening
   // Models in the first ~200ms after boot showed "pick a model" even when
   // the user was on Grok.
-  // Gate the "Getting Hearth ready" screen on settings + /api/state, but never
+  // Gate the "Getting Inglen ready" screen on settings + /api/state, but never
   // let a cold-boot backend strand the user on a blank screen. Even with a
   // threaded server and the _list_models port pre-check, the first calls can
   // stall for tens of seconds while the tray is still warming voice/wake models
   // and scanning drives — that CPU work holds the GIL and starves the request
-  // threads (the ~30s "Getting Hearth ready" hang). Cap the wait at 3s, then
+  // threads (the ~30s "Getting Inglen ready" hang). Cap the wait at 3s, then
   // show real state; the periodic refreshState/refreshModels polls reconcile a
   // beat later if the first calls were still in flight. refreshModels + refreshGpu
   // (nvidia-smi, ~20s cold) stay fully backgrounded off the critical path.
@@ -21253,14 +21252,14 @@ function teamMini(a) {
 function teamWhat(a) {
   const job = TEAM_JOBS[String(a && a.persona || '').toLowerCase()];
   const role = job ? job[0].toLowerCase() : (a && a.persona || '');
-  // One of Hearth's own helpers says what it thinks with: a provider or this PC.
+  // One of Inglen's own helpers says what it thinks with: a provider or this PC.
   if (a && a.on) return role + ' · on ' + ((BRAIN_MARKS[a.runtime] || {}).label || a.on);
   const h = a && a.runtime && (HARNESS[a.runtime] || BRAIN_MARKS[a.runtime]);
   return h ? h.label + ' · ' + h.maker : role;
 }
 function teamActivity(a) {
   if (a.status === 'failed') return "Didn't finish: " + (a.preview || 'no reason given');
-  if (a.status === 'stopped') return 'Stopped when Hearth closed';
+  if (a.status === 'stopped') return 'Stopped when Inglen closed';
   if (a.status === 'done') return a.preview ? 'Finished: ' + a.preview : 'Finished';
   if (a.blocked) return 'Wanted to use ' + a.blocked + ' and needs your OK. ' + _agentName() + ' will ask you.';
   if (a.activity === 'tool') return 'Using ' + a.tool;
@@ -21375,7 +21374,7 @@ document.querySelectorAll('.tm-tab').forEach(b => b.addEventListener('click', (e
   if (TEAM.tab === 'room') roomStart(); else roomStop();
   teamRender();
 }));
-// What each of Hearth's own helpers does, in the words a person would use.
+// What each of Inglen's own helpers does, in the words a person would use.
 // The role names (researcher, archivist) stay inside: they decide which tools
 // a helper gets, and mean nothing on a button.
 const TEAM_JOBS = {

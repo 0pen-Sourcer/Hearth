@@ -552,7 +552,7 @@ _QUIET_TOOLS = {"ToolSearch", "TodoWrite", "mcp__hearth__approve"}
 def decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
     """Answer Claude Code's permission question with the turn's own check."""
     if token != _TOKEN:
-        return {"behavior": "deny", "message": "not a Hearth session"}
+        return {"behavior": "deny", "message": "not an Inglen session"}
     name, args = hearth_view(tool, inp)
     check = _checks.get(token)
     if check is None:
@@ -604,7 +604,7 @@ def desktop(token: str, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
 def run_tool(token: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if token != _TOKEN or name not in HEARTH_SIDE:
-        return {"result": "Error: not a Hearth session"}
+        return {"result": "Error: not an Inglen session"}
     from .tools import execute_tool
     args = dict(args or {})
     if name == "spawn_subagent":
@@ -748,18 +748,18 @@ def persona_text(voice: bool, host: str = "Claude Code", tools: str = "mcp__hear
                  own_tools: str = "Your own file and shell tools are fine for files and commands.") -> str:
     from . import system_prompt
     preface = (
-        f"You are running inside {host} as the brain of Hearth, the user's local "
-        f"assistant, under the name and persona below. Hearth's own tools are available "
+        f"You are running inside {host} as the brain of Inglen, the user's local "
+        f"assistant, under the name and persona below. Inglen's own tools are available "
         f"as {tools}: use them for the desktop, apps, windows, screenshots, "
         f"memory, reminders, the phone and anything outside a code folder. {own_tools} "
-        f"Press keys, switch and close windows with Hearth's desktop tools, not from a shell: "
-        f"Hearth shows the user what those tools do and gives them the screen back after. "
-        f"To hand work to helpers, use Hearth's spawn_subagent, not {host}'s own sub-agents: "
-        f"Hearth's helpers appear in the user's Team view, and each one's report is given to you "
+        f"Press keys, switch and close windows with Inglen's desktop tools, not from a shell: "
+        f"Inglen shows the user what those tools do and gives them the screen back after. "
+        f"To hand work to helpers, use Inglen's spawn_subagent, not {host}'s own sub-agents: "
+        f"Inglen's helpers appear in the user's Team view, and each one's report is given to you "
         f"when it finishes, so after sending them you can simply end your message. "
         f"A helper can think with the model on this PC (runs_on 'local'), with a provider and model "
         f"you name, or be an agent program; never call a model server's API yourself to get work done. "
-        f"More of Hearth's tools exist than are listed: find them with find_tools and run one with use_tool. "
+        f"More of Inglen's tools exist than are listed: find them with find_tools and run one with use_tool. "
         f"Answer as the persona, never as {host}.\n\n")
     return preface + system_prompt(voice=voice)
 
