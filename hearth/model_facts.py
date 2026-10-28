@@ -28,9 +28,9 @@ _INDEX: Dict[str, Dict[str, Dict[str, Any]]] = {}
 _LOADED = [0.0]
 
 
-def _load() -> Dict[str, Any]:
+def _load(fetch: bool = True) -> Dict[str, Any]:
     fresh = _CACHE.is_file() and time.time() - _CACHE.stat().st_mtime < _DAY
-    if not fresh:
+    if not fresh and fetch:
         try:
             import urllib.request
             req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Hearth"})
@@ -51,23 +51,28 @@ def _load() -> Dict[str, Any]:
     return {}
 
 
-def _index() -> Dict[str, Dict[str, Dict[str, Any]]]:
+def _index(fetch: bool = True) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """The catalog by provider and model. Without fetch, only what is on disk
+    is read, so a chat turn never waits on the network for it."""
     with _LOCK:
-        if not _INDEX or time.time() - _LOADED[0] > _DAY:
-            cat = _load()
+        if not _INDEX or (fetch and time.time() - _LOADED[0] > _DAY):
+            cat = _load(fetch)
             if cat:
                 _INDEX.clear()
                 for pid, prov in cat.items():
                     if isinstance(prov, dict):
                         _INDEX[pid.lower()] = {str(k).lower(): v for k, v in (prov.get("models") or {}).items()
                                                if isinstance(v, dict)}
-                _LOADED[0] = time.time()
+                try:
+                    _LOADED[0] = time.time() if fetch else _CACHE.stat().st_mtime
+                except OSError:
+                    _LOADED[0] = 0.0
         return _INDEX
 
 
-def catalog_entry(provider: str, model_id: str) -> Optional[Dict[str, Any]]:
+def catalog_entry(provider: str, model_id: str, fetch: bool = True) -> Optional[Dict[str, Any]]:
     """The catalog's record for a model, by the provider it came from first."""
-    idx = _index()
+    idx = _index(fetch)
     mid = (model_id or "").strip().lower()
     if mid.startswith("models/"):
         mid = mid[len("models/"):]
@@ -95,14 +100,40 @@ def catalog_entry(provider: str, model_id: str) -> Optional[Dict[str, Any]]:
     return min(found, key=lambda f: len(f[0]))[1] if found else None
 
 
-def from_catalog(provider: str, model_id: str) -> Dict[str, Any]:
-    e = catalog_entry(provider, model_id) or {}
+def reasoning_levels(options: Any) -> Dict[str, Any]:
+    """What a catalog entry's reasoning_options say: the effort levels it takes
+    (efforts, without "none"), whether reasoning can be switched off (can_off),
+    and the value that switches it off (off) when the levels name one. A
+    switch beside levels that have no "none" is a separate setting this
+    field can't reach, so such a model counts as one that can't be switched off."""
+    opts = options if isinstance(options, list) else [options] if isinstance(options, dict) else []
+    out: Dict[str, Any] = {}
+    toggle = False
+    for o in opts:
+        if not isinstance(o, dict):
+            continue
+        if o.get("type") == "effort" and isinstance(o.get("values"), list):
+            vals = [str(v).lower() for v in o["values"] if v]
+            out["efforts"] = [v for v in vals if v != "none"]
+            if "none" in vals:
+                out["off"] = "none"
+        elif o.get("type") == "toggle":
+            toggle = True
+    if "efforts" in out or toggle:
+        out["can_off"] = "off" in out or (toggle and "efforts" not in out)
+    return out
+
+
+def from_catalog(provider: str, model_id: str, fetch: bool = True) -> Dict[str, Any]:
+    e = catalog_entry(provider, model_id, fetch) or {}
     out: Dict[str, Any] = {}
     ins = (e.get("modalities") or {}).get("input")
     if ins:
         out["inputs"] = [str(x) for x in ins]
     if "reasoning" in e:
         out["reasoning"] = bool(e["reasoning"])
+    if e.get("reasoning"):
+        out.update(reasoning_levels(e.get("reasoning_options")))
     ctx = (e.get("limit") or {}).get("context")
     if isinstance(ctx, int) and ctx > 0:
         out["ctx"] = ctx
@@ -164,7 +195,12 @@ def for_agent(agent: str, model_id: str) -> Dict[str, Any]:
         own["reasoning"] = True
     if agent == "codex":
         own["inputs"] = _codex_inputs(real)
-    return merge(own, agent, real)
+    out = merge(own, agent, real)
+    # The levels are the agent's own; the catalog's for the same model may not be ones it takes.
+    out["efforts"] = own["efforts"]
+    out.pop("can_off", None)
+    out.pop("off", None)
+    return out
 
 
 def _codex_inputs(slug: str):

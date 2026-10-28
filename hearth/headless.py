@@ -323,19 +323,41 @@ def _close_when_stopped(resp, should_cancel):
     return asyncio.ensure_future(watch())
 
 
+def effort_facts(base: str, model: str) -> Dict[str, Any]:
+    """A cloud model's reasoning levels: the provider's own list first, the
+    model catalog (read from disk only) for what it leaves out."""
+    listed = listed_facts(base, model)
+    try:
+        from . import model_facts
+        cat = model_facts.from_catalog(provider_for(base), model, fetch=False)
+    except Exception:
+        cat = {}
+    out = {k: cat[k] for k in ("reasoning", "efforts", "can_off", "off") if k in cat}
+    out.update({k: v for k, v in listed.items() if v not in (None, "", [])})
+    if listed.get("efforts") and "off" not in listed:
+        # Levels from the provider's list replace the catalog's, its off value with them.
+        out.pop("off", None)
+    return out
+
+
 def _cloud_reasoning_effort(base: str, think: bool, model: str, level: str = ""):
-    """`reasoning_effort` for a cloud model. /think OFF → skip the reasoning pass
-    ("minimal" on OpenAI, "none" elsewhere). /think ON → the user's chosen effort
-    LEVEL (low/medium/high) if they picked one, else None to use the model's own
-    default. Models that 400 on the field are remembered and sent nothing."""
+    """`reasoning_effort` for a cloud model, or None to send nothing.
+
+    On: the chosen level when the model takes it, else nothing (the model's own
+    default). Off: the value the model lists for off; nothing when its levels
+    have none or it can't stop reasoning. With no levels known, "minimal" on
+    OpenAI and "none" elsewhere. Models that refused the field get nothing."""
     if (model or "").lower() in _NO_REASONING_EFFORT:
         return None
-    listed = listed_facts(base, model)
+    facts = effort_facts(base, model)
     if think:
         lv = (level or "").strip().lower()
-        return lv if lv in (listed.get("efforts") or _EFFORT_LEVELS) else None
-    # A model whose provider says reasoning can't be switched off keeps its default.
-    if listed.get("can_off") is False:
+        return lv if lv in (facts.get("efforts") or _EFFORT_LEVELS) else None
+    if facts.get("can_off") is False or facts.get("reasoning") is False:
+        return None
+    if facts.get("off"):
+        return facts["off"]
+    if facts.get("efforts"):
         return None
     return "minimal" if "openai.com" in (base or "").lower() else "none"
 
@@ -497,6 +519,17 @@ def provider_models(base: str, key: str = "", timeout: float = 6):
         types = (caps.get("thinking") or {}).get("types") or {}
         if isinstance(types, dict) and "disabled" in types:
             f["can_off"] = bool((types.get("disabled") or {}).get("supported"))
+        # OpenRouter's rows name each model's levels and whether reasoning is mandatory.
+        rsn = m.get("reasoning")
+        if isinstance(rsn, dict) and isinstance(rsn.get("supported_efforts"), list):
+            levels = [str(x).lower() for x in rsn["supported_efforts"] if x]
+            order = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+            f["efforts"] = sorted((x for x in levels if x != "none"),
+                                  key=lambda x: order.index(x) if x in order else len(order))
+            f["reasoning"] = True
+            f["can_off"] = "none" in levels or not rsn.get("mandatory")
+            if f["can_off"]:
+                f["off"] = "none"
         if m.get("id") and f:
             facts[m["id"]] = f
     _LIST_SIZES[base.rstrip("/")] = (time.time(), sizes)

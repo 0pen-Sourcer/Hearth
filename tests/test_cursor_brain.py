@@ -48,7 +48,9 @@ with open(fake, "w", encoding="utf-8") as f:
     f.write(f"""import json, sys
 if "--list-models" in sys.argv:
     print("Available models\\n\\nauto - Auto (current, default)\\ngpt-5.2 - GPT-5.2\\n"
-          "claude-opus-5-thinking-high - Claude Opus 5 1M Thinking\\n\\nTip: use --model")
+          "claude-opus-5-thinking-high - Claude Opus 5 1M Thinking\\n"
+          "gpt-5.5-low - GPT-5.5 Low\\ngpt-5.5-medium - GPT-5.5\\ngpt-5.5-medium-fast - GPT-5.5 Fast\\n"
+          "gpt-5.5-high - GPT-5.5 High\\ngpt-5.5-extra-high - GPT-5.5 Extra High\\n\\nTip: use --model")
     sys.exit(0)
 open({argv_log!r}, "a").write(json.dumps({{"argv": sys.argv[1:], "stdin": sys.stdin.read()}}) + "\\n")
 out = lambda o: print(json.dumps(o), flush=True)
@@ -144,8 +146,30 @@ check("off Ask, its direct writes are allowed again", "Write(**)" not in cli["pe
 ms = cur.models()
 check(f"its models are the ones it lists {[m['id'] for m in ms]}",
       [(m["id"], m["label"]) for m in ms] == [("", "Default"), ("gpt-5.2", "GPT-5.2"),
-                                              ("claude-opus-5-thinking-high", "Claude Opus 5 1M Thinking")]
-      and ms[2]["ctx"] == 1000000)
+                                              ("claude-opus-5-thinking", "Claude Opus 5 1M Thinking"),
+                                              ("gpt-5.5", "GPT-5.5")]
+      and ms[2]["ctx"] == 1000000 and ms[2]["model"] == "claude-opus-5-thinking-high")
+g = next(m for m in ms if m["id"] == "gpt-5.5")
+check(f"one row per model, its levels as efforts and its Fast tier {g['efforts']} {g['fast']!r}",
+      g["efforts"] == ["low", "medium", "high", "xhigh"] and g["model"] == "gpt-5.5-medium" and g["fast"])
+check("a model with one id has no levels to pick", ms[1]["efforts"] == [] and ms[2]["efforts"] == [])
+check("the level picked is put back into the id, spelled as Cursor lists it",
+      cur.model_id("gpt-5.5", "xhigh", False, ms) == "gpt-5.5-extra-high"
+      and cur.model_id("gpt-5.5", "", True, ms) == "gpt-5.5-medium-fast"
+      and cur.model_id("gpt-5.5", "high", True, ms) == "gpt-5.5-high"
+      and cur.model_id("gpt-5.5", "max", False, ms) == "gpt-5.5-medium"
+      and cur.model_id("gpt-5.5-high", "", False, ms) == "gpt-5.5-high"
+      and cur.model_id("", "high", False, ms) == "")
+real_chosen, real_effort = cb.chosen_model, cb.chosen_effort
+cb.chosen_model, cb.chosen_effort = (lambda p: "gpt-5.5"), (lambda: "low")
+turn("again", [])
+third = [json.loads(l) for l in open(argv_log)][-1]["argv"]
+cb.chosen_model, cb.chosen_effort = real_chosen, real_effort
+check(f"a turn runs the id for the chosen level {third}", third[third.index("--model") + 1] == "gpt-5.5-low")
+check("a full id saved before is its model's row in the menu",
+      (lambda: (setattr(cb, "chosen_model", lambda p: "gpt-5.5-high"), cb.agent_models("cursor-agent")["model"])[1])()
+      == "gpt-5.5")
+cb.chosen_model = real_chosen
 
 cb.exe_for = lambda p: None
 ev = turn("hi", [])

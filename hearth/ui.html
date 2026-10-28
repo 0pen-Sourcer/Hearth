@@ -9349,7 +9349,7 @@ function _mpCardHTML(f) {
   add('From', f.where);
   add('Inputs', (f.inputs || []).map(x => MP_INPUT_WORDS[x] || x).join(', '));
   add('Reasoning', f.reasoning == null ? '' : f.reasoning
-      ? ((f.efforts || []).length ? `Yes \u00b7 ${f.efforts.length} levels` : 'Yes') : 'No');
+      ? ((f.efforts || []).length ? `Yes \u00b7 ${f.efforts.join(', ')}` : 'Yes') : 'No');
   add('Context', f.ctx ? Number(f.ctx).toLocaleString() + ' tokens' : '');
   add('Size', f.size_gb ? f.size_gb + ' GB' : '');
   add('Price', f.free ? 'Free' : '');
@@ -10270,6 +10270,8 @@ function _thinkOptions() {
     const info = STATE.agentInfo && STATE.agentInfo.provider === agent ? STATE.agentInfo : null;
     const m = info && info.models.find(x => x.id === (info.model || ''));
     const levels = (m && m.efforts) || [], about = (m && m.effort_about) || {};
+    // A model the agent takes no level for has nothing to pick: no control.
+    if (!levels.length) return [];
     // Named as the agent names them: Codex calls its lowest level Light.
     const named = l => l === 'xhigh' ? 'Extra high' : (agent === 'codex' && l === 'low') ? 'Light' : l[0].toUpperCase() + l.slice(1);
     return [{ on: true, level: '', label: 'Default', sub: AGENT_BRAINS[agent] + "'s own setting" },
@@ -10277,13 +10279,16 @@ function _thinkOptions() {
   }
   const cloud = !!(STATE.brain && STATE.brain.kind === 'cloud');
   if (!cloud) return THINK_OPTIONS.filter(o => !o.level);
-  // The provider's own word on this model's effort levels, when it gives one.
+  // The provider's or the catalog's word on this model's effort levels.
   const f = _cloudFacts();
+  if (f && f.reasoning === false) return [];
+  const off = f && f.can_off === false ? [] : [THINK_OPTIONS[0]];
   if (f && (f.efforts || []).length) {
     const named = l => ({ xhigh: 'Extra high', max: 'Max', minimal: 'Minimal' }[l] || l[0].toUpperCase() + l.slice(1)) + ' effort';
-    return [...(f.can_off === false ? [] : [THINK_OPTIONS[0]]), THINK_OPTIONS[1],
-            ...f.efforts.map(l => ({ on: true, level: l, label: named(l), sub: '' }))];
+    return [...off, THINK_OPTIONS[1], ...f.efforts.map(l => ({ on: true, level: l, label: named(l), sub: '' }))];
   }
+  // It reasons, and nothing names levels for it: on or off only.
+  if (f && f.reasoning) return [...off, THINK_OPTIONS[1]];
   return THINK_OPTIONS;
 }
 const CLOUD_FACTS = new Map();
@@ -10416,6 +10421,9 @@ function renderThinkMenu() {
   const menu = document.getElementById('think-menu');
   if (!menu) return;
   const opts = _thinkOptions();
+  // Hidden where the brain and model offer nothing to set.
+  thinkBtn.hidden = !opts.length && !_agentFast();
+  if (thinkBtn.hidden) menu.classList.remove('open');
   menu.innerHTML = opts.map((o, i) =>
     `<button class="think-menu-item" data-think="${i}">`
     + `<span class="tick"></span>`

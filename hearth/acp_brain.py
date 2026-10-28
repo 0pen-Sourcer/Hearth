@@ -51,12 +51,12 @@ def _mcp_servers() -> List[Dict[str, Any]]:
              "env": [{"name": k, "value": v} for k, v in launch["env"].items()]}]
 
 
-async def _start(provider: str, cwd: str):
+async def _start(provider: str, cwd: str, extra: Optional[List[str]] = None):
     exe = _base.exe_for(provider)
     if not exe:
         return None
     return await asyncio.create_subprocess_exec(
-        *exe, *_base.ACP[provider].get("args", []), cwd=cwd, stdin=asyncio.subprocess.PIPE,
+        *exe, *_base.ACP[provider].get("args", []), *(extra or []), cwd=cwd, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
         env=dict(os.environ, **_env_for(provider)), creationflags=_NO_WINDOW)
 
@@ -68,23 +68,62 @@ async def _hello(rpc: _Rpc) -> Dict[str, Any]:
         "clientInfo": {"name": "hearth", "title": "Hearth", "version": "0.7.6"}}, 60)
 
 
-def _model_option(opts: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    return next((o for o in opts or [] if o.get("category") == "model" or o.get("id") == "model"), None)
+def _choices(opt: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """A select option's values as {value, name, description}, groups opened up."""
+    out: List[Dict[str, Any]] = []
+    for o in (opt or {}).get("options") or []:
+        if isinstance(o, str):
+            out.append({"value": o, "name": o})
+        elif isinstance(o, dict) and isinstance(o.get("options"), list):
+            out += _choices(o)
+        elif isinstance(o, dict) and o.get("value") not in (None, ""):
+            out.append(o)
+    return out
 
 
-def _remember_models(provider: str, opt: Optional[Dict[str, Any]]) -> None:
-    if not opt:
-        return
-    listed = [{"id": str(o.get("value") or ""), "label": str(o.get("name") or o.get("value") or ""),
-               "about": str(o.get("description") or ""), "model": str(o.get("value") or ""),
-               "ctx": None, "efforts": []} for o in opt.get("options") or [] if o.get("value")]
+def _model_option(opts: List[Dict[str, Any]], offered: Any = None) -> Optional[Dict[str, Any]]:
+    """The session's model setting: a config option, or the separate model list
+    some agents send instead (set with session/set_model)."""
+    hit = next((o for o in opts or [] if o.get("category") == "model" or o.get("id") == "model"), None)
+    if hit or not isinstance(offered, dict) or not offered.get("availableModels"):
+        return hit
+    return {"id": "model", "via": "session/set_model", "currentValue": offered.get("currentModelId") or "",
+            "options": [{"value": m.get("modelId"), "name": m.get("name") or m.get("modelId"),
+                         "description": m.get("description") or ""}
+                        for m in offered["availableModels"] if isinstance(m, dict) and m.get("modelId")]}
+
+
+def _level_option(opts: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The session's reasoning effort setting, when the agent offers one for its current model."""
+    return next((o for o in opts or [] if o.get("category") == "thought_level"), None)
+
+
+def _levels(opt: Optional[Dict[str, Any]]) -> List[str]:
+    """The levels a thought_level option offers, without its own "default"."""
+    return [str(c["value"]) for c in _choices(opt) if str(c["value"]).lower() != "default"]
+
+
+def _stored(provider: str) -> Dict[str, Any]:
+    try:
+        with open(_MODELS, encoding="utf-8") as f:
+            return json.load(f).get(provider) or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _store(provider: str, **changes: Any) -> None:
+    """Update this agent's entry in the models file, keeping what else it holds."""
     try:
         with open(_MODELS, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         data = {}
-    data[provider] = {"stamp": (_base.exe_for(provider) or [""])[-1], "models": listed,
-                      "default": str(opt.get("currentValue") or "")}
+    stamp = (_base.exe_for(provider) or [""])[-1]
+    entry = data.get(provider) or {}
+    if entry.get("stamp") != stamp:
+        entry = {"stamp": stamp}
+    entry.update(changes)
+    data[provider] = entry
     try:
         os.makedirs(_base._HOME, exist_ok=True)
         with open(_MODELS, "w", encoding="utf-8") as f:
@@ -93,23 +132,135 @@ def _remember_models(provider: str, opt: Optional[Dict[str, Any]]) -> None:
         pass
 
 
-def models(provider: str) -> List[Dict[str, Any]]:
-    """The models the agent offered when a session last started, with its own default first."""
+def _remember_models(provider: str, opt: Optional[Dict[str, Any]]) -> None:
+    if not opt:
+        return
+    listed = [{"id": str(o["value"]), "label": str(o.get("name") or o["value"]),
+               "about": str(o.get("description") or ""), "model": str(o["value"]),
+               "ctx": None} for o in _choices(opt)]
+    _store(provider, models=listed, default=str(opt.get("currentValue") or ""))
+
+
+def _remember_levels(provider: str, opts: List[Dict[str, Any]], model: str = "") -> None:
+    """The effort levels the agent offered for the model the session is on:
+    an empty list when it offered none for that model."""
+    model = model or str((_model_option(opts) or {}).get("currentValue") or "")
+    if not model:
+        return
+    seen = dict(_stored(provider).get("levels") or {})
+    seen[model] = _levels(_level_option(opts))
+    _store(provider, levels=seen)
+
+
+def _run_quiet(argv: List[str], timeout: float = 60) -> str:
     try:
-        with open(_MODELS, encoding="utf-8") as f:
-            got = json.load(f).get(provider) or {}
-    except (OSError, ValueError):
-        got = {}
-    if not got.get("models"):
+        r = subprocess.run(argv, capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL,
+                           creationflags=_NO_WINDOW)
+    except Exception:
+        return ""
+    return (r.stdout + b"\n" + r.stderr).decode("utf-8", "replace")
+
+
+def parse_variants(text: str) -> Dict[str, List[str]]:
+    """model -> its reasoning levels, from a listing that prints each model's
+    id on its own line followed by its JSON details with a "variants" object."""
+    import re
+    dec = json.JSONDecoder()
+    out: Dict[str, List[str]] = {}
+    pos = 0
+    head = re.compile(r"^([^\s{}\[\]\"]+)\s*$", re.M)
+    while True:
+        m = head.search(text, pos)
+        if not m:
+            break
+        rest = m.end()
+        while rest < len(text) and text[rest].isspace():
+            rest += 1
+        if rest < len(text) and text[rest] == "{":
+            try:
+                obj, end = dec.raw_decode(text, rest)
+            except ValueError:
+                pos = m.end()
+                continue
+            v = obj.get("variants") if isinstance(obj, dict) else None
+            out[m.group(1)] = [str(k) for k in v] if isinstance(v, dict) else []
+            pos = end
+        else:
+            pos = m.end()
+    return out
+
+
+def _variants(provider: str) -> Dict[str, List[str]]:
+    """Every model's levels from the agent's own verbose model list, where its
+    spec names the command for one. Read once per installed version."""
+    how = (_base.ACP.get(provider) or {}).get("levels_args")
+    exe = _base.exe_for(provider)
+    if not how or not exe:
+        return {}
+    got = _stored(provider)
+    if isinstance(got.get("variants"), dict) and got.get("stamp") == exe[-1]:
+        return got["variants"]
+    found = parse_variants(_run_quiet(exe + list(how), 90))
+    if found:
+        _store(provider, variants=found)
+    return found
+
+
+def flag_levels(help_text: str, flag: str) -> List[str]:
+    """The values a CLI's help lists for a flag ("[possible values: a, b]" or "(choices: "a", "b")")."""
+    import re
+    i = help_text.find(flag)
+    if i < 0:
+        return []
+    near = help_text[i:i + 400]
+    m = re.search(r"\[possible values:\s*([^\]]+)\]|\(choices:\s*([^)]+)\)", near)
+    if not m:
+        return []
+    return [v.strip().strip('"\'') for v in (m.group(1) or m.group(2)).split(",") if v.strip().strip('"\'')]
+
+
+def _flag_levels(provider: str) -> List[str]:
+    """The levels an agent takes as a start flag, read from its --help once per installed version."""
+    flag = (_base.ACP.get(provider) or {}).get("effort_flag")
+    exe = _base.exe_for(provider)
+    if not flag or not exe:
+        return []
+    got = _stored(provider)
+    if isinstance(got.get("flag_levels"), list) and got.get("stamp") == exe[-1]:
+        return got["flag_levels"]
+    found = flag_levels(_run_quiet(exe + ["--help"], 30), flag)
+    _store(provider, flag_levels=found)
+    return found
+
+
+def efforts_for(provider: str, model: str) -> List[str]:
+    """The reasoning levels this agent takes with this model: what its session
+    offered for it, else its own model list, else its start flag."""
+    got = _stored(provider)
+    seen = (got.get("levels") or {}).get(model)
+    if seen:
+        return list(seen)
+    return list(_variants(provider).get(model) or _flag_levels(provider))
+
+
+def models(provider: str) -> List[Dict[str, Any]]:
+    """The models the agent offered when a session last started, with its own
+    default first, each with the reasoning levels it takes."""
+    got = _stored(provider)
+    if not got.get("models") and not got.get("asked"):
         try:
             asyncio.run(_discover(provider))
-            with open(_MODELS, encoding="utf-8") as f:
-                got = json.load(f).get(provider) or {}
         except Exception:
-            got = {}
-    listed = got.get("models") or []
-    return ([{"id": "", "label": "Default", "about": got.get("default") or "The agent's own choice",
-              "model": got.get("default") or "", "ctx": None, "efforts": []}] + listed) if listed else []
+            pass
+        _store(provider, asked=True)
+        got = _stored(provider)
+    listed = [dict(m, efforts=efforts_for(provider, m.get("model") or m.get("id") or ""))
+              for m in got.get("models") or []]
+    default = str(got.get("default") or "")
+    if not listed and not _flag_levels(provider):
+        return []
+    return [{"id": "", "label": "Default", "about": default or "The agent's own choice",
+             "model": default, "ctx": None, "efforts": efforts_for(provider, default)}] + listed
 
 
 async def _discover(provider: str) -> None:
@@ -124,7 +275,9 @@ async def _discover(provider: str) -> None:
     try:
         await _hello(rpc)
         new = await rpc.call("session/new", {"cwd": cwd, "mcpServers": []}, 60)
-        _remember_models(provider, _model_option(new.get("configOptions")))
+        opt = _model_option(new.get("configOptions"), new.get("models"))
+        _remember_models(provider, opt)
+        _remember_levels(provider, new.get("configOptions") or [], str((opt or {}).get("currentValue") or ""))
     finally:
         reader.cancel()
         try:
@@ -196,8 +349,12 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     session = _base.session_for(key, history)
     cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
     os.makedirs(cwd, exist_ok=True)
+    effort = _base.chosen_effort()
+    # An agent that takes the level only when it starts gets it as a flag.
+    flag = spec.get("effort_flag")
+    extra = [flag, effort] if flag and effort and effort in _flag_levels(provider) else []
     try:
-        proc = await _start(provider, cwd)
+        proc = await _start(provider, cwd, extra)
     except Exception as e:
         emit("error", message=f"{name} didn't start: {type(e).__name__}: {e}")
         return 1
@@ -248,16 +405,39 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
             text_in = (persona + "\n\n---\n\n"
                        + (f"Earlier in this conversation:\n{earlier}\n\nNow the user says:\n" if earlier else "")
                        + prompt)
-        opt = _model_option(opened.get("configOptions"))
+        opts = opened.get("configOptions") or []
+        opt = _model_option(opts, opened.get("models"))
         _remember_models(provider, opt)
         model_used = str((opt or {}).get("currentValue") or "")
         want = _base.chosen_model(provider)
+        switched = False
         if want and opt and want != model_used:
             try:
-                await rpc.call("session/set_config_option", {"sessionId": sid, "configId": opt["id"], "value": want}, 30)
-                model_used = want
+                if opt.get("via"):
+                    await rpc.call(opt["via"], {"sessionId": sid, "modelId": want}, 30)
+                else:
+                    # The answer carries every option again: the effort one
+                    # comes and goes with the model.
+                    got = await rpc.call("session/set_config_option",
+                                         {"sessionId": sid, "configId": opt["id"], "value": want}, 30)
+                    opts = (got or {}).get("configOptions") or opts
+                model_used, switched = want, True
             except Exception:
                 pass
+        if opt and not opt.get("via"):
+            _remember_levels(provider, opts, model_used)
+        lvl = _level_option(opts)
+        if lvl:
+            offered = [str(c["value"]) for c in _choices(lvl)]
+            target = effort if effort in offered else ("default" if "default" in offered else "")
+            # After a model switch the level it reports isn't one that was
+            # picked, so the level is always set then.
+            if target and (switched or target != str(lvl.get("currentValue") or "")):
+                try:
+                    await rpc.call("session/set_config_option",
+                                   {"sessionId": sid, "configId": lvl["id"], "value": target}, 30)
+                except Exception:
+                    pass
 
         async def ask(tool_name: str, args: Dict[str, Any]) -> bool:
             return await _base.ask_hearth(permission_check, tool_name, args)
@@ -322,6 +502,8 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                     began, first = shown.pop(cid)
                     emit("tool_result", name=first, content=(out if status == "completed" else f"Failed: {out}")[:20000],
                          ms=int((time.time() - began) * 1000), id=cid)
+            elif kind == "config_option_update" and opt and not opt.get("via"):
+                _remember_levels(provider, up.get("configOptions") or [], model_used)
             elif kind == "usage_update":
                 usage["ctx"] = up.get("size")
                 usage["used"] = up.get("used")
