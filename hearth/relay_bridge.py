@@ -203,6 +203,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                            "count": r["count"], "pinned": bool(r.get("pinned"))} for r in rows], "own": own_chat}
     if what == "chat":
         return chat_action(m)
+    if what == "media":
+        # One part of a file the PC carded: the phone fetches a file when it is opened.
+        from . import relay_media
+        return relay_media.chunk(str(m.get("media") or ""), int(m.get("offset") or 0), int(m.get("length") or 0))
     if what == "agent_sessions":
         # The coding agents' own sessions on this PC, newest first.
         from . import agent_sessions
@@ -241,11 +245,21 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                 stats = dict(stats, duration_ms=done["duration_ms"])
             thought = "".join(str(e.get("content") or "") for e in events if e.get("kind") == "think_chunk").strip()
             text = chat_sync._text(x.get("content"))
+            # The files a message carried, as cards the phone opens from this PC: what the person sent
+            # (kept where it was saved) and what a reply named, the way the reply sent them.
+            files = []
+            from . import relay_media
+            from .bridge_status import files_in
+            sent = re.findall(r"\[They sent .+?, saved at (.+?)\. Look at it", text, flags=re.S)
+            for p in (sent if role == "user" else files_in(text, relay_media.MAX_FILE)):
+                c = relay_media.card(p)
+                if c:
+                    files.append(c)
             # A file sent from a phone is kept as a note for the model; the person sent the file.
             text = re.sub(r"\[They sent (.+?), saved at .+?before answering about it\.\]",
                           lambda g: "Sent " + g.group(1), text, flags=re.S)
-            if text or steps:
-                msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps,
+            if text or steps or files:
+                msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps, "files": files,
                              "via": x.get("via") or "", "stats": stats, "thought": thought[-6000:],
                              "context": [context_item(t) for t in (x.get("context") or []) if isinstance(t, dict)]})
         keep = int(m.get("last") or 60)
@@ -696,6 +710,7 @@ class Relay(cc.Adapter):
     """Sends go out as encrypted frames on the phone's live connection, or to
     its mailbox on the server when it's away."""
     name, label, max_len = "relay", "Phone", 20000
+    max_file = 100 * 1024 * 1024           # sent as a card and opened from the PC, so no app limit applies
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
@@ -777,14 +792,12 @@ class Relay(cc.Adapter):
         return mid
 
     def send_file(self, chat, path):
-        try:
-            if os.path.getsize(path) > 15_000_000:
-                return
-            with open(path, "rb") as f:
-                data = R.b64(f.read())
-        except OSError:
-            return
-        self._push(chat, {"type": "file", "name": os.path.basename(path), "data": data})
+        """A card for the file (name, size, type, a thumbnail); the phone fetches the rest when it's
+        opened, so nothing big waits in the relay's mailbox for a phone that's away."""
+        from . import relay_media
+        c = relay_media.card(path)
+        if c is not None:
+            self._push(chat, {"type": "file", **c})
 
     def typing(self, chat):
         self._push(chat, {"type": "typing"})

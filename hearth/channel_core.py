@@ -439,7 +439,7 @@ class Hub:
                 self.a.edit(chat, status["id"], bridge_status.format_done(tools_used))
             for piece in split(final, self.a.max_len):
                 self.a.send(chat, piece, reply_to)
-            for f in bridge_status.files_in(reply, 45_000_000):
+            for f in bridge_status.files_in(reply, getattr(self.a, "max_file", 45_000_000)):
                 if f in text:            # what they just sent, named in the reply: not sent back
                     continue
                 self.a.send_file(chat, f)
