@@ -203,6 +203,13 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                            "count": r["count"], "pinned": bool(r.get("pinned"))} for r in rows], "own": own_chat}
     if what == "chat":
         return chat_action(m)
+    if what == "changes":
+        # File changes the agent made, newest first, for the phone's Recent changes (hearth/undo.py).
+        from . import undo as _undo
+        return {"changes": _undo.recent(30)}
+    if what == "undo":
+        from . import undo as _undo
+        return _undo.undo(str(m.get("id") or ""))
     if what == "agent_sessions":
         # The coding agents' own sessions on this PC, newest first.
         from . import agent_sessions

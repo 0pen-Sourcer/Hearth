@@ -342,7 +342,7 @@ SLASH_COMMANDS = {
     "/mode": "what runs without asking: ask, edits, auto", "/perms": "saved permissions",
     "/allow": "let me write under a folder", "/disallow": "take that back", "/allowed": "folders I may write in",
     "/lockdown": "keep reads inside the workspace", "/about": "version and stats", "/update": "get a newer version",
-    "/repair": "restore damaged files", "/phone": "reach me from Telegram, Discord or WhatsApp", "/pair": "let someone in with their code", "/exit": "quit",
+    "/repair": "restore damaged files", "/undo": "put back a file change: /undo lists, /undo <n> puts one back", "/phone": "reach me from Telegram, Discord or WhatsApp", "/pair": "let someone in with their code", "/exit": "quit",
     # Other names for the same commands.
     "/endpoint": "same as /brain", "/provider": "same as /brain", "/load": "same as /model",
     "/usage": "same as /status", "/import": "same as /import-memory", "/skills": "same as /skill",
@@ -430,7 +430,7 @@ HELP_GROUPS = [
     ("Helpers", ["/team", "/agents", "/agent", "/jobs"]),
     ("Voice", ["/voice", "/listen", "/stt", "/sleep", "/wake"]),
     ("This PC", ["/allow", "/disallow", "/allowed", "/lockdown", "/perms", "/workspace", "/tools", "/mcp", "/skill", "/log"]),
-    ("Inglen", ["/about", "/update", "/repair", "/phone", "/pair", "/exit"]),
+    ("Inglen", ["/about", "/update", "/repair", "/undo", "/phone", "/pair", "/exit"]),
 ]
 
 
@@ -2792,6 +2792,28 @@ class JarvisCLI:
             return True
         if low in ("/status", "/usage"):
             self._print_status()
+            return True
+        if low == "/undo" or low.startswith("/undo "):
+            # File changes the agent made (written, changed, moved, deleted), newest first; each can be put back.
+            from hearth import undo as _undo
+            rows = _undo.recent(15)
+            arg = low[5:].strip()
+            if arg:
+                if not arg.isdigit() or not 1 <= int(arg) <= len(rows):
+                    print(f"{C_DIM}/undo lists the changes; /undo <number> puts one back{C_RESET}")
+                    return True
+                r = _undo.undo(rows[int(arg) - 1]["id"])
+                print(f"{C_OK}{r['said']}{C_RESET}" if r.get("ok") else f"{C_ERR}{r.get('error')}{C_RESET}")
+                return True
+            if not rows:
+                print(f"{C_DIM}nothing to put back: file changes show here for a week{C_RESET}")
+                return True
+            import time as _t
+            for i, c in enumerate(rows, 1):
+                ago = int(_t.time() - c["at"])
+                when = f"{ago // 60} min ago" if ago < 3600 else f"{ago // 3600} h ago" if ago < 86400 else f"{ago // 86400} d ago"
+                print(f"  {i:>2}. {c['what']}  {C_DIM}{when} · {c['where']}{'' if c['can'] else ' · too big to keep'}{C_RESET}")
+            print(f"{C_DIM}/undo <number> puts one back{C_RESET}")
             return True
         if low == "/about":
             kind = "local" if _is_local_endpoint(LOCAL_API_BASE) else "cloud"

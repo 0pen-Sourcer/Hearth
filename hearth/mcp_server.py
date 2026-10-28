@@ -191,10 +191,13 @@ def _run(name: str, args: Dict[str, Any]):
     if hit:
         _APPROVED.remove(hit)
         args = dict(args, _approved=APPROVAL_TOKEN)
-    elif _BRAIN_GATE and _BRAIN_URL and name in _RISKY_TOOLS and not mode_allows(name, args):
-        verdict = _ask_hearth("mcp__hearth__" + name, args)
-        if verdict.get("behavior") != "allow":
-            return "Not done. " + str(verdict.get("message") or "The user declined this.")
+    elif _BRAIN_GATE and _BRAIN_URL and name in _RISKY_TOOLS:
+        if not mode_allows(name, args):
+            verdict = _ask_hearth("mcp__hearth__" + name, args)
+            if verdict.get("behavior") != "allow":
+                return "Not done. " + str(verdict.get("message") or "The user declined this.")
+        # Allowed by the switch or by the person: marked approved, as the window's own turns mark it,
+        # so run_command's guard doesn't refuse again what Auto let through (deleting what the app made).
         args = dict(args, _approved=APPROVAL_TOKEN)
     if name in _IN_HEARTH:
         # Helpers live in the Hearth that started this server: their tools run there.
