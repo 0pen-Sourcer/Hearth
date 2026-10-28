@@ -1683,6 +1683,12 @@
   .lately-pop .lp-where { font-size: 12px; color: var(--fg-dim); margin-top: 2px; line-height: 1.4; }
   .lately-pop .lp-open { font-size: 11.5px; color: var(--fg-faint); margin-top: 3px; }
   .lately-pop .lp-foot { padding: 8px 12px; font-size: 11px; color: var(--fg-faint); border-top: 1px solid var(--border); }
+  .lately-pop .lp-kind { color: var(--fg-faint); font-weight: 400; margin-right: 4px; }
+  .lately-pop .lp-src { font-size: 11.5px; color: var(--accent); cursor: pointer; margin-top: 3px; background: none; border: 0; padding: 0; text-align: left; }
+  .lately-pop .lp-src:hover { text-decoration: underline; }
+  .lately-pop .lp-acts { display: flex; gap: 6px; margin-top: 6px; }
+  .lately-pop .lp-acts button, .mem-lately .ml-done { font: 11.5px var(--sans); color: var(--fg-dim); background: var(--hover); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .lately-pop .lp-acts button:hover, .mem-lately .ml-done:hover { color: var(--fg); }
   .retry-note { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 12.5px; color: var(--fg-faint); }
   .retry-note .rn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-faint); animation: rnPulse 1.2s ease-in-out infinite; }
   @keyframes rnPulse { 50% { opacity: .25; } }
@@ -4277,7 +4283,7 @@
         <input type="text" id="mem-search" placeholder="Search…">
         <button class="mem-share-btn" id="mem-share" title="Let your coding agents use this memory too">Share with agents</button>
       </div>
-      <!-- What's going on lately: kept for the next messages; each can be removed. -->
+      <!-- Going on: each chat still open, its card; each can be put away or forgotten. -->
       <div class="mem-lately" id="mem-lately" hidden></div>
       <!-- Graph default-visible; List/Tree start hidden. Matches the toggle. -->
       <div class="list-pane" id="mem-list"></div>
@@ -7831,12 +7837,12 @@ function renderMessage(m) {
     if (regenBtn) {
       regenBtn.addEventListener('click', () => regenerateFromMessage(m));
     }
-    // What it had in mind from their other chats, when anything went in.
+    // What it had in mind from memory (cards, facts, searches), when anything went in.
     if (Array.isArray(m.context) && m.context.length) {
       const mem = document.createElement('button');
       mem.className = 'a-mem';
-      mem.title = 'What I had in mind from your other chats';
-      mem.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg> lately';
+      mem.title = 'What I had in mind';
+      mem.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg> in mind';
       mem.addEventListener('click', (e) => { e.stopPropagation(); showLately(mem, m.context); });
       const acts = div.querySelector('.actions');
       if (acts) acts.appendChild(mem);
@@ -12467,30 +12473,55 @@ function memFactHTML(raw) {
   const n = parseInt(fm.recall_count || '0', 10) || 0;
   const meta = [`<span class="tag ${tcls}">${esc(fm.type || 'fact')}</span>`];
   if (when(fm.updated)) meta.push(`<span>Saved ${esc(when(fm.updated))}</span>`);
-  meta.push(`<span>${n ? `Recalled ${n === 1 ? 'once' : n + ' times'}` : 'Not recalled yet'}${n && when(fm.last_recalled_at) ? `, last ${esc(when(fm.last_recalled_at))}` : ''}</span>`);
+  const lastUsed = fm.last_used || fm.last_recalled_at;
+  meta.push(`<span>${n ? `Recalled ${n === 1 ? 'once' : n + ' times'}` : 'Not recalled yet'}${n && when(lastUsed) ? `, last ${esc(when(lastUsed))}` : ''}</span>`);
   return `<div class="mem-fact"><div class="mf-text">${renderMD(text || '(empty)')}</div><div class="mf-meta">${meta.join('')}</div></div>`;
 }
-// The "going on lately" notes, above the facts: what comes along with each new
-// message. Each one can be removed; a chat talked in again starts a new one.
+// "Going on": each chat's card that is still open, above the facts. The newest
+// go along with a new chat's first message. Each can be marked done or forgotten.
+let _latelySeq = 0;
 async function refreshLately() {
   const box = $('mem-lately');
   if (!box) return;
+  const seq = ++_latelySeq;
   let rows = [];
-  try { rows = (await api('/api/threads')).threads || []; } catch {}
+  try { rows = ((await api('/api/cards')).cards || []).filter(c => c.status === 'open'); } catch {}
+  if (seq !== _latelySeq) return;          // a newer refresh is drawing the list
   box.hidden = !rows.length;
   if (!rows.length) { box.innerHTML = ''; return; }
-  box.innerHTML = `<div class="ml-head">Going on lately <span>comes along with your next messages, from your recent chats</span></div>`
-    + rows.map(t => `<div class="ml-row" data-chat="${esc(t.chat)}">
-        <div class="ml-body"><div class="ml-top"><b>${esc(t.topic || '')}</b><em>${esc(t.ago || '')}</em></div>
-          ${t.where ? `<div class="ml-where">${esc(t.where)}</div>` : ''}
-          ${(t.open || []).length ? `<div class="ml-open">Still open: ${esc(t.open.join('; '))}</div>` : ''}</div>
+  box.innerHTML = `<div class="ml-head">Going on <span>where your chats stand; a new chat starts with the newest in mind</span></div>`
+    + rows.map(c => `<div class="ml-row" data-chat="${esc(c.chat)}">
+        <div class="ml-body"><div class="ml-top"><b>${esc(c.goal || '')}</b><em>${esc(c.ago || '')}${c.title ? ' · ' + esc(c.title) : ''}</em></div>
+          ${_cardDetail(c) ? `<div class="ml-where">${esc(_cardDetail(c))}</div>` : ''}
+          ${(c.left || []).length ? `<div class="ml-open">Left: ${esc(c.left.join('; '))}</div>` : ''}</div>
+        <button class="ml-done" title="Done with this">Done</button>
         <button class="ml-del" title="Forget this">${_ICON_TRASH_SM}</button></div>`).join('');
+  const drop = (row) => { row.remove(); if (!box.querySelector('.ml-row')) box.hidden = true; };
   box.querySelectorAll('.ml-del').forEach(b => b.onclick = async () => {
     const row = b.closest('.ml-row');
-    try { await api('/api/threads/' + encodeURIComponent(row.dataset.chat), { method: 'DELETE' }); } catch (e) { toast("Couldn't forget it", e.message, 'err'); return; }
-    row.remove();
-    if (!box.querySelector('.ml-row')) box.hidden = true;
+    try { await api('/api/cards/' + encodeURIComponent(row.dataset.chat), { method: 'DELETE' }); } catch (e) { toast("Couldn't forget it", e.message, 'err'); return; }
+    drop(row);
   });
+  box.querySelectorAll('.ml-done').forEach(b => b.onclick = async () => {
+    const row = b.closest('.ml-row');
+    if (!(await _memoryItem('card', row.dataset.chat, 'done'))) return;
+    drop(row);
+  });
+}
+function _cardDetail(c) {
+  const slots = Object.entries(c.slots || {}).map(([k, v]) => `${k}: ${v}`).join('; ');
+  return [slots, c.where || ''].filter(Boolean).join('. ');
+}
+async function _memoryItem(kind, id, action) {
+  try {
+    await api('/api/memory/item', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ kind, id, action }) });
+    return true;
+  } catch (e) { toast("Couldn't change it", e.message, 'err'); return false; }
+}
+function _openChatById(id) {
+  if (!id || !(STATE.conversations || []).some(c => c.id === id)) { toast('That chat is gone', '', 'warn'); return; }
+  setActiveId(id); renderConvoList(); renderChat(); showView('chat');
 }
 const _ICON_TRASH_SM = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 
@@ -13106,17 +13137,33 @@ function renderFiles(entries) {
   }
 }
 $('files-show-hidden').addEventListener('change', () => renderFiles(STATE.fileEntries || []));
-// Under a reply: the threads from their other chats that went in with the
-// message, so it's plain why it guessed what it did.
+// Under a reply: each card, fact, search and chat from memory that went into it,
+// with the chat it came from, so it's plain why it said what it did. A wrong one
+// can be forgotten here, and a finished one put away.
+const _MIND_KIND = { card: 'Going on', fact: 'Fact', search: 'Search', chat: 'Chat' };
 function showLately(anchor, rows) {
   document.querySelectorAll('.lately-pop').forEach(x => x.remove());
   const pop = document.createElement('div');
   pop.className = 'lately-pop mp-menu';
-  pop.innerHTML = `<div class="mp-sec">What I had in mind · ${rows.length}</div>` + rows.map(t => `
-    <div class="lp-row"><div class="lp-top"><b>${esc(t.topic || '')}</b><span>${esc(t.ago || '')}</span></div>
+  pop.innerHTML = `<div class="mp-sec">What I had in mind · ${rows.length}</div>` + rows.map((t, i) => {
+    const kind = t.kind || 'card';
+    const acts = (kind === 'card' || kind === 'fact')
+      ? `<div class="lp-acts"><button data-act="forget">Wrong, forget it</button><button data-act="done">Done with this</button></div>` : '';
+    const src = t.chat && kind !== 'chat' ? `<button class="lp-src" data-chat="${esc(t.chat)}">From ${esc(t.chat_title || 'another chat')}</button>`
+      : (t.chat ? `<button class="lp-src" data-chat="${esc(t.chat)}">Open it</button>` : '');
+    return `<div class="lp-row" data-i="${i}"><div class="lp-top"><span class="lp-kind">${esc(_MIND_KIND[kind] || '')}</span><b>${esc(t.topic || '')}</b><span>${esc(t.ago || '')}</span></div>
       ${t.where ? `<div class="lp-where">${esc(t.where)}</div>` : ''}
-      ${(t.open || []).length ? `<div class="lp-open">Still open: ${esc(t.open.join('; '))}</div>` : ''}</div>`).join('')
-    + `<div class="lp-foot">From your recent chats. Switch it off with "Remember things on its own" in Settings.</div>`;
+      ${(t.open || []).length ? `<div class="lp-open">Still open: ${esc(t.open.join('; '))}</div>` : ''}${src}${acts}</div>`;
+  }).join('')
+    + `<div class="lp-foot">From your memory and chats. Switch it off with "Remember things on its own" in Settings.</div>`;
+  pop.querySelectorAll('.lp-src').forEach(b => b.onclick = () => { pop.remove(); _openChatById(b.dataset.chat); });
+  pop.querySelectorAll('.lp-acts button').forEach(b => b.onclick = async () => {
+    const row = b.closest('.lp-row');
+    const t = rows[+row.dataset.i];
+    if (!(await _memoryItem(t.kind || 'card', t.id || t.chat, b.dataset.act))) return;
+    row.querySelector('.lp-acts').textContent = b.dataset.act === 'done' ? 'Put away.' : 'Forgotten.';
+    refreshLately();
+  });
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   pop.style.left = Math.max(8, Math.min(window.innerWidth - 348, r.left)) + 'px';

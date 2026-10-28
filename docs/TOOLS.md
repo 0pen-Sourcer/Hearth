@@ -121,7 +121,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `memory_recall` | Search saved memories |
 | `memory_save` | Save a lasting fact about the user or their world (preferences, hardware, projects, people, setups) |
 | `read_chat` † | Read one earlier chat in order, by its title or id: what it was about, and the latest turns in full |
-| `search_chats` | Full-text search over every past conversation |
+| `search_chats` | Search every past conversation for anything said or decided in an earlier chat, best match first, with what is still going on in each |
 
 ## Reminders & alerts
 

@@ -157,14 +157,10 @@ def _is_reasoning_param_error(e: Exception) -> bool:
 
 _EFFORT_LEVELS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 
-# Background fact-extraction is a SECOND LLM call. On a local single-slot server
-# it competes with the user's own next turn, so the chat would sit waiting behind
-# an invisible extraction. Two guards: a turn-active flag (a real user turn always
-# wins) and a single-flight lock (several quick turns can't stack up N concurrent
-# extractions). Skipping is safe — the extractor reads the last few turns, so the
-# next run picks up whatever this one missed.
+# Set while a turn owns the model. The memory pass (memory_pass) is a second
+# call; on a local single-slot server it waits for this to clear, so a real
+# turn never queues behind it.
 _TURN_ACTIVE = threading.Event()
-_EXTRACT_LOCK = threading.Lock()
 
 
 def turn_is_active() -> bool:
@@ -203,52 +199,37 @@ def image_for_model(path: str) -> Tuple[str, str]:
     return f"data:{_mt.guess_type(path)[0] or 'image/png'};base64,{data}", note
 
 
-def lately_block(chat_id: Optional[str], emit=None) -> str:
-    """What has been going on in their other chats, for in front of a message.
-    Empty when memory is switched off or nothing is going on. The surface hears
-    which threads went in, so the reply can show them."""
+def memory_context(chat_id: Optional[str], history: Optional[List[Dict[str, Any]]] = None,
+                   emit=None) -> Tuple[str, List[Dict[str, Any]]]:
+    """What a chat's FIRST message gets from memory: the newest open cards of
+    the other chats. Later turns get nothing here (the model has the tools),
+    and nothing ever goes ahead of the history, so the cached prefix holds.
+    The surface hears which cards went in, so the reply can show them."""
+    if any(m.get("role") in ("user", "assistant") for m in history or []) or str(chat_id or "").startswith("rem_"):
+        return "", []
     try:
-        from . import memory_extract as _mx, threads as _threads
+        from . import memory_extract as _mx, memory_cards
         if not _mx.enabled():
-            return ""
-        rows = _threads.recent(exclude=chat_id)
-        text = _threads.block(exclude=chat_id)
+            return "", []
+        text, cards = memory_cards.block(exclude=chat_id)
     except Exception:
-        return ""
-    if text and emit is not None:
+        return "", []
+    items = [memory_cards.as_item(c) for c in cards]
+    if items and emit is not None:
         try:
-            emit("context_used", threads=[{"topic": t.get("topic", ""), "where": t.get("where", ""),
-                                           "open": t.get("open") or [], "ago": t.get("ago", "")} for t in rows])
+            emit("context_used", threads=items)
         except Exception:
             pass
-    return text
+    return text, items
 
 
 def note_turn_async(messages: List[Dict[str, Any]], model: str, chat_id: Optional[str], emit=None) -> None:
-    """The memory pass for a turn an agent program answered: facts, and where
-    the chat stands. In the background; it never holds up the reply."""
+    """A finished turn: the chat gets its memory pass once it goes quiet."""
     try:
-        from . import memory_extract as _mx
-        if not _mx.enabled():
-            return
-    except Exception:
-        return
-
-    def _go() -> None:
-        try:
-            saved, warns = _mx.extract_and_save(messages, _mx.make_brain_llm_call(model),
-                                                recent_turns=4, chat_id=chat_id)
-            if saved and emit is not None:
-                try:
-                    emit("facts_saved", count=len(saved), titles=[f["title"] for f in saved])
-                except Exception:
-                    pass
-            elif warns:
-                print("[hearth.memory_extract] nothing saved: " + "; ".join(warns)[:300], flush=True)
-        except Exception as e:
-            print(f"[hearth.memory_extract] extract failed: {type(e).__name__}: {e}", flush=True)
-    import threading as _threading
-    _threading.Thread(target=_go, daemon=True, name="hearth-memory-pass").start()
+        from . import memory_pass
+        memory_pass.turn_ended(chat_id, messages, model or "", emit)
+    except Exception as e:
+        print(f"[hearth.memory_pass] not scheduled: {type(e).__name__}: {e}", flush=True)
 
 
 def one_shot(prompt: str, model: str, base: str = "", key: str = "",
@@ -1058,27 +1039,48 @@ async def _run_once(
     after the system prompt, then the new `prompt` is appended as a user msg.
     Without it, behavior is the same as before: single-shot prompt.
     """
-    # What has been going on lately in their other chats, put in front of the
-    # message (never ahead of the history, so the cached prefix holds).
-    _lately = "" if prompt.strip() == NOTIFY_FLUSH else lately_block(chat_id, emit)
+    # Memory for this turn: the chat it is in (facts saved during it name it), a
+    # fresh copy of the facts index for a new chat, and on a chat's first message
+    # the open cards of the others, put in front of the message, never ahead of
+    # the history, so the cached prefix holds. Each memory tool call adds to the
+    # list the reply shows ("what I had in mind").
+    _flush_turn = prompt.strip() == NOTIFY_FLUSH
+    try:
+        from . import memory as _mem_turn, memory_cards as _cards_turn, memory_pass as _pass_turn
+        _mem_turn.set_current_chat(chat_id)
+        if not history:
+            _mem_turn.refreeze_index()
+        _pass_turn.turn_started(chat_id)
+        _lately, _used = ("", []) if _flush_turn else memory_context(chat_id, history, emit)
+        emit = _cards_turn.Trail(emit, _used)
+    except Exception:
+        _lately = ""
     # An agent program as the brain (Claude Code, Codex) runs the whole turn itself.
     try:
         from . import claude_brain as _cb
         if _cb.active():
             _reply: List[str] = []
+            _said: List[str] = []
+            _chunks: List[str] = []
 
             def _agent_emit(kind: str, **fields) -> None:
                 if kind == "done" and fields.get("reply"):
                     _reply.append(str(fields["reply"]))
+                elif kind == "assistant" and fields.get("content"):
+                    _said.append(str(fields["content"]))
+                elif kind == "assistant_chunk" and fields.get("content"):
+                    _chunks.append(str(fields["content"]))
                 emit(kind, **fields)
             rc = await _cb.run_turn(prompt, emit=_agent_emit, history=history,
                                     permission_check=permission_check if supervised else None,
                                     should_cancel=should_cancel, voice=voice, model=model,
                                     drain_steer=drain_steer, context=_lately)
-            # The memory pass runs for an agent brain too, through its own one-shot.
-            if _reply and prompt.strip() != NOTIFY_FLUSH:
+            # The memory pass runs for an agent brain too. A "done" with no reply
+            # (Codex's app server) leaves the reply in what the turn said.
+            _text_out = _reply[-1] if _reply else (_said[-1] if _said else "".join(_chunks).strip())
+            if _text_out and not _flush_turn:
                 note_turn_async(list(history or []) + [{"role": "user", "content": prompt},
-                                                       {"role": "assistant", "content": _reply[-1]}],
+                                                       {"role": "assistant", "content": _text_out}],
                                 model or "", chat_id, emit)
             return rc
     except ImportError:
@@ -1376,57 +1378,9 @@ async def _run_once(
     _TURN_ACTIVE.set()
     iterations = 0
 
-    # The memory pass after a turn, in the background (both ways a turn can end use it).
-    def _bg_fact_extract(_msgs):
-        # Single-flight: several quick turns must not stack up concurrent
-        # extractions (each is a full LLM call). Skip rather than queue.
-        if not _EXTRACT_LOCK.acquire(blocking=False):
-            return
-        try:
-            # Let a real turn win. Give the user a beat to start typing/sending,
-            # then bail if a new turn claimed the model — its facts get picked
-            # up by the next extraction anyway (it reads the last few turns).
-            time.sleep(1.5)
-            if _TURN_ACTIVE.is_set():
-                return
-            _run_extract(_msgs)
-        finally:
-            _EXTRACT_LOCK.release()
-
-    def _run_extract(_msgs):
-        try:
-            from . import memory_extract as _mx, anthropic_chat as _ac
-            if _ac.is_anthropic(LOCAL_API_BASE):
-                # Anthropic's compatible endpoint refuses what this call sends; its own API works.
-                _llm = _mx.make_brain_llm_call(model)
-            else:
-                import openai as _oai_module
-                _sync = _oai_module.OpenAI(api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE)
-                _llm = _mx.make_openai_llm_call(_sync, model)
-            _saved, _warns = _mx.extract_and_save(_msgs, _llm, recent_turns=4, chat_id=chat_id)
-            if _saved:
-                try:
-                    emit("facts_saved", count=len(_saved),
-                         titles=[f["title"] for f in _saved])
-                except Exception:
-                    pass
-            elif _warns:
-                # Surface WHY nothing was saved instead of swallowing it —
-                # goes to the log so a broken extractor is diagnosable.
-                print("[hearth.memory_extract] nothing saved: "
-                      + "; ".join(_warns)[:300], flush=True)
-        except Exception as _ee:
-            print(f"[hearth.memory_extract] extract failed: "
-                  f"{type(_ee).__name__}: {_ee}", flush=True)
-
+    # The memory pass, once the chat has gone quiet (both ways a turn can end use it).
     def _memory_pass_async() -> None:
-        try:
-            import threading as _threading
-            from . import memory_extract as _mx_gate
-            if _mx_gate.enabled():
-                _threading.Thread(target=_bg_fact_extract, args=(list(messages),), daemon=True).start()
-        except Exception:
-            pass
+        note_turn_async(list(messages), model or "", chat_id, emit)
 
     # No history means a fresh conversation. Deferred tools unlocked by an
     # earlier one are process-global, so a long-lived caller (the phone bridges
@@ -1649,31 +1603,14 @@ async def _run_once(
                         print(f"  [hearth] compaction summary failed: "
                               f"{type(_e).__name__}: {_e}", file=sys.stderr)
                         return ""
-                # PASSIVE FACT EXTRACTION — runs BEFORE compact so the
-                # extractor sees the FULL chunk that's about to be summarized
-                # into oblivion. At every safe boundary (compact,
-                # end-of-session), do one cheap LLM pass over recent
-                # turns and persist durable facts into memory.save(). The user
-                # doesn't have to say "remember that" — facts get saved
-                # automatically, with a joke/quote/violence filter on the
-                # extractor side. Failure is silent — never blocks the chat.
+                # The memory pass runs now, before compaction summarizes away
+                # what it would read.
                 try:
-                    from . import memory_extract as _mx
-                    import openai as _oai_module
-                    _sync = _oai_module.OpenAI(
-                        api_key=LOCAL_API_KEY, base_url=LOCAL_API_BASE
-                    )
-                    _llm = _mx.make_openai_llm_call(_sync, model)
-                    _saved, _warns = _mx.extract_and_save(
-                        messages, _llm, recent_turns=6
-                    )
-                    if _saved:
-                        emit("facts_saved", count=len(_saved),
-                             titles=[f["title"] for f in _saved])
+                    from . import memory_pass as _mp
+                    _mp.now(chat_id, list(messages), model or "", emit)
                 except Exception as _mx_err:
-                    # Don't surface as an error event — fact extraction failing
-                    # mid-compact shouldn't look scary in the GUI. Just log.
-                    emit("nudge", reason=f"fact_extract skipped: {type(_mx_err).__name__}")
+                    # A failed pass mid-compaction is logged, never shown as an error.
+                    emit("nudge", reason=f"memory pass skipped: {type(_mx_err).__name__}")
                 # Aggressive target so the kept tail (which may include
                 # big browse / read_file results) gets re-tightened if
                 # the first pass leaves us still over budget.
@@ -2620,12 +2557,8 @@ async def _run_once(
              reason=("stopped_early" if _stopped_note else "finished"),
              note=(_stopped_note or None))
 
-        # PASSIVE FACT EXTRACTION — durable facts accumulate without the user
-        # saying "remember that". Fire it on a daemon thread AFTER 'done' so the
-        # turn completes instantly; it saves to memory itself and best-effort
-        # emits a toast if the stream is still listening.
-        # Turn is over ('done' already emitted) — release the model so the
-        # extractor below may use it, and so a NEW user turn can claim it.
+        # The turn is over: release the model for a new turn, and let the
+        # chat's memory pass run once it has gone quiet.
         _TURN_ACTIVE.clear()
 
         _memory_pass_async()

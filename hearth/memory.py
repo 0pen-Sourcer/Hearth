@@ -364,7 +364,9 @@ def save(title: str, mtype: str, description: str, body: str = "",
          sub_category: Optional[str] = None,
          force: bool = False,
          volatility: str = "durable",
-         supersedes: Optional[str] = None) -> str:
+         supersedes: Optional[str] = None,
+         source_chat: Optional[str] = None,
+         importance: Optional[int] = None) -> str:
     """Write a memory file + add/update the index entry.
 
     The optional sub_category groups facts within a type for the v0.6 memory
@@ -446,7 +448,19 @@ def save(title: str, mtype: str, description: str, body: str = "",
         _days = _TRANSIENT_DAYS if _vol == "transient" else _SEASONAL_DAYS
         _exp = (datetime.now() + timedelta(days=_days)).isoformat(timespec="seconds")
         front.append(f"expires_at: {_exp}")
-    front.append(f"updated: {datetime.now().isoformat(timespec='seconds')}")
+    _now_iso = datetime.now().isoformat(timespec='seconds')
+    # When it became true, where it was learned and how much it matters. A
+    # superseded or invalidated fact gets valid_to and stays in the archive.
+    front.append(f"valid_from: {_now_iso}")
+    _src = source_chat if source_chat is not None else current_chat()
+    if _src:
+        front.append(f"source_chat: {_src}")
+    try:
+        _imp = min(3, max(1, int(importance))) if importance is not None else 2
+    except (TypeError, ValueError):
+        _imp = 2
+    front.append(f"importance: {_imp}")
+    front.append(f"updated: {_now_iso}")
     front.append("---")
     content = "\n".join(front) + "\n\n" + body.strip() + "\n"
 
@@ -496,7 +510,48 @@ def forget(title: str) -> str:
         removed = True
     if not removed:
         return f"no memory found matching '{title}'"
+    refreeze_index()
     return f"forgot: {slug}"
+
+
+def invalidate(title: str, reason: str = "no longer true") -> Optional[str]:
+    """A fact that stopped being true: kept in the archive with valid_to set,
+    so "what did I use before" still finds it. Returns the slug, or None."""
+    fn = _slug(title) + ".md"
+    if not os.path.isfile(os.path.join(MEM_DIR, fn)):
+        want = (title or "").strip().lower()
+        fn = next((f for f in _fact_files()
+                   if (_read_body(os.path.join(MEM_DIR, f))[0].get("name") or "").strip().lower() == want), "")
+        if not fn:
+            return None
+    out = _archive_file(fn, {"valid_to": _stamp(), "archived_reason": reason})
+    if out:
+        refreeze_index()
+    return out
+
+
+def _stamp() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def last_used(fm: Dict[str, str]) -> str:
+    """When a fact last went into a reply; older files wrote last_recalled_at."""
+    return fm.get("last_used") or fm.get("last_recalled_at") or ""
+
+
+# The chat a turn is in, so a fact saved during it names where it was learned.
+import contextvars as _cv
+_TURN_CHAT: "_cv.ContextVar[str]" = _cv.ContextVar("hearth_turn_chat", default="")
+_LAST_CHAT = {"id": ""}
+
+
+def set_current_chat(chat_id: Optional[str]) -> None:
+    _TURN_CHAT.set(chat_id or "")
+    _LAST_CHAT["id"] = chat_id or ""
+
+
+def current_chat() -> str:
+    return _TURN_CHAT.get() or _LAST_CHAT["id"]
 
 
 def _curate_base(title: str) -> str:
@@ -736,14 +791,31 @@ def index_for_prompt(max_lines: int = 20, max_line_chars: int = 120) -> str:
     return "[ Memories on file (call memory_recall to load any) ]\n" + body
 
 
+# The index as the system prompt carries it is fixed for a conversation: a fact
+# saved mid-chat would otherwise change the prompt's opening and the server
+# would read the whole history again. A new chat, or a fact forgotten, takes a
+# fresh copy.
+_FROZEN: Dict[str, Optional[str]] = {"text": None}
+
+
+def frozen_index_for_prompt() -> str:
+    if _FROZEN["text"] is None:
+        _FROZEN["text"] = index_for_prompt()
+    return _FROZEN["text"] or ""
+
+
+def refreeze_index() -> None:
+    _FROZEN["text"] = None
+
+
 def _rewrite_frontmatter(path: str, fm: Dict[str, str], body: str) -> None:
     """Persist a memory file with updated frontmatter. Preserves field order
     when possible: standard keys first, then anything else. Used by the
     recall-count bumper; cheap to call per-pick because most chats touch
     only 1-2 memories per turn."""
     order = ["name", "type", "description", "sub_category", "tags",
-             "volatility", "expires_at", "superseded_by", "archived_reason",
-             "recall_count", "last_recalled_at", "updated"]
+             "volatility", "expires_at", "valid_from", "valid_to", "source_chat", "importance",
+             "superseded_by", "archived_reason", "recall_count", "last_used", "updated"]
     lines = ["---"]
     for k in order:
         if k in fm:
@@ -773,7 +845,8 @@ def _bump_recall(path: str) -> None:
     except ValueError:
         n = 0
     fm["recall_count"] = str(n + 1)
-    fm["last_recalled_at"] = datetime.now().isoformat(timespec="seconds")
+    fm["last_used"] = datetime.now().isoformat(timespec="seconds")
+    fm.pop("last_recalled_at", None)
     _rewrite_frontmatter(path, fm, body)
     # Promote out of archive once a topic gets pulled enough times that
     # hiding it is clearly wrong.
@@ -839,7 +912,7 @@ def _coldness(fm: Dict[str, str]) -> float:
         n = int(fm.get("recall_count", "0") or "0")
     except ValueError:
         n = 0
-    when = fm.get("last_recalled_at") or fm.get("updated") or ""
+    when = last_used(fm) or fm.get("updated") or ""
     try:
         last = datetime.fromisoformat(when)
     except (ValueError, TypeError):
@@ -953,7 +1026,7 @@ def _supersede(topic: str, new_slug: str) -> Optional[str]:
     # the wrong memory is worse than archiving none.
     slug = _slug(topic)
     if slug != new_slug and os.path.isfile(os.path.join(MEM_DIR, slug + ".md")):
-        return _archive_file(slug + ".md", {"superseded_by": new_slug})
+        return _archive_file(slug + ".md", {"superseded_by": new_slug, "valid_to": _stamp()})
     want = topic.lower()
     for fn in _fact_files():
         if fn[:-3] == new_slug:
@@ -963,7 +1036,7 @@ def _supersede(topic: str, new_slug: str) -> Optional[str]:
         except (OSError, UnicodeDecodeError):
             continue
         if (fm.get("name") or "").strip().lower() == want:
-            return _archive_file(fn, {"superseded_by": new_slug})
+            return _archive_file(fn, {"superseded_by": new_slug, "valid_to": _stamp()})
     return None
 
 
@@ -1012,7 +1085,7 @@ def expire_stale(now: Optional[datetime] = None, *, once_per_day: bool = False) 
         except ValueError:
             n = 0
         recent = False
-        lr = fm.get("last_recalled_at")
+        lr = last_used(fm)
         if lr:
             try:
                 recent = (now - datetime.fromisoformat(lr)).days <= 60
@@ -1024,7 +1097,8 @@ def expire_stale(now: Optional[datetime] = None, *, once_per_day: bool = False) 
             fm["expires_at"] = (now + timedelta(days=days)).isoformat(timespec="seconds")
             _rewrite_frontmatter(full, fm, body)
             continue
-        s = _archive_file(fn, {"archived_reason": "expired"})
+        s = _archive_file(fn, {"archived_reason": "expired",
+                                "valid_to": now.isoformat(timespec="seconds")})
         if s:
             archived.append(s)
     try:

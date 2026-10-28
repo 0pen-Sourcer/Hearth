@@ -1459,24 +1459,48 @@ with sync_playwright() as pw:
     check(f"a reply that had other chats in mind shows what, and the turn says which chat it is in {lately}",
           lately["chat"] and lately["btn"] and lately["rows"] == ["CBSE private form"]
           and "Fee payment" in (lately["open"] or "") and lately["kept"] == 1)
-    # What's going on lately went along with messages but showed nowhere.
-    from hearth import threads as _threads
-    _threads.note("c_phone", {"topic": "Phone hunt", "where": "Still after the Edge 60 Pro.", "open": ["Hasn't bought it"]})
+    # The Memory tab shows each chat still going on; one can be put away, one forgotten.
+    from hearth import memory_cards as _cards
+    _cards.put("c_phone", {"goal": "Phone hunt", "where": "Still after the Edge 60 Pro.", "left": ["Hasn't bought it"]})
+    _cards.put("c_trip", {"goal": "Goa trip", "left": ["Book the hotel"]}, now=time.time() - 60)
     seen_lately = pg.evaluate("""async () => {
       showView('memory');
       await refreshLately();
       const box = $('mem-lately');
       const out = { shown: !box.hidden, rows: [...box.querySelectorAll('.ml-row b')].map(b => b.textContent),
                     open: (box.querySelector('.ml-open') || {}).textContent };
-      box.querySelector('.ml-del').click();
-      await new Promise(r => setTimeout(r, 400));
+      const gone = async (sel) => { for (let i = 0; i < 40 && box.querySelector(sel); i++) await new Promise(r => setTimeout(r, 100)); };
+      box.querySelector('.ml-row[data-chat="c_phone"] .ml-done').click();
+      await gone('.ml-row[data-chat="c_phone"]');
+      box.querySelector('.ml-row[data-chat="c_trip"] .ml-del').click();
+      await gone('.ml-row[data-chat="c_trip"]');
       out.after = !box.hidden;
+      out.left = [...box.querySelectorAll('.ml-row')].map(r => r.dataset.chat);
       showView('chat');
       return out;
     }""")
-    check(f"the Memory tab shows what's going on lately, and one can be forgotten {seen_lately}",
-          seen_lately["shown"] and seen_lately["rows"] == ["Phone hunt"] and "Hasn't bought it" in (seen_lately["open"] or "")
-          and seen_lately["after"] is False and _threads.get("c_phone") is None)
+    check(f"the Memory tab shows what's going on, and each can be put away or forgotten {seen_lately} {_cards.get('c_phone')}",
+          seen_lately["shown"] and seen_lately["rows"] == ["Phone hunt", "Goa trip"]
+          and "Hasn't bought it" in (seen_lately["open"] or "") and seen_lately["after"] is False
+          and _cards.get("c_phone")["status"] == "done" and _cards.get("c_trip") is None)
+    # Under a reply, a card it had in mind can be put away from there too.
+    _cards.put("c_cbse", {"goal": "CBSE private form", "left": ["Fee payment"]})
+    put_away = pg.evaluate("""async () => {
+      const anchor = document.querySelector('#chat-body') || document.body;
+      showLately(anchor, [{ kind: 'card', id: 'c_cbse', chat: 'c_cbse', chat_title: 'CBSE form', topic: 'CBSE private form', open: ['Fee payment'], ago: 'today' },
+                          { kind: 'search', id: 'pixel', topic: 'Searched "pixel"', where: '2 found', chat: 'c_phone', chat_title: 'Phone hunt' }]);
+      const pop = document.querySelector('.lately-pop');
+      const out = { src: [...pop.querySelectorAll('.lp-src')].map(b => b.textContent),
+                    acts: pop.querySelectorAll('.lp-acts').length };
+      pop.querySelector('.lp-acts button[data-act="done"]').click();
+      await new Promise(r => setTimeout(r, 400));
+      out.after = (pop.querySelector('.lp-acts') || {}).textContent;
+      pop.remove();
+      return out;
+    }""")
+    check(f"each item names the chat it came from; a card can be put away from the reply {put_away}",
+          put_away["src"] == ["From CBSE form", "From Phone hunt"] and put_away["acts"] == 1
+          and put_away["after"] == "Put away." and _cards.get("c_cbse")["status"] == "done")
     # Each coding agent kept its own memory; Hearth's can be shared with them.
     shared_posts = []
 
