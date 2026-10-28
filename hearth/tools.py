@@ -6445,6 +6445,8 @@ def _load_model(p: Dict) -> str:
             return "Error: " + str(r.get("error") or r.get("message") or "the model didn't load")
         _save_settings({"helper_model": path, "helper_ctx": ctx})
         llmserver.invalidate_status_cache()
+        if r.get("shared"):
+            return str(r.get("note")) + " Start one with spawn_subagent runs_on='local'."
         return (f"{name} is loaded for helpers at {r.get('url') or 'the helper port'}. "
                 "Start one with spawn_subagent runs_on='local'. Your own brain is unchanged.")
     from .web import load_local_brain

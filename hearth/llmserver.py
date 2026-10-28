@@ -2138,6 +2138,46 @@ def _parse_extra_server_args(extra: Optional[str]) -> List[str]:
     return out
 
 
+_FLAGS: Dict[tuple, frozenset] = {}
+
+
+def engine_flags(exe: str) -> frozenset:
+    """The options this llama-server build lists in its --help. Builds differ
+    (--kv-unified arrived in 2025), and an option a build doesn't know stops it
+    from starting, so an extra one is passed only when the build lists it."""
+    try:
+        key = (exe, os.path.getmtime(exe))
+    except OSError:
+        return frozenset()
+    if key not in _FLAGS:
+        try:
+            out = subprocess.run([exe, "--help"], capture_output=True, timeout=30,
+                                 creationflags=_NO_WINDOW).stdout.decode("utf-8", "replace")
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        _FLAGS[key] = frozenset(re.findall(r"(?<![\w-])(--?[a-zA-Z][\w-]*)", out))
+    return _FLAGS[key]
+
+
+def _shared_kv_args(exe: str, slots: int, extra: List[str]) -> List[str]:
+    """With more than one slot, one KV buffer for all of them (--kv-unified):
+    a slot that sits idle is saved to the RAM prompt cache and cleared when
+    another starts work (the build's --cache-idle-slots, on by default), so its
+    room goes to whoever is working instead of staying held in VRAM. Each
+    request still fits in ctx/slots, as before, so the total never runs out.
+    Left alone when the person set it either way in the Advanced flags."""
+    if slots < 2 or any(a in ("-kvu", "--kv-unified", "-no-kvu", "--no-kv-unified") for a in extra):
+        return []
+    return ["--kv-unified"] if "--kv-unified" in engine_flags(exe) else []
+
+
+def same_file(a: str, b: str) -> bool:
+    try:
+        return bool(a and b) and os.path.samefile(a, b)
+    except OSError:
+        return _normalize_model_key(a) == _normalize_model_key(b)
+
+
 def start_builtin(model_path: str, *args, **kwargs) -> Dict[str, Any]:
     """Start the built-in server on a model (see _start_builtin for the options).
 
@@ -2570,7 +2610,9 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
             # images (view_image / screenshots). llama-server offloads it to GPU
             # by default; harmless for a text-only chat.
             cmd += ["--mmproj", _mmproj]
-        cmd += _parse_extra_server_args(extra_args)
+        _extra = _parse_extra_server_args(extra_args)
+        cmd += _shared_kv_args(_native["exe"], slots, _extra)
+        cmd += _extra
     else:
         # PyInstaller: sys.executable is Hearth.exe (tray), so route via the
         # --hearth-run-llama-server sentinel; from source it's python → -m.
@@ -2815,8 +2857,16 @@ def _start_builtin(model_path: str, port: Optional[int] = None,
                   "gpu_layers_on": _gpu_on, "total_layers": _total_layers,
                   "slots": slots, "total_ctx": total_ctx,
                   "exe": (_native or {}).get("exe") if _use_native else None,
-                  "engine": "native" if _use_native else "wheel"}
+                  "engine": "native" if _use_native else "wheel",
+                  "kv_unified": "--kv-unified" in cmd}
     _write_runfile(_proc_info)
+    # A helper server on this same file is now a second copy of it: helpers use
+    # this one instead (subagents route to the main server when none runs).
+    try:
+        if helper_status().get("running") and same_file(_helper["info"].get("model_path", ""), model_path):
+            stop_helper()
+    except Exception:
+        pass
     # Remember the user's tuned config so the next "Use this" on the same
     # .gguf restores GPU offload / ctx / KV cache without them setting it again.
     save_model_config(model_path, {
@@ -4112,6 +4162,17 @@ def start_helper(model_path: str, ctx: int = 16384, n_gpu_layers: int = -1,
     `ctx` is per helper; `slots` helpers can run on it at once."""
     if not model_path or not Path(model_path).is_file():
         return {"ok": False, "error": f"model file not found: {model_path}"}
+    # The main model is this file already: a second server would load a second
+    # copy of the same weights. Helpers use the main server's slots instead.
+    main = (dict(_proc_info or {}) if _proc is not None and _proc.poll() is None else {}) or read_runfile()
+    if main and same_file(main.get("model_path") or "", model_path):
+        stop_helper()
+        n = int(main.get("slots") or 1)
+        return {"ok": True, "shared": True, "url": main.get("url") or "", "model": Path(model_path).stem,
+                "note": ("That model is already loaded as the main brain, so helpers use it there "
+                         + (f"({n - 1} at once beside the chat) " if n > 1 else
+                            "(one at a time with the chat; raise Settings, server_parallel_slots to overlap them) ")
+                         + "instead of loading a second copy.")}
     native = engine_for(model_path) or find_native_llama_server()
     if not native:
         return {"ok": False, "error": "a helper model needs the llama.cpp engine; install it in Models > Engine"}
@@ -4121,6 +4182,7 @@ def start_helper(model_path: str, ctx: int = 16384, n_gpu_layers: int = -1,
            "--ctx-size", str(int(ctx) * max(1, slots)), "--parallel", str(max(1, slots)),
            "--n-gpu-layers", str(999 if n_gpu_layers == -1 else n_gpu_layers),
            "--api-key", BUILTIN_API_KEY, "--batch-size", "1024", "--ubatch-size", "512"]
+    cmd += _shared_kv_args(native["exe"], max(1, slots), [])
     # Same KV choice as the main model: q8_0 with flash attention, except on
     # RTX 50-series where this engine's flash kernels misbehave on long context.
     cmd += (["--flash-attn", "off"] if blackwell else
@@ -4141,7 +4203,8 @@ def start_helper(model_path: str, ctx: int = 16384, n_gpu_layers: int = -1,
     except Exception:
         pass
     _helper["proc"] = proc
-    _helper["info"] = {"model_path": model_path, "model": Path(model_path).stem, "ctx": ctx}
+    _helper["info"] = {"model_path": model_path, "model": Path(model_path).stem, "ctx": ctx,
+                       "slots": max(1, slots), "kv_unified": "--kv-unified" in cmd}
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if proc.poll() is not None:

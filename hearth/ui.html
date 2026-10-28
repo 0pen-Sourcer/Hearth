@@ -18582,6 +18582,7 @@ function modelsWireRowClicks(pane) {
         const r = await api('/api/llmserver/helper', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model_path: mp }) });
         if (mp && !r.ok) toast("The helper model didn't start", r.error || '', 'err', 9000);
+        else if (mp && r.shared) toast('Helpers share the main model', r.note || '', 'ok', 7000);
         else toast(mp ? 'Helper model ready' : 'Helper model stopped',
                    mp ? 'Helpers and sub-agents use it now; the main model stays on the chat.' : '', 'ok', 4000);
       } catch (err) { toast("The helper model didn't start", err.message, 'err', 9000); }
