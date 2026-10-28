@@ -1535,7 +1535,11 @@ def _load_settings() -> Dict:
         # Apply on the next start_builtin (settings persist; restart to act).
         "server_autoboot": True,        # auto-load preferred_model on Hearth launch
         "server_default_ctx": 24576,    # 24K. Persona+tools = ~18K; needs headroom for chat+output. 16K was tight, 8K silently OOM'd.
-        "server_parallel_slots": 1,     # concurrent request slots. 1 = sub-agents queue. Each slot costs another ctx worth of KV cache, so this is clamped to free VRAM at load.
+        # Concurrent request slots: 0 = from graphics memory (llmserver.get_parallel_slots).
+        # A number counts only with server_parallel_slots_chosen: the old default of 1 was
+        # written to every settings file by the first save and then read as a choice.
+        "server_parallel_slots": 0,
+        "server_parallel_slots_chosen": False,
         "keep_local_warm": False,       # when switching to cloud, keep the local builtin loaded? Off = free VRAM (default). On = leave it warm so quick swap-back doesn't reload (~10s tax). Power-user toggle.
         # ---- Toast quiet-mode toggles (user-controlled noise level) ----
         "toast_facts_saved": True,      # "Remembered N facts" on auto-extract

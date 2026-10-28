@@ -4,25 +4,13 @@ What it finds is kept in ~/.hearth/this_pc.json, not in the person's memory:
 memory is what the person told it and what they worked on together, read and
 edited on the Memory page, and three entries about the GPU, the model server
 and every drive's folders read as clutter there. The system prompt carries one
-short line from the file (this_pc_line); the learn_environment tool gives the
-whole drive map when a search needs it. Older versions saved these as memories;
+short line from the file (this_pc_line). There is no drive map any more: one
+search finds a folder, and a list of everyone's folders went stale and cost
+tokens every turn. Older versions saved these as memories;
 drop_old_memories takes them out unless the person changed them.
 
-(Below: the original notes.)
 
-The whole point: the agent walks into a session already knowing the hardware,
-the installed models, and where files live — so it never flails with slow
-recursive disk scans. A small local model has none of that context by default.
-So at first run (and on demand via the `learn_environment` tool / the
-CLI `/learn` command) we detect the environment ONCE, fast, and write it to
-~/Jarvis/memory/ as normal memory facts. After that the model just *knows*.
-
-Everything here is generic and machine-agnostic — it reads the real machine, it
-never hardcodes anyone's paths. The detected facts land only in the user's local
-memory dir (gitignored), never in the shipped repo.
-
-Fast by construction: hardware is one nvidia-smi / CIM call, models is one HTTP
-GET, the drive map is a NON-recursive top-level listing of each fixed drive.
+Fast by construction: the GPU is one nvidia-smi / CIM call and the models one HTTP GET.
 """
 
 from __future__ import annotations
@@ -88,7 +76,7 @@ def _vram_guidance(vram_gb: Optional[float]) -> str:
         cap = "up to ~20B models fit"
     else:
         cap = "larger models (30B+) are viable"
-    return (f"With ~{vram_gb:g}GB VRAM, {cap} in LM Studio. Don't suggest models "
+    return (f"With ~{vram_gb:g}GB VRAM, {cap}. Don't suggest models "
             f"too big for that; for heavier jobs the cloud option is there.")
 
 
@@ -144,18 +132,6 @@ def detect_drives(max_dirs: int = 18) -> Dict[str, List[str]]:
     return out
 
 
-def _format_drive_map(drives: Dict[str, List[str]]) -> str:
-    lines = ["Drive layout on this PC (go straight here; do NOT scan whole drives "
-             "recursively — it's slow and usually finds nothing):"]
-    for root, names in drives.items():
-        shown = ", ".join(names[:14])
-        more = f" (+{len(names) - 14} more)" if len(names) > 14 else ""
-        lines.append(f"  - {root}  {shown}{more}")
-    lines.append("To find something, look at the top-level folder names above and go "
-                 "to the likely one; only then list/scan that one folder.")
-    return "\n".join(lines)
-
-
 THIS_PC_PATH = os.path.join(os.path.expanduser("~/.hearth"), "this_pc.json")
 # The memories older versions wrote, by title, with the description each was given:
 # one the person rewrote has another description and is left alone.
@@ -182,10 +158,7 @@ def this_pc_line() -> str:
     if gpu and d.get("vram_gb"):
         gpu += f" ({d['vram_gb']:g} GB VRAM)"
     bits = [b for b in (gpu, f"{d['ram_gb']:g} GB RAM" if d.get("ram_gb") else "", str(d.get("os") or "")) if b]
-    roots = ", ".join(list(d.get("drives") or {})[:8])
-    return ("This PC: " + "; ".join(bits) + "." if bits else "") + (
-        f" Drives: {roots}; learn_environment lists their top folders, so look there before searching a whole drive."
-        if roots else "")
+    return "This PC: " + "; ".join(bits) + "." if bits else ""
 
 
 def drop_old_memories() -> List[str]:
@@ -213,7 +186,7 @@ def learn_environment(endpoint: Optional[str] = None, write: bool = True, detail
     learn_environment tool, for a model that needs the drive map)."""
     gpu = detect_gpu()
     models = detect_models(endpoint)
-    drives = detect_drives()
+    drives = detect_drives()           # kept only to notice a drive coming or going (refresh)
 
     summary_bits: List[str] = []
 
@@ -233,8 +206,6 @@ def learn_environment(endpoint: Optional[str] = None, write: bool = True, detail
     summary_bits.append(f"hardware ({gpu_str}, {ram_gb}GB RAM)")
     base = (endpoint or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
     summary_bits.append(f"{len(models)} model(s)" if models else "no model server reachable")
-    if drives:
-        summary_bits.append(f"{len(drives)} drive(s)")
     if write:
         try:
             import time as _time
@@ -242,7 +213,7 @@ def learn_environment(endpoint: Optional[str] = None, write: bool = True, detail
             tmp = THIS_PC_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"gpu": gpu.get("name") or "", "vram_gb": gpu.get("vram_gb"), "ram_gb": ram_gb,
-                           "cores": cores, "os": osname, "drives": drives, "models": models,
+                           "cores": cores, "os": osname, "drives": sorted(drives), "models": models,
                            "server": base, "at": int(_time.time())}, f)
             os.replace(tmp, THIS_PC_PATH)
         except OSError:
@@ -272,8 +243,6 @@ def learn_environment(endpoint: Optional[str] = None, write: bool = True, detail
            _vram_guidance(gpu.get("vram_gb"))]
     if models:
         out.append(f"Models at {base} (list_models has the live list): " + ", ".join(models))
-    if drives:
-        out.append(_format_drive_map(drives))
     return "\n".join(out)
 
 

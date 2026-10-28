@@ -837,7 +837,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "message_helper",
         "description":
             "For a helper: ask or tell another helper that is working at the same "
-            "time, by name, or the assistant that sent you (to: 'JARVIS'). Use it when "
+            "time, by name, or the assistant that sent you (to: 'main'). Use it when "
             "their part of the job touches yours, or to send word part-way: something "
             "found that changes the plan, or a question only they can answer. Set "
             "wait_for_reply to wait for a helper's answer (up to 5 minutes).",
@@ -1567,10 +1567,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "learn_environment",
         "description": (
-            "This machine as it is now: GPU/VRAM, RAM, installed models, and each drive's "
-            "top-level folders. Call it before searching a whole drive for something, when "
-            "the user adds a drive or a model, or asks you to get to know their setup. Fast "
-            "and non-recursive. It is kept for the app, not saved as one of the user's memories."
+            "This machine as it is now: GPU/VRAM, RAM, OS and the models the local server has. "
+            "Call it when the user asks what their PC can run, adds a GPU or a model, or asks "
+            "you to get to know their setup. Kept for the app, not saved as one of their memories."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -3675,7 +3674,7 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
         if bad:
             if _autonomous:
                 where = ("A helper can't run destructive commands. Put what you would "
-                         "run and why in your report, and JARVIS can ask them.")
+                         "run and why in your report, and the assistant who sent you can ask them.")
             else:
                 where = ("Nobody approved it where they can see it, so it can't run from "
                          "here even if they say yes in this chat. Say what it would do and "

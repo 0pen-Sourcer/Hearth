@@ -54,11 +54,24 @@ check("one the person rewrote stays, and so does everything else they have",
 check(f"the boot line is short {said!r}", said.startswith("Learned ") and "\n" not in said)
 
 line = E.this_pc_line()
-check(f"the system prompt says the machine in one line {line!r}",
-      "RTX 5060 (8 GB VRAM)" in line and "C:\\" in line and "E:\\" in line and "Game dev" not in line)
+check(f"the system prompt says the machine in one line, with no folder list {line!r}",
+      "RTX 5060 (8 GB VRAM)" in line and "Game dev" not in line and "Drives" not in line)
 check("and it is in the prompt", line in persona.system_prompt())
 full = E.learn_environment(endpoint="http://localhost:1234/v1", detail=True)
-check("the learn_environment tool gives the folders when a search needs them", "Game dev" in full and "qwen3-8b" in full)
+check("the learn_environment tool says the machine and its models, and lists no one's folders",
+      "qwen3-8b" in full and "RTX 5060" in full and "Game dev" not in full)
+
+# The number of helpers at once: the old default of 1 in every settings file isn't a choice.
+import json
+from hearth import llmserver as L
+L.detect_gpu_vram_gb = lambda: 16.0
+sp = os.path.join(os.environ["HEARTH_WORKSPACE"], "settings.json")
+json.dump({"server_parallel_slots": 1}, open(sp, "w"))
+check(f"a 1 left from the old default doesn't hold a 16 GB card at one ({L.get_parallel_slots()})", L.get_parallel_slots() == 2)
+json.dump({"server_parallel_slots": 1, "server_parallel_slots_chosen": True}, open(sp, "w"))
+check("a 1 the person picked is kept", L.get_parallel_slots() == 1)
+json.dump({"server_parallel_slots": 0, "server_parallel_slots_chosen": False}, open(sp, "w"))
+check("Automatic is from graphics memory", L.get_parallel_slots() == 2)
 
 print("\n" + ("all this-PC checks passed" if not FAILS else f"{len(FAILS)} failed"))
 sys.exit(1 if FAILS else 0)

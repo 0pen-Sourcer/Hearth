@@ -3011,7 +3011,8 @@ class JarvisCLI:
                 plan = {"codex": "on your ChatGPT plan (it counts toward your Codex limit)",
                         "claude-code": "on your Claude plan (it counts toward its usage limits)"}.get(
                             provider, f"on your {_cb.PLANS.get(provider, '')} plan")
-                print(f"{C_OK}JARVIS now thinks with {_cb.BRAINS[provider]}{C_RESET} {C_DIM}{plan}. "
+                from hearth.persona import NAME as _me
+                print(f"{C_OK}{_me} now thinks with {_cb.BRAINS[provider]}{C_RESET} {C_DIM}{plan}. "
                       f"Helpers keep using the local model. /brain local to switch back.{C_RESET}")
                 return True
 
