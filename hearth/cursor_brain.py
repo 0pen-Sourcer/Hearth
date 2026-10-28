@@ -81,17 +81,110 @@ def _result_text(body: Dict[str, Any]) -> str:
     return ""
 
 
+# Cursor puts the reasoning level in the model id: <base>-<level>, then -fast
+# for its Fast tier. These are the level words its ids use, and how each is
+# named in its labels.
+_LEVEL_WORDS = {"none": "None", "minimal": "Minimal", "low": "Low", "medium": "Medium", "high": "High",
+                "xhigh": "Extra High", "extra-high": "Extra High", "max": "Max"}
+FAST_ABOUT = "Faster replies, uses more of the plan"
+
+
+def split_id(mid: str) -> Tuple[str, str, bool]:
+    """(base, level, fast) for one listed id; level is "" when the id has none."""
+    fast = mid.endswith("-fast")
+    rest = mid[:-len("-fast")] if fast else mid
+    for word in sorted(_LEVEL_WORDS, key=len, reverse=True):
+        if rest.endswith("-" + word) and len(rest) > len(word) + 1:
+            return rest[:-len(word) - 1], ("xhigh" if word == "extra-high" else word), fast
+    return rest, "", fast
+
+
+def group(listed: List[Tuple[str, str]]) -> List[Dict[str, Any]]:
+    """Listed (id, label) pairs as one row per model, its levels as efforts.
+
+    A row's `ids` maps each level ("" for the one without a level word) to its
+    id, `fast_ids` the same for the Fast tier, and `level` is the one Cursor
+    uses when none is picked: the id whose label doesn't name its level."""
+    import re
+    rows: Dict[str, Dict[str, Any]] = {}
+    for mid, label in listed:
+        if mid == "auto":
+            rows[""] = {"id": "", "label": "Default", "about": "Cursor picks the model", "model": "auto",
+                        "ctx": None, "efforts": [], "ids": {"": "auto"}, "fast_ids": {}, "level": ""}
+            continue
+        base, level, fast = split_id(mid)
+        row = rows.setdefault(base, {"id": base, "label": "", "about": "", "model": "", "ctx": None,
+                                     "efforts": [], "ids": {}, "fast_ids": {}, "level": None, "_labels": {}})
+        (row["fast_ids"] if fast else row["ids"])[level] = mid
+        if " 1M" in label:
+            row["ctx"] = 1000000
+        if not fast:
+            row["_labels"][level] = label
+            named = _LEVEL_WORDS.get(level, "")
+            if row["level"] is None and (not level or not re.search(r"\b" + re.escape(named) + r"\b", label)):
+                row["level"], row["label"] = level, label
+    out = []
+    for base, row in rows.items():
+        labels = row.pop("_labels", {})
+        if not row["ids"] and row["fast_ids"]:              # only a Fast id listed
+            row["ids"] = dict(row["fast_ids"])
+        if row["level"] is None:
+            first = next(iter(row["ids"]), "")
+            row["level"] = first
+            named = _LEVEL_WORDS.get(first, "")
+            label = labels.get(first, base)
+            row["label"] = re.sub(r"\s+" + re.escape(named) + r"\b", "", label).strip() if named else label
+        row["label"] = row["label"] or base
+        row["model"] = row["ids"].get(row["level"]) or next(iter(row["ids"].values()), base)
+        order = list(_LEVEL_WORDS)
+        row["efforts"] = sorted((lv for lv in row["ids"] if lv), key=order.index) if len(row["ids"]) > 1 else []
+        row["fast"] = FAST_ABOUT if row["fast_ids"] and base else ""
+        out.append(row)
+    return out
+
+
 def models() -> List[Dict[str, Any]]:
-    """What `--list-models` offers, asked once per installed version."""
+    """The models Cursor offers, one row per model with its levels."""
     exe = _base.exe_for(PROVIDER)
-    if not exe:
-        return []
+    return group(_listed(exe)) if exe else []
+
+
+def row_for(chosen: str, rows: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    """The row a saved model belongs to: by its base, or by any of its ids."""
+    rows = models() if rows is None else rows
+    return next((r for r in rows if r["id"] == chosen), None) or next(
+        (r for r in rows if chosen and (chosen in r["ids"].values() or chosen in r["fast_ids"].values())), None)
+
+
+def model_id(chosen: str, effort: str, fast: bool, rows: Optional[List[Dict[str, Any]]] = None) -> str:
+    """The id to run: the chosen model at the chosen level, on its Fast tier
+    when that is on and listed. A level it doesn't list falls back to its own."""
+    row = row_for(chosen, rows)
+    if not row:
+        return chosen
+    if not row["id"]:
+        return ""
+    if effort and effort in row["ids"]:
+        level = effort
+    elif chosen in row["ids"].values() or chosen in row["fast_ids"].values():
+        # A full id saved before levels were offered keeps its level.
+        level = split_id(chosen)[1]
+        level = level if level in row["ids"] else row["level"]
+    else:
+        level = row["level"]
+    if fast and level in row["fast_ids"]:
+        return row["fast_ids"][level]
+    return row["ids"].get(level) or row["model"]
+
+
+def _listed(exe: List[str]) -> List[Tuple[str, str]]:
+    """(id, label) for each model `--list-models` prints, asked once per installed version."""
     stamp = exe[-1]
     try:
         with open(_LIST_CACHE, encoding="utf-8") as f:
             cached = json.load(f)
-        if cached.get("stamp") == stamp and cached.get("models"):
-            return cached["models"]
+        if cached.get("stamp") == stamp and cached.get("listed"):
+            return [tuple(x) for x in cached["listed"]]
     except (OSError, ValueError):
         pass
     try:
@@ -99,23 +192,26 @@ def models() -> List[Dict[str, Any]]:
                            creationflags=0x08000000 if sys.platform == "win32" else 0)
     except Exception:
         return []
-    import re
-    out: List[Dict[str, Any]] = []
-    for line in re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", r.stdout.decode("utf-8", "replace")).splitlines():
-        mid, sep, label = line.strip().partition(" - ")
-        if not sep or " " in mid or not mid:
-            continue
-        label = re.sub(r"\s*\((current|default|current, default)\)\s*$", "", label).strip().strip("​")
-        out.append({"id": "" if mid == "auto" else mid, "label": "Default" if mid == "auto" else label,
-                    "about": "Cursor picks the model" if mid == "auto" else "", "model": mid,
-                    "ctx": 1000000 if " 1M" in label else None, "efforts": []})
+    out = parse_list(r.stdout.decode("utf-8", "replace"))
     if out:
         try:
             os.makedirs(_base._HOME, exist_ok=True)
             with open(_LIST_CACHE, "w", encoding="utf-8") as f:
-                json.dump({"stamp": stamp, "models": out}, f)
+                json.dump({"stamp": stamp, "listed": out}, f)
         except OSError:
             pass
+    return out
+
+
+def parse_list(text: str) -> List[Tuple[str, str]]:
+    import re
+    out: List[Tuple[str, str]] = []
+    for line in re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text).splitlines():
+        mid, sep, label = line.strip().partition(" - ")
+        if not sep or " " in mid or not mid:
+            continue
+        label = re.sub(r"\s*\((current|default|current, default)\)\s*$", "", label).strip().strip("​")
+        out.append((mid, label))
     return out
 
 
@@ -198,7 +294,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     except OSError as e:
         emit("error", message=f"Couldn't set Cursor up in {cwd}: {e}")
         return 1
-    model = _base.chosen_model(PROVIDER)
+    model = model_id(_base.chosen_model(PROVIDER), _base.chosen_effort(), _base.fast_on(PROVIDER))
     args = build_args(exe, session=session, model=model)
 
     t0 = time.time()

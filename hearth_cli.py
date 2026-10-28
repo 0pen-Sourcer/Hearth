@@ -3643,13 +3643,23 @@ class JarvisCLI:
                 info = _cb.agent_models(_agent)
                 levels = next((m["efforts"] for m in info["models"] if m["id"] == info["model"]), [])
                 can_off, now = False, (info.get("effort") or "default")
+                if not levels:
+                    print(f"{C_DIM}{info.get('label') or _agent} takes no thinking level for this model; "
+                          f"it decides how hard to think on its own.{C_RESET}")
+                    return True
             else:
                 _facts = {}
                 try:
                     from hearth import headless as _hl
-                    _facts = _hl.listed_facts(LOCAL_API_BASE, self.current_model or "")
+                    # A cloud model's levels from its provider's list and the catalog;
+                    # a local server's thinking is on or off.
+                    _facts = (_hl.effort_facts(LOCAL_API_BASE, self.current_model or "")
+                              if _hl.provider_for(LOCAL_API_BASE) != "local" else {})
                 except Exception:
                     pass
+                if _facts.get("reasoning") is False:
+                    print(f"{C_DIM}{self._model_label()} doesn't reason, so there is no thinking to set.{C_RESET}")
+                    return True
                 levels = list(_facts.get("efforts") or [])
                 can_off = _facts.get("can_off") is not False
                 now = "off" if not self.think_on else (getattr(self, "think_level", "") or "default")

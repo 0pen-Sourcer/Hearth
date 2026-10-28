@@ -420,8 +420,10 @@ _d = tempfile.mkdtemp()
 _launcher = os.path.join(_d, "copilot.bat")
 with open(_launcher, "w") as f:
     f.write('@echo off\r\necho Cannot find GitHub Copilot CLI\r\nset /p a="Install GitHub Copilot CLI? (y/N): "\r\n')
-_w = xa._which
+_w, _wa, _also = xa._which, xa._which_all, xa.AGENTS["copilot"].get("also")
 xa._which = lambda names: _launcher if names == ["copilot"] else _w(names)
+xa._which_all = lambda names: [_launcher] if names == ["copilot"] else _wa(names)
+xa.AGENTS["copilot"]["also"] = []                # the PC's own install, where there is one, isn't looked at
 _rj, _ej = xa._run_job, xa._end_job
 xa._run_job = lambda aid, kind, argv, limit: (1, ["npm ERR! stand-in"], False)
 xa._end_job = lambda *a, **k: None
@@ -429,7 +431,8 @@ if sys.platform == "win32":
     _got = xa.install("copilot")
     check(f"a launcher that only offers to install the CLI is not the CLI, so Install really installs {xa.find('copilot')} {_got}",
           xa.find("copilot") is None and not _got.get("already") and not _got.get("ok"))
-xa._which, xa._run_job, xa._end_job = _w, _rj, _ej
+xa._which, xa._which_all, xa._run_job, xa._end_job = _w, _wa, _rj, _ej
+xa.AGENTS["copilot"]["also"] = _also
 
 # A helper on OpenCode used its own broken default model; it can be given one, and
 # without one it takes the model picked for that agent as JARVIS's brain.

@@ -96,6 +96,7 @@ AGENTS: Dict[str, Dict[str, Any]] = {
                      "stream": "cursor", "prompt_arg": True,
                      "also": [os.path.join("%LOCALAPPDATA%", "cursor-agent", "cursor-agent.cmd")]},
     "copilot": {"label": "Copilot CLI", "maker": "GitHub", "exe": ["copilot"],
+                "also": [r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\GitHub.Copilot_*\copilot.exe"],
                 "args": lambda allow: (["--allow-all-tools"] if allow == "auto" else []) + ["-p"],
                 "stream": "text", "prompt_arg": True},
     "goose": {"label": "Goose", "maker": "Block", "exe": ["goose"],
@@ -169,22 +170,66 @@ def _which(names: List[str]) -> Optional[str]:
     return None
 
 
+def _which_all(names: List[str]) -> List[str]:
+    """Every file on PATH for these names, in PATH order."""
+    exts = (".cmd", ".exe", ".bat", ".com") if sys.platform == "win32" else ("",)
+    dirs = [d.strip().strip('"') for d in (os.environ.get("PATH") or "").split(os.pathsep) if d.strip()]
+    out: List[str] = []
+    for n in names:
+        for ext in exts:
+            for d in dirs:
+                p = os.path.join(d, n + ext)
+                if os.path.isfile(p) and (sys.platform == "win32" or os.access(p, os.X_OK)):
+                    _add_new(out, p)
+    return out
+
+
+def _add_new(paths: List[str], p: str) -> None:
+    key = os.path.normcase(os.path.realpath(p))
+    if all(os.path.normcase(os.path.realpath(q)) != key for q in paths):
+        paths.append(p)
+
+
+_ANSWERS: Dict[Tuple[str, float], bool] = {}
+
+
+def _is_the_program(path: str) -> bool:
+    """Whether `path --version` answers as the program itself. An editor can put
+    a stand-in under the same name that only says the real one isn't installed."""
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return False
+    if key not in _ANSWERS:
+        try:
+            r = subprocess.run(_direct_argv(path) + ["--version"], capture_output=True, timeout=20,
+                               stdin=subprocess.DEVNULL, creationflags=_NO_WINDOW)
+            said = (r.stdout + r.stderr).decode("utf-8", "replace").lower()
+            _ANSWERS[key] = r.returncode == 0 and "not found" not in said and "not installed" not in said
+        except Exception:
+            _ANSWERS[key] = False
+    return _ANSWERS[key]
+
+
 def find(aid: str) -> Optional[str]:
-    """Where an agent's CLI is: on PATH, or where its desktop app keeps it."""
+    """Where an agent's CLI is: on PATH, or where its installer or desktop app
+    keeps it. With more than one, the first that answers as the program."""
     spec = AGENTS.get(aid) or {}
-    path = _which(spec.get("exe") or [])
-    # A batch file that isn't an npm shim is a launcher of something else:
-    # VS Code puts a "copilot" on PATH that offers to install the real CLI
-    # and sits waiting for an answer. That isn't the agent.
-    if path and spec.get("prompt_arg") and _direct_argv(path)[0].lower().endswith((".cmd", ".bat")):
-        path = None
-    if path:
-        return path
+    hits = _which_all(spec.get("exe") or [])
+    if not hits:
+        one = _which(spec.get("exe") or [])
+        hits = [one] if one else []
+    # A batch file that isn't an npm shim is a launcher of something else that
+    # sits waiting for an answer. That isn't the agent.
+    if spec.get("prompt_arg"):
+        hits = [p for p in hits if not _direct_argv(p)[0].lower().endswith((".cmd", ".bat"))]
     for pat in spec.get("also") or []:
-        hits = [p for p in glob.glob(os.path.expandvars(os.path.expanduser(pat))) if os.path.isfile(p)]
-        if hits:
-            return max(hits, key=os.path.getmtime)
-    return None
+        found = [p for p in glob.glob(os.path.expandvars(os.path.expanduser(pat))) if os.path.isfile(p)]
+        if found:
+            _add_new(hits, max(found, key=os.path.getmtime))
+    if len(hits) > 1:
+        return next((p for p in hits if _is_the_program(p)), hits[0])
+    return hits[0] if hits else None
 
 
 # An agent whose own account turned it away: which one, and what it said.

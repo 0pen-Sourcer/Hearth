@@ -44,10 +44,14 @@ BRAINS = {"claude-code": "Claude Code", "codex": "Codex", "cursor-agent": "Curso
 PLANS = {"claude-code": "Claude", "codex": "ChatGPT", "cursor-agent": "Cursor"}
 # Agents that speak the Agent Client Protocol, run by acp_brain: how each is
 # started over ACP, and, where ACP comes as a separate adapter, its program.
+# levels_args: the command that lists every model with its reasoning levels.
+# effort_flag: the start flag that sets the level, its values read from --help.
+# Either way a thought_level option the session offers comes first.
 ACP = {
-    "opencode": {"label": "OpenCode", "plan": "OpenCode", "site": "https://opencode.ai", "args": ["acp"]},
+    "opencode": {"label": "OpenCode", "plan": "OpenCode", "site": "https://opencode.ai", "args": ["acp"],
+                 "levels_args": ["models", "--verbose"]},
     "copilot": {"label": "Copilot CLI", "plan": "GitHub Copilot", "site": "https://github.com/github/copilot-cli",
-                "args": ["--acp"]},
+                "args": ["--acp"], "effort_flag": "--reasoning-effort"},
     "goose": {"label": "Goose", "plan": "own provider's", "site": "https://block.github.io/goose", "args": ["acp"]},
     # Not "grok": that name is xAI's API in the provider list.
     "grok-build": {"label": "Grok Build", "plan": "xAI", "site": "https://x.ai", "agent": "grok",
@@ -472,8 +476,14 @@ def agent_models(provider: str) -> Dict[str, Any]:
         models = acp_brain.models(provider)
     else:
         models = []
+    chosen = chosen_model(provider)
+    if provider == "cursor-agent" and chosen:
+        # A full Cursor id saved before its levels were grouped is its model's row.
+        from . import cursor_brain
+        row = cursor_brain.row_for(chosen, models)
+        chosen = row["id"] if row else chosen
     return {"provider": provider, "label": BRAINS.get(provider, provider), "models": models,
-            "model": chosen_model(provider), "effort": chosen_effort(), "fast_on": fast_on(provider)}
+            "model": chosen, "effort": chosen_effort(), "fast_on": fast_on(provider)}
 
 
 def context_window(provider: Optional[str] = None) -> Optional[int]:
@@ -481,8 +491,9 @@ def context_window(provider: Optional[str] = None) -> Optional[int]:
     provider = provider or current()
     if not provider:
         return None
-    want = chosen_model(provider)
-    for m in agent_models(provider)["models"]:
+    info = agent_models(provider)
+    want = info["model"]
+    for m in info["models"]:
         if m["id"] == want:
             return m.get("ctx")
     return None

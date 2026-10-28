@@ -35,6 +35,12 @@ def refused_field(err: Exception, kwargs: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _value(kwargs: Dict[str, Any], field: str) -> Any:
+    if field in kwargs:
+        return kwargs[field]
+    return (kwargs.get("extra_body") or {}).get(field)
+
+
 def _drop(kwargs: Dict[str, Any], field: str) -> None:
     kwargs.pop(field, None)
     extra = kwargs.get("extra_body")
@@ -45,7 +51,10 @@ def _drop(kwargs: Dict[str, Any], field: str) -> None:
 def _prepare(kwargs: Dict[str, Any]) -> str:
     model = str(kwargs.get("model") or "").lower()
     for f in _REFUSED.get(model, ()):
-        _drop(kwargs, f)
+        # "field=value": only that value was refused; the field stays for others.
+        name, eq, val = f.partition("=")
+        if not eq or str(_value(kwargs, name)) == val:
+            _drop(kwargs, name)
     return model
 
 
@@ -53,8 +62,14 @@ def _learn(err: Exception, kwargs: Dict[str, Any], model: str) -> bool:
     field = refused_field(err, kwargs)
     if not field:
         return False
+    # An error that quotes the value sent refuses that value, not the field:
+    # a reasoning level the model doesn't list leaves the others usable.
+    val = _value(kwargs, field)
+    msg = str(getattr(err, "message", "") or err)
+    if isinstance(val, str) and val and re.search(r"[`'\"]" + re.escape(val) + r"[`'\"]", msg):
+        field = f"{field}={val}"
     _REFUSED.setdefault(model, set()).add(field)
-    _drop(kwargs, field)
+    _drop(kwargs, field.partition("=")[0])
     return True
 
 
