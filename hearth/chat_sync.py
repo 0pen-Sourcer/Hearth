@@ -104,7 +104,7 @@ def listing(limit: int = 30) -> List[Dict[str, Any]]:
             continue
         out.append({"id": d.get("id") or fn[:-5], "title": d.get("title") or "Untitled",
                     "updated": d.get("updated") or 0, "source": d.get("source") or "window",
-                    "count": len(d.get("messages") or [])})
+                    "count": len(d.get("messages") or []), "pinned": bool(d.get("pinned"))})
     out.sort(key=lambda c: -int(c["updated"] or 0))
     return out[:limit]
 

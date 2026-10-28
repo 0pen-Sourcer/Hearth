@@ -200,7 +200,9 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "chats":
         rows = chat_sync.listing(int(m.get("limit") or 80))
         return {"chats": [{"id": r["id"], "title": r["title"], "at": r["updated"], "source": r["source"],
-                           "count": r["count"]} for r in rows], "own": own_chat}
+                           "count": r["count"], "pinned": bool(r.get("pinned"))} for r in rows], "own": own_chat}
+    if what == "chat":
+        return chat_action(m)
     if what == "open":
         from .term_render import tool_words
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
@@ -303,6 +305,65 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             s = {}
         return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or ""}
     return {"error": f"unknown request {what!r}"}
+
+
+def chat_action(m: Dict[str, Any]) -> Dict[str, Any]:
+    """Pin, rename or delete a chat from the phone, through the window's own
+    conversation routes, so the window's sidebar and the phone agree."""
+    cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
+    action = str(m.get("action") or "")
+    if not cid:
+        return {"ok": False, "error": "no chat"}
+    path = "/api/conversations/" + urllib.parse.quote(cid, safe="")
+    if action == "pin":
+        out = _window("POST", "/api/conversations/pin", {"id": cid, "pinned": bool(m.get("pinned"))})
+        return {"ok": out.get("ok") is not False, "pinned": bool(out.get("pinned")), **_why(out)}
+    if action == "rename":
+        title = " ".join(str(m.get("title") or "").split())[:120]
+        if not title:
+            return {"ok": False, "error": "a name can't be empty"}
+        d = _window("GET", path)
+        if d.get("ok") is False or not d.get("id"):
+            return {"ok": False, "error": d.get("error") or "that chat isn't on the PC"}
+        d["title"], d["titled"] = title, True        # named by hand: never retitled
+        out = _window("POST", "/api/conversations", d)
+        return {"ok": out.get("ok") is not False, "title": title, **_why(out)}
+    if action == "delete":
+        out = _window("DELETE", path)
+        return {"ok": out.get("ok") is not False, **_why(out)}
+    return {"ok": False, "error": f"unknown action {action!r}"}
+
+
+def _why(out: Dict[str, Any]) -> Dict[str, Any]:
+    return {"error": out.get("error") or "the PC didn't do it"} if out.get("ok") is False else {}
+
+
+def drop_from(cid: str, text: str, back: int = 0) -> bool:
+    """An edited message from the phone: the chat goes back to just before it,
+    so the new words are asked in its place. `back` counts the person's
+    messages after it; the text has to match, or nothing is dropped."""
+    from . import chat_sync
+    d = chat_sync.load(cid)
+    msgs = list((d or {}).get("messages") or [])
+    want = " ".join(str(text or "").split())
+    if not msgs or not want:
+        return False
+
+    def said(x):
+        # A message that carried a file has the note about it after the words.
+        return re.sub(r"\s*\[They sent .+$", "", " ".join(chat_sync._text(x.get("content")).split()))
+
+    mine = [i for i, x in enumerate(msgs) if x.get("role") == "user"]
+    at = None
+    if 0 <= back < len(mine) and said(msgs[mine[-1 - back]]) == want:
+        at = mine[-1 - back]
+    else:
+        at = next((i for i in reversed(mine) if said(msgs[i]) == want), None)
+    if at is None:
+        return False
+    d["messages"], d["msg_count"] = msgs[:at], at
+    chat_sync.atomic_write_json(chat_sync._path(cid), d, indent=2, ensure_ascii=False)
+    return True
 
 
 def team_now() -> List[Dict[str, Any]]:
@@ -907,6 +968,10 @@ class Bridge:
         if m.get("voice"):
             ext = str(m.get("voice_ext") or "webm").strip(".").lower()
             voice = cc.save_upload(R.unb64(m["voice"]), "voice-note." + (ext if ext in ("webm", "mp4", "ogg", "m4a", "wav") else "webm"))
+        edit = m.get("edit") if isinstance(m.get("edit"), dict) else None
+        if edit and m.get("chat"):
+            cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat")))[:80]
+            drop_from(cid, str(edit.get("text") or ""), int(edit.get("back") or 0))
         self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files,
                          cid=str(m.get("chat") or ""), regen=bool(m.get("regen")))
 
