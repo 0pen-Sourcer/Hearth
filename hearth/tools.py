@@ -837,7 +837,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "message_helper",
         "description":
             "For a helper: ask or tell another helper that is working at the same "
-            "time, by name, or the assistant that sent you (to: 'JARVIS'). Use it when "
+            "time, by name, or the assistant that sent you (to: 'main'). Use it when "
             "their part of the job touches yours, or to send word part-way: something "
             "found that changes the plan, or a question only they can answer. Set "
             "wait_for_reply to wait for a helper's answer (up to 5 minutes).",
@@ -1567,10 +1567,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "learn_environment",
         "description": (
-            "Re-scan this machine (GPU/VRAM, RAM, installed models, top-level drive map) "
-            "and refresh it into long-term memory. Call this when the user installs a new "
-            "model, adds a drive, or asks you to 'get to know my setup' / 'relearn my PC'. "
-            "Fast and non-recursive. It's how you stay grounded instead of disk-scanning."
+            "This machine as it is now: GPU/VRAM, RAM, OS and the models the local server has. "
+            "Call it when the user asks what their PC can run, adds a GPU or a model, or asks "
+            "you to get to know their setup. Kept for the app, not saved as one of their memories."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -3675,7 +3674,7 @@ def _destructive_refusal(p: Dict, cmd: str, tool: str) -> Optional[str]:
         if bad:
             if _autonomous:
                 where = ("A helper can't run destructive commands. Put what you would "
-                         "run and why in your report, and JARVIS can ask them.")
+                         "run and why in your report, and the assistant who sent you can ask them.")
             else:
                 where = ("Nobody approved it where they can see it, so it can't run from "
                          "here even if they say yes in this chat. Say what it would do and "
@@ -6445,6 +6444,8 @@ def _load_model(p: Dict) -> str:
             return "Error: " + str(r.get("error") or r.get("message") or "the model didn't load")
         _save_settings({"helper_model": path, "helper_ctx": ctx})
         llmserver.invalidate_status_cache()
+        if r.get("shared"):
+            return str(r.get("note")) + " Start one with spawn_subagent runs_on='local'."
         return (f"{name} is loaded for helpers at {r.get('url') or 'the helper port'}. "
                 "Start one with spawn_subagent runs_on='local'. Your own brain is unchanged.")
     from .web import load_local_brain
@@ -6515,7 +6516,7 @@ def _list_models(p: Dict) -> str:
 def _learn_environment(p: Dict) -> str:
     from .environment import learn_environment
     endpoint = _RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE")
-    return learn_environment(endpoint=endpoint)
+    return learn_environment(endpoint=endpoint, detail=True)
 
 
 # ---------------------------------------------------------------------------
@@ -8657,26 +8658,39 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         pass  # never block a call because the schema lookup itself failed
 
     t0 = datetime.now()
+    # What a file-changing call replaces is copied aside first, so it can be undone (hearth/undo.py).
+    _undo = None
+    if name in _UNDOABLE:
+        try:
+            from . import undo as _undo_mod
+            _undo = _undo_mod.before(name, args)
+        except Exception:
+            _undo = None
     try:
         result = handler(args)
     except PermissionError as e:
+        _undo_done(_undo, False)
         msg = f"Error ({name}): {e}"
         _log_activity("error", tool=name, id=_cid, error=str(e))
         return msg
     except FileNotFoundError as e:
+        _undo_done(_undo, False)
         msg = f"Error ({name}): file not found: {e}"
         _log_activity("error", tool=name, id=_cid, error=str(e))
         return msg
     except KeyError as e:
+        _undo_done(_undo, False)
         msg = f"Error ({name}): missing required parameter {e}"
         _log_activity("error", tool=name, id=_cid, error=str(e))
         return msg
     except Exception as e:
+        _undo_done(_undo, False)
         msg = f"Error ({name}): {type(e).__name__}: {e}"
         _log_activity("error", tool=name, id=_cid, error=str(e))
         return msg
     if not isinstance(result, str):
         result = json.dumps(result, ensure_ascii=False, default=str)
+    _undo_done(_undo, not _says_failed(result))
     # A caller can ask for more of its own result (web_fetch on a big page,
     # read_file on long source). Bounded so one call cannot flood the context.
     _cap = RESULT_CAPS.get(name, DEFAULT_CAP)
@@ -8691,6 +8705,19 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
     _log_activity("result", tool=name, id=_cid, chars=len(truncated), ms=dt_ms,
                   ok=not _says_failed(truncated), preview=truncated[:300])
     return truncated
+
+
+_UNDOABLE = {"write_file", "edit_file", "delete_path", "move_path", "create_directory", "run_command"}
+
+
+def _undo_done(token, ok: bool) -> None:
+    if token is None:
+        return
+    try:
+        from . import undo as _undo_mod
+        _undo_mod.after(token, ok)
+    except Exception:
+        pass
 
 
 def _says_failed(text: str) -> bool:
@@ -9262,17 +9289,45 @@ def mode_allows(name: str, args=None) -> bool:
     if name == "connectors" and str((args or {}).get("action") or "status") == "status":
         return True                     # looking at what's connected changes nothing
     if m == "auto":
+        # What the app made itself (this week), it may delete or move without asking: each change is
+        # copied aside first, so it can be undone (hearth/undo.py).
+        if name in ("delete_path", "move_path") and _all_made_by_app(name, args):
+            return True
         if name in _ALWAYS_ASK_IN_AUTO:
             return False
         if name == "delegate":
             return True                 # an agent program, under its own rules; Auto doesn't stop it
         if name in _SHELL_TOOLS:
             cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
-            return bool(cmd) and _is_destructive(cmd) is None and _is_outward(cmd) is None
+            if bool(cmd) and _is_destructive(cmd) is None and _is_outward(cmd) is None:
+                return True
+            # A plain delete of only what the app made (rm -rf <a folder it created>) goes ahead too.
+            if name == "run_command" and cmd and _is_outward(cmd) is None:
+                from .undo import delete_targets
+                paths = delete_targets(cmd, str((args or {}).get("cwd") or ""))
+                return bool(paths) and all(_made(p) for p in paths)
+            return False
         return True
     if m == "edits":
         return name in _EDIT_TOOLS
     return False
+
+
+def _made(path: str) -> bool:
+    try:
+        from .undo import made_by_app
+        return made_by_app(path)
+    except Exception:
+        return False
+
+
+def _all_made_by_app(name: str, args) -> bool:
+    a = args or {}
+    try:
+        paths = [_write_path(a["path"])] if name == "delete_path" else [_write_path(a["source"])]
+    except (KeyError, TypeError):
+        return False
+    return all(_made(p) for p in paths)
 
 
 def standing_permission(name: str, args=None) -> str:

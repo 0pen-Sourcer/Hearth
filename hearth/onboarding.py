@@ -8,6 +8,7 @@ answer owns one profile line, so answering again replaces it.
 from __future__ import annotations
 
 import os
+import re
 from typing import Dict, Optional
 
 # The tone choices both setups offer, and how each reads to the model.
@@ -23,6 +24,36 @@ TONE_LABELS = {
     "brief": "Brief: minimum words",
 }
 AUDIO = ("headphones", "speakers")
+
+# Languages listening knows, as Settings lists them (code: name).
+LANGUAGES = {
+    "en": "English", "hi": "Hindi", "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese",
+    "ru": "Russian", "ar": "Arabic", "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "it": "Italian",
+    "tr": "Turkish", "id": "Indonesian", "vi": "Vietnamese", "bn": "Bengali", "ta": "Tamil", "te": "Telugu",
+    "mr": "Marathi", "ur": "Urdu",
+}
+# The first letter of a voice id for each language that has voices.
+_VOICE_LETTER = {"hi": "h", "es": "e", "fr": "f", "it": "i", "pt": "p", "ja": "j", "zh": "z"}
+
+
+def language_code(answer: str) -> Optional[str]:
+    """'hindi', 'Hi' or 'hi' -> 'hi'; None when it isn't a language listening knows."""
+    a = (answer or "").strip().lower()
+    if a in LANGUAGES:
+        return a
+    return next((c for c, n in LANGUAGES.items() if n.lower() == a or (len(a) >= 3 and n.lower().startswith(a))), None)
+
+
+def voice_for(lang: str, current: str = "") -> Optional[str]:
+    """A voice that speaks `lang`, of the same kind as the current one, or None when
+    no voice speaks it (or the current one already does)."""
+    letter = _VOICE_LETTER.get(lang)
+    if not letter or (current or "")[:1] == letter:
+        return None
+    from .voice import KOKORO_VOICES
+    kind = (current or "af")[1:2]
+    same = [v for v in KOKORO_VOICES if v[:1] == letter and v[1:2] == kind]
+    return (same or [v for v in KOKORO_VOICES if v[:1] == letter] or [None])[0]
 
 
 def _set_profile_field(prefix: str, value: Optional[str]) -> None:
@@ -95,6 +126,10 @@ def apply(answers: Dict[str, str]) -> Dict[str, object]:
     for key in ("ui_theme", "ui_accent", "ui_mode", "voice_name", "voice_speed"):
         if a.get(key):
             settings[key] = a[key]
+    if "language" in a and isinstance(a["language"], str) and re.fullmatch(r"[a-z]{0,3}", a["language"]):
+        # The language spoken to it: listening uses it (a multilingual model for
+        # anything but English); blank means work it out for each utterance.
+        settings["stt_language"] = a["language"]
     if "voice" in a:
         on = a["voice"] in (True, "full", "yes", "on")
         settings["voice_tts"] = on

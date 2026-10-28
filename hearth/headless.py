@@ -1718,6 +1718,13 @@ async def _run_once(
                 for _sp in ("top_k", "top_p", "min_p"):
                     if _sp in _scfg:
                         _xb[_sp] = _scfg[_sp]
+                # The chat keeps slot 0 of Hearth's own server, so a helper never
+                # pushes its cache out (kv_slots).
+                try:
+                    from . import kv_slots as _kvs
+                    _xb.update(_kvs.pin(LOCAL_API_BASE, _kvs.MAIN))
+                except Exception:
+                    pass
                 kwargs["extra_body"] = _xb
             else:
                 # Cloud: actually disable reasoning at the API when think is

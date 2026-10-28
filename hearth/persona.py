@@ -69,6 +69,14 @@ def _brain_line() -> str:
             "run on this PC.")
 
 
+def _this_pc() -> str:
+    try:
+        from .environment import this_pc_line
+        return this_pc_line()
+    except Exception:
+        return ""
+
+
 def _other_agents_line() -> str:
     """Agent CLIs installed here are separate programs the user can name."""
     try:
@@ -118,6 +126,7 @@ shell, browser, screen and voice, all on this machine.
 When they ask for something you go and do it, then say what happened. Calm,
 sharp, a little dry. Never a help desk.
 {_brain_line()} Asked what you run on, say exactly that.
+{_this_pc()}
 
 You work for one person on their own PC. The framework you run inside is Inglen
 (it used to be called Hearth), so "Inglen", "Hearth" or "hey hearth" means you:

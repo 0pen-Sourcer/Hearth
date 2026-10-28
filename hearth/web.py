@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import argparse
 from . import env as _env
+from . import live_bus
+live_bus.IN_WINDOW = True              # this process serves /api/events
 import asyncio
 import base64
 import io
@@ -39,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+import secrets
 import threading
 import time
 import urllib.parse
@@ -513,6 +516,7 @@ def _save_convo(data: Dict) -> bool:
     p = _convo_path(cid)
     try:
         _atomic_write_json(p, data, indent=2, ensure_ascii=False)
+        live_bus.publish({"kind": "chat", "chat": cid})
         return True
     except OSError:
         return False
@@ -524,6 +528,7 @@ def _delete_convo(cid: str) -> bool:
         return False
     try:
         os.remove(p)
+        live_bus.publish({"kind": "chat", "chat": cid, "gone": True})
         return True
     except OSError:
         return False
@@ -1535,7 +1540,11 @@ def _load_settings() -> Dict:
         # Apply on the next start_builtin (settings persist; restart to act).
         "server_autoboot": True,        # auto-load preferred_model on Hearth launch
         "server_default_ctx": 24576,    # 24K. Persona+tools = ~18K; needs headroom for chat+output. 16K was tight, 8K silently OOM'd.
-        "server_parallel_slots": 1,     # concurrent request slots. 1 = sub-agents queue. Each slot costs another ctx worth of KV cache, so this is clamped to free VRAM at load.
+        # Concurrent request slots: 0 = from graphics memory (llmserver.get_parallel_slots).
+        # A number counts only with server_parallel_slots_chosen: the old default of 1 was
+        # written to every settings file by the first save and then read as a choice.
+        "server_parallel_slots": 0,
+        "server_parallel_slots_chosen": False,
         "keep_local_warm": False,       # when switching to cloud, keep the local builtin loaded? Off = free VRAM (default). On = leave it warm so quick swap-back doesn't reload (~10s tax). Power-user toggle.
         # ---- Toast quiet-mode toggles (user-controlled noise level) ----
         "toast_facts_saved": True,      # "Remembered N facts" on auto-extract
@@ -1725,7 +1734,10 @@ def _save_settings_locked(d: Dict) -> Dict:
     _was_cloud = _prev_provider in _CLOUD
     _is_cloud_now = _new_provider in _CLOUD
     _prev_tts_device = cur.get("tts_device", "cpu")
+    _changed = sorted(k for k, v in d.items() if v is not None and cur.get(k) != v)
     cur.update({k: v for k, v in d.items() if v is not None})
+    if _changed:
+        live_bus.publish({"kind": "settings", "keys": [k for k in _changed if "key" not in k]})
     # A model file on this PC is never a cloud provider's model. Saved as one,
     # every message would ask the provider for a name it has never heard of.
     from .headless import PROVIDERS as _known
@@ -2043,6 +2055,31 @@ class HearthHandler(BaseHTTPRequestHandler):
     def _request_allowed(self) -> bool:
         return self._host_allowed() and self._origin_allowed()
 
+    def _events(self) -> None:
+        """What changes, as it changes (live_bus), to the window and to the phone bridge."""
+        q = live_bus.subscribe()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            self.wfile.write(b": open\n\n")
+            self.wfile.flush()
+            import queue as _queue
+            while True:
+                try:
+                    ev = q.get(timeout=15)
+                    data = "data: " + json.dumps(ev, ensure_ascii=False, default=str) + "\n\n"
+                except _queue.Empty:
+                    data = ": still here\n\n"
+                self.wfile.write(data.encode("utf-8"))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            live_bus.unsubscribe(q)
+
     def do_OPTIONS(self) -> None:
         # Hearth's own page is same-origin and never preflights. A preflight is
         # only ever another site asking permission, so it gets none.
@@ -2053,10 +2090,16 @@ class HearthHandler(BaseHTTPRequestHandler):
         if not self._request_allowed():
             return self._send_json(403, {"error": "forbidden origin"})
         path = urllib.parse.urlparse(self.path).path
+        if path == "/api/events":
+            return self._events()
         if path in ("/", "/index.html", "/ui"):
             return self._serve_ui()
         if path == "/room.js":
             return self._serve_room_js()
+        if path == "/api/undo":
+            # The newest file changes that can be put back (hearth/undo.py).
+            from . import undo as _undo
+            return self._send_json(200, {"changes": _undo.recent(30)})
         if path == "/api/room/now":
             # What JARVIS is doing in this window and in the terminal, for the
             # phone's room (the window's own room reads its page state).
@@ -2854,6 +2897,12 @@ class HearthHandler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/chat":
             return self._stream_chat()
+        if path == "/api/events":
+            # Another process (a bridge, the terminal) saying what changed; passed to every listener.
+            ev = self._read_json()
+            if isinstance(ev, dict) and ev.get("kind") in ("chat", "settings", "turn"):
+                live_bus.publish(ev)
+            return self._send_json(200, {"ok": True})
         if path == "/api/cancel":
             _CANCEL.set()  # run_once checks this between turns and bails out
             return self._send_json(200, {"cancelled": True})
@@ -3627,6 +3676,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             data = _cs.keep_terminal_turns(_load_convo(data["id"]), data)
             ok = _save_convo(data)
             return self._send_json(200 if ok else 500, {"ok": ok})
+        if path == "/api/undo":
+            from . import undo as _undo
+            return self._send_json(200, _undo.undo(str(self._read_json().get("id") or "")))
         if path == "/api/conversations/seen":
             data = _load_convo((self._read_json().get("id") or "").strip())
             if not data:
@@ -5115,8 +5167,17 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
+        _live_turn = secrets.token_hex(5)
+        live_bus.publish(live_bus.turn_event(chat_id, "window", _live_turn, "start", {"text": prompt}) or {})
+
         def emit(event_type: str, **fields: Any) -> None:
             _turn_saw(event_type, fields)
+            try:                                 # the phone and other windows see it as it's written
+                ev = live_bus.turn_event(chat_id, "window", _live_turn, event_type, fields)
+                if ev:
+                    live_bus.publish(ev)
+            except Exception:
+                pass
             line = json.dumps({"type": event_type, **fields}, ensure_ascii=False, default=str) + "\n"
             try:
                 self.wfile.write(line.encode("utf-8"))
@@ -5875,21 +5936,12 @@ def _maybe_learn_environment_async() -> None:
     HEARTH_NO_ONBOARDING=1."""
     if _env.get("NO_ONBOARDING") in ("1", "true", "yes"):
         return
-    onboarded = False
-    try:
-        from hearth.tools import MEMORY_DIR
-        idx = os.path.join(MEMORY_DIR, "MEMORY.md")
-        if os.path.exists(idx):
-            with open(idx, "r", encoding="utf-8") as f:
-                if sum(1 for ln in f if ln.strip().startswith("-")) >= 2:
-                    onboarded = True
-    except OSError:
-        return
-
     def _go():
         try:
             from hearth import environment as _envmod
-            if onboarded:
+            # Machine memories from older versions go; the facts live in this_pc.json now.
+            _envmod.drop_old_memories()
+            if _envmod.read_this_pc():
                 # Already onboarded: only relearn if the machine actually changed
                 # (drive plugged in, GPU swap) so context stays fresh without churn.
                 msg = _envmod.refresh_environment_if_changed(endpoint=LOCAL_API_BASE)

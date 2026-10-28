@@ -952,13 +952,22 @@ async def _run_subagent_async(
 
     with _INBOX_LOCK:
         _INBOX[agent_id] = []
+    # On Hearth's own llama-server a helper keeps a slot, and so its cache, of its own.
+    from . import kv_slots
+    _PINS[agent_id] = kv_slots.pin(base, agent_id)
     try:
         return await _subagent_turns(client, model, messages, tools, max_turns, agent_id, tpath,
                                      used, should_cancel, execute_tool)
     finally:
         with _INBOX_LOCK:
             _INBOX.pop(agent_id, None)
+        _PINS.pop(agent_id, None)
+        kv_slots.release(agent_id)
         await _close(client)
+
+
+# agent_id -> request fields that keep it on its own server slot (kv_slots.pin)
+_PINS: Dict[str, Dict[str, Any]] = {}
 
 
 async def _close(client) -> None:
@@ -1016,6 +1025,7 @@ async def _subagent_turns(client, model, messages, tools, max_turns, agent_id, t
                 tool_choice="auto" if tools and not wrap_up else None,
                 temperature=0.4,
                 stream=False,
+                **({"extra_body": dict(_PINS[agent_id])} if _PINS.get(agent_id) else {}),
             )
         except Exception as e:
             # Said the way the chat says it: what went wrong and what to do,

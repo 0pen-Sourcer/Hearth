@@ -43,12 +43,23 @@ def install(files: dict) -> Path:
     return base
 
 
+# Patches are applied only when signed by a release key (test_signed_patches.py): sign with a key made here.
+from cryptography.hazmat.primitives import serialization as _S                   # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+import base64 as _b64                                                            # noqa: E402
+from hearth import release_keys as _rk                                           # noqa: E402
+from hearth.patch_sign import sign_zip as _sign                                  # noqa: E402
+_KEY = Ed25519PrivateKey.generate()
+_rk.PUBLIC_KEYS = [_b64.b64encode(_KEY.public_key().public_bytes(_S.Encoding.Raw, _S.PublicFormat.Raw)).decode()]
+
+
 def patch_zip(files: dict) -> str:
     fd, path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
     with zipfile.ZipFile(path, "w") as z:
         for name, body in files.items():
             z.writestr(name, body)
+    _sign(path, _KEY.private_bytes(_S.Encoding.Raw, _S.PrivateFormat.Raw, _S.NoEncryption()), updater.HEARTH_VERSION)
     return path
 
 

@@ -342,7 +342,7 @@ SLASH_COMMANDS = {
     "/mode": "what runs without asking: ask, edits, auto", "/perms": "saved permissions",
     "/allow": "let me write under a folder", "/disallow": "take that back", "/allowed": "folders I may write in",
     "/lockdown": "keep reads inside the workspace", "/about": "version and stats", "/update": "get a newer version",
-    "/repair": "restore damaged files", "/phone": "reach me from Telegram, Discord or WhatsApp", "/pair": "let someone in with their code", "/exit": "quit",
+    "/repair": "restore damaged files", "/undo": "put back a file change: /undo lists, /undo <n> puts one back", "/phone": "reach me from Telegram, Discord or WhatsApp", "/pair": "let someone in with their code", "/exit": "quit",
     # Other names for the same commands.
     "/endpoint": "same as /brain", "/provider": "same as /brain", "/load": "same as /model",
     "/usage": "same as /status", "/import": "same as /import-memory", "/skills": "same as /skill",
@@ -430,7 +430,7 @@ HELP_GROUPS = [
     ("Helpers", ["/team", "/agents", "/agent", "/jobs"]),
     ("Voice", ["/voice", "/listen", "/stt", "/sleep", "/wake"]),
     ("This PC", ["/allow", "/disallow", "/allowed", "/lockdown", "/perms", "/workspace", "/tools", "/mcp", "/skill", "/log"]),
-    ("Inglen", ["/about", "/update", "/repair", "/phone", "/pair", "/exit"]),
+    ("Inglen", ["/about", "/update", "/repair", "/undo", "/phone", "/pair", "/exit"]),
 ]
 
 
@@ -2191,7 +2191,10 @@ class JarvisCLI:
                 path = cache[idx].get("path")
             print(f"{C_DIM}starting the helper model…{C_RESET}")
             r = await asyncio.to_thread(llmserver.start_helper, path)
-            if r.get("ok"):
+            if r.get("ok") and r.get("shared"):
+                _save_setting("helper_model", path)
+                print(f"{C_OK}{r.get('note')}{C_RESET}")
+            elif r.get("ok"):
                 _save_setting("helper_model", path)
                 print(f"{C_OK}helper model ready: {r.get('model')}{C_RESET}{C_DIM}  helpers and sub-agents use it; the main model stays on the chat{C_RESET}")
             else:
@@ -2810,6 +2813,28 @@ class JarvisCLI:
         if low in ("/status", "/usage"):
             self._print_status()
             return True
+        if low == "/undo" or low.startswith("/undo "):
+            # File changes the agent made (written, changed, moved, deleted), newest first; each can be put back.
+            from hearth import undo as _undo
+            rows = _undo.recent(15)
+            arg = low[5:].strip()
+            if arg:
+                if not arg.isdigit() or not 1 <= int(arg) <= len(rows):
+                    print(f"{C_DIM}/undo lists the changes; /undo <number> puts one back{C_RESET}")
+                    return True
+                r = _undo.undo(rows[int(arg) - 1]["id"])
+                print(f"{C_OK}{r['said']}{C_RESET}" if r.get("ok") else f"{C_ERR}{r.get('error')}{C_RESET}")
+                return True
+            if not rows:
+                print(f"{C_DIM}nothing to put back: file changes show here for a week{C_RESET}")
+                return True
+            import time as _t
+            for i, c in enumerate(rows, 1):
+                ago = int(_t.time() - c["at"])
+                when = f"{ago // 60} min ago" if ago < 3600 else f"{ago // 3600} h ago" if ago < 86400 else f"{ago // 86400} d ago"
+                print(f"  {i:>2}. {c['what']}  {C_DIM}{when} · {c['where']}{'' if c['can'] else ' · too big to keep'}{C_RESET}")
+            print(f"{C_DIM}/undo <number> puts one back{C_RESET}")
+            return True
         if low == "/about":
             kind = "local" if _is_local_endpoint(LOCAL_API_BASE) else "cloud"
             try:
@@ -3028,7 +3053,8 @@ class JarvisCLI:
                 plan = {"codex": "on your ChatGPT plan (it counts toward your Codex limit)",
                         "claude-code": "on your Claude plan (it counts toward its usage limits)"}.get(
                             provider, f"on your {_cb.PLANS.get(provider, '')} plan")
-                print(f"{C_OK}JARVIS now thinks with {_cb.BRAINS[provider]}{C_RESET} {C_DIM}{plan}. "
+                from hearth.persona import NAME as _me
+                print(f"{C_OK}{_me} now thinks with {_cb.BRAINS[provider]}{C_RESET} {C_DIM}{plan}. "
                       f"Helpers keep using the local model. /brain local to switch back.{C_RESET}")
                 return True
 
@@ -4865,6 +4891,19 @@ class JarvisCLI:
         a = ask("Will you hear me on headphones or speakers? (h / s, Enter to skip)").lower()
         if a[:1] in ("h", "s"):
             answers["audio"] = "headphones" if a[:1] == "h" else "speakers"
+        lang = ask("What language will you speak to me in? (Enter for English, or a name like hindi, or 'any' to work it out each time)")
+        if lang:
+            code = "" if lang.lower() in ("any", "detect", "auto") else onboarding.language_code(lang)
+            if code is None:
+                print(f"  {C_DIM}I don't know that one by name. Settings, Voice lists the languages I can listen in.{C_RESET}")
+            else:
+                answers["language"] = code
+                voice = onboarding.voice_for(code, _env.get("VOICE", "") or "")
+                if voice:
+                    answers["voice_name"] = voice
+                    print(f"  {C_DIM}I'll listen for {onboarding.LANGUAGES[code]} and answer in a {onboarding.LANGUAGES[code]} voice.{C_RESET}")
+                elif code and code != "en" and code not in onboarding._VOICE_LETTER:
+                    print(f"  {C_DIM}I'll listen for {onboarding.LANGUAGES[code]}. No voice speaks it yet, so replies read out loud use an English voice.{C_RESET}")
         print()
         print(f"  {C_TOOL}Before I change things on your PC:{C_RESET}")
         print(f"  {C_DIM}    1  ask me every time{C_RESET}")
@@ -4914,6 +4953,9 @@ class JarvisCLI:
         from hearth.persona import NAME as _me
         print()
         _type_out(f"  {C_BRAND}Hey, I'm {_me}.{C_RESET}")
+        print(f"  {C_DIM}I run on your PC and do real things on it. I think with the AI you already pay for "
+              f"(an agent like Claude Code or Codex) or a model of your own, remember what matters, send "
+              f"helpers for bigger jobs, answer from your phone, and ask before anything risky.{C_RESET}")
         _type_out(f"  {C_DIM}A minute of setup so I fit how you work. Enter skips a question, "
                   f"Ctrl-C skips the rest.{C_RESET}", delay=0.004)
         print()
@@ -5079,13 +5121,16 @@ class JarvisCLI:
         # which leaves a first-timer at a blank cursor with no idea what this
         # thing accepts — the moment most people close it and don't come back.
         print(f"  {C_BRAND}─ you're set ─{C_RESET}")
-        print(f"  {C_DIM}Talk to me in plain English. I can actually act on this "
-              f"machine, so try:{C_RESET}")
+        print(f"  {C_DIM}Talk to me in your own words. I act on this machine, remember, and can "
+              f"send helpers, so try:{C_RESET}")
         print(f"  {C_TOOL}    what's taking up space on my C drive?{C_RESET}")
         print(f"  {C_TOOL}    summarise the newest PDF in my Downloads{C_RESET}")
+        print(f"  {C_TOOL}    compare three note-taking apps and remember which one I pick{C_RESET}")
         print(f"  {C_DIM}Anything that touches your system asks first. "
               f"{C_RESET}{C_TOOL}/help{C_RESET}{C_DIM} lists commands, "
-              f"{C_RESET}{C_TOOL}/models{C_RESET}{C_DIM} manages models.{C_RESET}")
+              f"{C_RESET}{C_TOOL}/models{C_RESET}{C_DIM} manages models, "
+              f"{C_RESET}{C_TOOL}/phone{C_RESET}{C_DIM} connects a chat app; the phone app pairs from the "
+              f"window's Settings, Plus.{C_RESET}")
         print()
 
     async def _ask_user_interactive(self, question: str, options: list, allow_other: bool) -> dict:

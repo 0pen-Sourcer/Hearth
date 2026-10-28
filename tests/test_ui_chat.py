@@ -836,7 +836,7 @@ with sync_playwright() as pw:
     check(f"the character picked in one place shows as picked in the other {extras['him'], extras['her']}",
           extras["him"] == ["him", "him"] and extras["her"] == ["her", "her"])
     check(f"the tour points at one thing at a time, moves on, and can be skipped {extras['tour']}",
-          extras["tour"] == ["What I think with", True, "Talk to me", False, "1"])
+          extras["tour"] == ["What I think with", True, "Ask for real things", False, "1"])
     check("a voice test reads a different line each time, in the voice's own language", extras["quotes"])
     check(f"while a model is loading the eject button stops it {extras['stop'], extras['eject']}",
           extras["stop"] == [False, "stop"] and extras["eject"] == [True, "eject"])

@@ -1128,12 +1128,18 @@
   .ap-room i { display: block; width: 100%; aspect-ratio: 3 / 2; background-size: cover; background-position: center;
     border-radius: calc(var(--r-lg) - 4px); image-rendering: pixelated; }
   .ap-room b { padding: 0 4px 2px; }
+  .undo-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+  .undo-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r); }
+  .undo-row > div { flex: 1; min-width: 0; }
+  .undo-row b { display: block; font-weight: 500; overflow-wrap: anywhere; }
+  .undo-row small { color: var(--fg-faint); font-size: 11.5px; }
   #tour-ring { position: fixed; z-index: 9000; border-radius: 12px; pointer-events: none;
     box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(0, 0, 0, .62); }
   #tour-card { position: fixed; z-index: 9001; width: 300px; background: var(--bg-1); border: 1px solid var(--border-strong);
     border-radius: var(--r-lg); padding: 14px 16px; box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .7); font-family: var(--sans); }
   #tour-card b { display: block; color: var(--fg); font-size: 14px; margin-bottom: 4px; }
   #tour-card p { margin: 0 0 12px; color: var(--fg-dim); font-size: 12.5px; line-height: 1.5; }
+  #tour-card p.tour-try { color: var(--fg); margin-top: -4px; }
   .tour-row { display: flex; align-items: center; gap: 8px; }
   .tour-row span { flex: 1; color: var(--fg-faint); font-size: 11.5px; }
   .tour-row button { background: none; border: 1px solid var(--border); color: var(--fg-dim); border-radius: var(--r);
@@ -3840,6 +3846,12 @@
     color: var(--accent-2); background: var(--accent-bg);
     padding: 3px 8px; border-radius: 999px; border: 1px solid var(--accent-line);
   }
+  /* What is different, on the welcome card: four short lines, each with a line icon. */
+  .ob-points { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 18px; margin: -8px 0 20px; }
+  .ob-points div { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--fg-dim); line-height: 1.45; }
+  .ob-points b { display: block; color: var(--fg); font-weight: 600; font-size: 13px; }
+  .ob-points svg { flex-shrink: 0; margin-top: 2px; color: var(--accent-2); }
+  .ob-lang-note { font-size: 11.5px; color: var(--fg-faint); margin-top: 6px; line-height: 1.45; }
   .ob-tipline {
     background: var(--bg-2); border: 1px solid var(--border);
     border-radius: var(--r); padding: 10px 14px;
@@ -5117,10 +5129,11 @@
         <div class="field">
           <div class="label">
             <div class="name">Concurrent agents <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
-            <div class="hint">How many requests the server handles at once. At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Inglen steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Inglen); changing it mid-session does not touch the running server.</div>
+            <div class="hint">How many requests the server handles at once. <strong>Automatic</strong> picks from your graphics memory (one under 14 GB, two at 16 GB, more above). At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Inglen steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Inglen); changing it mid-session does not touch the running server.</div>
           </div>
           <select id="setting-server-slots">
-            <option value="1" selected>1 · agents queue (lowest VRAM)</option>
+            <option value="0" selected>Automatic · from your graphics memory</option>
+            <option value="1">1 · agents queue (lowest VRAM)</option>
             <option value="2">2 · two at once</option>
             <option value="3">3 · needs headroom</option>
             <option value="4">4 · large VRAM only</option>
@@ -5496,9 +5509,14 @@
         <div class="ob-hero"><span class="ob-h" aria-hidden="true"><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span></div>
         <h1 class="ob-title">Hey, I'm <span class="ob-agent-name">JARVIS</span>.</h1>
         <p class="ob-sub">I run on your PC and do real things on it: open apps, find and read your
-          files, browse the web, and talk out loud if you want. Nothing leaves this machine unless you
-          pick a cloud model. A few quick choices and we're going.</p>
-        <div class="ob-tipline">Every choice here can be changed later in Settings. My name is yours to pick too, a few steps on.</div>
+          files, browse the web, and talk out loud if you want. What makes me different:</p>
+        <div class="ob-points">
+          <div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/><path d="M9 21h6"/></svg><span><b>The AI you already pay for</b>Think with an agent you use, like Claude Code or Codex, on its own plan. Or a model on this PC, or a cloud key.</span></div>
+          <div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg><span><b>I remember</b>What you tell me and what we worked on, whichever brain you pick. You can read and change all of it.</span></div>
+          <div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg><span><b>Helpers for big jobs</b>I hand parts of a bigger job to helpers and you watch them work.</span></div>
+          <div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg><span><b>From your phone, and I ask first</b>Talk to me from your phone or a chat app. Anything risky waits for your OK.</span></div>
+        </div>
+        <div class="ob-tipline">A few quick choices and we're going. Every one can be changed later in Settings, and my name is yours to pick too.</div>
       </div>
 
       <!-- ---- step 2: pick a brain ---- -->
@@ -5597,6 +5615,11 @@
              actually speaks the chosen voice/speed combo so the user hears
              it BEFORE committing - no surprises post-onboarding. -->
         <div id="ob-voice-picker" hidden style="margin-top:18px; padding:14px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r);">
+          <div style="margin-bottom:12px;">
+            <label for="ob-lang" style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">What language will you speak to me in?</label>
+            <select id="ob-lang" class="ob-select" style="width:100%;"></select>
+            <div class="ob-lang-note" id="ob-lang-note"></div>
+          </div>
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:end;">
             <div>
               <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Voice</label>
@@ -5812,13 +5835,14 @@
           </svg>
         </div>
         <h1 class="ob-title">You're all set.</h1>
-        <p class="ob-sub">Ask the way you'd ask a friend. I act on this PC, so try one of these:</p>
+        <p class="ob-sub">Ask the way you'd ask a friend. I act on this PC, I remember, and I can send helpers. Try one:</p>
         <div class="ob-choices ob-tries">
           <button class="ob-choice ob-try" data-try="What's taking up the most space on my C drive?"><div class="ob-choice-title">What's taking up the most space on my C drive?</div></button>
           <button class="ob-choice ob-try" data-try="Find the biggest files in my Downloads folder"><div class="ob-choice-title">Find the biggest files in my Downloads folder</div></button>
           <button class="ob-choice ob-try" data-try="Open Notepad and write me a short to-do list for today"><div class="ob-choice-title">Open Notepad and write me a short to-do list for today</div></button>
+          <button class="ob-choice ob-try" data-try="Compare three note-taking apps for me, with helpers if it is worth it, and remember which one I pick"><div class="ob-choice-title">Compare three note-taking apps for me and remember which one I pick</div></button>
         </div>
-        <div class="ob-tipline">Type <code>/help</code> for commands. Your phone and email connect from <b>Settings, Connectors</b>.</div>
+        <div class="ob-tipline">Type <code>/help</code> for commands. Chat apps and email connect from <b>Settings, Connectors</b>; your phone from <b>Settings, Plus</b>.</div>
       </div>
     </div>
 
@@ -6237,6 +6261,26 @@ function askConfirm(title, body, yesLabel = 'OK', danger = false) {
     watch.observe($('modal'), { attributes: true, attributeFilter: ['class'] });
   });
 }
+// Recent file changes, each with Undo: what the agent wrote, changed, moved or deleted (hearth/undo.py).
+async function showUndo() {
+  let list = [];
+  try { list = (await api('/api/undo')).changes || []; } catch (e) { toast("Couldn't read the changes", e.message, 'err'); return; }
+  const ago = (t) => { const s = Date.now() / 1000 - t; return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)} min ago`
+    : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`; };
+  const body = list.length ? '<div class="undo-list">' + list.map(c =>
+    `<div class="undo-row"><div><b>${esc(c.what)}</b><small>${esc(ago(c.at))} · ${esc(c.where)}</small></div>`
+    + (c.can ? `<button class="btn-mini" data-undo="${esc(c.id)}">Undo</button>` : '<small>too big to keep</small>') + '</div>').join('') + '</div>'
+    : '<p>Nothing to put back. Files the agent writes, changes, moves or deletes show here for a week.</p>';
+  showModal('Recent changes', body, [{ label: 'Close' }]);
+  document.querySelectorAll('#modal-body [data-undo]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const r = await api('/api/undo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                       body: JSON.stringify({ id: b.dataset.undo }) }).catch(e => ({ ok: false, error: e.message }));
+    if (r.ok) { toast(r.said, '', 'ok'); b.closest('.undo-row').remove(); }
+    else { toast("Couldn't undo it", r.error || '', 'err'); b.disabled = false; }
+  });
+}
+
 function showModal(title, body, actions = []) {
   $('modal-title').textContent = title;
   // Treat body as HTML iff it contains <tags>; plain strings still go in as
@@ -7160,6 +7204,65 @@ async function syncConvosFromDisk() {
 }
 setInterval(() => { if (!document.hidden) syncConvosFromDisk(); }, 5000);
 
+// What changed elsewhere, the moment it changes (live_bus on the PC): a chat
+// saved by the phone or the terminal, settings changed from the phone, and a
+// reply the phone asked for as it is written, in the chat open here. The 5 s
+// look above stays for when the stream is down.
+const LIVE = { turns: new Map(), draw: 0, sync: 0 };
+function liveArgs(tool, cmd) {
+  if (!cmd) return {};
+  if (/run_command|start_job/.test(tool)) return { command: cmd };
+  if (/web_search|search/.test(tool)) return { query: cmd };
+  if (/web_fetch|fetch_url|browse|open_url/.test(tool)) return { url: cmd };
+  return { path: cmd };
+}
+function liveDraw() {
+  clearTimeout(LIVE.draw);
+  LIVE.draw = setTimeout(() => { try { renderChat(); } catch {} }, 120);
+}
+function onLiveEvent(ev) {
+  if (!ev || typeof ev !== 'object') return;
+  if (ev.kind === 'chat') {
+    clearTimeout(LIVE.sync);
+    LIVE.sync = setTimeout(() => syncConvosFromDisk(), 120);
+    return;
+  }
+  if (ev.kind === 'settings') {
+    try { refreshState(); } catch {}
+    try { refreshModels(); } catch {}
+    return;
+  }
+  if (ev.kind !== 'turn' || ev.from === 'window') return;
+  const c = STATE.conversations.find(x => x.id === ev.chat);
+  if (!c || c._stub || (c.id === STATE.activeId && STATE.streaming)) return;
+  let t = LIVE.turns.get(ev.turn);
+  if (ev.type === 'start') {
+    const user = { role: 'user', content: ev.text || '', via: ev.from, at: Date.now(), _live: true };
+    const reply = { role: 'assistant', content: '', via: ev.from, at: Date.now(), events: [], _live: true };
+    c.messages = (c.messages || []).concat([user, reply]);
+    LIVE.turns.set(ev.turn, t = { c, reply });
+  }
+  if (!t) return;
+  const r = t.reply;
+  if (ev.type === 'chunk') r.content += ev.text || '';
+  else if (ev.type === 'said') r.content = ev.text || r.content;
+  else if (ev.type === 'step') r.events.push({ kind: 'tool', name: ev.tool || '', args: liveArgs(ev.tool || '', ev.cmd || ''), result: '', ms: 0, pos: r.content.length });
+  else if (ev.type === 'step_out') { const last = r.events[r.events.length - 1]; if (last) last.result = ev.out || ''; }
+  else if (ev.type === 'error') r.events.push({ kind: 'error', text: ev.text || '', pos: r.content.length });
+  else if (ev.type === 'end') { LIVE.turns.delete(ev.turn); setTimeout(() => syncConvosFromDisk(), 300); }
+  if (t.c.id === STATE.activeId) liveDraw();
+}
+(function followLive() {
+  if (typeof EventSource === 'undefined') return;
+  let es = null;
+  const open = () => {
+    try { es = new EventSource('/api/events'); } catch { return; }
+    es.onmessage = (m) => { try { onLiveEvent(JSON.parse(m.data)); } catch {} };
+    es.onerror = () => { try { es.close(); } catch {} setTimeout(open, 3000); };
+  };
+  open();
+})();
+
 // Fill in a stub's messages. Shared by every caller, so a chat is fetched once.
 async function ensureConvoLoaded(c) {
   if (!c || !c._stub) return c;
@@ -7185,7 +7288,7 @@ async function persistConvo(c) {
     // A stub has no messages yet; saving it would erase the chat on disk.
     if (c._stub) return;
     const { _loading, ...rest } = c;
-    const toSave = { ...rest, messages: (c.messages || []).filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__') };
+    const toSave = { ...rest, messages: (c.messages || []).filter(m => !m.silent && !m._live && m.content !== '__HEARTH_NOTIFY_FLUSH__') };
     await api('/api/conversations', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -12023,6 +12126,8 @@ async function handleSlash(raw) {
       newConversation(); renderChat(); return true;
     case '/tour':
       startTour(); return true;
+    case '/undo':
+      showUndo(); return true;
     case '/clear':
       if (c) {
         c.messages = [];
@@ -14495,6 +14600,8 @@ async function refreshSettings() {
     // saves the rename in Settings.
     const _inp = document.getElementById('input');
     if (_inp) _inp.placeholder = `Message ${_agentName()}…`;
+    const _tmi = document.getElementById('tm-input');      // the Team room's box too
+    if (_tmi) _tmi.placeholder = `Talk to ${_agentName()}…`;
     // Footer chip shows the agent name, not a hardcoded handle.
     const _sf = document.querySelector('.settings-side-footer .who');
     if (_sf) _sf.textContent = _agentName();
@@ -15489,9 +15596,11 @@ async function refreshSettings() {
     if (ctxSel)  { ctxSel.value  = String(s.server_default_ctx || 32768);
       ctxSel.onchange  = (e) => saveSetting('server_default_ctx', parseInt(e.target.value, 10)); }
     const slotSel = $('setting-server-slots');
-    if (slotSel) { slotSel.value = String(s.server_parallel_slots || 1);
-      slotSel.onchange = (e) => {
-        saveSetting('server_parallel_slots', parseInt(e.target.value, 10));
+    if (slotSel) { slotSel.value = s.server_parallel_slots_chosen ? String(s.server_parallel_slots || 1) : '0';
+      slotSel.onchange = async (e) => {
+        const n = parseInt(e.target.value, 10);
+        await saveSetting('server_parallel_slots_chosen', n > 0);
+        saveSetting('server_parallel_slots', n);
         // Slots are a launch argument, so a running server keeps its old count.
         toast('Applies on next model load', 'Reload the model (or restart the server) for the new slot count.', 'ok', 5000);
       }; }
@@ -16898,6 +17007,7 @@ const SLASH_COMMANDS = [
   { cmd: '/log',          desc: 'jump to the Logs view', group: 'Go to' },
   { cmd: '/settings',     desc: 'open Settings', group: 'Go to' },
   { cmd: '/tour',         desc: 'a quick look around the app', group: 'Help' },
+  { cmd: '/undo',         desc: 'put back a file change', group: 'Help' },
   { cmd: '/welcome',      desc: 'run the first-run setup again', group: 'Help' },
   { cmd: '/help',         desc: 'list all slash commands', group: 'Help' },
   { cmd: '/exit',         desc: 'close the app window (or /quit)', group: 'Help' },
@@ -18584,6 +18694,7 @@ function modelsWireRowClicks(pane) {
         const r = await api('/api/llmserver/helper', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model_path: mp }) });
         if (mp && !r.ok) toast("The helper model didn't start", r.error || '', 'err', 9000);
+        else if (mp && r.shared) toast('Helpers share the main model', r.note || '', 'ok', 7000);
         else toast(mp ? 'Helper model ready' : 'Helper model stopped',
                    mp ? 'Helpers and sub-agents use it now; the main model stays on the chat.' : '', 'ok', 4000);
       } catch (err) { toast("The helper model didn't start", err.message, 'err', 9000); }
@@ -20391,6 +20502,37 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
   });
 });
 
+// The language question in the voice step. The languages are the ones listening
+// knows (Settings' list); a language Inglen also has voices for swaps the voice
+// list for that language's voices, taken from Settings' own list, and naming any
+// language other than English makes listening use a multilingual model.
+(function setupOnboardingLanguage() {
+  const sel = document.getElementById('ob-lang'), voiceSel = document.getElementById('ob-voice-name');
+  const note = document.getElementById('ob-lang-note'), all = document.getElementById('setting-stt-language');
+  if (!sel || !voiceSel || !all) return;
+  const VOICES_FOR = { hi: 'Hindi', es: 'Spanish', fr: 'French', it: 'Italian', pt: 'Portuguese', ja: 'Japanese', zh: 'Mandarin' };
+  const english = voiceSel.innerHTML;
+  sel.innerHTML = [...all.options].filter(o => o.value).map(o => `<option value="${esc(o.value)}">${esc(o.textContent)}</option>`).join('')
+    + '<option value="">More than one, work it out each time</option>';
+  const mine = String(navigator.language || 'en').slice(0, 2).toLowerCase();
+  sel.value = [...sel.options].some(o => o.value === mine) ? mine : 'en';
+  const paint = () => {
+    const lang = sel.value, name = (sel.selectedOptions[0] || {}).textContent || '';
+    const group = VOICES_FOR[lang] && [...document.querySelectorAll('#setting-voice-name optgroup')].find(g => g.label === VOICES_FOR[lang]);
+    if (group && group.children.length) {
+      voiceSel.innerHTML = group.innerHTML;
+      note.textContent = `I'll listen for ${name} and answer in a ${name} voice.`;
+    } else {
+      if (voiceSel.querySelector('optgroup[label="Male"]') == null) voiceSel.innerHTML = english;
+      note.textContent = lang === 'en' ? ''
+        : !lang ? 'I work out the language of each thing you say. A little slower than naming one.'
+        : `I'll listen for ${name}. No voice speaks it yet, so a reply read out loud uses an English voice.`;
+    }
+  };
+  sel.addEventListener('change', paint);
+  paint();
+})();
+
 // Onboarding voice picker - speed label tracking + Test button
 (function setupOnboardingVoicePicker() {
   const speedInput = document.getElementById('ob-voice-speed');
@@ -20472,7 +20614,7 @@ async function obFinish(skipped) {
   // silently after onboarding.
   let agentName = ($('ob-agent-name')?.value || '').trim();
   if (agentName && !/^[A-Za-z0-9 ]{1,20}$/.test(agentName)) {
-    toast('Agent name skipped', 'Must be 1-20 chars, letters/digits/spaces. Using JARVIS - change later in Settings.', 'warn', 6000);
+    toast('Name skipped', `Names are 1 to 20 letters, digits or spaces. Keeping ${_agentName()}; change it any time in Settings.`, 'warn', 6000);
     agentName = '';
   }
   const voiceOn = obState.voice === 'full';
@@ -20501,6 +20643,7 @@ async function obFinish(skipped) {
       voice_speed: pickedSpeed,
       approval_mode: _obSegValue('approval'),
       audio: voiceOn ? (obState.audio || undefined) : undefined,
+      language: voiceOn && $('ob-lang') ? $('ob-lang').value : undefined,
     };
     if (obState.voice) answers.voice = obState.voice;
     if (!skipped) Object.assign(answers, { name, role, tone, browser });
@@ -21513,17 +21656,18 @@ TEAM.timer = setInterval(teamPoll, 8000);
 // thing and a card beside it. Skippable at every stop, and never shown twice
 // unless asked for.
 const TOUR_STOPS = [
-  { sel: '#mp-trigger', title: 'What I think with', text: 'A model on this PC, a cloud one, or an agent you already use. Change it here whenever you like.' },
-  { sel: '#input', title: 'Talk to me', text: 'Type here, or press the mic and say it. Ask for something on your PC: a file, an app, a search.' },
-  { sel: '#btn-voice-mode', title: 'Just talk', text: 'Voice mode: no typing, no screen to read. You speak, I answer out loud, and you can cut in.' },
-  { sel: '.nav-btn[data-view="team"]', title: 'The room', text: 'Bigger jobs go to helpers. They work here where you can watch, and clicking anyone shows what they are doing. Pick the character and which room is home (cabin, winter, library or ocean) in Settings, Appearance.' },
-  { sel: '.nav-btn[data-view="memory"]', title: 'What I remember', text: 'What I have learned about you and your work. Read it, change it, or delete it.' },
-  { sel: '.nav-btn[data-view="reminders"]', title: 'Reminders', text: 'Ask me to remind you of something, or to do something at a set time. They are all listed here.' },
-  { sel: '.nav-btn[data-view="skills"]', title: 'Skills', text: 'Things I know how to do well, like making a PDF or a slide deck. You can add more.' },
-  { sel: '.nav-btn[data-view="files"]', title: 'Files', text: 'My workspace folder: what I make and save lands here.' },
-  { sel: '.nav-btn[data-view="logs"]', title: 'Logs', text: 'Everything I did, step by step: on this PC, by helpers, and from your phone. Nothing is hidden.' },
-  { sel: '.nav-btn[data-view="models"]', title: 'Models', text: 'Find a model, see whether it fits this PC, and download it. Nothing is downloaded unless you ask.' },
-  { sel: '.nav-btn[data-view="settings"]', title: 'Settings', text: 'You can change anything you want: my name and voice, the look, Simple or Advanced, what I may do without asking, your phone. This tour is under About.' },
+  { sel: '#mp-trigger', title: 'What I think with', text: 'An agent you already pay for, like Claude Code or Codex, a model on this PC, or a cloud key. My memory and tools come along whichever you pick.',
+    try: 'Open it and see what this PC has.' },
+  { sel: '#input', title: 'Ask for real things', text: 'Type, or press the mic and say it. I act on this PC: files, apps, the web.',
+    try: 'Find the biggest files in my Downloads folder.' },
+  { sel: '#btn-mode', title: 'Before I act', text: 'Ask, Auto-edit or Auto: how much runs without asking. Deleting your files, sending and installing wait for your OK, and Logs shows every step I took.',
+    try: 'Click it, or press Shift+Tab, to switch.' },
+  { sel: '.nav-btn[data-view="team"]', title: 'Helpers', text: 'Bigger jobs go to helpers working side by side. Watch them here, and click one to see what it is doing.',
+    try: 'Compare three note-taking apps, with helpers.' },
+  { sel: '.nav-btn[data-view="memory"]', title: 'What I remember', text: 'What I have learned about you and your work, whichever brain you use. Read it, change it, or delete it.',
+    try: 'Tell me something about yourself, then look here.' },
+  { sel: '.nav-btn[data-view="settings"]', title: 'Your phone and chat apps', text: 'Settings, Plus puts me on your phone, end to end encrypted, with Allow and Deny for risky steps. Connectors adds Telegram, Discord, WhatsApp and email. Name, voice and look are there too; this tour is under About.',
+    try: 'Open Settings, Plus to pair your phone.' },
 ];
 function startTour() {
   if (document.getElementById('tour-ring')) return;
@@ -21553,14 +21697,17 @@ function startTour() {
     // The card sits beside the thing: to its right when there is room, else under it.
     const cw = 300, right = box.left + box.width + 16 + cw < window.innerWidth;
     const x = right ? box.left + box.width + 16 : Math.max(12, Math.min(window.innerWidth - cw - 12, box.left));
-    const y = right ? Math.max(12, Math.min(window.innerHeight - 190, box.top)) : Math.min(window.innerHeight - 190, box.top + box.height + 14);
+    const ch = card.offsetHeight || 220;
+    const below = box.top + box.height + 14;
+    const y = right ? Math.max(12, Math.min(window.innerHeight - ch - 12, box.top))
+      : below + ch <= window.innerHeight - 12 ? below : Math.max(12, box.top - ch - 14);   // under it, or over it when there's no room
     card.style.left = x + 'px'; card.style.top = y + 'px';
   };
   const go = (step) => {
     at += step;
     if (at >= TOUR_STOPS.length) { end(); return; }
     const st = TOUR_STOPS[at];
-    card.innerHTML = `<b>${esc(st.title)}</b><p>${esc(st.text)}</p>
+    card.innerHTML = `<b>${esc(st.title)}</b><p>${esc(st.text)}</p>${st.try ? `<p class="tour-try">Try: ${esc(st.try)}</p>` : ''}
       <div class="tour-row"><span>${at + 1} of ${TOUR_STOPS.length}</span><button type="button" data-t="skip">Skip</button><button type="button" class="primary" data-t="next">${at === TOUR_STOPS.length - 1 ? 'Done' : 'Next'}</button></div>`;
     if (!_reduceMotion()) card.animate([{ opacity: 0.3, filter: 'blur(5px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 220, easing: 'ease-out' });
     place(true);
