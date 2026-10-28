@@ -3522,7 +3522,7 @@ _DESTRUCTIVE_PATTERNS = [
     re.compile(r">\s*[A-Za-z]:[\\/]"),
     re.compile(r">\s*\.\.[\\/]"),
     re.compile(r"\|\s*Out-File"),
-    # Found by the 10-28 audit: each of these deleted or overwrote without asking in Auto.
+    # Each of these can delete or overwrite while looking routine.
     re.compile(r"\b(rd|rmdir)\b\s+(/\w+\s+)*(/s|/q)\b", re.I),       # behind `cmd /c`, not only at a statement start
     re.compile(r"\bfind\b.*\s-(delete|exec(dir)?\s+(rm|del|shred))\b", re.I),
     re.compile(r"\b(shred|truncate|mkfs(\.\w+)?)\b|\bdd\b.*\bof=", re.I),
@@ -8531,6 +8531,7 @@ _DRYRUN_GUARDED = {
     "helper_changes",                    # brings a helper's changes into real folders
     "race_helpers",                      # starts agent programs and runs a command
     "forge_generate", "forge_shutdown",  # drive an external image server
+    "load_model",                        # starts the engine and fills the graphics card
 }
 
 
