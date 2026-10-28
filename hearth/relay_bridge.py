@@ -152,6 +152,11 @@ def forget_phone(pid: str) -> Dict[str, Any]:
 # The relay passes frames of up to 256 KB. A message bigger than PART (a photo,
 # a file, a voice note) goes as parts {type: part, pid, i, n, s} of its JSON,
 # joined again on the other side before it is read.
+# How often the reply so far, and the reasoning, go to the phone while a turn runs.
+# Durable Objects bill incoming WebSocket messages 20:1, so ten a second for a
+# minute is 30 billed requests.
+LIVE_EVERY = 0.1
+THINK_EVERY = 0.25
 PART = 150_000
 
 
@@ -702,6 +707,8 @@ class Relay(cc.Adapter):
         self.rooms: Dict[str, "Room"] = {}     # chat (phone id) -> room
         self._live_at: Dict[str, float] = {}   # turn -> when its live text last went out
         self._think_at: Dict[str, float] = {}  # turn -> when its reasoning last went out
+        self._latest: Dict[str, str] = {}      # "live:<turn>" -> the newest text, for a send that is waiting
+        self._later: Dict[str, threading.Timer] = {}
         self.asks: Dict[str, str] = {}         # chat -> the id of the question waiting there
         self._told: List[str] = []             # turns whose finish a notification has said
 
@@ -751,6 +758,7 @@ class Relay(cc.Adapter):
         return call if not c or not call.cid or c == call.cid else None
 
     def send(self, chat, text, reply_to=None):
+        self._turn_done()
         call = self._call_for(chat)
         if call is not None:
             call.done(text)
@@ -797,14 +805,53 @@ class Relay(cc.Adapter):
             call.step(words)
         self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site})
 
-    def think(self, chat, text):
-        """The reasoning so far, a few times a second, folded on the phone like the window's."""
-        t = cc.turn_context().get("t", "")
+    def _paced(self, chat, kind: str, text: str, every: float, last: Dict[str, float]) -> None:
+        """Send the newest text at most once every `every` seconds; a piece that lands
+        inside the wait goes when it ends, so the phone never sits on an old piece."""
+        ctx = cc.turn_context()
+        t = ctx.get("t", "")
+        key = f"{kind}:{t}"
+        self._latest[key] = text
         now = time.time()
-        if now - self._think_at.get(t, 0) < 0.5:
+        wait = every - (now - last.get(t, 0))
+        if wait <= 0:
+            last[t] = now
+            if len(last) > 50:
+                last.clear(); last[t] = now
+            self._push(chat, {"type": kind, "text": text})
             return
-        self._think_at[t] = now
-        self._push(chat, {"type": "think", "text": text[-4000:]})
+        if key in self._later:
+            return                           # one send is already waiting; it takes the newest text
+
+        def go():
+            self._later.pop(key, None)
+            newest = self._latest.get(key)
+            if newest is None:
+                return
+            last[t] = time.time()
+            prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), ctx
+            try:
+                self._push(chat, {"type": kind, "text": newest})
+            finally:
+                cc._TURN.ctx = prev
+        timer = threading.Timer(wait, go)
+        timer.daemon = True
+        self._later[key] = timer
+        timer.start()
+
+    def _turn_done(self) -> None:
+        """The finished reply is on its way: nothing paced for this turn is sent after it."""
+        t = cc.turn_context().get("t", "")
+        for kind in ("live", "think"):
+            key = f"{kind}:{t}"
+            timer = self._later.pop(key, None)
+            if timer is not None:
+                timer.cancel()
+            self._latest.pop(key, None)
+
+    def think(self, chat, text):
+        """The reasoning so far, four times a second, folded on the phone like the window's."""
+        self._paced(chat, "think", text[-4000:], THINK_EVERY, self._think_at)
 
     def heard(self, chat, text, cid=""):
         """What a voice note said, so the phone shows the words instead of "Voice note"."""
@@ -820,14 +867,7 @@ class Relay(cc.Adapter):
         call = self._call_for(chat)
         if call is not None:
             call.live(text)                 # every piece, so the voice starts at the first clause
-        t = cc.turn_context().get("t", "")
-        now = time.time()
-        if now - self._live_at.get(t, 0) < 0.35:
-            return
-        self._live_at[t] = now
-        if len(self._live_at) > 50:
-            self._live_at = {t: now}
-        self._push(chat, {"type": "live", "text": text})
+        self._paced(chat, "live", text, LIVE_EVERY, self._live_at)
 
 
 class Room:
@@ -1113,12 +1153,12 @@ class Bridge:
             now = time.time()
             if kind == "step":
                 push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or ""})
-            elif kind == "live" and now - sent["live"] >= 0.35:
+            elif kind == "live" and now - sent["live"] >= LIVE_EVERY:
                 sent["live"] = now
                 push({"type": "live", "text": f.get("text") or ""})
             elif kind == "think":
                 thought.append(str(f.get("text") or ""))
-                if now - sent["think"] >= 0.5:
+                if now - sent["think"] >= THINK_EVERY:
                     sent["think"] = now
                     push({"type": "think", "text": "".join(thought)[-4000:]})
             elif kind == "text":
