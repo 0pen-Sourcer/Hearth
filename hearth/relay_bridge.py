@@ -717,6 +717,61 @@ def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---------------------------------------------------------------- the adapter
 
+class AgentWatch:
+    """Which coding-agent sessions on the PC just finished a turn: written to since the
+    last look, quiet for QUIET_S since, and ending on the agent's own words (a turn
+    still running ends on a step, or on the person's message). Sessions that were
+    already there when it started, and ones the phone is driving, are left alone."""
+    EVERY_S = 10
+    QUIET_S = 20
+
+    def __init__(self):
+        self.seen: Optional[Dict[str, int]] = None   # chat -> when it was last written, at the last look
+        self.waiting: Dict[str, Dict[str, Any]] = {}  # written to, not quiet yet
+        self.told: Dict[str, int] = {}
+
+    def look(self, rows: List[Dict[str, Any]], now_ms: float, busy: set) -> List[Dict[str, Any]]:
+        if self.seen is None:
+            self.seen = {r["chat"]: r["at"] for r in rows}
+            return []
+        for r in rows:
+            k, at = r["chat"], r["at"]
+            before = self.seen.get(k)
+            self.seen[k] = at
+            if k in busy:
+                self.waiting.pop(k, None)
+            elif before is None or at > before:
+                self.waiting[k] = r
+        out = []
+        for k, r in list(self.waiting.items()):
+            if now_ms - r["at"] < self.QUIET_S * 1000:
+                continue
+            del self.waiting[k]
+            if self.told.get(k) == r["at"]:
+                continue
+            self.told[k] = r["at"]
+            note = self._note(r)
+            if note:
+                out.append(note)
+        return out
+
+    @staticmethod
+    def _note(r: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        from . import agent_sessions
+        got = agent_sessions.read(r["agent"], r["id"]) or {}
+        msgs = got.get("messages") or []
+        last = msgs[-1] if msgs else None
+        if not last or last.get("role") != "assistant":
+            return None
+        parts = last.get("parts") or []
+        if not last.get("error") and parts and "text" not in parts[-1]:
+            return None                            # it ended on a step: still at work, or waiting on a tool
+        text = (parts[-1].get("text") if parts else "") or last.get("text") or ""
+        what = r.get("title") or r.get("project") or "a session"
+        return {"kind": "done", "title": f"{r.get('label') or 'An agent'} {'stopped' if last.get('error') else 'finished'}",
+                "body": f"{what}: {' '.join(text.split())[:200]}", "c": r["chat"]}
+
+
 class Relay(cc.Adapter):
     """Sends go out as encrypted frames on the phone's live connection, or to
     its mailbox on the server when it's away."""
@@ -1247,8 +1302,26 @@ class Bridge:
                     self.rooms.pop(room, None)
             await asyncio.sleep(1.0)
 
+    def watch_agents(self) -> None:
+        """Tell the phone when a coding agent finishes on the PC, as Shed does: Codex
+        or Claude Code run in their own window, not through the phone, still reach it."""
+        watch = AgentWatch()
+        while not self.stopping:
+            time.sleep(AgentWatch.EVERY_S)
+            if not self.adapter.rooms:
+                continue
+            try:
+                from . import agent_sessions
+                notes = watch.look(agent_sessions.listing(60), time.time() * 1000, set(self.agent_runs))
+            except Exception:
+                continue
+            for n in notes:
+                for chat in list(self.adapter.rooms):     # each paired phone
+                    self.adapter.notify(chat, n)
+
     def run(self) -> None:
         asyncio.set_event_loop(self.loop)
+        threading.Thread(target=self.watch_agents, daemon=True, name="relay-agent-watch").start()
         try:
             self.loop.run_until_complete(self.keep_rooms())
         except KeyboardInterrupt:
