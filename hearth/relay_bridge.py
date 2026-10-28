@@ -210,15 +210,33 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             role = x.get("role")
             if role not in ("user", "assistant"):
                 continue
-            steps = [tool_words(e.get("name") or "", e.get("args")) for e in x.get("events") or []
-                     if isinstance(e, dict) and e.get("kind") == "tool"]
+            events = [e for e in x.get("events") or [] if isinstance(e, dict)]
+            steps = []
+            for e in events:
+                if e.get("kind") != "tool":
+                    continue
+                args = e.get("args") if isinstance(e.get("args"), dict) else {}
+                if e.get("name") == "web_search" and not args.get("query") and e.get("result"):
+                    # Codex steps saved before their query was read kept it as the result.
+                    args = {"query": str(e.get("result"))[:90]}
+                step = {"w": tool_words(e.get("name") or "", args), "tool": e.get("name") or "",
+                        "site": cc.site_of(args)}
+                if e.get("name") == "web_search":
+                    step["sites"] = cc.sites_in(str(e.get("result") or ""))
+                steps.append(step)
+            # The window keeps a turn's stats on its done event and its reasoning as think chunks.
+            done = next((e for e in reversed(events) if e.get("kind") == "done"), {})
+            stats = x.get("stats") or done.get("stats") or None
+            if stats is not None and done.get("duration_ms") is not None and "duration_ms" not in stats:
+                stats = dict(stats, duration_ms=done["duration_ms"])
+            thought = "".join(str(e.get("content") or "") for e in events if e.get("kind") == "think_chunk").strip()
             text = chat_sync._text(x.get("content"))
             # A file sent from a phone is kept as a note for the model; the person sent the file.
             text = re.sub(r"\[They sent (.+?), saved at .+?before answering about it\.\]",
                           lambda g: "Sent " + g.group(1), text, flags=re.S)
             if text or steps:
                 msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps,
-                             "via": x.get("via") or "", "stats": x.get("stats") or None,
+                             "via": x.get("via") or "", "stats": stats, "thought": thought[-6000:],
                              "context": [{"topic": t.get("topic") or "", "ago": t.get("ago") or ""}
                                          for t in (x.get("context") or []) if isinstance(t, dict)]})
         keep = int(m.get("last") or 60)
@@ -470,6 +488,7 @@ class Relay(cc.Adapter):
         self.loop = loop
         self.rooms: Dict[str, "Room"] = {}     # chat (phone id) -> room
         self._live_at: Dict[str, float] = {}   # turn -> when its live text last went out
+        self._think_at: Dict[str, float] = {}  # turn -> when its reasoning last went out
 
     def _push(self, chat: str, obj: Dict[str, Any]) -> Optional[str]:
         room = self.rooms.get(str(chat))
@@ -511,6 +530,15 @@ class Relay(cc.Adapter):
         """One step of the reply as it happens ("Read notes.txt"), with the tool
         and the site it reaches, so the phone can show that site's icon."""
         self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site})
+
+    def think(self, chat, text):
+        """The reasoning so far, a few times a second, folded on the phone like the window's."""
+        t = cc.turn_context().get("t", "")
+        now = time.time()
+        if now - self._think_at.get(t, 0) < 0.5:
+            return
+        self._think_at[t] = now
+        self._push(chat, {"type": "think", "text": text[-4000:]})
 
     def step_sites(self, chat, sites):
         """The sites a search just found, for the step before it."""

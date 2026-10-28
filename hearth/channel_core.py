@@ -334,6 +334,8 @@ class Hub:
             pass
 
         written: List[str] = []
+        thought: List[str] = []
+        thinks = callable(getattr(self.a, "think", None))   # an app that shows the reasoning as it goes
         stats: Dict[str, Any] = {}
         context: List[Any] = []
 
@@ -344,6 +346,12 @@ class Hub:
                     stats["duration_ms"] = kw["duration_ms"]
             elif kind == "context_used":
                 context[:] = list(kw.get("threads") or [])
+            if kind == "thinking_chunk" and thinks and kw.get("content"):
+                thought.append(kw["content"])
+                try:
+                    self.a.think(chat, "".join(thought))
+                except Exception:
+                    pass
             if kind == "assistant_chunk" and live and kw.get("content"):
                 written.append(kw["content"])
                 try:
