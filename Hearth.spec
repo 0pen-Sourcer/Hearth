@@ -414,8 +414,10 @@ for _pkg in ("uiautomation", "comtypes"):
 # `--hearth-run-python -m hearth.<x>_bridge` sentinel — without collecting the
 # package the frozen bridge dies on import. Discord = discord.py; WhatsApp =
 # neonize (+ segno for the QR). Telegram is pure-stdlib (urllib), nothing to add.
+# Plus: the phone link's encryption (cryptography's AES-GCM and X25519 are
+# imported from relay_crypto, which the window loads lazily) and its socket.
 # Missing packages are skipped (the try/except), so a venv without one is fine.
-for _pkg in ("discord", "neonize", "segno"):
+for _pkg in ("discord", "neonize", "segno", "cryptography", "websockets"):
     try:
         from PyInstaller.utils.hooks import collect_all as _collect_all
         _d, _b, _h = _collect_all(_pkg)

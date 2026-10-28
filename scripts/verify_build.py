@@ -30,6 +30,8 @@ MODULES = {
                    "torch", "scipy.signal", "soundfile"],
     "wake word": ["hearth.wake"],
     "documents": ["pypdfium2", "matplotlib", "reportlab", "pptx", "openpyxl"],
+    "Plus phone link": ["hearth.relay_crypto", "hearth.relay_bridge", "hearth.plus",
+                        "cryptography.hazmat.primitives.ciphers.aead", "websockets", "segno"],
 }
 
 PROBE = r'''
