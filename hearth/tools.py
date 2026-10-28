@@ -3522,6 +3522,19 @@ _DESTRUCTIVE_PATTERNS = [
     re.compile(r">\s*[A-Za-z]:[\\/]"),
     re.compile(r">\s*\.\.[\\/]"),
     re.compile(r"\|\s*Out-File"),
+    # Found by the 10-28 audit: each of these deleted or overwrote without asking in Auto.
+    re.compile(r"\b(rd|rmdir)\b\s+(/\w+\s+)*(/s|/q)\b", re.I),       # behind `cmd /c`, not only at a statement start
+    re.compile(r"\bfind\b.*\s-(delete|exec(dir)?\s+(rm|del|shred))\b", re.I),
+    re.compile(r"\b(shred|truncate|mkfs(\.\w+)?)\b|\bdd\b.*\bof=", re.I),
+    # Code run inline by an interpreter, calling what deletes, moves or overwrites.
+    re.compile(r"\b(python[\d.]*|py|node|deno|bun|ruby|perl|php)(\.exe)?\b.*\s(-c|-e|--eval|-r)\b.*"
+               r"(rmtree|rmSync|rm\(|unlink|remove\(|rmdir|rename|replace\(|truncate|writeFile|move\(|"
+               r"open\([^)]*['\"][wa]|write_text|write_bytes|kill)", re.I),
+    # A command hidden from reading: PowerShell's encoded commands, decoded text piped into a shell.
+    re.compile(r"\b(powershell|pwsh)(\.exe)?\b.*\s-(e|ec|en|enc|enco\w*|encodedcommand)\s+\S{8,}", re.I),
+    re.compile(r"(base64\s+(-d|--decode)|certutil\b.*-decode|FromBase64String).*\|\s*(sh|bash|zsh|iex|Invoke-Expression|cmd)\b", re.I),
+    # Writing into the home folder's own files (shell start-up, keys, config).
+    re.compile(r">>?\s*(~|\$HOME|%USERPROFILE%|\$env:USERPROFILE)", re.I),
 ]
 
 
