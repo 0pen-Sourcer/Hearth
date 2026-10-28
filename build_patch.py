@@ -160,6 +160,10 @@ def main() -> int:
 
     # Signed with the release key, or the app refuses it (hearth/patch_sign.py).
     key_file = os.environ.get("HEARTH_PATCH_KEY", "")
+    if not key_file:
+        # Where the release key lives on the machine that builds releases.
+        home_key = os.path.join(os.path.expanduser("~"), ".hearth", "release_patch_key.txt")
+        key_file = home_key if os.path.isfile(home_key) else ""
     if key_file:
         import base64
         from hearth.patch_sign import sign_zip

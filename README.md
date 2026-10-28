@@ -77,7 +77,7 @@ Every fact JARVIS learns is a small markdown file in your workspace that you can
 
 ### Everywhere else
 
-The terminal app (`hearth.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. Anyone new needs a pairing code you approve, and you can write a connector for another app in one Python file ([docs/CONNECTORS.md](docs/CONNECTORS.md)). It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
+The terminal app (`inglen.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. Anyone new needs a pairing code you approve, and you can write a connector for another app in one Python file ([docs/CONNECTORS.md](docs/CONNECTORS.md)). It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
 
 ### Safety
 
@@ -122,8 +122,8 @@ cd Hearth
 .\install.ps1                      # bring your own server (LM Studio, Ollama, vLLM, llama.cpp or a cloud key)
 .\install.ps1 -BuiltinLLM cuda     # NVIDIA card: Inglen installs and runs its own llama.cpp server
 .\install.ps1 -BuiltinLLM cpu      # no card: the same server on the CPU
-.\hearth.bat                       # start the terminal app
-python -m hearth.tray --open       # start the window
+.\inglen.bat                       # start the terminal app
+.\inglen.bat window                # start the window
 ```
 
 In the window, Models, Engine downloads the official llama.cpp build for your card at any time, the same engine the Full installer brings.
@@ -141,8 +141,8 @@ Inglen finds a running LM Studio (port 1234), Ollama (11434) or llama.cpp server
 
 | | Start it with | |
 |---|---|---|
-| **Window** | `Hearth.exe`, or `python -m hearth.tray --open` | Chats, Team room, memory, models, settings, voice |
-| **Terminal** | `.\hearth.bat` | Everything the window does, with slash commands and voice |
+| **Window** | the Inglen shortcut, or `.\inglen.bat window` | Chats, Team room, memory, models, settings, voice |
+| **Terminal** | the Inglen CLI shortcut, or `.\inglen.bat` | Everything the window does, with slash commands and voice |
 | **Headless** | `python -m hearth.headless --prompt "..."` | JSON lines out, for scripts, CI or another agent; `--format text` for people |
 | **MCP server** | `python -m hearth.mcp_server` | Inglen's tools inside LM Studio, Claude Desktop, Cursor or Cline |
 

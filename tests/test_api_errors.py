@@ -104,7 +104,7 @@ check(f"a wait of an hour is a quota too, with when ({long_wait.hint})",
 from hearth import claude_brain  # noqa: E402
 cc = claude_brain.out_of_usage("claude-code", {"message": "Claude Code stopped: You've hit your session limit · resets 3:20pm"})
 check(f"an agent out of usage says so in its own words, with when ({cc})",
-      cc.get("category") == "quota" and cc["message"].startswith("Claude Code is out of usage on your Claude plan")
+      cc.get("category") == "quota" and cc["message"].startswith("Claude Code is out of usage: ") and "Pick another" not in cc["message"]
       and "resets 3:20pm" in cc["message"] and "stopped:" not in cc["message"])
 other = claude_brain.out_of_usage("codex", {"message": "Codex stopped: network error"})
 check("any other stop is left as it was", other == {"message": "Codex stopped: network error"})

@@ -29,7 +29,7 @@ set "WT=%HERE%Windows Terminal\wt.exe"
 if exist "%WT%" goto launch_wt
 where wt >nul 2>nul
 if %errorlevel%==0 (
-    start "" wt --title "Hearth" "%CLI%" %*
+    start "" wt --title "Inglen" "%CLI%" %*
     exit /b
 )
 REM Fallback: no terminal — direct
@@ -37,5 +37,5 @@ REM Fallback: no terminal — direct
 exit /b
 
 :launch_wt
-start "" "%WT%" --title "Hearth" "%CLI%" %*
+start "" "%WT%" --title "Inglen" "%CLI%" %*
 exit /b

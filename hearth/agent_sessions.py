@@ -870,7 +870,7 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask) -> int:
         return 2
     # A second program writing into a session that is open on the PC would tangle both.
     state = live_state(agent, sid, d.get("path") or "")
-    if state in ("open", "recent") and agent == "codex" and _exe(agent):
+    if state == "open" and agent == "codex" and _exe(agent):
         # Codex takes a message for a session open in its own app (codex queue, as Shed
         # does): the app that owns the session runs it, and its reply shows here.
         if await _queue_codex(_exe(agent), sid, cwd, text):

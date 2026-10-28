@@ -94,7 +94,85 @@ def _signal_voice_open() -> None:
         print(f"[hearth.tray] voice-open signal failed: {e}", file=sys.stderr)
 
 
-def _open_desktop_window(voice: bool = False):
+def _signal_open_chat(cid: str) -> None:
+    """Ask the open window to show a chat (or start one: "new")."""
+    if not _server_url:
+        return
+    try:
+        import json as _json
+        import urllib.request
+        req = urllib.request.Request(_server_url.rstrip("/") + "/api/window/chat",
+                                     data=_json.dumps({"id": cid}).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=2).read()
+    except Exception:
+        pass
+
+
+def open_chat(cid: str) -> None:
+    """Open the window on a chat, or on a new one ("new")."""
+    if _desktop_proc and _desktop_proc.poll() is None:
+        _signal_open_chat(cid)
+    else:
+        _open_desktop_window(chat=cid)
+
+
+def _menus_dark(theme: str) -> bool:
+    """Whether the menu should be dark: as Inglen's own look is, and for System
+    as Windows' app mode is."""
+    if theme == "light":
+        return False
+    if theme == "system" and sys.platform == "win32":
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                               r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            return not winreg.QueryValueEx(k, "AppsUseLightTheme")[0]
+        except Exception:
+            return True
+    return True
+
+
+def _dark_menus(theme: str = "") -> None:
+    """Native menus in the look's mode, as other apps' tray menus are
+    (uxtheme's SetPreferredAppMode/FlushMenuThemes, Windows 10 1903 and later)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ux = ctypes.WinDLL("uxtheme")
+        ux[135](2 if _menus_dark(theme or _look()[0]) else 3)   # ForceDark / ForceLight
+        ux[136]()                                                # FlushMenuThemes
+    except Exception:
+        pass
+
+
+def _wake_name() -> str:
+    try:
+        from .persona import NAME
+        return str(NAME).title()
+    except Exception:
+        return "Jarvis"
+
+
+def _menu_chats(limit: int = 12):
+    """Pinned chats and the newest others, for the tray menu."""
+    try:
+        from . import chat_sync
+        rows = [c for c in chat_sync.listing(60) if c.get("count")]
+    except Exception:
+        return [], []
+    pinned = [c for c in rows if c.get("pinned")][:5]
+    rest = [c for c in rows if not c.get("pinned")][:limit]
+    return pinned, rest
+
+
+def _short(title: str, n: int = 40) -> str:
+    t = " ".join(str(title or "Untitled").split())
+    return t if len(t) <= n else t[: n - 1].rstrip() + "\u2026"
+
+
+def _open_desktop_window(voice: bool = False, chat: str = ""):
     """Open the PyWebView native window as a SUBPROCESS.
 
     voice=True appends ?voice=1 so the GUI auto-starts voice mode on load (the
@@ -119,7 +197,7 @@ def _open_desktop_window(voice: bool = False):
             _signal_voice_open()
         return
 
-    url = _server_url + ("?voice=1" if voice else "")
+    url = _server_url + ("?voice=1" if voice else (f"?chat={chat}" if chat else ""))
 
     # Combined flags: CREATE_NO_WINDOW suppresses the brief cmd console
     # flash users see when subprocess.Popen launches a child on Windows.
@@ -399,20 +477,38 @@ def main(argv: Optional[list] = None) -> int:
             pass
         os._exit(0)
 
-    menu = pystray.Menu(
-        pystray.MenuItem("Open Inglen", on_open, default=True),
-        pystray.MenuItem("Voice mode", on_voice),
-        pystray.MenuItem("Open in browser", on_browser),
-        pystray.MenuItem("Open workspace folder", on_workspace),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem(
-            lambda item: f"Wake word → voice: {'on' if wake_state['on'] else 'off'}",
-            on_toggle_wake,
-            checked=lambda item: wake_state["on"],
-        ),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Quit", on_quit),
-    )
+    def _chat_item(c):
+        return pystray.MenuItem(_short(c.get("title")), lambda icon, item, cid=c["id"]: open_chat(cid))
+
+    def _items():
+        pinned, rest = _menu_chats()
+        out = [pystray.MenuItem("Open Inglen", on_open, default=True), pystray.Menu.SEPARATOR]
+        if pinned:
+            out.append(pystray.MenuItem("Pinned", None, enabled=False))
+            out += [_chat_item(c) for c in pinned]
+            out.append(pystray.Menu.SEPARATOR)
+        if rest:
+            out.append(pystray.MenuItem("Recent", None, enabled=False))
+            out += [_chat_item(c) for c in rest[:3]]
+        more = [_chat_item(c) for c in rest[3:]]
+        if more:
+            more.append(pystray.Menu.SEPARATOR)
+        more += [pystray.MenuItem("Open in browser", on_browser),
+                 pystray.MenuItem("Open workspace folder", on_workspace)]
+        out.append(pystray.MenuItem("More", pystray.Menu(*more)))
+        out += [
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("New chat", lambda icon, item: open_chat("new")),
+            pystray.MenuItem("Voice mode", on_voice),
+            pystray.MenuItem(lambda item: f"Listen for \"{_wake_name()}\"", on_toggle_wake,
+                             checked=lambda item: wake_state["on"]),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Quit Inglen", on_quit),
+        ]
+        return out
+
+    _dark_menus()
+    menu = pystray.Menu(lambda: _items())
 
     # ASCII hyphen, NOT an em-dash: X11 encodes the window title as latin-1
     # (via Xlib set_wm_name), and a U+2014 here crashes the tray on Linux
@@ -428,12 +524,23 @@ def main(argv: Optional[list] = None) -> int:
 
     def _follow_look():
         # The window saves its theme and accent; redraw the tray icon to match.
+        # The chat list in the menu is rebuilt when chats change.
         last = _cur_look
+        seen = None
         while True:
             time.sleep(3)
+            try:
+                p, r = _menu_chats()
+                sig = [(c["id"], c.get("title"), c.get("pinned")) for c in p + r]
+                if sig != seen:
+                    seen = sig
+                    icon.update_menu()
+            except Exception:
+                pass
             now = _look()
             if now != last:
                 last = now
+                _dark_menus(now[0])
                 try:
                     icon.icon = _icon_for_look(*now)
                 except Exception:

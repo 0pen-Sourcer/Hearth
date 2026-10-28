@@ -7,4 +7,4 @@ in a release signed by the other.
 
 Empty means this build refuses every patch: add the key before building.
 """
-PUBLIC_KEYS: list = []
+PUBLIC_KEYS: list = ["RiTndrxL0eKGUFGPIx9T48QnK90c+1WebtVzCaP3U24="]

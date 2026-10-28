@@ -1394,7 +1394,11 @@
     letter-spacing: 0.3px;
   }
   .meta.ok { color: var(--ok); opacity: 0.7; }
-  .meta.err { color: var(--err); }
+  /* A turn that stopped: a quiet card, like the phone's, not a red code line. */
+  .meta.err { text-align: left; font: 13px/1.5 var(--sans); letter-spacing: 0; color: var(--fg-dim);
+    background: color-mix(in srgb, var(--err) 7%, transparent); border: 1px solid color-mix(in srgb, var(--err) 26%, transparent);
+    border-radius: 10px; padding: 9px 12px; max-width: 640px; }
+  .meta.err::before { content: 'It stopped'; display: block; color: var(--err); font-weight: 600; font-size: 12px; margin-bottom: 2px; }
   .meta.warn { color: var(--warn); }
 
   /* Per-message throughput footer (tok/s). Hidden by default — only fades in
@@ -9975,6 +9979,13 @@ async function refreshState() {
     // Wake word fired while this window was already open: the tray couldn't spawn
     // a new ?voice=1 window, so it flipped a one-shot flag. Enter voice mode in
     // place — same as the ?voice=1 boot path.
+    if (s && s.open_chat) {
+      try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.focus_window)
+          window.pywebview.api.focus_window();
+      } catch (e) {}
+      openChatFromTray(s.open_chat);
+    }
     if (s && s.enter_voice && !voiceModeOn) {
       // Raise our own native window first — wake may have fired while it was
       // buried, and only the window's own process wins Windows' foreground lock.
@@ -16372,6 +16383,20 @@ function exitVoiceMode() {
 // Fed by the mic recorder (peak 0..1) so the grid reacts to YOUR voice while
 // you talk, the same way it reacts to the AI's voice while it speaks.
 function voiceUpdate(level) { voiceMicLevel = level || 0; }
+
+// The tray's chat list: "new" starts a chat, an id opens that chat.
+async function openChatFromTray(id) {
+  if (id === 'new') { newConversation(); showView('chat'); return; }
+  if (!STATE.conversations.find(c => c.id === id)) { try { await syncConvosFromDisk(); } catch (e) {} }
+  if (!STATE.conversations.find(c => c.id === id)) return;
+  setActiveId(id); renderConvoList(); renderChat(); showView('chat');
+}
+window.addEventListener('load', () => {
+  try {
+    const cid = new URLSearchParams(location.search).get('chat');
+    if (cid) setTimeout(() => openChatFromTray(cid).catch(() => {}), 900);
+  } catch (e) {}
+});
 
 // Wake word + tray "Voice mode" open Inglen with ?voice=1 — auto-enter voice
 // mode AND start listening, so saying the wake word lands you already talking

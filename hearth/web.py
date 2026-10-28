@@ -85,6 +85,8 @@ _window_ref = None
 # fires but a window is ALREADY open, so it can't spawn a fresh ?voice=1 window.
 # The GUI's /api/state poll reads-and-clears it and enters voice mode in place.
 _pending_voice_open = False
+# A chat the tray asked the open window to show (an id, or "new"); one-shot.
+_pending_open_chat = ""
 
 # Same shape for "surface the window": a second launch POSTs /api/focus, but the
 # window lives in the desktop_attach SUBPROCESS so this process's _window_ref is
@@ -123,6 +125,12 @@ def _surface_window() -> None:
         cb()
     except Exception:
         pass
+
+
+def _take_pending_open_chat() -> str:
+    global _pending_open_chat
+    cid, _pending_open_chat = _pending_open_chat, ""
+    return cid
 
 
 def _take_pending_voice_open() -> bool:
@@ -1251,15 +1259,11 @@ def _list_models() -> List[Dict]:
                  else "Gemini" if "googleapis" in _h else "Anthropic" if "anthropic" in _h else "the provider")
         _said = _GET_REFUSED.get(_list_url, "")
         if _said and "key" in _said.lower() and any(w in _said.lower() for w in ("invalid", "not valid", "incorrect")):
-            _models_notice = (f"{_prov} says the API key isn't valid. Paste the whole key again in Settings, "
-                              f"Chat brain.")
+            _models_notice = f"{_prov} didn't accept the API key."
         elif _said:
-            _models_notice = f"{_prov} wouldn't list its models: {_said}"
+            _models_notice = f"{_prov} didn't list its models: {_said}"
         else:
-            _reason = "returned no response" if _raw_models is None else "returned an empty list"
-            _models_notice = (f"{_prov} {_reason} for the model list. That is usually a key that can't list "
-                              f"models, or no credit left. The model in use still works; another can be "
-                              f"typed in Settings, Chat brain.")
+            _models_notice = f"{_prov} sent no model list. The model in use still works."
     else:
         _models_notice = ""
     _loaded_idx = 0
@@ -4033,6 +4037,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             _pending_focus = True
             _surface_window()
             return self._send_json(200, _focus_window())
+        if path == "/api/window/chat":
+            # The tray menu picked a chat (or New chat) while the window is open:
+            # its /api/state poll opens it and raises the window.
+            global _pending_open_chat
+            _pending_open_chat = str((self._read_json() or {}).get("id") or "new")[:200]
+            _focus_window()
+            return self._send_json(200, {"ok": True})
         if path == "/api/voice/open":
             # Wake word / tray Voice-mode fired while a window was already open.
             # The tray can't spawn a second ?voice=1 window, so it asks us to flip
@@ -4631,6 +4642,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             # One-shot: wake fired while a window was already open. The GUI enters
             # voice mode in place instead of the tray spawning a ?voice=1 window.
             "enter_voice": _take_pending_voice_open(),
+            "open_chat": _take_pending_open_chat(),
             # One-shot: a second launch asked us to surface. The open window raises
             # itself through its own process (voice's reliable foreground path).
             "surface": _take_pending_focus(),

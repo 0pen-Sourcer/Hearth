@@ -1,9 +1,9 @@
 @echo off
-REM Hearth CLI launcher - simple direct invocation.
+REM Inglen terminal launcher - simple direct invocation (inglen.bat calls this).
 REM Want it in Windows Terminal instead? Use Hearth-cli.bat.
 
 setlocal
-title Hearth - local AI for your machine
+title Inglen
 chcp 65001 >nul
 
 set "HEARTH_HOME=%~dp0"
@@ -21,6 +21,6 @@ if exist "%HEARTH_HOME%.venv\Scripts\python.exe" (
 REM Pause on error so a crash doesn't disappear
 if errorlevel 1 (
     echo.
-    echo [hearth] exited with error - press any key to close...
+    echo [inglen] exited with error - press any key to close...
     pause >nul
 )

@@ -153,7 +153,7 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 
 ## The terminal
 
-`hearth.bat` (from source) or the **CLI** shortcut the installer adds to the Start menu does everything the window does, with slash commands and voice. `@path` attaches a file. The prompt stays open while JARVIS replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
+The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the window does, with slash commands and voice. `@path` attaches a file. The prompt stays open while JARVIS replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
 
 ```
 /help            every command

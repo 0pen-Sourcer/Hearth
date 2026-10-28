@@ -323,8 +323,7 @@ def out_of_usage(agent: str, fields: Dict[str, Any]) -> Dict[str, Any]:
     name = BRAINS.get(agent, "The agent")
     said = re.sub(r"^\s*[\w .-]+? stopped:\s*", "", msg).strip()
     return dict(fields, category="quota",
-                message=f"{name} is out of usage on your {PLANS.get(agent, name)} plan: {said.rstrip('.')}. "
-                        f"Pick another brain to carry on now.")
+                message=f"{name} is out of usage: {said.rstrip('.')}.")
 
 
 def note_claude_limits(ev: Dict[str, Any]) -> None:
@@ -1084,9 +1083,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     if full:
         when = time.strftime("%I:%M %p", time.localtime(full["resets_at"])).lstrip("0")
         emit("error", category="quota",
-             message=(f"{BRAINS.get(agent, 'The agent')} is out of usage on your {PLANS.get(agent, 'plan')} plan "
-                      f"until {when} (its {({'5 hours': '5-hour', '7 days': 'weekly'}).get(full['window'], full['window'])} limit). "
-                      f"Pick another brain to carry on now."))
+             message=f"{BRAINS.get(agent, 'The agent')} is out of usage until {when}.")
         emit("done", reply="", iterations=0)
         return 0
     news = helper_news(emit)

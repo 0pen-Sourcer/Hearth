@@ -26,9 +26,9 @@ REM Last resort: legacy console
 exit /b
 
 :launch_bundled_wt
-start "" "%WT%" --title "Hearth" "%CLI%" %*
+start "" "%WT%" --title "Inglen" "%CLI%" %*
 exit /b
 
 :launch_system_wt
-start "" wt --title "Hearth" "%CLI%" %*
+start "" wt --title "Inglen" "%CLI%" %*
 exit /b

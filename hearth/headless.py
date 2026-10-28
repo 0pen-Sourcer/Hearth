@@ -128,7 +128,7 @@ def bridge_reply_or_reason(reply_text: str, err_category=None, err_message=None)
     if err_category == "rate_limit":
         return "I'm rate-limited right now. Give it a moment and try me again."
     if err_category == "quota":
-        return ("The model I think with is out of usage for now. " + (err_message or "")).strip()
+        return err_message or "The model I think with is out of usage for now."
     if err_category == "auth":
         return "My model connection isn't authorized at the moment. Ping whoever runs Inglen."
     if err_message:
