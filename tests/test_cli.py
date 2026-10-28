@@ -81,7 +81,7 @@ check("-h does the same", code == 0 and "usage:" in out)
 code, out, _ = run(["--version"], timeout=60)
 check("--version exits cleanly", code == 0)
 check(f"and names the version: {out.strip()[:40]!r}",
-      out.strip().startswith("hearth ") and "unknown" not in out)
+      out.strip().startswith("inglen ") and "unknown" not in out)
 
 # ------------------------------------------------------------- end of input
 code, out, secs = run([], stdin=subprocess.DEVNULL, timeout=150)

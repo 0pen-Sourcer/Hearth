@@ -49,7 +49,8 @@ _CLASSIC = (0x8B, 0x5C, 0xF6)
 
 def accent_rgb(settings: dict) -> tuple:
     """The dot colour for the saved look."""
-    if (settings.get("ui_theme") or "classic") == "classic":
+    from .look_icon import default_theme
+    if (settings.get("ui_theme") or default_theme(settings)) == "classic":
         return _CLASSIC
     return _ACCENTS.get(settings.get("ui_accent") or "rose", _ACCENTS["rose"])
 

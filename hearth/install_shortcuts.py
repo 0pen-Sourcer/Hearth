@@ -34,6 +34,92 @@ def _windows_paths():
     return _get(CSIDL_DESKTOP), _get(CSIDL_STARTUP)
 
 
+def _programs_path() -> Optional[str]:
+    """The person's Start menu Programs folder."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+    buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+    ctypes.windll.shell32.SHGetFolderPathW(0, 0x0002, 0, 0, buf)   # CSIDL_PROGRAMS
+    return buf.value or None
+
+
+def app_icon() -> Optional[str]:
+    """The app's own icon file, shipped in assets/ (it goes out with updates,
+    unlike the icon inside Hearth.exe, which only a new installer changes)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (os.path.join(os.path.dirname(here), "assets"),
+              os.path.join(getattr(sys, "_MEIPASS", ""), "assets")):
+        f = os.path.join(d, "icon_app.ico")
+        if os.path.isfile(f):
+            return f
+    return None
+
+
+# Shortcuts from before the rename, and what each is called now.
+_RENAMES = (("Hearth.lnk", "Inglen.lnk"), ("Hearth CLI.lnk", "Inglen CLI.lnk"),
+            ("Uninstall Hearth.lnk", "Uninstall Inglen.lnk"))
+_OURS = ("hearth.exe", "hearth-cli.bat", "unins000.exe")
+
+
+def rebrand(desktop: Optional[str] = None, programs: Optional[str] = None) -> int:
+    """Rename this app's own Hearth shortcuts to Inglen, with the app icon. Only
+    shortcuts that point at this app's programs are touched; returns how many."""
+    if sys.platform != "win32":
+        return 0
+    if desktop is None:
+        desktop = _windows_paths()[0]
+    if programs is None:
+        programs = _programs_path()
+    try:
+        import win32com.client  # type: ignore
+        shell = win32com.client.Dispatch("WScript.Shell")
+    except Exception:
+        return 0
+    moves = []
+    for folder, new_folder in ((desktop, desktop),
+                               (programs and os.path.join(programs, "Hearth"), programs and os.path.join(programs, "Inglen"))):
+        if not folder or not os.path.isdir(folder):
+            continue
+        for old, new in _RENAMES:
+            moves.append((os.path.join(folder, old), os.path.join(new_folder, new)))
+    done = 0
+    for old, new in moves:
+        if not os.path.isfile(old):
+            continue
+        try:
+            sc = shell.CreateShortcut(old)
+            if os.path.basename(sc.TargetPath or "").lower() not in _OURS:
+                continue
+            os.makedirs(os.path.dirname(new), exist_ok=True)
+            fresh = shell.CreateShortcut(new)
+            fresh.TargetPath = sc.TargetPath
+            fresh.Arguments = sc.Arguments
+            fresh.WorkingDirectory = sc.WorkingDirectory
+            fresh.Description = (sc.Description or "").replace("Hearth", "Inglen")
+            # The icon beside the program it opens, so it stays right for that install.
+            icon = os.path.join(os.path.dirname(sc.TargetPath), "_internal", "assets", "icon_app.ico")
+            if not os.path.isfile(icon):
+                icon = app_icon()
+            if icon and not os.path.basename(sc.TargetPath).lower().startswith("unins"):
+                fresh.IconLocation = icon
+            else:
+                fresh.IconLocation = sc.IconLocation
+            fresh.Save()
+            os.remove(old)
+            done += 1
+        except Exception:
+            continue
+    old_dir = programs and os.path.join(programs, "Hearth")
+    try:
+        if old_dir and os.path.isdir(old_dir) and not os.listdir(old_dir):
+            os.rmdir(old_dir)
+    except OSError:
+        pass
+    return done
+
+
 def _make_shortcut(target_path: str, args: str, lnk_path: str,
                    icon_path: Optional[str] = None,
                    description: str = "",
@@ -131,12 +217,12 @@ def install(no_autostart: bool = False) -> int:
     packaged = next((p for p in exe_candidates if os.path.isfile(p)), None)
     if packaged:
         target, t_args, t_wd, t_pythonw = packaged, "", os.path.dirname(packaged), False
-        icon_path = packaged  # exe carries its own icon
+        icon_path = app_icon() or packaged
     else:
         target, t_args, t_wd, t_pythonw = pythonw, "-m hearth.tray", repo_root, True
 
     # Desktop shortcut → opens tray + immediately opens window
-    desktop_lnk = os.path.join(desktop, "Hearth.lnk")
+    desktop_lnk = os.path.join(desktop, "Inglen.lnk")
     ok = _make_shortcut(
         target_path=target,
         args=(t_args + " --open").strip() if t_args else "",
@@ -177,6 +263,7 @@ def uninstall() -> int:
         return 1
     removed = 0
     for path in (
+        os.path.join(desktop, "Inglen.lnk"),
         os.path.join(desktop, "Hearth.lnk"),
         os.path.join(startup, "Hearth.lnk"),
         os.path.join(startup, "Hearth (tray).lnk"),  # legacy name

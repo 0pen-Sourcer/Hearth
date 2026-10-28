@@ -11,6 +11,8 @@
 ; "Python.Runtime.Loader.Initialize" error).
 
 #define MyAppName "Hearth"
+; What people see. MyAppName stays: it names the folder existing installs live in.
+#define MyAppDisplay "Inglen"
 #define MyAppVersion "0.7.6-preview"
 #define MyAppPublisher "0pen-sourcer"
 #define MyAppExeName "Hearth.exe"
@@ -32,11 +34,11 @@
 
 [Setup]
 AppId={{B7E2B6A4-1C9F-4F3D-9A6E-7E5C2F0A1D34}
-AppName={#MyAppName}
+AppName={#MyAppDisplay}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\{#MyAppName}
-DefaultGroupName={#MyAppName}
+DefaultGroupName={#MyAppDisplay}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=Output
@@ -71,14 +73,20 @@ Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cre
 Source: "MicrosoftEdgeWebView2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: WebView2Missing and FileExists(ExpandConstant('{src}\MicrosoftEdgeWebView2Setup.exe'))
 
 [Icons]
-Name: "{group}\{#MyAppName}";        Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\{#MyAppName} CLI";    Filename: "{app}\Hearth-cli.bat"
-Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{#MyAppDisplay}";        Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\_internal\assets\icon_app.ico"
+Name: "{group}\{#MyAppDisplay} CLI";    Filename: "{app}\Hearth-cli.bat"; IconFilename: "{app}\_internal\assets\icon_app.ico"
+Name: "{group}\Uninstall {#MyAppDisplay}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#MyAppDisplay}";  Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\_internal\assets\icon_app.ico"; Tasks: desktopicon
 ; The CLI is a first-class surface, not an afterthought, but only the GUI got a
 ; desktop shortcut so it looked like the app was GUI-only.
-Name: "{autodesktop}\{#MyAppName} CLI"; Filename: "{app}\Hearth-cli.bat"; \
-  IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppDisplay} CLI"; Filename: "{app}\Hearth-cli.bat"; \
+  IconFilename: "{app}\_internal\assets\icon_app.ico"; Tasks: desktopicon
+
+[InstallDelete]
+; Shortcuts from before the rename to Inglen.
+Type: files; Name: "{autodesktop}\Hearth.lnk"
+Type: files; Name: "{autodesktop}\Hearth CLI.lnk"
+Type: filesandordirs; Name: "{autoprograms}\Hearth"
 
 [UninstallDelete]
 ; Inno only removes files it put there itself. Hearth writes into its own folder
@@ -96,7 +104,7 @@ Filename: "{tmp}\MicrosoftEdgeWebView2Setup.exe"; Parameters: "/silent /install"
   StatusMsg: "Installing Edge WebView2 runtime (needed for the GUI)..."; \
   Flags: waituntilterminated; Check: WebView2Missing and FileExists(ExpandConstant('{tmp}\MicrosoftEdgeWebView2Setup.exe'))
 ; Offer to launch after a normal install (checkbox on the final page).
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; \
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppDisplay}"; \
   Flags: nowait postinstall skipifsilent
 ; In-app update path: Hearth exits and runs this with /SILENT, so the postinstall
 ; entry above is skipped and the user would be left with no app open. Relaunch it

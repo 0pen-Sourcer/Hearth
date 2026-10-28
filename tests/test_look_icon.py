@@ -96,6 +96,15 @@ if r.status == 200:
     import io
     check("in that look's accent", orange_share(Image.open(io.BytesIO(body))) < 0.1)
 
+# A new install starts in Rose on Dark; one set up before keeps the Classic it always had.
+from hearth import look_icon as _li  # noqa: E402
+_dt = getattr(_li, "default_theme", lambda s: "classic")
+check("a new install opens in Dark, not Classic", _dt({}) == "dark" and _li.DEFAULT == ("dark", "rose"))
+check("an install set up before the rename keeps Classic", _dt({"onboarded": True}) == "classic")
+check("the app's own icon is in Rose, not the ember flame",
+      os.path.isfile(os.path.join(ROOT, "assets", "icon_app.ico"))
+      and orange_share(Image.open(os.path.join(ROOT, "assets", "icon_app.png"))) < 0.1)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

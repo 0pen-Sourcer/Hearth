@@ -1,7 +1,7 @@
 """Hearth's icon in the saved look.
 
-Classic keeps the H. Every other theme shows the hearth with its flame in the
-accent colour. The tray, the window, the page's tab icon and desktop notices
+Classic shows its own mark, the i with a flame. Every other theme shows the
+hearth with its flame in the accent colour. The tray, the window, the page's tab icon and desktop notices
 all take it from here, so they never disagree.
 """
 from __future__ import annotations
@@ -13,7 +13,13 @@ from typing import Optional, Tuple
 
 ACCENTS = {"ember": "#d9774a", "sage": "#74a883", "ocean": "#5b93c2", "rose": "#cf7089",
            "violet": "#8b6cf0", "mono": "#a3a09a"}
-DEFAULT = ("classic", "rose")
+DEFAULT = ("dark", "rose")
+
+
+def default_theme(settings: dict) -> str:
+    """The look when none was picked: Rose on Dark for a new install, Classic for
+    one set up before the rename, which never saved a choice and has always had it."""
+    return "classic" if (settings or {}).get("onboarded") else DEFAULT[0]
 _ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 
 
@@ -34,7 +40,7 @@ def saved() -> Tuple[str, str]:
         ws = _get("WORKSPACE") or os.path.join(os.path.expanduser("~"), "Jarvis")
         with open(os.path.join(ws, "settings.json"), encoding="utf-8") as f:
             s = json.load(f) or {}
-        return (str(s.get("ui_theme") or DEFAULT[0]), str(s.get("ui_accent") or DEFAULT[1]))
+        return (str(s.get("ui_theme") or default_theme(s)), str(s.get("ui_accent") or DEFAULT[1]))
     except Exception:
         return DEFAULT
 

@@ -62,7 +62,7 @@ def _answer_flags(argv: List[str]) -> None:
             from hearth.updater import HEARTH_VERSION as _v
         except Exception:
             _v = "unknown"
-        print(f"hearth {_v}")
+        print(f"inglen {_v}")
         sys.exit(0)
     # Frozen builds re-launch this exe with private sentinels of their own, and
     # the migrator reads sys.argv; anything unrecognised is left for them.
@@ -710,10 +710,27 @@ LMSTUDIO_SYNC_PATH = os.path.expanduser(
 # ---- ANSI palette ---------------------------------------------------------
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
-# Brand gradient, ember to firelight, matching the GUI's default accent.
-GRAD = ["\033[38;5;166m", "\033[38;5;172m", "\033[38;5;173m",
-        "\033[38;5;209m", "\033[38;5;215m", "\033[38;5;223m"]
-C_BRAND = "\033[38;5;209m"   # ember
+# The brand gradient follows the look saved in the window (Classic's violet, or
+# the accent), deep to light, so the terminal and the window agree.
+_GRADS = {
+    "classic": (55, 56, 92, 99, 141, 183), "violet": (55, 56, 92, 99, 141, 183),
+    "rose": (125, 161, 168, 175, 211, 218), "sage": (65, 71, 107, 108, 114, 151),
+    "ocean": (24, 25, 31, 67, 74, 110), "ember": (166, 172, 173, 209, 215, 223),
+    "mono": (241, 243, 245, 247, 250, 253),
+}
+
+
+def _look_grad():
+    try:
+        from hearth.look_icon import saved
+        theme, accent = saved()
+        return _GRADS.get("classic" if theme == "classic" else accent, _GRADS["rose"])
+    except Exception:
+        return _GRADS["rose"]
+
+
+GRAD = [f"\033[38;5;{n}m" for n in _look_grad()]
+C_BRAND = GRAD[3]
 C_USER = "\033[1;97m"
 BOLD_ON = "\033[1m"
 C_BOT = "\033[38;5;223m"     # warm off-white
@@ -1661,17 +1678,17 @@ class JarvisCLI:
 
     # -- Boot screen --------------------------------------------------------
     def animate_intro(self):
-        # Boot banner - was JARVIS, now HEARTH (the framework).
+        # The app's name in block letters.
         art = [
-            "     █░█ █▀▀ ▄▀█ █▀█ ▀█▀ █░█     ",
-            "     █▀█ ██▄ █▀█ █▀▄ ░█░ █▀█     ",
+            "     █ █▄░█ █▀▀ █░░ █▀▀ █▄░█     ",
+            "     █ █░▀█ █▄█ █▄▄ ██▄ █░▀█     ",
         ]
         try:
             from hearth import edition as _ed
             _ed_label = _ed.label()
         except Exception:
             _ed_label = "Full"
-        sub = f"  local-first personal AI  ◆  hearth v{HEARTH_VERSION} ({_ed_label})"
+        sub = f"  local-first personal AI  ◆  inglen v{HEARTH_VERSION} ({_ed_label})"
         os.system("cls" if os.name == "nt" else "clear")
         # Two lines: the mark, and beside it what is answering and where.
         try:
@@ -1681,11 +1698,11 @@ class JarvisCLI:
         home = os.path.expanduser("~")
         ws = WORKSPACE.replace(home, "~") if WORKSPACE.lower().startswith(home.lower()) else WORKSPACE
         beside = [
-            f"{C_BOLD}hearth{C_RESET} {C_DIM}{HEARTH_VERSION} · {_ed_label}{C_RESET}",
+            f"{C_BOLD}inglen{C_RESET} {C_DIM}{HEARTH_VERSION} · {_ed_label}{C_RESET}",
             f"{C_BOT}{_AGENT_NAME}{C_RESET}{C_DIM} · {self._model_label()} · {ws}{C_RESET}",
         ]
         for i, ln in enumerate(art):
-            color = GRAD[i % len(GRAD)]
+            color = GRAD[3 + i % 3]
             sys.stdout.write(f"{C_BOLD}{color}{ln.rstrip()}{C_RESET}   {beside[i]}\n")
             sys.stdout.flush()
             time.sleep(0.04)

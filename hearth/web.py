@@ -1699,7 +1699,8 @@ def _saved_look() -> str:
     """The saved theme, accent and Simple/Advanced as a JS object literal, for
     the page to apply before its first paint."""
     s = _load_settings()
-    look = {"theme": s.get("ui_theme"), "accent": s.get("ui_accent"), "ui": s.get("ui_mode")}
+    from .look_icon import default_theme
+    look = {"theme": s.get("ui_theme") or default_theme(s), "accent": s.get("ui_accent"), "ui": s.get("ui_mode")}
     ok = {"theme": {"classic", "dark", "light", "system"},
           "accent": {"ember", "sage", "ocean", "rose", "violet", "mono"},
           "ui": {"simple", "advanced"}}

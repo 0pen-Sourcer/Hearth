@@ -62,7 +62,7 @@ ENGINE_BUNDLED = False
 block_cipher = None
 
 REPO_ROOT = os.path.abspath(SPECPATH)
-ICON_PATH = os.path.join(REPO_ROOT, "assets", "icon.ico")
+ICON_PATH = os.path.join(REPO_ROOT, "assets", "icon_app.ico")
 if not os.path.isfile(ICON_PATH):
     ICON_PATH = os.path.join(REPO_ROOT, "assets", "icon.png")
     if not os.path.isfile(ICON_PATH):

@@ -85,17 +85,21 @@ def _saved_look(url: str) -> str:
         import json as _json
         from .env import get as _get
         ws = _get("WORKSPACE") or os.path.join(os.path.expanduser("~"), "Jarvis")
+        from .look_icon import default_theme
         with open(os.path.join(ws, "settings.json"), encoding="utf-8") as f:
-            return str(_json.load(f).get("ui_theme") or "classic")
+            s = _json.load(f) or {}
+        return str(s.get("ui_theme") or default_theme(s))
     except Exception:
         pass
     try:
         import json as _json
         import urllib.request
+        from .look_icon import default_theme
         with urllib.request.urlopen(url.rstrip("/") + "/api/settings", timeout=5) as r:
-            return str(_json.load(r).get("ui_theme") or "classic")
+            s = _json.load(r) or {}
+        return str(s.get("ui_theme") or default_theme(s))
     except Exception:
-        return "classic"
+        return "dark"
 
 
 def _force_foreground_win() -> bool:

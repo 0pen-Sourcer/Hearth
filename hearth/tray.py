@@ -38,9 +38,10 @@ def _look() -> tuple:
     """The window's theme and accent, as it saved them in settings."""
     try:
         s = web_backend._load_settings() or {}
-        return (str(s.get("ui_theme") or "classic"), str(s.get("ui_accent") or "rose"))
+        from .look_icon import default_theme
+        return (str(s.get("ui_theme") or default_theme(s)), str(s.get("ui_accent") or "rose"))
     except Exception:
-        return ("classic", "rose")
+        return ("dark", "rose")
 
 
 def _icon_for_look(theme: str, accent: str):
@@ -61,17 +62,13 @@ def _icon_image():
             return Image.open(icon_path).convert("RGBA")
         except Exception:
             pass
-    # Fallback: a 64x64 ember "H" on dark bg
+    # Fallback: a 64x64 ember "I" on a dark ground, three rectangles.
     img = Image.new("RGBA", (64, 64), (28, 25, 22, 255))
     draw = ImageDraw.Draw(img)
-    # Simple H letterform — three rectangles
     accent = (224, 123, 76, 255)
-    # Left vertical
-    draw.rectangle([(14, 12), (24, 52)], fill=accent)
-    # Right vertical
-    draw.rectangle([(40, 12), (50, 52)], fill=accent)
-    # Crossbar (slightly higher than center — gives it character)
-    draw.rectangle([(14, 28), (50, 36)], fill=accent)
+    draw.rectangle([(18, 12), (46, 18)], fill=accent)
+    draw.rectangle([(28, 12), (36, 52)], fill=accent)
+    draw.rectangle([(18, 46), (46, 52)], fill=accent)
     return img
 
 
@@ -214,6 +211,17 @@ def main(argv: Optional[list] = None) -> int:
         primary, _existing_port = singleton.acquire_or_defer(singleton.DEFAULT_PORT)
         if not primary:
             singleton.announce_secondary_and_exit()
+
+    # Shortcuts made before the rename say Hearth with the old icon; an update
+    # can't change them, so the installed app renames its own once.
+    if getattr(sys, "frozen", False) and sys.platform == "win32":
+        def _rebrand():
+            try:
+                from .install_shortcuts import rebrand
+                rebrand()
+            except Exception:
+                pass
+        threading.Thread(target=_rebrand, daemon=True).start()
 
     # Start backend
     global _server_url
