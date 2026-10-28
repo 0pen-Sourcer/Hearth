@@ -185,6 +185,7 @@ _TOOL = {"bash": "run_command", "shell": "run_command", "run_shell_command": "ru
 # Tools only the agents have, said plainly. None: bookkeeping, not a step.
 _AGENT_WORDS = {"update_plan": "Updated its plan", "todowrite": "Updated its to-do list",
                 "request_user_input": "Asked you a question", "request_user_input_async": "Asked you a question",
+                "askuserquestion": "Asked you a question",
                 "view_image": "Looked at an image", "spawn_agent": "Started a helper", "task": "Started a helper",
                 "tool_search": "Looked for a tool", "list_mcp_resources": "Looked at its tools",
                 "wait": None, "wait_agent": None, "write_stdin": None, "close_agent": None}
@@ -239,6 +240,25 @@ def _said(desc: Any) -> str:
     return (d[0].upper() + d[1:])[:120] if d else ""
 
 
+QUESTION_TOOLS = ("request_user_input", "request_user_input_async", "askuserquestion")
+
+
+def _question_of(args: Any) -> str:
+    """The words of a question an agent put to the person (Codex's request_user_input,
+    Claude Code's AskUserQuestion), for the phone's notification."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            return ""
+    if not isinstance(args, dict):
+        return ""
+    qs = args.get("questions")
+    if isinstance(qs, list) and qs and isinstance(qs[0], dict):
+        return str(qs[0].get("question") or qs[0].get("header") or "")[:300]
+    return str(args.get("question") or args.get("prompt") or "")[:300]
+
+
 def _steps_of(name: str, args: Any, desc: Any = "") -> List[Dict[str, Any]]:
     """The steps one tool call amounts to. The agent's own words for it win over
     Inglen's template ("Ran ...", "Read ..."), which is only for calls it didn't describe."""
@@ -270,7 +290,13 @@ def _step(name: str, args: Any) -> Optional[Dict[str, Any]]:
     from .term_render import tool_words
     low = name.lower()
     if low in _AGENT_WORDS:
-        return {"w": _AGENT_WORDS[low], "tool": low} if _AGENT_WORDS[low] else None
+        if not _AGENT_WORDS[low]:
+            return None
+        st = {"w": _AGENT_WORDS[low], "tool": low}
+        q = _question_of(args)
+        if q:
+            st["cmd"] = q
+        return st
     args = args if isinstance(args, dict) else {}
     for key in ("command", "cmd"):
         if isinstance(args.get(key), list):
@@ -844,6 +870,13 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask) -> int:
         return 2
     # A second program writing into a session that is open on the PC would tangle both.
     state = live_state(agent, sid, d.get("path") or "")
+    if state in ("open", "recent") and agent == "codex" and _exe(agent):
+        # Codex takes a message for a session open in its own app (codex queue, as Shed
+        # does): the app that owns the session runs it, and its reply shows here.
+        if await _queue_codex(_exe(agent), sid, cwd, text):
+            emit("text", text=f"Sent to {name} on your PC, which has this session open. Its reply shows here "
+                              f"as it writes it.")
+            return 0
     if state == "open":
         emit("error", message=f"This session is open in {name} on your PC right now. Send it there, or close it "
                               f"there and send this again.")
@@ -865,6 +898,19 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask) -> int:
     except Exception as e:
         emit("error", message=f"{name} didn't run: {type(e).__name__}: {e}")
         return 1
+
+
+async def _queue_codex(exe: List[str], sid: str, cwd: str, text: str) -> bool:
+    """`codex queue --thread <id> --message <text>`. False when this Codex has no
+    queue command (older builds) or it refused, so the caller says why as before."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *exe, "queue", "--thread", sid, "--message", text, cwd=cwd,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await asyncio.wait_for(proc.communicate(), timeout=30)
+        return proc.returncode == 0
+    except Exception:
+        return False
 
 
 async def _lines(args: List[str], cwd: str, text: str):

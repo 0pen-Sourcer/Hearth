@@ -737,8 +737,10 @@ class AgentWatch:
         self.seen: Optional[Dict[str, int]] = None   # chat -> when it was last written, at the last look
         self.waiting: Dict[str, Dict[str, Any]] = {}  # written to, not quiet yet
         self.told: Dict[str, int] = {}
+        self.moved: List[str] = []                    # sessions written to since the last look
 
     def look(self, rows: List[Dict[str, Any]], now_ms: float, busy: set) -> List[Dict[str, Any]]:
+        self.moved = []
         if self.seen is None:
             self.seen = {r["chat"]: r["at"] for r in rows}
             return []
@@ -746,6 +748,8 @@ class AgentWatch:
             k, at = r["chat"], r["at"]
             before = self.seen.get(k)
             self.seen[k] = at
+            if before is not None and at > before:
+                self.moved.append(k)
             if k in busy:
                 self.waiting.pop(k, None)
             elif before is None or at > before:
@@ -772,12 +776,18 @@ class AgentWatch:
         if not last or last.get("role") != "assistant":
             return None
         parts = last.get("parts") or []
+        what = r.get("title") or r.get("project") or "a session"
+        # Named for the agent only ("Codex"), with what it said: these apps change how they
+        # stop and ask, and a title like "finished" would be wrong for a turn that asks.
+        who = r.get("label") or "An agent"
         if not last.get("error") and parts and "text" not in parts[-1]:
+            st = (parts[-1].get("steps") or [{}])[-1]
+            if st.get("tool") in agent_sessions.QUESTION_TOOLS and not st.get("out"):
+                return {"kind": "ask", "title": who, "body": f"{what}: {st.get('cmd') or 'It has a question for you.'}",
+                        "c": r["chat"]}
             return None                            # it ended on a step: still at work, or waiting on a tool
         text = (parts[-1].get("text") if parts else "") or last.get("text") or ""
-        what = r.get("title") or r.get("project") or "a session"
-        return {"kind": "done", "title": f"{r.get('label') or 'An agent'} {'stopped' if last.get('error') else 'finished'}",
-                "body": f"{what}: {' '.join(text.split())[:200]}", "c": r["chat"]}
+        return {"kind": "done", "title": who, "body": f"{what}: {' '.join(text.split())[:200]}", "c": r["chat"]}
 
 
 class Relay(cc.Adapter):
@@ -1328,6 +1338,16 @@ class Bridge:
             for n in notes:
                 for chat in list(self.adapter.rooms):     # each paired phone
                     self.adapter.notify(chat, n)
+            # A session open on a phone shows what its agent wrote since, without reopening it.
+            for c in watch.moved:
+                if c in self.agent_runs:
+                    continue
+                prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+                try:
+                    for chat in list(self.adapter.rooms):
+                        self.adapter._push(chat, {"type": "changed", "what": "chat", "c": c})
+                finally:
+                    cc._TURN.ctx = prev
 
     # Settings a phone shows: a change on the PC redraws its brain chip and modes at once.
     _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|preferred_model|ui_theme|ui_accent|theme)")

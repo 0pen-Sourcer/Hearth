@@ -3,7 +3,7 @@
 The owner saw Codex's own notification on the PC and none on the phone: the
 phone was told only about turns it started. Now the bridge looks every 10 s;
 a session written to and then quiet for 20 s, ending on the agent's words,
-sends "Codex finished". Still working (ending on a step or on the person's
+sends "Codex" with what it said (or the question it asks). Still working (ending on a step or on the person's
 message), already there at start, or driven from the phone: nothing.
 
     .\\.venv\\Scripts\\python.exe tests\\test_agent_watch.py
@@ -55,13 +55,20 @@ ends["a"] = done
 w.look([row("a", t0 + 95_000)], t0 + 96_000, set())
 got = w.look([row("a", t0 + 95_000)], t0 + 120_000, set())
 check(f"written, then quiet, ending on its words: Codex finished, opening that session {got}",
-      len(got) == 1 and got[0]["title"] == "Codex finished" and got[0]["c"] == "agent_codex_a"
+      len(got) == 1 and got[0]["title"] == "Codex" and got[0]["c"] == "agent_codex_a"
       and got[0]["body"].startswith("Menu flashes: Fixed the menu."))
 check("and only once", w.look([row("a", t0 + 95_000)], t0 + 140_000, set()) == [])
 ends["b"] = err
 w.look([row("a", t0 + 95_000), row("b", t0 + 150_000, "Inventory")], t0 + 151_000, set())
 got = w.look([row("a", t0 + 95_000), row("b", t0 + 150_000, "Inventory")], t0 + 175_000, set())
-check(f"a new session that stopped on an error says it stopped {got}", len(got) == 1 and got[0]["title"] == "Codex stopped")
+check(f"a new session that stopped on an error says what it said {got}",
+      len(got) == 1 and got[0]["title"] == "Codex" and "usage limit" in got[0]["body"])
+ends["d"] = [{"role": "assistant", "text": "", "parts": [{"steps": [{"w": "Asked you a question", "tool": "request_user_input",
+                                                                     "cmd": "Keep the parcel sealed?"}]}]}]
+w.look([row("d", t0 + 300_000, "Courier")], t0 + 301_000, set())
+got = w.look([row("d", t0 + 300_000, "Courier")], t0 + 330_000, set())
+check(f"a question put to the person is said, with its words {got}",
+      len(got) == 1 and got[0]["kind"] == "ask" and got[0]["body"] == "Courier: Keep the parcel sealed?")
 ends["c"] = done
 w.look([row("c", t0 + 180_000)], t0 + 181_000, {"agent_codex_c"})
 check("one the phone is driving is left to its own notification",
