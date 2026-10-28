@@ -1137,9 +1137,15 @@ def _list_models() -> List[Dict]:
     # auth-gated builtin/cloud server doesn't 401-storm the log on every
     # GUI poll (this was 5-10 spurious 401s in server-log per second
     # because the GUI polls /api/models every 9s + Hearth's internal probes).
+    # Only a server on this machine can be LM Studio: a cloud address isn't asked
+    # (it would only 404, and it would be sent the key for nothing).
     v0_url = probe_base.replace("/v1", "/api/v0") + "/models"
-    _v0_key = os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
-    data = _http_get_json(v0_url, headers={"Authorization": f"Bearer {_v0_key}"})
+    try:
+        _v0_key = (_load_settings().get("llm_key") or "").strip() or os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
+    except Exception:
+        _v0_key = os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
+    data = (_http_get_json(v0_url, headers={"Authorization": f"Bearer {_v0_key}"})
+            if _is_local_probe else None)
     if data and isinstance(data, dict) and data.get("data"):
         # Cross-reference with /v1/models to verify "loaded" state isn't stale.
         # LM Studio v0 sometimes reports state="loaded" for a model the user
@@ -1188,13 +1194,13 @@ def _list_models() -> List[Dict]:
     # cloud key persists in settings (llm_key) — without this, after a relaunch a
     # cloud provider (Groq/OpenAI/...) gets "hearth-builtin", 401s, and the model
     # list comes back empty even though the brain itself works fine.
-    api_key = os.environ.get("LOCAL_API_KEY")
-    if not api_key:
-        try:
-            api_key = (_load_settings().get("llm_key") or "").strip() or None
-        except Exception:
-            api_key = None
-    api_key = api_key or "hearth-builtin"
+    # The brain saved in Settings is what the list is for, so its key goes first;
+    # the environment's is for a server started from a terminal.
+    try:
+        api_key = (_load_settings().get("llm_key") or "").strip() or None
+    except Exception:
+        api_key = None
+    api_key = api_key or os.environ.get("LOCAL_API_KEY") or "hearth-builtin"
     from .headless import model_list_request
     _list_url, _list_hdr = model_list_request(probe_base, api_key)
     _raw_models = _http_get_json(_list_url, headers=_list_hdr, timeout=6)
