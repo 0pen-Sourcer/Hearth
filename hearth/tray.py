@@ -172,6 +172,17 @@ def _short(title: str, n: int = 40) -> str:
     return t if len(t) <= n else t[: n - 1].rstrip() + "\u2026"
 
 
+def chat_menu_item(c: dict):
+    """A tray menu row that opens one chat. pystray accepts an action of at most
+    two parameters, so the chat id is closed over, not a default argument."""
+    import pystray
+    cid = c["id"]
+
+    def _open(icon, item):
+        open_chat(cid)
+    return pystray.MenuItem(_short(c.get("title")), _open)
+
+
 def _open_desktop_window(voice: bool = False, chat: str = ""):
     """Open the PyWebView native window as a SUBPROCESS.
 
@@ -477,8 +488,7 @@ def main(argv: Optional[list] = None) -> int:
             pass
         os._exit(0)
 
-    def _chat_item(c):
-        return pystray.MenuItem(_short(c.get("title")), lambda icon, item, cid=c["id"]: open_chat(cid))
+    _chat_item = chat_menu_item
 
     def _items():
         pinned, rest = _menu_chats()

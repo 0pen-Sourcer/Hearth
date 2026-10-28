@@ -17,7 +17,7 @@
       if (saved && saved[key]) return saved[key];
       try { return localStorage.getItem(local) || dflt; } catch (e) { return dflt; }
     }
-    var mode = pick('theme', 'hearth_theme', 'dark');
+    var mode = pick('theme', 'hearth_theme', (saved && saved.theme_default) || 'dark');
     var accent = pick('accent', 'hearth_accent', 'rose');
     var ui = pick('ui', 'hearth_ui', 'simple');
     try { localStorage.setItem('hearth_theme', mode); localStorage.setItem('hearth_accent', accent); localStorage.setItem('hearth_ui', ui); } catch (e) {}

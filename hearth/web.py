@@ -1713,10 +1713,14 @@ def _saved_look() -> str:
     the page to apply before its first paint."""
     s = _load_settings()
     from .look_icon import default_theme
-    look = {"theme": s.get("ui_theme") or default_theme(s), "accent": s.get("ui_accent"), "ui": s.get("ui_mode")}
+    # A saved look wins; with none, what the window last showed; with neither, the
+    # default for this install (Classic for one set up before the rename).
+    look = {"theme": s.get("ui_theme"), "accent": s.get("ui_accent"), "ui": s.get("ui_mode"),
+            "theme_default": default_theme(s)}
     ok = {"theme": {"classic", "dark", "light", "system"},
           "accent": {"ember", "sage", "ocean", "rose", "violet", "mono"},
           "ui": {"simple", "advanced"}}
+    ok["theme_default"] = ok["theme"]
     return json.dumps({k: v for k, v in look.items() if v in ok[k]})
 
 
