@@ -76,9 +76,9 @@ write(cl_path, lines(
      "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "1 failing"}]}},
     {"type": "assistant", "cwd": PA, "isSidechain": True, "timestamp": "2026-10-27T09:00:21Z",
      "message": {"role": "assistant", "content": [{"type": "text", "text": "a sub-agent's aside"}]}},
-    {"type": "assistant", "cwd": PA, "timestamp": "2026-10-27T09:00:30Z",
+    {"type": "assistant", "cwd": PA, "timestamp": "2026-10-27T09:00:30Z", "model": "claude-opus-5-5",
      "message": {"role": "assistant", "content": [{"type": "text", "text": "Fixed: it rounds once, at the end."}]}}))
-touch(cl_path, 60)
+touch(cl_path, 300)
 
 # Codex: its session line, the environment it adds as the person's turn, events and a shell call.
 CX = "22222222-2222-2222-2222-222222222222"
@@ -188,6 +188,8 @@ check("Gemini's project is found from the folder its hash names", by["gemini-cli
 check(f"titles are what the session was about ({[r['title'] for r in rows]})",
       by["claude-code"]["title"] == "Fix the checkout total" and by["codex"]["title"] == "add an RSS feed"
       and by["pi"]["title"] == "tidy the notes index" and by["opencode"]["title"] == "Write the README")
+check(f"the model each session last ran on ({by['claude-code'].get('model')})", by["claude-code"].get("model") == "claude-opus-5-5")
+check("sessions not in use aren't marked live", all(not r.get("live") for r in rows))
 check("each is named by its agent and has a phone chat id", by["codex"]["label"] == "Codex"
       and S.parse_chat(by["codex"]["chat"]) == ("codex", CX))
 check("the bridge answers the phone's request for them",
@@ -266,6 +268,39 @@ check(f"the replayed old messages aren't shown again, and the answer is ({got[-1
       got[-1] == ("text", {"text": "Cleaned the build folder."}) and not any("an old reply" in str(f) for _, f in got))
 rc, got, asked = say(by["opencode"]["chat"], "clean the build", allow=False)
 check("told no, it doesn't", got[-1] == ("text", {"text": "Left the build folder."}))
+
+# A session open in Claude Code on the PC right now: Claude writes ~/.claude/sessions/<pid>.json for it.
+write(os.path.join(HOME, ".claude", "sessions", f"{os.getpid()}.json"), json.dumps({"pid": os.getpid(), "sessionId": CL}))
+before = len(ran("claude"))
+rc, got, _ = say(by["claude-code"]["chat"], "and refunds?")
+check(f"a session open in its program right now isn't resumed a second time ({got[-1][1].get('message', '')[:60]})",
+      rc == 3 and len(ran("claude")) == before and "open in Claude Code" in got[-1][1]["message"])
+check("and the list says it's open", next(r for r in S.listing() if r["agent"] == "claude-code")["live"] == "open")
+os.remove(os.path.join(HOME, ".claude", "sessions", f"{os.getpid()}.json"))
+touch(cx_path, 10)
+rc, got, _ = say(by["codex"]["chat"], "still there?")
+check("one written seconds ago may still be working: it waits", rc == 3 and "minute and a half" in got[-1][1]["message"])
+touch(cx_path, 600)
+
+# A long session (pictures make them hundreds of MB): read from its end, title and folder from its start.
+BIG = "55555555-5555-5555-5555-555555555555"
+big_path = os.path.join(os.path.dirname(cl_path), BIG + ".jsonl")
+with open(big_path, "w", encoding="utf-8") as f:
+    f.write(json.dumps({"type": "user", "cwd": PA, "timestamp": "2026-10-20T09:00:00Z",
+                        "message": {"role": "user", "content": "start of a very long session"}}) + "\n")
+    pad = "x" * 200_000
+    for i in range(30):
+        f.write(json.dumps({"type": "assistant", "cwd": PA, "timestamp": "2026-10-20T09:01:00Z",
+                            "message": {"role": "assistant", "content": [{"type": "text", "text": f"part {i} {pad}"}]}}) + "\n")
+    f.write(json.dumps({"type": "user", "cwd": PA, "timestamp": "2026-10-20T10:00:00Z",
+                        "message": {"role": "user", "content": "the last thing I asked"}}) + "\n")
+touch(big_path, 900)
+t0 = time.time()
+t = S.transcript(S.chat_id("claude-code", BIG))
+check(f"a {os.path.getsize(big_path) // 1_000_000} MB session opens from its end ({time.time() - t0:.2f} s), "
+      f"with its title and folder from its start",
+      t.get("messages") and t["messages"][-1]["text"] == "the last thing I asked" and t["title"] == "start of a very long session"
+      and t["cwd"] == PA)
 
 rc, got, _ = say(by["gemini-cli"]["chat"], "hi")
 check(f"an agent not installed says so ({got})", rc == 2 and got and "isn't installed" in got[0][1]["message"])

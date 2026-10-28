@@ -36,6 +36,9 @@ AGENTS = ("claude-code", "codex", "opencode", "gemini-cli", "pi")
 PREFIX = "as_"                       # a phone chat id for a session: as_<agent>_<session id>
 PER_AGENT = 60                       # the newest sessions read per agent
 HEAD_BYTES = 256 * 1024              # how much of a session file is read for its title
+TAIL_BYTES = 4 * 1024 * 1024         # how much of its end is read for the transcript (a session with
+                                     # pictures in it runs to hundreds of MB)
+RECENT_S = 90                        # a session written this recently may be in use right now
 _CACHE: Dict[Tuple[str, float, int], Dict[str, Any]] = {}
 _OC: Dict[str, Any] = {}
 
@@ -74,10 +77,20 @@ def parse_chat(cid: str) -> Optional[Tuple[str, str]]:
 # ---------------------------------------------------------------- reading lines
 
 def _jsonl(path: str, limit: int = 0):
-    """The objects in a JSON-lines file; the first `limit` bytes only when given."""
+    """The objects in a JSON-lines file: the first `limit` bytes when given;
+    otherwise the whole file, or its last TAIL_BYTES when it is bigger."""
     try:
         with open(path, "rb") as f:
-            raw = f.read(limit) if limit else f.read()
+            if limit:
+                raw = f.read(limit)
+            else:
+                size = os.fstat(f.fileno()).st_size
+                if size > TAIL_BYTES:
+                    f.seek(size - TAIL_BYTES)
+                    raw = f.read()
+                    raw = raw[raw.find(b"\n") + 1:]   # the first line is cut short
+                else:
+                    raw = f.read()
     except OSError:
         return
     lines = raw.split(b"\n")
@@ -165,6 +178,19 @@ def _step(name: str, args: Any) -> Dict[str, Any]:
 
 def _msg(role: str, text: str, at: int, steps: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     return {"role": role, "text": text[-8000:], "at": at, "steps": steps or []}
+
+
+def _last_model(path: str) -> str:
+    """The model a session last ran on, from the end of its file (each agent writes it per turn)."""
+    try:
+        with open(path, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            f.seek(max(0, size - 128 * 1024))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    found = re.findall(r'"model"\s*:\s*"([^"<]{1,100})"', tail)
+    return found[-1] if found else ""
 
 
 def _fold(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -310,7 +336,8 @@ def _gemini_read(path: str, head: bool) -> Dict[str, Any]:
             steps = [_step(str(c.get("name") or ""), c.get("args") or {}) for c in m.get("toolCalls") or [] if isinstance(c, dict)]
             msgs.append(_msg("assistant", text, at, steps))
     title = next((_title(m["text"]) for m in msgs if m["role"] == "user"), "")
-    return {"id": str(d.get("sessionId") or ""), "cwd": _gemini_root(path), "title": title, "messages": _fold(msgs),
+    return {"id": str(d.get("sessionId") or ""), "cwd": str(d.get("cwd") or "") or _gemini_root(path), "title": title,
+            "messages": _fold(msgs),
             "at": _ms(d.get("lastUpdated"))}
 
 
@@ -444,6 +471,64 @@ def _known_folders() -> List[str]:
     return seen
 
 
+def _claude_live() -> Dict[str, int]:
+    """Claude Code sessions open right now: each running one writes ~/.claude/sessions/<pid>.json."""
+    out: Dict[str, int] = {}
+    try:
+        import psutil
+    except ImportError:
+        return out
+    for p in glob.glob(os.path.join(_home(), ".claude", "sessions", "*.json")):
+        try:
+            with open(p, encoding="utf-8") as f:
+                rec = json.load(f)
+            pid = int(rec.get("pid") or 0)
+            if rec.get("sessionId") and pid and psutil.pid_exists(pid):
+                out[str(rec["sessionId"])] = pid
+        except (OSError, ValueError, TypeError):
+            continue
+    return out
+
+
+def _held_open(paths: List[str]) -> set:
+    """Which of these files an agent program has open right now (Codex keeps its session file open)."""
+    want = {os.path.normcase(os.path.abspath(p)) for p in paths if p}
+    held: set = set()
+    if not want:
+        return held
+    try:
+        import psutil
+    except ImportError:
+        return held
+    for proc in psutil.process_iter(["name"]):
+        name = (proc.info.get("name") or "").lower()
+        if not name.startswith(("codex", "node", "opencode", "gemini", "pi")):
+            continue
+        try:
+            for f in proc.open_files():
+                n = os.path.normcase(f.path)
+                if n in want:
+                    held.add(n)
+        except Exception:
+            continue
+    return held
+
+
+def live_state(agent: str, sid: str, path: str = "") -> str:
+    """'open' when the session is running in its program on the PC right now, 'recent' when it was
+    written in the last minute and a half (it may be), else ''."""
+    if agent == "claude-code" and sid in _claude_live():
+        return "open"
+    if path and agent == "codex" and os.path.normcase(os.path.abspath(path)) in _held_open([path]):
+        return "open"
+    try:
+        if path and time.time() - os.path.getmtime(path) < RECENT_S:
+            return "recent"
+    except OSError:
+        pass
+    return ""
+
+
 def listing(limit: int = 120) -> List[Dict[str, Any]]:
     """Every agent's sessions, newest first: agent, id, chat (the phone's id for
     it), project folder, title and when it was last used."""
@@ -455,12 +540,19 @@ def listing(limit: int = 120) -> List[Dict[str, Any]]:
                 continue
             rows.append({"agent": agent, "id": h["id"], "cwd": h.get("cwd") or "",
                          "title": h.get("title") or "", "at": int(mt * 1000), "path": p})
+    claude_open = _claude_live()
+    codex_open = _held_open([r["path"] for r in rows if r["agent"] == "codex" and time.time() * 1000 - r["at"] < 86400000])
     rows += _opencode_list()
     out = []
     for r in sorted(rows, key=lambda r: -r["at"])[:limit]:
+        path = r.get("path") or ""
+        live = ("open" if (r["agent"] == "claude-code" and r["id"] in claude_open)
+                or (path and os.path.normcase(os.path.abspath(path)) in codex_open)
+                else "recent" if time.time() * 1000 - r["at"] < RECENT_S * 1000 else "")
         out.append({"agent": r["agent"], "label": label(r["agent"]), "id": r["id"], "chat": chat_id(r["agent"], r["id"]),
                     "cwd": r["cwd"], "project": os.path.basename(r["cwd"].rstrip("/\\")) or r["cwd"],
-                    "title": r["title"] or "Untitled session", "at": r["at"]})
+                    "title": r["title"] or "Untitled session", "at": r["at"], "live": live,
+                    "model": _last_model(path) if path else ""})
     return out
 
 
@@ -484,6 +576,17 @@ def read(agent: str, sid: str) -> Dict[str, Any]:
     else:
         p = _find(agent, sid)
         d = _FILES[agent][1](p, False) if p else {}
+        if d and p:
+            # A long session is read from its end; its id, folder and title are at the start.
+            try:
+                st = os.stat(p)
+                h = _head(agent, p, st.st_mtime, st.st_size)
+            except OSError:
+                h = {}
+            for k in ("id", "cwd"):
+                d[k] = d.get(k) or h.get(k) or ""
+            d["title"] = h.get("title") or d.get("title") or ""   # what it began with, not the tail's first question
+            d["path"] = p
     return d if d and d.get("id") == sid else {}
 
 
@@ -532,6 +635,16 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask) -> int:
     if not d or not cwd or not os.path.isdir(cwd):
         emit("error", message=f"{name} can't carry this session on: its project folder isn't on this PC.")
         return 2
+    # A second program writing into a session that is open on the PC would tangle both.
+    state = live_state(agent, sid, d.get("path") or "")
+    if state == "open":
+        emit("error", message=f"This session is open in {name} on your PC right now. Send it there, or close it "
+                              f"there and send this again.")
+        return 3
+    if state == "recent":
+        emit("error", message=f"{name} wrote to this session in the last minute and a half, so it may still be working "
+                              f"on your PC. Try again in a moment.")
+        return 3
     exe = _exe(agent)
     if not exe:
         emit("error", message=f"{name} isn't installed on this PC any more.")
