@@ -64,6 +64,10 @@ class FakeTTS:
     def recently_spoke_text(self): return self.last.lower()
     def stop(self): self.stopped = True
 
+    @property
+    def DEFAULT(self):              # this PC's own speaker is the module itself here
+        return self
+
 
 rv._REALTIME_AVAILABLE = True
 rv._tts = FakeTTS()

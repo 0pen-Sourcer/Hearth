@@ -9219,6 +9219,19 @@ def approval_mode() -> str:
     return "auto" if s.get("yolo") else "ask"
 
 
+def needs_a_tap(name: str, args=None) -> bool:
+    """What a spoken "yes" may not approve, so a stray word, a TV or the
+    assistant's own voice can never set it off: what Auto mode would still
+    stop to ask about (deleting, moving, sending, installing, destructive or
+    outward commands)."""
+    if name in _ALWAYS_ASK_IN_AUTO:
+        return True
+    if name in _SHELL_TOOLS and name != "delegate":
+        cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
+        return _is_destructive(cmd) is not None or _is_outward(cmd) is not None
+    return name == "helper_changes" and str((args or {}).get("action") or "") == "discard"
+
+
 def mode_allows(name: str, args=None) -> bool:
     """True when the current approval mode lets this call run without asking."""
     m = approval_mode()
