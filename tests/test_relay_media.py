@@ -106,6 +106,12 @@ check(f"a rebuilt chat carries the file the person sent ({[c['name'] for c in ms
       [c["name"] for c in msgs[0].get("files", [])] == ["notes.pdf"] and msgs[0]["files"][0]["kind"] == "pdf"
       and msgs[0]["text"].startswith("look"))
 check("and the file a reply named, as a card it can open", [c["media"] for c in msgs[1].get("files", [])] == [p["media"]])
+import time as _t  # noqa: E402
+t0 = _t.time()
+for _ in range(20):
+    RB.answer({"what": "open", "chat": cid})
+each = (_t.time() - t0) / 20
+check(f"reopening a chat with a picture doesn't redraw its thumbnail each time ({each * 1000:.1f} ms an open)", each < 0.02)
 check("ids stay the same across restarts (kept on disk)", M._id_for(pic) == p["media"] and os.path.isfile(M.STORE))
 
 print()

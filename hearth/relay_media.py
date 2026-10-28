@@ -69,8 +69,25 @@ def kind_of(name: str) -> str:
     return "pdf" if mime == "application/pdf" else "file"
 
 
+_THUMBS: Dict[tuple, str] = {}
+
+
 def _thumb(path: str) -> str:
-    """A small JPEG of a picture, as a data URL; '' when it isn't one Pillow can read."""
+    """A small JPEG of a picture, as a data URL; '' when it isn't one Pillow can read. Kept per file
+    version, since a chat rebuilt for the phone cards its pictures every time it is opened."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return ""
+    key = (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+    if key not in _THUMBS:
+        if len(_THUMBS) > 500:
+            _THUMBS.clear()
+        _THUMBS[key] = _make_thumb(path)
+    return _THUMBS[key]
+
+
+def _make_thumb(path: str) -> str:
     try:
         from PIL import Image
         with Image.open(path) as im:
