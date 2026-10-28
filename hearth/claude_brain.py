@@ -79,6 +79,7 @@ _SESSIONS_LOCK = threading.Lock()
 _bridge_url = ""
 _TOKEN = secrets.token_hex(16)
 _checks: Dict[str, Callable] = {}          # token -> the running turn's permission check
+_turns: Dict[str, Any] = {}                # token -> the running turn, for Auto's reviewer
 
 
 def set_bridge_url(url: str) -> None:
@@ -552,6 +553,14 @@ def decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
     """Answer Claude Code's permission question with the turn's own check."""
     if token != _TOKEN:
         return {"behavior": "deny", "message": "not an Inglen session"}
+    # This arrives on the bridge's own thread: put the turn back so Auto's
+    # reviewer checks the step against what the person said in it.
+    from . import auto_review
+    with auto_review.using(_turns.get(token)):
+        return _decide(token, tool, inp)
+
+
+def _decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
     name, args = hearth_view(tool, inp)
     check = _checks.get(token)
     if check is None:
@@ -792,6 +801,16 @@ def _permission_mode() -> str:
         return "default"
 
 
+def quick_model(provider: str) -> str:
+    """Which model quick() answers with for this agent: its small one where quick()
+    asks for it, else the one the person picked ('' for the agent's own default)."""
+    if provider == "claude-code":
+        return "haiku"
+    if provider == "codex":
+        return ""
+    return chosen_model(provider) or ""
+
+
 def quick(prompt: str, timeout: float = 45, any_agent: bool = False) -> str:
     """A short answer from the brain with no tools, persona or session: for a
     chat's title, or the memory pass. Empty when the agent isn't there or
@@ -803,14 +822,14 @@ def quick(prompt: str, timeout: float = 45, any_agent: bool = False) -> str:
     if not exe:
         return ""
     if provider == "claude-code":
-        args = exe + ["-p", "--model", "haiku", "--no-session-persistence", "--strict-mcp-config", "--tools", ""]
+        args = exe + ["-p", "--model", quick_model(provider), "--no-session-persistence", "--strict-mcp-config", "--tools", ""]
     elif provider == "codex":
         args = exe + ["exec", "--skip-git-repo-check", "--sandbox", "read-only",
                       "-c", 'model_reasoning_effort="low"', "-"]
     elif not any_agent:
         return ""
     elif provider == "cursor-agent":
-        model = chosen_model(provider)
+        model = quick_model(provider)
         args = exe + ["-p", "--output-format", "text"] + (["--model", model] if model else [])
     elif provider in ACP:
         try:
@@ -1236,6 +1255,11 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
 
     t0 = time.time()
     _checks[_TOKEN] = permission_check
+    try:
+        from . import auto_review
+        _turns[_TOKEN] = auto_review.current()
+    except Exception:
+        pass
     tool_names: Dict[str, Tuple[str, float]] = {}
     text_parts: List[str] = []
     final_text, result, sid = "", None, None
@@ -1361,6 +1385,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
         return 1
     finally:
         _checks.pop(_TOKEN, None)
+        _turns.pop(_TOKEN, None)
 
     if sid:
         _save_session(key, sid, last=asked(prompt))

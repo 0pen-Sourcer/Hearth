@@ -181,6 +181,10 @@
   .steer-note .steer-who { display: block; font: 11.5px var(--sans); color: var(--fg-faint); margin-bottom: 2px; }
   .steer-note .steer-who em { font-style: normal; }
   .steer-note .steer-text { color: var(--fg); font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+  .review-note { display: flex; align-items: flex-start; gap: 7px; margin: 4px 0 8px; font: 12.5px/1.45 var(--sans); color: var(--fg-dim); }
+  .review-note svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; }
+  .review-note.ask { color: var(--warn); }
+  .perm-why { font: 12.5px/1.45 var(--sans); color: var(--fg-dim); margin: 2px 0 4px; }
   .steer-note.waiting { border-left-style: dashed; background: none; outline: 1px dashed var(--border); outline-offset: -1px; }
   .steer-note.waiting .steer-text { color: var(--fg-dim); }
   .tool .t-bg { margin-left: 8px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--fg-dim);
@@ -4191,6 +4195,7 @@
           <span class="perm-args" id="perm-args"></span>
           <span class="perm-close" id="perm-close" title="Cancel">×</span>
         </div>
+        <div class="perm-why" id="perm-why" hidden></div>
         <div class="perm-keys">
           <span class="perm-key" data-decision="allow"><b>1</b> Yes (once)</span>
           <span class="perm-key" data-decision="deny"><b>2</b> No</span>
@@ -4858,6 +4863,24 @@
             <div class="hint">Show the model's thinking before its answer, for models that think. Replies can take much longer.</div>
           </div>
           <div class="switch" data-key="think_default"></div>
+        </div>
+
+        <!-- Auto's reviewer (hearth/auto_review.py): the same check on every brain. -->
+        <div class="field">
+          <div class="label">
+            <div class="name">Auto's reviewer</div>
+            <div class="hint">In Auto, a step that would stop to ask goes ahead when what you said clearly asked for exactly it. Shutting down, disks, accounts, security settings, hidden commands and saved passwords always ask.</div>
+            <div class="voice-status" id="reviewer-status">checking…</div>
+            <button type="button" class="btn-mini" id="btn-reviewer-check" style="margin-top:6px">Check this model</button>
+          </div>
+          <div class="switch" data-key="auto_reviewer"></div>
+        </div>
+        <div class="field" data-adv>
+          <div class="label">
+            <div class="name">Review every command</div>
+            <div class="hint">In Auto, also check the commands that would run without asking. Slower: each one waits for the reviewer.</div>
+          </div>
+          <div class="switch" data-key="auto_review_every_command"></div>
         </div>
 
         <div class="field" data-adv>
@@ -6745,7 +6768,9 @@ function placePermStrip() {
 }
 let pendingFollowup = null;  // text the user typed during a perm prompt; sent after current turn ends
 
-function showInlinePermission(reqId, toolName, args) {
+function showInlinePermission(reqId, toolName, args, why) {
+  const whyEl = $('perm-why');
+  if (whyEl) { whyEl.textContent = why || ''; whyEl.hidden = !why; }
   pendingPermId = reqId;
   pendingPermTool = toolName;
   pendingPermArgs = args;
@@ -7740,6 +7765,8 @@ function replayAssistant(msgDiv, m, body) {
       appendPart(makeSubagentCard(ev), msgDiv);
     } else if (ev.kind === 'steer') {
       appendPart(makeSteerNote(ev.text || '', false), msgDiv);
+    } else if (ev.kind === 'auto_review') {
+      appendPart(makeReviewNote(ev.words, ev.verdict), msgDiv);
     } else if (ev.kind === 'error') {
       appendPart(makeMeta(ev.text || 'error', 'err'), msgDiv);
     }
@@ -10337,6 +10364,17 @@ document.addEventListener('click', (e) => {
 let _steerChips = [];
 // Something said part-way through a reply: shown where it went in, as the
 // person's own words inside the reply, and kept with the chat.
+// Auto's reviewer said go (or ask) for a step: the same words the phone, the
+// terminal and the chat apps show (hearth/auto_review.words).
+const _REVIEW_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
+function makeReviewNote(words, verdict) {
+  const d = document.createElement('div');
+  d.className = 'review-note' + (verdict === 'ask' ? ' ask' : '');
+  d.innerHTML = _REVIEW_ICON;
+  const t = document.createElement('span'); t.textContent = words || '';
+  d.appendChild(t);
+  return d;
+}
 function makeSteerNote(text, waiting) {
   const d = document.createElement('div');
   d.className = 'steer-note' + (waiting ? ' waiting' : '');
@@ -11761,7 +11799,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'permission_request') {
       // Inline strip above the input - keyboard-driven, no center modal.
-      showInlinePermission(ev.id, ev.name, ev.args || {});
+      showInlinePermission(ev.id, ev.name, ev.args || {}, ev.why || '');
+      return;
+    }
+
+    if (ev.type === 'auto_review') {
+      assistantMsg.events.push({ kind: 'auto_review', tool: ev.tool, verdict: ev.verdict, words: ev.words,
+                                 pos: assistantMsg.content.length });
+      appendPart(makeReviewNote(ev.words, ev.verdict), live);
       return;
     }
 
@@ -14660,8 +14705,9 @@ async function refreshSettings() {
     $$('.switch').forEach(sw => {
       const k = sw.dataset.key;
       // gen_stats, show_diffs, activity_hud and auto_memory default ON (only off when explicitly disabled); the rest default off.
-      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud' || k === 'auto_memory') ? (s[k] !== false) : !!s[k]);
+      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud' || k === 'auto_memory' || k === 'auto_reviewer') ? (s[k] !== false) : !!s[k]);
     });
+    refreshReviewer();
     refreshEmail();
     // Agent name field - populated from current setting. The Rename button
     // triggers the full workspace rename (slow, restarts tray). Typing in
@@ -15788,7 +15834,31 @@ $$('.switch').forEach(sw => {
       thinkBtn.classList.toggle('on', next);
     }
     if (k === 'user_bubbles') document.body.classList.toggle('chat-bubbles', next);
+    if (k === 'auto_reviewer') setTimeout(() => refreshReviewer(), 300);
   });
+});
+
+// Auto's reviewer: whether it is on for the brain in use, and how its model did
+// on the labelled steps. A check runs in the background; this follows it.
+let _reviewerPoll = null;
+async function refreshReviewer(st) {
+  const el = $('reviewer-status'), btn = $('btn-reviewer-check');
+  if (!el) return;
+  try { st = st || await api('/api/auto_review'); }
+  catch { el.textContent = "Couldn't read the reviewer's state."; return; }
+  el.textContent = st.said || '';
+  if (btn) {
+    btn.disabled = !!st.running || st.setting === 'off';
+    btn.textContent = st.check ? 'Check again' : 'Check this model';
+  }
+  clearTimeout(_reviewerPoll);
+  if (st.running && STATE.view === 'settings') _reviewerPoll = setTimeout(() => refreshReviewer(), 2000);
+}
+$('btn-reviewer-check')?.addEventListener('click', async () => {
+  try {
+    const st = await api('/api/auto_review/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    refreshReviewer(st);
+  } catch (e) { toast("Couldn't start the check", e.message, 'err'); }
 });
 
 // Persona is read-only and lives in hearth/persona.py; we no longer surface

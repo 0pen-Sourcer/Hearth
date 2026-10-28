@@ -337,6 +337,13 @@ class Hub:
             run["question"], run["answer"] = ev, None
             run["tap"] = needs_a_tap(name, args)
         question = f"Before I go on: may I {_what(name, args)}?"
+        try:
+            from .auto_review import why
+            because = why(name, args)            # the reviewer's or the floor's reason, as the window says it
+        except Exception:
+            because = ""
+        if because:
+            question += " " + because
         if callable(getattr(self.a, "ask", None)):
             self.a.ask(chat, question)                 # shown with Allow / Deny where the app can
         else:
@@ -412,6 +419,14 @@ class Hub:
                 written.clear()
             elif kind == "error":
                 err["cat"], err["msg"] = kw.get("category") or "error", str(kw.get("message", ""))
+            elif kind == "auto_review" and steps and kw.get("verdict") == "go" and kw.get("words"):
+                # Auto's reviewer let a step go: a step of its own, in the window's words.
+                try:
+                    self.a.step(chat, kw["words"], tool="auto_review")
+                except TypeError:
+                    self.a.step(chat, kw["words"])
+                except Exception:
+                    pass
             elif kind == "quiet" and steps and kw.get("message"):
                 try:
                     self.a.step(chat, kw["message"])

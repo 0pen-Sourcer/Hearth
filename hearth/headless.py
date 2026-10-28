@@ -2653,8 +2653,19 @@ async def run_once(prompt: str, **kw) -> int:
     background memory pass or a waiting reminder isn't held up by a turn that
     returned early or raised."""
     try:
+        from . import auto_review           # Auto's reviewer checks steps against what was said
+        auto_review.begin_turn(kw.get("chat_id"), prompt, kw.get("history"), kw.get("emit"),
+                               supervised=kw.get("supervised", True))
+    except Exception:
+        pass
+    try:
         return await _run_once(prompt, **kw)
     finally:
+        try:
+            from . import auto_review
+            auto_review.end_turn()
+        except Exception:
+            pass
         _TURN_ACTIVE.clear()
         try:
             from . import desktop_session

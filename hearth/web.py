@@ -665,7 +665,12 @@ def _make_permission_check(emit_fn):
         req_id = f"perm_{int(time.time()*1000)}_{name}"
         _permission_queues[req_id] = _queue.Queue()
         try:
-            emit_fn("permission_request", id=req_id, name=name, args=args)
+            try:
+                from . import auto_review as _ar
+                _why = _ar.why(name, args)        # the reviewer's or the floor's reason, '' for none
+            except Exception:
+                _why = ""
+            emit_fn("permission_request", id=req_id, name=name, args=args, **({"why": _why} if _why else {}))
             try:
                 decision = _permission_queues[req_id].get(timeout=180.0)
             except _queue.Empty:
@@ -2593,6 +2598,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             })
         if path == "/api/settings":
             return self._send_json(200, _load_settings())
+        if path == "/api/auto_review":
+            from . import auto_review
+            return self._send_json(200, auto_review.status())
         if path == "/api/gpu":
             return self._send_json(200, _gpu_snapshot())
         if path == "/api/tools":
@@ -2992,6 +3000,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _eject_model())
         if path == "/api/settings":
             return self._send_json(200, _save_settings(self._read_json()))
+        if path == "/api/auto_review/check":
+            from . import auto_review
+            started = auto_review.check_in_background(again=True)
+            return self._send_json(200, dict(auto_review.status(), started=started))
         if path == "/api/voice/mic-test":
             try:
                 from . import listen as _mic   # not `_listen`: that name in here shadows the module-wide one

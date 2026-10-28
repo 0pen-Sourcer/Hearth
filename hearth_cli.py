@@ -5904,9 +5904,16 @@ class JarvisCLI:
                 return "allow"
             if self.tool_perms.get(name) == "never":
                 return "deny"
+            try:
+                from hearth.auto_review import why as _why
+                because = _why(name, args)
+            except Exception:
+                because = ""
             async def _q():
                 shown = args.get("command") or args.get("path") or json.dumps(args)[:120]
                 print(f"\n  {C_WARN}{name}{C_RESET} {C_DIM}{str(shown)[:160]}{C_RESET}")
+                if because:
+                    print(f"    {C_DIM}{because}{C_RESET}")
                 print(f"    {C_WARN}allow this call?{C_RESET} "
                       f"{C_DIM}[y]es / [n]o / [a]lways / [N]ever / or type what to do instead{C_RESET}")
                 return await self._read_choice(f"    {C_TOOL}>{C_RESET} ")
@@ -5950,6 +5957,8 @@ class JarvisCLI:
             elif t == "tool_result":
                 first = " ".join(str(f.get("content") or "").split())[:110]
                 print(f"    {C_DIM}↳ {first}{C_RESET}")
+            elif t == "auto_review" and f.get("words"):
+                print(f"    {C_WARN if f.get('verdict') == 'ask' else C_DIM}↳ {f['words']}{C_RESET}")
             elif t == "error":
                 print(f"\n{C_ERR}{f.get('message')}{C_RESET}")
             elif t == "done":
@@ -5963,8 +5972,13 @@ class JarvisCLI:
                 elif st.get("tokens_in"):
                     print(f"{C_DIM}  {st.get('brain')} · {st['tokens_in']:,} in, {st.get('tokens_out') or 0:,} out{C_RESET}")
 
-        await _cb.run_turn(prompt, emit=emit, history=history, permission_check=ask,
-                           should_cancel=self._respond_cancel.is_set)
+        from hearth import auto_review as _ar          # Auto's reviewer checks steps against this turn's words
+        _ar.begin_turn((getattr(self, "_chat", None) or {}).get("id"), prompt, history, emit)
+        try:
+            await _cb.run_turn(prompt, emit=emit, history=history, permission_check=ask,
+                               should_cancel=self._respond_cancel.is_set)
+        finally:
+            _ar.end_turn()
         text = "".join(reply).strip()
         if text:
             self.messages.append({"role": "assistant", "content": text})
@@ -6131,6 +6145,13 @@ class JarvisCLI:
     async def _ask_permission_picker(self, name: str, args: Dict[str, Any]):
         from hearth import term_pick
         what = _term_render.tool_words(name, args if isinstance(args, dict) else {})
+        try:
+            from hearth.auto_review import why as _why
+            because = _why(name, args)          # the reviewer's or the floor's reason
+        except Exception:
+            because = ""
+        if because:
+            print(f"  {C_DIM}{because}{C_RESET}")
         picked = await term_pick.pick(
             f"{C_WARN}Allow this?{C_RESET}",
             [("allow", "Yes, this once"), ("always", f"Yes, and don't ask again for {name}"),

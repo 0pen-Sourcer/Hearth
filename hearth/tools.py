@@ -9294,23 +9294,56 @@ def mode_allows(name: str, args=None) -> bool:
         if name in ("delete_path", "move_path") and _all_made_by_app(name, args):
             return True
         if name in _ALWAYS_ASK_IN_AUTO:
-            return False
+            return _reviewed(name, args)
         if name == "delegate":
             return True                 # an agent program, under its own rules; Auto doesn't stop it
         if name in _SHELL_TOOLS:
             cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
+            if _on_floor(name, args):
+                return False            # power, disks, accounts, start-up, hidden commands, keys: always ask
             if bool(cmd) and _is_destructive(cmd) is None and _is_outward(cmd) is None:
+                if _review_every_command():
+                    return _reviewed(name, args)
                 return True
             # A plain delete of only what the app made (rm -rf <a folder it created>) goes ahead too.
             if name == "run_command" and cmd and _is_outward(cmd) is None:
                 from .undo import delete_targets
                 paths = delete_targets(cmd, str((args or {}).get("cwd") or ""))
-                return bool(paths) and all(_made(p) for p in paths)
-            return False
+                if bool(paths) and all(_made(p) for p in paths):
+                    return True
+            return _reviewed(name, args)
         return True
     if m == "edits":
         return name in _EDIT_TOOLS
     return False
+
+
+def _reviewed(name: str, args) -> bool:
+    """A step Auto's patterns stop: the reviewer lets it go when the person clearly asked
+    for exactly it; the floor never goes (hearth/auto_review.py)."""
+    try:
+        from .auto_review import allows
+        return allows(name, args)
+    except Exception:
+        return False
+
+
+def _on_floor(name: str, args) -> bool:
+    # The patterns above miss some of these ("sudo rm -rf", "curl ... | bash",
+    # "crontab -e"), and Auto would let them run without asking.
+    try:
+        from .auto_review import floor_reason
+        return bool(floor_reason(name, args))
+    except Exception:
+        return True
+
+
+def _review_every_command() -> bool:
+    try:
+        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
+            return bool((json.load(f) or {}).get("auto_review_every_command"))
+    except (OSError, ValueError):
+        return False
 
 
 def _made(path: str) -> bool:
