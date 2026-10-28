@@ -475,7 +475,6 @@
   .hx-fav { width: 76%; height: 76%; object-fit: contain; display: block; border-radius: 2px; }
   .has-fav { background: #f4f2ee !important; }
   .convo-app { width: 12px; height: 12px; border-radius: 3px; flex: none; opacity: 0.85; }
-  .hx-fav.brand { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
   .mp-txt { flex: 1; min-width: 0; }
   .mp-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mp-s { display: block; font-size: 11.5px; color: var(--fg-dim); margin-top: 1px; }
@@ -7985,22 +7984,22 @@ const HARNESS_ICONS = {
 };
 const HARNESS = {
   'claude-code':  { label: 'Claude Code',  maker: 'Anthropic',    c: '#d97757', icon: 'claude' },
-  'codex':        { label: 'Codex',        maker: 'OpenAI',       c: '#10a37f', icon: 'openai', site: 'chatgpt.com' },
-  'antigravity':  { label: 'Antigravity',  maker: 'Google',       c: '#4285f4', icon: 'google', site: 'antigravity.google' },
-  'gemini-cli':   { label: 'Gemini CLI',   maker: 'Google',       c: '#8e75ff', icon: 'gemini', site: 'gemini.google.com' },
+  'codex':        { label: 'Codex',        maker: 'OpenAI',       c: '#10a37f', icon: 'openai' },
+  'antigravity':  { label: 'Antigravity',  maker: 'Google',       c: '#4285f4', icon: 'google' },
+  'gemini-cli':   { label: 'Gemini CLI',   maker: 'Google',       c: '#8e75ff', icon: 'gemini' },
   'grok':         { label: 'Grok',         maker: 'xAI',          c: '#6b7280', site: 'x.ai' },
-  'kimi':         { label: 'Kimi Code',    maker: 'Moonshot AI',  c: '#2563eb', icon: 'kimi', site: 'kimi.com' },
-  'opencode':     { label: 'OpenCode',     maker: 'SST',          c: '#a3a3a3', icon: 'opencode', site: 'opencode.ai' },
+  'kimi':         { label: 'Kimi Code',    maker: 'Moonshot AI',  c: '#2563eb', icon: 'kimi' },
+  'opencode':     { label: 'OpenCode',     maker: 'SST',          c: '#a3a3a3', icon: 'opencode' },
   'qwen-code':    { label: 'Qwen Code',    maker: 'Alibaba',      c: '#615ced', icon: 'qwen' },
   'crush':        { label: 'Crush',        maker: 'Charm',        c: '#e0569c', site: 'charm.sh' },
   'cursor-agent': { label: 'Cursor Agent', maker: 'Cursor',       c: '#555b66', icon: 'cursor' },
-  'copilot':      { label: 'Copilot CLI',  maker: 'GitHub',       c: '#6e40c9', icon: 'copilot', site: 'github.com' },
+  'copilot':      { label: 'Copilot CLI',  maker: 'GitHub',       c: '#6e40c9', icon: 'copilot' },
   'goose':        { label: 'Goose',        maker: 'Block',        c: '#b08900', site: 'goose-docs.ai' },
   'aider':        { label: 'Aider',        maker: 'Aider',        c: '#1f9d55' },
   'droid':        { label: 'Droid',        maker: 'Factory',      c: '#e8590c', site: 'factory.ai' },
-  'amp':          { label: 'Amp',          maker: 'Sourcegraph',  c: '#e5484d', icon: 'sourcegraph', site: 'ampcode.com' },
+  'amp':          { label: 'Amp',          maker: 'Sourcegraph',  c: '#e5484d', icon: 'sourcegraph' },
   'pi':           { label: 'Pi',           maker: 'pi.dev',       c: '#71717a', site: 'pi.dev' },
-  'cline':        { label: 'Cline',        maker: 'Cline',        c: '#3b82f6', icon: 'cline', site: 'cline.bot' },
+  'cline':        { label: 'Cline',        maker: 'Cline',        c: '#3b82f6', icon: 'cline' },
   'continue':     { label: 'Continue',     maker: 'Continue',     c: '#0ea5e9', site: 'continue.dev' },
   'amazon-q':     { label: 'Amazon Q',     maker: 'AWS',          c: '#8b5cf6', site: 'aws.amazon.com' },
   'kiro':         { label: 'Kiro',         maker: 'AWS',          c: '#7c3aed', site: 'kiro.dev' },
@@ -8010,23 +8009,13 @@ const HARNESS = {
 };
 // The mark that sits in a badge: the maker's drawn icon, else its site's own
 // icon on a light tile, else the first letter (also when the icon can't be had).
-for (const [k, v] of Object.entries(HARNESS)) v.key = v.key || k;
-
-// A mark without the brand's own icon: its drawing, else its site's icon, else its letter.
-function harnessPlain(h) {
+function harnessMark(h) {
   const d = h && h.icon && HARNESS_ICONS[h.icon];
   if (d) return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
   const letter = esc((h && h.label || '?')[0]);
   if (h && h.site) return `<img class="hx-fav" src="/api/favicon?d=${encodeURIComponent(h.site)}" alt="${letter}" `
     + `onload="this.parentNode.classList.add('has-fav')" onerror="this.replaceWith(this.alt)">`;
   return letter;
-}
-// The brand's own app icon (fetched once by the PC), falling back to harnessPlain.
-function harnessMark(h) {
-  if (!h || !h.key) return harnessPlain(h);
-  return `<img class="hx-fav brand" src="/api/brand-icon?k=${encodeURIComponent(h.key)}" alt="" `
-    + `data-fb="${esc(harnessPlain(h))}" onload="this.parentNode.classList.add('has-fav')" `
-    + `onerror="this.outerHTML=this.dataset.fb">`;
 }
 // A saved provider's badge: its own mark where Hearth knows one, else a cloud.
 function provIco(id) {
@@ -21135,15 +21124,14 @@ function teamNeedsYou(a) { return !!a.blocked && a.status === 'working'; }
 // model on this PC.
 const BRAIN_MARKS = {
   anthropic:  { label: 'Claude',     maker: 'Anthropic',  c: '#d97757', icon: 'claude' },
-  openai:     { label: 'GPT',        maker: 'OpenAI',     c: '#10a37f', icon: 'openai', site: 'openai.com' },
-  gemini:     { label: 'Gemini',     maker: 'Google',     c: '#8e75ff', icon: 'gemini', site: 'gemini.google.com' },
-  google:     { label: 'Gemini',     maker: 'Google',     c: '#8e75ff', icon: 'gemini', site: 'gemini.google.com' },
+  openai:     { label: 'GPT',        maker: 'OpenAI',     c: '#10a37f', icon: 'openai' },
+  gemini:     { label: 'Gemini',     maker: 'Google',     c: '#8e75ff', icon: 'gemini' },
+  google:     { label: 'Gemini',     maker: 'Google',     c: '#8e75ff', icon: 'gemini' },
   grok:       { label: 'Grok',       maker: 'xAI',        c: '#6b7280', site: 'x.ai' },
   xai:        { label: 'Grok',       maker: 'xAI',        c: '#6b7280', site: 'x.ai' },
   openrouter: { label: 'OpenRouter', maker: 'OpenRouter', c: '#6467f2', site: 'openrouter.ai' },
   groq:       { label: 'Groq',       maker: 'Groq',       c: '#f55036', site: 'groq.com' },
 };
-for (const [k, v] of Object.entries(BRAIN_MARKS)) v.key = v.key || ({ grok: 'xai', google: 'gemini' }[k] || k);
 // A brain's own mark: the agent's or the provider's, else the chip for a model
 // on this PC (dim when none is loaded).
 function brainMarkHTML(key, off = false) {
