@@ -73,10 +73,45 @@ def to_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _failure(m: Dict[str, Any]) -> str:
+    """The error a reply ended in, when it has no words of its own."""
+    if m.get("role") != "assistant" or _text(m.get("content")).strip():
+        return ""
+    return next((str(e.get("text") or "") for e in (m.get("events") or [])
+                 if isinstance(e, dict) and e.get("kind") == "error"), "")
+
+
 def from_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """A chat file's turns as plain messages for the terminal to go on from."""
-    return [{"role": m["role"], "content": _text(m.get("content"))}
-            for m in messages if m.get("role") in ("user", "assistant") and _text(m.get("content")).strip()]
+    """A chat file's turns as plain messages for the terminal to go on from. A
+    reply that failed isn't something the model said: the failure goes in front of
+    the next message as context (last_failure gives one at the very end)."""
+    from .headless import failure_note
+    out, failed = [], ""
+    for m in messages:
+        if m.get("role") not in ("user", "assistant"):
+            continue
+        f = _failure(m)
+        if f:
+            failed = f
+            continue
+        text = _text(m.get("content"))
+        if not text.strip():
+            continue
+        if failed and m["role"] == "user":
+            text = failure_note(failed) + "\n\n" + text
+        failed = ""
+        out.append({"role": m["role"], "content": text})
+    return out
+
+
+def last_failure(messages: List[Dict[str, Any]]) -> str:
+    """The error the chat's newest reply ended in, if it ended in one."""
+    for m in reversed(messages or []):
+        if m.get("role") == "assistant":
+            return _failure(m)
+        if m.get("role") == "user":
+            return ""
+    return ""
 
 
 def load(cid: str) -> Optional[Dict[str, Any]]:

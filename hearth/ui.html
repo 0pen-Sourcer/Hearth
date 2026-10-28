@@ -10731,6 +10731,12 @@ function switchBranch(idx, dir) {
 // model knows on the next turn what it already ran and what came back.
 function historyOf(msgs) {
   const history = [];
+  // A reply that ended in an error isn't something the model said: the error goes
+  // in front of the next message as context, and one at the end goes with the turn
+  // (history.lastFailure -> prior_failure).
+  let failed = '';
+  const errOf = m => m.role === 'assistant' && !(m.content || '').trim() && Array.isArray(m.events)
+    ? ((m.events.find(e => e && e.kind === 'error') || {}).text || '') : '';
   msgs
     .filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__')
     .forEach((m, n) => {
@@ -10743,9 +10749,16 @@ function historyOf(msgs) {
         tools.forEach((e, i) => history.push({ role: 'tool', tool_call_id: calls[i].id, name: e.name,
           content: String(e.result == null ? '' : e.result).slice(0, 4000) || '(no output)' }));
       }
+      const err = errOf(m);
+      if (err) { failed = err; return; }
       if (m.role === 'assistant' && !(m.content || '').trim()) return;
-      history.push({ role: m.role, content: m.content || '' });
+      let content = m.content || '';
+      if (failed && m.role === 'user' && typeof content === 'string')
+        content = `<previous_turn_failed>Your last turn in this chat didn't complete: ${failed.split('\n')[0].slice(0, 300)} The person saw this. Don't answer as if that turn had gone through.</previous_turn_failed>\n\n` + content;
+      failed = '';
+      history.push({ role: m.role, content });
     });
+  history.lastFailure = failed;
   return history;
 }
 async function send(forced = null, displayAs = null, opts = {}) {
@@ -11150,7 +11163,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(Object.assign({ prompt, think: _think, history, voice: voiceModeOn, chat: (activeConvo() || {}).id || null },
+      body: JSON.stringify(Object.assign({ prompt, think: _think, history, prior_failure: history.lastFailure || '', voice: voiceModeOn, chat: (activeConvo() || {}).id || null },
                                          _chatModel ? { model: _chatModel } : {})),
       signal: currentAbort ? currentAbort.signal : undefined,
     });

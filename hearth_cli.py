@@ -6001,13 +6001,22 @@ class JarvisCLI:
         self._respond_cancel.clear()
         self._steer_q: List[str] = []
         steer_task = asyncio.create_task(self._steer_loop())
+        failed: List[str] = []
+
+        def _emit(kind, **fields):
+            if kind == "error":
+                failed.append(str(fields.get("message") or ""))
+            return turn.emit(kind, **fields)
+        prior, self._last_failure = getattr(self, "_last_failure", ""), ""
         try:
             await _hl.run_once(
-                prompt, emit=turn.emit, model=self.current_model, think=self.think_on,
+                prompt, emit=_emit, model=self.current_model, think=self.think_on,
                 think_level=getattr(self, "think_level", "") or "", history=history,
                 permission_check=self._ask_permission, should_cancel=self._respond_cancel.is_set,
                 drain_steer=self._drain_steer, voice=bool(self.voice_on),
-                chat_id=(getattr(self, "_chat", None) or {}).get("id"))
+                chat_id=(getattr(self, "_chat", None) or {}).get("id"), prior_failure=prior)
+            # The next turn hears that this one failed (headless.failure_note).
+            self._last_failure = failed[-1] if failed else ""
         finally:
             turn.running = False
             self._turn = None

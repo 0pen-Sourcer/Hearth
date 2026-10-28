@@ -366,6 +366,7 @@ class Hub:
         live = callable(getattr(self.a, "live", None))      # and the reply as it is written
         saved = chat_sync.load(cid) or {}
         history = chat_sync.from_chat(saved.get("messages") or [])[-16:]
+        prior_failure = chat_sync.last_failure(saved.get("messages") or [])
         primer = bridge_status.channel_primer(self.a.label)
         parts: List[str] = []
         tools_used: List[Any] = []
@@ -462,7 +463,7 @@ class Hub:
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(headless.run_once(
-                    text, emit=emit, history=[primer] + history, chat_id=cid,
+                    text, emit=emit, history=[primer] + history, chat_id=cid, prior_failure=prior_failure,
                     permission_check=lambda n, a: self._ask(chat, run, n, a),
                     drain_steer=steer, supervised=False,
                     think=bool(settings.get("think_default")), think_level=str(settings.get("think_level") or "")))

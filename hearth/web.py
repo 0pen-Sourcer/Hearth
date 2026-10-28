@@ -5248,7 +5248,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 prompt, emit=emit, think=think, think_level=think_level, model=model, history=history,
                 permission_check=_make_permission_check(emit),
                 should_cancel=_CANCEL.is_set, drain_steer=_drain_steer,
-                voice=voice, chat_id=chat_id,
+                voice=voice, chat_id=chat_id, prior_failure=str(body.get("prior_failure") or "")[:600],
             ))
         except Exception as e:
             emit("error", message=f"{type(e).__name__}: {e}")

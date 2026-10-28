@@ -1030,6 +1030,7 @@ async def _run_once(
     supervised: bool = True,
     voice: bool = False,
     chat_id: Optional[str] = None,
+    prior_failure: str = "",
 ) -> int:
     """Run a single prompt against the model. Returns process exit code.
 
@@ -1055,6 +1056,12 @@ async def _run_once(
         emit = _cards_turn.Trail(emit, _used)
     except Exception:
         _lately = ""
+    # The last turn in this chat failed (out of usage, a key refused, a provider
+    # down): the brain hears it, so it doesn't carry on as if it had answered or
+    # try the same thing blindly. Never part of what it said.
+    _failed = failure_note(prior_failure)
+    if _failed:
+        _lately = f"{_lately}\n\n{_failed}" if _lately else _failed
     # An agent program as the brain (Claude Code, Codex) runs the whole turn itself.
     try:
         from . import claude_brain as _cb
@@ -2630,6 +2637,15 @@ async def _run_once(
          state_file=state_path if state_path else None)
     return 0
 
+
+
+def failure_note(text: str) -> str:
+    """What the brain is told about a turn that failed: the error's first line, short."""
+    line = " ".join(str(text or "").strip().splitlines()[:1]).strip()[:300]
+    if not line:
+        return ""
+    return (f"<previous_turn_failed>Your last turn in this chat didn't complete: {line} "
+            f"The person saw this. Don't answer as if that turn had gone through.</previous_turn_failed>")
 
 
 async def run_once(prompt: str, **kw) -> int:
