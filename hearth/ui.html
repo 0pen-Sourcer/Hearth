@@ -5129,10 +5129,11 @@
         <div class="field">
           <div class="label">
             <div class="name">Concurrent agents <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
-            <div class="hint">How many requests the server handles at once. At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Inglen steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Inglen); changing it mid-session does not touch the running server.</div>
+            <div class="hint">How many requests the server handles at once. <strong>Automatic</strong> picks from your graphics memory (one under 14 GB, two at 16 GB, more above). At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Inglen steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Inglen); changing it mid-session does not touch the running server.</div>
           </div>
           <select id="setting-server-slots">
-            <option value="1" selected>1 · agents queue (lowest VRAM)</option>
+            <option value="0" selected>Automatic · from your graphics memory</option>
+            <option value="1">1 · agents queue (lowest VRAM)</option>
             <option value="2">2 · two at once</option>
             <option value="3">3 · needs headroom</option>
             <option value="4">4 · large VRAM only</option>
@@ -14540,6 +14541,8 @@ async function refreshSettings() {
     // saves the rename in Settings.
     const _inp = document.getElementById('input');
     if (_inp) _inp.placeholder = `Message ${_agentName()}…`;
+    const _tmi = document.getElementById('tm-input');      // the Team room's box too
+    if (_tmi) _tmi.placeholder = `Talk to ${_agentName()}…`;
     // Footer chip shows the agent name, not a hardcoded handle.
     const _sf = document.querySelector('.settings-side-footer .who');
     if (_sf) _sf.textContent = _agentName();
@@ -15534,9 +15537,11 @@ async function refreshSettings() {
     if (ctxSel)  { ctxSel.value  = String(s.server_default_ctx || 32768);
       ctxSel.onchange  = (e) => saveSetting('server_default_ctx', parseInt(e.target.value, 10)); }
     const slotSel = $('setting-server-slots');
-    if (slotSel) { slotSel.value = String(s.server_parallel_slots || 1);
-      slotSel.onchange = (e) => {
-        saveSetting('server_parallel_slots', parseInt(e.target.value, 10));
+    if (slotSel) { slotSel.value = s.server_parallel_slots_chosen ? String(s.server_parallel_slots || 1) : '0';
+      slotSel.onchange = async (e) => {
+        const n = parseInt(e.target.value, 10);
+        await saveSetting('server_parallel_slots_chosen', n > 0);
+        saveSetting('server_parallel_slots', n);
         // Slots are a launch argument, so a running server keeps its old count.
         toast('Applies on next model load', 'Reload the model (or restart the server) for the new slot count.', 'ok', 5000);
       }; }
@@ -20550,7 +20555,7 @@ async function obFinish(skipped) {
   // silently after onboarding.
   let agentName = ($('ob-agent-name')?.value || '').trim();
   if (agentName && !/^[A-Za-z0-9 ]{1,20}$/.test(agentName)) {
-    toast('Agent name skipped', 'Must be 1-20 chars, letters/digits/spaces. Using JARVIS - change later in Settings.', 'warn', 6000);
+    toast('Name skipped', `Names are 1 to 20 letters, digits or spaces. Keeping ${_agentName()}; change it any time in Settings.`, 'warn', 6000);
     agentName = '';
   }
   const voiceOn = obState.voice === 'full';

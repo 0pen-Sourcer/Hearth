@@ -44,7 +44,7 @@ numpy
 faster-whisper
 
 # ---- MCP interop (optional: expose/consume MCP tools) ----
-mcp
+mcp<2              # 2.x renamed FastMCP (mcp_server.py, memory_mcp.py use it)
 
 # ---- Browser control (optional) ----
 # After install, fetch the browser engine: python -m playwright install chromium

@@ -284,10 +284,14 @@ def get_parallel_slots() -> int:
         try:
             import json as _j
             with open(WORKSPACE / "settings.json", encoding="utf-8") as f:
-                raw = str((_j.load(f) or {}).get("server_parallel_slots") or "")
+                s = _j.load(f) or {}
+            # Only a number the person picked. Every settings file has a 1 in it from
+            # when that was the default, and it kept 16 GB cards at one helper at a time.
+            if s.get("server_parallel_slots_chosen"):
+                raw = str(s.get("server_parallel_slots") or "")
         except (OSError, ValueError):
             raw = ""
-    if raw:
+    if raw and raw != "0":
         try:
             return max(1, min(int(raw), MAX_PARALLEL_SLOTS))
         except ValueError:
