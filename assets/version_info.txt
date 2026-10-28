@@ -18,12 +18,12 @@ VSVersionInfo(
         '040904B0',
         [
           StringStruct('CompanyName', '0pen-sourcer'),
-          StringStruct('FileDescription', 'Hearth'),
+          StringStruct('FileDescription', 'Inglen'),
           StringStruct('FileVersion', '0.7.0.0'),
           StringStruct('InternalName', 'Hearth'),
           StringStruct('LegalCopyright', 'MIT License'),
           StringStruct('OriginalFilename', 'Hearth.exe'),
-          StringStruct('ProductName', 'Hearth'),
+          StringStruct('ProductName', 'Inglen'),
           StringStruct('ProductVersion', '0.7.0-preview'),
         ],
       )

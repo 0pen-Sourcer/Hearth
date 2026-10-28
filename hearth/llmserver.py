@@ -799,7 +799,7 @@ def _release_part(key: str, lock: "_threading.Lock", mine: "_threading.Event") -
 
 def _download_with_resume(url, dest, tmp,
                           on_progress: Optional[Callable[[int, int], None]] = None,
-                          ua: str = "Hearth/0.7 (HF-download)",
+                          ua: str = "Inglen/0.7.6 (HF-download)",
                           cancel: Optional[Callable[[], bool]] = None) -> int:
     """Stream `url` into `tmp`, RESUMING from an existing .part via an HTTP Range
     request so a closed/interrupted download continues instead of restarting
@@ -2997,7 +2997,7 @@ def search_huggingface(query: str, limit: int = 12) -> List[Dict[str, Any]]:
            f"search={urllib.parse.quote(query)}"
            f"&filter=gguf&sort=downloads&direction=-1&limit={limit}")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Inglen/0.7.6"})
         with urllib.request.urlopen(req, timeout=8) as r:
             models = json.loads(r.read().decode("utf-8"))
     except Exception as e:
@@ -3342,7 +3342,7 @@ def list_hf_files(repo: str) -> List[Dict[str, Any]]:
         return []
     try:
         url = f"https://huggingface.co/api/models/{urllib.parse.quote(repo, safe='/')}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Inglen/0.7.6"})
         with urllib.request.urlopen(req, timeout=8) as r:
             info = json.loads(r.read().decode("utf-8"))
     except Exception as e:
@@ -3419,7 +3419,7 @@ def popular_chat_models(limit: int = 12) -> List[Dict[str, Any]]:
     url = ("https://huggingface.co/api/models?filter=gguf&pipeline_tag=text-generation"
            "&sort=downloads&direction=-1&limit=40&expand[]=gguf&expand[]=downloads&expand[]=likes&expand[]=tags")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Inglen/0.7.6"})
         with urllib.request.urlopen(req, timeout=10) as r:
             models = json.loads(r.read().decode("utf-8"))
     except Exception as e:
@@ -3452,7 +3452,7 @@ def suggest_model(vram_gb: Optional[float] = None) -> Optional[Dict[str, Any]]:
     url = ("https://huggingface.co/api/models?filter=gguf&pipeline_tag=text-generation"
            "&sort=downloads&direction=-1&limit=60&expand[]=gguf&expand[]=downloads&expand[]=tags")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Inglen/0.7.6"})
         with urllib.request.urlopen(req, timeout=10) as r:
             models = json.loads(r.read().decode("utf-8"))
     except Exception:
@@ -3495,7 +3495,7 @@ _REPO_SIBLINGS: Dict[str, List[Dict[str, Any]]] = {}
 def _repo_siblings(repo: str) -> List[Dict[str, Any]]:
     if repo not in _REPO_SIBLINGS:
         url = f"https://huggingface.co/api/models/{urllib.parse.quote(repo, safe='/')}?blobs=true"
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Inglen/0.7.6"})
         with urllib.request.urlopen(req, timeout=8) as r:
             _REPO_SIBLINGS[repo] = json.loads(r.read().decode("utf-8")).get("siblings") or []
     return _REPO_SIBLINGS[repo]
@@ -3722,7 +3722,7 @@ def _fetch_vision_addon(job: Dict[str, Any], on_progress) -> None:
     model is in. Missing it only costs vision, so a failure here is noted, not fatal."""
     try:
         url = f"https://huggingface.co/api/models/{urllib.parse.quote(job['repo'], safe='/')}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Hearth/0.7"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Inglen/0.7.6"})
         with urllib.request.urlopen(req, timeout=8) as r:
             addon = vision_addon(json.loads(r.read().decode("utf-8")).get("siblings") or [])
         if not addon:

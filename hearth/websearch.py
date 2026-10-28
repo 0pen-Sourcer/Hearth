@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from typing import List, Tuple
 
-_UA = "Hearth/0.7.6"
+_UA = "Inglen/0.7.6"
 _TIMEOUT = 25
 
 # Vendors reachable with no account. Walked from a rotating start so a rate limit

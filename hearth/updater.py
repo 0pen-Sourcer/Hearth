@@ -494,7 +494,7 @@ def check_for_update(current: str = "", timeout: float = 6.0) -> dict:
     url = f"https://api.github.com/repos/{REPO}/releases/latest"
     try:
         req = urllib.request.Request(url, headers={
-            "User-Agent": "Hearth/0.7",
+            "User-Agent": "Inglen/0.7.6",
             "Accept": "application/vnd.github+json",
         })
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -533,7 +533,7 @@ def check_source_update(timeout: float = 5.0, marker: str = SOURCE_UPDATE_MARKER
     try:
         url = f"https://api.github.com/repos/{REPO}/commits?sha=main&per_page=30"
         req = urllib.request.Request(url, headers={
-            "User-Agent": "Hearth/0.7", "Accept": "application/vnd.github+json"})
+            "User-Agent": "Inglen/0.7.6", "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             commits = json.loads(r.read().decode("utf-8"))
     except Exception as e:

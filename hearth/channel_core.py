@@ -560,7 +560,7 @@ def push(channel: str, text: str) -> str:
                 headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Inglen"}), timeout=12)
             return "Sent to your Telegram."
         h = {"Authorization": f"Bot {token}", "Content-Type": "application/json",
-             "User-Agent": "Hearth (https://github.com/0pen-sourcer/hearth, 0.7)"}
+             "User-Agent": "DiscordBot (https://github.com/0pen-sourcer/hearth, 0.7.6) Inglen"}
         chan = json.loads(urllib.request.urlopen(urllib.request.Request(
             "https://discord.com/api/v10/users/@me/channels", data=json.dumps({"recipient_id": who}).encode(),
             headers=h), timeout=12).read().decode())
