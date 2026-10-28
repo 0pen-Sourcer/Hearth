@@ -702,6 +702,27 @@ class Relay(cc.Adapter):
         self.rooms: Dict[str, "Room"] = {}     # chat (phone id) -> room
         self._live_at: Dict[str, float] = {}   # turn -> when its live text last went out
         self._think_at: Dict[str, float] = {}  # turn -> when its reasoning last went out
+        self.asks: Dict[str, str] = {}         # chat -> the id of the question waiting there
+        self._told: List[str] = []             # turns whose finish a notification has said
+
+    def notify(self, chat: str, obj: Dict[str, Any], urgent: bool = False) -> None:
+        """A notification for the phone while the app isn't on screen: sealed for
+        the phone, handed to the relay, which sends it on by Web Push."""
+        room = self.rooms.get(str(chat))
+        if room is None:
+            return
+        fut = asyncio.run_coroutine_threadsafe(room.notice(obj, urgent), self.loop)
+        try:
+            fut.result(10)
+        except Exception:
+            pass
+
+    def finished(self, chat: str, title: str, text: str, c: str, t: str) -> None:
+        """One notification per finished reply."""
+        if not t or t in self._told:
+            return
+        self._told = (self._told + [t])[-200:]
+        self.notify(chat, {"kind": "done", "title": title, "body": " ".join(text.split())[:240], "c": c})
 
     def _push(self, chat: str, obj: Dict[str, Any]) -> Optional[str]:
         room = self.rooms.get(str(chat))
@@ -730,7 +751,12 @@ class Relay(cc.Adapter):
         call = self._call_for(chat)
         if call is not None:
             call.done(text)
-        return self._push(chat, {"type": "text", "text": text})
+        mid = self._push(chat, {"type": "text", "text": text})
+        ctx = cc.turn_context()
+        if ctx.get("t"):
+            from . import persona
+            self.finished(chat, persona.NAME, text, ctx.get("c", ""), ctx["t"])
+        return mid
 
     def edit(self, chat, msg_id, text):
         return self._push(chat, {"type": "edit", "of": msg_id, "text": text}) is not None
@@ -739,7 +765,13 @@ class Relay(cc.Adapter):
         call = self._call_for(chat)
         if call is not None:
             call.ask(text)
-        return self._push(chat, {"type": "ask", "text": text})
+        # The question's own id: an answer from a notification counts only for it.
+        aid, c = secrets.token_hex(8), cc.turn_context().get("c", "")
+        self.asks[c or str(chat)] = aid
+        mid = self._push(chat, {"type": "ask", "text": text, "ask": aid})
+        from . import persona
+        self.notify(chat, {"kind": "ask", "title": f"{persona.NAME} asks", "body": text, "c": c, "ask": aid}, urgent=True)
+        return mid
 
     def send_file(self, chat, path):
         try:
@@ -807,6 +839,7 @@ class Room:
         self.pc = bridge.pc
         self.joiner = Joiner()
         self.lookups: set = set()
+        self.seen_boxes: set = set()          # answers from notifications already taken
         self.call = None                      # a voice call from the phone, while one is on
 
     @property
@@ -815,6 +848,12 @@ class Room:
 
     def box_key(self) -> bytes:
         return R.mailbox_key(R.dh(self.pc, self.phone), self.room)
+
+    async def notice(self, obj: Dict[str, Any], urgent: bool = False) -> None:
+        if self.ws is None or not self.phone:
+            return
+        box = R.seal_box(self.box_key(), obj)
+        await self.ws.send(json.dumps({"t": "push", "iv": box["iv"], "c": box["c"], "urgent": urgent}))
 
     async def deliver(self, obj: Dict[str, Any]) -> None:
         if self.ws is None:
@@ -880,6 +919,11 @@ class Room:
             from . import persona
             await self.deliver({"type": "hi", "name": persona.NAME})
             warm_brain()                      # the picker's answers, ready before it's opened
+            return
+        if t == "box" and self.phone:          # Allow or Deny tapped on a notification
+            m = R.open_box(self.box_key(), f, self.seen_boxes)
+            if m and m.get("type") == "answer":
+                await asyncio.to_thread(self.bridge.on_answer, self, m)
             return
         if t == "msg" and self.chan is not None:
             m = self.chan.open(f)
@@ -988,6 +1032,37 @@ class Bridge:
         self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files,
                          cid=str(m.get("chat") or ""), regen=bool(m.get("regen")))
 
+    def on_answer(self, room: Room, m: Dict[str, Any]) -> None:
+        """Allow or Deny from a notification. It answers only the question it was
+        shown for, and only while that question still waits: an old answer
+        played again, or one for a question answered in the app, does nothing."""
+        cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("c") or ""))[:80]
+        key, aid, yes = cid or room.chat, str(m.get("ask") or ""), bool(m.get("yes"))
+        if not aid or self.adapter.asks.get(key) != aid:
+            return
+        self.adapter.asks.pop(key, None)
+        run = self.agent_runs.get(cid)
+        if run is not None:
+            q = run.get("q")
+            if q is None or q.is_set():
+                return
+            run["answer"] = yes
+            q.set()
+        else:
+            with self.hub._lock:
+                busy = self.hub._busy.get(key) or {}
+                q = busy.get("question")
+            if q is None or q.is_set():
+                return
+            self.hub.receive(room.chat, "phone", "yes" if yes else "no", name="Phone", cid=cid)
+        # The app shows the question answered when it opens.
+        fut = asyncio.run_coroutine_threadsafe(
+            room.deliver({"type": "asked", "ask": aid, "yes": yes, "c": cid, "id": secrets.token_hex(6)}), self.loop)
+        try:
+            fut.result(15)
+        except Exception:
+            pass
+
     def agent_say(self, room: Room, m: Dict[str, Any]) -> None:
         """A message in one of the coding agents' sessions: that agent carries the
         session on, and the phone sees its steps and reply as they come. A yes or
@@ -1010,6 +1085,7 @@ class Bridge:
             q = run.get("q")
             if q is not None and not q.is_set():
                 run["answer"] = bool(cc._YES.match(text))
+                self.adapter.asks.pop(cid, None)
                 q.set()
             else:
                 push({"type": "text", "text": "It's still working on your last message; send this once it's done."})
@@ -1034,12 +1110,19 @@ class Bridge:
                     push({"type": "think", "text": "".join(thought)[-4000:]})
             elif kind == "text":
                 push({"type": "text", "text": f.get("text") or ""})
+                self.adapter.finished(room.chat, name, f.get("text") or "", cid, turn)
             elif kind == "error":
                 push({"type": "text", "text": f.get("message") or "It stopped."})
 
+        name = agent_sessions.label((agent_sessions.parse_chat(cid) or ("", ""))[0])
+
         def ask(question: str) -> bool:
             run["q"], run["answer"] = threading.Event(), False
-            push({"type": "ask", "text": question})
+            aid = secrets.token_hex(8)
+            self.adapter.asks[cid] = aid
+            push({"type": "ask", "text": question, "ask": aid})
+            self.adapter.notify(room.chat, {"kind": "ask", "title": f"{name} asks", "body": question, "c": cid, "ask": aid},
+                                urgent=True)
             run["q"].wait(cc.ASK_TIMEOUT_S)
             run["q"] = None
             return bool(run["answer"])
@@ -1065,8 +1148,12 @@ class Bridge:
                 if r is None:
                     r = self.rooms[room] = Room(self, room, R.unb64(info["ps"]), phone)
                     tasks[room] = asyncio.create_task(r.run())
+                    if phone:
+                        # Reachable while it's away too: its mailbox, and notifications.
+                        self.adapter.rooms.setdefault(r.chat, r)
                 elif phone and r.phone is None:          # just confirmed on the PC
                     r.phone = phone
+                    self.adapter.rooms.setdefault(r.chat, r)
                     if confirmed == room:
                         await r.tell_paired()
             for room in list(self.rooms):
