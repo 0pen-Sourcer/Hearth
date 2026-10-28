@@ -474,6 +474,7 @@
   .mp-ico.ag svg { fill: currentColor; }
   .hx-fav { width: 76%; height: 76%; object-fit: contain; display: block; border-radius: 2px; }
   .has-fav { background: #f4f2ee !important; }
+  .convo-app { width: 12px; height: 12px; border-radius: 3px; flex: none; opacity: 0.85; }
   .hx-fav.brand { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
   .mp-txt { flex: 1; min-width: 0; }
   .mp-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -7312,12 +7313,19 @@ function renderConvoRow(c) {
   // A chat started in the terminal carries a prompt mark instead of a bubble,
   // a reminder's own chat a clock, with a dot until it has been opened.
   const fromTerminal = c.source === 'terminal', fromReminder = c.source === 'reminder';
+  // From the phone app, a phone; from a chat app, that app's own mark.
+  const fromPhone = c.source === 'relay', fromApp = ['telegram', 'discord', 'whatsapp'].includes(c.source);
   if (fromTerminal) div.title = 'Started in the terminal';
   if (fromReminder) div.title = 'A reminder';
+  if (fromPhone) div.title = 'Started on your phone';
+  if (fromApp) div.title = 'From ' + c.source[0].toUpperCase() + c.source.slice(1);
   const unseen = c.unread && c.id !== STATE.activeId;
+  const phoneMark = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>';
   div.innerHTML = `
     ${fromTerminal
       ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6"><path d="M4 17l6-5-6-5"/><path d="M12 19h8"/></svg>'
+      : fromPhone ? phoneMark
+      : fromApp ? `<img class="convo-app" src="/api/brand-icon?k=${c.source}" alt="" data-fb="${esc(phoneMark)}" onerror="this.outerHTML=this.dataset.fb">`
       : fromReminder
       ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="opacity:0.6"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M5 3 2 6M22 6l-3-3"/></svg>'
       : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.6">
