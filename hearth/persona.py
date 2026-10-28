@@ -11,7 +11,7 @@ from datetime import datetime
 
 from .tools import WORKSPACE, read_locked
 from .skills_loader import skills_for_prompt
-from .memory import index_for_prompt, read_rules, read_profile, DEFAULT_RULES
+from .memory import frozen_index_for_prompt, read_rules, read_profile, DEFAULT_RULES
 
 
 def _own_lines(text: str, template: str = "") -> str:
@@ -91,7 +91,7 @@ def system_prompt(voice: bool = False) -> str:
     today = datetime.now().strftime("%A, %d %B %Y")
     rules = _own_lines(read_rules(), DEFAULT_RULES)
     profile = _own_lines(read_profile())
-    mem_index = index_for_prompt().strip()
+    mem_index = frozen_index_for_prompt().strip()
     workspace = WORKSPACE
     reads_line = (
         "Reads are confined to the workspace (lockdown is on)."

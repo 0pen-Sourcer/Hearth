@@ -36,7 +36,7 @@ def check(label, cond):
 
 
 # Render the shipped part alone: no profile, memories, rules or skills.
-for fn in ("read_rules", "read_profile", "index_for_prompt",
+for fn in ("read_rules", "read_profile", "frozen_index_for_prompt",
            "skills_for_prompt"):
     setattr(P, fn, lambda *a, **k: "")
 os.environ.pop("HEARTH_PERSONA", None)

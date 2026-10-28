@@ -1,22 +1,14 @@
-"""Passive fact extraction — durable memory without `memory_save` tool calls.
+"""The memory pass: one model call over a chat that went quiet.
 
-At safe boundaries (end of session, after compaction) run a single LLM pass
-over recent turns, extract durable facts about the user, persist via
-memory.save(). The agent does not need to fire memory_save by hand.
+It returns a fixed JSON shape: the chat's card (where it stands, or null for a
+chat with no goal) and a short list of fact changes, each an add, an update or
+an invalidate checked against up to ten saved facts the conversation may touch
+(found by words and names, no vectors). Invalid JSON changes nothing: the old
+card stays and no fact is written.
 
-Facts are user-scoped, not chat-scoped: the same person across multiple GUI
-chat threads writes to one shared ~/Jarvis/memory/ bank.
-
-Safety guards on the extraction pass:
-  - Hard filter on jokes, hypotheticals, sarcasm, quoted speech, illegal
-    or violent content.
-  - 1-5 confidence score per fact; only >=4 persists.
-  - Strict category whitelist matching memory.VALID_TYPES
-    (user / feedback / project / reference).
-  - The extractor sees the saved titles. A saved title is rewritten only
-    when marked as an update, and the old version is archived first.
-
-Cost: one cheap LLM call per compaction or session end, not per turn.
+Facts are about the person, not one chat: every chat writes to one memory.
+Safety: jokes, quotes, hypotheticals, role-play and harmful content are left
+out; a fact needs confidence 4 of 5; categories are memory.VALID_TYPES.
 """
 
 from __future__ import annotations
@@ -30,228 +22,138 @@ from . import memory as _memory
 from .chat_call import chat_create
 
 
-# Categories the LLM is allowed to use. Anything else gets dropped silently.
-# Matches memory.VALID_TYPES so save() doesn't have to normalize down the line.
 ALLOWED_CATEGORIES = ("user", "project", "reference", "feedback")
-
-# Confidence floor. The extractor rates each fact 1-5 on "would the user
-# genuinely want me to remember this across future chats?". 1-2 = joke /
-# unclear / hypothetical, 3 = maybe, 4 = clearly meant it, 5 = explicit
-# "remember that ...". Only >=4 gets saved.
 DEFAULT_CONFIDENCE_FLOOR = 4
-
-# How many recent assistant+user turns to scan. Tool messages count too but
-# add noise; the prompt tells the model to focus on USER intent.
 DEFAULT_RECENT_TURNS = 8
+CANDIDATES = 10
 
 
-EXTRACTION_PROMPT = """You are Hearth's memory extraction pass. Read the recent conversation below and extract DURABLE facts about the USER that would help a future assistant serve them better.
+PASS_PROMPT = """You keep the memory of a personal assistant. Read the conversation at the end and answer with ONE JSON object and nothing else, in exactly this shape:
 
-# What counts as a durable fact
-Be GENEROUS here. The goal is "the assistant feels like it knows me" — that comes
-from remembering casual life details, not just formal preferences. If the
-user mentions it offhand, it's probably worth saving:
+{"card": null or {"goal": "...", "status": "open" | "done" | "dropped", "where": "...", "slots": {"name": "value"}, "left": ["..."], "names": ["..."]},
+ "facts": [{"op": "add" | "update" | "invalidate", "title": "...", "target": "...", "category": "user" | "project" | "reference" | "feedback", "layer": "fact" | "preference" | "rule", "description": "...", "body": "...", "confidence": 1-5, "volatility": "durable" | "seasonal" | "transient", "importance": 1-3}]}
 
-- Their name, role, hardware they own ("just got new wireless earbuds"), OS,
-  file/drive layout they referenced.
-- Stuff they're hyped for or planning ("picking up that new game next
-  Friday", "going on vacation next month").
-- Stuff that just broke / they're annoyed about ("left earbud died",
-  "WiFi's been flaky"). These age out but are useful for 1-2 weeks.
-- Stated preferences ("I prefer dark mode", "always use uv not pip",
-  "I hate cilantro").
-- Long-running projects + their state ("Hearth v0.6 launch is next week").
-- External tool URLs / accounts they mentioned ("my Notion is at X").
-- Workflow corrections ("don't run tests before commits — they're slow").
-- People + relationships they mentioned by role ("my coworker Sam reviews PRs",
-  "my dog Bandit", "my brother just moved to Seattle").
-- Media they love or hate ("currently playing Sekiro", "halfway through Dune part 2").
-- Health / lifestyle they shared ("workout at 7am", "intermittent fasting",
-  "trying to cut sugar"). Skip if it sounds like a one-time complaint.
+# card: where THIS chat stands, so the assistant can pick it up from their other chats
+- goal: what they are trying to get done, in one line ("Buy a phone under 30k"). The card is null when the chat has no goal: small talk, a joke, a greeting, a one-off question. Never describe the chat itself ("banter", "casual talk").
+- status: "open" while something is unfinished, "done" once it got done, "dropped" when they gave up on it.
+- where: one short line on where it got to.
+- slots: values settled so far, such as a budget, a shortlist, dates, sizes, places. {} when there are none.
+- left: THEIR pending things (a purchase not made, a fee not paid, a reply they wait for), not work the assistant is doing. [] when nothing is left.
+- names: products, people, places and projects named.
+- "Card before" is this chat's card so far. Give the whole card again with what changed: it replaces the old one.
 
-Casual > formal. A real assistant remembers "your left earbud broke" because
-it's the kind of thing a friend would ask about next time. Conf 4 is right
-for these; reserve 5 for things they EXPLICITLY asked to be remembered.
+# facts: lasting things about the USER worth knowing in any later chat
+Who they are, what they own, their tastes, the people in their life, projects and plans, what broke. Casual life details count. Leave out jokes, sarcasm, role-play, quotes from films or games, hypotheticals, one-off questions, anything illegal or violent, and things only the assistant said. Once they said not to save or remember things, answer {"card": null, "facts": []}.
+- op "add": a new fact. op "update": "target" is a saved title below that this conversation changes ("moved to Linux" for a saved OS); give the new text. op "invalidate": "target" is a saved fact that is no longer true, with nothing replacing it. A saved fact repeated without a change is left out.
+- title: a short kebab-case slug. description: one sentence. body: one to three sentences with the specifics.
+- confidence: 5 when they asked to remember it, 4 when clearly meant; 3 or less is dropped.
+- volatility: "durable" for identity, things owned, lasting tastes; "seasonal" for what holds now and changes within a year (grade, job, city, the game they are playing); "transient" for a week or two (something broke, a plan for Friday). Unsure between durable and seasonal: seasonal.
+- importance: 3 central to them, 2 useful, 1 minor.
+- layer: "fact" by default; "preference" for how they want replies ("short answers"); "rule" for a standing order ("always answer in English").
 
-# What does NOT count (BAN — filter these out)
-- Jokes, sarcasm, role-play, hyperbole, anything said as a joke.
-- Quoted speech from movies/shows/games/books ("I'm the one who knocks").
-- Hypotheticals ("what if I told you...").
-- Anything illegal, violent, NSFW, or about real harm — these aren't
-  preferences a real user wants remembered. Even if literal, skip.
-- One-off questions ("what's the capital of France").
-- Things the assistant said, only things the USER said or revealed.
-- A fact already saved (see "Already saved" below) that the conversation does
-  not change. Repeating it is noise.
-- Anything at all, once the user has said in this conversation not to save or
-  remember things. Return [].
+# Example: a chat about buying a phone
+{"card": {"goal": "Buy a phone under 30k with a good camera", "status": "open", "where": "Down to two models", "slots": {"budget": "30k", "shortlist": "Pixel 9a, Nothing Phone 3"}, "left": ["Hasn't bought it yet"], "names": ["Pixel 9a", "Nothing Phone 3"]},
+ "facts": [{"op": "add", "title": "phone-camera-priority", "target": "", "category": "user", "layer": "fact", "description": "Cares most about the camera when choosing a phone.", "body": "Came up while comparing phones.", "confidence": 4, "volatility": "seasonal", "importance": 2}]}
 
-# Output format — STRICT JSON ONLY, no preamble, no markdown fences
-Return a JSON array. Each fact is an object with these exact keys:
-
-  - "title": short kebab-case slug, max 5 words. e.g. "favorite-editor"
-  - "category": one of: user | project | reference | feedback
-  - "description": ONE concise sentence summarizing the fact.
-  - "body": 1-3 sentences with the specifics + WHY it matters going forward.
-  - "confidence": integer 1-5. Score it honestly. Anything <=3 will be DROPPED.
-  - "volatility": how long this stays true — JUDGE it:
-      "durable"  = identity/permanent: name, birthday, hardware they own, lasting
-        preferences ("hates cilantro"), relationships.
-      "seasonal" = true NOW but changes on a life cadence: school grade/year
-        ("in class 12"), current job/title, current city, "currently playing X",
-        active project, what they're learning. These EXPIRE (~1 year).
-      "transient" = breaks/annoyances/short plans ("left earbud died", "wifi
-        flaky", "picking up the game Friday"). Useful ~2 weeks.
-    When unsure between durable and seasonal, pick SEASONAL — a durable fact that
-    goes stale (still thinking they're "in class 12" two years later) is far worse.
-  - "updates" (optional): true when the title is one already saved and the
-    conversation CHANGES that fact ("switched to Linux" for a saved
-    "primary-os"). The saved version is kept in the archive. Without it, a
-    title that is already saved is skipped.
-  - "supersedes" (optional): if this fact, under a NEW title, REPLACES an
-    earlier one because the user moved on ("now in college" replaces "in class
-    12"), put the OLD fact's exact title from "Already saved". Omit if it
-    replaces nothing.
-  - "layer": WHERE this belongs (default "fact"):
-      "fact"       = something about them or their world → searchable memory.
-      "preference" = how they want REPLIES / recurring needs ("prefers terse
-        answers", "wants tables for data", "low-code, explain simply",
-        "always uses uv not pip") → the always-on user profile.
-      "rule"       = an explicit STANDING ORDER they gave ("always answer in
-        English", "never run tests before commits") → house rules.
-    Corrections like "stop doing X", "too verbose", "I hate when you Y", "just
-    give me the answer" are "preference" (or "rule" if phrased as a standing
-    order) — NOT facts. Most things are "fact"; use preference/rule only for
-    how-you-should-behave signals.
-
-If you find NOTHING worth saving, return: []
-
-# Examples
-GOOD (will save):
-  {"title": "primary-gpu", "category": "user", "description": "User runs a mid-range NVIDIA GPU with ~8 GB VRAM.", "body": "Local LLMs need to fit in 8 GB. Surfaced when sizing model picks.", "confidence": 5, "volatility": "durable"}
-
-  {"title": "current-grade", "category": "user", "description": "User is currently in class 12 (final year of school).", "body": "School grade — changes yearly; re-confirm rather than assume next year.", "confidence": 4, "volatility": "seasonal"}
-
-  {"title": "broken-earbud", "category": "user", "description": "One side of the user's wireless earbuds stopped working.", "body": "Minor annoyance — they may repair or replace. Worth bringing up next time audio comes up.", "confidence": 4, "volatility": "transient"}
-
-  {"title": "primary-os", "category": "user", "description": "User switched their main machine to Linux Mint.", "body": "Tailor shell/commands to Linux now.", "confidence": 5, "volatility": "seasonal", "updates": true}
-
-  {"title": "college-year", "category": "user", "description": "User started first year of college.", "body": "Moved on from school; tailor study help to college level.", "confidence": 5, "volatility": "seasonal", "supersedes": "current-grade"}
-
-  {"title": "side-project-deadline", "category": "project", "description": "Side project has a hard ship date this month.", "body": "Avoid blocking on related work; shipping is the win condition.", "confidence": 5, "volatility": "seasonal"}
-
-BAD (will NOT save — extractor must filter these):
-  {"title": "likes-breaking-bad", "category": "user", "description": "User likes kids who cook Heisenberg's Blue.", ...}  # joke / quote — DROP
-  {"title": "wants-to-destroy-world", "category": "user", "description": "User wants to take over the world.", ...}  # joke / hyperbole — DROP
-  {"title": "asked-about-france", "category": "user", "description": "User asked what the capital of France is.", ...}  # one-off question — DROP
-
+# Example: small talk
+{"card": null, "facts": []}
 """
 
 
-# What the background pass saved, newest last, for the window to hear about:
-# it runs after a reply has finished streaming, so it can't be sent with it.
+# What the background pass saved, newest last, for the window to hear about.
 NOTICED: List[Dict[str, Any]] = []
 
 
-def _already_saved_block() -> str:
-    try:
-        titles = _memory.fact_titles()
-    except Exception:
-        titles = []
-    listing = "\n".join(f"- {t}" for t in titles) if titles else "(nothing yet)"
-    return f"# Already saved (titles, newest first)\n{listing}\n\n# Recent conversation\n"
-
-
-THREAD_PROMPT = """
-# Where this chat stands
-Also say where THIS conversation stands, for a short "lately" list the assistant
-reads in their other chats. Then return an OBJECT, not a bare array:
-  {"facts": [ ...the facts as above... ],
-   "thread": {"topic": "2-5 words", "where": "one short line: what it is about and where it stands now",
-              "open": ["what they said they will do or are waiting on, not done yet"],
-              "closed": ["items from 'Open before' that are now done"]}}
-Open items are THEIR pending things (a purchase not made yet, a fee not paid, a reply
-they are waiting for), not work the assistant is doing. Use "thread": null for a chat
-with nothing ongoing (a one-off question, small talk), and when they asked not to
-save or remember anything.
-"""
-
-
-def _thread_block(chat_id: Optional[str]) -> str:
-    try:
-        from . import threads as _threads
-        t = _threads.get(chat_id) if chat_id else None
-    except Exception:
-        t = None
-    if not t:
-        return "\n# Open before (this chat)\n(nothing)\n"
-    items = "\n".join(f"- {o}" for o in t.get("open") or []) or "(nothing)"
-    return f"\n# Open before (this chat)\nTopic: {t.get('topic', '')}\n{items}\n"
-
-
 def _safe_strip_json(s: str) -> str:
-    """Some small models wrap JSON in ```json fences or add a one-line
-    intro. Pull the first balanced [...] or {...} out of the string."""
+    """Some small models wrap JSON in fences or add a line before it. Pull the
+    first balanced object or array out of the string."""
     s = (s or "").strip()
-    # Strip markdown fences
+    s = re.sub(r"<think>[\s\S]*?</think>", "", s, flags=re.I).strip()
     s = re.sub(r"^```(?:json)?\s*", "", s)
     s = re.sub(r"\s*```$", "", s)
     s = s.strip()
-    # An object (facts + where the chat stands) when it opens before any array.
     if "{" in s and "}" in s and ("[" not in s or s.index("{") < s.index("[")):
         start, end = s.index("{"), s.rindex("}")
         if end > start:
             return s[start: end + 1]
-    # Find first [ to last ] — JSON array case
     if "[" in s and "]" in s:
-        start = s.index("[")
-        end = s.rindex("]")
+        start, end = s.index("["), s.rindex("]")
         if end > start:
-            return s[start : end + 1]
+            return s[start: end + 1]
     return s
 
 
 def _format_turns_for_prompt(messages: List[Dict[str, Any]], recent_turns: int) -> str:
-    """Take the last N user+assistant turns and render them as a transcript.
-    Skip tool/system messages — they're noise for fact extraction."""
+    """The last exchanges as a transcript: what was said and replied, without
+    tool output or what Hearth put in front of a message."""
+    from .session_search import clean_said
     convo = [m for m in messages if m.get("role") in ("user", "assistant")]
-    convo = convo[-(recent_turns * 2):]  # rough turn = user + assistant pair
+    convo = convo[-(recent_turns * 2):]
     lines: List[str] = []
     for m in convo:
-        role = m.get("role", "?")
         content = m.get("content", "")
         if isinstance(content, list):
-            # Multimodal content blocks — just concat the text parts
-            content = " ".join(
-                (b.get("text", "") if isinstance(b, dict) else str(b))
-                for b in content
-            )
+            content = " ".join((b.get("text", "") if isinstance(b, dict) else str(b)) for b in content)
         content = (content or "").strip()
-        if not content:
+        if m.get("role") == "user":
+            content = clean_said(content)
+        if not content or content == "__HEARTH_NOTIFY_FLUSH__":
             continue
-        # Cap each turn to keep prompt bounded
         if len(content) > 1200:
             content = content[:1200] + " […]"
-        lines.append(f"{role.upper()}: {content}")
+        lines.append(f"{m['role'].upper()}: {content}")
     return "\n\n".join(lines)
 
 
 def _fact_already_known(title: str) -> bool:
-    """Check if a fact with this slug is already on disk. Cheap stat."""
-    slug = _memory._slug(title)
-    path = os.path.join(_memory.MEM_DIR, f"{slug}.md")
-    return os.path.isfile(path)
+    return os.path.isfile(os.path.join(_memory.MEM_DIR, f"{_memory._slug(title)}.md"))
 
 
 def enabled() -> bool:
-    """Whether facts are noted in the background at all (Settings: Remember
-    things on its own). Being asked not to save is left to the extractor."""
+    """Whether memory is noted in the background at all (Settings: Remember
+    things on its own). Being asked not to save is left to the pass."""
     try:
         from .tools import WORKSPACE
         with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
             return (json.load(f) or {}).get("auto_memory") is not False
     except Exception:
         return True
+
+
+def candidates(transcript: str) -> List[Dict[str, str]]:
+    """Up to ten saved facts the pass checks its proposals against: those the
+    words and names of the conversation point at, then the newest."""
+    out: List[Dict[str, str]] = []
+    try:
+        from . import session_search
+        out = session_search.fact_candidates(transcript, CANDIDATES)
+    except Exception:
+        out = []
+    have = {c["title"] for c in out}
+    if len(out) < CANDIDATES:
+        try:
+            for t in _memory.fact_titles(CANDIDATES):
+                if t not in have and len(out) < CANDIDATES:
+                    out.append({"title": t, "description": ""})
+                    have.add(t)
+        except Exception:
+            pass
+    return out
+
+
+def _candidates_block(cands: List[Dict[str, str]]) -> str:
+    rows = "\n".join(f"- {c['title']}" + (f": {c['description']}" if c.get("description") else "") for c in cands)
+    return "# Saved facts this conversation may touch\n" + (rows or "(nothing saved yet)") + "\n"
+
+
+def _card_from_old(thread: Any) -> Any:
+    """The shape an earlier prompt asked for ("thread"), read as a card."""
+    if not isinstance(thread, dict):
+        return thread
+    if "goal" in thread:
+        return thread
+    return {"goal": thread.get("topic"), "where": thread.get("where"), "left": thread.get("open") or [],
+            "status": "open" if thread.get("open") else "done"}
 
 
 def extract_and_save(
@@ -263,165 +165,73 @@ def extract_and_save(
     skip_known: bool = True,
     chat_id: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Run the extraction pass and persist surviving facts.
-
-    Args:
-      messages: full chat history (includes tool/system — we filter inside).
-      llm_call: callable(system_prompt, user_prompt) -> assistant text. Pass
-                a function that wraps whatever client the caller uses
-                (cli/headless both have an OpenAI client handy).
-      recent_turns: how many user+assistant pairs to scan.
-      confidence_floor: drop facts below this confidence. 4 is the safe
-                       default; raise to 5 for "only save if model is sure".
-      skip_known: skip a fact whose title is already saved unless the
-                  extractor marks it as an update. False rewrites it anyway.
-
-    Returns:
-      (saved_facts, warnings): list of facts that were actually persisted,
-      and any human-readable warnings (e.g. "model returned non-JSON").
-    """
+    """Run the memory pass over `messages` and keep what it returns: the chat's
+    card (when `chat_id` is given) and the facts. `llm_call(system, user)`
+    answers with text. Returns (facts saved, warnings)."""
     saved: List[Dict[str, Any]] = []
     warnings: List[str] = []
-
     transcript = _format_turns_for_prompt(messages, recent_turns)
     if not transcript.strip():
         return saved, ["no user/assistant content to scan"]
 
-    base = EXTRACTION_PROMPT
+    cards = None
+    before = None
     if chat_id:
-        # The facts go inside the object; a bare "[]" would drop where the chat
-        # stands, and a small model follows the first format it reads.
-        base = (base.replace("Return a JSON array. Each fact is an object",
-                             "Return ONE JSON object as described under \"Where this chat stands\" "
-                             "below; its \"facts\" is an array. Each fact is an object")
-                    .replace("If you find NOTHING worth saving, return: []",
-                             "No facts worth saving: \"facts\" is [], and you still give \"thread\".")
-                    .replace("remember things. Return [].",
-                             "remember things. Return {\"facts\": [], \"thread\": null}."))
-    user_prompt = (base + (THREAD_PROMPT if chat_id else "") + _already_saved_block() + "\n"
-                   + transcript + "\n" + (_thread_block(chat_id) if chat_id else "")
-                   + ("\nAnswer with the object {\"facts\": [...], \"thread\": {...}}.\nJSON:" if chat_id else "\nJSON:"))
+        try:
+            from . import memory_cards as cards
+            before = cards.get(chat_id)
+        except Exception:
+            cards = None
+    shown = {k: v for k, v in (before or {}).items() if k in ("goal", "status", "where", "slots", "left", "names")}
+    user_prompt = (PASS_PROMPT + "\n" + _candidates_block(candidates(transcript))
+                   + "\n# Card before (this chat)\n" + (json.dumps(shown, ensure_ascii=False) if shown else "null")
+                   + "\n\n# Conversation\n" + transcript + "\n\nJSON:")
     try:
-        raw = llm_call(
-            "You are a precise JSON-emitting fact extractor. Output ONLY JSON.",
-            user_prompt,
-        )
+        raw = llm_call("You are a precise JSON-emitting memory pass. Output ONLY JSON.", user_prompt)
     except Exception as e:
         warnings.append(f"extractor LLM call failed: {type(e).__name__}: {e}")
         return saved, warnings
-
-    cleaned = _safe_strip_json(raw)
     try:
-        facts = json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        warnings.append(f"extractor returned non-JSON: {e} — raw head: {raw[:120]!r}")
+        got = json.loads(_safe_strip_json(raw))
+    except (json.JSONDecodeError, TypeError) as e:
+        warnings.append(f"extractor returned non-JSON: {e} — raw head: {str(raw)[:120]!r}")
         return saved, warnings
 
-    thread = None
-    if isinstance(facts, dict):
-        thread = facts.get("thread")
-        facts = facts.get("facts") or []
+    card = None
+    if isinstance(got, dict):
+        card = got.get("card") if "card" in got else _card_from_old(got.get("thread"))
+        facts = got.get("facts") or []
+    else:
+        facts = got
     if not isinstance(facts, list):
         warnings.append(f"extractor returned non-list: {type(facts).__name__}")
         return saved, warnings
-    if chat_id and isinstance(thread, dict):
+    if cards is not None and isinstance(card, dict):
         try:
-            from . import threads as _threads
-            _threads.note(chat_id, thread)
+            if isinstance(got, dict) and "thread" in got and isinstance(got.get("thread"), dict):
+                # The earlier shape closed items one by one.
+                done = {str(c).lower() for c in got["thread"].get("closed") or []}
+                card["left"] = [x for x in (card.get("left") or []) if str(x).lower() not in done]
+            cards.put(chat_id, card)
         except Exception as e:
-            warnings.append(f"thread note failed: {type(e).__name__}: {e}")
+            warnings.append(f"card not kept: {type(e).__name__}: {e}")
 
     for f in facts:
         if not isinstance(f, dict):
             continue
-        title = str(f.get("title") or "").strip()
-        category = str(f.get("category") or "").strip().lower()
-        desc = str(f.get("description") or "").strip()
-        body = str(f.get("body") or "").strip()
-        try:
-            conf = int(f.get("confidence", 0))
-        except (TypeError, ValueError):
-            conf = 0
+        out = _apply_fact(f, confidence_floor, skip_known, chat_id, warnings)
+        if out:
+            saved.append(out)
 
-        # Volatility judged by the extractor; default seasonal (safer than
-        # durable — a stale "still in class 12" is worse than a re-confirm).
-        vol = str(f.get("volatility") or "seasonal").strip().lower()
-        if vol not in ("durable", "seasonal", "transient"):
-            vol = "seasonal"
-        supersedes = str(f.get("supersedes") or "").strip() or None
-        layer = str(f.get("layer") or "fact").strip().lower()
-
-        if not desc:
-            continue
-        if conf < confidence_floor:
-            # Quietly drop — this is the joke-fact gate
-            continue
-
-        # Route by layer: behavior signals shape REPLIES, so they go to the
-        # always-on profile / house rules — not buried in the searchable bank.
-        if layer == "preference":
-            try:
-                _memory.upsert_profile_line(desc)
-                saved.append({"title": title or "preference", "category": "profile",
-                              "description": desc, "confidence": conf})
-            except Exception as e:
-                warnings.append(f"profile upsert failed: {type(e).__name__}: {e}")
-            continue
-        if layer == "rule":
-            try:
-                _memory.append_rule(desc)
-                saved.append({"title": title or "rule", "category": "rule",
-                              "description": desc, "confidence": conf})
-            except Exception as e:
-                warnings.append(f"rule add failed: {type(e).__name__}: {e}")
-            continue
-
-        # Fact path → searchable memory bank.
-        if not title:
-            continue
-        if category not in ALLOWED_CATEGORIES:
-            warnings.append(f"dropped '{title}': bad category {category!r}")
-            continue
-        updates = f.get("updates") is True
-        if _fact_already_known(title):
-            if skip_known and not updates:
-                continue
-            _memory.archive_before_update(title)
-
-        try:
-            _memory.save(
-                title=title,
-                mtype=category,
-                description=desc,
-                body=body or desc,
-                tags=["auto-extracted"],
-                volatility=vol,
-                supersedes=supersedes,
-            )
-            saved.append(
-                {"title": title, "category": category, "description": desc,
-                 "confidence": conf}
-            )
-        except Exception as e:
-            warnings.append(f"save failed for '{title}': {type(e).__name__}: {e}")
-
-    # Periodic full maintenance sweep — gated to ~daily so it's free on the
-    # common turn (the gate returns instantly) and actually runs at most once a
-    # day or when memory crosses its size cap. Bundles: expire stale facts +
-    # a consolidation pass + a size-cap guard. All local, no LLM, non-destructive
-    # (archives are recoverable). Deferred on first sight so a fresh install or
-    # an upgrade doesn't mass-mutate. This is what makes /curate truly automatic.
     try:
-        res = _memory.auto_curate()
-        if res.get("ran"):
-            n = len(res.get("archived", [])) + len(res.get("expired", []))
-            if n:
-                warnings.append(
-                    f"auto-maintenance ({res.get('trigger', 'gated')}): "
-                    f"tidied {n} memor{'y' if n == 1 else 'ies'}")
+        _memory.auto_curate()
     except Exception:
         pass
-
+    try:
+        if cards is not None:
+            cards.close_stale()
+    except Exception:
+        pass
     if saved:
         import time as _time
         NOTICED.append({"at": _time.time(), "titles": [f.get("title", "") for f in saved]})
@@ -429,66 +239,105 @@ def extract_and_save(
     return saved, warnings
 
 
+def _apply_fact(f: Dict[str, Any], floor: int, skip_known: bool, chat_id: Optional[str],
+                warnings: List[str]) -> Optional[Dict[str, Any]]:
+    op = str(f.get("op") or "").strip().lower()
+    title = str(f.get("title") or "").strip()
+    target = str(f.get("target") or "").strip()
+    if f.get("updates") is True:              # the earlier shape of an update
+        op, target = "update", target or title
+    category = str(f.get("category") or "").strip().lower()
+    desc = str(f.get("description") or "").strip()
+    body = str(f.get("body") or "").strip()
+    try:
+        conf = int(f.get("confidence", 0))
+    except (TypeError, ValueError):
+        conf = 0
+    try:
+        importance = min(3, max(1, int(f.get("importance") or 2)))
+    except (TypeError, ValueError):
+        importance = 2
+    vol = str(f.get("volatility") or "seasonal").strip().lower()
+    if vol not in ("durable", "seasonal", "transient"):
+        vol = "seasonal"
+    layer = str(f.get("layer") or "fact").strip().lower()
+
+    if op == "invalidate":
+        if conf and conf < floor:
+            return None
+        slug = _memory.invalidate(target or title) if (target or title) else None
+        return {"title": target or title, "category": "invalidated", "description": desc, "confidence": conf} if slug else None
+    if not desc or conf < floor:
+        return None
+    if layer == "preference":
+        try:
+            _memory.upsert_profile_line(desc)
+            return {"title": title or "preference", "category": "profile", "description": desc, "confidence": conf}
+        except Exception as e:
+            warnings.append(f"profile upsert failed: {type(e).__name__}: {e}")
+            return None
+    if layer == "rule":
+        try:
+            _memory.append_rule(desc)
+            return {"title": title or "rule", "category": "rule", "description": desc, "confidence": conf}
+        except Exception as e:
+            warnings.append(f"rule add failed: {type(e).__name__}: {e}")
+            return None
+    if op == "update" and target and _fact_already_known(target):
+        title = target
+    if not title:
+        return None
+    if category not in ALLOWED_CATEGORIES:
+        warnings.append(f"dropped '{title}': bad category {category!r}")
+        return None
+    if _fact_already_known(title):
+        if skip_known and op != "update":
+            return None
+        _memory.archive_before_update(title)
+    try:
+        _memory.save(title=title, mtype=category, description=desc, body=body or desc, tags=["auto-extracted"],
+                     volatility=vol, supersedes=str(f.get("supersedes") or "").strip() or None,
+                     source_chat=chat_id or "", importance=importance)
+    except Exception as e:
+        warnings.append(f"save failed for '{title}': {type(e).__name__}: {e}")
+        return None
+    return {"title": title, "category": category, "description": desc, "confidence": conf}
+
+
 def make_brain_llm_call(model: str = "") -> Callable[[str, str], str]:
-    """The memory pass through whatever the brain is: an agent program (its
-    quick one-shot), Anthropic's own API, or an OpenAI-compatible server."""
-    def _call(system: str, user: str) -> str:
-        from . import claude_brain as _cb
-        if _cb.active():
-            return _cb.quick(system + "\n\n" + user, timeout=150)
-        from .headless import one_shot
-        return one_shot(system + "\n\n" + user, model, max_tokens=2000, timeout=90)
-    return _call
+    """The pass through the cheapest model on hand (see memory_pass.choose_llm)."""
+    from . import memory_pass
+    return memory_pass.choose_llm(model)[0]
 
 
 def make_openai_llm_call(client, model: str, *, temperature: float = 0.0,
                         max_tokens: int = 2000) -> Callable[[str, str], str]:
-    """Convenience: wrap an OpenAI-compatible client into the llm_call shape
-    extract_and_save expects. Caller passes their own client so we don't
-    have to know which endpoint/key combo is in use.
+    """An OpenAI-compatible client as the llm_call extract_and_save takes.
 
-    The budget is deliberately generous: a facts array is easily >600 tokens, and
-    a truncated reply dies as 'Unterminated string' with NOTHING saved. A
-    reasoning model also spends part of the budget thinking before it emits any
-    JSON, so a tight cap silently disabled extraction entirely.
-    """
+    The budget is generous: a truncated reply fails as an unterminated string
+    and nothing is kept, and a reasoning model spends part of it thinking."""
     def _call(system: str, user: str) -> str:
-        kwargs = dict(
-            model=model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        # Disable reasoning for the extractor. A model that "thinks" first burns
-        # the whole token budget on <think> and never emits the JSON (or the
-        # reasoning's brackets confuse the [...] slice), so nothing gets saved.
-        # Local servers honor chat_template_kwargs; cloud ones ignore it, so ask
-        # for minimal reasoning_effort too. Both are best-effort: if an endpoint
-        # rejects either field, retry clean rather than losing the extraction.
+        kwargs = dict(model=model, messages=[{"role": "system", "content": system},
+                                             {"role": "user", "content": user}],
+                      temperature=temperature, max_tokens=max_tokens)
+        # No reasoning for the pass: a model that thinks first can spend the whole
+        # budget there. Local servers read chat_template_kwargs, cloud ones the
+        # reasoning field; an endpoint that refuses either is asked again plainly.
         try:
-            r = chat_create(client,
-                **kwargs,
-                extra_body={"chat_template_kwargs": {"enable_thinking": False},
-                            "reasoning": {"enabled": False}})
+            r = chat_create(client, **kwargs,
+                            extra_body={"chat_template_kwargs": {"enable_thinking": False},
+                                        "reasoning": {"enabled": False}})
         except Exception:
             try:
-                r = chat_create(client,
-                    **kwargs,
-                    extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+                r = chat_create(client, **kwargs, extra_body={"chat_template_kwargs": {"enable_thinking": False}})
             except Exception:
                 r = chat_create(client, **kwargs)
         _msg = r.choices[0].message
         out = (getattr(_msg, "content", None) or "").strip()
         if not out:
-            # Reasoning model that put everything in its reasoning channel and
-            # left content empty (the 'raw head: ""' failure). The JSON is often
-            # sitting in there, so use it rather than saving nothing.
+            # A reasoning model that put everything in its reasoning channel.
             _ex = getattr(_msg, "model_extra", None) or {}
-            out = (getattr(_msg, "reasoning_content", None)
-                   or getattr(_msg, "reasoning", None)
+            out = (getattr(_msg, "reasoning_content", None) or getattr(_msg, "reasoning", None)
                    or _ex.get("reasoning") or _ex.get("reasoning_content") or "").strip()
         return out
     return _call

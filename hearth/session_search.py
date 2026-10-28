@@ -1,352 +1,680 @@
-"""FTS5 cross-session search over the user's chat history.
+"""Memory's index: every exchange of every chat, the saved facts, and the
+"where were we" card of each chat, in one SQLite file.
 
-Builds an SQLite FTS5 virtual table over every message in
-~/Jarvis/conversations/*.json so the model can ask "what did we discuss
-about the Forge bug last week?" and get a real answer without loading 50
-conversation files into context.
+An exchange (what was said and the reply to it) is one row of an FTS5 table,
+with the chat, when it happened and the names it mentions. Facts are indexed
+from their markdown files, which stay the copy a person edits; the index is
+rebuilt from them whenever they change. Cards (memory_cards) live here too,
+and are the one table that is not rebuilt from elsewhere.
 
-Index lives at ~/Jarvis/session_index.db. Auto-rebuilt on tool call if
-older than a conversation file's mtime. Pure SQLite stdlib — no extra
-deps.
+Ranking is one score, no embeddings: BM25 plus the names a query shares with a
+row, how recent it is, how much it matters, and a lift for a chat still open.
+Words for time ("yesterday", "last week", "in June") become a date range by
+rule, never by asking a model.
 
 Public API:
-    rebuild_index() -> int                # full reindex; returns row count
-    search(query, limit=8) -> List[Match] # top FTS5 matches with context
+    rebuild_index() -> int                         # every chat indexed again
+    search(query, limit=8, after=, before=) -> List[Match]
+    format_matches(matches) -> str
+    time_range(text) -> (start, end, rest)
+    names(text) -> List[str]
+    fact_candidates(text, limit=10) -> List[dict]
+    read_chat(chat, start=None) -> str
 """
 
 from __future__ import annotations
 
+import calendar
+import datetime as _dt
 import json
+import math
 import os
 import re
 import sqlite3
+import threading
 import time
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from .tools import WORKSPACE, is_write_temp
 
 INDEX_PATH = os.path.join(WORKSPACE, "session_index.db")
 CONVOS_DIR = os.path.join(WORKSPACE, "conversations")
+NOTIFY_FLUSH = "__HEARTH_NOTIFY_FLUSH__"
+
+_SCHEMA = 2
+_LOCK = threading.RLock()
 
 
 @dataclass
 class Match:
     conversation_id: str
     title: str
-    message_index: int
-    role: str
-    content: str
-    snippet: str  # FTS5 snippet() context window (clean text, '…' for elision)
+    message_index: int        # the message number read_chat gives this exchange
+    role: str                 # "exchange", or "card" for a chat's card
+    content: str              # what was said
+    snippet: str
     score: float
-    updated: float
+    updated: float            # when, in seconds
+    reply: str = ""
+    kind: str = "round"
 
 
 # Marks a row that came from the recency fallback rather than a real keyword
-# hit. Both used to render identically, so the model could not tell "these
-# messages answer your question" from "search matched nothing, here is whatever
-# was most recent" — and it would answer confidently off unrelated context.
+# hit, so "these answer it" and "nothing matched, here is the latest" read apart.
 RECENCY_SCORE = 999.0
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(INDEX_PATH)
+def _connect(path: Optional[str] = None) -> sqlite3.Connection:
+    path = path or INDEX_PATH
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    conn = sqlite3.connect(path, timeout=15)
     conn.executescript("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS messages USING fts5(
-            conversation_id UNINDEXED,
-            title           UNINDEXED,
-            message_index   UNINDEXED,
-            role            UNINDEXED,
-            content,
-            updated         UNINDEXED,
-            tokenize='porter unicode61'
-        );
-        CREATE TABLE IF NOT EXISTS meta (
-            conversation_id TEXT PRIMARY KEY,
-            indexed_mtime   REAL
-        );
+        CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+        CREATE VIRTUAL TABLE IF NOT EXISTS rounds USING fts5(
+            chat UNINDEXED, title UNINDEXED, msg UNINDEXED, at UNINDEXED,
+            said, reply, names, tokenize='porter unicode61');
+        CREATE TABLE IF NOT EXISTS chats (chat TEXT PRIMARY KEY, mtime REAL, rounds INTEGER);
+        CREATE VIRTUAL TABLE IF NOT EXISTS facts USING fts5(
+            slug UNINDEXED, name, text, names, archived UNINDEXED, valid_to UNINDEXED,
+            importance UNINDEXED, updated UNINDEXED, source_chat UNINDEXED,
+            tokenize='porter unicode61');
+        CREATE TABLE IF NOT EXISTS cards (chat TEXT PRIMARY KEY, data TEXT, status TEXT, updated REAL);
+        CREATE TABLE IF NOT EXISTS passes (chat TEXT PRIMARY KEY, rounds INTEGER, at REAL);
     """)
+    row = conn.execute("SELECT v FROM kv WHERE k='schema'").fetchone()
+    if not row or int(row[0]) < _SCHEMA:
+        # The first index held one row per message; it is derived, so it goes.
+        conn.executescript("DROP TABLE IF EXISTS messages; DROP TABLE IF EXISTS meta;")
+        conn.execute("INSERT OR REPLACE INTO kv(k, v) VALUES ('schema', ?)", (str(_SCHEMA),))
+        conn.commit()
     return conn
 
 
-def _convo_mtime(path: str) -> float:
+def _mtime(path: str) -> float:
     try:
         return os.path.getmtime(path)
     except OSError:
         return 0.0
 
 
+# ---------------------------------------------------------------- names
+_NAME_STOP = frozenset("""
+i im i'm ive i've id i'd ill i'll the a an and or but so if then this that these those it its it's
+my your our their his her we you they he she me us them what when where why how which who whom
+yes no ok okay hey hi hello thanks thank sure well also just now today tomorrow yesterday
+monday tuesday wednesday thursday friday saturday sunday please can could would should will
+do does did is are was were be been have has had not don't dont let lets let's there here
+""".split())
+_RUN = re.compile(r"(?:[A-Z][\w'+-]*|[A-Z]{2,}\w*)(?:[ \t]+(?:[A-Z][\w'+-]*|\d[\w+-]*(?:\.\d+)?|[A-Z]{2,}\w*))*")
+_HANDLE = re.compile(r"[@#][A-Za-z0-9_][\w.-]{1,40}")
+_PRICE = re.compile(r"(?:[₹$€£]|\brs\.?\s?|\binr\s?|\busd\s?)\s?\d[\d,.]*\s?[kKmMlL]?\b|\b\d[\d,.]*\s?(?:k|lakh|rupees|dollars)\b", re.I)
+_MIXED = re.compile(r"\b(?=[A-Za-z]*\d)(?=\d*[A-Za-z])[A-Za-z0-9]{2,}(?:[-.][A-Za-z0-9]+)*\b")
+
+
+def _norm_name(s: str) -> str:
+    return " ".join(s.strip(" .,:;!?'\"()[]").lower().split())
+
+
+def names(text: str, limit: int = 24) -> List[str]:
+    """Proper nouns, products, handles, prices and model-like words in a text,
+    lowercased: what ties one chat to another without vectors."""
+    text = text or ""
+    found: List[str] = []
+
+    def add(s: str) -> None:
+        n = _norm_name(s)
+        if len(n) < 2 or n in _NAME_STOP or n in found:
+            return
+        found.append(n)
+
+    for m in _RUN.finditer(text):
+        words = m.group(0).split()
+        # A capital that only starts a sentence is not a name on its own.
+        start = m.start()
+        before = text[:start].rstrip()
+        sentence_start = not before or before[-1] in ".!?\n:"
+        while words and words[0].lower().strip(".,'") in _NAME_STOP:
+            words = words[1:]
+            sentence_start = False
+        if not words:
+            continue
+        if len(words) == 1 and sentence_start and not any(c.isdigit() for c in words[0]) \
+                and not words[0].isupper():
+            continue
+        add(" ".join(words))
+    for rx in (_HANDLE, _PRICE, _MIXED):
+        for m in rx.finditer(text):
+            add(m.group(0))
+    return found[:limit]
+
+
+def _name_hits(row_names: str, q_tokens: set) -> int:
+    hits = 0
+    for n in (row_names or "").split("|"):
+        toks = [t for t in re.findall(r"\w+", n) if len(t) >= 2]
+        if toks and any(t in q_tokens for t in toks if not t.isdigit() or len(t) >= 3):
+            hits += 1
+    return hits
+
+
+# ---------------------------------------------------------------- time words
+_MONTHS = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
+_MONTHS.update({m.lower(): i for i, m in enumerate(calendar.month_abbr) if m})
+_DAYS = {d.lower(): i for i, d in enumerate(calendar.day_name)}
+_NUM = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+        "eight": 8, "nine": 9, "ten": 10, "couple of": 2, "few": 3}
+_UNIT_DAYS = {"day": 1, "week": 7, "month": 30, "year": 365}
+_NUMW = r"(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|couple of|few)"
+
+
+def time_range(text: str, now: Optional[float] = None) -> Tuple[Optional[float], Optional[float], str]:
+    """A span of time named in `text`, as (start, end) in seconds, and the text
+    without those words. (None, None, text) when it names none."""
+    t = text or ""
+    now_dt = _dt.datetime.fromtimestamp(now if now is not None else time.time())
+    day0 = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    low = t.lower()
+
+    def out(a: _dt.datetime, b: _dt.datetime, m: "re.Match") -> Tuple[float, float, str]:
+        rest = (t[:m.start()] + " " + t[m.end():])
+        return a.timestamp(), b.timestamp(), " ".join(rest.split())
+
+    rules: List[Tuple[str, Any]] = [
+        (r"\b(?:earlier today|this morning|this afternoon|this evening|tonight|today|just now|a moment ago|moments ago)\b",
+         lambda m: (day0, now_dt)),
+        (r"\blast night\b", lambda m: (day0 - _dt.timedelta(hours=6), day0 + _dt.timedelta(hours=6))),
+        (r"\b(?:yesterday|day before)\b", lambda m: (day0 - _dt.timedelta(days=1), day0)),
+        (r"\bthis week\b", lambda m: (day0 - _dt.timedelta(days=day0.weekday()), now_dt)),
+        (r"\blast week\b", lambda m: (day0 - _dt.timedelta(days=day0.weekday() + 7),
+                                      day0 - _dt.timedelta(days=day0.weekday()))),
+        (r"\bthis month\b", lambda m: (day0.replace(day=1), now_dt)),
+        (r"\blast month\b", lambda m: ((day0.replace(day=1) - _dt.timedelta(days=1)).replace(day=1), day0.replace(day=1))),
+        (r"\bthis year\b", lambda m: (day0.replace(month=1, day=1), now_dt)),
+        (r"\blast year\b", lambda m: (day0.replace(year=day0.year - 1, month=1, day=1), day0.replace(month=1, day=1))),
+        (rf"\b(?:in the |over the )?(?:past|last) {_NUMW} (day|week|month|year)s?\b",
+         lambda m: (now_dt - _dt.timedelta(days=_count(m.group(1)) * _UNIT_DAYS[m.group(2)]), now_dt)),
+        (rf"\b{_NUMW} (day|week|month|year)s? ago\b", lambda m: _ago(day0, _count(m.group(1)), m.group(2))),
+        (r"\bthe other day\b", lambda m: (day0 - _dt.timedelta(days=7), day0)),
+        (r"\b(?:recently|lately)\b", lambda m: (now_dt - _dt.timedelta(days=14), now_dt)),
+        (r"\b(?:on |last )?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lambda m: _weekday(day0, m.group(1))),
+        (r"\b(?:in|during|back in|on|since) (january|february|march|april|may|june|july|august|september|october|"
+         r"november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b",
+         lambda m: _month(day0, m.group(1))),
+    ]
+    for rx, span in rules:
+        m = re.search(rx, low)
+        if m:
+            a, b = span(m)
+            return out(a, b, m)
+    return None, None, t
+
+
+def _count(w: str) -> int:
+    w = (w or "").strip().lower()
+    return int(w) if w.isdigit() else _NUM.get(w, 1)
+
+
+def _ago(day0: _dt.datetime, n: int, unit: str):
+    span = _UNIT_DAYS[unit]
+    centre = day0 - _dt.timedelta(days=n * span)
+    pad = max(1, span // 2) if span > 1 else 0
+    return centre - _dt.timedelta(days=pad), centre + _dt.timedelta(days=pad + 1)
+
+
+def _weekday(day0: _dt.datetime, name: str):
+    back = (day0.weekday() - _DAYS[name]) % 7 or 7
+    d = day0 - _dt.timedelta(days=back)
+    return d, d + _dt.timedelta(days=1)
+
+
+def _month(day0: _dt.datetime, name: str):
+    mo = _MONTHS.get(name[:3] if name not in _MONTHS else name) or _MONTHS[name]
+    year = day0.year if mo <= day0.month else day0.year - 1
+    a = day0.replace(year=year, month=mo, day=1)
+    b = (a + _dt.timedelta(days=32)).replace(day=1)
+    return a, b
+
+
+def _when_arg(v: Any, edge: str, now: Optional[float] = None) -> Optional[float]:
+    """A before/after value: a date, a date and time, or words for a time."""
+    if v in (None, ""):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) / (1000 if float(v) > 1e12 else 1)
+    s = str(v).strip()
+    try:
+        return _dt.datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        pass
+    a, b, _rest = time_range(s, now)
+    if a is None:
+        return None
+    return a if edge == "start" else b
+
+
+# ---------------------------------------------------------------- what gets indexed
+_INJECTED = (re.compile(r"<lately>[\s\S]*?</lately>\s*"),
+             re.compile(r"\s*\[Current local time:[^\]]*\]\s*$"))
+
+
+def clean_said(text: str) -> str:
+    """What a person typed, without what Hearth put in front of it or after it."""
+    for rx in _INJECTED:
+        text = rx.sub("", text or "")
+    return text.strip()
+
+
+def _text(content: Any) -> str:
+    if isinstance(content, list):
+        return " ".join(str(p.get("text") or "") for p in content if isinstance(p, dict) and isinstance(p.get("text"), str))
+    return content if isinstance(content, str) else ""
+
+
+def rounds_of(messages: List[Dict[str, Any]], default_at: float = 0.0) -> List[Dict[str, Any]]:
+    """A chat's messages as exchanges: each thing said with the reply to it.
+    `msg` is the number read_chat gives the message that opens the exchange."""
+    out: List[Dict[str, Any]] = []
+    n = -1
+    for m in messages or []:
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant") or m.get("silent"):
+            continue
+        text = _text(m.get("content")).strip()
+        if text == NOTIFY_FLUSH:
+            continue
+        n += 1
+        at = m.get("at")
+        try:
+            at = float(at) / (1000 if float(at) > 1e12 else 1) if at else default_at
+        except (TypeError, ValueError):
+            at = default_at
+        if m["role"] == "user" or not out:
+            out.append({"msg": n, "at": at, "said": clean_said(text) if m["role"] == "user" else "",
+                        "reply": "" if m["role"] == "user" else text})
+        else:
+            out[-1]["reply"] = (out[-1]["reply"] + "\n" + text).strip()
+    return [r for r in out if r["said"] or r["reply"]]
+
+
+def _index_chat(conn: sqlite3.Connection, cid: str, title: str, messages: List[Dict[str, Any]],
+                at: float, mtime: float) -> int:
+    conn.execute("DELETE FROM rounds WHERE chat = ?", (cid,))
+    rows = rounds_of(messages, at)
+    for r in rows:
+        conn.execute("INSERT INTO rounds(chat, title, msg, at, said, reply, names) VALUES (?,?,?,?,?,?,?)",
+                     (cid, title, r["msg"], r["at"], r["said"][:8000], r["reply"][:8000],
+                      "|".join(names(r["said"] + "\n" + r["reply"][:3000]))))
+    conn.execute("INSERT OR REPLACE INTO chats(chat, mtime, rounds) VALUES (?,?,?)", (cid, mtime, len(rows)))
+    return len(rows)
+
+
+def _sources() -> Dict[str, str]:
+    """chat id -> file, for every chat and the old terminal history."""
+    out: Dict[str, str] = {}
+    try:
+        names_ = os.listdir(CONVOS_DIR)
+    except OSError:
+        names_ = []
+    for fn in names_:
+        # A staged write carries .json and an id that was never indexed.
+        if fn.endswith(".json") and not is_write_temp(fn) and not fn.startswith("."):
+            out[fn[:-5]] = os.path.join(CONVOS_DIR, fn)
+    logs = os.path.join(os.path.dirname(CONVOS_DIR), "logs")
+    for cid, fn in (("cli-history", "jarvis_history.json"), ("cli-transcript", "cli_transcript.jsonl")):
+        p = os.path.join(logs, fn)
+        if os.path.isfile(p):
+            out[cid] = p
+    return out
+
+
+def _read_source(cid: str, path: str) -> Tuple[str, str, List[Dict[str, Any]], float]:
+    """(id, title, messages, when) of one source."""
+    mt = _mtime(path)
+    if cid == "cli-transcript":
+        msgs = []
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(rec, dict):
+                        msgs.append(rec)
+        except OSError:
+            pass
+        return cid, "CLI transcript (full)", msgs, mt
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if cid == "cli-history":
+        return cid, "CLI session history", data if isinstance(data, list) else [], mt
+    if not isinstance(data, dict):
+        return cid, "Untitled", [], mt
+    upd = data.get("updated") or mt
+    try:
+        upd = float(upd) / (1000 if float(upd) > 1e12 else 1)
+    except (TypeError, ValueError):
+        upd = mt
+    return str(data.get("id") or cid), data.get("title") or "Untitled", data.get("messages") or [], upd
+
+
 def _needs_reindex() -> bool:
-    """Check if any conversation file is newer than its indexed timestamp."""
+    """Whether a chat changed, appeared or went since it was indexed."""
     if not os.path.isfile(INDEX_PATH):
         return True
-    if not os.path.isdir(CONVOS_DIR):
-        return False
     try:
         conn = _connect()
-        cur = conn.execute("SELECT conversation_id, indexed_mtime FROM meta")
-        indexed = {row[0]: row[1] for row in cur.fetchall()}
+        indexed = dict(conn.execute("SELECT chat, mtime FROM chats").fetchall())
         conn.close()
     except sqlite3.Error:
         return True
-    for fn in os.listdir(CONVOS_DIR):
-        # A staged write carries the .json extension and no chat id that was
-        # ever indexed, so it read as an unindexed conversation and this said
-        # the index was stale on every call. One left behind by a killed save
-        # meant the whole index was rebuilt for every search.
-        if not fn.endswith(".json") or is_write_temp(fn):
-            continue
-        cid = fn[:-5]
-        path = os.path.join(CONVOS_DIR, fn)
-        if cid not in indexed:
-            return True
-        if _convo_mtime(path) > indexed[cid] + 0.5:
-            return True
-    # Also re-index when the CLI flat history mtime moved past last index.
-    cli_path = os.path.join(os.path.dirname(CONVOS_DIR), "logs", "jarvis_history.json")
-    if os.path.isfile(cli_path):
-        last = indexed.get("cli-history", 0.0)
-        if _convo_mtime(cli_path) > last + 0.5:
-            return True
-    # And when the never-pruned CLI transcript grew.
-    tx_path = os.path.join(os.path.dirname(CONVOS_DIR), "logs", "cli_transcript.jsonl")
-    if os.path.isfile(tx_path):
-        if _convo_mtime(tx_path) > indexed.get("cli-transcript", 0.0) + 0.5:
-            return True
-    return False
+    src = _sources()
+    if set(src) != set(indexed):
+        return True
+    return any(_mtime(p) > (indexed.get(c) or 0) + 0.5 for c, p in src.items())
+
+
+def sync() -> int:
+    """Index the chats that changed since the last time; drop the ones gone.
+    Returns how many chats were indexed again."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            indexed = dict(conn.execute("SELECT chat, mtime FROM chats").fetchall())
+            src = _sources()
+            done = 0
+            for gone in set(indexed) - set(src):
+                conn.execute("DELETE FROM rounds WHERE chat = ?", (gone,))
+                conn.execute("DELETE FROM chats WHERE chat = ?", (gone,))
+            for cid, path in src.items():
+                mt = _mtime(path)
+                if cid in indexed and mt <= (indexed[cid] or 0) + 0.5:
+                    continue
+                try:
+                    real, title, msgs, at = _read_source(cid, path)
+                except (OSError, ValueError):
+                    continue
+                if real != cid:
+                    conn.execute("DELETE FROM rounds WHERE chat = ?", (real,))
+                _index_chat(conn, cid, title, msgs, at, mt)
+                done += 1
+            conn.commit()
+            return done
+        finally:
+            conn.close()
 
 
 def rebuild_index() -> int:
-    """Drop + rebuild the entire FTS5 index. Returns rows indexed.
-
-    Sources: GUI conversations at ~/Jarvis/conversations/*.json AND the
-    CLI's flat history at ~/Jarvis/logs/jarvis_history.json. Without the
-    CLI source, search_chats run from the GUI couldn't see rules/quirks
-    the user set in CLI sessions (and vice versa).
-    """
-    if not os.path.isdir(CONVOS_DIR):
-        os.makedirs(CONVOS_DIR, exist_ok=True)
-    if os.path.isfile(INDEX_PATH):
+    """Index every chat again. Returns the exchanges indexed. Cards and what the
+    memory pass has done are kept: they are not derived from the chats."""
+    with _LOCK:
+        conn = _connect()
         try:
-            os.remove(INDEX_PATH)
-        except OSError:
-            pass
+            conn.execute("DELETE FROM rounds")
+            conn.execute("DELETE FROM chats")
+            conn.commit()
+        finally:
+            conn.close()
+    sync()
     conn = _connect()
-    total = 0
+    try:
+        return conn.execute("SELECT COUNT(*) FROM rounds").fetchone()[0]
+    finally:
+        conn.close()
 
-    # 1) GUI conversations — one file per chat thread.
-    for fn in sorted(os.listdir(CONVOS_DIR)):
-        if not fn.endswith(".json") or is_write_temp(fn):
-            continue
-        path = os.path.join(CONVOS_DIR, fn)
+
+def chat_rounds(cid: str) -> int:
+    """How many exchanges a chat has, as indexed."""
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT rounds FROM chats WHERE chat = ?", (cid,)).fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------- facts
+def _fact_rows() -> List[Dict[str, Any]]:
+    from . import memory
+    out = []
+    for root, archived in ((memory.MEM_DIR, 0), (memory._ARCHIVE_DIR, 1)):
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                convo = json.load(f)
-        except (OSError, json.JSONDecodeError):
+            files = os.listdir(root)
+        except OSError:
             continue
-        cid = convo.get("id") or fn[:-5]
-        title = convo.get("title") or "Untitled"
-        updated = convo.get("updated") or _convo_mtime(path)
-        for idx, msg in enumerate(convo.get("messages", [])):
-            content = (msg.get("content") or "").strip()
-            if not content:
+        for fn in files:
+            if not fn.endswith(".md") or fn.lower() == "memory.md" or fn.startswith("."):
                 continue
-            conn.execute(
-                "INSERT INTO messages(conversation_id, title, message_index, role, content, updated) VALUES (?,?,?,?,?,?)",
-                (cid, title, idx, msg.get("role", "?"), content, float(updated)),
-            )
-            total += 1
-        conn.execute(
-            "INSERT OR REPLACE INTO meta(conversation_id, indexed_mtime) VALUES (?, ?)",
-            (cid, _convo_mtime(path)),
-        )
+            try:
+                fm, body = memory._read_body(os.path.join(root, fn))
+            except (OSError, UnicodeDecodeError):
+                continue
+            text = (fm.get("description") or "") + "\n" + body
+            out.append({"slug": fn[:-3], "name": fm.get("name") or fn[:-3], "text": text,
+                        "names": "|".join(names((fm.get("name") or "") + "\n" + text)),
+                        "archived": archived, "valid_to": fm.get("valid_to") or ("archived" if archived else ""),
+                        "importance": fm.get("importance") or "2", "updated": fm.get("updated") or "",
+                        "source_chat": fm.get("source_chat") or "", "description": fm.get("description") or ""})
+    return out
 
-    # 2) CLI flat history — one big array of messages. Index it as a
-    # synthetic "cli-history" conversation so search_chats returns CLI
-    # turns alongside GUI ones.
-    cli_path = os.path.join(os.path.dirname(CONVOS_DIR), "logs", "jarvis_history.json")
-    if os.path.isfile(cli_path):
-        try:
-            with open(cli_path, "r", encoding="utf-8") as f:
-                cli_msgs = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            cli_msgs = []
-        if isinstance(cli_msgs, list):
-            cid = "cli-history"
-            title = "CLI session history"
-            mtime = _convo_mtime(cli_path)
-            for idx, msg in enumerate(cli_msgs):
-                if not isinstance(msg, dict):
-                    continue
-                raw = msg.get("content")
-                # CLI history mixes plain strings with multimodal/list
-                # payloads (image-attached turns, tool_calls). Coerce
-                # lists to a flat string of their text parts; ignore
-                # anything that doesn't yield text.
-                if isinstance(raw, list):
-                    parts = []
-                    for p in raw:
-                        if isinstance(p, dict) and isinstance(p.get("text"), str):
-                            parts.append(p["text"])
-                    raw = "\n".join(parts)
-                content = (raw or "").strip() if isinstance(raw, str) else ""
-                if not content:
-                    continue
-                conn.execute(
-                    "INSERT INTO messages(conversation_id, title, message_index, role, content, updated) VALUES (?,?,?,?,?,?)",
-                    (cid, title, idx, msg.get("role", "?"), content, float(mtime)),
-                )
-                total += 1
-            conn.execute(
-                "INSERT OR REPLACE INTO meta(conversation_id, indexed_mtime) VALUES (?, ?)",
-                (cid, mtime),
-            )
 
-    # 3) Append-only CLI transcript (never pruned). jarvis_history.json above is
-    # the working context and gets trimmed to fit the model window; this JSONL
-    # keeps the FULL back-and-forth so old turns stay searchable.
-    tx_path = os.path.join(os.path.dirname(CONVOS_DIR), "logs", "cli_transcript.jsonl")
-    if os.path.isfile(tx_path):
-        cid = "cli-transcript"
-        title = "CLI transcript (full)"
-        mtime = _convo_mtime(tx_path)
+def _facts_stamp() -> str:
+    from . import memory
+    parts = []
+    for root in (memory.MEM_DIR, memory._ARCHIVE_DIR):
         try:
-            with open(tx_path, "r", encoding="utf-8") as f:
-                for idx, line in enumerate(f):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    content = (rec.get("content") or "").strip()
-                    if not content:
-                        continue
-                    conn.execute(
-                        "INSERT INTO messages(conversation_id, title, message_index, role, content, updated) VALUES (?,?,?,?,?,?)",
-                        (cid, title, idx, rec.get("role", "?"), content, float(mtime)),
-                    )
-                    total += 1
-            conn.execute(
-                "INSERT OR REPLACE INTO meta(conversation_id, indexed_mtime) VALUES (?, ?)",
-                (cid, mtime),
-            )
+            for e in os.scandir(root):
+                if e.name.endswith(".md"):
+                    parts.append(f"{root[-8:]}/{e.name}:{e.stat().st_mtime_ns}:{e.stat().st_size}")
         except OSError:
             pass
-
-    conn.commit()
-    conn.close()
-    return total
+    import hashlib
+    return hashlib.sha1("\n".join(sorted(parts)).encode("utf-8")).hexdigest()
 
 
-# Phrases that mean "I'm asking about WHEN, or about recent talk" — for these,
-# recency has to beat text score. Otherwise BM25 ranks by keyword density, and the
-# generic words in a temporal question (were/doing/yesterday) match nearly
-# everywhere, so a pure relevance sort returns the OLDEST dense match instead of
-# the most recent one.
+def sync_facts() -> None:
+    """Index the fact files again when any of them changed."""
+    stamp = _facts_stamp()
+    with _LOCK:
+        conn = _connect()
+        try:
+            row = conn.execute("SELECT v FROM kv WHERE k='facts_stamp'").fetchone()
+            if row and row[0] == stamp:
+                return
+            conn.execute("DELETE FROM facts")
+            for r in _fact_rows():
+                conn.execute("INSERT INTO facts(slug, name, text, names, archived, valid_to, importance, updated,"
+                             " source_chat) VALUES (?,?,?,?,?,?,?,?,?)",
+                             (r["slug"], r["name"], r["text"][:6000], r["names"], r["archived"], r["valid_to"],
+                              r["importance"], r["updated"], r["source_chat"]))
+            conn.execute("INSERT OR REPLACE INTO kv(k, v) VALUES ('facts_stamp', ?)", (stamp,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def fact_candidates(text: str, limit: int = 10) -> List[Dict[str, str]]:
+    """Up to `limit` current facts a conversation may touch: by its words and
+    the names in it. What the memory pass diffs its proposals against."""
+    sync_facts()
+    toks = _query_tokens(text)
+    if not toks:
+        return []
+    # The rarer words carry the topic; the most frequent forty are plenty.
+    counts: Dict[str, int] = {}
+    for t in toks:
+        counts[t] = counts.get(t, 0) + 1
+    words = sorted(counts, key=lambda w: (-len(w) if counts[w] == 1 else -counts[w]))[:40]
+    q = " OR ".join(f'"{w}"' for w in words)
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT slug, name, text, names, bm25(facts) FROM facts WHERE facts MATCH ? "
+                            "AND archived = 0 ORDER BY bm25(facts) LIMIT 40", (q,)).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    finally:
+        conn.close()
+    qset = set(toks)
+    scored = []
+    best = max([-r[4] for r in rows] or [1.0]) or 1.0
+    for slug, name, body, nm, b in rows:
+        scored.append(((-b) / best + 0.8 * min(1.0, _name_hits(nm, qset) / 2), slug, name, body))
+    scored.sort(key=lambda x: -x[0])
+    return [{"slug": s, "title": n, "description": " ".join(t.split("\n", 1)[0].split())[:160]}
+            for _sc, s, n, t in scored[:limit]]
+
+
+# ---------------------------------------------------------------- search
+_STOP = frozenset("""
+a an and are as at be but by can could do does did for from get give had has have how i in into is it its
+like make me my need of on or please show so some tell that the their them then there these this those to
+use using want was what when where which who why will with would you your about we were us our
+remember recall said say talk talked talking chat chats discussed discuss again earlier before
+""".split())
+
+
+def _query_tokens(text: str) -> List[str]:
+    return [t for t in re.findall(r"\w+", (text or "").lower()) if len(t) >= 2 and t not in _STOP]
+
+
 _TEMPORAL_RE = re.compile(
-    r"\b("
-    r"yesterday|today|tonight|this morning|this afternoon|this evening|"
-    r"last night|earlier|recently|just now|moments? ago|a moment ago|"
-    r"last time|previously|the other day|(a\s+)?few\s+(days?|hours?)\s+ago|"
-    r"\d+\s+(days?|hours?|weeks?)\s+ago|this week|last week|a while ago|"
-    r"what were we|what did we|what was i|what have we|"
-    r"continue where|pick up where|where we left"
-    r")\b",
-    re.IGNORECASE,
-)
+    r"\b(yesterday|today|tonight|this morning|last night|earlier|recently|lately|just now|last time|previously|"
+    r"the other day|(a\s+)?few\s+(days?|hours?)\s+ago|\d+\s+(days?|hours?|weeks?)\s+ago|this week|last week|"
+    r"what were we|what did we|what was i|what have we|continue where|pick up where|where we left)\b", re.I)
 
 
 def _is_temporal_query(q: str) -> bool:
     return bool(_TEMPORAL_RE.search(q or ""))
 
 
-def search(query: str, limit: int = 8) -> List[Match]:
-    """Top FTS5 matches across all past conversations. Auto-rebuilds index
-    if any conversation file is newer than its last-indexed timestamp."""
+def _ranked_query(q: str) -> str:
+    toks = _query_tokens(q) or [t for t in re.findall(r"\w+", (q or "").lower()) if t]
+    return " OR ".join(f'"{t}"' for t in dict.fromkeys(toks))
+
+
+def _open_chats(conn: sqlite3.Connection) -> set:
+    try:
+        return {r[0] for r in conn.execute("SELECT chat FROM cards WHERE status = 'open'").fetchall()}
+    except sqlite3.Error:
+        return set()
+
+
+def score(bm25n: float, name_overlap: float, age_days: float, importance: float, is_open: bool,
+          half_life: float = 14.0) -> float:
+    """One number for how well an item answers a query; higher is better."""
+    return (bm25n * 1.0 + name_overlap * 0.8 + math.exp(-max(0.0, age_days) / half_life) * 0.5
+            + (importance / 3.0) * 0.3 + (0.5 if is_open else 0.0))
+
+
+def search(query: str, limit: int = 8, *, after: Any = None, before: Any = None,
+           match_all: bool = False, now: Optional[float] = None) -> List[Match]:
+    """The exchanges, and the cards, that best answer a query, best first.
+
+    Time words in the query, and `after` / `before`, limit it to a span. With
+    no words left once those are taken out, it is a look by time: the
+    exchanges in that span, newest first. `match_all` keeps every word
+    required, the way the sidebar's search box reads what is typed."""
     query = (query or "").strip()
-    if not query:
+    now = now if now is not None else time.time()
+    start, end, rest = time_range(query, now) if not match_all else (None, None, query)
+    a = _when_arg(after, "start", now)
+    b = _when_arg(before, "end", now)
+    start = a if a is not None else start
+    end = b if b is not None else end
+    if not rest.strip() and start is None and end is None and not query:
         return []
     if _needs_reindex():
-        rebuild_index()
+        sync()
     if not os.path.isfile(INDEX_PATH):
         return []
-    fts_q = _safe_fts_query(query)
-    # Temporal/recency questions rank by RECENCY first (newest match wins, bm25
-    # only breaks ties); everything else ranks by relevance with recency breaking
-    # ties. Both ORDER BY strings are hardcoded constants — no user input reaches
-    # the SQL, so the f-string is injection-safe.
-    _order = ("updated DESC, bm25(messages)" if _is_temporal_query(query)
-              else "bm25(messages), updated DESC")
-    sql = f"""
-            SELECT conversation_id, title, message_index, role, content,
-                   snippet(messages, 4, '', '', '…', 28),
-                   bm25(messages), updated
-              FROM messages
-             WHERE messages MATCH ?
-          ORDER BY {_order}
-             LIMIT ?
-            """
+    lo = start if start is not None else 0.0
+    hi = end if end is not None else 1e13
     conn = _connect()
-    rows = []
-    # A query written with operators that FTS5 still cannot parse is searched
-    # again as plain keywords rather than dropped.
-    for attempt in dict.fromkeys((fts_q, _quoted_fts_query(query))):
-        try:
-            rows = conn.execute(sql, (attempt, limit)).fetchall()
-            break
-        except sqlite3.OperationalError:
-            continue
-    conn.close()
-    matches = [
-        Match(
-            conversation_id=r[0], title=r[1], message_index=r[2], role=r[3],
-            content=r[4], snippet=r[5], score=r[6], updated=r[7],
-        )
-        for r in rows
-    ]
-    if matches:
-        return matches
-    # Recency fallback: strict FTS5 found nothing — common for vague, natural
-    # questions like "what were we talking about just now" (no literal keyword
-    # overlap). Return the most-recent real messages so the model gets ACTUAL
-    # recent context instead of zero results, which previously made it fabricate
-    # an answer from stale system-prompt memory (the "I don't have it so I'll
-    # guess" failure). Recency is exactly what "just now / last / recent" wants.
+    try:
+        open_ = _open_chats(conn)
+        keywords = _query_tokens(rest) if not match_all else re.findall(r"\w+", rest)
+        if not keywords:
+            if start is None and end is None:
+                return _recent(limit)
+            rows = conn.execute(
+                "SELECT chat, title, msg, at, said, reply, substr(said, 1, 220) FROM rounds "
+                "WHERE CAST(at AS REAL) >= ? AND CAST(at AS REAL) < ? ORDER BY CAST(at AS REAL) DESC LIMIT ?",
+                (lo, hi, limit)).fetchall()
+            return [Match(r[0], r[1], int(r[2]), "exchange", r[4], r[6] or (r[5] or "")[:220], 0.0, float(r[3]),
+                          reply=r[5]) for r in rows]
+        tries = ([_safe_fts_query(rest), _quoted_fts_query(rest)] if match_all
+                 else ([rest] if _FTS_OPERATOR.search(rest) else []) + [_ranked_query(rest)])
+        rows = []
+        for q in dict.fromkeys(tries):
+            try:
+                rows = conn.execute(
+                    "SELECT chat, title, msg, at, said, reply, snippet(rounds, -1, '', '', '…', 24), "
+                    "bm25(rounds, 1.0, 0.7, 1.5), names FROM rounds WHERE rounds MATCH ? "
+                    "AND CAST(at AS REAL) >= ? AND CAST(at AS REAL) < ? ORDER BY bm25(rounds, 1.0, 0.7, 1.5) LIMIT 60",
+                    (q, lo, hi)).fetchall()
+                break
+            except sqlite3.OperationalError:
+                continue
+        qset = set(_query_tokens(rest))
+        best = max([-r[7] for r in rows] or [1.0]) or 1.0
+        temporal = _is_temporal_query(query)
+        out: List[Match] = []
+        for r in rows:
+            age = (now - float(r[3] or 0)) / 86400.0
+            s = score((-r[7]) / best, min(1.0, _name_hits(r[8], qset) / 2), age, 1.0, r[0] in open_,
+                      half_life=3.0 if temporal else 14.0)
+            out.append(Match(r[0], r[1], int(r[2]), "exchange", r[4], r[6], round(s, 3), float(r[3] or 0), reply=r[5]))
+        if not match_all:
+            out.extend(_card_matches(qset, now, lo, hi))
+        out.sort(key=lambda m: (-m.score, -m.updated))
+        # One exchange per chat first, so one long chat does not fill the list.
+        seen, first, later = set(), [], []
+        for m in out:
+            (later if (m.conversation_id, m.kind) in seen else first).append(m)
+            seen.add((m.conversation_id, m.kind))
+        out = (first + later)[:limit]
+    finally:
+        conn.close()
+    if out or match_all or start is not None or end is not None:
+        return out
+    # Nothing matched a vague question: the latest exchanges, marked as such.
     return _recent(limit)
 
 
+def _card_matches(qset: set, now: float, lo: float, hi: float) -> List[Match]:
+    from . import memory_cards
+    out = []
+    for c in memory_cards.everything(now=now):
+        upd = float(c.get("updated") or 0)
+        if not (lo <= upd < hi) or not qset:
+            continue
+        text = memory_cards.card_text(c)
+        toks = set(_query_tokens(text))
+        hit = len(qset & toks)
+        if not hit:
+            continue
+        s = score(hit / max(1, len(qset)), min(1.0, _name_hits("|".join(c.get("names") or []), qset) / 2),
+                  (now - upd) / 86400.0, 2.0, c.get("status") == "open")
+        out.append(Match(c["chat"], c.get("title") or c.get("goal") or "", 0, "card", text, text[:240],
+                         round(s, 3), upd, kind="card"))
+    return out
+
+
 def _recent(limit: int = 8) -> List[Match]:
-    """Most-recent user/assistant messages across all conversations, newest
-    first. The fallback when keyword search misses — gives 'what did we just
-    talk about' a real answer instead of nothing."""
+    """The newest exchanges anywhere: what a vague question gets when no word
+    of it matched, marked so the model does not take them for an answer."""
     if not os.path.isfile(INDEX_PATH):
         return []
     conn = _connect()
     try:
-        cur = conn.execute(
-            """
-            SELECT conversation_id, title, message_index, role, content,
-                   substr(content, 1, 200), ?, updated
-              FROM messages
-             WHERE role IN ('user', 'assistant') AND length(trim(content)) > 0
-          ORDER BY updated DESC, message_index DESC
-             LIMIT ?
-            """,
-            (RECENCY_SCORE, limit),
-        )
-        rows = cur.fetchall()
+        rows = conn.execute("SELECT chat, title, msg, at, said, reply FROM rounds "
+                            "ORDER BY CAST(at AS REAL) DESC, CAST(msg AS INTEGER) DESC LIMIT ?", (limit,)).fetchall()
     except sqlite3.OperationalError:
         rows = []
-    conn.close()
-    return [
-        Match(
-            conversation_id=r[0], title=r[1], message_index=r[2], role=r[3],
-            content=r[4], snippet=r[5], score=r[6], updated=r[7],
-        )
-        for r in rows
-    ]
+    finally:
+        conn.close()
+    return [Match(r[0], r[1], int(r[2]), "exchange", r[4], (r[4] or r[5] or "")[:200], RECENCY_SCORE,
+                  float(r[3] or 0), reply=r[5]) for r in rows]
 
 
 # FTS5 reads AND, OR and NOT only as whole uppercase words, and NEAR only as
@@ -371,55 +699,47 @@ def _quoted_fts_query(q: str) -> str:
     return " ".join(f'"{t.replace(chr(34), chr(34) * 2)}"' for t in tokens)
 
 
+_RESULT_CHARS = 6000          # about 1.5k tokens, what a small model reads well
+
+
 def format_matches(matches: List[Match]) -> str:
-    """Render matches as readable text for the model's tool result."""
+    """Matches as the model reads them: each a small item with when, which chat,
+    what was said and the reply, within about 1.5k tokens."""
     if not matches:
-        # Include the actual conversation count + index state so the model
-        # can distinguish "no chats exist yet" from "you matched zero of
-        # 200 chats — try a broader query". Previously a 0-results return
-        # looked the same as an empty store, and the model would tell the
-        # user "I have no history" when really they have 50 chats.
         try:
-            n_files = 0
-            if os.path.isdir(CONVOS_DIR):
-                n_files = sum(1 for f in os.listdir(CONVOS_DIR)
-                              if f.endswith(".json") and not is_write_temp(f))
-            n_indexed = 0
-            if os.path.isfile(INDEX_PATH):
-                conn = _connect()
-                try:
-                    n_indexed = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-                finally:
-                    conn.close()
+            n_files = len([c for c in _sources() if not c.startswith("cli-")])
         except Exception:
-            n_files = n_indexed = -1
+            n_files = -1
         if n_files == 0:
             return "There are no earlier chats; this is the first one."
-        return (f"No past conversations matched the query. "
-                f"({n_files} conversation file(s) in store, {n_indexed} "
-                f"indexed messages — try broader terms, fewer terms, or "
-                f"a different phrasing.)")
-    import datetime
+        return ("No past conversation matched. Try other words, fewer words, or a time "
+                "(after/before) to list the chats from then.")
     _fallback = all(getattr(m, "score", 0) == RECENCY_SCORE for m in matches)
     if _fallback:
         out: List[str] = [
-            "No message actually matched that query. Keyword search found "
-            "nothing, so these are simply the most RECENT messages, which may "
-            "be unrelated to what was asked. Do not present them as the answer "
-            "— if they don't cover it, say the search found nothing and ask "
-            "the user to name a specific term, file or topic."
-        ]
+            "No message actually matched that query. These are only the most RECENT exchanges, "
+            "which may be unrelated. Do not present them as the answer; if they don't cover it, say "
+            "the search found nothing and ask for a specific term, file or topic."]
     else:
-        out = [f"Top {len(matches)} match(es):"]
+        out = [f"{len(matches)} found:"]
+    used = len(out[0])
     for i, m in enumerate(matches, 1):
-        when = datetime.datetime.fromtimestamp(m.updated / (1000 if m.updated > 1e12 else 1))
-        when_s = when.strftime("%Y-%m-%d %H:%M")
-        out.append(
-            f"\n[{i}] {m.title}  ({when_s}, msg #{m.message_index}, {m.role})\n"
-            f"    {m.snippet}\n"
-            f"    convo_id={m.conversation_id}"
-        )
-    out.append("\nread_chat with a convo_id reads that whole chat in order.")
+        when = _when(m.updated)
+        if m.kind == "card":
+            item = f"\n[{i}] Going on, in chat \"{m.title}\" ({when}): {m.content}\n    convo_id={m.conversation_id}"
+        else:
+            said = " ".join((m.content or "").split())
+            reply = " ".join((m.reply or "").split())
+            item = (f"\n[{i}] {m.title}  ({when}, message #{m.message_index})\n"
+                    + (f"    They said: {said[:360]}{'…' if len(said) > 360 else ''}\n" if said else "")
+                    + (f"    Reply: {reply[:360]}{'…' if len(reply) > 360 else ''}\n" if reply else "")
+                    + f"    convo_id={m.conversation_id}")
+        if used + len(item) > _RESULT_CHARS:
+            out.append(f"\n({len(matches) - i + 1} more left out)")
+            break
+        out.append(item)
+        used += len(item)
+    out.append("\nTo carry on from one, read_chat with its convo_id reads it in order.")
     return "\n".join(out)
 
 
@@ -572,6 +892,13 @@ def read_chat(chat: str, start: Optional[int] = None, budget: int = 11000) -> st
             if m.get("role") in ("user", "assistant") and not m.get("silent")
             and chat_sync._text(m.get("content")).strip() != "__HEARTH_NOTIFY_FLUSH__"]
     head = f"Chat: {found['title']} ({_when(found['updated'])}, {len(msgs)} messages, id={found['id']})"
+    try:
+        from . import memory_cards
+        card = memory_cards.get(found["id"])
+        if card:
+            head += "\nWhere it stood: " + memory_cards.card_text(card)
+    except Exception:
+        pass
     if not msgs:
         return head + "\nIt has no messages."
     lines = [_line(i, m) for i, m in enumerate(msgs)]

@@ -71,9 +71,10 @@ def memory_forget(title: str) -> str:
 
 
 @mcp.tool()
-def search_chats(query: str, limit: int = 5) -> str:
-    """Search the person's past conversations with Hearth for what was said or decided."""
-    return _run("search_chats", {"query": query, "limit": limit})
+def search_chats(query: str = "", after: str = "", before: str = "", limit: int = 5) -> str:
+    """Search the person's past conversations with Hearth for what was said or decided.
+    Time words in the query, or after/before (YYYY-MM-DD), limit it to then."""
+    return _run("search_chats", {"query": query, "after": after or None, "before": before or None, "limit": limit})
 
 
 @mcp.tool()
@@ -84,18 +85,12 @@ def read_chat(chat: str, start: int = 0) -> str:
 
 @mcp.tool()
 def whats_going_on() -> str:
-    """What's in motion lately across their chats: each thread, where it stands, what's still open."""
-    from hearth import threads
-    rows = threads.everything()[:10]
+    """What's in motion across their chats: each chat's goal, where it stands, what's left."""
+    from hearth import memory_cards
+    rows = [c for c in memory_cards.everything() if c.get("status") == "open"][:10]
     if not rows:
-        return "Nothing noted lately."
-    out = []
-    for t in rows:
-        line = f"- {t.get('topic')} ({t.get('ago')}): {t.get('where', '')}"
-        if t.get("open"):
-            line += " Still open: " + "; ".join(t["open"]) + "."
-        out.append(line)
-    return "\n".join(out)
+        return "Nothing going on right now."
+    return "\n".join(f"- {memory_cards.card_text(c)} ({c.get('ago')}, chat {c.get('chat')})" for c in rows)
 
 
 if __name__ == "__main__":

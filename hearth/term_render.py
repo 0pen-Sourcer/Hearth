@@ -266,9 +266,13 @@ class Turn:
         self.out(f"{ACCENT}◆{RESET} {who} finished{DIM}: {str(f.get('summary') or '')[:100]}{RESET}")
 
     def _on_context_used(self, threads: Any = None, **_):
-        # What it had in mind from other chats, one quiet line, as the window's icon.
+        # What it had in mind from memory, one quiet line, as the window's icon.
+        # The list comes again whole as it grows; only what is new is said.
+        seen = self.__dict__.setdefault("_mind_seen", set())
         names = [str(t.get("topic") or "") for t in (threads or []) if isinstance(t, dict) and t.get("topic")]
+        names = [n for n in names if n not in seen]
         if names:
+            seen.update(names)
             self.out(f"{DIM}◦ had in mind: {', '.join(names[:5])}{RESET}")
 
     def _on_facts_saved(self, titles: Any = None, **f):

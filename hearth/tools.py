@@ -654,17 +654,20 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "search_chats",
         "description": (
-            "Full-text search over every past conversation. Use it for anything that "
-            "happened in an earlier chat. Returns matches with snippets and each "
-            "chat's id; read_chat reads one whole."
+            "Search every past conversation for anything said or decided in an earlier "
+            "chat, best match first, with what is still going on in each. Time words in "
+            "the query (\"yesterday\", \"last week\", \"in June\") or after/before limit it "
+            "to then; with no query it lists the chats from that time. Each result has "
+            "the chat's id: to carry a chat on, read_chat reads it in order."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Keywords or phrase."},
+                "query": {"type": "string", "description": "Keywords, names or a phrase."},
+                "after": {"type": "string", "description": "Only from this date (YYYY-MM-DD) or time on."},
+                "before": {"type": "string", "description": "Only before this date or time."},
                 "limit": {"type": "integer", "description": "Max matches. Default 8."},
             },
-            "required": ["query"],
         },
     },
     {
@@ -6701,7 +6704,10 @@ def _list_generations(p: Dict) -> str:
 
 def _search_chats(p: Dict) -> str:
     from . import session_search
-    return session_search.format_matches(session_search.search(p.get("query", ""), int(p.get("limit") or 8)))
+    if not any(p.get(k) for k in ("query", "after", "before")):
+        return "Give search_chats a query, or after/before for a time."
+    return session_search.format_matches(session_search.search(
+        p.get("query") or "", int(p.get("limit") or 8), after=p.get("after"), before=p.get("before")))
 
 
 _HANDLERS = {

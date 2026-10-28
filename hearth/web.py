@@ -2175,7 +2175,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"results": []})
             try:
                 from . import session_search
-                matches = session_search.search(q, limit=12)
+                matches = session_search.search(q, limit=12, match_all=True)
                 return self._send_json(200, {"results": [
                     {"conversation_id": m.conversation_id, "title": m.title,
                      "role": m.role, "snippet": m.snippet} for m in matches]})
@@ -2323,10 +2323,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import plus as _plus, relay_bridge as _rb
             return self._send_json(200, {**_plus.status(), "relay": bool(_rb.relay_url()), "phones": _rb.phones(),
                                          "pairing": _rb.pairing_status(), "bridge": _bridge_running("relay")})
-        if path == "/api/threads":
-            # What's going on lately, as kept for the next messages.
-            from . import threads as _threads
-            return self._send_json(200, {"threads": _threads.everything()})
+        if path == "/api/cards":
+            # Where each chat stands, for the Memory tab's "Going on".
+            from . import memory_cards
+            return self._send_json(200, {"cards": memory_cards.everything()})
         if path.startswith("/api/memory/"):
             name = urllib.parse.unquote(path[len("/api/memory/"):])
             return self._send_memory_one(name)
@@ -2752,9 +2752,9 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/memory/"):
             name = urllib.parse.unquote(path[len("/api/memory/"):])
             return self._delete_memory(name)
-        if path.startswith("/api/threads/"):
-            from . import threads as _threads
-            _threads.forget(urllib.parse.unquote(path[len("/api/threads/"):]))
+        if path.startswith("/api/cards/"):
+            from . import memory_cards
+            memory_cards.forget(urllib.parse.unquote(path[len("/api/cards/"):]))
             return self._send_json(200, {"ok": True})
         if path.startswith("/api/conversations/"):
             cid = urllib.parse.unquote(path[len("/api/conversations/"):])
@@ -2967,6 +2967,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {
                 "ok": rc == 0, "rc": rc, "log": buf.getvalue(),
             })
+        if path == "/api/memory/item":
+            # "wrong / forget" or "done with this" on what a reply had in mind.
+            from . import memory_cards
+            ob = self._read_json() or {}
+            r = memory_cards.act(str(ob.get("kind") or ""), str(ob.get("id") or ""), str(ob.get("action") or ""))
+            return self._send_json(200 if r.get("ok") else 400, r)
         if path == "/api/memory-share":
             from . import shared_memory as _sm
             ob = self._read_json() or {}
@@ -3613,6 +3619,12 @@ class HearthHandler(BaseHTTPRequestHandler):
             if len(msgs) <= keep + 2:
                 return self._send_json(200, {"ok": False, "error": "not enough messages to compact"})
             older, tail = msgs[:-keep], msgs[-keep:]
+            try:
+                # The chat's memory pass reads it whole, before it is summarized.
+                from . import memory_pass
+                threading.Thread(target=memory_pass.now, args=(cid, list(msgs)), daemon=True).start()
+            except Exception:
+                pass
 
             def _txt(m):
                 c = m.get("content")

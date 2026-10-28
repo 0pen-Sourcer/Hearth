@@ -82,11 +82,11 @@ asyncio.run(headless.run_once("check my pc", model="m", max_depth=2, chat_id="c_
 check(f"a turn that hits the step limit ends as one ({(got.get('done') or {}).get('reason')})",
       (got.get("done") or {}).get("reason") == "max_depth_reached")
 check("and leaves the model free", not headless.turn_is_active())
-for _ in range(40):
-    if ran:
-        break
-    time.sleep(0.1)
-check(f"and the memory pass runs for it, with its chat ({ran})", ran == ["c_cap"])
+from hearth import memory_pass  # noqa: E402
+check(f"and its chat's memory pass waits for the chat to go quiet {memory_pass.pending()}",
+      "c_cap" in memory_pass.pending())
+memory_pass.flush()
+check(f"then runs, with its chat ({ran})", ran == ["c_cap"])
 
 print()
 if FAILS:

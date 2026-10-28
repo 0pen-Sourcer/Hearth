@@ -219,8 +219,7 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             if text or steps:
                 msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps,
                              "via": x.get("via") or "", "stats": x.get("stats") or None,
-                             "context": [{"topic": t.get("topic") or "", "ago": t.get("ago") or ""}
-                                         for t in (x.get("context") or []) if isinstance(t, dict)]})
+                             "context": [context_item(t) for t in (x.get("context") or []) if isinstance(t, dict)]})
         keep = int(m.get("last") or 60)
         return {"chat": cid, "title": d.get("title") or "", "source": d.get("source") or "",
                 "messages": msgs[-keep:], "more": max(0, len(msgs) - keep)}
@@ -233,6 +232,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                          for a in subagents.team_state()]}
     if what == "ideas":
         return ideas()
+    if what == "memory_item":
+        # "wrong / forget" or "done with this" on what a reply had in mind.
+        from . import memory_cards
+        return memory_cards.act(str(m.get("kind") or ""), str(m.get("item") or ""), str(m.get("action") or ""))
     if what == "icons":
         # Each agent's and provider's own mark, from its site, as the window shows them.
         from .web import _favicon
@@ -263,14 +266,22 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     return {"error": f"unknown request {what!r}"}
 
 
+def context_item(t: Dict[str, Any]) -> Dict[str, Any]:
+    """One thing a reply had in mind, as the phone shows it: topic and ago as
+    before, with its kind (card, fact, search, chat), id and source chat."""
+    return {"topic": t.get("topic") or "", "ago": t.get("ago") or "", "kind": t.get("kind") or "card",
+            "id": t.get("id") or "", "where": t.get("where") or "", "open": list(t.get("open") or [])[:3],
+            "chat": t.get("chat") or "", "chat_title": t.get("chat_title") or ""}
+
+
 def ideas() -> Dict[str, Any]:
-    """What a new chat on the phone offers: the threads going on lately (each
+    """What a new chat on the phone offers: the chats still going on (each
     opens its chat) and the reminder ideas Hearth already wrote, from its cache."""
     out: Dict[str, Any] = {"threads": [], "ideas": []}
     try:
-        from . import threads
-        out["threads"] = [{"topic": t.get("topic") or "", "chat": t.get("chat") or "", "ago": t.get("ago") or "",
-                           "open": (t.get("open") or [])[:2]} for t in threads.recent(limit=3) if t.get("chat")]
+        from . import memory_cards
+        out["threads"] = [{"topic": c.get("goal") or "", "chat": c.get("chat") or "", "ago": c.get("ago") or "",
+                           "open": (c.get("left") or [])[:2]} for c in memory_cards.open_cards(limit=3) if c.get("chat")]
     except Exception:
         pass
     try:
