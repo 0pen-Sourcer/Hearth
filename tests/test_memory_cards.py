@@ -245,10 +245,15 @@ claude_brain.exe_for = lambda p: ["cursor-agent.exe"]
 claude_brain.chosen_model = lambda p: "auto"
 ran = []
 import subprocess  # noqa: E402
-claude_brain.subprocess.run = lambda args, **kw: ran.append(args) or NS(returncode=0, stdout=b'{"card": null}')
+claude_brain.subprocess.run = lambda args, **kw: (ran.append(args), cwds.append(kw.get("cwd"))) and NS(returncode=0, stdout=b'{"card": null}')
+cwds = []
 check("a chat's title doesn't spend a Cursor request", claude_brain.quick("title?") == "" and not ran)
 check(f"the memory pass does, with no tools {ran}", claude_brain.quick("pass", any_agent=True) == '{"card": null}'
       and ran and ran[0][:4] == ["cursor-agent.exe", "-p", "--output-format", "text"])
+claude_brain.current = lambda: "codex"
+claude_brain.quick("title?")
+check(f"a one-shot runs in a folder of its own, gone after ({cwds[-1:]})",
+      len(cwds) == 2 and os.path.basename(cwds[-1] or "").startswith("hearth-once-") and not os.path.exists(cwds[-1]))
 
 
 async def fake_once(provider, prompt):

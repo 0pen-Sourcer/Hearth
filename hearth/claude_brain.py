@@ -803,8 +803,6 @@ def quick(prompt: str, timeout: float = 45, any_agent: bool = False) -> str:
     exe = exe_for(provider) if provider else None
     if not exe:
         return ""
-    import tempfile
-    cwd = tempfile.gettempdir()
     if provider == "claude-code":
         args = exe + ["-p", "--model", "haiku", "--no-session-persistence", "--strict-mcp-config", "--tools", ""]
     elif provider == "codex":
@@ -815,7 +813,6 @@ def quick(prompt: str, timeout: float = 45, any_agent: bool = False) -> str:
     elif provider == "cursor-agent":
         model = chosen_model(provider)
         args = exe + ["-p", "--output-format", "text"] + (["--model", model] if model else [])
-        cwd = tempfile.mkdtemp(prefix="hearth-once-")
     elif provider in ACP:
         try:
             return asyncio.run(asyncio.wait_for(_acp_once(provider, prompt), timeout))
@@ -823,11 +820,18 @@ def quick(prompt: str, timeout: float = 45, any_agent: bool = False) -> str:
             return ""
     else:
         return ""
+    # A folder of its own, so an agent that keeps sessions files this one apart from
+    # the person's projects (and the phone's Coding agents list leaves it out).
+    import shutil
+    import tempfile
+    cwd = tempfile.mkdtemp(prefix="hearth-once-")
     try:
         r = subprocess.run(args, input=prompt.encode("utf-8"), capture_output=True, timeout=timeout,
                            cwd=cwd, creationflags=0x08000000 if sys.platform == "win32" else 0)
     except Exception:
         return ""
+    finally:
+        shutil.rmtree(cwd, ignore_errors=True)
     return r.stdout.decode("utf-8", "replace").strip() if r.returncode == 0 else ""
 
 
