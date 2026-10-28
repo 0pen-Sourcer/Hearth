@@ -504,13 +504,28 @@ class Relay(cc.Adapter):
             return None
         return mid
 
+    def _call_for(self, chat):
+        """The call in progress in this phone's room, when the turn is in its chat."""
+        room = self.rooms.get(str(chat))
+        call = getattr(room, "call", None) if room is not None else None
+        if call is None or call.ended:
+            return None
+        c = cc.turn_context().get("c", "")
+        return call if not c or not call.cid or c == call.cid else None
+
     def send(self, chat, text, reply_to=None):
+        call = self._call_for(chat)
+        if call is not None:
+            call.done(text)
         return self._push(chat, {"type": "text", "text": text})
 
     def edit(self, chat, msg_id, text):
         return self._push(chat, {"type": "edit", "of": msg_id, "text": text}) is not None
 
     def ask(self, chat, text):
+        call = self._call_for(chat)
+        if call is not None:
+            call.ask(text)
         return self._push(chat, {"type": "ask", "text": text})
 
     def send_file(self, chat, path):
@@ -529,6 +544,9 @@ class Relay(cc.Adapter):
     def step(self, chat, words, tool="", site=""):
         """One step of the reply as it happens ("Read notes.txt"), with the tool
         and the site it reaches, so the phone can show that site's icon."""
+        call = self._call_for(chat)
+        if call is not None:
+            call.step(words)
         self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site})
 
     def think(self, chat, text):
@@ -551,6 +569,9 @@ class Relay(cc.Adapter):
 
     def live(self, chat, text):
         """The reply so far, a few times a second; the finished one follows as text."""
+        call = self._call_for(chat)
+        if call is not None:
+            call.live(text)                 # every piece, so the voice starts at the first clause
         t = cc.turn_context().get("t", "")
         now = time.time()
         if now - self._live_at.get(t, 0) < 0.35:
@@ -573,6 +594,7 @@ class Room:
         self.pc = bridge.pc
         self.joiner = Joiner()
         self.lookups: set = set()
+        self.call = None                      # a voice call from the phone, while one is on
 
     @property
     def chat(self) -> str:
@@ -649,6 +671,9 @@ class Room:
         if t == "msg" and self.chan is not None:
             m = self.chan.open(f)
             m = self.joiner.add(m) if m else None
+            if m and str(m.get("type") or "").startswith("call."):
+                self.on_call(m)
+                return
             if m and m.get("type") == "req":
                 # Lookups run side by side, so a slow one (icons from the web)
                 # never holds up a switch the person is waiting on.
@@ -657,6 +682,33 @@ class Room:
                 task.add_done_callback(self.lookups.discard)
             elif m:
                 await asyncio.to_thread(self.bridge.on_message, self, m)
+
+    def on_call(self, m: Dict[str, Any]) -> None:
+        """A call from the phone: its audio frames, its start and its end."""
+        kind = m.get("type")
+        if kind == "call.up":
+            if self.call is not None:
+                self.call.up(str(m.get("data") or ""), int(m.get("rate") or 16000))
+            return
+        if kind == "call.start":
+            if self.call is not None and not self.call.ended:
+                self.call.end()
+            from .call import Call
+            adapter, chat = self.bridge.adapter, self.chat
+            cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
+
+            def send(obj):
+                adapter._push(chat, obj)
+
+            def say(text):
+                return self.bridge.hub.receive(chat, "phone", text, name="Phone", cid=cid, spoken=True)
+
+            self.call = Call(send, say, cid=cid)
+            threading.Thread(target=self.call.start, daemon=True, name="relay-call").start()
+            return
+        if kind == "call.end" and self.call is not None:
+            call, self.call = self.call, None
+            threading.Thread(target=call.end, daemon=True).start()
 
     async def tell_paired(self) -> None:
         if self.ws is not None:
