@@ -193,6 +193,31 @@ _CODE_CALL = re.compile(r"tools\.([A-Za-z_][\w]*)\s*\(\s*\{(.*?)\}\s*\)", re.S)
 _CODE_STR = r"""\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`([^`]*)`)"""
 
 
+def _result_text(content: Any) -> str:
+    """A tool result's text, in whichever shape the agent wrote it."""
+    if isinstance(content, str):
+        try:                                 # Codex wraps some outputs as {"output": ..., "metadata": ...}
+            j = json.loads(content)
+            if isinstance(j, dict) and isinstance(j.get("output"), str):
+                return j["output"]
+        except ValueError:
+            pass
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(c.get("text") or "") if isinstance(c, dict) else str(c) for c in content)
+    if isinstance(content, dict):
+        return str(content.get("output") or content.get("text") or "")
+    return ""
+
+
+def _give_out(by_id: Dict[str, List[Dict[str, Any]]], cid: Any, content: Any) -> None:
+    """The output of a call, onto the last step it made (for the phone's step detail)."""
+    sts = by_id.get(str(cid or ""))
+    if sts:
+        from .channel_core import out_of
+        sts[-1]["out"] = out_of(_result_text(content))
+
+
 def _code_steps(src: str) -> List[Dict[str, Any]]:
     """The steps inside one code-mode script, in order; "Ran a script" when none can be read."""
     out = []
@@ -257,7 +282,12 @@ def _step(name: str, args: Any) -> Optional[Dict[str, Any]]:
                 "query": args.get("query") or "", "url": args.get("url") or "",
                 "pattern": args.get("pattern") or "", "name": args.get("pattern") or ""}
         args = {k: v for k, v in args.items() if v}
-    return {"w": tool_words(tool, args), "tool": tool}
+    from .channel_core import detail_of
+    st = {"w": tool_words(tool, args), "tool": tool}
+    cmd = detail_of(args)
+    if cmd:
+        st["cmd"] = cmd
+    return st
 
 
 def _msg(role: str, text: str, at: int, steps: Optional[List[Dict[str, Any]]] = None,
@@ -330,6 +360,7 @@ def _claude_files() -> List[str]:
 def _claude_read(path: str, head: bool) -> Dict[str, Any]:
     sid = os.path.basename(path)[:-6]
     cwd, title, summary, msgs = "", "", "", []
+    by_id: Dict[str, List[Dict[str, Any]]] = {}
     for o in _jsonl(path, HEAD_BYTES if head else 0):
         cwd = cwd or str(o.get("cwd") or "")
         if o.get("type") == "summary" and o.get("summary"):
@@ -340,6 +371,9 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
         m = o.get("message") or {}
         content, at = m.get("content"), _ms(o.get("timestamp"))
         if o["type"] == "user":
+            for b in content if isinstance(content, list) else []:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    _give_out(by_id, b.get("tool_use_id"), b.get("content"))
             text = _text_of(content)
             if not _typed(text):
                 continue                        # tool results and the program's own notes
@@ -360,7 +394,9 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
                 if b.get("type") == "tool_use":
                     name, args = hearth_view(str(b.get("name") or ""), b.get("input") or {})
                     desc = (b.get("input") or {}).get("description") if isinstance(b.get("input"), dict) else ""
-                    msgs.append(_msg("assistant", "", at, _steps_of(name, args, desc), error=failed))
+                    sts = _steps_of(name, args, desc)
+                    by_id[str(b.get("id") or "")] = sts
+                    msgs.append(_msg("assistant", "", at, sts, error=failed))
                 elif b.get("type") == "text" and b.get("text"):
                     msgs.append(_msg("assistant", str(b["text"]), at, [], error=failed))
     return {"id": sid, "cwd": cwd, "title": summary or title, "messages": _fold(msgs)}
@@ -394,6 +430,7 @@ def _codex_files() -> List[str]:
 
 def _codex_read(path: str, head: bool) -> Dict[str, Any]:
     sid, cwd, title = "", "", ""
+    by_id: Dict[str, List[Dict[str, Any]]] = {}
     said: List[Dict[str, Any]] = []             # what the person and Codex said, from its event lines
     items: List[Dict[str, Any]] = []            # the same from the model's own items (older files)
     for o in _jsonl(path, HEAD_BYTES if head else 0):
@@ -411,6 +448,8 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
             said.append(_msg("user", str(p["message"]), at))
         elif kind == "event_msg" and p.get("type") == "agent_message" and p.get("message"):
             said.append(_msg("assistant", str(p["message"]), at))
+        elif p.get("type") in ("function_call_output", "custom_tool_call_output", "local_shell_call_output"):
+            _give_out(by_id, p.get("call_id"), p.get("output"))
         elif kind == "event_msg" and p.get("type") in ("error", "stream_error") and p.get("message"):
             said.append(_msg("assistant", str(p["message"]), at, error=True))
         elif p.get("type") == "message" and p.get("role") in ("user", "assistant"):
@@ -427,6 +466,7 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
             except ValueError:
                 args = {}
             sts = _steps_of(str(p.get("name") or "shell"), args)
+            by_id[str(p.get("call_id") or "")] = sts
             for lst in (said, items) if sts else ():
                 # Steps after the agent's words come after them: a new piece, joined in order by _fold.
                 if lst and lst[-1]["role"] == "assistant" and not lst[-1].get("error") and not lst[-1]["text"]:
@@ -877,9 +917,14 @@ async def _say_claude(exe: List[str], sid: str, cwd: str, text: str, emit: Emit)
                 if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") not in _QUIET_TOOLS:
                     _in = b.get("input") if isinstance(b.get("input"), dict) else {}
                     for st in _steps_of(*hearth_view(str(b.get("name") or ""), _in), _in.get("description")):
-                        emit("step", words=st["w"], tool=st["tool"])
+                        emit("step", words=st["w"], tool=st["tool"], cmd=st.get("cmd", ""))
                     if parts:
                         parts.append("\n\n")
+        elif t == "user":
+            for b in (ev.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    from .channel_core import out_of
+                    emit("step_out", out=out_of(_result_text(b.get("content"))))
         elif t == "result":
             final = str(ev.get("result") or "")
             if ev.get("is_error"):
@@ -906,7 +951,10 @@ async def _say_codex(exe: List[str], sid: str, cwd: str, text: str, emit: Emit) 
         kind = item.get("type")
         if t == "item.started" and kind == "command_execution":
             st = _step("shell", {"command": item.get("command", "")})
-            emit("step", words=st["w"], tool=st["tool"])
+            emit("step", words=st["w"], tool=st["tool"], cmd=st.get("cmd", ""))
+        elif t == "item.completed" and kind == "command_execution" and item.get("aggregated_output") is not None:
+            from .channel_core import out_of
+            emit("step_out", out=out_of(item.get("aggregated_output")))
         elif t == "item.completed":
             if kind == "agent_message" and item.get("text"):
                 replies.append(str(item["text"]))

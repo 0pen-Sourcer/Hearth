@@ -817,13 +817,20 @@ class Relay(cc.Adapter):
     def typing(self, chat):
         self._push(chat, {"type": "typing"})
 
-    def step(self, chat, words, tool="", site=""):
-        """One step of the reply as it happens ("Read notes.txt"), with the tool
-        and the site it reaches, so the phone can show that site's icon."""
+    step_detail = True                  # steps carry what they ran, and their output follows
+
+    def step(self, chat, words, tool="", site="", cmd=""):
+        """One step of the reply as it happens ("Read notes.txt"), with the tool,
+        the site it reaches (for that site's icon) and what it ran (for the step's detail)."""
         call = self._call_for(chat)
         if call is not None:
             call.step(words)
-        self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site})
+        self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site, **({"cmd": cmd} if cmd else {})})
+
+    def step_out(self, chat, out):
+        """What the step before it gave back, cut short, for the step's detail on the phone."""
+        if out:
+            self._push(chat, {"type": "step_out", "out": out})
 
     def _paced(self, chat, kind: str, text: str, every: float, last: Dict[str, float]) -> None:
         """Send the newest text at most once every `every` seconds; a piece that lands
@@ -1172,7 +1179,10 @@ class Bridge:
         def emit(kind: str, **f: Any) -> None:
             now = time.time()
             if kind == "step":
-                push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or ""})
+                push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or "",
+                      **({"cmd": f["cmd"]} if f.get("cmd") else {})})
+            elif kind == "step_out" and f.get("out"):
+                push({"type": "step_out", "out": f["out"]})
             elif kind == "live" and now - sent["live"] >= LIVE_EVERY:
                 sent["live"] = now
                 push({"type": "live", "text": f.get("text") or ""})

@@ -83,7 +83,9 @@ write(os.path.join(CX, "rollout-e-55555555-5555-5555-5555-555555555555.jsonl"),
            "<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>\n"
            "Fix the menu screen, it flashes"),
       {"timestamp": T, "type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec", "input": script}},
-      call("exec_command", arguments=json.dumps({"cmd": ["C:\\Users\\x\\pwsh.exe", "-Command", "npm test"]})),
+      call("exec_command", call_id="c2", arguments=json.dumps({"cmd": ["C:\\Users\\x\\pwsh.exe", "-Command", "npm test"]})),
+      {"timestamp": T, "type": "response_item", "payload": {"type": "function_call_output", "call_id": "c2",
+                                                             "output": json.dumps({"output": "12 passing", "metadata": {}})}},
       call("update_plan", arguments=json.dumps({"plan": []})),
       call("write_stdin", arguments=json.dumps({"chars": "y"})),
       said("The menu reloads on every focus. Fixing that."),
@@ -97,8 +99,10 @@ write(os.path.join(CL, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl"),
        "<ide_selection>The user selected the lines 3 to 9 from ui.html</ide_selection>\nMake Rose the default look"}},
       {"type": "assistant", "cwd": GAME, "timestamp": T, "message": {"role": "assistant", "model": "claude-x", "content": [
           {"type": "text", "text": "Writing down your asks first."},
-          {"type": "tool_use", "name": "Bash", "input": {"command": "git status", "description": "Show working tree status"}},
-          {"type": "tool_use", "name": "Grep", "input": {"pattern": "round("}}]}},
+          {"type": "tool_use", "name": "Bash", "id": "toolu_1", "input": {"command": "git status", "description": "Show working tree status"}},
+          {"type": "tool_use", "name": "Grep", "input": {"pattern": "round("}, "id": "toolu_2"}]}},
+      {"type": "user", "cwd": GAME, "timestamp": T, "message": {"role": "user", "content": [
+          {"type": "tool_result", "tool_use_id": "toolu_1", "content": "On branch main\nAPI_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}]}},
       {"type": "assistant", "cwd": GAME, "timestamp": T, "isApiErrorMessage": True,
        "message": {"role": "assistant", "model": "<synthetic>", "content": [
            {"type": "text", "text": "You've hit your 5-hour limit · resets 12:20am"}]}})
@@ -138,5 +142,10 @@ steps = [s["w"] for s in cl[1]["steps"]]
 check(f"a step the agent described reads in its own words; one it didn't is said plainly, a pattern in quotes {steps}",
       steps == ["Show working tree status", "Searched for \u201cround(\u201d"])
 
+st = cl[1]["steps"][0]
+check(f"a step carries what it ran and what came back, secrets blanked ({st.get('cmd')!r}, {st.get('out', '')[:60]!r})",
+      st.get("cmd") == "git status" and "On branch main" in st.get("out", "") and "abcdefghijklmnop" not in st.get("out", ""))
+npm = next(s for s in reply["steps"] if s["w"] == "Ran npm test")
+check(f"Codex's step output is matched to its call ({npm.get('out')!r})", npm.get("out") == "12 passing" and npm.get("cmd") == "npm test")
 print("\n" + ("all agent chat cleaning checks passed" if not FAILS else f"{len(FAILS)} failed"))
 sys.exit(1 if FAILS else 0)
