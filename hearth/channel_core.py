@@ -447,6 +447,8 @@ class Hub:
             print(f"[{self.a.name}] couldn't send the reply: {type(e).__name__}: {e}")
         now = int(time.time() * 1000)
         events = [{"kind": "tool", "name": n, "args": a or {}, "result": "", "ms": 0, "pos": 0} for n, a in tools_used]
+        if thought:          # the reasoning, kept as the window keeps it, so a phone reopening the chat folds it in
+            events.insert(0, {"kind": "think_chunk", "content": "".join(thought)[-20000:]})
         chat_sync.post(cid, " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}", self.a.name, [
             {"role": "user", "content": text, "via": self.a.name, "at": now},
             {"role": "assistant", "content": final, "via": self.a.name, "at": now, **({"events": events} if events else {}),
