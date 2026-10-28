@@ -117,6 +117,22 @@ def open_chat(cid: str) -> None:
         _open_desktop_window(chat=cid)
 
 
+def _dpi_aware() -> None:
+    """Draw the tray's menu at the screen's real resolution. Without this Windows
+    draws it at 100% and stretches it on a scaled display, so the text blurs."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        if not ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):  # per monitor v2
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 def _menus_dark(theme: str) -> bool:
     """Whether the menu should be dark: as Inglen's own look is, and for System
     as Windows' app mode is."""
@@ -517,6 +533,7 @@ def main(argv: Optional[list] = None) -> int:
         ]
         return out
 
+    _dpi_aware()
     _dark_menus()
     menu = pystray.Menu(lambda: _items())
 

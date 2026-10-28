@@ -78,8 +78,10 @@ check("an undone change can't be undone twice", U.undo(rows[0]["id"])["ok"] is F
 
 # A plain delete through the shell, of what it made, is copied aside first too.
 # As a turn runs it once Auto said yes (headless and the MCP server mark it approved).
-r = T.execute_tool("run_command", {"command": f'rm -rf "{made}"', "_approved": T.APPROVAL_TOKEN})
-check(f"rm -rf of its own folder ran ({r[:60]!r})", not os.path.exists(made))
+# Commands run in PowerShell on Windows, so the delete is written the way it is there.
+rm = (f'Remove-Item -Recurse -Force "{made}"' if sys.platform == "win32" else f'rm -rf "{made}"')
+r = T.execute_tool("run_command", {"command": rm, "_approved": T.APPROVAL_TOKEN})
+check(f"a delete of its own folder ran ({r[:60]!r})", not os.path.exists(made))
 U.undo(U.recent(1)[0]["id"])
 check("and comes back with Undo", os.path.isfile(os.path.join(made, "out.txt")))
 check("a failed call leaves nothing to undo", T.execute_tool("delete_path", {"path": os.path.join(WS, "nope")}).startswith("Error")

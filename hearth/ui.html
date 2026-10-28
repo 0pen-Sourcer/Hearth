@@ -21354,7 +21354,15 @@ window.addEventListener('load', function initSidebarDrawer() {
 // when something needs you. Free time happens only when nothing is running.
 const TEAM = { agents: [], filter: 'all', tab: 'list', open: new Set(), timer: null, cleared: new Set() };
 try { JSON.parse(localStorage.getItem('hearth_team_cleared') || '[]').forEach(id => TEAM.cleared.add(id)); } catch {}
-// The room (room.js) drawn from this window's own state.
+// The room (room.js) drawn from this window's own state. A local request can be
+// reset on the way (some antivirus does it to bursts); without room.js the rest of
+// this script must still run, so the host is made here and the file asked for again.
+if (!window.ROOM_HOST) {
+  window.ROOM_HOST = {};
+  const _again = document.createElement('script');
+  _again.src = '/room.js?again=1';
+  document.head.appendChild(_again);
+}
 const _roomPref = (key, dflt) => { try { return localStorage.getItem(key) || dflt; } catch { return dflt; } };
 Object.assign(ROOM_HOST, {
   name: () => _agentName(),
