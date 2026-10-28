@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/team-room.png" alt="The Team room, with JARVIS and six helpers at their desks, two on Codex, one on Claude Code, one on Claude Haiku, with one helper's steps open on the right" width="900">
+  <img src="docs/media/team-room.png" alt="The Team room, with JARVIS by the fire and six helpers at their desks, two on Codex, one on Claude Code and three of Inglen's own, each saying what it is doing" width="900">
 </p>
 
 ---
@@ -43,7 +43,7 @@ Inglen is the framework (it was called Hearth until v0.7.6, and the files and se
 <table>
 <tr>
 <td width="50%" align="center"><strong>It does the thing, on your desktop</strong><br><img src="docs/media/hero.gif" alt="Inglen creating a folder, writing a file, and opening it in Notepad from one request" width="420"></td>
-<td width="50%" align="center"><strong>One menu for every brain</strong><br><img src="docs/media/brains.png" alt="The model menu with Claude Code, Codex, Cursor and a saved Anthropic key" width="420"></td>
+<td width="50%" align="center"><strong>One menu for every brain</strong><br><img src="docs/media/brains.png" alt="The model menu with Claude Code in use and Codex, Cursor, OpenCode, Copilot CLI and Gemini CLI below it" width="420"></td>
 </tr>
 <tr>
 <td width="50%" align="center"><strong>A memory that tidies itself</strong><br><img src="docs/media/memory.gif" alt="Inglen's memory browser" width="420"></td>
