@@ -2191,7 +2191,10 @@ class JarvisCLI:
                 path = cache[idx].get("path")
             print(f"{C_DIM}starting the helper model…{C_RESET}")
             r = await asyncio.to_thread(llmserver.start_helper, path)
-            if r.get("ok"):
+            if r.get("ok") and r.get("shared"):
+                _save_setting("helper_model", path)
+                print(f"{C_OK}{r.get('note')}{C_RESET}")
+            elif r.get("ok"):
                 _save_setting("helper_model", path)
                 print(f"{C_OK}helper model ready: {r.get('model')}{C_RESET}{C_DIM}  helpers and sub-agents use it; the main model stays on the chat{C_RESET}")
             else:
