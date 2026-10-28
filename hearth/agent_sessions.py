@@ -529,6 +529,20 @@ def live_state(agent: str, sid: str, path: str = "") -> str:
     return ""
 
 
+def _ours(cwd: str) -> bool:
+    """A session this app started itself (an agent brain's turn in the workspace or a temp
+    folder of ours): it is already one of the app's own chats, so it isn't listed again."""
+    if not cwd:
+        return False
+    import tempfile
+    from .tools import WORKSPACE
+    here = os.path.normcase(os.path.abspath(cwd))
+    if here == os.path.normcase(WORKSPACE):
+        return True
+    parent, name = os.path.split(here)
+    return parent == os.path.normcase(os.path.abspath(tempfile.gettempdir())) and name.startswith(("hearth-", "hearth_"))
+
+
 def listing(limit: int = 120) -> List[Dict[str, Any]]:
     """Every agent's sessions, newest first: agent, id, chat (the phone's id for
     it), project folder, title and when it was last used."""
@@ -544,7 +558,7 @@ def listing(limit: int = 120) -> List[Dict[str, Any]]:
     codex_open = _held_open([r["path"] for r in rows if r["agent"] == "codex" and time.time() * 1000 - r["at"] < 86400000])
     rows += _opencode_list()
     out = []
-    for r in sorted(rows, key=lambda r: -r["at"])[:limit]:
+    for r in sorted((r for r in rows if not _ours(r["cwd"])), key=lambda r: -r["at"])[:limit]:
         path = r.get("path") or ""
         live = ("open" if (r["agent"] == "claude-code" and r["id"] in claude_open)
                 or (path and os.path.normcase(os.path.abspath(path)) in codex_open)

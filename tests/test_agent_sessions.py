@@ -176,8 +176,18 @@ for line in sys.stdin:
 FAKE = {"claude-code": "fake_claude.py", "codex": "fake_codex.py", "opencode": "fake_opencode.py"}
 claude_brain.exe_for = lambda p: [sys.executable, os.path.join(BIN, FAKE[p])] if p in FAKE else None
 
+# Sessions the app started itself, as an agent brain: one in the workspace, one in a temp folder of its own.
+OWN_TMP = tempfile.mkdtemp(prefix="hearth-acp-")
+for n, where in enumerate((os.environ["HEARTH_WORKSPACE"], OWN_TMP)):
+    sid = f"9999999{n}-0000-0000-0000-000000000000"
+    own = os.path.join(HOME, ".claude", "projects", f"own{n}", sid + ".jsonl")
+    write(own, lines({"type": "user", "cwd": where, "sessionId": sid, "timestamp": "2026-10-28T09:00:00Z",
+                      "message": {"role": "user", "content": "a turn the app ran itself"}}))
+
 # ---------------------------------------------------------------- the listing
 rows = S.listing()
+check(f"sessions the app ran itself aren't listed ({[r['cwd'] for r in rows]})",
+      not any(r["id"].startswith("9999999") for r in rows))
 by = {r["agent"]: r for r in rows}
 check(f"every agent's sessions are listed ({sorted(by)})", sorted(by) == ["claude-code", "codex", "gemini-cli", "opencode", "pi"])
 check("newest first", [r["agent"] for r in rows] == ["claude-code", "codex", "gemini-cli", "pi", "opencode"])
