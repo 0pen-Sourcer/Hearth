@@ -1128,6 +1128,11 @@
   .ap-room i { display: block; width: 100%; aspect-ratio: 3 / 2; background-size: cover; background-position: center;
     border-radius: calc(var(--r-lg) - 4px); image-rendering: pixelated; }
   .ap-room b { padding: 0 4px 2px; }
+  .undo-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+  .undo-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r); }
+  .undo-row > div { flex: 1; min-width: 0; }
+  .undo-row b { display: block; font-weight: 500; overflow-wrap: anywhere; }
+  .undo-row small { color: var(--fg-faint); font-size: 11.5px; }
   #tour-ring { position: fixed; z-index: 9000; border-radius: 12px; pointer-events: none;
     box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(0, 0, 0, .62); }
   #tour-card { position: fixed; z-index: 9001; width: 300px; background: var(--bg-1); border: 1px solid var(--border-strong);
@@ -6237,6 +6242,26 @@ function askConfirm(title, body, yesLabel = 'OK', danger = false) {
     watch.observe($('modal'), { attributes: true, attributeFilter: ['class'] });
   });
 }
+// Recent file changes, each with Undo: what the agent wrote, changed, moved or deleted (hearth/undo.py).
+async function showUndo() {
+  let list = [];
+  try { list = (await api('/api/undo')).changes || []; } catch (e) { toast("Couldn't read the changes", e.message, 'err'); return; }
+  const ago = (t) => { const s = Date.now() / 1000 - t; return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)} min ago`
+    : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`; };
+  const body = list.length ? '<div class="undo-list">' + list.map(c =>
+    `<div class="undo-row"><div><b>${esc(c.what)}</b><small>${esc(ago(c.at))} · ${esc(c.where)}</small></div>`
+    + (c.can ? `<button class="btn-mini" data-undo="${esc(c.id)}">Undo</button>` : '<small>too big to keep</small>') + '</div>').join('') + '</div>'
+    : '<p>Nothing to put back. Files the agent writes, changes, moves or deletes show here for a week.</p>';
+  showModal('Recent changes', body, [{ label: 'Close' }]);
+  document.querySelectorAll('#modal-body [data-undo]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const r = await api('/api/undo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                       body: JSON.stringify({ id: b.dataset.undo }) }).catch(e => ({ ok: false, error: e.message }));
+    if (r.ok) { toast(r.said, '', 'ok'); b.closest('.undo-row').remove(); }
+    else { toast("Couldn't undo it", r.error || '', 'err'); b.disabled = false; }
+  });
+}
+
 function showModal(title, body, actions = []) {
   $('modal-title').textContent = title;
   // Treat body as HTML iff it contains <tags>; plain strings still go in as
@@ -12023,6 +12048,8 @@ async function handleSlash(raw) {
       newConversation(); renderChat(); return true;
     case '/tour':
       startTour(); return true;
+    case '/undo':
+      showUndo(); return true;
     case '/clear':
       if (c) {
         c.messages = [];
@@ -16898,6 +16925,7 @@ const SLASH_COMMANDS = [
   { cmd: '/log',          desc: 'jump to the Logs view', group: 'Go to' },
   { cmd: '/settings',     desc: 'open Settings', group: 'Go to' },
   { cmd: '/tour',         desc: 'a quick look around the app', group: 'Help' },
+  { cmd: '/undo',         desc: 'put back a file change', group: 'Help' },
   { cmd: '/welcome',      desc: 'run the first-run setup again', group: 'Help' },
   { cmd: '/help',         desc: 'list all slash commands', group: 'Help' },
   { cmd: '/exit',         desc: 'close the app window (or /quit)', group: 'Help' },

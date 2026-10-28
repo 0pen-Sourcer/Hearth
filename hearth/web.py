@@ -2057,6 +2057,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_ui()
         if path == "/room.js":
             return self._serve_room_js()
+        if path == "/api/undo":
+            # The newest file changes that can be put back (hearth/undo.py).
+            from . import undo as _undo
+            return self._send_json(200, {"changes": _undo.recent(30)})
         if path == "/api/room/now":
             # What JARVIS is doing in this window and in the terminal, for the
             # phone's room (the window's own room reads its page state).
@@ -3627,6 +3631,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             data = _cs.keep_terminal_turns(_load_convo(data["id"]), data)
             ok = _save_convo(data)
             return self._send_json(200 if ok else 500, {"ok": ok})
+        if path == "/api/undo":
+            from . import undo as _undo
+            return self._send_json(200, _undo.undo(str(self._read_json().get("id") or "")))
         if path == "/api/conversations/seen":
             data = _load_convo((self._read_json().get("id") or "").strip())
             if not data:

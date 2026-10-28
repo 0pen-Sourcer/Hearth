@@ -207,6 +207,13 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         # One part of a file the PC carded: the phone fetches a file when it is opened.
         from . import relay_media
         return relay_media.chunk(str(m.get("media") or ""), int(m.get("offset") or 0), int(m.get("length") or 0))
+    if what == "changes":
+        # File changes the agent made, newest first, for the phone's Recent changes (hearth/undo.py).
+        from . import undo as _undo
+        return {"changes": _undo.recent(30)}
+    if what == "undo":
+        from . import undo as _undo
+        return _undo.undo(str(m.get("id") or ""))
     if what == "agent_sessions":
         # The coding agents' own sessions on this PC, newest first.
         from . import agent_sessions
