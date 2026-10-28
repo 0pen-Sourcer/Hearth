@@ -137,12 +137,23 @@ def label() -> str:
     return BRAINS.get(current() or "", "")
 
 
+_EXE_SEEN: Dict[str, Tuple[float, Optional[List[str]]]] = {}
+_EXE_KEEP_S = 30.0
+
+
 def exe_for(provider: str) -> Optional[List[str]]:
+    """How to start an agent program. Finding it scans every folder on PATH, so
+    the answer is kept for half a minute: a model list asks once per model."""
+    hit = _EXE_SEEN.get(provider)
+    if hit and time.time() - hit[0] < _EXE_KEEP_S:
+        return list(hit[1]) if hit[1] else None
     from . import external_agents as _xa
     spec = ACP.get(provider) or {}
     adapter = spec.get("adapter")
     exe = (shutil.which(adapter + ".cmd") or shutil.which(adapter)) if adapter else _xa.find(spec.get("agent") or provider)
-    return _xa._direct_argv(exe) if exe else None
+    out = _xa._direct_argv(exe) if exe else None
+    _EXE_SEEN[provider] = (time.time(), list(out) if out else None)
+    return out
 
 
 def claude_exe() -> Optional[List[str]]:

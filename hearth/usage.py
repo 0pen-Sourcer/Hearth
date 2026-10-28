@@ -37,6 +37,40 @@ def _openrouter(key: str) -> Optional[Dict[str, Any]]:
 _REPORTS = {"claude-code", "codex"}
 
 
+def _logged_refusal(agent: str, within_s: float = 86400) -> "tuple":
+    """(what the agent logged, when) for the newest out-of-usage refusal in its own
+    log within a day, or ('', 0). Only for agents whose log Hearth knows."""
+    import os
+    import re
+    from datetime import datetime
+    spec = _cb.ACP.get(agent) or {}
+    path = os.path.expanduser(str(spec.get("log") or ""))
+    if not path or not os.path.isfile(path):
+        return "", 0
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - 400_000))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return "", 0
+    for line in reversed(tail.splitlines()):
+        if "level=ERROR" not in line or not _cb._OUT_OF_USAGE.search(line):
+            continue
+        m = re.search(r"timestamp=(\S+)", line)
+        e = re.search(r'error\.error="([^"]+)', line)
+        try:
+            when = datetime.fromisoformat(m.group(1).replace("Z", "+00:00")).timestamp() if m else 0
+        except ValueError:
+            when = 0
+        if not when or time.time() - when > within_s or not e:
+            return "", 0
+        said = e.group(1)
+        for pre in ("AI_RetryError: Failed after 3 attempts. Last error: ", "AI_APICallError: "):
+            said = said.replace(pre, "")
+        return said.strip()[:240], when
+    return "", 0
+
+
 def everything(provider_key) -> List[Dict[str, Any]]:
     """One entry per brain Hearth knows about on this PC."""
     out: List[Dict[str, Any]] = []
@@ -56,7 +90,13 @@ def everything(provider_key) -> List[Dict[str, Any]]:
         elif aid in _REPORTS:
             entry["note"] = f"{label} hasn't been used from Hearth yet; its usage shows here after the first run."
         else:
-            entry["note"] = f"{label} doesn't tell other apps how much of its plan is used."
+            refused, when = _logged_refusal(aid)
+            if refused:
+                # What the agent itself logged, with when; not a guess at how much is left.
+                entry.update(at=when, refused=refused,
+                             note=f"{label} refused at {time.strftime('%H:%M', time.localtime(when))}: {refused}")
+            else:
+                entry["note"] = f"Can't tell: {label} doesn't report how much of its plan is used."
         out.append(entry)
     from .headless import PROVIDERS
     for pid, (label, _url) in PROVIDERS.items():

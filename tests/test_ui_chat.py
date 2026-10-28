@@ -343,7 +343,10 @@ with sync_playwright() as pw:
           { id: 'claude-code', label: 'Claude Code', kind: 'plan', plan: 'Claude', at: Date.now() / 1000,
             windows: [{ name: '5-hour', used: 40, resets_at: Date.now() / 1000 + 3600 }] },
           { id: 'codex', label: 'Codex', kind: 'plan', plan: 'ChatGPT', at: Date.now() / 1000,
-            windows: [{ name: 'Weekly', used: 72, resets_at: Date.now() / 1000 + 86400 }] }] }) : real(p);
+            windows: [{ name: 'Weekly', used: 72, resets_at: Date.now() / 1000 + 86400 }] },
+          { id: 'opencode', label: 'OpenCode', kind: 'plan', plan: 'OpenCode', at: Date.now() / 1000,
+            refused: 'Free usage limit reached.', note: 'OpenCode refused at 14:45: Free usage limit reached.' },
+          { id: 'goose', label: 'Goose', kind: 'plan', plan: 'own', note: "Can't tell: Goose doesn't report." }] }) : real(p);
       STATE.streaming = true;
       document.getElementById('input').value = '/status';
       await send();
@@ -352,6 +355,11 @@ with sync_playwright() as pw:
       const opened = !body.hidden && !!body.querySelector('.st-panel') && !document.getElementById('modal-body').querySelector('.st-panel');
       const bars = [...body.querySelectorAll('.st-bar')].filter(b => !/Context used/.test(b.textContent)).length;
       const folded = [...body.querySelectorAll('.st-other')].map(b => b.textContent.trim());
+      // Opening a folded row shows it at once, without asking the PC again.
+      const before = asked.length;
+      body.querySelector('.st-other[data-st="codex"]').click();
+      await new Promise(r => setTimeout(r, 60));
+      const expanded = !!body.querySelector('.st-other.open[data-st="codex"]') && asked.length === before;
       body.querySelector('#st-refresh').click();
       await new Promise(r => setTimeout(r, 300));
       const fresh = asked.some(p => p.includes('fresh=1'));
@@ -359,7 +367,7 @@ with sync_playwright() as pw:
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       const closed = body.hidden;
       window.api = real;
-      return { opened, bars, folded, fresh, closed };
+      return { opened, bars, folded, fresh, closed, expanded };
     }""")
     # A model loaded from Models & engine showed a static line; the bar was only on the sticker.
     mload = pg.evaluate("""async () => {
@@ -380,7 +388,11 @@ with sync_playwright() as pw:
     ctxs = pg.evaluate("""() => [fmtCtxPill(90000), fmtCtxPill(32768), fmtCtxPill(1048576), fmtCtxPill(977000)]""")
     check(f"context sizes read as they were set {ctxs}", ctxs == ["90K", "32K", "1M", "977K"])
     check(f"/status opens mid-reply, with only the brain in use open and a refresh {stat}",
-          stat["opened"] and stat["closed"] and stat["bars"] == 1 and len(stat["folded"]) == 1 and "72%" in stat["folded"][0] and stat["fresh"])
+          stat["opened"] and stat["closed"] and stat["bars"] == 1 and len(stat["folded"]) == 3 and "72%" in stat["folded"][0]
+          and stat["fresh"])
+    check(f"a folded brain opens at once, without asking the PC again {stat['expanded']}", stat["expanded"])
+    check(f"/status says only what it knows: an agent's own refusal, else can't tell {stat['folded'][1:]}",
+          "refused: Free usage limit reached." in stat["folded"][1] and "can't tell" in stat["folded"][2])
     check(f"a message typed in another chat while one replies isn't sent to that reply {slash}",
           slash["kept"] == "new question elsewhere" and "new question elsewhere" not in slash["steered"])
 

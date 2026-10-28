@@ -104,10 +104,18 @@ def _levels(opt: Optional[Dict[str, Any]]) -> List[str]:
     return [str(c["value"]) for c in _choices(opt) if str(c["value"]).lower() != "default"]
 
 
+_STORED_READ: Dict[str, Any] = {"mtime": None, "data": {}}
+
+
 def _stored(provider: str) -> Dict[str, Any]:
+    """This agent's entry in the models file, read again only when the file changes
+    (a model list asks once per model)."""
     try:
-        with open(_MODELS, encoding="utf-8") as f:
-            return json.load(f).get(provider) or {}
+        mtime = os.path.getmtime(_MODELS)
+        if _STORED_READ["mtime"] != mtime:
+            with open(_MODELS, encoding="utf-8") as f:
+                _STORED_READ.update(mtime=mtime, data=json.load(f) or {})
+        return _STORED_READ["data"].get(provider) or {}
     except (OSError, ValueError, AttributeError):
         return {}
 

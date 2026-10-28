@@ -474,6 +474,7 @@
   .mp-ico.ag svg { fill: currentColor; }
   .hx-fav { width: 76%; height: 76%; object-fit: contain; display: block; border-radius: 2px; }
   .has-fav { background: #f4f2ee !important; }
+  #btn-think:disabled { opacity: 0.4; cursor: default; }
   .convo-app { width: 12px; height: 12px; border-radius: 3px; flex: none; opacity: 0.85; }
   .mp-txt { flex: 1; min-width: 0; }
   .mp-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -10335,7 +10336,7 @@ function _thinkIndex() {
 
 function applyThinkButton() {
   const o = _thinkOptions()[_thinkIndex()];
-  if (!o) return;
+  if (!o || thinkBtn.disabled) return;
   thinkBtn.classList.toggle('on', o.on);
   thinkBtn.title = o.on
     ? `Reasoning: ${o.label.toLowerCase()} (${o.sub}). Click to change.`
@@ -10437,9 +10438,18 @@ function renderThinkMenu() {
   const menu = document.getElementById('think-menu');
   if (!menu) return;
   const opts = _thinkOptions();
-  // Hidden where the brain and model offer nothing to set.
-  thinkBtn.hidden = !opts.length && !_agentFast();
-  if (thinkBtn.hidden) menu.classList.remove('open');
+  // Where the brain and model offer nothing to set it stays in its place,
+  // greyed and off, so the composer doesn't shift as brains change.
+  const none = !opts.length && !_agentFast();
+  thinkBtn.hidden = false;
+  thinkBtn.disabled = none;
+  if (none) {
+    menu.classList.remove('open');
+    thinkBtn.classList.remove('on');
+    thinkBtn.title = "This model doesn't take a thinking level";
+    const lbl = thinkBtn.querySelector('.think-label');
+    if (lbl) lbl.textContent = 'think';
+  }
   menu.innerHTML = opts.map((o, i) =>
     `<button class="think-menu-item" data-think="${i}">`
     + `<span class="tick"></span>`
@@ -11847,7 +11857,7 @@ function stUsageHTML(list, compact) {
     let body = '';
     if (u.windows) {
       body = u.windows.map(w => w.used == null
-        ? `<div class="st-bar"><div class="st-bar-top"><span>${esc(w.name)}</span><b>reset since it last reported</b></div></div>`
+        ? `<div class="st-bar"><div class="st-bar-top"><span>${esc(w.name)}</span><b>can't tell: it reset after the last report</b></div></div>`
         : _stBar(w.name, w.used, `${w.used}% used${w.resets_at ? ' · resets in ' + _stAgo(w.resets_at - t) : ''}`)).join('');
       if (u.at && t - u.at > 1800) body += `<span class="st-note st-stale">${esc(u.label)} reports this when it runs, so it may have moved since.</span>`;
     } else if (u.credits) {
@@ -11864,15 +11874,16 @@ function _stSummary(u) {
   const t = Date.now() / 1000;
   if (u.windows) {
     const live = u.windows.filter(w => w.used != null);
-    if (!live.length) return 'reset since it last reported';
+    if (!live.length) return "can't tell: its limits reset after the last report";
     const top = live.reduce((a, w) => (w.used > a.used ? w : a), live[0]);
-    return `${top.used}% of ${top.name.toLowerCase()}${u.at && t - u.at > 1800 ? ' · as of ' + _stAgo(t - u.at) + ' ago' : ''}`;
+    return `${top.used}% of its ${top.name.toLowerCase()} limit used${u.at ? ', as of ' + _stAgo(t - u.at) + ' ago' : ''}`;
   }
   if (u.credits) {
     const c = u.credits;
     return c.left != null ? '$' + Number(c.left).toFixed(2) + ' left' : '$' + Number(c.used || 0).toFixed(2) + ' used';
   }
-  return u.note ? 'not reported' : '';
+  if (u.refused) return 'refused: ' + u.refused;
+  return u.note ? "can't tell" : '';
 }
 const ST = { open: new Set(), timer: 0 };
 // Status opens just above the message box, the size of what it says, and
@@ -11898,11 +11909,15 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _stOpen(
 document.addEventListener('mousedown', (e) => {
   if (_stOpen() && !e.target.closest('#status-pop')) hideStatus();
 });
-async function renderStatus(fresh) {
+async function renderStatus(fresh, again) {
   let st;
   const box = $('status-pop');
-  try { st = await api('/api/status' + (fresh ? '?fresh=1' : '')); }
-  catch (e) { box.innerHTML = `<div class="st-panel"><div class="st-card">${esc(e.message)}</div></div>`; return; }
+  if (again && ST.last) st = ST.last;
+  else {
+    try { st = await api('/api/status' + (fresh ? '?fresh=1' : '')); }
+    catch (e) { box.innerHTML = `<div class="st-panel"><div class="st-card">Couldn't read the status: ${esc(e.message)}</div></div>`; return; }
+    ST.last = st;
+  }
   if (!_stOpen()) return;
   const b = st.brain || {}, h = HARNESS[b.id] || BRAIN_MARKS[b.id];
   const ico = h ? `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>`
@@ -11951,7 +11966,7 @@ async function renderStatus(fresh) {
   box.querySelectorAll('.st-other').forEach(btn => btn.onclick = () => {
     const id = btn.dataset.st;
     if (ST.open.has(id)) ST.open.delete(id); else ST.open.add(id);
-    renderStatus(false);
+    renderStatus(false, true);
   });
 }
 

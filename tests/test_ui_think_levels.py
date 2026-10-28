@@ -49,7 +49,7 @@ SHOW = """([brain, info, facts]) => {
   if (facts) CLOUD_FACTS.set(`prov::${brain.providerKey}::${brain.model}`, facts);
   renderThinkMenu(); applyThinkButton();
   const btn = document.getElementById('btn-think');
-  return { hidden: btn.hidden,
+  return { hidden: btn.hidden || btn.disabled, shown: !btn.hidden,
            items: [...document.querySelectorAll('#think-menu .think-menu-item:not([data-fast])')].map(e => e.firstChild.nextSibling.firstChild.textContent.trim()),
            fast: !!document.querySelector('#think-menu .think-fast') };
 }"""
@@ -81,7 +81,8 @@ with sync_playwright() as pw:
     check(f"an agent model's own levels, after its own default {got}",
           not got["hidden"] and got["items"] == ["Default", "Low", "Medium", "High", "Extra high"])
     got = pg.evaluate(SHOW, agent([{"id": "composer", "efforts": []}], "composer"))
-    check(f"an agent model with no levels has no control, not a lone Default {got}", got["hidden"])
+    check(f"an agent model with no levels has the control greyed in its place, not a lone Default {got}",
+          got["hidden"] and got["shown"])
     got = pg.evaluate(SHOW, agent([{"id": "composer", "efforts": [], "fast": "Faster"}], "composer"))
     check(f"one with only a Fast tier keeps the control for it {got}", not got["hidden"] and got["fast"] and got["items"] == [])
 
@@ -90,7 +91,7 @@ with sync_playwright() as pw:
     check(f"a cloud model's levels, and no Off where it can't stop {got}",
           not got["hidden"] and got["items"] == ["On", "Low effort", "High effort"])
     got = pg.evaluate(SHOW, cloud("gpt-plain", {"reasoning": False}))
-    check(f"a cloud model that doesn't reason has no control {got}", got["hidden"])
+    check(f"a cloud model that doesn't reason has the control greyed in its place {got}", got["hidden"] and got["shown"])
     got = pg.evaluate(SHOW, cloud("gem-pro", {"reasoning": True}))
     check(f"one that reasons with no levels named is on or off {got}", got["items"] == ["Off", "On"])
     check(f"no page errors {errors}", not errors)
