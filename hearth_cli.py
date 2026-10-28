@@ -4887,6 +4887,19 @@ class JarvisCLI:
         a = ask("Will you hear me on headphones or speakers? (h / s, Enter to skip)").lower()
         if a[:1] in ("h", "s"):
             answers["audio"] = "headphones" if a[:1] == "h" else "speakers"
+        lang = ask("What language will you speak to me in? (Enter for English, or a name like hindi, or 'any' to work it out each time)")
+        if lang:
+            code = "" if lang.lower() in ("any", "detect", "auto") else onboarding.language_code(lang)
+            if code is None:
+                print(f"  {C_DIM}I don't know that one by name. Settings, Voice lists the languages I can listen in.{C_RESET}")
+            else:
+                answers["language"] = code
+                voice = onboarding.voice_for(code, _env.get("VOICE", "") or "")
+                if voice:
+                    answers["voice_name"] = voice
+                    print(f"  {C_DIM}I'll listen for {onboarding.LANGUAGES[code]} and answer in a {onboarding.LANGUAGES[code]} voice.{C_RESET}")
+                elif code and code != "en" and code not in onboarding._VOICE_LETTER:
+                    print(f"  {C_DIM}I'll listen for {onboarding.LANGUAGES[code]}. No voice speaks it yet, so replies read out loud use an English voice.{C_RESET}")
         print()
         print(f"  {C_TOOL}Before I change things on your PC:{C_RESET}")
         print(f"  {C_DIM}    1  ask me every time{C_RESET}")
@@ -4936,6 +4949,9 @@ class JarvisCLI:
         from hearth.persona import NAME as _me
         print()
         _type_out(f"  {C_BRAND}Hey, I'm {_me}.{C_RESET}")
+        print(f"  {C_DIM}I run on your PC and do real things on it. I think with the AI you already pay for "
+              f"(an agent like Claude Code or Codex) or a model of your own, remember what matters, send "
+              f"helpers for bigger jobs, answer from your phone, and ask before anything risky.{C_RESET}")
         _type_out(f"  {C_DIM}A minute of setup so I fit how you work. Enter skips a question, "
                   f"Ctrl-C skips the rest.{C_RESET}", delay=0.004)
         print()
@@ -5101,13 +5117,16 @@ class JarvisCLI:
         # which leaves a first-timer at a blank cursor with no idea what this
         # thing accepts — the moment most people close it and don't come back.
         print(f"  {C_BRAND}─ you're set ─{C_RESET}")
-        print(f"  {C_DIM}Talk to me in plain English. I can actually act on this "
-              f"machine, so try:{C_RESET}")
+        print(f"  {C_DIM}Talk to me in your own words. I act on this machine, remember, and can "
+              f"send helpers, so try:{C_RESET}")
         print(f"  {C_TOOL}    what's taking up space on my C drive?{C_RESET}")
         print(f"  {C_TOOL}    summarise the newest PDF in my Downloads{C_RESET}")
+        print(f"  {C_TOOL}    compare three note-taking apps and remember which one I pick{C_RESET}")
         print(f"  {C_DIM}Anything that touches your system asks first. "
               f"{C_RESET}{C_TOOL}/help{C_RESET}{C_DIM} lists commands, "
-              f"{C_RESET}{C_TOOL}/models{C_RESET}{C_DIM} manages models.{C_RESET}")
+              f"{C_RESET}{C_TOOL}/models{C_RESET}{C_DIM} manages models, "
+              f"{C_RESET}{C_TOOL}/phone{C_RESET}{C_DIM} connects a chat app; the phone app pairs from the "
+              f"window's Settings, Plus.{C_RESET}")
         print()
 
     async def _ask_user_interactive(self, question: str, options: list, allow_other: bool) -> dict:
