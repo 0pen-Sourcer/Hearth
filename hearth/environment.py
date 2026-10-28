@@ -1,4 +1,14 @@
-"""Auto-discover the user's machine and seed it into local memory.
+"""Auto-discover the user's machine, so the assistant knows it from the start.
+
+What it finds is kept in ~/.hearth/this_pc.json, not in the person's memory:
+memory is what the person told it and what they worked on together, read and
+edited on the Memory page, and three entries about the GPU, the model server
+and every drive's folders read as clutter there. The system prompt carries one
+short line from the file (this_pc_line); the learn_environment tool gives the
+whole drive map when a search needs it. Older versions saved these as memories;
+drop_old_memories takes them out unless the person changed them.
+
+(Below: the original notes.)
 
 The whole point: the agent walks into a session already knowing the hardware,
 the installed models, and where files live — so it never flails with slow
@@ -146,11 +156,61 @@ def _format_drive_map(drives: Dict[str, List[str]]) -> str:
     return "\n".join(lines)
 
 
-def learn_environment(endpoint: Optional[str] = None, write: bool = True) -> str:
-    """Detect hardware + models + drive map and (optionally) seed local memory.
-    Returns a short human-readable summary of what was learned."""
-    from . import memory
+THIS_PC_PATH = os.path.join(os.path.expanduser("~/.hearth"), "this_pc.json")
+# The memories older versions wrote, by title, with the description each was given:
+# one the person rewrote has another description and is left alone.
+_OLD = {"Hardware and VRAM budget": r"^.*GB RAM, (\d+|None) cores$",
+        "Local LLM setup": r"^LLM server at .*; use list_models, never disk-scan$",
+        "Where things live": r"^Drive map: go straight to the right folder instead of scanning$"}
 
+
+def read_this_pc() -> Dict[str, object]:
+    try:
+        with open(THIS_PC_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def this_pc_line() -> str:
+    """One line for the system prompt: the machine, and where to look for the rest. '' before the first scan."""
+    d = read_this_pc()
+    if not d:
+        return ""
+    gpu = str(d.get("gpu") or "")
+    if gpu and d.get("vram_gb"):
+        gpu += f" ({d['vram_gb']:g} GB VRAM)"
+    bits = [b for b in (gpu, f"{d['ram_gb']:g} GB RAM" if d.get("ram_gb") else "", str(d.get("os") or "")) if b]
+    roots = ", ".join(list(d.get("drives") or {})[:8])
+    return ("This PC: " + "; ".join(bits) + "." if bits else "") + (
+        f" Drives: {roots}; learn_environment lists their top folders, so look there before searching a whole drive."
+        if roots else "")
+
+
+def drop_old_memories() -> List[str]:
+    """Take out the machine memories older versions saved, unless the person changed them."""
+    import re as _re
+    from . import memory
+    gone = []
+    for title, auto in _OLD.items():
+        path = memory._path_for(title)
+        if not os.path.isfile(path):
+            continue
+        try:
+            fm, _body = memory._read_body(path)
+        except Exception:
+            continue
+        if _re.match(auto, str(fm.get("description") or "").strip()):
+            memory.forget(title)
+            gone.append(title)
+    return gone
+
+
+def learn_environment(endpoint: Optional[str] = None, write: bool = True, detail: bool = False) -> str:
+    """Detect hardware, models and the drive map, and (when `write`) keep them in
+    THIS_PC_PATH. Returns a short summary, or with `detail` everything found (the
+    learn_environment tool, for a model that needs the drive map)."""
     gpu = detect_gpu()
     models = detect_models(endpoint)
     drives = detect_drives()
@@ -170,43 +230,27 @@ def learn_environment(endpoint: Optional[str] = None, write: bool = True) -> str
     gpu_str = gpu.get("name") or "unknown GPU"
     if gpu.get("vram_gb"):
         gpu_str += f" ({gpu['vram_gb']:g}GB VRAM)"
-    hw_body = (
-        f"This machine: {gpu_str}; "
-        f"{cores or '?'} logical CPU cores; "
-        f"{ram_gb or '?'}GB RAM; {osname}.\n"
-        + _vram_guidance(gpu.get("vram_gb"))
-        + "\nSee [[Local LLM setup]] and [[Where things live]]."
-    )
-    if write:
-        memory.save("Hardware and VRAM budget", "user",
-                    f"{gpu_str}, {ram_gb}GB RAM, {cores} cores", hw_body)
     summary_bits.append(f"hardware ({gpu_str}, {ram_gb}GB RAM)")
-
-    # --- Models ---------------------------------------------------------
     base = (endpoint or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
-    if models:
-        model_lines = "\n".join(f"  - {m}" for m in models)
-        mbody = (
-            f"The local LLM server is at {base}.\n"
-            f"To see installed models call the list_models tool (queries the API "
-            f"instantly). NEVER scan the disk for model files. Models seen at setup:\n"
-            f"{model_lines}\n"
-            f"See [[Hardware and VRAM budget]]."
-        )
-        if write:
-            memory.save("Local LLM setup", "reference",
-                        f"LLM server at {base}; use list_models, never disk-scan", mbody)
-        summary_bits.append(f"{len(models)} model(s)")
-    else:
-        summary_bits.append("no model server reachable (start LM Studio, then /learn)")
-
-    # --- Drive map ------------------------------------------------------
+    summary_bits.append(f"{len(models)} model(s)" if models else "no model server reachable")
     if drives:
-        if write:
-            memory.save("Where things live", "reference",
-                        "Drive map: go straight to the right folder instead of scanning",
-                        _format_drive_map(drives))
         summary_bits.append(f"{len(drives)} drive(s)")
+    if write:
+        try:
+            import time as _time
+            os.makedirs(os.path.dirname(THIS_PC_PATH), exist_ok=True)
+            tmp = THIS_PC_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"gpu": gpu.get("name") or "", "vram_gb": gpu.get("vram_gb"), "ram_gb": ram_gb,
+                           "cores": cores, "os": osname, "drives": drives, "models": models,
+                           "server": base, "at": int(_time.time())}, f)
+            os.replace(tmp, THIS_PC_PATH)
+        except OSError:
+            pass
+        try:
+            drop_old_memories()
+        except Exception:
+            pass
 
     # Stamp the machine fingerprint so the per-boot refresh stays a no-op until
     # something actually changes (first-run onboarding and /learn both land here).
@@ -221,7 +265,16 @@ def learn_environment(endpoint: Optional[str] = None, write: bool = True) -> str
         except Exception:
             pass
 
-    return "Learned " + ", ".join(summary_bits) + "."
+    said = "Learned " + ", ".join(summary_bits) + "."
+    if not detail:
+        return said
+    out = [said, f"This machine: {gpu_str}; {cores or '?'} logical CPU cores; {ram_gb or '?'}GB RAM; {osname}.",
+           _vram_guidance(gpu.get("vram_gb"))]
+    if models:
+        out.append(f"Models at {base} (list_models has the live list): " + ", ".join(models))
+    if drives:
+        out.append(_format_drive_map(drives))
+    return "\n".join(out)
 
 
 def _fingerprint_path() -> str:

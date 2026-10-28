@@ -1567,10 +1567,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "learn_environment",
         "description": (
-            "Re-scan this machine (GPU/VRAM, RAM, installed models, top-level drive map) "
-            "and refresh it into long-term memory. Call this when the user installs a new "
-            "model, adds a drive, or asks you to 'get to know my setup' / 'relearn my PC'. "
-            "Fast and non-recursive. It's how you stay grounded instead of disk-scanning."
+            "This machine as it is now: GPU/VRAM, RAM, installed models, and each drive's "
+            "top-level folders. Call it before searching a whole drive for something, when "
+            "the user adds a drive or a model, or asks you to get to know their setup. Fast "
+            "and non-recursive. It is kept for the app, not saved as one of the user's memories."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -6515,7 +6515,7 @@ def _list_models(p: Dict) -> str:
 def _learn_environment(p: Dict) -> str:
     from .environment import learn_environment
     endpoint = _RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE")
-    return learn_environment(endpoint=endpoint)
+    return learn_environment(endpoint=endpoint, detail=True)
 
 
 # ---------------------------------------------------------------------------

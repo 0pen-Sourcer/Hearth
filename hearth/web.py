@@ -5874,21 +5874,12 @@ def _maybe_learn_environment_async() -> None:
     HEARTH_NO_ONBOARDING=1."""
     if _env.get("NO_ONBOARDING") in ("1", "true", "yes"):
         return
-    onboarded = False
-    try:
-        from hearth.tools import MEMORY_DIR
-        idx = os.path.join(MEMORY_DIR, "MEMORY.md")
-        if os.path.exists(idx):
-            with open(idx, "r", encoding="utf-8") as f:
-                if sum(1 for ln in f if ln.strip().startswith("-")) >= 2:
-                    onboarded = True
-    except OSError:
-        return
-
     def _go():
         try:
             from hearth import environment as _envmod
-            if onboarded:
+            # Machine memories from older versions go; the facts live in this_pc.json now.
+            _envmod.drop_old_memories()
+            if _envmod.read_this_pc():
                 # Already onboarded: only relearn if the machine actually changed
                 # (drive plugged in, GPU swap) so context stays fresh without churn.
                 msg = _envmod.refresh_environment_if_changed(endpoint=LOCAL_API_BASE)
