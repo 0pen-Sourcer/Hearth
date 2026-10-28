@@ -203,9 +203,17 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                            "count": r["count"], "pinned": bool(r.get("pinned"))} for r in rows], "own": own_chat}
     if what == "chat":
         return chat_action(m)
+    if what == "agent_sessions":
+        # The coding agents' own sessions on this PC, newest first.
+        from . import agent_sessions
+        from .brand_icons import key_for
+        return {"sessions": [dict(r, brand=key_for(r["agent"])) for r in agent_sessions.listing(int(m.get("limit") or 120))]}
     if what == "open":
         from .term_render import tool_words
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
+        from . import agent_sessions
+        if agent_sessions.parse_chat(cid):
+            return agent_sessions.transcript(cid, int(m.get("last") or 60))
         d = chat_sync.load(cid) or {}
         msgs = []
         for x in d.get("messages") or []:
@@ -931,6 +939,7 @@ class Bridge:
         self.adapter = Relay(self.loop)
         self.hub = cc.Hub(self.adapter, configured_senders=["phone"])
         self.rooms: Dict[str, Room] = {}
+        self.agent_runs: Dict[str, Dict[str, Any]] = {}     # session chat -> its run, while an agent answers
 
     def wanted(self) -> Dict[str, Dict[str, Any]]:
         """room -> {ps, phone}: every paired phone's room, and a pairing in progress."""
@@ -958,6 +967,10 @@ class Bridge:
             return
         if m.get("type") != "user":
             return
+        from . import agent_sessions
+        if agent_sessions.parse_chat(str(m.get("chat") or "")):
+            self.agent_say(room, m)
+            return
         files = []
         for f in m.get("files") or []:
             try:
@@ -974,6 +987,71 @@ class Bridge:
             drop_from(cid, str(edit.get("text") or ""), int(edit.get("back") or 0))
         self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files,
                          cid=str(m.get("chat") or ""), regen=bool(m.get("regen")))
+
+    def agent_say(self, room: Room, m: Dict[str, Any]) -> None:
+        """A message in one of the coding agents' sessions: that agent carries the
+        session on, and the phone sees its steps and reply as they come. A yes or
+        no while it waits on a question answers the question."""
+        from . import agent_sessions
+        cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
+        text = str(m.get("text") or "").strip()
+        turn = secrets.token_hex(5)
+
+        def push(obj: Dict[str, Any]) -> None:
+            fut = asyncio.run_coroutine_threadsafe(
+                room.deliver(dict(obj, id=secrets.token_hex(6), c=cid, t=turn)), self.loop)
+            try:
+                fut.result(15)
+            except Exception:
+                pass
+
+        run = self.agent_runs.get(cid)
+        if run is not None:
+            q = run.get("q")
+            if q is not None and not q.is_set():
+                run["answer"] = bool(cc._YES.match(text))
+                q.set()
+            else:
+                push({"type": "text", "text": "It's still working on your last message; send this once it's done."})
+            return
+        if not text:
+            return
+        run = self.agent_runs[cid] = {"q": None, "answer": False}
+        sent = {"live": 0.0, "think": 0.0}
+        thought: List[str] = []
+
+        def emit(kind: str, **f: Any) -> None:
+            now = time.time()
+            if kind == "step":
+                push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or ""})
+            elif kind == "live" and now - sent["live"] >= 0.35:
+                sent["live"] = now
+                push({"type": "live", "text": f.get("text") or ""})
+            elif kind == "think":
+                thought.append(str(f.get("text") or ""))
+                if now - sent["think"] >= 0.5:
+                    sent["think"] = now
+                    push({"type": "think", "text": "".join(thought)[-4000:]})
+            elif kind == "text":
+                push({"type": "text", "text": f.get("text") or ""})
+            elif kind == "error":
+                push({"type": "text", "text": f.get("message") or "It stopped."})
+
+        def ask(question: str) -> bool:
+            run["q"], run["answer"] = threading.Event(), False
+            push({"type": "ask", "text": question})
+            run["q"].wait(cc.ASK_TIMEOUT_S)
+            run["q"] = None
+            return bool(run["answer"])
+
+        def go() -> None:
+            try:
+                push({"type": "typing"})
+                asyncio.run(agent_sessions.say(cid, text, emit, ask))
+            finally:
+                self.agent_runs.pop(cid, None)
+
+        threading.Thread(target=go, daemon=True, name="relay-agent-session").start()
 
     async def keep_rooms(self) -> None:
         """Join new rooms (a pairing started, a phone confirmed), leave dropped ones."""
