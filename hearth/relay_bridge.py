@@ -540,6 +540,10 @@ class Relay(cc.Adapter):
         self._think_at[t] = now
         self._push(chat, {"type": "think", "text": text[-4000:]})
 
+    def heard(self, chat, text, cid=""):
+        """What a voice note said, so the phone shows the words instead of "Voice note"."""
+        self._push(chat, {"type": "heard", "text": text, **({"c": cid} if cid else {})})
+
     def step_sites(self, chat, sites):
         """The sites a search just found, for the step before it."""
         if sites:

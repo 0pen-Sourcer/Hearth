@@ -248,7 +248,8 @@ class Hub:
 
     # Called by the adapter, from whatever thread it receives on.
     def receive(self, chat: str, sender: str, text: str = "", name: str = "", reply_to: Any = None,
-                voice: str = "", files: Optional[List[str]] = None, cid: str = "", regen: bool = False) -> str:
+                voice: str = "", files: Optional[List[str]] = None, cid: str = "", regen: bool = False,
+                spoken: bool = False) -> str:
         """What became of the message: 'ran', 'answered', 'joined', 'pairing',
         'ignored' or 'empty'. `cid` puts it in a Hearth chat of the sender's
         choosing (an app that lists every chat); otherwise it goes in the
@@ -264,6 +265,11 @@ class Hub:
         if voice:
             heard = _transcribe(voice)
             text = (text + "\n" if text else "") + (heard or "(a voice note I couldn't make out)")
+            if heard and callable(getattr(self.a, "heard", None)):
+                try:
+                    self.a.heard(chat, heard, cid)      # the app shows the words, as the window does
+                except Exception:
+                    pass
         for f in files or []:
             text = (text + "\n" if text else "") + (
                 f"[They sent {os.path.basename(f)}, saved at {f}. Look at it with view_image if it's a picture, "
@@ -278,7 +284,10 @@ class Hub:
             if run is not None:
                 q = run.get("question")
                 if q is not None and not q.is_set():
-                    run["answer"] = bool(_YES.match(text))
+                    yes = bool(_YES.match(text))
+                    if yes and spoken and run.get("tap"):
+                        return "needs_tap"          # said, not tapped: this one takes the Allow button
+                    run["answer"] = yes
                     q.set()
                     return "answered"
                 run["steer"].append(text)
@@ -296,8 +305,10 @@ class Hub:
         if mode_allows(name, args):
             return "allow"
         ev = threading.Event()
+        from .tools import needs_a_tap
         with self._lock:
             run["question"], run["answer"] = ev, None
+            run["tap"] = needs_a_tap(name, args)
         question = f"Before I go on: may I {_what(name, args)}?"
         if callable(getattr(self.a, "ask", None)):
             self.a.ask(chat, question)                 # shown with Allow / Deny where the app can
