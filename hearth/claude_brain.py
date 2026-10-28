@@ -49,7 +49,10 @@ PLANS = {"claude-code": "Claude", "codex": "ChatGPT", "cursor-agent": "Cursor"}
 # Either way a thought_level option the session offers comes first.
 ACP = {
     "opencode": {"label": "OpenCode", "plan": "OpenCode", "site": "https://opencode.ai", "args": ["acp"],
-                 "levels_args": ["models", "--verbose"]},
+                 "levels_args": ["models", "--verbose"],
+                 # Where it writes a failed request (out of free usage, a provider error) that it
+                 # only retries and never sends back over the protocol.
+                 "log": "~/.local/share/opencode/log/opencode.log"},
     "copilot": {"label": "Copilot CLI", "plan": "GitHub Copilot", "site": "https://github.com/github/copilot-cli",
                 "args": ["--acp"], "effort_flag": "--reasoning-effort"},
     "goose": {"label": "Goose", "plan": "own provider's", "site": "https://block.github.io/goose", "args": ["acp"]},
