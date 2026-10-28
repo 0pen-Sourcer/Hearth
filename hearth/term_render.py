@@ -262,6 +262,9 @@ class Turn:
     def _on_heads_up(self, message: str = "", **_):
         self.out(f"{WARN}{message}{RESET}")
 
+    def _on_quiet(self, message: str = "", **_):
+        self.status = message
+
     def _on_slow_tool(self, name: str = "", **_):
         self.status = f"{tool_words(name, {})} (taking a while)"
 

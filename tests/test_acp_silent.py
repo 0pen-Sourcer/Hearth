@@ -1,8 +1,8 @@
-"""An agent brain that goes silent doesn't leave JARVIS "thinking" forever.
-OpenCode, out of free usage, writes the refusal to its own log and keeps
-retrying without a word to Hearth; Hearth reads that log and ends the turn
-with the agent's own words. An agent that is silent with nothing logged is
-given up on after a few minutes, said plainly.
+"""An agent brain that goes quiet: the person is told, and the turn keeps
+waiting (a model may think for minutes without streaming it); it ends early
+only on an error the agent logged and never sent back (OpenCode out of free
+usage retries in silence), with the agent's own words. This lives in the one
+dispatcher every agent brain passes through.
 
     .\\.venv\\Scripts\\python.exe tests\\test_acp_silent.py
 """
@@ -19,7 +19,7 @@ work = tempfile.mkdtemp(prefix="hearth-acp-silent-")
 os.environ.update(JARVIS_WORKSPACE=work, HEARTH_WORKSPACE=work, HEARTH_NO_ACTIVITY_LOG="1")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from hearth import acp_brain as A, claude_brain as cb, external_agents as xa, web  # noqa: E402
+from hearth import claude_brain as cb, external_agents as xa, web  # noqa: E402
 
 FAILS = []
 
@@ -30,12 +30,13 @@ def check(label, cond):
         FAILS.append(label)
 
 
-# A stand-in agent that takes the prompt and never answers; with a log path it
-# writes the refusal there the way OpenCode does.
+# A stand-in agent. With a log path it logs a refusal the way OpenCode does and
+# never answers; without one it thinks silently for a while, then answers.
 agent = os.path.join(work, "agent.py")
 Path(agent).write_text(r'''
 import json, sys, time
 logpath = sys.argv[1] if len(sys.argv) > 1 else ""
+quiet_for = float(sys.argv[2]) if len(sys.argv) > 2 else 0
 out = lambda o: (sys.stdout.write(json.dumps({"jsonrpc": "2.0", **o}) + "\n"), sys.stdout.flush())
 for raw in sys.stdin:
     m = json.loads(raw)
@@ -44,12 +45,18 @@ for raw in sys.stdin:
         out({"id": m["id"], "result": {"protocolVersion": 1, "agentCapabilities": {}}})
     elif meth == "session/new":
         out({"id": m["id"], "result": {"sessionId": "ses_silent1"}})
-    elif meth == "session/prompt" and logpath:
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + ".000Z"
-        with open(logpath, "a") as f:
-            f.write(f'timestamp={stamp} level=ERROR run=x message="stream error" providerID=opencode modelID=glm '
-                    f'session.id=ses_silent1 error.error="AI_RetryError: Failed after 3 attempts. Last error: Free usage '
-                    f'limit reached. Subscribe to keep going: https://example.org/go"\n')
+    elif meth == "session/prompt":
+        if logpath != "-":
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + ".000Z"
+            with open(logpath, "a") as f:
+                f.write(f'timestamp={stamp} level=ERROR run=x message="stream error" session.id=ses_silent1 '
+                        f'error.error="AI_RetryError: Failed after 3 attempts. Last error: Free usage limit reached. '
+                        f'Subscribe to keep going: https://example.org/go"\n')
+            continue
+        time.sleep(quiet_for)
+        out({"method": "session/update", "params": {"sessionId": "ses_silent1", "update": {
+             "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Thought it through."}}}})
+        out({"id": m["id"], "result": {"stopReason": "end_turn"}})
 ''', encoding="utf-8")
 agent_log = os.path.join(work, "agent.log")
 
@@ -62,31 +69,36 @@ cb.SITES["stand-in-acp"] = "https://example.org"
 web._save_settings(dict(web._load_settings(), onboarded=True))
 
 
-def turn(spec, limit):
+def turn(spec, quiet_s):
     cb.ACP["stand-in-acp"] = spec
+    cb._EXE_SEEN.clear()
     cb.set_brain("stand-in-acp")
-    A.SILENT_LIMIT_S, A.LOG_CHECK_S = limit, 1.0
+    cb.QUIET_S = quiet_s
     events = []
     t0 = time.time()
     asyncio.run(cb.run_turn("hi", emit=lambda k, **f: events.append((k, f)), history=[]))
     return events, time.time() - t0
 
 
-events, took = turn({"label": "Stand-in", "plan": "Stand-in", "site": "https://example.org", "agent": "stand-in",
-                     "args": [agent, agent_log], "log": agent_log}, 60)
+base = {"label": "Stand-in", "plan": "Stand-in", "site": "https://example.org", "agent": "stand-in"}
+
+events, took = turn(dict(base, args=[agent, agent_log], log=agent_log), 60)
 err = next((f.get("message") for k, f in events if k == "error"), "")
 check(f"an agent that logs its refusal ends the turn with its own words ({took:.0f} s): {err[:90]}",
-      took < 30 and "Free usage limit reached" in err and "AI_RetryError" not in err)
+      took < 60 and "Free usage limit reached" in err and "AI_RetryError" not in err)
 check("and the turn is over", any(k == "done" for k, _ in events))
 
-events, took = turn({"label": "Stand-in", "plan": "Stand-in", "site": "https://example.org", "agent": "stand-in",
-                     "args": [agent]}, 4)
-err = next((f.get("message") for k, f in events if k == "error"), "")
-check(f"one silent with nothing logged is given up on, said plainly ({took:.0f} s): {err[:80]}",
-      4 <= took < 30 and "sent nothing" in err)
+# Thinking quietly for 30 s, told after 6 s of quiet: told once, never cut off, the late answer arrives.
+events, took = turn(dict(base, args=[agent, "-", "30"]), 6)
+told = [f for k, f in events if k == "quiet"]
+reply = next((f.get("content") for k, f in events if k == "assistant"), "")
+check(f"a long quiet stretch is said once, plainly ({len(told)}): {(told[0]['message'] if told else '')[:70]}",
+      len(told) == 1 and "quiet" in told[0]["message"] and "Stop" in told[0]["message"])
+check(f"and the turn keeps waiting for the answer ({took:.0f} s): {reply!r}",
+      reply == "Thought it through." and not any(k == "error" for k, _ in events) and took >= 29)
 
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
     sys.exit(1)
-print("all silent agent checks passed")
+print("all quiet agent checks passed")

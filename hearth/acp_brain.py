@@ -343,48 +343,6 @@ def _text(content: List[Dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
-# How long an agent may send nothing (no text, thought or step, no step of its
-# own still running) before the turn ends with that said, instead of waiting forever.
-SILENT_LIMIT_S = float(os.environ.get("HEARTH_AGENT_SILENT_S", "180") or "180")
-# After this much silence, the agent's own log is read for an error on the session.
-LOG_CHECK_S = 20.0
-_LOG_PREFIXES = ("AI_RetryError: Failed after 3 attempts. Last error: ", "AI_APICallError: ", "Error: ")
-
-
-def logged_failure(provider: str, session: str, since: float) -> str:
-    """An error the agent wrote to its own log for this session since `since`
-    and didn't send back, in its own words; '' when there is none."""
-    spec = _base.ACP.get(provider) or {}
-    path = os.path.expanduser(str(spec.get("log") or ""))
-    if not path or not session or not os.path.isfile(path):
-        return ""
-    try:
-        with open(path, "rb") as f:
-            f.seek(max(0, os.path.getsize(path) - 400_000))
-            tail = f.read().decode("utf-8", "replace")
-    except OSError:
-        return ""
-    found = ""
-    for line in tail.splitlines():
-        if session not in line or "level=ERROR" not in line:
-            continue
-        m = re.search(r"timestamp=(\S+)", line)
-        try:
-            from datetime import datetime
-            when = datetime.fromisoformat(m.group(1).replace("Z", "+00:00")).timestamp() if m else 0
-        except ValueError:
-            when = 0
-        if when and when < since - 2:
-            continue
-        e = re.search(r'error\.error="([^"]+)', line) or re.search(r'error="([^"]+)', line)
-        if e:
-            found = e.group(1)
-    for pre in _LOG_PREFIXES:
-        while found.startswith(pre):
-            found = found[len(pre):]
-    return found.strip()[:400]
-
-
 async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
                    permission_check=None, should_cancel=None, voice: bool = False) -> int:
     provider = _base.current() or ""
@@ -496,7 +454,6 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
         turn = asyncio.ensure_future(rpc.call("session/prompt", {"sessionId": sid,
                                                                  "prompt": [{"type": "text", "text": text_in}]}, 86400))
         cancelled = False
-        began, heard, checked = time.time(), time.time(), 0.0
         # The answer to the prompt can arrive ahead of updates still queued; those are read first.
         while not (turn.done() and rpc.inbox.empty()):
             if should_cancel and should_cancel() and not cancelled:
@@ -506,25 +463,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
             try:
                 msg = await asyncio.wait_for(rpc.inbox.get(), timeout=0.4)
             except asyncio.TimeoutError:
-                quiet = time.time() - heard
-                if cancelled or shown or quiet < LOG_CHECK_S:
-                    continue                      # a step of its own is running, or it spoke just now
-                if time.time() - checked > 10:
-                    checked = time.time()
-                    said = logged_failure(provider, sid, began)
-                    if said:
-                        # Out of usage reads as that (the wrapper names the plan); anything else as the agent put it.
-                        failure = said if _base._OUT_OF_USAGE.search(said) else f"{name} couldn't answer: {said}"
-                        rpc.send({"method": "session/cancel", "params": {"sessionId": sid}})
-                        break
-                if quiet >= SILENT_LIMIT_S:
-                    span = f"{int(quiet)} seconds" if quiet < 120 else f"{int(quiet // 60)} minutes"
-                    failure = (f"{name} has sent nothing for {span}, so I stopped waiting. "
-                               f"It may have hit its plan's limit or got stuck; pick another brain or try again.")
-                    rpc.send({"method": "session/cancel", "params": {"sessionId": sid}})
-                    break
                 continue
-            heard = time.time()
             if msg is None:
                 break
             meth, prm = msg.get("method"), msg.get("params") or {}

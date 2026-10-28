@@ -997,6 +997,53 @@ def reached_tool(kind: str, fields: Dict[str, Any], reached: Dict[str, Optional[
     return {**fields, "name": inner, "args": inner_args if isinstance(inner_args, dict) else {}}
 
 
+# After this long with nothing from the agent (no text, thought or step, and no
+# step of its own running), the person is told it has gone quiet and can stop it.
+# Nothing ends on a timer: a model may think for minutes without streaming it.
+QUIET_S = float(os.environ.get("HEARTH_AGENT_QUIET_S", "90") or "90")
+_LOG_PREFIXES = ("AI_RetryError: Failed after 3 attempts. Last error: ", "AI_APICallError: ", "Error: ")
+
+
+def last_logged_error(agent: str, since: float, session: str = "") -> Tuple[str, float]:
+    """(the newest error the agent wrote to its own log since `since`, on
+    `session` when given, in its own words; when), or ('', 0). Only for agents
+    whose spec names their log: one that retries a refused request without a
+    word (OpenCode out of free usage) would otherwise look busy forever."""
+    spec = ACP.get(agent) or {}
+    path = os.path.expanduser(str(spec.get("log") or ""))
+    if not path or not os.path.isfile(path):
+        return "", 0.0
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - 400_000))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return "", 0.0
+    found, found_at = "", 0.0
+    for line in tail.splitlines():
+        if "level=ERROR" not in line or (session and session not in line):
+            continue
+        m = re.search(r"timestamp=(\S+)", line)
+        try:
+            from datetime import datetime
+            when = datetime.fromisoformat(m.group(1).replace("Z", "+00:00")).timestamp() if m else 0
+        except ValueError:
+            when = 0
+        if not when or when < since - 2:
+            continue
+        e = re.search(r'error\.error="([^"]+)', line) or re.search(r'error="([^"]+)', line)
+        if e:
+            found, found_at = e.group(1), when
+    for pre in _LOG_PREFIXES:
+        while found.startswith(pre):
+            found = found[len(pre):]
+    return found.strip()[:400], (found_at if found else 0.0)
+
+
+def logged_failure(agent: str, since: float, session: str = "") -> str:
+    return last_logged_error(agent, since, session)[0]
+
+
 async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
                    permission_check=None, should_cancel=None, voice: bool = False,
                    model: Optional[str] = None, drain_steer=None, context: str = "") -> int:
@@ -1009,8 +1056,16 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     # Every agent's turn ends with what it cost, by one rule for all of them.
     _emit, agent = emit, current() or ""
     reached: Dict[str, Optional[str]] = {}      # call id -> the tool use_tool ran (None: a lookup)
+    # When the agent last said anything, and which of its own steps are running.
+    heard = {"at": time.time(), "steps": set(), "told": False, "stop": False}
 
     def emit(kind: str, **fields) -> None:
+        heard["at"], heard["told"] = time.time(), False
+        cid = str(fields.get("id") or "")
+        if kind == "tool_call" and cid:
+            heard["steps"].add(cid)
+        elif kind == "tool_result":
+            heard["steps"].discard(cid)
         if kind in ("tool_call", "tool_call_partial", "tool_result"):
             fields = reached_tool(kind, fields, reached)
             if fields is None:
@@ -1045,6 +1100,49 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     if context and prompt.strip() != NOTIFY_FLUSH:
         # What has been going on in their other chats; not part of what was asked.
         prompt = f"<lately>\n{context}\n</lately>\n\n{prompt}"
+    began = time.time()
+    asked_stop = should_cancel
+
+    def should_cancel() -> bool:
+        return bool(heard["stop"] or (asked_stop and asked_stop()))
+
+    async def watch(turn) -> None:
+        """Say when the agent has gone quiet; end the turn only on an error it logged."""
+        name = BRAINS.get(agent, "The agent")
+        while True:
+            await asyncio.sleep(5)
+            quiet = time.time() - heard["at"]
+            if heard["steps"] or quiet < min(20.0, QUIET_S):
+                continue
+            said = logged_failure(agent, began)
+            if said:
+                emit("error", message=said if _OUT_OF_USAGE.search(said) else f"{name} couldn't answer: {said}")
+                heard["stop"] = True
+                # An agent stuck retrying may never confirm the stop: give it a moment, then end it.
+                await asyncio.sleep(10)
+                if not turn.done():
+                    turn.cancel()
+                return
+            if quiet >= QUIET_S and not heard["told"]:
+                heard["told"] = True
+                _emit("quiet", seconds=int(quiet), name=name,
+                      message=f"{name} has been quiet for {int(quiet)} s. It may still be thinking; Stop ends it.")
+
+    turn = asyncio.ensure_future(_turn_on(prompt, emit, history, permission_check, should_cancel, voice, drain_steer))
+    watcher = asyncio.ensure_future(watch(turn))
+    try:
+        return await turn
+    except asyncio.CancelledError:
+        if not heard["stop"]:
+            raise
+        emit("done", reason="stopped", iterations=0)
+        return 0
+    finally:
+        watcher.cancel()
+
+
+async def _turn_on(prompt, emit, history, permission_check, should_cancel, voice, drain_steer) -> int:
+    """The turn on the agent program in use (run_turn wraps it)."""
     other = {"codex": "codex_brain", "cursor-agent": "cursor_brain"}.get(current() or "") or (
         "acp_brain" if current() in ACP else "")
     if not other:

@@ -38,37 +38,9 @@ _REPORTS = {"claude-code", "codex"}
 
 
 def _logged_refusal(agent: str, within_s: float = 86400) -> "tuple":
-    """(what the agent logged, when) for the newest out-of-usage refusal in its own
-    log within a day, or ('', 0). Only for agents whose log Hearth knows."""
-    import os
-    import re
-    from datetime import datetime
-    spec = _cb.ACP.get(agent) or {}
-    path = os.path.expanduser(str(spec.get("log") or ""))
-    if not path or not os.path.isfile(path):
-        return "", 0
-    try:
-        with open(path, "rb") as f:
-            f.seek(max(0, os.path.getsize(path) - 400_000))
-            tail = f.read().decode("utf-8", "replace")
-    except OSError:
-        return "", 0
-    for line in reversed(tail.splitlines()):
-        if "level=ERROR" not in line or not _cb._OUT_OF_USAGE.search(line):
-            continue
-        m = re.search(r"timestamp=(\S+)", line)
-        e = re.search(r'error\.error="([^"]+)', line)
-        try:
-            when = datetime.fromisoformat(m.group(1).replace("Z", "+00:00")).timestamp() if m else 0
-        except ValueError:
-            when = 0
-        if not when or time.time() - when > within_s or not e:
-            return "", 0
-        said = e.group(1)
-        for pre in ("AI_RetryError: Failed after 3 attempts. Last error: ", "AI_APICallError: "):
-            said = said.replace(pre, "")
-        return said.strip()[:240], when
-    return "", 0
+    """(an out-of-usage refusal the agent logged within a day, when), or ('', 0)."""
+    said, when = _cb.last_logged_error(agent, time.time() - within_s)
+    return (said, when) if said and _cb._OUT_OF_USAGE.search(said) else ("", 0)
 
 
 def everything(provider_key) -> List[Dict[str, Any]]:

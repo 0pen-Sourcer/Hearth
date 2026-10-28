@@ -374,6 +374,11 @@ class Hub:
                 written.clear()
             elif kind == "error":
                 err["cat"], err["msg"] = kw.get("category") or "error", str(kw.get("message", ""))
+            elif kind == "quiet" and steps and kw.get("message"):
+                try:
+                    self.a.step(chat, kw["message"])
+                except Exception:
+                    pass
             elif kind == "tool_result" and steps and kw.get("name") == "web_search" \
                     and callable(getattr(self.a, "step_sites", None)):
                 try:

@@ -11186,9 +11186,18 @@ async function send(forced = null, displayAs = null, opts = {}) {
         ev.type === 'assistant_chunk' || ev.type === 'tool_call' ||
         ev.type === 'tool_call_partial') _clearPromptPoll();
     // The request is going through again; the line goes once anything arrives.
-    if (ev.type !== 'retry' && ev.type !== 'context_state' && live) {
+    if (ev.type !== 'retry' && ev.type !== 'quiet' && ev.type !== 'context_state' && live) {
       const rn = live.querySelector('.retry-note');
       if (rn) rn.remove();
+    }
+    if (ev.type === 'quiet') {
+      // The agent has said nothing for a while; it goes as soon as it does.
+      if (live) {
+        let rn = live.querySelector('.retry-note');
+        if (!rn) { rn = document.createElement('div'); rn.className = 'retry-note'; appendPart(rn, live); }
+        rn.innerHTML = `<span class="rn-dot"></span><span>${esc(ev.message || 'Quiet for a while')}</span>`;
+      }
+      return;
     }
     if (ev.type === 'retry') {
       if (live) {
