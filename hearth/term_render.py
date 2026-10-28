@@ -37,6 +37,8 @@ _VERB = {
     "list_dir": ("Listed", "path"), "delete_file": ("Deleted", "path"), "move_file": ("Moved", "src"),
     "find_files": ("Searched for", "pattern"), "grep": ("Searched for", "pattern"),
     "web_search": ("Searched the web for", "query"), "fetch_url": ("Opened", "url"), "browse": ("Opened", "url"),
+    "web_fetch": ("Read", "url"), "open_url": ("Opened", "url"), "search_chats": ("Searched past chats for", "query"),
+    "read_chat": ("Read an earlier chat", ""), "load_model": ("Loaded", "model"), "list_models": ("Listed the models", ""),
     "memory_save": ("Remembered", "name"), "memory_recall": ("Looked up", "query"), "memory_forget": ("Forgot", "name"),
     "set_reminder": ("Set a reminder:", "what"), "open_app": ("Opened", "name"), "screenshot": ("Took a screenshot", ""),
     "view_image": ("Looked at", "path"), "spawn_subagent": ("Started a helper:", "persona"),
@@ -55,6 +57,8 @@ def tool_words(name: str, args: Optional[Dict[str, Any]]) -> str:
     val = " ".join(str(val).split()) if val else ""
     if key == "path" and val:
         val = val.replace(os.path.expanduser("~"), "~")
+    if key == "url" and val:
+        val = re.sub(r"^https?://(www\.)?", "", val).rstrip("/")
     return f"{verb} {val[:90]}".strip() if val else verb
 
 

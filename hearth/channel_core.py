@@ -207,6 +207,31 @@ IN_A_CHAT_APP = False
 _YES = re.compile(r"^\s*(y|ye|yes|yeah|yep|ok|okay|sure|go|go ahead|do it|allow|approve)\b", re.I)
 
 
+def site_of(args: Any) -> str:
+    """The site a tool call reaches (a page it reads or opens), as a bare domain."""
+    import urllib.parse
+    if not isinstance(args, dict):
+        return ""
+    url = str(args.get("url") or args.get("href") or "")
+    host = urllib.parse.urlparse(url).netloc.lower() if url.startswith(("http://", "https://")) else ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def sites_in(text: str, most: int = 6) -> List[str]:
+    """The sites a search result names, first seen first."""
+    import re
+    import urllib.parse
+    out: List[str] = []
+    for url in re.findall(r"https?://[^\s<>\"')\]]+", text or ""):
+        host = urllib.parse.urlparse(url).netloc.lower()
+        host = host[4:] if host.startswith("www.") else host
+        if host and host not in out:
+            out.append(host)
+        if len(out) >= most:
+            break
+    return out
+
+
 class Hub:
     """Runs each message an adapter receives. One reply at a time per chat;
     messages that arrive meanwhile answer its question or join it."""
@@ -330,11 +355,20 @@ class Hub:
                 written.clear()
             elif kind == "error":
                 err["cat"], err["msg"] = kw.get("category") or "error", str(kw.get("message", ""))
+            elif kind == "tool_result" and steps and kw.get("name") == "web_search" \
+                    and callable(getattr(self.a, "step_sites", None)):
+                try:
+                    self.a.step_sites(chat, sites_in(str(kw.get("content") or "")))
+                except Exception:
+                    pass
             elif kind == "tool_call" and kw.get("name"):
                 tools_used.append((kw["name"], kw.get("args")))
                 if steps:
+                    words = tool_words(kw["name"], kw.get("args"))
                     try:
-                        self.a.step(chat, tool_words(kw["name"], kw.get("args")))
+                        self.a.step(chat, words, tool=kw["name"], site=site_of(kw.get("args")))
+                    except TypeError:
+                        self.a.step(chat, words)        # an app whose step takes the words only
                     except Exception:
                         pass
                 now = time.time()

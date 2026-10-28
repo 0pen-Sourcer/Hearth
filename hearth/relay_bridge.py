@@ -234,9 +234,17 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "ideas":
         return ideas()
     if what == "icons":
-        # Each agent's and provider's own mark, from its site, as the window shows them.
+        # Brands' own marks by key and sites' icons by domain, as the window shows them.
         from .web import _favicon
+        from .brand_icons import brand_icon
         out = {}
+        for key in [str(x) for x in (m.get("keys") or [])][:40]:
+            try:
+                icon = brand_icon(key)
+            except Exception:
+                icon = None
+            if icon:
+                out["brand:" + key] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
         for site in [str(x) for x in (m.get("sites") or [])][:24]:
             try:
                 icon = _favicon(site)
@@ -245,6 +253,14 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             if icon:
                 out[site] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
         return {"icons": out}
+    if what == "provider_models":
+        # One saved provider's models, asked with its saved key, as the window's menu lists them.
+        out = _window("POST", "/api/providers/models", {"id": str(m.get("id") or "")}, timeout=20)
+        return out if out.get("models") is not None else {"error": out.get("error") or "no model list"}
+    if what == "facts":
+        # What a model takes in, whether it reasons, its context and price: the window's details card.
+        v = str(m.get("v") or "")
+        return _window("GET", "/api/model/facts?v=" + urllib.parse.quote(v, safe=""))
     if what in ("brain", "agent_models"):
         return cached_brain(what, m)
     if what in ("use", "set"):
@@ -368,7 +384,7 @@ def _settle_brain(what: str, m: Dict[str, Any]) -> None:
     elif m.get("kind") == "provider":
         b["provider"] = str(m.get("id") or "")
         p = next((x for x in b.get("providers") or [] if x.get("id") == b["provider"]), None)
-        b["model"] = (p or {}).get("model") or ""
+        b["model"] = str(m.get("model") or (p or {}).get("model") or "")
     else:
         # A model loading on the PC: what's loaded changes as it goes, so read it fresh.
         _BRAIN_CACHE.pop("brain", None)
@@ -397,14 +413,16 @@ def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
         disk = (_window("GET", "/api/llmserver/status").get("disk_models") or [])
         if models.get("ok") is False and not models.get("agent_brains"):
             return {"error": models.get("error") or "the window didn't answer"}
+        from .brand_icons import key_for
         agents = [{"id": a["id"], "label": a.get("label") or a["id"], "plan": a.get("plan") or "",
-                   "site": a.get("icon_site") or urllib.parse.urlparse(a.get("site") or "").netloc}
+                   "site": a.get("icon_site") or urllib.parse.urlparse(a.get("site") or "").netloc,
+                   "brand": key_for(a["id"])}
                   for a in models.get("agent_brains") or [] if a.get("installed")]
         provider = str(state.get("provider") or settings.get("llm_provider") or "")
         return {"provider": provider, "model": state.get("picked_model") or settings.get("llm_model") or "",
                 "agents": agents,
                 "providers": [{"id": p["id"], "label": p.get("label") or p["id"], "model": p.get("model") or "",
-                               "active": bool(p.get("active")),
+                               "active": bool(p.get("active")), "brand": key_for(p["id"]),
                                "site": re.sub(r"^api\.|^generativelanguage\.", "",
                                               urllib.parse.urlparse(p.get("url") or "").netloc)}
                               for p in models.get("providers") or []],
@@ -489,9 +507,15 @@ class Relay(cc.Adapter):
     def typing(self, chat):
         self._push(chat, {"type": "typing"})
 
-    def step(self, chat, words):
-        """One step of the reply as it happens ("Read notes.txt")."""
-        self._push(chat, {"type": "step", "words": words})
+    def step(self, chat, words, tool="", site=""):
+        """One step of the reply as it happens ("Read notes.txt"), with the tool
+        and the site it reaches, so the phone can show that site's icon."""
+        self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site})
+
+    def step_sites(self, chat, sites):
+        """The sites a search just found, for the step before it."""
+        if sites:
+            self._push(chat, {"type": "sites", "sites": list(sites)[:6]})
 
     def live(self, chat, text):
         """The reply so far, a few times a second; the finished one follows as text."""
