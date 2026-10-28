@@ -1125,7 +1125,7 @@ class Bridge:
                 push({"type": "text", "text": f.get("text") or ""})
                 self.adapter.finished(room.chat, name, f.get("text") or "", cid, turn)
             elif kind == "error":
-                push({"type": "text", "text": f.get("message") or "It stopped."})
+                push({"type": "text", "text": f.get("message") or "It stopped.", "error": True})
 
         name = agent_sessions.label((agent_sessions.parse_chat(cid) or ("", ""))[0])
 

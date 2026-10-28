@@ -434,6 +434,8 @@ class Hub:
         final = redact_secrets_only(reply or "(no output)")[0]
         stats = {k: v for k, v in stats.items() if v is not None}
         _TURN.ctx = dict(_TURN.ctx or {}, stats=stats, context=context)   # the finished reply carries them
+        if err["cat"] and not "".join(parts).strip():
+            _TURN.ctx["error"] = True          # the reply is why it failed: the phone shows it as an error
         try:
             if status["id"] is not None and tools_used:
                 self.a.edit(chat, status["id"], bridge_status.format_done(tools_used))

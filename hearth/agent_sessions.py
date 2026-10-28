@@ -138,17 +138,38 @@ def _text_of(content: Any) -> str:
     return ""
 
 
-# What an agent puts in the person's turn that the person didn't type.
+# What an agent puts in the person's turn that the person didn't type: a turn
+# that is only this is left out, and a block of it before their words is taken off.
 _NOT_TYPED = re.compile(r"^\s*(<(command-|local-command|environment_context|user_instructions|system-reminder)"
                         r"|Caveat: The messages below|# AGENTS\.md)", re.S)
+# Blocks an agent puts before the person's words: <ide_selection>...</ide_selection>,
+# <recommended_plugins>, <external_codex_apps_open_page> and the like, by their shape.
+_BLOCK = re.compile(r"^\s*<([a-z][a-z0-9_:-]*)\b[^>]*>.*?</\1>\s*", re.S)
+_EMPTY_TAG = re.compile(r"^\s*<[a-z][a-z0-9_:-]*\b[^>]*/>\s*", re.S)
+# Codex's IDE extension sends "# Context from my IDE setup: ... ## My request for Codex: <words>".
+_IDE_ASK = re.compile(r"^\s*# Context from my IDE setup:.*?^## My request for Codex:\s*", re.S | re.M)
+
+
+def _clean(text: str) -> str:
+    """The person's own words in a turn, without what their agent added before them."""
+    t = text or ""
+    if _NOT_TYPED.match(t):
+        return ""
+    t = _IDE_ASK.sub("", t, count=1)
+    while True:
+        m = _BLOCK.match(t) or _EMPTY_TAG.match(t)
+        if not m:
+            break
+        t = t[m.end():]
+    return "" if _NOT_TYPED.match(t) else t.strip()
 
 
 def _typed(text: str) -> bool:
-    return bool(text.strip()) and not _NOT_TYPED.match(text)
+    return bool(_clean(text))
 
 
 def _title(text: str) -> str:
-    t = " ".join(text.split())
+    t = " ".join(_clean(text).split())
     return t[:77] + "..." if len(t) > 80 else t
 
 
@@ -161,11 +182,74 @@ _TOOL = {"bash": "run_command", "shell": "run_command", "run_shell_command": "ru
          "webfetch": "web_fetch", "web_fetch": "web_fetch", "websearch": "web_search", "google_web_search": "web_search"}
 
 
-def _step(name: str, args: Any) -> Dict[str, Any]:
+# Tools only the agents have, said plainly. None: bookkeeping, not a step.
+_AGENT_WORDS = {"update_plan": "Updated its plan", "todowrite": "Updated its to-do list",
+                "request_user_input": "Asked you a question", "request_user_input_async": "Asked you a question",
+                "view_image": "Looked at an image", "spawn_agent": "Started a helper", "task": "Started a helper",
+                "tool_search": "Looked for a tool", "list_mcp_resources": "Looked at its tools",
+                "wait": None, "wait_agent": None, "write_stdin": None, "close_agent": None}
+# Codex's code mode runs a small script ("exec") that calls its tools: tools.exec_command({cmd: "..."}).
+_CODE_CALL = re.compile(r"tools\.([A-Za-z_][\w]*)\s*\(\s*\{(.*?)\}\s*\)", re.S)
+_CODE_STR = r"""\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`([^`]*)`)"""
+
+
+def _code_steps(src: str) -> List[Dict[str, Any]]:
+    """The steps inside one code-mode script, in order; "Ran a script" when none can be read."""
+    out = []
+    for name, body in _CODE_CALL.findall(src or ""):
+        args = {}
+        for key in ("cmd", "command", "path", "file_path", "query", "url", "pattern"):
+            m = re.search(r"\b" + key + _CODE_STR, body)
+            if m:
+                args[key] = next(g for g in m.groups() if g is not None)
+        st = _step(name, args)
+        if st:
+            out.append(st)
+    return out or [{"w": "Ran a script", "tool": "run_command"}]
+
+
+def _said(desc: Any) -> str:
+    """The agent's own line for a step (Claude Code's `description`, OpenCode's `title`), when it gave one."""
+    d = " ".join(str(desc or "").split())
+    return (d[0].upper() + d[1:])[:120] if d else ""
+
+
+def _steps_of(name: str, args: Any, desc: Any = "") -> List[Dict[str, Any]]:
+    """The steps one tool call amounts to. The agent's own words for it win over
+    Inglen's template ("Ran ...", "Read ..."), which is only for calls it didn't describe."""
+    if name == "exec" and isinstance(args, str):
+        return _code_steps(args)
+    st = _step(name, args)
+    if st and not _said(desc) and isinstance(args, dict):
+        desc = args.get("description") or args.get("title") or ""
+    if st and _said(desc):
+        st = dict(st, w=_said(desc))
+    return [st] if st else []
+
+
+_SHELL = re.compile(r"(^|[\\/])(pwsh|powershell|bash|sh|zsh|cmd)(\.exe)?$", re.I)
+
+
+def _unwrap(argv: List[Any]) -> str:
+    """A command as the agent meant it: ["...\\pwsh.exe", "-Command", "git status"] is "git status"."""
+    words = [str(x) for x in argv]
+    if len(words) >= 3 and _SHELL.search(words[0]) and words[1].lower() in ("-command", "-c", "-lc", "/c", "-noprofile"):
+        rest = words[2:]
+        if words[1].lower() == "-noprofile" and rest and rest[0].lower() == "-command":
+            rest = rest[1:]
+        return " ".join(rest)
+    return " ".join(words)
+
+
+def _step(name: str, args: Any) -> Optional[Dict[str, Any]]:
     from .term_render import tool_words
+    low = name.lower()
+    if low in _AGENT_WORDS:
+        return {"w": _AGENT_WORDS[low], "tool": low} if _AGENT_WORDS[low] else None
     args = args if isinstance(args, dict) else {}
-    if isinstance(args.get("command"), list):
-        args = dict(args, command=" ".join(str(x) for x in args["command"]))
+    for key in ("command", "cmd"):
+        if isinstance(args.get(key), list):
+            args = dict(args, **{key: _unwrap(args[key])})
     tool = _TOOL.get(name.lower(), name)
     if name.lower() in _TOOL:
         args = {"command": args.get("command") or args.get("cmd") or "",
@@ -176,8 +260,14 @@ def _step(name: str, args: Any) -> Dict[str, Any]:
     return {"w": tool_words(tool, args), "tool": tool}
 
 
-def _msg(role: str, text: str, at: int, steps: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    return {"role": role, "text": text[-8000:], "at": at, "steps": steps or []}
+def _msg(role: str, text: str, at: int, steps: Optional[List[Dict[str, Any]]] = None,
+         error: bool = False) -> Dict[str, Any]:
+    if role == "user":
+        text = _clean(text) or text
+    m = {"role": role, "text": text[-8000:], "at": at, "steps": steps or []}
+    if error:
+        m["error"] = True
+    return m
 
 
 def _last_model(path: str) -> str:
@@ -193,19 +283,41 @@ def _last_model(path: str) -> str:
     return found[-1] if found else ""
 
 
+def _parts(m: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    if m["steps"]:
+        out.append({"steps": list(m["steps"])})
+    if m["text"]:
+        out.append({"text": m["text"]})
+    return out
+
+
 def _fold(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """One reply per turn, as a chat shows it: the agent's messages and steps
-    between two of the person's join into one."""
+    between two of the person's join into one, and `parts` keeps them in the
+    order they came (steps, words, more steps), as the window shows a turn.
+    `text` and `steps` stay whole for copying and for older phones. An error
+    the agent wrote stays a message of its own."""
     out: List[Dict[str, Any]] = []
     for m in msgs:
-        if m["role"] == "assistant" and out and out[-1]["role"] == "assistant":
-            prev = out[-1]
+        prev = out[-1] if out else None
+        if (m["role"] == "assistant" and prev and prev["role"] == "assistant"
+                and not m.get("error") and not prev.get("error")):
             prev["steps"] = prev["steps"] + m["steps"]
             if m["text"]:
                 prev["text"] = (prev["text"] + "\n\n" + m["text"]).strip()
+            for part in _parts(m):
+                last = prev["parts"][-1] if prev["parts"] else None
+                if last and "steps" in part and "steps" in last:
+                    last["steps"] = last["steps"] + part["steps"]
+                else:
+                    prev["parts"].append(part)
             prev["at"] = m["at"] or prev["at"]
         else:
-            out.append(dict(m))
+            n = dict(m)
+            if n["role"] == "assistant":
+                n["parts"] = _parts(n)
+            out.append(n)
     return [m for m in out if m["text"] or m["steps"]]
 
 
@@ -237,16 +349,44 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
             msgs.append(_msg("user", text, at))
         else:
             from .claude_brain import hearth_view
-            steps = []
-            for b in content if isinstance(content, list) else []:
-                if isinstance(b, dict) and b.get("type") == "tool_use":
+            # Claude Code writes a failed call (a usage limit, an API error) as a reply of its own.
+            failed = bool(o.get("isApiErrorMessage") or o.get("error")) or m.get("model") == "<synthetic>"
+            if not isinstance(content, list):
+                msgs.append(_msg("assistant", _text_of(content), at, [], error=failed))
+                continue
+            for b in content:                   # each block in its order: words, then the steps after them
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "tool_use":
                     name, args = hearth_view(str(b.get("name") or ""), b.get("input") or {})
-                    steps.append(_step(name, args))
-            msgs.append(_msg("assistant", _text_of(content), at, steps))
+                    desc = (b.get("input") or {}).get("description") if isinstance(b.get("input"), dict) else ""
+                    msgs.append(_msg("assistant", "", at, _steps_of(name, args, desc), error=failed))
+                elif b.get("type") == "text" and b.get("text"):
+                    msgs.append(_msg("assistant", str(b["text"]), at, [], error=failed))
     return {"id": sid, "cwd": cwd, "title": summary or title, "messages": _fold(msgs)}
 
 
 # ---------------------------------------------------------------- Codex
+
+# Codex's own runs that aren't a conversation of the person's: the auto-review
+# (guardian) checks, its sub-agents, compaction and memory passes. Codex marks
+# them in the first line (source, thread_source, parent_thread_id); older files
+# without the marks are known by the reviewer's own prompt.
+_REVIEW = re.compile(r">>\s*APPROVAL REQUEST START|>>\s*TRANSCRIPT DELTA START|The Codex agent has requested the following"
+                     r"|Continue the same review conversation")
+
+
+def _codex_not_theirs(meta: Dict[str, Any]) -> bool:
+    src = meta.get("source")
+    if isinstance(src, dict) and ({"subagent", "internal"} & {k.lower() for k in src}):
+        return True
+    if isinstance(src, str) and src.lower() in ("internal", "subagent"):
+        return True
+    ts = str(meta.get("thread_source") or "").lower()
+    if ts and ts != "user":
+        return True
+    return bool(meta.get("parent_thread_id") or meta.get("agent_role") or meta.get("agent_nickname"))
+
 
 def _codex_files() -> List[str]:
     return glob.glob(os.path.join(_home(), ".codex", "sessions", "**", "*.jsonl"), recursive=True)
@@ -261,6 +401,8 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
         at = _ms(o.get("timestamp"))
         if kind == "session_meta" or (not sid and o.get("id") and "instructions" in o):
             sid, cwd = str(p.get("id") or sid), str(p.get("cwd") or cwd)
+            if _codex_not_theirs(p):
+                return {"id": sid, "cwd": cwd, "title": "", "messages": [], "hidden": True}
             continue
         if kind == "turn_context" and p.get("cwd"):
             cwd = cwd or str(p["cwd"])
@@ -269,6 +411,8 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
             said.append(_msg("user", str(p["message"]), at))
         elif kind == "event_msg" and p.get("type") == "agent_message" and p.get("message"):
             said.append(_msg("assistant", str(p["message"]), at))
+        elif kind == "event_msg" and p.get("type") in ("error", "stream_error") and p.get("message"):
+            said.append(_msg("assistant", str(p["message"]), at, error=True))
         elif p.get("type") == "message" and p.get("role") in ("user", "assistant"):
             text = _text_of(p.get("content"))
             if p["role"] == "user" and not _typed(text):
@@ -276,21 +420,28 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
             items.append(_msg(p["role"], text, at))
         elif p.get("type") in ("function_call", "local_shell_call", "custom_tool_call"):
             try:
-                args = json.loads(p.get("arguments") or "{}") if isinstance(p.get("arguments"), str) else (p.get("action") or {})
+                if p.get("type") == "custom_tool_call":
+                    args = p.get("input") or ""          # code mode: the script itself
+                else:
+                    args = json.loads(p.get("arguments") or "{}") if isinstance(p.get("arguments"), str) else (p.get("action") or {})
             except ValueError:
                 args = {}
-            st = _step(str(p.get("name") or "shell"), args)
-            for lst in (said, items):
-                if lst and lst[-1]["role"] == "assistant":
-                    lst[-1]["steps"].append(st)
+            sts = _steps_of(str(p.get("name") or "shell"), args)
+            for lst in (said, items) if sts else ():
+                # Steps after the agent's words come after them: a new piece, joined in order by _fold.
+                if lst and lst[-1]["role"] == "assistant" and not lst[-1].get("error") and not lst[-1]["text"]:
+                    lst[-1]["steps"] += sts
                 else:
-                    lst.append(_msg("assistant", "", at, [st]))
+                    lst.append(_msg("assistant", "", at, list(sts)))
         if head and title and cwd and sid:
             break
     if not sid:
         m = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", os.path.basename(path))
         sid = m.group(1) if m else ""
     msgs = said if any(m["role"] == "user" for m in said) else items
+    first = next((m["text"] for m in msgs if m["role"] == "user"), "")
+    if _REVIEW.search(first[:4000]):
+        return {"id": sid, "cwd": cwd, "title": "", "messages": [], "hidden": True}
     if not title:
         title = next((_title(m["text"]) for m in msgs if m["role"] == "user"), "")
     return {"id": sid, "cwd": cwd, "title": title, "messages": _fold(msgs)}
@@ -333,7 +484,8 @@ def _gemini_read(path: str, head: bool) -> Dict[str, Any]:
         if m.get("type") == "user" and _typed(text):
             msgs.append(_msg("user", text, at))
         elif m.get("type") in ("gemini", "model", "assistant"):
-            steps = [_step(str(c.get("name") or ""), c.get("args") or {}) for c in m.get("toolCalls") or [] if isinstance(c, dict)]
+            steps = [s for c in m.get("toolCalls") or [] if isinstance(c, dict)
+                     for s in _steps_of(str(c.get("name") or ""), c.get("args") or {})]
             msgs.append(_msg("assistant", text, at, steps))
     title = next((_title(m["text"]) for m in msgs if m["role"] == "user"), "")
     return {"id": str(d.get("sessionId") or ""), "cwd": str(d.get("cwd") or "") or _gemini_root(path), "title": title,
@@ -367,8 +519,8 @@ def _pi_read(path: str, head: bool) -> Dict[str, Any]:
                 break
             msgs.append(_msg("user", text, at))
         elif role == "assistant":
-            steps = [_step(str(c.get("name") or ""), c.get("arguments") or {}) for c in content or []
-                     if isinstance(c, dict) and c.get("type") == "toolCall"]
+            steps = [s for c in content or [] if isinstance(c, dict) and c.get("type") == "toolCall"
+                     for s in _steps_of(str(c.get("name") or ""), c.get("arguments") or {})]
             msgs.append(_msg("assistant", _text_of(content), at, steps))
     if not sid:
         m = re.search(r"_([0-9a-f-]{36})\.jsonl$", path)
@@ -427,8 +579,9 @@ def _opencode_read(sid: str) -> Dict[str, Any]:
             if _typed(text):
                 msgs.append(_msg("user", text, at))
         elif mi.get("role") == "assistant":
-            steps = [_step(str(p.get("tool") or ""), (p.get("state") or {}).get("input") or {})
-                     for p in parts if isinstance(p, dict) and p.get("type") == "tool"]
+            steps = [s for p in parts if isinstance(p, dict) and p.get("type") == "tool"
+                     for s in _steps_of(str(p.get("tool") or ""), (p.get("state") or {}).get("input") or {},
+                                        (p.get("state") or {}).get("title"))]
             msgs.append(_msg("assistant", text, at, steps))
     return {"id": sid, "cwd": str(info.get("directory") or ""), "title": _title(str(info.get("title") or "")),
             "messages": _fold(msgs)}
@@ -550,7 +703,7 @@ def listing(limit: int = 120) -> List[Dict[str, Any]]:
     for agent, (files, _) in _FILES.items():
         for p, mt, sz in _newest(files(), PER_AGENT):
             h = _head(agent, p, mt, sz)
-            if not h.get("id"):
+            if not h.get("id") or h.get("hidden"):
                 continue
             rows.append({"agent": agent, "id": h["id"], "cwd": h.get("cwd") or "",
                          "title": h.get("title") or "", "at": int(mt * 1000), "path": p})
@@ -722,8 +875,9 @@ async def _say_claude(exe: List[str], sid: str, cwd: str, text: str, emit: Emit)
         elif t == "assistant":
             for b in (ev.get("message") or {}).get("content") or []:
                 if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") not in _QUIET_TOOLS:
-                    st = _step(*hearth_view(str(b.get("name") or ""), b.get("input") or {}))
-                    emit("step", words=st["w"], tool=st["tool"])
+                    _in = b.get("input") if isinstance(b.get("input"), dict) else {}
+                    for st in _steps_of(*hearth_view(str(b.get("name") or ""), _in), _in.get("description")):
+                        emit("step", words=st["w"], tool=st["tool"])
                     if parts:
                         parts.append("\n\n")
         elif t == "result":
@@ -732,7 +886,8 @@ async def _say_claude(exe: List[str], sid: str, cwd: str, text: str, emit: Emit)
                 failed = final or str(ev.get("subtype") or "error")
         elif t == "_exit" and ev.get("code") and not final and not parts:
             failed = ev.get("err", "")[-400:] or f"it stopped (exit {ev.get('code')})"
-    reply = "".join(parts).strip() or final.strip()
+    # A failed run's result is its error; said once, as an error, not again as a reply.
+    reply = "".join(parts).strip() or ("" if failed else final.strip())
     if failed:
         emit("error", message=f"Claude Code stopped: {failed}"[:600])
     if reply:
