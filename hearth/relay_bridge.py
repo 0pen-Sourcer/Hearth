@@ -711,6 +711,9 @@ class Relay(cc.Adapter):
         room = self.rooms.get(str(chat))
         if room is None:
             return
+        # A push carries about 4 KB; a long command in a question must not lose the notification.
+        body = " ".join(str(obj.get("body") or "").split())
+        obj = dict(obj, body=body[:300] + ("..." if len(body) > 300 else ""), title=str(obj.get("title") or "")[:80])
         fut = asyncio.run_coroutine_threadsafe(room.notice(obj, urgent), self.loop)
         try:
             fut.result(10)
@@ -1028,6 +1031,13 @@ class Bridge:
         edit = m.get("edit") if isinstance(m.get("edit"), dict) else None
         if edit and m.get("chat"):
             cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat")))[:80]
+            with self.hub._lock:
+                busy = cid in self.hub._busy
+            if busy:
+                # Cutting the chat under a turn still running would tangle the two.
+                self.adapter._push(room.chat, {"type": "text", "c": cid,
+                                               "text": "I'm still answering in this chat; edit once I'm done."})
+                return
             drop_from(cid, str(edit.get("text") or ""), int(edit.get("back") or 0))
         self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files,
                          cid=str(m.get("chat") or ""), regen=bool(m.get("regen")))
@@ -1049,12 +1059,15 @@ class Bridge:
             run["answer"] = yes
             q.set()
         else:
+            # Set as the answer in one step: sent as a message, it could start a turn of its own
+            # if the question were answered in the app meanwhile.
             with self.hub._lock:
-                busy = self.hub._busy.get(key) or {}
+                busy = self.hub._busy.get(cid) or self.hub._busy.get(room.chat) or {}
                 q = busy.get("question")
-            if q is None or q.is_set():
-                return
-            self.hub.receive(room.chat, "phone", "yes" if yes else "no", name="Phone", cid=cid)
+                if q is None or q.is_set():
+                    return
+                busy["answer"] = yes
+                q.set()
         # The app shows the question answered when it opens.
         fut = asyncio.run_coroutine_threadsafe(
             room.deliver({"type": "asked", "ask": aid, "yes": yes, "c": cid, "id": secrets.token_hex(6)}), self.loop)

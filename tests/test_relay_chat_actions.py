@@ -83,6 +83,25 @@ chat("c_ed3", "Edits", [("user", "keep me"), ("assistant", "A1")])
 check("words that don't match drop nothing", not RB.drop_from("c_ed3", "something else", back=0)
       and len(chat_sync.load("c_ed3")["messages"]) == 2)
 
+# A notification for a question with a long command still fits one push.
+import asyncio  # noqa: E402
+noticed = []
+
+
+class _Room:
+    async def notice(self, obj, urgent=False):
+        noticed.append(obj)
+
+
+loop = asyncio.new_event_loop()
+threading.Thread(target=loop.run_forever, daemon=True).start()
+relay = RB.Relay(loop)
+relay.rooms["p1"] = _Room()
+relay.notify("p1", {"kind": "ask", "title": "JARVIS asks", "body": "Before I go on: may I run `" + "x" * 5000 + "`?", "ask": "a1"})
+sealed = json.dumps(noticed[-1]) if noticed else ""
+check(f"a long question's notification is cut to fit a push ({len(sealed)} bytes)",
+      noticed and len(noticed[-1]["body"]) <= 303 and noticed[-1]["ask"] == "a1")
+
 srv.shutdown()
 print()
 if FAILS:

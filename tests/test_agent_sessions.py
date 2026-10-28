@@ -213,6 +213,10 @@ t = S.transcript(by["opencode"]["chat"])
 check(f"OpenCode, from its own export ({[m['text'] for m in t['messages']]})",
       [m["text"] for m in t["messages"]] == ["write the README", "Wrote it."] and "README.md" in t["messages"][1]["steps"][0]["w"])
 check("a session that isn't there says so", S.transcript(S.chat_id("codex", "nope")).get("error"))
+check("part of an id isn't taken for a whole one", S.transcript(S.chat_id("codex", CX[:8])).get("error")
+      and S.transcript(S.chat_id("claude-code", "1111")).get("error"))
+check("an id the agent would read as a flag is refused", S.parse_chat("as_claude-code_--dangerously-skip-permissions") is None
+      and S.parse_chat("as_codex_-p") is None)
 
 
 # ---------------------------------------------------------------- carrying on
@@ -225,7 +229,10 @@ def say(chat, text, allow=True):
     def ask(q):
         asked.append(q)
         return allow
-    rc = asyncio.run(S.say(chat, text, emit, ask))
+    try:
+        rc = asyncio.run(asyncio.wait_for(S.say(chat, text, emit, ask), 60))
+    except asyncio.TimeoutError:
+        rc = "stalled"
     return rc, got, asked
 
 
@@ -238,6 +245,8 @@ rc, got, _ = say(by["claude-code"]["chat"], "does it handle refunds?")
 c = ran("claude")[-1]
 check(f"Claude Code resumes that session, in its project folder ({c['argv'][:3]}, {c['cwd']})",
       c["argv"][:3] == ["-p", "--resume", CL] and os.path.samefile(c["cwd"], PA) and c["text"] == "does it handle refunds?")
+check(f"with Before acting on Ask, the permission mode is said outright, so the person's own default can't skip it ({c['argv']})",
+      c["argv"][c["argv"].index("--permission-mode") + 1] == "default" if "--permission-mode" in c["argv"] else False)
 check(f"its steps and words come back as they happen, then the reply ({[k for k, _ in got]})",
       ("step", {"words": "Read cart.js", "tool": "read_file"}) in got and any(k == "live" for k, _ in got)
       and got[-1] == ("text", {"text": "Done: the total rounds once."}) and rc == 0)

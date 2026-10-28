@@ -67,7 +67,8 @@ def parse_chat(cid: str) -> Optional[Tuple[str, str]]:
     if not cid.startswith(PREFIX):
         return None
     agent, _, sid = cid[len(PREFIX):].partition("_")
-    return (agent, sid) if agent in AGENTS and sid else None
+    # An id starts with a letter or digit, so it can never be read as a flag by the agent program.
+    return (agent, sid) if agent in AGENTS and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,}", sid) else None
 
 
 # ---------------------------------------------------------------- reading lines
@@ -369,7 +370,7 @@ def _opencode_list() -> List[Dict[str, Any]]:
     hit = _OC.get("list")
     if hit and time.time() - hit[0] < 30:
         return hit[1]
-    got = _opencode("session", "list", "--format", "json")
+    got = _opencode("session", "list", "--format", "json", timeout=8)
     rows = got if isinstance(got, list) else (got or {}).get("sessions") or [] if isinstance(got, dict) else []
     out = []
     for s in rows:
@@ -384,7 +385,7 @@ def _opencode_list() -> List[Dict[str, Any]]:
 
 
 def _opencode_read(sid: str) -> Dict[str, Any]:
-    got = _opencode("export", sid, timeout=40)
+    got = _opencode("export", sid, timeout=15)
     if not isinstance(got, dict):
         return {}
     info = got.get("info") or {}
@@ -467,7 +468,8 @@ def _find(agent: str, sid: str) -> Optional[str]:
     if agent not in _FILES:
         return None
     for p in _FILES[agent][0]():
-        if sid in os.path.basename(p):
+        # The whole id, where each agent puts it in the file name: never a part of another id.
+        if re.search(r"(^|[-_])" + re.escape(sid) + r"\.jsonl?$", os.path.basename(p)):
             return p
     # A file named some other way: its own id says which.
     for p, mt, sz in _newest(_FILES[agent][0](), 400):
@@ -478,9 +480,11 @@ def _find(agent: str, sid: str) -> Optional[str]:
 
 def read(agent: str, sid: str) -> Dict[str, Any]:
     if agent == "opencode":
-        return _opencode_read(sid)
-    p = _find(agent, sid)
-    return _FILES[agent][1](p, False) if p else {}
+        d = _opencode_read(sid)
+    else:
+        p = _find(agent, sid)
+        d = _FILES[agent][1](p, False) if p else {}
+    return d if d and d.get("id") == sid else {}
 
 
 def transcript(cid: str, last: int = 60) -> Dict[str, Any]:
@@ -548,9 +552,12 @@ async def _lines(args: List[str], cwd: str, text: str):
         *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
         creationflags=0x08000000 if sys.platform == "win32" else 0)
-    proc.stdin.write(text.encode("utf-8"))
-    await proc.stdin.drain()
-    proc.stdin.close()
+    try:                                        # one that exits before reading what it was sent
+        proc.stdin.write(text.encode("utf-8"))
+        await proc.stdin.drain()
+        proc.stdin.close()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
     while True:
         line = await proc.stdout.readline()
         if not line:
@@ -568,9 +575,10 @@ async def _lines(args: List[str], cwd: str, text: str):
 
 async def _say_claude(exe: List[str], sid: str, cwd: str, text: str, emit: Emit) -> int:
     from .claude_brain import hearth_view, _QUIET_TOOLS
-    args = exe + ["-p", "--resume", sid, "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
-    if _mode() in ("edits", "auto"):
-        args += ["--permission-mode", "acceptEdits"]
+    # Always said outright: a default mode in the person's own Claude settings (even one that skips
+    # every permission) must not decide what a run from the phone may do.
+    args = exe + ["-p", "--resume", sid, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+                  "--permission-mode", "acceptEdits" if _mode() in ("edits", "auto") else "default"]
     parts: List[str] = []
     final, failed = "", ""
     async for ev in _lines(args, cwd, text):
