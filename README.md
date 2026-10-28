@@ -1,4 +1,4 @@
-<h1 align="center">Hearth</h1>
+<h1 align="center">Inglen</h1>
 
 <p align="center">
   <strong>Your own JARVIS, running on your own PC.</strong>
@@ -26,28 +26,28 @@
 
 ---
 
-I built Hearth at 17 because I wanted the assistant from the films, the one that knows you and actually does things, and nothing I could run on my own PC came close. Chat apps can't touch your machine. Coding agents stay inside a code folder. Cloud assistants forget you when the tab closes.
+I built Inglen at 17 because I wanted the assistant from the films, the one that knows you and actually does things, and nothing I could run on my own PC came close. Chat apps can't touch your machine. Coding agents stay inside a code folder. Cloud assistants forget you when the tab closes.
 
-Hearth is the framework. JARVIS is the assistant it comes with, and you can rename it to anything. It runs on whatever brain you give it, keeps its memory on your disk, and asks before it does anything risky.
+Inglen is the framework (it was called Hearth until v0.7.6, and the files and settings still use that name). JARVIS is the assistant it comes with, and you can rename it to anything. It runs on whatever brain you give it, keeps its memory on your disk, and asks before it does anything risky.
 
 ## Get started in three steps
 
-1. **Download** [Hearth for Windows](https://github.com/0pen-sourcer/Hearth/releases/latest). Full (about 1 GB) brings its own model server; Lite (about 500 MB) is for when you already run LM Studio, Ollama or a cloud key. Both install to your user folder without admin rights.
+1. **Download** [Inglen for Windows](https://github.com/0pen-sourcer/Hearth/releases/latest). Full (about 1 GB) brings its own model server; Lite (about 500 MB) is for when you already run LM Studio, Ollama or a cloud key. Both install to your user folder without admin rights.
 2. **Pick a brain.** Setup finds what you already have, an agent like Claude Code or Codex, a model file on your disk, or a running LM Studio or Ollama, and offers it. You can also download a model from inside the app, or paste a cloud key.
 3. **Talk to it.** Type, or press the mic and speak. Ask it to find a file, tidy your Downloads, read a PDF, fix a test, or start a team on something bigger.
 
-> **Windows Defender may flag the installer.** Hearth isn't code-signed yet, and unsigned Python apps sometimes trip Defender's machine-learning check (`Program:Win32/Contebrew.A!ml`). It is a false positive, and the app's whole source is in this repo. If it happens, restore the file from Windows Security, Protection history. Signed builds are planned.
+> **Windows Defender may flag the installer.** Inglen isn't code-signed yet, and unsigned Python apps sometimes trip Defender's machine-learning check (`Program:Win32/Contebrew.A!ml`). It is a false positive, and the app's whole source is in this repo. If it happens, restore the file from Windows Security, Protection history. Signed builds are planned.
 
 ## See it
 
 <table>
 <tr>
-<td width="50%" align="center"><strong>It does the thing, on your desktop</strong><br><img src="docs/media/hero.gif" alt="Hearth creating a folder, writing a file, and opening it in Notepad from one request" width="420"></td>
+<td width="50%" align="center"><strong>It does the thing, on your desktop</strong><br><img src="docs/media/hero.gif" alt="Inglen creating a folder, writing a file, and opening it in Notepad from one request" width="420"></td>
 <td width="50%" align="center"><strong>One menu for every brain</strong><br><img src="docs/media/brains.png" alt="The model menu with Claude Code, Codex, Cursor and a saved Anthropic key" width="420"></td>
 </tr>
 <tr>
-<td width="50%" align="center"><strong>A memory that tidies itself</strong><br><img src="docs/media/memory.gif" alt="Hearth's memory browser" width="420"></td>
-<td width="50%" align="center"><strong>Find and run a model without leaving the app</strong><br><img src="docs/media/discover.gif" alt="Downloading and running a model inside Hearth" width="420"></td>
+<td width="50%" align="center"><strong>A memory that tidies itself</strong><br><img src="docs/media/memory.gif" alt="Inglen's memory browser" width="420"></td>
+<td width="50%" align="center"><strong>Find and run a model without leaving the app</strong><br><img src="docs/media/discover.gif" alt="Downloading and running a model inside Inglen" width="420"></td>
 </tr>
 </table>
 
@@ -57,15 +57,15 @@ Hearth is the framework. JARVIS is the assistant it comes with, and you can rena
 
 ### Your PC
 
-Hearth reads and writes files, including PDF, Word, Excel, PowerPoint, EPUB and archives, and it can work through a PDF hundreds of pages long. It runs PowerShell commands, opens any app, file, folder or link, and drives a real Chrome, Edge or Brave window you can watch while it clicks and types. Beyond the browser it reads a window's buttons and fields by name and operates the desktop itself, with the real cursor moving, a soft edge in your accent colour round the screen while it works, and your own window handed back when it's done. It takes screenshots and, with a model that can see, tells you what is on them. It searches the web without an API key, sets reminders in plain words ("every weekday at 9am"), sends email if you set it up, and runs long jobs like a whole-drive search in the background while you keep talking. It makes pictures and short videos on your own graphics card with an engine it installs itself, reading a ComfyUI or WebUI models folder in place, or with a cloud key.
+Inglen reads and writes files, including PDF, Word, Excel, PowerPoint, EPUB and archives, and it can work through a PDF hundreds of pages long. It runs PowerShell commands, opens any app, file, folder or link, and drives a real Chrome, Edge or Brave window you can watch while it clicks and types. Beyond the browser it reads a window's buttons and fields by name and operates the desktop itself, with the real cursor moving, a soft edge in your accent colour round the screen while it works, and your own window handed back when it's done. It takes screenshots and, with a model that can see, tells you what is on them. It searches the web without an API key, sets reminders in plain words ("every weekday at 9am"), sends email if you set it up, and runs long jobs like a whole-drive search in the background while you keep talking. It makes pictures and short videos on your own graphics card with an engine it installs itself, reading a ComfyUI or WebUI models folder in place, or with a cloud key.
 
 ### Brains
 
-A model on this PC through the built-in llama.cpp server, LM Studio, Ollama, vLLM or anything OpenAI-compatible. A cloud model with your own key from Anthropic, OpenAI, Google Gemini, OpenRouter, xAI or Groq. Or **Claude Code, Codex or Cursor**, on the plan you already pay for and with no API key. Other agents that speak the Agent Client Protocol can be the brain once installed, such as OpenCode, Copilot CLI, Goose and Grok Build; OpenCode has been run this way, the others follow the protocol. JARVIS thinks with the agent and still uses Hearth's tools, memory and voice. You switch between all of them from one menu at the top of the window, mid-conversation, without restarting. A model on this PC can stay loaded under a cloud brain, so helpers keep working for free.
+A model on this PC through the built-in llama.cpp server, LM Studio, Ollama, vLLM or anything OpenAI-compatible. A cloud model with your own key from Anthropic, OpenAI, Google Gemini, OpenRouter, xAI or Groq. Or **Claude Code, Codex or Cursor**, on the plan you already pay for and with no API key. Other agents that speak the Agent Client Protocol can be the brain once installed, such as OpenCode, Copilot CLI, Goose and Grok Build; OpenCode has been run this way, the others follow the protocol. JARVIS thinks with the agent and still uses Inglen's tools, memory and voice. You switch between all of them from one menu at the top of the window, mid-conversation, without restarting. A model on this PC can stay loaded under a cloud brain, so helpers keep working for free.
 
 ### Helpers and the Team room
 
-Bigger jobs go to helpers. One sentence starts a mixed team, like "three on Codex for the frontend, two on Claude Haiku for the tests, one on this PC for the docs". Each helper walks into the Team room, sits at a desk and works, and clicking anyone shows who asked, the task and every step so far. You can tell a working helper something or stop it, helpers message each other and JARVIS as they go, and each report comes back to JARVIS. An agent program working in a git repository gets its own copy, and its changes wait for you to bring them in, discard them or undo them. Past eight helpers the next room opens, and there is a winter cabin, a library and an ocean room besides the first. Helpers can also be other agent programs, each on your own install and account. Claude Code, Codex, Cursor and OpenCode have been run from Hearth; it has adapters for 19 more, among them Gemini CLI, Copilot CLI, Aider and Goose, written from each one's documented headless mode and not yet run here. Starting a helper by hand shows the ones on your PC and how to get the rest.
+Bigger jobs go to helpers. One sentence starts a mixed team, like "three on Codex for the frontend, two on Claude Haiku for the tests, one on this PC for the docs". Each helper walks into the Team room, sits at a desk and works, and clicking anyone shows who asked, the task and every step so far. You can tell a working helper something or stop it, helpers message each other and JARVIS as they go, and each report comes back to JARVIS. An agent program working in a git repository gets its own copy, and its changes wait for you to bring them in, discard them or undo them. Past eight helpers the next room opens, and there is a winter cabin, a library and an ocean room besides the first. Helpers can also be other agent programs, each on your own install and account. Claude Code, Codex, Cursor and OpenCode have been run from Inglen; it has adapters for 19 more, among them Gemini CLI, Copilot CLI, Aider and Goose, written from each one's documented headless mode and not yet run here. Starting a helper by hand shows the ones on your PC and how to get the rest.
 
 ### Voice
 
@@ -73,7 +73,7 @@ Press the mic and talk. Speech-to-text (faster-whisper) and text-to-speech (Koko
 
 ### Memory and skills
 
-Every fact JARVIS learns is a small markdown file in your workspace that you can read, edit or delete. JARVIS keeps an index of them in view and looks up the ones a message needs. It notes lasting facts on its own unless you turn that off, ones that are never used are archived rather than deleted, and a new fact that overlaps an old one updates it. It also keeps track of what's going on in your other chats and what's still open, so a new chat that starts with "guess what" gets a real guess, and each reply can show what it had in mind. Every past chat is searchable, and one switch shares your memory with Claude Code, Codex, Cursor or OpenCode so they know you too. A skill is a folder that teaches a workflow, like making a PDF, a slide deck or a spreadsheet, and it uses the Agent Skills format Claude and Codex read too, so most skills on GitHub install here in one line, `/skill install owner/repo`, and each can be switched off without removing it. See [docs/SKILLS.md](docs/SKILLS.md) and [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
+Every fact JARVIS learns is a small markdown file in your workspace that you can read, edit or delete. JARVIS keeps an index of them in view and looks up the ones a message needs. It notes lasting facts on its own unless you turn that off, ones that are never used are archived rather than deleted, and a new fact that overlaps an old one updates it. Each chat keeps a short card of where it stands (the goal, what's done and what's still open), so a new chat that starts with "guess what" gets a real guess, and each reply can show what it had in mind. Every past chat is searchable, by words or by time ("what did we do last Tuesday"), and one switch shares your memory with Claude Code, Codex, Cursor or OpenCode so they know you too. A skill is a folder that teaches a workflow, like making a PDF, a slide deck or a spreadsheet, and it uses the Agent Skills format Claude and Codex read too, so most skills on GitHub install here in one line, `/skill install owner/repo`, and each can be switched off without removing it. See [docs/SKILLS.md](docs/SKILLS.md) and [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
 
 ### Everywhere else
 
@@ -81,7 +81,7 @@ The terminal app (`hearth.bat`) does everything the window does, with slash comm
 
 ### Safety
 
-A switch beside the send box decides what runs without asking. **Ask** checks before anything acts on your machine. **Auto-edit** lets edits inside the workspace through. **Auto** runs routine work on its own and still asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs. Writes are confined to the workspace folder unless you allow another one, and Hearth never runs elevated.
+A switch beside the send box decides what runs without asking. **Ask** checks before anything acts on your machine. **Auto-edit** lets edits inside the workspace through. **Auto** runs routine work on its own and still asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs. Writes are confined to the workspace folder unless you allow another one, and Inglen never runs elevated.
 
 ---
 
@@ -89,11 +89,11 @@ A switch beside the send box decides what runs without asking. **Ask** checks be
 
 On this PC, any model of about 7B or larger that was trained for tool calling works. The Models tab marks each file by whether it fits your graphics card and points at the right size for it. Small local models handle everyday work well (open this, read that, remember this) and can lose the thread on long multi-step jobs; a loop guard catches them when they start repeating. For deep research or long coding work, a cloud model or an agent brain is the better pick, and you can switch for one task and back.
 
-Hearth reads the tool-call formats of Gemma, Hermes, Qwen, Llama, Mistral, Phi, Granite and Command-R, so a model whose server doesn't parse its tool calls still works.
+Inglen reads the tool-call formats of Gemma, Hermes, Qwen, Llama, Mistral, Phi, Granite and Command-R, so a model whose server doesn't parse its tool calls still works.
 
 ## How it compares
 
-OpenClaw and Hermes are agents that go wide, across many messaging channels. OpenClaw recommends WSL2 on Windows, and Hermes controls a desktop only through a Linux add-on. Open WebUI and LM Studio are places to chat with a model, and LM Studio can use Hearth's tools through MCP. Hearth goes deep on one Windows PC. It controls the desktop itself, runs the agents you already pay for as its brain or as helpers, and keeps everything on your disk.
+OpenClaw and Hermes are agents that go wide, across many messaging channels. OpenClaw recommends WSL2 on Windows, and Hermes controls a desktop only through a Linux add-on. Open WebUI and LM Studio are places to chat with a model, and LM Studio can use Inglen's tools through MCP. Inglen goes deep on one Windows PC. It controls the desktop itself, runs the agents you already pay for as its brain or as helpers, and keeps everything on your disk.
 
 ## FAQ
 
@@ -105,9 +105,9 @@ OpenClaw and Hermes are agents that go wide, across many messaging channels. Ope
 
 **Can it replace ChatGPT?** For talking, looking things up and working on your own files and apps, on a good brain, yes. On a small local model it is quicker to set up than it is clever, so pick the brain to match the job.
 
-**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. There is no telemetry. Hearth also asks GitHub for its own updates and for the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
+**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. There is no telemetry. Inglen also asks GitHub for its own updates and for the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
 
-**Why "Hearth"?** It's the warm center of the house. JARVIS lives there.
+**Why "Inglen"?** An ingle is the fire in a hearth, the warm center of the house. JARVIS lives there. It was called Hearth before, and an update from Hearth keeps your settings, memory and chats.
 
 ---
 
@@ -120,7 +120,7 @@ Needs Python 3.11 or newer.
 git clone https://github.com/0pen-sourcer/Hearth.git
 cd Hearth
 .\install.ps1                      # bring your own server (LM Studio, Ollama, vLLM, llama.cpp or a cloud key)
-.\install.ps1 -BuiltinLLM cuda     # NVIDIA card: Hearth installs and runs its own llama.cpp server
+.\install.ps1 -BuiltinLLM cuda     # NVIDIA card: Inglen installs and runs its own llama.cpp server
 .\install.ps1 -BuiltinLLM cpu      # no card: the same server on the CPU
 .\hearth.bat                       # start the terminal app
 python -m hearth.tray --open       # start the window
@@ -130,9 +130,9 @@ In the window, Models, Engine downloads the official llama.cpp build for your ca
 
 The installer is safe to run again and can skip optional parts (voice, speech-to-text, the MCP SDK, file readers, the window, browser control); `Get-Help .\install.ps1 -Detailed` lists them. Started on Lite and want the built-in server later? Run the Full installer over it and your settings, memory and chats stay where they are.
 
-On macOS and Linux the terminal app and the web window work, and most tools (shell, files, screenshots, apps, windows, clipboard, web, reminders, notifications) have native paths there. Linux is tested on Mint 22 and Ubuntu 24.04, where Hearth also downloads its model and image engines for itself; macOS runs the same code but hasn't been tried on a real Mac yet. Desktop control and the installer are Windows only for now. Steps are in [docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md).
+On macOS and Linux the terminal app and the web window work, and most tools (shell, files, screenshots, apps, windows, clipboard, web, reminders, notifications) have native paths there. Linux is tested on Mint 22 and Ubuntu 24.04, where Inglen also downloads its model and image engines for itself; macOS runs the same code but hasn't been tried on a real Mac yet. Desktop control and the installer are Windows only for now. Steps are in [docs/INSTALL_LINUX_MAC.md](docs/INSTALL_LINUX_MAC.md).
 
-Hearth finds a running LM Studio (port 1234), Ollama (11434) or llama.cpp server (8080) on its own. For anything else, set `LOCAL_API_BASE` to an OpenAI-compatible address.
+Inglen finds a running LM Studio (port 1234), Ollama (11434) or llama.cpp server (8080) on its own. For anything else, set `LOCAL_API_BASE` to an OpenAI-compatible address.
 
 </details>
 
@@ -144,7 +144,7 @@ Hearth finds a running LM Studio (port 1234), Ollama (11434) or llama.cpp server
 | **Window** | `Hearth.exe`, or `python -m hearth.tray --open` | Chats, Team room, memory, models, settings, voice |
 | **Terminal** | `.\hearth.bat` | Everything the window does, with slash commands and voice |
 | **Headless** | `python -m hearth.headless --prompt "..."` | JSON lines out, for scripts, CI or another agent; `--format text` for people |
-| **MCP server** | `python -m hearth.mcp_server` | Hearth's tools inside LM Studio, Claude Desktop, Cursor or Cline |
+| **MCP server** | `python -m hearth.mcp_server` | Inglen's tools inside LM Studio, Claude Desktop, Cursor or Cline |
 
 </details>
 
@@ -155,7 +155,7 @@ Hearth finds a running LM Studio (port 1234), Ollama (11434) or llama.cpp server
    you (mic) ──▶ faster-whisper ──┐
    you (keys) ──────── text ──────┤
                                    ▼
-                     Hearth (window / terminal / bridge)
+                     Inglen (window / terminal / bridge)
                                    │  messages + tools
                                    ▼
           a model on this PC, a cloud model, or Claude Code / Codex / Cursor
@@ -169,7 +169,7 @@ Hearth finds a running LM Studio (port 1234), Ollama (11434) or llama.cpp server
    you (ears) ◀── Kokoro ◀── streamed reply
 ```
 
-Hearth has over a hundred tools, but only a core set goes to the model in full each turn. It sees the names of the rest and loads one when it needs it, so the prompt stays small. `HEARTH_ALL_TOOLS=1` loads everything up front. The full list is in [docs/TOOLS.md](docs/TOOLS.md).
+Inglen has over a hundred tools, but only a core set goes to the model in full each turn. It sees the names of the rest and loads one when it needs it, so the prompt stays small. `HEARTH_ALL_TOOLS=1` loads everything up front. The full list is in [docs/TOOLS.md](docs/TOOLS.md).
 
 </details>
 
@@ -246,11 +246,11 @@ Good first pull requests are macOS and Linux versions of the Windows-only tools 
 
 ## Privacy
 
-Hearth runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Hearth is fully offline. The [MIT license](LICENSE) is the whole agreement.
+Inglen runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Inglen is fully offline. The [MIT license](LICENSE) is the whole agreement.
 
 ## Support
 
-Hearth is free and built by one person. Ways to help it along are in [docs/SUPPORT.md](docs/SUPPORT.md).
+Inglen is free and built by one person. Ways to help it along are in [docs/SUPPORT.md](docs/SUPPORT.md).
 
 ## License
 

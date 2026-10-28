@@ -1,6 +1,6 @@
 # Tools
 
-Hearth gives the model **111 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
+Inglen gives the model **111 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
 To keep the prompt small, **36** core tools load with their full description and **75** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
@@ -78,7 +78,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `list_installed_apps` † | Installed applications (Windows registry uninstall keys) |
 | `list_models` † | List the LLM models available on the connected server (LM Studio / Ollama / cloud) by querying its API |
 | `list_processes` † | List running processes (top by memory) |
-| `load_model` † | Load a model file from this PC on Hearth's built-in engine |
+| `load_model` † | Load a model file from this PC on Inglen's built-in engine |
 | `network_info` † | Local IP address, hostname, network adapters, wifi |
 | `open_app` | Open an app by name, a file with its default program, a folder in Explorer, or a URL |
 | `run_command` | Run a shell command |

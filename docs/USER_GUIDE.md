@@ -1,12 +1,12 @@
-# Hearth user guide
+# Inglen user guide
 
-For when you've just installed Hearth and want to know what it does and where things are.
+For when you've just installed Inglen and want to know what it does and where things are.
 
 ---
 
 ## Getting started
 
-1. **Install.** Download [Hearth for Windows](https://github.com/0pen-sourcer/Hearth/releases/latest). Full (about 1 GB) brings its own model engine; Lite (about 500 MB) is for when you already run LM Studio, Ollama or a cloud key. Both install to your user folder without admin rights. Windows Defender may flag the unsigned installer; it's a false positive, and you can restore the file from Windows Security, Protection history.
+1. **Install.** Download [Inglen for Windows](https://github.com/0pen-sourcer/Hearth/releases/latest). Full (about 1 GB) brings its own model engine; Lite (about 500 MB) is for when you already run LM Studio, Ollama or a cloud key. Both install to your user folder without admin rights. Windows Defender may flag the unsigned installer; it's a false positive, and you can restore the file from Windows Security, Protection history.
 2. **Pick a brain.** Setup finds what you already have: an agent like Claude Code or Codex, a model file on your disk, or a running LM Studio or Ollama. Pick one, or download a model from the Models tab later, or paste a cloud key.
 3. **Talk to it.** Type, or press the mic and speak.
 
@@ -29,11 +29,11 @@ Running from source instead? See "Install from source" in the [README](../README
 
 JARVIS can think with any of these, switched from the model menu at any time:
 
-- **A model on this PC**, through Hearth's own engine, LM Studio, Ollama or any OpenAI-compatible server. Private, free, and offline.
+- **A model on this PC**, through Inglen's own engine, LM Studio, Ollama or any OpenAI-compatible server. Private, free, and offline.
 - **A cloud model** with your own key from Anthropic, OpenAI, Google Gemini, OpenRouter, xAI or Groq.
 - **An agent you already pay for**: Claude Code, Codex or Cursor, on your plan and with no key. Other agents that speak the Agent Client Protocol work too once installed, such as OpenCode, Copilot CLI, Goose and Grok Build.
 
-Whatever the brain, JARVIS keeps Hearth's tools, memory and voice, and asks before anything risky. The Think menu lists the effort levels the chosen model has; on Codex and Claude Code it also has a Fast switch. With a cloud brain, a model on this PC can stay loaded (a switch in the model menu) to run helpers for free.
+Whatever the brain, JARVIS keeps Inglen's tools, memory and voice, and asks before anything risky. The Think menu lists the effort levels the chosen model has; on Codex and Claude Code it also has a Fast switch. With a cloud brain, a model on this PC can stay loaded (a switch in the model menu) to run helpers for free.
 
 **Which local model?** Any model of about 7B or larger trained for tool calling. The Models tab marks each file by whether it fits your graphics card. Small models handle everyday work well and can lose the thread on long multi-step jobs; for those, a cloud model or an agent brain is the better pick.
 
@@ -43,10 +43,10 @@ Whatever the brain, JARVIS keeps Hearth's tools, memory and voice, and asks befo
 
 Bigger jobs go to helpers. Ask for them in plain words ("have Codex write the tests while a helper on Claude Haiku looks up the API"), or press **New helper** in the Team tab.
 
-- **Where they run.** One of Hearth's own helpers runs on JARVIS's brain, this PC's model, or a cloud model you name. Agent programs (Claude Code, Codex, Cursor, OpenCode and more) run on your own install and account.
+- **Where they run.** One of Inglen's own helpers runs on JARVIS's brain, this PC's model, or a cloud model you name. Agent programs (Claude Code, Codex, Cursor, OpenCode and more) run on your own install and account.
 - **Watching them.** The Team room shows each helper at a desk; past eight, the next room opens. Click anyone to see who asked, the task, every step, and what it changed.
 - **Talking to them.** Type in a working helper's panel to tell it something part-way. Helpers also message each other and JARVIS as they work; in the room, the sender walks over and says it.
-- **Their changes.** An agent program working in a git repository gets its own copy of it. Its changes wait in its panel to be brought in, discarded or undone. Hearth's own helpers write directly, and what they changed can be undone.
+- **Their changes.** An agent program working in a git repository gets its own copy of it. Its changes wait in its panel to be brought in, discarded or undone. Inglen's own helpers write directly, and what they changed can be undone.
 - **Stopping one.** The Stop button in its panel, or `/team stop <n>` in the terminal.
 - **Racing.** Ask for the same task from two agents ("have Codex and Claude Code both fix this bug and run the tests") and you get one comparison to choose from.
 
@@ -58,7 +58,7 @@ Press the mic in the top bar. The window turns into a dot grid that listens and 
 
 - Speak, pause, and JARVIS answers out loud. The mic opens again for your reply.
 - **Interrupting.** On headphones, talk over a reply and it stops on your first word, then answers what you said instead. On speakers it ignores what the mic hears while it talks, so it doesn't answer itself, except anything that starts with its name: "Jarvis, stop" cuts the reply.
-- **The desktop HUD.** When Hearth isn't the focused window, a small dot grid floats over your other apps. Clicks pass through it; hold Ctrl to drag it.
+- **The desktop HUD.** When Inglen isn't the focused window, a small dot grid floats over your other apps. Clicks pass through it; hold Ctrl to drag it.
 - **Wake word.** Right-click the tray icon and turn on **Wake word**. Saying "Jarvis" opens voice mode.
 - Voices, speed, the mic and the listening model are in Settings, Voice.
 
@@ -95,7 +95,7 @@ When something needs your OK, a strip above the chat box asks: **Yes (once)**, *
 
 ## Reminders
 
-Say it however you like. Hearth works out the exact time and reads back the day and time in words.
+Say it however you like. Inglen works out the exact time and reads back the day and time in words.
 
 | Say | Set for |
 |---|---|
@@ -117,17 +117,17 @@ Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs 
 ## Memory and chats
 
 - **Memory.** Every fact JARVIS learns is a small file in `~/Jarvis/memory`. It keeps an index of them in view and looks up what a message needs, and ones never used are archived rather than deleted. Read, change or delete them in the Memory tab.
-- **Saving on its own.** After a reply JARVIS notes lasting facts from the chat. Turn that off in Settings, Behavior, Remember things on its own, and it saves only when you ask. Telling it in a chat not to save something works too.
+- **Saving on its own.** Once a chat goes quiet, JARVIS notes lasting facts from it, on a model loaded on this PC when there is one and otherwise on the brain you use. Turn that off in Settings, Behavior, Remember things on its own, and it saves only when you ask. Telling it in a chat not to save something works too.
 - **What's going on.** When a chat goes quiet for a few minutes, JARVIS notes where it stands: the goal, what you settled on (a budget, a shortlist) and what's still left, like the phone you haven't bought yet or the form waiting on a payment. The newest of those come along with the first message of a new chat, so "guess what, I got it" gets a real guess. The **in mind** button under a reply lists each thing it used, with the chat it came from, and lets you forget one or mark it done. The Memory tab lists them under **Going on**. The same switch turns this off.
-- **Past chats.** Every chat is searchable, so "what did we decide about X last week" works.
-- **Shared with your coding agents.** The Memory tab's **Share with agents** has a switch for each of Claude Code, Codex, Cursor and OpenCode that you have installed. One that's on can use your memory as a tool, with your facts, past chats and what's going on, and nothing else of Hearth's.
+- **Past chats.** Every chat is searchable by words and by time, so "what did we decide about X last week" works.
+- **Shared with your coding agents.** The Memory tab's **Share with agents** has a switch for each of Claude Code, Codex, Cursor and OpenCode that you have installed. One that's on can use your memory as a tool, with your facts, past chats and what's going on, and nothing else of Inglen's.
 - **One set of chats.** A chat from the terminal shows in the window and can be carried on there, and `/chats` and `/chat <n>` open any chat in the terminal.
 
 ---
 
 ## Dropping files
 
-Drag files onto the window. Hearth reads PDF, Word, Excel, PowerPoint, EPUB, notebooks, RTF, CSV, JSON, HTML and compressed files; it looks inside zip and tar archives without unpacking them; and with a model that can see, it reads images.
+Drag files onto the window. Inglen reads PDF, Word, Excel, PowerPoint, EPUB, notebooks, RTF, CSV, JSON, HTML and compressed files; it looks inside zip and tar archives without unpacking them; and with a model that can see, it reads images.
 
 Type `@` in the message box to pick a past chat by its title or a file or folder by its name; it goes along with the message. The Files tab previews a file in place, and its **Open** menu lists the apps that can open it.
 
@@ -135,7 +135,7 @@ Type `@` in the message box to pick a past chat by its title or a file or folder
 
 ## Images and video
 
-Ask for a picture or a short video in plain words. **Models, Images & video** installs Hearth's image engine (stable-diffusion.cpp) for your graphics card and lists the image models it finds, in `~/.hearth/image-models` or in a ComfyUI or WebUI models folder you add there. A ready model on your PC is used first; with a key for xAI Grok, OpenAI or Google Gemini saved, the cloud works too, whatever the brain. Say "on my PC" or "in the cloud" to choose. A model is recognised by its file name for now, so one with a name all its own isn't listed yet.
+Ask for a picture or a short video in plain words. **Models, Images & video** installs Inglen's image engine (stable-diffusion.cpp) for your graphics card and lists the image models it finds, in `~/.hearth/image-models` or in a ComfyUI or WebUI models folder you add there. A ready model on your PC is used first; with a key for xAI Grok, OpenAI or Google Gemini saved, the cloud works too, whatever the brain. Say "on my PC" or "in the cloud" to choose. A model is recognised by its file name for now, so one with a name all its own isn't listed yet.
 
 ---
 
@@ -153,7 +153,7 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 
 ## The terminal
 
-`hearth.bat` (from source) or **Hearth CLI** (from the installer) does everything the window does, with slash commands and voice. `@path` attaches a file. The prompt stays open while JARVIS replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
+`hearth.bat` (from source) or the **CLI** shortcut the installer adds to the Start menu does everything the window does, with slash commands and voice. `@path` attaches a file. The prompt stays open while JARVIS replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
 
 ```
 /help            every command
@@ -215,6 +215,8 @@ A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide
 - **Behavior**: the agent's name, reasoning, house rules, saving memories on its own, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
 - **Appearance**: Classic, Light, Dark or System, Simple or Advanced, the accent, the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups).
 - **Connectors**: Telegram, Discord, WhatsApp, who is let in, and email.
+- **Plus**: Inglen Plus, a paid add-on with a phone app that reaches this PC from anywhere; pairing a phone happens here.
+- **Built-in server** and **MCP servers** (in the Advanced view): the engine's settings and other tools' servers.
 - **About**: version, updates, repair, start at login, and the tour.
 
 Everything saves as you change it, with no restart.
@@ -245,9 +247,9 @@ Reads default to your whole disk; writes, deletes and moves stay in the workspac
 
 - **The app won't open**: check `~/Jarvis/logs/hearth_tray.log`. If Windows Defender quarantined `Hearth.exe`, restore it from Windows Security, Protection history.
 - **A model won't load**: the error says why (too big for the card, a newer model than the engine, a format the engine can't read). Update the engine in Models, Engine, or pick a smaller file. A model made for another build of llama.cpp (its page says which) loads once you add that build under Models, Engine, Add an engine.
-- **An agent brain gives no answer**: check it's signed in (`claude auth status`, `codex login status`, `cursor-agent status`), or open `/agents` in the terminal.
+- **An agent brain goes quiet**: after 90 seconds with no word from it, the chat says it may still be thinking, and Stop ends the turn. When the agent wrote an error to its own log (a used-up free limit, say), the turn ends with those words. Otherwise check it's signed in (`claude auth status`, `codex login status`, `cursor-agent status`), or open `/agents` in the terminal.
 - **Voice talks over itself on speakers**: pick speakers in Settings, Voice; on headphones it can be interrupted.
-- **Something broken**: Settings, About, Repair puts Hearth's own files back without touching your chats or memory.
+- **Something broken**: Settings, About, Repair puts Inglen's own files back without touching your chats or memory.
 - The Logs tab shows every tool call and its result, which usually explains what happened.
 
 ---

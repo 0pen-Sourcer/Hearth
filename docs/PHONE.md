@@ -1,6 +1,6 @@
-# Reach Hearth from your phone
+# Reach Inglen from your phone
 
-Message Hearth from Telegram, Discord or WhatsApp and it runs the full agent on your PC, then
+Message Inglen from Telegram, Discord or WhatsApp and it runs the full agent on your PC, then
 replies, with files, pictures and voice notes going both ways. There is no OAuth, no public server
 and no port forwarding. Nothing leaves your machine except through the app you connect.
 
@@ -9,7 +9,7 @@ and no port forwarding. Nothing leaves your machine except through the app you c
 - **WhatsApp** is experimental. It links a real account through an unofficial library, which
   carries a ban risk, so use a spare number only.
 
-A connected app runs alongside Hearth, starts again on every launch, and stops when Hearth closes.
+A connected app runs alongside Inglen, starts again on every launch, and stops when Inglen closes.
 
 ## Connect an app
 
@@ -25,7 +25,7 @@ bot. In a server you share with it, it answers when you @mention it.
 
 **WhatsApp.** Press **Start** under WhatsApp in Connectors and scan the QR code with WhatsApp
 (Settings, Linked Devices, Link a Device). With "also answer my own self-chat" on, you can message
-yourself on that number to reach Hearth.
+yourself on that number to reach Inglen.
 
 ## Letting people in
 
@@ -43,13 +43,13 @@ someone you let in can't let in others.
 
 ## What it can do from the phone
 
-Anything Hearth can do on the PC. It reads and writes files, runs commands, searches the web,
+Anything Inglen can do on the PC. It reads and writes files, runs commands, searches the web,
 drives apps, makes images, sets reminders and starts helpers. On Telegram and Discord you watch
 the tools run in a message that updates as it works, then get the answer. On WhatsApp the answer
 ends with a line saying what was used.
 
 Send a **voice note** and it is written down by the speech model on your PC. Send a **photo or a
-file** and Hearth keeps it in your workspace's uploads folder and looks at it. When the reply names
+file** and Inglen keeps it in your workspace's uploads folder and looks at it. When the reply names
 a file, the file is sent back to you.
 
 If a step would ask for your OK on the PC (deleting something, running a command, sending an
@@ -57,7 +57,7 @@ email), it asks in the chat instead. Reply **yes** to let it go on, anything els
 Auto approval mode it asks only what Auto always asks. Messages you send while it is still working
 are handed to the reply in progress.
 
-Each person's conversation is one of your Hearth chats, marked with the app, so you can carry it on
+Each person's conversation is one of your Inglen chats, marked with the app, so you can carry it on
 in the window.
 
 ## Reminders on your phone

@@ -1,6 +1,6 @@
 # Skills: write once, share with a link
 
-A **skill** teaches Hearth a repeatable workflow: "to make a slide deck, follow
+A **skill** teaches Inglen a repeatable workflow: "to make a slide deck, follow
 these steps and use this script." It's just a folder with a `SKILL.md`. The
 model sees a one-line summary of every installed skill in its prompt, and loads
 the full instructions only when it actually uses one, so you can have dozens
@@ -10,7 +10,7 @@ Skills are different from tools and plugins:
 
 | | What it is | Best for |
 |---|---|---|
-| **Tool** | A built-in callable (`read_file`, `run_command`, …) | The hundred-odd things Hearth can already do |
+| **Tool** | A built-in callable (`read_file`, `run_command`, …) | The hundred-odd things Inglen can already do |
 | **Plugin** | A Python file that adds a *new* tool | "I need a brand-new callable right now" |
 | **Skill** | Prose + scripts that orchestrate existing tools | "I know the 8 steps to do X, here they are" |
 
@@ -53,7 +53,7 @@ tools: [list_directory, create_directory, move_path]
   loads the skill, so make it a clear "use this when…".
 - `version`, `author`: optional, shown at install.
 - `tools`: optional but **recommended**, the tools the skill expects to call.
-  Hearth shows this at install so the user knows what the skill will touch. If
+  Inglen shows this at install so the user knows what the skill will touch. If
   any are risky (`run_command`, `write_file`, `delete_path`, …) the installer
   flags the skill as one that can run code / change files.
 
@@ -61,7 +61,7 @@ tools: [list_directory, create_directory, move_path]
 
 ## Authoring
 
-The fastest way is to let Hearth scaffold it:
+The fastest way is to let Inglen scaffold it:
 
 ```
 /skill new clean-downloads
@@ -70,7 +70,7 @@ The fastest way is to let Hearth scaffold it:
 That drops a `clean-downloads/` folder with a filled-in `SKILL.md` template under
 `~/Jarvis/skills/`. Edit the body, drop any helper scripts in `scripts/`, and
 it's live immediately (`/skill list`, or the Skills tab in the window, to confirm). You can
-also just ask Hearth in chat; when it notices you doing the same multi-step thing twice,
+also just ask Inglen in chat; when it notices you doing the same multi-step thing twice,
 it can write a skill for you.
 
 ---
@@ -80,7 +80,7 @@ it can write a skill for you.
 A skill is a folder, so sharing is just publishing that folder.
 
 1. Put your skill folder in a GitHub repo (the repo root, or a subfolder).
-2. Share the repo. Anyone with Hearth installs it with one line:
+2. Share the repo. Anyone with Inglen installs it with one line:
 
    ```
    /skill install yourname/your-repo
@@ -92,7 +92,7 @@ A skill is a folder, so sharing is just publishing that folder.
    /skill install yourname/your-repo/clean-downloads
    ```
 
-   They can also paste the GitHub link into chat and Hearth will offer to install
+   They can also paste the GitHub link into chat and Inglen will offer to install
    it. A specific branch or tag: `yourname/your-repo@v2`.
 
 3. Add it to the community index so others find it:
@@ -103,7 +103,7 @@ A skill is a folder, so sharing is just publishing that folder.
 
 ## Safety (read before installing other people's skills)
 
-A skill runs with the **same access as Hearth itself**; there is no sandbox.
+A skill runs with the **same access as Inglen itself**; there is no sandbox.
 Its `SKILL.md` is instructions the model follows, and any `scripts/` it ships run
 via `run_command`. So treat an installed skill like any other code you downloaded.
 

@@ -1,6 +1,6 @@
-# Running Hearth on macOS / Linux
+# Running Inglen on macOS / Linux
 
-Hearth ships a one-click installer for Windows. On macOS and Linux you run it
+Inglen ships a one-click installer for Windows. On macOS and Linux you run it
 from source. The terminal app and web UI are fully usable, and most tools work the same
 way they do on Windows. A few Windows-specific conveniences (desktop shortcuts,
 Start-Menu app launching, the registry app list) either fall back to a POSIX
@@ -56,12 +56,12 @@ These are only needed for specific features:
 
 ## The built-in model server
 
-Open **Models, Engine** in the window and install the engine. Hearth downloads
+Open **Models, Engine** in the window and install the engine. Inglen downloads
 the official llama.cpp build for your system and card from its releases: CUDA for
 an NVIDIA card, Vulkan for AMD and Intel, Metal on Apple silicon, and the CPU
 build otherwise. Nothing needs compiling.
 
-If you'd rather not run the built-in server, just point Hearth at LM Studio or
+If you'd rather not run the built-in server, just point Inglen at LM Studio or
 Ollama in **Settings, Chat brain**. That path is identical on every OS.
 
 ## Images and video

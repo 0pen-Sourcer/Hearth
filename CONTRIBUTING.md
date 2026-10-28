@@ -1,6 +1,6 @@
-# Contributing to Hearth
+# Contributing to Inglen
 
-Hearth started as one person's tool and got opened up to the world because the gap between "your model can chat" and "your model can run your machine" is too big to leave unfilled. The faster Hearth generalizes beyond one developer's setup, the better it gets for everyone, so PRs are welcome and triaged seriously.
+Inglen started as one person's tool and got opened up to the world because the gap between "your model can chat" and "your model can run your machine" is too big to leave unfilled. The faster Inglen generalizes beyond one developer's setup, the better it gets for everyone, so PRs are welcome and triaged seriously.
 
 ## TL;DR
 
@@ -34,7 +34,7 @@ Any agent that speaks the Agent Client Protocol can already be JARVIS's brain th
 
 ### 5. Share a skill (no code needed)
 
-The highest-leverage contribution isn't even to this repo. A skill is a folder with a `SKILL.md` that teaches Hearth a workflow; see [docs/SKILLS.md](docs/SKILLS.md). Write one that does something useful on a real PC ("archive last month's screenshots", "set up a new Python project"), push it to a repo, and add it to the community index, [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills). Anyone installs it with `/skill install <you>/<repo>`. The more good skills exist, the more reasons there are to run Hearth.
+The highest-leverage contribution isn't even to this repo. A skill is a folder with a `SKILL.md` that teaches Inglen a workflow; see [docs/SKILLS.md](docs/SKILLS.md). Write one that does something useful on a real PC ("archive last month's screenshots", "set up a new Python project"), push it to a repo, and add it to the community index, [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills). Anyone installs it with `/skill install <you>/<repo>`. The more good skills exist, the more reasons there are to run Inglen.
 
 ## What we won't merge
 
@@ -74,7 +74,7 @@ python -X utf8 tests/test_team.py
 
 ## Code style
 
-- Match what's already there. Hearth is pragmatic, not pedantic. Reads like 2026 Python; uses type hints where they help; avoids `class` for things that fit in a function.
+- Match what's already there. Inglen is pragmatic, not pedantic. Reads like 2026 Python; uses type hints where they help; avoids `class` for things that fit in a function.
 - One feature per PR. Tangentially-related cleanups are fine in the same PR if they're small.
 - No comments for the sake of comments. If the code is self-explanatory, leave it. Comment the *why*, not the *what*.
 - Black/ruff-clean if you can; we don't enforce it in CI yet.

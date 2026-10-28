@@ -54,7 +54,7 @@ def main() -> int:
     out = []
     out.append("# Tools\n")
     out.append(
-        f"Hearth gives the model **{total} tools** to operate your machine. "
+        f"Inglen gives the model **{total} tools** to operate your machine. "
         f"Everything runs locally, and the only outbound calls are web searches "
         f"and fetches the model itself makes. Tools that act on your machine "
         f"(shell, file writes, app launch, clicking and typing) ask permission "
