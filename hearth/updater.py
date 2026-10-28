@@ -319,11 +319,22 @@ def apply_patch(path: str) -> dict:
         return {"ok": False, "error": "this build isn't patchable"}
     if not path or not os.path.isfile(path):
         return {"ok": False, "error": "patch file not found"}
+    # Nothing is written unless the patch is signed by a release key and every file matches its signed hash.
+    from .patch_sign import check as _check, MANIFEST, SIGNATURE
+    signed = _check(path, HEARTH_VERSION)
+    if not signed.get("ok"):
+        # A refused download isn't kept: the next try fetches it again instead of reusing it.
+        if os.path.dirname(os.path.abspath(path)) == os.path.abspath(os.path.expanduser("~/.hearth/updates")):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        return {"ok": False, "error": signed["error"]}
     backup = _backup_dir(base)
     marker = os.path.join(base, _INFLIGHT)
     try:
         with zipfile.ZipFile(path) as z:
-            names = [n for n in z.namelist() if not n.endswith("/")]
+            names = [n for n in z.namelist() if not n.endswith("/") and n not in (MANIFEST, SIGNATURE)]
             # Refuse absolute paths and traversal before writing anything.
             for n in names:
                 p = os.path.normpath(os.path.join(base, n))

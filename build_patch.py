@@ -158,6 +158,22 @@ def main() -> int:
         for src, arc in members:
             z.write(src, arc)
 
+    # Signed with the release key, or the app refuses it (hearth/patch_sign.py).
+    key_file = os.environ.get("HEARTH_PATCH_KEY", "")
+    if key_file:
+        import base64
+        from hearth.patch_sign import sign_zip
+        with open(key_file) as f:
+            sign_zip(out, base64.b64decode(f.read().strip()), HEARTH_VERSION)
+        print("  signed with the release key")
+    else:
+        print("WARNING: not signed (set HEARTH_PATCH_KEY to the key file). Installs refuse unsigned patches;\n"
+              "         sign it later with scripts/patch_keys.py sign.", file=sys.stderr)
+    from hearth.release_keys import PUBLIC_KEYS
+    if not PUBLIC_KEYS:
+        print("WARNING: hearth/release_keys.py lists no public key: a build made now refuses every patch.",
+              file=sys.stderr)
+
     size = os.path.getsize(out)
     print(f"{out}")
     print(f"  code: {code_count} files")
