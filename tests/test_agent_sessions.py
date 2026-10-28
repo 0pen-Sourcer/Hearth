@@ -260,7 +260,8 @@ check(f"Claude Code resumes that session, in its project folder ({c['argv'][:3]}
 check(f"with Before acting on Ask, the permission mode is said outright, so the person's own default can't skip it ({c['argv']})",
       c["argv"][c["argv"].index("--permission-mode") + 1] == "default" if "--permission-mode" in c["argv"] else False)
 check(f"its steps and words come back as they happen, then the reply ({[k for k, _ in got]})",
-      ("step", {"words": "Read cart.js", "tool": "read_file"}) in got and any(k == "live" for k, _ in got)
+      any(k == "step" and f.get("words") == "Read cart.js" and f.get("tool") == "read_file" and f.get("cmd") == "cart.js"
+          for k, f in got) and any(k == "live" for k, _ in got)
       and got[-1] == ("text", {"text": "Done: the total rounds once."}) and rc == 0)
 
 rc, got, _ = say(by["codex"]["chat"], "how many posts?")
