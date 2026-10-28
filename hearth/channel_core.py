@@ -217,6 +217,33 @@ def site_of(args: Any) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+# What a step ran or reached, for the phone's step detail: the command, the file,
+# the search or the page. Its output follows (step_out), cut short.
+_DETAIL_KEYS = ("command", "cmd", "path", "file_path", "pattern", "query", "url", "name", "src")
+OUT_MAX = 3000
+
+
+def detail_of(args: Any) -> str:
+    if not isinstance(args, dict):
+        return ""
+    from .redact import redact_secrets_only
+    for k in _DETAIL_KEYS:
+        v = args.get(k)
+        if isinstance(v, list):
+            v = " ".join(str(x) for x in v)
+        if v:
+            return redact_secrets_only(str(v)[:2000])[0]
+    return ""
+
+
+def out_of(content: Any) -> str:
+    """A tool's result as the phone's step detail shows it: the start of it, secrets blanked."""
+    from .redact import redact_secrets_only
+    text = str(content or "")
+    cut = text[:OUT_MAX] + (f"\n... ({len(text) - OUT_MAX} more characters)" if len(text) > OUT_MAX else "")
+    return redact_secrets_only(cut)[0]
+
+
 def sites_in(text: str, most: int = 6) -> List[str]:
     """The sites a search result names, first seen first."""
     import re
@@ -330,6 +357,11 @@ class Hub:
         if run.get("regen"):
             chat_sync.drop_last_turn(cid)             # the answer asked for again replaces the last one
         _TURN.ctx = {"c": cid, "t": secrets.token_hex(5)}
+        try:
+            from . import live_bus
+            live_bus.publish(live_bus.turn_event(cid, self.a.name, _TURN.ctx["t"], "start", {"text": text}))
+        except Exception:
+            pass
         steps = callable(getattr(self.a, "step", None))     # an app that shows each step itself
         live = callable(getattr(self.a, "live", None))      # and the reply as it is written
         saved = chat_sync.load(cid) or {}
@@ -351,6 +383,11 @@ class Hub:
         context: List[Any] = []
 
         def emit(kind, **kw):
+            try:                                   # the window shows a phone's reply as it is written
+                from . import live_bus
+                live_bus.publish(live_bus.turn_event(cid, self.a.name, (_TURN.ctx or {}).get("t", ""), kind, kw))
+            except Exception:
+                pass
             if kind == "done":
                 stats.update(kw.get("stats") or {})
                 if kw.get("duration_ms") is not None:
@@ -385,12 +422,21 @@ class Hub:
                     self.a.step_sites(chat, sites_in(str(kw.get("content") or "")))
                 except Exception:
                     pass
+            if kind == "tool_result" and steps and callable(getattr(self.a, "step_out", None)):
+                try:
+                    self.a.step_out(chat, out_of(kw.get("content")))
+                except Exception:
+                    pass
             elif kind == "tool_call" and kw.get("name"):
                 tools_used.append((kw["name"], kw.get("args")))
                 if steps:
                     words = tool_words(kw["name"], kw.get("args"))
                     try:
-                        self.a.step(chat, words, tool=kw["name"], site=site_of(kw.get("args")))
+                        if getattr(self.a, "step_detail", False):
+                            self.a.step(chat, words, tool=kw["name"], site=site_of(kw.get("args")),
+                                        cmd=detail_of(kw.get("args")))
+                        else:
+                            self.a.step(chat, words, tool=kw["name"], site=site_of(kw.get("args")))
                     except TypeError:
                         self.a.step(chat, words)        # an app whose step takes the words only
                     except Exception:
@@ -434,6 +480,8 @@ class Hub:
         final = redact_secrets_only(reply or "(no output)")[0]
         stats = {k: v for k, v in stats.items() if v is not None}
         _TURN.ctx = dict(_TURN.ctx or {}, stats=stats, context=context)   # the finished reply carries them
+        if err["cat"] and not "".join(parts).strip():
+            _TURN.ctx["error"] = True          # the reply is why it failed: the phone shows it as an error
         try:
             if status["id"] is not None and tools_used:
                 self.a.edit(chat, status["id"], bridge_status.format_done(tools_used))
@@ -449,9 +497,15 @@ class Hub:
         events = [{"kind": "tool", "name": n, "args": a or {}, "result": "", "ms": 0, "pos": 0} for n, a in tools_used]
         if thought:          # the reasoning, kept as the window keeps it, so a phone reopening the chat folds it in
             events.insert(0, {"kind": "think_chunk", "content": "".join(thought)[-20000:]})
+        failed = bool(err["cat"]) and not "".join(parts).strip()
+        if failed:
+            # Kept as the window keeps its own errors (an error event, no reply), so the window
+            # shows it in red there too and it isn't fed back to the model as something said.
+            events.append({"kind": "error", "text": final, "pos": 0})
         chat_sync.post(cid, " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}", self.a.name, [
             {"role": "user", "content": text, "via": self.a.name, "at": now},
-            {"role": "assistant", "content": final, "via": self.a.name, "at": now, **({"events": events} if events else {}),
+            {"role": "assistant", "content": "" if failed else final, "via": self.a.name, "at": now,
+             **({"events": events} if events else {}),
              **({"stats": stats} if stats else {}), **({"context": context} if context else {})}])
         with self._lock:
             self._busy.pop(run.get("key", chat), None)

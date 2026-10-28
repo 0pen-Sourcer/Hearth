@@ -7204,6 +7204,65 @@ async function syncConvosFromDisk() {
 }
 setInterval(() => { if (!document.hidden) syncConvosFromDisk(); }, 5000);
 
+// What changed elsewhere, the moment it changes (live_bus on the PC): a chat
+// saved by the phone or the terminal, settings changed from the phone, and a
+// reply the phone asked for as it is written, in the chat open here. The 5 s
+// look above stays for when the stream is down.
+const LIVE = { turns: new Map(), draw: 0, sync: 0 };
+function liveArgs(tool, cmd) {
+  if (!cmd) return {};
+  if (/run_command|start_job/.test(tool)) return { command: cmd };
+  if (/web_search|search/.test(tool)) return { query: cmd };
+  if (/web_fetch|fetch_url|browse|open_url/.test(tool)) return { url: cmd };
+  return { path: cmd };
+}
+function liveDraw() {
+  clearTimeout(LIVE.draw);
+  LIVE.draw = setTimeout(() => { try { renderChat(); } catch {} }, 120);
+}
+function onLiveEvent(ev) {
+  if (!ev || typeof ev !== 'object') return;
+  if (ev.kind === 'chat') {
+    clearTimeout(LIVE.sync);
+    LIVE.sync = setTimeout(() => syncConvosFromDisk(), 120);
+    return;
+  }
+  if (ev.kind === 'settings') {
+    try { refreshState(); } catch {}
+    try { refreshModels(); } catch {}
+    return;
+  }
+  if (ev.kind !== 'turn' || ev.from === 'window') return;
+  const c = STATE.conversations.find(x => x.id === ev.chat);
+  if (!c || c._stub || (c.id === STATE.activeId && STATE.streaming)) return;
+  let t = LIVE.turns.get(ev.turn);
+  if (ev.type === 'start') {
+    const user = { role: 'user', content: ev.text || '', via: ev.from, at: Date.now(), _live: true };
+    const reply = { role: 'assistant', content: '', via: ev.from, at: Date.now(), events: [], _live: true };
+    c.messages = (c.messages || []).concat([user, reply]);
+    LIVE.turns.set(ev.turn, t = { c, reply });
+  }
+  if (!t) return;
+  const r = t.reply;
+  if (ev.type === 'chunk') r.content += ev.text || '';
+  else if (ev.type === 'said') r.content = ev.text || r.content;
+  else if (ev.type === 'step') r.events.push({ kind: 'tool', name: ev.tool || '', args: liveArgs(ev.tool || '', ev.cmd || ''), result: '', ms: 0, pos: r.content.length });
+  else if (ev.type === 'step_out') { const last = r.events[r.events.length - 1]; if (last) last.result = ev.out || ''; }
+  else if (ev.type === 'error') r.events.push({ kind: 'error', text: ev.text || '', pos: r.content.length });
+  else if (ev.type === 'end') { LIVE.turns.delete(ev.turn); setTimeout(() => syncConvosFromDisk(), 300); }
+  if (t.c.id === STATE.activeId) liveDraw();
+}
+(function followLive() {
+  if (typeof EventSource === 'undefined') return;
+  let es = null;
+  const open = () => {
+    try { es = new EventSource('/api/events'); } catch { return; }
+    es.onmessage = (m) => { try { onLiveEvent(JSON.parse(m.data)); } catch {} };
+    es.onerror = () => { try { es.close(); } catch {} setTimeout(open, 3000); };
+  };
+  open();
+})();
+
 // Fill in a stub's messages. Shared by every caller, so a chat is fetched once.
 async function ensureConvoLoaded(c) {
   if (!c || !c._stub) return c;
@@ -7229,7 +7288,7 @@ async function persistConvo(c) {
     // A stub has no messages yet; saving it would erase the chat on disk.
     if (c._stub) return;
     const { _loading, ...rest } = c;
-    const toSave = { ...rest, messages: (c.messages || []).filter(m => !m.silent && m.content !== '__HEARTH_NOTIFY_FLUSH__') };
+    const toSave = { ...rest, messages: (c.messages || []).filter(m => !m.silent && !m._live && m.content !== '__HEARTH_NOTIFY_FLUSH__') };
     await api('/api/conversations', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},

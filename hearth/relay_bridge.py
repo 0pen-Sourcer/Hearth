@@ -152,6 +152,11 @@ def forget_phone(pid: str) -> Dict[str, Any]:
 # The relay passes frames of up to 256 KB. A message bigger than PART (a photo,
 # a file, a voice note) goes as parts {type: part, pid, i, n, s} of its JSON,
 # joined again on the other side before it is read.
+# How often the reply so far, and the reasoning, go to the phone while a turn runs.
+# Durable Objects bill incoming WebSocket messages 20:1, so ten a second for a
+# minute is 30 billed requests.
+LIVE_EVERY = 0.1
+THINK_EVERY = 0.25
 PART = 150_000
 
 
@@ -242,6 +247,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                     args = {"query": str(e.get("result"))[:90]}
                 step = {"w": tool_words(e.get("name") or "", args), "tool": e.get("name") or "",
                         "site": cc.site_of(args)}
+                if cc.detail_of(args):
+                    step["cmd"] = cc.detail_of(args)
+                if e.get("result"):
+                    step["out"] = cc.out_of(e.get("result"))
                 if e.get("name") == "web_search":
                     step["sites"] = cc.sites_in(str(e.get("result") or ""))
                 steps.append(step)
@@ -265,6 +274,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             # A file sent from a phone is kept as a note for the model; the person sent the file.
             text = re.sub(r"\[They sent (.+?), saved at .+?before answering about it\.\]",
                           lambda g: "Sent " + g.group(1), text, flags=re.S)
+            failed = next((str(e.get("text") or "") for e in events if e.get("kind") == "error"), "")
+            if failed and not text.strip():
+                msgs.append({"role": "assistant", "text": failed, "at": x.get("at") or 0, "steps": steps, "error": True})
+                continue
             if text or steps or files:
                 msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps, "files": files,
                              "via": x.get("via") or "", "stats": stats, "thought": thought[-6000:],
@@ -469,7 +482,27 @@ def room_art(files: List[str]) -> Dict[str, Any]:
                 images[f] = "data:image/png;base64," + base64.b64encode(fh.read()).decode()
         except OSError:
             continue
-    return {"v": art_version(), "manifest": man, "files": sorted(allowed), "images": images}
+    return {"v": art_version(), "manifest": man, "files": sorted(allowed), "images": images,
+            "hashes": _art_hashes(sorted(allowed))}
+
+
+_HASHES: Dict[str, Any] = {"v": "", "h": {}}
+
+
+def _art_hashes(files: List[str]) -> Dict[str, str]:
+    """SHA-256 of each picture. The relay serves the same pictures to the phone, which
+    keeps its copy only when it matches; a PC with other pictures sends its own."""
+    v = art_version()
+    if _HASHES["v"] != v:
+        out = {}
+        for f in files:
+            try:
+                with open(os.path.join(_TEAM_ART, f), "rb") as fh:
+                    out[f] = hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                continue
+        _HASHES.update(v=v, h=out)
+    return dict(_HASHES["h"])
 
 
 def room_state() -> Dict[str, Any]:
@@ -713,6 +746,71 @@ def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---------------------------------------------------------------- the adapter
 
+class AgentWatch:
+    """Which coding-agent sessions on the PC just finished a turn: written to since the
+    last look, quiet for QUIET_S since, and ending on the agent's own words (a turn
+    still running ends on a step, or on the person's message). Sessions that were
+    already there when it started, and ones the phone is driving, are left alone."""
+    EVERY_S = 10
+    QUIET_S = 20
+
+    def __init__(self):
+        self.seen: Optional[Dict[str, int]] = None   # chat -> when it was last written, at the last look
+        self.waiting: Dict[str, Dict[str, Any]] = {}  # written to, not quiet yet
+        self.told: Dict[str, int] = {}
+        self.moved: List[str] = []                    # sessions written to since the last look
+
+    def look(self, rows: List[Dict[str, Any]], now_ms: float, busy: set) -> List[Dict[str, Any]]:
+        self.moved = []
+        if self.seen is None:
+            self.seen = {r["chat"]: r["at"] for r in rows}
+            return []
+        for r in rows:
+            k, at = r["chat"], r["at"]
+            before = self.seen.get(k)
+            self.seen[k] = at
+            if before is not None and at > before:
+                self.moved.append(k)
+            if k in busy:
+                self.waiting.pop(k, None)
+            elif before is None or at > before:
+                self.waiting[k] = r
+        out = []
+        for k, r in list(self.waiting.items()):
+            if now_ms - r["at"] < self.QUIET_S * 1000:
+                continue
+            del self.waiting[k]
+            if self.told.get(k) == r["at"]:
+                continue
+            self.told[k] = r["at"]
+            note = self._note(r)
+            if note:
+                out.append(note)
+        return out
+
+    @staticmethod
+    def _note(r: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        from . import agent_sessions
+        got = agent_sessions.read(r["agent"], r["id"]) or {}
+        msgs = got.get("messages") or []
+        last = msgs[-1] if msgs else None
+        if not last or last.get("role") != "assistant":
+            return None
+        parts = last.get("parts") or []
+        what = r.get("title") or r.get("project") or "a session"
+        # Named for the agent only ("Codex"), with what it said: these apps change how they
+        # stop and ask, and a title like "finished" would be wrong for a turn that asks.
+        who = r.get("label") or "An agent"
+        if not last.get("error") and parts and "text" not in parts[-1]:
+            st = (parts[-1].get("steps") or [{}])[-1]
+            if st.get("tool") in agent_sessions.QUESTION_TOOLS and not st.get("out"):
+                return {"kind": "ask", "title": who, "body": f"{what}: {st.get('cmd') or 'It has a question for you.'}",
+                        "c": r["chat"]}
+            return None                            # it ended on a step: still at work, or waiting on a tool
+        text = (parts[-1].get("text") if parts else "") or last.get("text") or ""
+        return {"kind": "done", "title": who, "body": f"{what}: {' '.join(text.split())[:200]}", "c": r["chat"]}
+
+
 class Relay(cc.Adapter):
     """Sends go out as encrypted frames on the phone's live connection, or to
     its mailbox on the server when it's away."""
@@ -724,6 +822,8 @@ class Relay(cc.Adapter):
         self.rooms: Dict[str, "Room"] = {}     # chat (phone id) -> room
         self._live_at: Dict[str, float] = {}   # turn -> when its live text last went out
         self._think_at: Dict[str, float] = {}  # turn -> when its reasoning last went out
+        self._latest: Dict[str, str] = {}      # "live:<turn>" -> the newest text, for a send that is waiting
+        self._later: Dict[str, threading.Timer] = {}
         self.asks: Dict[str, str] = {}         # chat -> the id of the question waiting there
         self._told: List[str] = []             # turns whose finish a notification has said
 
@@ -773,6 +873,7 @@ class Relay(cc.Adapter):
         return call if not c or not call.cid or c == call.cid else None
 
     def send(self, chat, text, reply_to=None):
+        self._turn_done()
         call = self._call_for(chat)
         if call is not None:
             call.done(text)
@@ -809,22 +910,68 @@ class Relay(cc.Adapter):
     def typing(self, chat):
         self._push(chat, {"type": "typing"})
 
-    def step(self, chat, words, tool="", site=""):
-        """One step of the reply as it happens ("Read notes.txt"), with the tool
-        and the site it reaches, so the phone can show that site's icon."""
+    step_detail = True                  # steps carry what they ran, and their output follows
+
+    def step(self, chat, words, tool="", site="", cmd=""):
+        """One step of the reply as it happens ("Read notes.txt"), with the tool,
+        the site it reaches (for that site's icon) and what it ran (for the step's detail)."""
         call = self._call_for(chat)
         if call is not None:
             call.step(words)
-        self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site})
+        self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site, **({"cmd": cmd} if cmd else {})})
+
+    def step_out(self, chat, out):
+        """What the step before it gave back, cut short, for the step's detail on the phone."""
+        if out:
+            self._push(chat, {"type": "step_out", "out": out})
+
+    def _paced(self, chat, kind: str, text: str, every: float, last: Dict[str, float]) -> None:
+        """Send the newest text at most once every `every` seconds; a piece that lands
+        inside the wait goes when it ends, so the phone never sits on an old piece."""
+        ctx = cc.turn_context()
+        t = ctx.get("t", "")
+        key = f"{kind}:{t}"
+        self._latest[key] = text
+        now = time.time()
+        wait = every - (now - last.get(t, 0))
+        if wait <= 0:
+            last[t] = now
+            if len(last) > 50:
+                last.clear(); last[t] = now
+            self._push(chat, {"type": kind, "text": text})
+            return
+        if key in self._later:
+            return                           # one send is already waiting; it takes the newest text
+
+        def go():
+            self._later.pop(key, None)
+            newest = self._latest.get(key)
+            if newest is None:
+                return
+            last[t] = time.time()
+            prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), ctx
+            try:
+                self._push(chat, {"type": kind, "text": newest})
+            finally:
+                cc._TURN.ctx = prev
+        timer = threading.Timer(wait, go)
+        timer.daemon = True
+        self._later[key] = timer
+        timer.start()
+
+    def _turn_done(self) -> None:
+        """The finished reply is on its way: nothing paced for this turn is sent after it."""
+        t = cc.turn_context().get("t", "")
+        for kind in ("live", "think"):
+            key = f"{kind}:{t}"
+            timer = self._later.pop(key, None)
+            if timer is not None:
+                timer.cancel()
+            self._latest.pop(key, None)
 
     def think(self, chat, text):
-        """The reasoning so far, a few times a second, folded on the phone like the window's."""
-        t = cc.turn_context().get("t", "")
-        now = time.time()
-        if now - self._think_at.get(t, 0) < 0.5:
-            return
-        self._think_at[t] = now
-        self._push(chat, {"type": "think", "text": text[-4000:]})
+        """The reasoning so far, four times a second, folded on the phone like the window's."""
+        self._paced(chat, "think", text[-4000:], THINK_EVERY, self._think_at)
 
     def heard(self, chat, text, cid=""):
         """What a voice note said, so the phone shows the words instead of "Voice note"."""
@@ -840,14 +987,7 @@ class Relay(cc.Adapter):
         call = self._call_for(chat)
         if call is not None:
             call.live(text)                 # every piece, so the voice starts at the first clause
-        t = cc.turn_context().get("t", "")
-        now = time.time()
-        if now - self._live_at.get(t, 0) < 0.35:
-            return
-        self._live_at[t] = now
-        if len(self._live_at) > 50:
-            self._live_at = {t: now}
-        self._push(chat, {"type": "live", "text": text})
+        self._paced(chat, "live", text, LIVE_EVERY, self._live_at)
 
 
 class Room:
@@ -1006,6 +1146,8 @@ class Bridge:
         self.adapter = Relay(self.loop)
         self.hub = cc.Hub(self.adapter, configured_senders=["phone"])
         self.rooms: Dict[str, Room] = {}
+        self._mirrored: Dict[str, str] = {}                 # a window turn -> its text so far, for the phones
+        self._said: Dict[str, List[str]] = {}
         self.agent_runs: Dict[str, Dict[str, Any]] = {}     # session chat -> its run, while an agent answers
 
     def wanted(self) -> Dict[str, Dict[str, Any]]:
@@ -1132,20 +1274,23 @@ class Bridge:
         def emit(kind: str, **f: Any) -> None:
             now = time.time()
             if kind == "step":
-                push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or ""})
-            elif kind == "live" and now - sent["live"] >= 0.35:
+                push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or "",
+                      **({"cmd": f["cmd"]} if f.get("cmd") else {})})
+            elif kind == "step_out" and f.get("out"):
+                push({"type": "step_out", "out": f["out"]})
+            elif kind == "live" and now - sent["live"] >= LIVE_EVERY:
                 sent["live"] = now
                 push({"type": "live", "text": f.get("text") or ""})
             elif kind == "think":
                 thought.append(str(f.get("text") or ""))
-                if now - sent["think"] >= 0.5:
+                if now - sent["think"] >= THINK_EVERY:
                     sent["think"] = now
                     push({"type": "think", "text": "".join(thought)[-4000:]})
             elif kind == "text":
                 push({"type": "text", "text": f.get("text") or ""})
                 self.adapter.finished(room.chat, name, f.get("text") or "", cid, turn)
             elif kind == "error":
-                push({"type": "text", "text": f.get("message") or "It stopped."})
+                push({"type": "text", "text": f.get("message") or "It stopped.", "error": True})
 
         name = agent_sessions.label((agent_sessions.parse_chat(cid) or ("", ""))[0])
 
@@ -1197,8 +1342,117 @@ class Bridge:
                     self.rooms.pop(room, None)
             await asyncio.sleep(1.0)
 
+    def watch_agents(self) -> None:
+        """Tell the phone when a coding agent finishes on the PC, as Shed does: Codex
+        or Claude Code run in their own window, not through the phone, still reach it."""
+        watch = AgentWatch()
+        while not self.stopping:
+            time.sleep(AgentWatch.EVERY_S)
+            if not self.adapter.rooms:
+                continue
+            try:
+                from . import agent_sessions
+                notes = watch.look(agent_sessions.listing(60), time.time() * 1000, set(self.agent_runs))
+            except Exception:
+                continue
+            for n in notes:
+                for chat in list(self.adapter.rooms):     # each paired phone
+                    self.adapter.notify(chat, n)
+            # A session open on a phone shows what its agent wrote since, without reopening it.
+            for c in watch.moved:
+                if c in self.agent_runs:
+                    continue
+                prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+                try:
+                    for chat in list(self.adapter.rooms):
+                        self.adapter._push(chat, {"type": "changed", "what": "chat", "c": c})
+                finally:
+                    cc._TURN.ctx = prev
+
+    # Settings a phone shows: a change on the PC redraws its brain chip and modes at once.
+    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|preferred_model|ui_theme|ui_accent|theme)")
+
+    def follow_window(self) -> None:
+        """Pass what changes on the PC (live_bus) to every paired phone as it happens:
+        a chat changed, the brain or modes changed, and a reply the window is writing."""
+        if not WINDOW_URL:
+            return
+        from . import live_bus
+        live_bus.listen(WINDOW_URL, self.on_window_event, stop=lambda: self.stopping)
+
+    def on_window_event(self, ev: Dict[str, Any]) -> None:
+        phones = list(self.adapter.rooms)
+        if not phones:
+            return
+        kind = ev.get("kind")
+        out: Optional[Dict[str, Any]] = None
+        if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):
+            _BRAIN_CACHE.clear()                  # the phone's next look at the brain reads it fresh
+            out = {"type": "changed", "what": "brain"}
+        elif kind == "chat" and ev.get("chat"):
+            out = {"type": "changed", "what": "chat", "c": ev["chat"], **({"gone": True} if ev.get("gone") else {})}
+        elif kind == "turn" and ev.get("from") == "window" and ev.get("chat"):
+            self._mirror(phones, ev)
+            return
+        if out:
+            prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+            try:
+                for chat in phones:
+                    self.adapter._push(chat, out)
+            finally:
+                cc._TURN.ctx = prev
+
+    def _mirror(self, phones: List[str], ev: Dict[str, Any]) -> None:
+        """A reply the window is writing, shown on the phones in that chat as it comes."""
+        t, cid, kind = str(ev.get("turn") or ""), ev["chat"], ev.get("type")
+        prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), {"c": cid, "t": t}
+        try:
+            text = self._mirrored.get(t, "")
+            if kind == "start":
+                self._mirrored[t] = ""
+                for chat in phones:
+                    self.adapter._push(chat, {"type": "user", "text": ev.get("text") or "", "via": "window"})
+            elif kind == "chunk":
+                self._mirrored[t] = text + str(ev.get("text") or "")
+                for chat in phones:
+                    self.adapter.live(chat, self._mirrored[t])
+            elif kind == "think":
+                for chat in phones:
+                    self.adapter.think(chat, str(ev.get("text") or ""))
+            elif kind == "step":
+                for chat in phones:
+                    self.adapter._push(chat, {"type": "step", "words": ev.get("words") or "", "tool": ev.get("tool") or "",
+                                              **({"cmd": ev["cmd"]} if ev.get("cmd") else {})})
+            elif kind == "step_out":
+                for chat in phones:
+                    self.adapter._push(chat, {"type": "step_out", "out": ev.get("out") or ""})
+            elif kind == "said":
+                # One turn can say something, work, then say more: the phones get the
+                # whole reply once, at the end, as the window keeps it.
+                said = self._said.setdefault(t, [])
+                if ev.get("text"):
+                    said.append(str(ev["text"]))
+                self._mirrored[t] = "\n\n".join(said)
+            elif kind == "error":
+                for chat in phones:
+                    self.adapter._push(chat, {"type": "text", "text": ev.get("text") or "", "error": True})
+            elif kind == "end":
+                final = "\n\n".join(self._said.pop(t, [])) or self._mirrored.get(t, "")
+                self._mirrored.pop(t, None)
+                self.adapter._turn_done()
+                if final.strip():
+                    for chat in phones:
+                        self.adapter._push(chat, {"type": "text", "text": final})
+            if len(self._mirrored) > 50:
+                self._mirrored.clear()
+                self._said.clear()
+        finally:
+            cc._TURN.ctx = prev
+
     def run(self) -> None:
         asyncio.set_event_loop(self.loop)
+        threading.Thread(target=self.watch_agents, daemon=True, name="relay-agent-watch").start()
+        threading.Thread(target=self.follow_window, daemon=True, name="relay-follow-window").start()
         try:
             self.loop.run_until_complete(self.keep_rooms())
         except KeyboardInterrupt:

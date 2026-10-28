@@ -36,6 +36,7 @@ _VERB = {
     "read_file": ("Read", "path"), "write_file": ("Wrote", "path"), "edit_file": ("Edited", "path"),
     "list_dir": ("Listed", "path"), "delete_file": ("Deleted", "path"), "move_file": ("Moved", "src"),
     "find_files": ("Searched for", "pattern"), "grep": ("Searched for", "pattern"),
+    "grep_search": ("Searched for", "pattern"), "find_file": ("Looked for", "name"),
     "web_search": ("Searched the web for", "query"), "fetch_url": ("Opened", "url"), "browse": ("Opened", "url"),
     "web_fetch": ("Read", "url"), "open_url": ("Opened", "url"), "search_chats": ("Searched past chats for", "query"),
     "read_chat": ("Read an earlier chat", ""), "load_model": ("Loaded", "model"), "list_models": ("Listed the models", ""),
@@ -57,6 +58,8 @@ def tool_words(name: str, args: Optional[Dict[str, Any]]) -> str:
     val = " ".join(str(val).split()) if val else ""
     if key == "path" and val:
         val = val.replace(os.path.expanduser("~"), "~")
+    if key in ("pattern", "query") and val and name not in ("web_search", "search_chats", "memory_recall"):
+        val = f"\u201c{val[:88]}\u201d"          # a pattern like round( reads as what it is
     if key == "url" and val:
         val = re.sub(r"^https?://(www\.)?", "", val).rstrip("/")
     return f"{verb} {val[:90]}".strip() if val else verb

@@ -130,6 +130,7 @@ def append(cid: str, new: List[Dict[str, Any]]) -> int:
     d["msg_count"] = len(d["messages"])
     os.makedirs(CONVOS_DIR, exist_ok=True)
     atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
+    _changed(cid)
     return len(d["messages"])
 
 
@@ -176,6 +177,16 @@ def retitle(cid: str, title: str) -> None:
         return
     d["title"] = title
     atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
+    _changed(cid)
+
+
+def _changed(cid: str) -> None:
+    """Every open window and phone sees the chat change at once (live_bus)."""
+    try:
+        from . import live_bus
+        live_bus.publish({"kind": "chat", "chat": cid})
+    except Exception:
+        pass
 
 
 def post(cid: str, title: str, source: str, messages: List[Dict[str, Any]], unread: bool = False) -> None:
@@ -190,6 +201,7 @@ def post(cid: str, title: str, source: str, messages: List[Dict[str, Any]], unre
         d["unread"] = True
     os.makedirs(CONVOS_DIR, exist_ok=True)
     atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
+    _changed(cid)
 
 
 def drop_last_turn(cid: str) -> bool:
@@ -205,6 +217,7 @@ def drop_last_turn(cid: str) -> bool:
         msgs.pop()
     d["messages"], d["msg_count"] = msgs, len(msgs)
     atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
+    _changed(cid)
     return True
 
 
