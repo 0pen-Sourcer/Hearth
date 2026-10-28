@@ -417,7 +417,8 @@ with sync_playwright() as pw:
       out.asking = (ROOM.says.get('__main') || {}).text;
       const strip = document.getElementById('perm-strip');
       out.stripInRoom = !strip.hidden && strip.nextElementSibling === document.getElementById('tm-compose');
-      out.mark = !!document.querySelector('#tm-labels .tm-label .hx-mini svg');
+      // The brand's own icon, or its drawn mark while that loads or when it can't.
+      out.mark = !!document.querySelector('#tm-labels .tm-label .hx-mini svg, #tm-labels .tm-label .hx-mini img.hx-fav.brand');
       out.markWhy = { brain: mainBrainMark(), provider: (STATE.settings || {}).llm_provider,
                       label: (document.querySelector('#tm-labels .tm-label') || {}).innerHTML || '' };
       // A name tag between two pixels makes its border shimmer as people walk.

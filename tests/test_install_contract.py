@@ -155,7 +155,7 @@ _gpu.primary = _real_primary
 import build_patch                                                  # noqa: E402
 
 packed = {arc for _, arc in build_patch.code_members()}
-for want in ("hearth/ui.html", "hearth_cli.py", "hearth/subagents/coder.md",
+for want in ("hearth/ui.html", "hearth/room.js", "hearth_cli.py", "hearth/subagents/coder.md",
              "hearth/skills/make-pdf/SKILL.md", "assets/icon.png", "assets/mark.svg"):
     check(f"the patch packs {want}", want in packed)
 if os.path.isdir(os.path.join(ROOT, "assets", "team")):

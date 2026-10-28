@@ -174,6 +174,7 @@ def _focus_window() -> dict:
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _UI_PATH = os.path.join(_HERE, "ui.html")
+_ROOM_JS = os.path.join(_HERE, "room.js")
 LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
 LM_STUDIO_V0 = LOCAL_API_BASE.replace("/v1", "/api/v0")
 SETTINGS_PATH = os.path.join(WORKSPACE, "settings.json")
@@ -183,6 +184,34 @@ CONVOS_DIR = os.path.join(WORKSPACE, "conversations")
 # bails. Cleared at the start of each /chat. Single-user local GUI = one
 # generation at a time, so a single shared flag is enough.
 _CANCEL = threading.Event()
+
+# What a turn in this window is doing, in the words the window's own status
+# uses ("thinking", "calling read_file", "writing", "idle"), and a tool waiting
+# on a yes. The phone's room shows JARVIS from it.
+_TURN_NOW: Dict[str, Any] = {"state": "idle", "waiting": "", "at": 0.0}
+
+
+def _turn_saw(event: str, fields: Dict[str, Any]) -> None:
+    if event == "permission_request":
+        _TURN_NOW["waiting"] = str(fields.get("name") or "")
+    elif event == "tool_call":
+        _TURN_NOW.update(state=f"calling {fields.get('name') or ''}", waiting="")
+    elif event == "assistant_chunk":
+        _TURN_NOW.update(state="writing", waiting="")
+    elif event == "tool_result":
+        _TURN_NOW.update(state="thinking", waiting="")
+    _TURN_NOW["at"] = time.time()
+
+
+def room_now() -> Dict[str, Any]:
+    """JARVIS's state for the phone's room: this window's turn, and one
+    running in the terminal."""
+    state, waiting = _TURN_NOW["state"], _TURN_NOW["waiting"]
+    if state != "idle" and time.time() - _TURN_NOW["at"] > 900:     # a turn that never said it ended
+        state, waiting = "idle", ""
+    from . import activity
+    return {"state": state, "waiting": waiting, "elsewhere": activity.current(not_from="window")}
+
 
 # Steering queue: messages the user typed while a generation was in flight.
 # run_once drains it between tool iterations and injects them as user turns.
@@ -2025,6 +2054,12 @@ class HearthHandler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path in ("/", "/index.html", "/ui"):
             return self._serve_ui()
+        if path == "/room.js":
+            return self._serve_room_js()
+        if path == "/api/room/now":
+            # What JARVIS is doing in this window and in the terminal, for the
+            # phone's room (the window's own room reads its page state).
+            return self._send_json(200, room_now())
         if path.startswith("/assets/"):
             return self._serve_asset(path[len("/assets/"):])
         if path == "/api/setup/what-to-get":
@@ -5068,6 +5103,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         def emit(event_type: str, **fields: Any) -> None:
+            _turn_saw(event_type, fields)
             line = json.dumps({"type": event_type, **fields}, ensure_ascii=False, default=str) + "\n"
             try:
                 self.wfile.write(line.encode("utf-8"))
@@ -5075,6 +5111,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+        _TURN_NOW.update(state="thinking", waiting="", at=time.time())
         _CANCEL.clear()  # fresh generation — clear any prior stop request
         with _STEER_LOCK:
             _STEER_Q.clear()  # drop any steer left over from a prior turn
@@ -5114,6 +5151,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 emit("error", message=(
                     "The model is still warming up, or none is loaded. Give it a "
                     "few seconds and say it again — or load one in the Models tab."))
+                _TURN_NOW.update(state="idle", waiting="")
                 return
         try:
             asyncio.run(run_once(
@@ -5125,6 +5163,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         except Exception as e:
             emit("error", message=f"{type(e).__name__}: {e}")
         finally:
+            _TURN_NOW.update(state="idle", waiting="", at=time.time())
             # Tear down the ask_user binding so a later headless / CLI run
             # doesn't unexpectedly route through a dead emit closure.
             try:
@@ -5426,6 +5465,19 @@ class HearthHandler(BaseHTTPRequestHandler):
         payload = payload.replace(b"/*__HEARTH_LOOK__*/{}", _saved_look().encode("utf-8"), 1)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _serve_room_js(self) -> None:
+        try:
+            with open(_ROOM_JS, "rb") as f:
+                payload = f.read()
+        except OSError:
+            return self.send_error(404, "room.js missing")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/javascript; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()

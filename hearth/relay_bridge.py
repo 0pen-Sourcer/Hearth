@@ -225,12 +225,17 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         return {"chat": cid, "title": d.get("title") or "", "source": d.get("source") or "",
                 "messages": msgs[-keep:], "more": max(0, len(msgs) - keep)}
     if what == "team":
-        from . import subagents
         return {"team": [{"id": a.get("id"), "name": a.get("name") or a.get("persona") or "Helper",
                           "role": a.get("persona") or "", "status": a.get("status"), "what": a.get("what") or "",
                           "task": str(a.get("prompt") or "")[:300], "on": a.get("on") or a.get("runtime") or "",
                           "steps": a.get("tools_used") or 0, "blocked": a.get("blocked") or ""}
-                         for a in subagents.team_state()]}
+                         for a in team_now()]}
+    if what == "room":
+        return room_state()
+    if what == "room_art":
+        return room_art([str(x) for x in (m.get("files") or [])][:4])
+    if what == "story":
+        return story(str(m.get("id") or ""))
     if what == "ideas":
         return ideas()
     if what == "icons":
@@ -277,6 +282,134 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             s = {}
         return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or ""}
     return {"error": f"unknown request {what!r}"}
+
+
+def team_now() -> List[Dict[str, Any]]:
+    """The helpers as the window has them. Only the process that started a
+    helper knows it is still running, so this process's own reading would call
+    the window's helpers stopped; it is the fallback when no window is up."""
+    r = _window("GET", "/api/team", timeout=10)
+    if isinstance(r.get("agents"), list):
+        return r["agents"]
+    from . import subagents
+    return subagents.team_state()
+
+
+# ---------------------------------------------------------------- the room
+
+_TEAM_ART = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "team")
+_ART_V: Dict[str, Any] = {}
+
+
+def _art_files(man: Dict[str, Any]) -> List[str]:
+    rooms = man.get("rooms") or [{"file": "room.png"}]
+    names = [r.get("file") for r in rooms] + (["props.png"] if man.get("props") else []) \
+        + [f"{r}.png" for r in man.get("roles") or []]
+    return [n for n in names if isinstance(n, str) and re.fullmatch(r"[\w.-]+\.png", n)]
+
+
+def _manifest() -> Dict[str, Any]:
+    try:
+        with open(os.path.join(_TEAM_ART, "manifest.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def art_version() -> str:
+    """One name for this set of room pictures: the phone keeps them under it
+    and asks again only when it changes."""
+    man = _manifest()
+    if not man:
+        return ""
+    files = ["manifest.json"] + _art_files(man)
+    stamp = []
+    for f in files:
+        try:
+            st = os.stat(os.path.join(_TEAM_ART, f))
+            stamp.append((f, st.st_size, st.st_mtime_ns))
+        except OSError:
+            stamp.append((f, 0, 0))
+    if _ART_V.get("stamp") != stamp:
+        h = hashlib.sha1()
+        for f, _, _ in stamp:
+            try:
+                with open(os.path.join(_TEAM_ART, f), "rb") as fh:
+                    h.update(f.encode() + b"\0" + fh.read())
+            except OSError:
+                pass
+        _ART_V.update(stamp=stamp, v=h.hexdigest()[:16])
+    return _ART_V["v"]
+
+
+def room_art(files: List[str]) -> Dict[str, Any]:
+    """The room's manifest, and the pictures asked for as data URLs (a few at
+    a time: each is a few hundred KB and goes in parts)."""
+    man = _manifest()
+    if not man:
+        return {"error": "the room's pictures aren't on this PC"}
+    allowed = set(_art_files(man))
+    images = {}
+    for f in files:
+        if f not in allowed:
+            continue
+        try:
+            with open(os.path.join(_TEAM_ART, f), "rb") as fh:
+                images[f] = "data:image/png;base64," + base64.b64encode(fh.read()).decode()
+        except OSError:
+            continue
+    return {"v": art_version(), "manifest": man, "files": sorted(allowed), "images": images}
+
+
+def room_state() -> Dict[str, Any]:
+    """Everything the phone's room needs each time it looks: the helpers, what
+    JARVIS is doing, the character and home room picked on the PC, and which
+    pictures it is drawn with."""
+    from .brand_icons import key_for
+    agents = []
+    for a in team_now():
+        a = dict(a)
+        a["prompt"] = str(a.get("prompt") or "")[:600]
+        a["preview"] = str(a.get("preview") or "")[:600]
+        a["brand"] = key_for(str(a.get("runtime") or ""))
+        agents.append(a)
+    now = _window("GET", "/api/room/now", timeout=5)
+    if "state" not in now:
+        from . import activity
+        now = {"state": "idle", "waiting": "", "elsewhere": activity.current()}
+    try:
+        from .web import _load_settings
+        s = _load_settings() or {}
+    except Exception:
+        s = {}
+    return {"agents": agents, "main": now, "art": art_version(),
+            "look": {"look": s.get("room_look") or "her", "home": s.get("room_home") or "cabin",
+                     "wipe": s.get("room_wipe") or "pixel"}}
+
+
+def story(agent_id: str) -> Dict[str, Any]:
+    """One helper's work so far, as the window's panel beside the room shows
+    it, each step already said in words."""
+    from . import subagents
+    from .term_render import _VERB
+    got = _window("GET", "/api/team/story?id=" + urllib.parse.quote(agent_id, safe=""), timeout=10)
+    if "steps" not in got:
+        got = subagents.agent_story(agent_id)
+    if not got:
+        return {"error": "no such helper"}
+    steps = []
+    for st in (got.get("steps") or [])[-60:]:
+        st = dict(st)
+        if st.get("tool"):
+            verb = _VERB.get(st["tool"], (str(st["tool"]).replace("_", " ").capitalize(), ""))[0]
+            st["w"] = f"{verb} {st.get('what') or ''}".strip()
+        if st.get("result") is not None:
+            st["result"] = str(st["result"])[:300]
+        steps.append(st)
+    ch = got.get("changes") or {}
+    return {"id": agent_id, "prompt": str(got.get("prompt") or "")[:2000], "by": got.get("by") or "",
+            "steps": steps, "final": str(got.get("final") or "")[:3000], "error": got.get("error") or "",
+            "ended": got.get("ended"), "changed": len(ch.get("files") or []) if isinstance(ch, dict) else 0}
 
 
 def ideas() -> Dict[str, Any]:
