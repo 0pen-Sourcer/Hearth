@@ -453,7 +453,27 @@ def room_art(files: List[str]) -> Dict[str, Any]:
                 images[f] = "data:image/png;base64," + base64.b64encode(fh.read()).decode()
         except OSError:
             continue
-    return {"v": art_version(), "manifest": man, "files": sorted(allowed), "images": images}
+    return {"v": art_version(), "manifest": man, "files": sorted(allowed), "images": images,
+            "hashes": _art_hashes(sorted(allowed))}
+
+
+_HASHES: Dict[str, Any] = {"v": "", "h": {}}
+
+
+def _art_hashes(files: List[str]) -> Dict[str, str]:
+    """SHA-256 of each picture. The relay serves the same pictures to the phone, which
+    keeps its copy only when it matches; a PC with other pictures sends its own."""
+    v = art_version()
+    if _HASHES["v"] != v:
+        out = {}
+        for f in files:
+            try:
+                with open(os.path.join(_TEAM_ART, f), "rb") as fh:
+                    out[f] = hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                continue
+        _HASHES.update(v=v, h=out)
+    return dict(_HASHES["h"])
 
 
 def room_state() -> Dict[str, Any]:
