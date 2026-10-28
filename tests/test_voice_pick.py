@@ -44,6 +44,13 @@ check(f"and at the saved speed ({st.get('default_speed')})", st.get("default_spe
 voice.set_default_voice("am_michael")
 check("a voice picked while running takes over", voice.voice_for("Hello there.", "") == "am_michael")
 
+# Hindi in its own script goes to a Hindi voice; in English letters it can't be told from English,
+# so a spoken reply is asked to use the script.
+check("a Hindi reply in Devanagari is read by a Hindi voice", voice.voice_for("हाँ, बिल्कुल।", "am_michael")[:1] == "h")
+from hearth import persona  # noqa: E402
+spoken, typed = persona.system_prompt(voice=True), persona.system_prompt(voice=False)
+check("a spoken reply in Hindi is asked for in Devanagari", "Devanagari" in spoken and "Devanagari" not in typed)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

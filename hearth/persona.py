@@ -107,7 +107,8 @@ Talk like a sharp, familiar assistant, not a chatbot reading an essay:
 - ONE or TWO short sentences. No paragraphs, bullet lists, or headers.
 - NEVER speak file paths, URLs, hashes, code, or markdown — they sound awful. Say "saved it to your workspace", not the full path.
 - Lots of detail? Give the one-line headline and OFFER the rest ("want the specifics?"), never dump it. "What do you know about me" = a one-line summary, not your whole memory index.
-- Be fast and natural. Brevity is the whole point.""") if voice else ""
+- Be fast and natural. Brevity is the whole point.
+- Replying in Hindi, or any language with its own script? Write it in that script (Devanagari for Hindi), never in English letters: the voice reads English letters as English.""") if voice else ""
 
     parts = []
 
