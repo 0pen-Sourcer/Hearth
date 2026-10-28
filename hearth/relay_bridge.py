@@ -236,6 +236,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                     args = {"query": str(e.get("result"))[:90]}
                 step = {"w": tool_words(e.get("name") or "", args), "tool": e.get("name") or "",
                         "site": cc.site_of(args)}
+                if cc.detail_of(args):
+                    step["cmd"] = cc.detail_of(args)
+                if e.get("result"):
+                    step["out"] = cc.out_of(e.get("result"))
                 if e.get("name") == "web_search":
                     step["sites"] = cc.sites_in(str(e.get("result") or ""))
                 steps.append(step)
@@ -249,6 +253,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             # A file sent from a phone is kept as a note for the model; the person sent the file.
             text = re.sub(r"\[They sent (.+?), saved at .+?before answering about it\.\]",
                           lambda g: "Sent " + g.group(1), text, flags=re.S)
+            failed = next((str(e.get("text") or "") for e in events if e.get("kind") == "error"), "")
+            if failed and not text.strip():
+                msgs.append({"role": "assistant", "text": failed, "at": x.get("at") or 0, "steps": steps, "error": True})
+                continue
             if text or steps:
                 msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps,
                              "via": x.get("via") or "", "stats": stats, "thought": thought[-6000:],
@@ -1108,6 +1116,8 @@ class Bridge:
         self.adapter = Relay(self.loop)
         self.hub = cc.Hub(self.adapter, configured_senders=["phone"])
         self.rooms: Dict[str, Room] = {}
+        self._mirrored: Dict[str, str] = {}                 # a window turn -> its text so far, for the phones
+        self._said: Dict[str, List[str]] = {}
         self.agent_runs: Dict[str, Dict[str, Any]] = {}     # session chat -> its run, while an agent answers
 
     def wanted(self) -> Dict[str, Dict[str, Any]]:
@@ -1319,9 +1329,90 @@ class Bridge:
                 for chat in list(self.adapter.rooms):     # each paired phone
                     self.adapter.notify(chat, n)
 
+    # Settings a phone shows: a change on the PC redraws its brain chip and modes at once.
+    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|preferred_model|ui_theme|ui_accent|theme)")
+
+    def follow_window(self) -> None:
+        """Pass what changes on the PC (live_bus) to every paired phone as it happens:
+        a chat changed, the brain or modes changed, and a reply the window is writing."""
+        if not WINDOW_URL:
+            return
+        from . import live_bus
+        live_bus.listen(WINDOW_URL, self.on_window_event, stop=lambda: self.stopping)
+
+    def on_window_event(self, ev: Dict[str, Any]) -> None:
+        phones = list(self.adapter.rooms)
+        if not phones:
+            return
+        kind = ev.get("kind")
+        out: Optional[Dict[str, Any]] = None
+        if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):
+            _BRAIN_CACHE.clear()                  # the phone's next look at the brain reads it fresh
+            out = {"type": "changed", "what": "brain"}
+        elif kind == "chat" and ev.get("chat"):
+            out = {"type": "changed", "what": "chat", "c": ev["chat"], **({"gone": True} if ev.get("gone") else {})}
+        elif kind == "turn" and ev.get("from") == "window" and ev.get("chat"):
+            self._mirror(phones, ev)
+            return
+        if out:
+            prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+            try:
+                for chat in phones:
+                    self.adapter._push(chat, out)
+            finally:
+                cc._TURN.ctx = prev
+
+    def _mirror(self, phones: List[str], ev: Dict[str, Any]) -> None:
+        """A reply the window is writing, shown on the phones in that chat as it comes."""
+        t, cid, kind = str(ev.get("turn") or ""), ev["chat"], ev.get("type")
+        prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), {"c": cid, "t": t}
+        try:
+            text = self._mirrored.get(t, "")
+            if kind == "start":
+                self._mirrored[t] = ""
+                for chat in phones:
+                    self.adapter._push(chat, {"type": "user", "text": ev.get("text") or "", "via": "window"})
+            elif kind == "chunk":
+                self._mirrored[t] = text + str(ev.get("text") or "")
+                for chat in phones:
+                    self.adapter.live(chat, self._mirrored[t])
+            elif kind == "think":
+                for chat in phones:
+                    self.adapter.think(chat, str(ev.get("text") or ""))
+            elif kind == "step":
+                for chat in phones:
+                    self.adapter._push(chat, {"type": "step", "words": ev.get("words") or "", "tool": ev.get("tool") or "",
+                                              **({"cmd": ev["cmd"]} if ev.get("cmd") else {})})
+            elif kind == "step_out":
+                for chat in phones:
+                    self.adapter._push(chat, {"type": "step_out", "out": ev.get("out") or ""})
+            elif kind == "said":
+                # One turn can say something, work, then say more: the phones get the
+                # whole reply once, at the end, as the window keeps it.
+                said = self._said.setdefault(t, [])
+                if ev.get("text"):
+                    said.append(str(ev["text"]))
+                self._mirrored[t] = "\n\n".join(said)
+            elif kind == "error":
+                for chat in phones:
+                    self.adapter._push(chat, {"type": "text", "text": ev.get("text") or "", "error": True})
+            elif kind == "end":
+                final = "\n\n".join(self._said.pop(t, [])) or self._mirrored.get(t, "")
+                self._mirrored.pop(t, None)
+                self.adapter._turn_done()
+                if final.strip():
+                    for chat in phones:
+                        self.adapter._push(chat, {"type": "text", "text": final})
+            if len(self._mirrored) > 50:
+                self._mirrored.clear()
+                self._said.clear()
+        finally:
+            cc._TURN.ctx = prev
+
     def run(self) -> None:
         asyncio.set_event_loop(self.loop)
         threading.Thread(target=self.watch_agents, daemon=True, name="relay-agent-watch").start()
+        threading.Thread(target=self.follow_window, daemon=True, name="relay-follow-window").start()
         try:
             self.loop.run_until_complete(self.keep_rooms())
         except KeyboardInterrupt:

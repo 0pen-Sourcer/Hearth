@@ -357,6 +357,11 @@ class Hub:
         if run.get("regen"):
             chat_sync.drop_last_turn(cid)             # the answer asked for again replaces the last one
         _TURN.ctx = {"c": cid, "t": secrets.token_hex(5)}
+        try:
+            from . import live_bus
+            live_bus.publish(live_bus.turn_event(cid, self.a.name, _TURN.ctx["t"], "start", {"text": text}))
+        except Exception:
+            pass
         steps = callable(getattr(self.a, "step", None))     # an app that shows each step itself
         live = callable(getattr(self.a, "live", None))      # and the reply as it is written
         saved = chat_sync.load(cid) or {}
@@ -378,6 +383,11 @@ class Hub:
         context: List[Any] = []
 
         def emit(kind, **kw):
+            try:                                   # the window shows a phone's reply as it is written
+                from . import live_bus
+                live_bus.publish(live_bus.turn_event(cid, self.a.name, (_TURN.ctx or {}).get("t", ""), kind, kw))
+            except Exception:
+                pass
             if kind == "done":
                 stats.update(kw.get("stats") or {})
                 if kw.get("duration_ms") is not None:
@@ -487,9 +497,15 @@ class Hub:
         events = [{"kind": "tool", "name": n, "args": a or {}, "result": "", "ms": 0, "pos": 0} for n, a in tools_used]
         if thought:          # the reasoning, kept as the window keeps it, so a phone reopening the chat folds it in
             events.insert(0, {"kind": "think_chunk", "content": "".join(thought)[-20000:]})
+        failed = bool(err["cat"]) and not "".join(parts).strip()
+        if failed:
+            # Kept as the window keeps its own errors (an error event, no reply), so the window
+            # shows it in red there too and it isn't fed back to the model as something said.
+            events.append({"kind": "error", "text": final, "pos": 0})
         chat_sync.post(cid, " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}", self.a.name, [
             {"role": "user", "content": text, "via": self.a.name, "at": now},
-            {"role": "assistant", "content": final, "via": self.a.name, "at": now, **({"events": events} if events else {}),
+            {"role": "assistant", "content": "" if failed else final, "via": self.a.name, "at": now,
+             **({"events": events} if events else {}),
              **({"stats": stats} if stats else {}), **({"context": context} if context else {})}])
         with self._lock:
             self._busy.pop(run.get("key", chat), None)
