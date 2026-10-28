@@ -178,7 +178,9 @@ claude_brain.exe_for = lambda p: [sys.executable, os.path.join(BIN, FAKE[p])] if
 
 # Sessions the app started itself, as an agent brain: one in the workspace, one in a temp folder of its own.
 OWN_TMP = tempfile.mkdtemp(prefix="hearth-acp-")
-for n, where in enumerate((os.environ["HEARTH_WORKSPACE"], OWN_TMP)):
+OWN_TREE = os.path.join(HOME, ".hearth", "worktrees", "shop-ada", "repo")
+os.makedirs(OWN_TREE)
+for n, where in enumerate((os.environ["HEARTH_WORKSPACE"], OWN_TMP, OWN_TREE)):
     sid = f"9999999{n}-0000-0000-0000-000000000000"
     own = os.path.join(HOME, ".claude", "projects", f"own{n}", sid + ".jsonl")
     write(own, lines({"type": "user", "cwd": where, "sessionId": sid, "timestamp": "2026-10-28T09:00:00Z",

@@ -748,18 +748,36 @@ def live_state(agent: str, sid: str, path: str = "") -> str:
     return ""
 
 
+def _forms(path: str) -> set:
+    """A folder as written and as Windows spells it in full (C:\\Users\\SWAGGY~1 and the long name)."""
+    out = {os.path.normcase(os.path.abspath(path))}
+    try:
+        out.add(os.path.normcase(os.path.realpath(path)))
+    except OSError:
+        pass
+    return out
+
+
 def _ours(cwd: str) -> bool:
-    """A session this app started itself (an agent brain's turn in the workspace or a temp
-    folder of ours): it is already one of the app's own chats, so it isn't listed again."""
+    """A session this app started itself (an agent brain's turn in the workspace, a temp
+    folder of ours, or a helper's worktree): it is already one of the app's own chats or
+    helpers, so it isn't listed again."""
     if not cwd:
         return False
     import tempfile
     from .tools import WORKSPACE
-    here = os.path.normcase(os.path.abspath(cwd))
-    if here == os.path.normcase(WORKSPACE):
+    here = _forms(cwd)
+    if here & _forms(WORKSPACE):
         return True
-    parent, name = os.path.split(here)
-    return parent == os.path.normcase(os.path.abspath(tempfile.gettempdir())) and name.startswith(("hearth-", "hearth_"))
+    trees = _forms(os.path.join(os.path.expanduser("~"), ".hearth", "worktrees"))
+    if any(h.startswith(w + os.sep) for h in here for w in trees):
+        return True
+    temp = _forms(tempfile.gettempdir())
+    for h in here:
+        parent, name = os.path.split(h)
+        if parent in temp and name.startswith(("hearth-", "hearth_")):
+            return True
+    return False
 
 
 def listing(limit: int = 120) -> List[Dict[str, Any]]:
