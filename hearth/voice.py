@@ -55,41 +55,9 @@ DEFAULT_SPEED = float(_env.get("VOICE_SPEED", "1.0"))
 
 _engine: Optional[Tuple[str, object]] = None  # ("kokoro" | "piper", obj)
 _lock = threading.Lock()
-# Set when caller wants the in-flight speech aborted (new turn arrived).
-_abort = threading.Event()
-
-# TTS playback state - so listen.py can mute the mic while the assistant speaks
-# and avoid feedback-looping on its own voice through the speakers. Use a
-# COUNTER (not a bool) so streaming sentence-by-sentence play stays True for
-# the entire speak() call across multiple _play() chunks.
-_speaking_count = 0
-_last_spoke_at = 0.0
-_speaking_state_lock = threading.Lock()
-
-# Rolling log of what the assistant recently said, so realtime voice can tell a real
-# barge (new words) from the mic picking up the assistant's own voice off the speakers
-# (words that match what was just spoken). (timestamp, lowercased text) pairs.
-_spoken_log: "list[tuple[float, str]]" = []
-_spoken_log_lock = threading.Lock()
-
-
-def note_spoken(text: str) -> None:
-    """Record a line the assistant is about to speak, for echo discrimination."""
-    if not text:
-        return
-    with _spoken_log_lock:
-        _spoken_log.append((time.time(), text.lower()))
-        if len(_spoken_log) > 40:
-            del _spoken_log[:-40]
-
-
-def recently_spoke_text(within_s: float = 6.0) -> str:
-    """Text the assistant spoke in the last `within_s` seconds, joined + lowercased.
-    Empty if nothing recent."""
-    cutoff = time.time() - within_s
-    with _spoken_log_lock:
-        return " ".join(t for (ts, t) in _spoken_log if ts >= cutoff)
-
+# Speaking state lives on a Speaker (below): this PC's speakers have one, and
+# a phone call gets its own, so neither cuts or deafens the other. These names
+# stay for the code that reads the PC's own.
 
 # How long after TTS stops the mic stays untrusted. Both capture paths (the
 # realtime recorder and the CLI push-to-talk loop) read this one value, so the
@@ -112,37 +80,38 @@ def half_duplex_enabled() -> bool:
         return False
 
 
+def note_spoken(text: str) -> None:
+    """Record a line the assistant is about to speak, for echo discrimination."""
+    DEFAULT.note_spoken(text)
+
+
+def recently_spoke_text(within_s: float = 6.0) -> str:
+    """Text the assistant spoke in the last `within_s` seconds, joined + lowercased.
+    Empty if nothing recent."""
+    return DEFAULT.recently_spoke_text(within_s)
+
+
 def is_speaking() -> bool:
     """True while a speak() call is producing audio. listen.py gates STT on
     this so the mic doesn't transcribe the assistant's own voice through the speakers."""
-    return _speaking_count > 0
+    return DEFAULT.is_speaking()
 
 
 def seconds_since_spoke() -> float:
     """Seconds since the last TTS chunk finished playing; inf if never spoken.
     Used to extend the post-TTS cooldown so the speaker buffer tail doesn't
     trigger a phantom utterance."""
-    if _last_spoke_at == 0.0:
-        return float("inf")
-    return max(0.0, time.time() - _last_spoke_at)
+    return DEFAULT.seconds_since_spoke()
 
 
 def _mark_speaking_start() -> None:
-    global _speaking_count
-    with _speaking_state_lock:
-        _speaking_count += 1
-    set_voice_state("speaking")
+    DEFAULT.mark_start()
 
 
 def _mark_speaking_end() -> None:
-    global _speaking_count, _last_spoke_at
-    with _speaking_state_lock:
-        _speaking_count = max(0, _speaking_count - 1)
-        _last_spoke_at = time.time()
-        _still = _speaking_count > 0
-    # Only fall back to idle when the LAST overlapping utterance finished.
-    if not _still:
-        set_voice_state("idle")
+    DEFAULT.mark_end()
+
+
 # Last HARD load error — surfaced in status() so we don't silently report
 # "engine: null" when the actual issue is, e.g., a missing file format.
 _last_load_error: Optional[str] = None
@@ -932,20 +901,7 @@ def stop() -> None:
     """Cut the currently-speaking turn AND drop any queued sentence chunks
     waiting on the lock. Called when a new user message arrives (or on
     barge-in) so audio doesn't trail into the next response."""
-    _abort.set()
-    # Empty the pipeline so no already-synthesized sentence plays after the
-    # user barged in. The play loop also sees _abort and aborts its stream.
-    _drain_queues()
-    try:
-        import sounddevice as sd  # type: ignore
-        sd.stop()
-    except Exception:
-        pass
-    # Immediately mark idle so half-duplex tail starts counting from now
-    # instead of 0.4s later via the play-loop timeout. Without this the mic
-    # stays deaf for tail+0.4 after every barge.
-    if is_speaking():
-        _mark_speaking_end()
+    DEFAULT.stop()
 
 
 def reset_abort() -> None:
@@ -953,25 +909,18 @@ def reset_abort() -> None:
     start of a fresh recording cycle (CLI mic toggle / GUI voiceCycle listening
     phase). Without this, the flag set by stop() would persist forever and
     silence the assistant on every subsequent turn."""
-    _abort.clear()
+    DEFAULT.reset_abort()
 
 
 # ---- Gapless TTS pipeline ---------------------------------------------------
-# The old path synthesized a sentence, played it (blocking), synthesized the
-# next, played it... so every sentence boundary had a synth-sized GAP, and each
-# separate speak() POST re-acquired a lock and reopened the audio device, adding
-# more seams. Result: "patched together" robotic speech. This replaces it with a
-# producer/consumer: ONE synth thread stays AHEAD of playback filling a queue,
-# and ONE play thread writes chunks into a SINGLE persistent output stream with
-# no gap between them. Set HEARTH_TTS_GAPLESS=0 to fall back to the old path.
+# One synth thread per speaker stays AHEAD of playback filling a queue, and one
+# play thread writes chunks into a single continuous output with no gap between
+# them, so sentences run together with no seam. Set HEARTH_TTS_GAPLESS=0 to fall
+# back to synthesizing and playing one chunk at a time.
 import queue as _queue
 
 _TTS_GAPLESS = _env.get("TTS_GAPLESS", "1") != "0"
-_synth_q: "_queue.Queue" = _queue.Queue()
-_audio_q: "_queue.Queue" = _queue.Queue(maxsize=6)  # bounded: synth stays ~ahead
-_pipe_lock = threading.Lock()
-_synth_thr: Optional[threading.Thread] = None
-_play_thr: Optional[threading.Thread] = None
+_synth_engine_lock = threading.Lock()   # one synthesis at a time across speakers
 
 
 def _to_int16(samples):
@@ -982,162 +931,290 @@ def _to_int16(samples):
     return arr
 
 
-def _synth_loop() -> None:
-    while True:
-        text, voice, speed = _synth_q.get()
-        if _abort.is_set():
-            continue
-        engine = _load_engine()
-        if engine is None:
-            continue
-        kind, obj = engine
-        try:
-            for chunk in _chunk_sentences(text):
-                if _abort.is_set():
-                    break
-                if kind == "kokoro":
-                    v = voice_for(chunk, voice)
-                    samples, sr = obj.create(  # type: ignore[attr-defined]
-                        chunk, voice=v, speed=speed, lang=voice_language(v))
-                    arr = _to_int16(samples)
-                elif kind == "piper":
-                    buf = BytesIO()
-                    with wave.open(buf, "wb") as wav:
-                        obj.synthesize(chunk, wav)  # type: ignore[attr-defined]
-                    buf.seek(0)
-                    with wave.open(buf, "rb") as wav:
-                        sr = wav.getframerate()
-                        import numpy as np  # type: ignore
-                        arr = np.frombuffer(wav.readframes(wav.getnframes()),
-                                            dtype=np.int16)
-                else:
-                    continue
-                # Blocks when the play queue is full — natural backpressure that
-                # keeps synth just ahead of playback without runaway memory.
-                while not _abort.is_set():
-                    try:
-                        _audio_q.put((arr, sr), timeout=0.2)
+def _synth_chunk(kind: str, obj, chunk: str, voice, speed):
+    """(int16 samples, sample rate) for one chunk of text."""
+    if kind == "kokoro":
+        v = voice_for(chunk, voice)
+        samples, sr = obj.create(chunk, voice=v, speed=speed, lang=voice_language(v))  # type: ignore[attr-defined]
+        return _to_int16(samples), sr
+    buf = BytesIO()
+    with wave.open(buf, "wb") as wav:
+        obj.synthesize(chunk, wav)  # type: ignore[attr-defined]
+    buf.seek(0)
+    with wave.open(buf, "rb") as wav:
+        sr = wav.getframerate()
+        import numpy as np  # type: ignore
+        return np.frombuffer(wav.readframes(wav.getnframes()), dtype=np.int16), sr
+
+
+class Speaker:
+    """Where the assistant's voice goes, with its own speaking state.
+
+    With no sink it plays on this PC's speakers (the window, the terminal,
+    voice mode). With a sink, every frame of audio goes to it instead, paced to
+    real time (`lead` seconds ahead) so is_speaking() follows what the far end
+    is playing and a stop still catches audio not sent yet. A sink is a
+    callable taking (int16 samples, sample rate); it may have flush(), called
+    when speech is cut."""
+
+    FRAME_S = 0.06
+
+    def __init__(self, sink: Optional[Callable] = None, lead: float = 0.3, first_chunk: int = 60):
+        self.sink = sink
+        self.lead = lead
+        self.first_chunk = first_chunk
+        self.abort = threading.Event()
+        self._count = 0
+        self._last = 0.0
+        self._state_lock = threading.Lock()
+        self._log: "list[tuple[float, str]]" = []
+        self._log_lock = threading.Lock()
+        self.synth_q: "_queue.Queue" = _queue.Queue()
+        self.audio_q: "_queue.Queue" = _queue.Queue(maxsize=6)
+        self._pipe_lock = threading.Lock()
+        self._threads: "list[threading.Thread]" = []
+
+    # ---- state
+    def note_spoken(self, text: str) -> None:
+        if not text:
+            return
+        with self._log_lock:
+            self._log.append((time.time(), text.lower()))
+            if len(self._log) > 40:
+                del self._log[:-40]
+
+    def recently_spoke_text(self, within_s: float = 6.0) -> str:
+        cutoff = time.time() - within_s
+        with self._log_lock:
+            return " ".join(t for (ts, t) in self._log if ts >= cutoff)
+
+    def is_speaking(self) -> bool:
+        return self._count > 0
+
+    def seconds_since_spoke(self) -> float:
+        if self._last == 0.0:
+            return float("inf")
+        return max(0.0, time.time() - self._last)
+
+    def mark_start(self) -> None:
+        with self._state_lock:
+            self._count += 1
+        if self.sink is None:
+            set_voice_state("speaking")
+
+    def mark_end(self) -> None:
+        with self._state_lock:
+            self._count = max(0, self._count - 1)
+            self._last = time.time()
+            still = self._count > 0
+        if not still and self.sink is None:
+            set_voice_state("idle")
+
+    # ---- speaking
+    def speak(self, text: str, blocking: bool = False, voice: Optional[str] = None,
+              speed: Optional[float] = None) -> str:
+        """'ok' | 'no_voice' | 'empty'."""
+        text = _clean_for_tts(text or "")
+        if not text:
+            return "empty"
+        if _load_engine(allow_download=True) is None:
+            return "no_voice"
+        speed = speed if speed is not None else current_speed()
+        self.note_spoken(text)
+        if not _TTS_GAPLESS and self.sink is None:
+            return _speak_legacy(text, blocking, voice, speed)
+        if self.abort.is_set():
+            return "ok"  # a stop() landed; don't queue into a cut turn
+        self._ensure_pipeline()
+        self.synth_q.put((text, voice, speed))
+        if blocking:
+            while (not self.abort.is_set() and
+                   (not self.synth_q.empty() or not self.audio_q.empty() or self.is_speaking())):
+                time.sleep(0.05)
+        return "ok"
+
+    def stop(self) -> None:
+        self.abort.set()
+        self._drain()
+        if self.sink is None:
+            try:
+                import sounddevice as sd  # type: ignore
+                sd.stop()
+            except Exception:
+                pass
+        else:
+            flush = getattr(self.sink, "flush", None)
+            if callable(flush):
+                try:
+                    flush()
+                except Exception:
+                    pass
+        # Idle at once, so the echo tail counts from the cut, not from the play loop's next wake.
+        if self.is_speaking():
+            with self._state_lock:
+                self._count = 0
+                self._last = time.time()
+            if self.sink is None:
+                set_voice_state("idle")
+
+    def reset_abort(self) -> None:
+        self.abort.clear()
+
+    # ---- pipeline
+    def _drain(self) -> None:
+        for q in (self.synth_q, self.audio_q):
+            try:
+                while True:
+                    q.get_nowait()
+            except _queue.Empty:
+                pass
+
+    def _ensure_pipeline(self) -> None:
+        with self._pipe_lock:
+            if self._threads and all(t.is_alive() for t in self._threads):
+                return
+            play = self._play_local if self.sink is None else self._play_remote
+            self._threads = [threading.Thread(target=self._synth_loop, daemon=True, name="hearth-tts-synth"),
+                             threading.Thread(target=play, daemon=True, name="hearth-tts-play")]
+            for t in self._threads:
+                t.start()
+
+    def _synth_loop(self) -> None:
+        while True:
+            text, voice, speed = self.synth_q.get()
+            if self.abort.is_set():
+                continue
+            engine = _load_engine()
+            if engine is None:
+                continue
+            kind, obj = engine
+            if kind not in ("kokoro", "piper"):
+                continue
+            try:
+                # A call starts talking at the first clause; the PC waits for a fuller sentence.
+                for chunk in _chunk_sentences(text, min_chars=self.first_chunk):
+                    if self.abort.is_set():
                         break
-                    except _queue.Full:
-                        continue
-        except Exception as e:
-            note_speak_error("synthesis", e)
-            continue
+                    with _synth_engine_lock:
+                        arr, sr = _synth_chunk(kind, obj, chunk, voice, speed)
+                    # Blocks while the play queue is full: synthesis stays just ahead of playback.
+                    while not self.abort.is_set():
+                        try:
+                            self.audio_q.put((arr, sr), timeout=0.2)
+                            break
+                        except _queue.Full:
+                            continue
+            except Exception as e:
+                note_speak_error("synthesis", e)
+                continue
 
-
-def _play_loop() -> None:
-    try:
-        import sounddevice as sd  # type: ignore
-    except (ImportError, OSError) as e:
-        note_speak_error("playback device", e)
-        return
-    stream = None
-    cur_sr = None
-    playing = False
-    FRAME = 2400  # ~0.1s at 24k: small enough that barge-in cuts fast
-    while True:
+    def _play_local(self) -> None:
         try:
-            item = _audio_q.get(timeout=0.4)
-        except _queue.Empty:
-            # Idle: close the device and drop back to 'idle' so the dot grid
-            # settles and the mic isn't blocked by a held output stream.
-            if stream is not None:
-                try: stream.stop(); stream.close()
-                except Exception: pass
-                stream, cur_sr = None, None
-            if playing:
-                playing = False
-                _mark_speaking_end()
-            continue
-        arr, sr = item
-        if _abort.is_set():
-            continue  # drain leftovers after a barge-in without playing them
-        try:
-            if stream is None or cur_sr != sr:
+            import sounddevice as sd  # type: ignore
+        except (ImportError, OSError) as e:
+            note_speak_error("playback device", e)
+            return
+        stream = None
+        cur_sr = None
+        playing = False
+        FRAME = 2400  # ~0.1s at 24k: small enough that barge-in cuts fast
+        while True:
+            try:
+                item = self.audio_q.get(timeout=0.4)
+            except _queue.Empty:
+                # Idle: close the device and drop back to 'idle' so the dot grid
+                # settles and the mic isn't blocked by a held output stream.
                 if stream is not None:
                     try: stream.stop(); stream.close()
                     except Exception: pass
-                stream = sd.OutputStream(samplerate=sr, channels=1, dtype="int16")
-                stream.start()
-                cur_sr = sr
-            if not playing:
-                playing = True
-                _mark_speaking_start()
-            _emit_levels(arr, sr)
-            # Write in small frames so a barge-in (_abort) stops within ~0.1s
-            # instead of waiting out the whole sentence.
-            view = arr.reshape(-1, 1)
-            for off in range(0, len(view), FRAME):
-                if _abort.is_set():
-                    try: stream.abort()
-                    except Exception: pass
                     stream, cur_sr = None, None
-                    if playing:
-                        playing = False
-                        _mark_speaking_end()
-                    break
-                stream.write(view[off:off + FRAME])
-        except Exception:
+                if playing:
+                    playing = False
+                    self.mark_end()
+                continue
+            arr, sr = item
+            if self.abort.is_set():
+                continue  # drain leftovers after a barge-in without playing them
             try:
-                if stream is not None: stream.close()
-            except Exception: pass
-            stream, cur_sr = None, None
+                if stream is None or cur_sr != sr:
+                    if stream is not None:
+                        try: stream.stop(); stream.close()
+                        except Exception: pass
+                    stream = sd.OutputStream(samplerate=sr, channels=1, dtype="int16")
+                    stream.start()
+                    cur_sr = sr
+                if not playing:
+                    playing = True
+                    self.mark_start()
+                _emit_levels(arr, sr)
+                # Small frames, so a barge-in stops within ~0.1s instead of after the sentence.
+                view = arr.reshape(-1, 1)
+                for off in range(0, len(view), FRAME):
+                    if self.abort.is_set():
+                        try: stream.abort()
+                        except Exception: pass
+                        stream, cur_sr = None, None
+                        if playing:
+                            playing = False
+                            self.mark_end()
+                        break
+                    stream.write(view[off:off + FRAME])
+            except Exception:
+                try:
+                    if stream is not None: stream.close()
+                except Exception: pass
+                stream, cur_sr = None, None
+
+    def _play_remote(self) -> None:
+        playing = False
+        start = 0.0          # when the far end began playing this stretch
+        sent = 0.0           # seconds of audio handed to it since then
+        while True:
+            try:
+                arr, sr = self.audio_q.get(timeout=0.1)
+            except _queue.Empty:
+                # Speaking lasts until the far end has had time to play what it was sent.
+                if playing and time.time() >= start + sent:
+                    playing = False
+                    self.mark_end()
+                continue
+            if self.abort.is_set():
+                continue
+            if not playing:
+                playing, start, sent = True, time.time(), 0.0
+                self.mark_start()
+            step = max(1, int(sr * self.FRAME_S))
+            for off in range(0, len(arr), step):
+                if self.abort.is_set():
+                    break
+                ahead = (start + sent) - time.time()
+                if ahead > self.lead:
+                    time.sleep(ahead - self.lead)
+                if self.abort.is_set():
+                    break
+                frame = arr[off:off + step]
+                try:
+                    self.sink(frame, sr)
+                except Exception as e:
+                    note_speak_error("sending audio", e)
+                    break
+                sent += len(frame) / float(sr)
+            if self.abort.is_set() and playing:
+                playing = False
+                self.mark_end()
 
 
-def _ensure_pipeline() -> None:
-    global _synth_thr, _play_thr
-    with _pipe_lock:
-        if _synth_thr is None or not _synth_thr.is_alive():
-            _synth_thr = threading.Thread(target=_synth_loop, daemon=True,
-                                          name="hearth-tts-synth")
-            _synth_thr.start()
-        if _play_thr is None or not _play_thr.is_alive():
-            _play_thr = threading.Thread(target=_play_loop, daemon=True,
-                                         name="hearth-tts-play")
-            _play_thr.start()
-
-
-def _drain_queues() -> None:
-    for q in (_synth_q, _audio_q):
-        try:
-            while True:
-                q.get_nowait()
-        except _queue.Empty:
-            pass
+# This PC's own speakers: everything that speaks here without saying otherwise.
+DEFAULT = Speaker()
+_abort = DEFAULT.abort
 
 
 def speak(text: str, blocking: bool = False,
           voice: Optional[str] = None,
           speed: Optional[float] = None) -> str:
     """Return: 'ok' | 'no_voice' | 'empty'. blocking=False runs in a daemon
-    thread so the chat keeps flowing.
-
-    Gapless: enqueues text into the synth pipeline, which stays ahead of a
-    single continuous output stream so sentences run together with no seam."""
-    text = _clean_for_tts(text or "")
-    if not text:
-        return "empty"
-    # A real speak() is the user genuinely using voice, so THIS is where the
-    # one-time model download is allowed. is_available() (status probes) never
-    # downloads. _engine caches, so the fetch happens at most once.
-    if _load_engine(allow_download=True) is None:
-        return "no_voice"
-    speed = speed if speed is not None else current_speed()
-    note_spoken(text)
-
-    if not _TTS_GAPLESS:
-        return _speak_legacy(text, blocking, voice, speed)
-
-    if _abort.is_set():
-        return "ok"  # a stop() landed; don't queue into a barged-in turn
-    _ensure_pipeline()
-    _synth_q.put((text, voice, speed))
-    if blocking:
-        # Rare (CLI). Wait until both queues drain and playback goes idle.
-        while (not _abort.is_set() and
-               (not _synth_q.empty() or not _audio_q.empty() or is_speaking())):
-            time.sleep(0.05)
-    return "ok"
+    thread so the chat keeps flowing. Plays on this PC's speakers."""
+    return DEFAULT.speak(text, blocking=blocking, voice=voice, speed=speed)
 
 
 def _speak_legacy(text, blocking, voice, speed) -> str:
