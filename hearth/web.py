@@ -1616,17 +1616,21 @@ _ICON_MAX = 512_000          # bigger than any sane icon; a file this size is cu
 _DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
-def _favicon(domain: str):
-    """A site's own icon, fetched from that site only and cached on disk, for
-    showing which sites a search or a page read touched. (bytes, mime) or None."""
+def _site_of(domain: str) -> str:
     d = (domain or "").strip().lower()
     if d.startswith("www."):
         d = d[4:]
-    if not _DOMAIN_RE.match(d):
-        return None
-    os.makedirs(_FAVICON_DIR, exist_ok=True)
+    return d if _DOMAIN_RE.match(d) else ""
+
+
+def _favicon_cached(domain: str):
+    """What the disk already knows about a site's icon, without the network:
+    (bytes, mime), False when it has none (looked up within a day), None when
+    it hasn't been looked up yet."""
+    d = _site_of(domain)
+    if not d:
+        return False
     path = os.path.join(_FAVICON_DIR, d)
-    miss = path + ".miss"
     # 150,000 bytes was an older read limit: a file exactly that long was cut off.
     if os.path.isfile(path) and os.path.getsize(path) == 150_000:
         os.remove(path)
@@ -1634,8 +1638,24 @@ def _favicon(domain: str):
         with open(path, "rb") as f:
             data = f.read()
         return data, _icon_mime(data)
+    miss = path + ".miss"
     if os.path.isfile(miss) and time.time() - os.path.getmtime(miss) < 86400:
-        return None
+        return False
+    return None
+
+
+def _favicon(domain: str):
+    """A site's own icon, fetched from that site only and cached on disk, for
+    showing which sites a search or a page read touched. (bytes, mime) or None.
+    This waits on the network for a site not looked up yet (up to ~20 s); a
+    request from the window uses _icon_now, which doesn't."""
+    known = _favicon_cached(domain)
+    if known is not None:
+        return known or None
+    d = _site_of(domain)
+    os.makedirs(_FAVICON_DIR, exist_ok=True)
+    path = os.path.join(_FAVICON_DIR, d)
+    miss = path + ".miss"
     for url in (f"https://{d}/favicon.ico", f"https://www.{d}/favicon.ico",
                 f"https://{d}/apple-touch-icon.png"):
         try:
@@ -1674,6 +1694,39 @@ def _favicon(domain: str):
     except Exception:
         pass
     open(miss, "w").close()
+    return None
+
+
+# Icons for the window: answered from disk at once; a site or brand not looked up yet
+# answers "none" now and is fetched in the background, so the next ask finds it. At
+# start the window asks for several at once, and each one waiting on the network held
+# one of the browser's six connections for up to 20 s (C20).
+_ICON_JOBS: Dict[Any, Any] = {}
+_ICON_LOCK = threading.Lock()
+_ICON_POOL = None
+
+
+def _icon_now(cached, fetch, arg):
+    icon = cached(arg)
+    if icon is not None:
+        return icon or None
+    global _ICON_POOL
+    key = (getattr(fetch, "__name__", ""), arg)
+    with _ICON_LOCK:
+        if key not in _ICON_JOBS:
+            if _ICON_POOL is None:
+                from concurrent.futures import ThreadPoolExecutor
+                _ICON_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="icon-fetch")
+
+            def run():
+                try:
+                    fetch(arg)
+                except Exception:
+                    pass
+                finally:
+                    with _ICON_LOCK:
+                        _ICON_JOBS.pop(key, None)
+            _ICON_JOBS[key] = _ICON_POOL.submit(run)
     return None
 
 
@@ -2942,12 +2995,18 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path in ("/api/favicon", "/api/brand-icon"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             if path == "/api/brand-icon":
-                from .brand_icons import brand_icon
-                icon = brand_icon(q.get("k", [""])[0])
+                from .brand_icons import brand_icon, brand_icon_cached
+                icon = _icon_now(brand_icon_cached, brand_icon, q.get("k", [""])[0])
             else:
-                icon = _favicon(q.get("d", [""])[0])
+                icon = _icon_now(_favicon_cached, _favicon, q.get("d", [""])[0])
             if not icon:
-                return self.send_error(404, "no icon")
+                # Not known yet (being fetched now) or none: the page shows its own stand-in, and
+                # the browser doesn't keep this answer, so the next draw asks again.
+                self.send_response(404)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             data, mime = icon
             self.send_response(200)
             self.send_header("Content-Type", mime)
