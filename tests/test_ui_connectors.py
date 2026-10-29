@@ -114,7 +114,7 @@ with sync_playwright() as pw:
     pg.route("**/api/mcp/status", lambda r: r.fulfill(json={"bridges": [
         {"name": "github", "raw_name": "github", "state": "connected", "tools": [{"name": "a"}, {"name": "b"}], "error": ""},
         {"name": "files", "raw_name": "files", "state": "error", "tools": [],
-         "error": "Couldn't start: node isn't installed", "detail": raw}]}))
+         "error": "Couldn't start: node can't be found", "detail": raw}]}))
     pg.evaluate("() => document.querySelector('.settings-side-btn[data-st=mcp]').click()")
     pg.wait_for_timeout(1200)
     mcp = pg.evaluate("document.querySelector('.settings-pane[data-st=mcp]').innerText")
@@ -125,7 +125,7 @@ with sync_playwright() as pw:
           not any(w in mcp for w in ("Model Context Protocol", "as a CLIENT", "as a SERVER", "Active MCP bridges", "Outbound", "Inbound")))
     check("a connected server shows its tool count", "github" in mcp and "2 tools" in mcp)
     check("a failed one says why in one plain sentence, without the raw error",
-          "Couldn't start: node isn't installed" in mcp and "ExceptionGroup" not in mcp)
+          "Couldn't start: node can't be found" in mcp and "ExceptionGroup" not in mcp)
     pg.click(".settings-pane[data-st=mcp] [data-mcp-row]")
     pg.wait_for_timeout(300)
     mcp_open = pg.evaluate("document.querySelector('.settings-pane[data-st=mcp]').innerText")

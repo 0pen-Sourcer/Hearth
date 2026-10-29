@@ -32,16 +32,16 @@ from hearth import mcp_client  # noqa: E402
 # ---------------------------------------------------------------- the sentence
 grp = BaseExceptionGroup("unhandled errors in a TaskGroup", [FileNotFoundError(2, "No such file", "npx")])
 err, detail = mcp_client.plain_failure(grp, "", "npx")
-check(f"a missing program inside a TaskGroup error reads plainly ({err!r})", err == "Couldn't start: npx isn't installed")
+check(f"a missing program inside a TaskGroup error reads plainly ({err!r})", err == "Couldn't start: npx can't be found")
 check("the raw error stays in the detail", "ExceptionGroup" in detail and "FileNotFoundError" in detail)
 
 closed = BaseExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("Connection closed")])
 err, detail = mcp_client.plain_failure(closed, '"node" is not recognized as an internal or external command,\n'
                                                'operable program or batch file.\n', "npx")
-check(f"Windows' 'not recognized' names the missing program ({err!r})", err == "Couldn't start: node isn't installed")
+check(f"Windows' 'not recognized' names the missing program ({err!r})", err == "Couldn't start: node can't be found")
 check("and the detail keeps what the server printed", "is not recognized" in detail)
 err, _ = mcp_client.plain_failure(closed, "/usr/bin/env: 'node': No such file or directory\n", "npx")
-check(f"so does env's 'No such file' ({err!r})", err == "Couldn't start: node isn't installed")
+check(f"so does env's 'No such file' ({err!r})", err == "Couldn't start: node can't be found")
 err, _ = mcp_client.plain_failure(closed, "", "server")
 check(f"a server that just exits says so ({err!r})", err == "Couldn't start: it stopped right away")
 check("no sentence carries an exception class name",
@@ -78,7 +78,7 @@ except Exception:
 b = bridges[0] if bridges else {}
 check(f"the failed server is listed as an error ({b.get('state')})", b.get("state") == "error")
 check(f"its reason names the missing program ({b.get('error')!r})",
-      b.get("error") == "Couldn't start: hearth-missing-node-xyz isn't installed")
+      b.get("error") == "Couldn't start: hearth-missing-node-xyz can't be found")
 check("the raw detail is kept", "hearth-missing-node-xyz" in (b.get("detail") or ""))
 check(f"nothing the server printed reached the terminal ({p.stderr.strip()[:120]!r})",
       "hearth-missing-node-xyz" not in p.stderr and "not recognized" not in p.stderr)

@@ -144,7 +144,7 @@ def plain_failure(exc: BaseException, stderr: str = "", command: str = "") -> Tu
         missing = os.path.basename(command or getattr(leaf, "filename", "") or "") or "its program"
     if missing:
         missing = re.sub(r"\.(exe|cmd|bat)$", "", missing, flags=re.I)
-        return f"Couldn't start: {missing} isn't installed", detail
+        return f"Couldn't start: {missing} can't be found", detail
     if isinstance(leaf, (asyncio.TimeoutError, TimeoutError)):
         return "Couldn't start: it didn't answer in time", detail
     if isinstance(leaf, PermissionError):
