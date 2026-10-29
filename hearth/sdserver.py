@@ -722,7 +722,7 @@ def ensure_loaded(video: bool, recipe_id: str = "") -> Dict[str, Any]:
     if not row:
         kind = "video" if video else "image"
         return {"ok": False, "code": "no_model",
-                "error": f"no {kind} model on this PC yet: add one under Models > Images & video"}
+                "error": f"no {kind} model on this PC yet: add one under Models, My Models"}
     if not row["ready"]:
         return {"ok": False, "code": "missing_files",
                 "error": f"{row['name']} still needs: {', '.join(row['missing'])}"}
@@ -868,17 +868,83 @@ def overview(start_engine: bool = True) -> Dict[str, Any]:
         out["error"] = cat["error"]
         return out
     out["status"] = cat["status"]
+    by_id = {f["id"]: f for f in cat["files"]}
+    roots = model_roots()
+
+    def size_of(fid: str) -> int:
+        n = (by_id.get(fid) or {}).get("size")
+        if isinstance(n, (int, float)) and n > 0:
+            return int(n)
+        path = file_path(fid, roots)
+        return os.path.getsize(path) if path else 0
+
     out["recipes"] = [{**{k: r[k] for k in ("id", "name", "description", "url", "video", "ready", "missing", "picks")},
-                       "has_model": any(s in (r["picks"] or {}) for s in _MAIN_SLOTS)}
+                       "has_model": any(s in (r["picks"] or {}) for s in _MAIN_SLOTS),
+                       "size_gb": round(sum(size_of(f) for f in (r["picks"] or {}).values()) / 1e9, 1),
+                       "own": bool(_own_main_file(r["picks"] or {}))}
                       for r in cat["recipes"]]
     kinds = known_kinds()
-    by_id = {f["id"]: f for f in cat["files"]}
     out["unnamed"] = [{"id": f["id"], "name": f.get("name") or f["id"], "category": f.get("category")}
                       for f in cat["unnamed"]]
     out["unsure"] = [{"id": fid, "name": by_id[fid].get("name") or fid, "family": kinds.get(fid, {}).get("family") or "",
                       "note": kinds.get(fid, {}).get("note") or ""}
                      for fid, rid in cat["placed"].items() if rid is None and fid in by_id]
     return out
+
+
+def file_path(file_id: str, roots: Optional[List[str]] = None) -> Optional[str]:
+    """Where an engine file id (category/name) is on disk: the first root that has it."""
+    rel = str(file_id or "").replace("\\", "/").lstrip("/")
+    if not rel or ".." in rel.split("/"):
+        return None
+    for root in roots if roots is not None else model_roots():
+        p = os.path.join(root, *rel.split("/"))
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _own_main_file(picks: Dict[str, str]) -> Optional[Path]:
+    """The recipe's model file when it sits in Inglen's own folder; parts it may
+    share with other models (VAE, text encoders) and other apps' folders don't count."""
+    fid = next((picks[s] for s in _MAIN_SLOTS if s in picks), None)
+    path = file_path(fid, [str(models_dir())]) if fid else None
+    if not path:
+        return None
+    target = Path(path).resolve()
+    try:
+        target.relative_to(models_dir().resolve())
+    except ValueError:
+        return None
+    return target
+
+
+def delete_model(recipe_id: str) -> Dict[str, Any]:
+    """Delete a ready model's own file from Inglen's folder, unloading it first.
+    Shared parts stay, and nothing is deleted from a folder the person added."""
+    if not running():
+        s = start()
+        if not s.get("ok"):
+            return s
+    cat = catalog()
+    if "error" in cat:
+        return {"ok": False, "error": cat["error"]}
+    row = next((r for r in cat["recipes"] if r["id"] == recipe_id), None)
+    if not row:
+        return {"ok": False, "error": f"the engine has no model '{recipe_id}'"}
+    target = _own_main_file(row["picks"] or {})
+    if not target:
+        return {"ok": False, "error": "this model's file is in a folder you added; remove it from there"}
+    status = cat.get("status") or {}
+    if status.get("recipe") == recipe_id and status.get("state") in ("ready", "loading"):
+        api("POST", "/sdcpp/v1/models/unload")
+    try:
+        freed = target.stat().st_size
+        target.unlink()
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    api("POST", "/sdcpp/v1/models/refresh")
+    return {"ok": True, "freed_gb": round(freed / 1e9, 2), "file": target.name}
 
 
 def forge_models() -> str:

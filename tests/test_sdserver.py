@@ -328,6 +328,54 @@ tries = len(loads)
 sdserver.ensure_loaded(False)
 check(f"and it isn't tried again on the next picture ({tries} then {len(loads)})", tries > 0 and len(loads) == tries)
 
+# My Models: each model's size, whether its file is Inglen's own, and Delete.
+from pathlib import Path  # noqa: E402
+home = Path(tempfile.mkdtemp(prefix="hearth-imgdel-"))
+other = Path(tempfile.mkdtemp(prefix="hearth-comfy-"))
+sdserver._home = lambda: home
+own_dir = sdserver.models_dir()
+(own_dir / "diffusion_models" / "z_image_turbo-Q4_K.gguf").write_bytes(b"z" * 2000)
+(own_dir / "vae" / "ae.safetensors").write_bytes(b"v" * 1000)
+(own_dir / "text_encoders" / "qwen_3_4b.safetensors").write_bytes(b"q" * 1000)
+(other / "diffusion_models").mkdir()
+(other / "diffusion_models" / "flux1-dev-Q4_0.gguf").write_bytes(b"f" * 1000)
+sized = [dict(f, size=3_500_000_000) if f["id"].startswith("diffusion_models/z_image") else f for f in FILES]
+seen: list = []
+
+
+def mine_api(method, path, body=None, timeout=30):
+    seen.append(path)
+    if path == "/sdcpp/v1/models/status":
+        return {"state": "ready", "recipe": "z-image-turbo", "error": None}
+    if path == "/sdcpp/v1/recipes":
+        return {"recipes": RECIPES}
+    if path == "/sdcpp/v1/model-files":
+        return {"files": sized}
+    return {}
+
+
+sdserver.api = mine_api
+sdserver.running = lambda: True
+sdserver.model_roots = lambda: [str(own_dir), str(other)]
+sdserver.installed = lambda: [home / "sdcpp" / "master-1" / sdserver.SERVER]
+sdserver.forge_models = lambda: ""
+llmserver.engine_build_of = lambda p: "cuda"
+ov = {r["id"]: r for r in sdserver.overview()["recipes"]}
+check(f"a model's size adds up its files ({ov['z-image-turbo'].get('size_gb')} GB)",
+      ov["z-image-turbo"].get("size_gb") == 3.5)
+check("a model whose file is in Inglen's folder is its own, one read from an added folder isn't",
+      ov["z-image-turbo"].get("own") is True and ov["flux1-dev"].get("own") is False)
+refused = sdserver.delete_model("flux1-dev")
+check("Delete refuses a model in a folder the person added, and the file stays",
+      not refused["ok"] and (other / "diffusion_models" / "flux1-dev-Q4_0.gguf").exists())
+seen.clear()
+gone = sdserver.delete_model("z-image-turbo")
+check(f"Delete unloads the loaded model and removes its file {gone}",
+      gone["ok"] and "/sdcpp/v1/models/unload" in seen
+      and not (own_dir / "diffusion_models" / "z_image_turbo-Q4_K.gguf").exists())
+check("the parts other models can use stay", (own_dir / "vae" / "ae.safetensors").exists())
+check("an id that climbs out of the folders finds nothing", sdserver.file_path("../../etc/passwd") is None)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

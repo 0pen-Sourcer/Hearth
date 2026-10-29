@@ -1875,6 +1875,13 @@
   }
   .models-pane { display: flex; flex-direction: column; gap: 12px; }
   .models-pane[hidden] { display: none; }
+  /* My Models: chat, image and video models in one list, filtered by kind. */
+  #mine-chat, #mine-images { display: flex; flex-direction: column; gap: 12px; }
+  #mine-chat[hidden], #mine-images[hidden], #models-pane-mine .models-section[hidden],
+  #models-pane-mine .model-row[hidden], #models-pane-mine .engine-note[hidden] { display: none; }
+  .mine-kinds { justify-content: flex-start; }
+  .mine-kinds .engine-pill { font-size: 12px; padding: 5px 12px; }
+  .mine-kind-n { margin-left: 4px; opacity: .7; font-family: var(--mono); font-size: 10.5px; }
   .models-empty {
     padding: 40px 20px;
     text-align: center;
@@ -4519,13 +4526,11 @@
         <button class="models-tab active" data-tab="mine">My Models <span class="count" id="tab-mine-n">0</span></button>
         <button class="models-tab" data-tab="discover">Discover</button>
         <button class="models-tab" data-tab="engine">Engine</button>
-        <button class="models-tab" data-tab="images">Images &amp; video</button>
       </div>
       <div class="models-body">
         <div class="models-pane" data-pane="mine" id="models-pane-mine"></div>
         <div class="models-pane" data-pane="discover" id="models-pane-discover" hidden></div>
         <div class="models-pane" data-pane="engine" id="models-pane-engine" hidden></div>
-        <div class="models-pane" data-pane="images" id="models-pane-images" hidden></div>
         <div class="progress-row" id="models-dl" hidden>
           <div class="label" id="models-dl-label"></div>
           <div class="progress-bar"><div id="models-dl-bar"></div></div>
@@ -18270,11 +18275,10 @@ async function refreshModelsView() {
     head.innerHTML += '<div style="margin-top:10px;padding:10px 12px;background:color-mix(in srgb, var(--accent) 8%, transparent);border:1px solid var(--accent-line);border-radius:8px;font-size:12.5px;color:var(--fg-dim)">You\'re on <b>Inglen Lite</b>, no built-in engine yet. Use a cloud brain (Settings → Chat brain) or LM Studio / Ollama, or <a href="#" onclick="document.getElementById(\'btn-runtime-update\').click();return false;" style="color:var(--accent-2)">download the GPU engine here ↓</a> to run local models in Inglen (just the engine, no app reinstall).</div>';
   }
 
-  // Disk-count badge on the "My Models" tab
-  $('tab-mine-n').textContent = (s.disk_models || []).length;
 
   // Render panes (cheap - none has a network call beyond status)
   modelsRenderMine();
+  modelsRenderImages();
   if (_modelsState.tab === 'discover') modelsRenderDiscover();
   showResumableDownload(s);   // surface any interrupted .part download + Resume
 }
@@ -18308,16 +18312,25 @@ function _renderModelsHeader(s) {
   } else {
     head.innerHTML = now(brainMarkHTML('', true), '', 'Nothing loaded. Pick a model below.');
   }
-  $('tab-mine-n').textContent = (s.disk_models || []).length;
+  _paintMineKinds();
 }
 function _renderModelsPanes(s) {
   modelsRenderMine();
   if (_modelsState.tab === 'discover') modelsRenderDiscover();
 }
 
+function _mineSkeleton() {
+  const root = $('models-pane-mine');
+  if (!$('mine-chat')) {
+    root.innerHTML = '<div class="engine-pills mine-kinds" id="mine-kinds"></div><div id="mine-chat"></div><div id="mine-images"></div>';
+    _paintMineImages();
+  }
+  return $('mine-chat');
+}
+
 function modelsRenderMine() {
   const s = _modelsState.status || {};
-  const pane = $('models-pane-mine');
+  const pane = _mineSkeleton();
   const disk = s.disk_models || [];
   const isBuiltin = s.builtin_running;
   // Scanning banner - when the user just switched brain cloud→local OR
@@ -18333,9 +18346,10 @@ function modelsRenderMine() {
   if (!disk.length) {
     pane.innerHTML = scanBanner + `
       <div class="models-empty">
-        <div class="big">${s.scanning ? 'Scanning local model catalog…' : 'No models on this PC yet'}</div>
+        <div class="big">${s.scanning ? 'Scanning local model catalog…' : 'No chat models on this PC yet'}</div>
         <div>${s.scanning ? 'One sec - Inglen is checking LM Studio, Ollama, HF cache, and Downloads.' : 'Use the <b>Discover</b> tab to search Hugging Face, or grab a <b>Quick pick</b>.<br>Inglen auto-detects models from LM Studio, Ollama, HF cache, and Downloads.'}</div>
       </div>`;
+    _paintMineKinds(); _applyMineKind();
     return;
   }
   const _helper = (s && s.helper) || {};
@@ -18344,7 +18358,7 @@ function modelsRenderMine() {
          <button class="model-action is-secondary" data-helper-path="">Stop</button></div>`
     : '';
   let html = scanBanner + helperNote +
-             '<div class="models-section"><div class="sec-head"><h3>On your machine</h3><span class="sub">' +
+             '<div class="models-section"><div class="sec-head"><h3>Chat models</h3><span class="sub">' +
              disk.length + ' file' + (disk.length === 1 ? '' : 's') +
              ' &middot; pulled from LM Studio, HF cache, and Downloads</span></div><div class="sec-body">';
   // Slug helper for fuzzy match - LM Studio short id ("harmonic-hermes-9b")
@@ -18407,7 +18421,7 @@ function modelsRenderMine() {
     // button down there says "Use with these settings" so the difference is
     // explicit: one is one-click, the other adopts your tuning first.
     html += `
-      <div class="model-row${loaded ? ' is-loaded' : ''}" data-row="${filenameId}">
+      <div class="model-row${loaded ? ' is-loaded' : ''}" data-row="${filenameId}"${m.not_chat ? ` data-not-chat="${esc(m.path)}"` : ''}>
         <div class="model-info">
           <div class="model-name" title="${esc(m.path)}">${esc(m.filename)}
             <span class="model-badge badge-src">${esc(m.source)}</span>
@@ -18460,6 +18474,7 @@ function modelsRenderMine() {
   pane.innerHTML = html;
   modelsWireRowClicks(pane);
   modelVisionFill(pane);
+  _mineHideImageDupes(); _paintMineKinds(); _applyMineKind();
   // "Show in folder" — reveal the model file in the OS explorer (models live
   // outside the workspace, so this hits the un-sandboxed /api/model/reveal).
   pane.querySelectorAll('[data-reveal-model]').forEach(btn => {
@@ -18646,9 +18661,9 @@ async function renderConnectorPeople() {
     const [channel, sender] = b.dataset.connRevoke.split('|'); post({ action: 'revoke', channel, sender }); });
 }
 
-// Images & video: Inglen's own engine for pictures and short videos
+// Image and video models: Inglen's own engine for pictures and short videos
 // (stable-diffusion.cpp), the folders it reads models from, and which models
-// the files there make ready. What each model family needs comes from the
+// the files there make ready, shown in My Models. What each model family needs comes from the
 // engine's own recipes; nothing here names a model.
 const IMG_DL_ID = '__imgengine__';
 const _imgDl = { t0: 0, b0: 0 };
@@ -18697,7 +18712,7 @@ async function imagesInstall() {
     dlUpsert(IMG_DL_ID, { status: 'error' });
     toast("The image engine didn't download", e.message || '', 'err', 8000);
   }
-  if (_modelsState.tab === 'images') modelsRenderImages();
+  modelsRenderImages(true);
 }
 
 function imagesFolderDialog() {
@@ -18713,29 +18728,111 @@ function imagesFolderDialog() {
         const r = await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: v }) });
         if (!r.ok) { toast("That folder didn't work", r.error || '', 'err', 8000); return false; }
-        modelsRenderImages();
+        modelsRenderImages(true);
       } } ]);
   setTimeout(() => $('img-folder-src')?.focus(), 50);
 }
 
-async function modelsRenderImages() {
-  const pane = $('models-pane-images'); if (!pane) return;
-  pane.innerHTML = '<div class="models-empty">Checking the image engine…</div>';
-  let o = {};
-  try { o = await api('/api/images'); } catch (e) { o = { error: e.message }; }
-  if (_modelsState.tab !== 'images') return;
+// Image and video models live in My Models beside the chat ones. The engine's
+// overview is fetched here and kept in _modelsState.images; painting reads the
+// copy, so a status refresh repaints without asking the engine again.
+async function modelsRenderImages(force) {
+  const now = Date.now();
+  // Asking starts the image engine, so only while the Models page is open.
+  if (!force && STATE.view !== 'models') return;
+  if (!force && _modelsState.images && now - (_modelsState.imagesAt || 0) < 10000) { _paintMineImages(); return; }
+  _modelsState.imagesAt = now;
+  if (!_modelsState.images) _paintMineImages();       // "Checking…" the first time only
+  let o;
+  try { o = await api('/api/images'); } catch (e) { o = { installed: !!(_modelsState.images || {}).installed, error: e.message }; }
+  _modelsState.images = o;
+  _paintMineImages();
+}
+
+// The kind filter: All, Chat, Images, Video, each with how many are ready.
+function _mineKindCounts() {
+  const o = _modelsState.images || {};
+  const ready = (o.recipes || []).filter(r => r.ready);
+  const chat = document.querySelectorAll('#mine-chat .model-row:not([hidden])').length;
+  return { chat, image: ready.filter(r => !r.video).length, video: ready.filter(r => r.video).length };
+}
+function _paintMineKinds() {
+  const bar = $('mine-kinds'); if (!bar) return;
+  const c = _mineKindCounts(), on = _modelsState.kind || 'all';
+  const pill = (k, label, n) => `<button class="engine-pill${on === k ? ' is-on' : ''}" data-mine-kind="${k}">${label}${n === null ? '' : ` <span class="mine-kind-n">${n}</span>`}</button>`;
+  bar.innerHTML = pill('all', 'All', c.chat + c.image + c.video) + pill('chat', 'Chat', c.chat)
+    + pill('image', 'Images', c.image) + pill('video', 'Video', c.video);
+  bar.querySelectorAll('[data-mine-kind]').forEach(b => b.onclick = () => {
+    _modelsState.kind = b.dataset.mineKind;
+    _paintMineKinds(); _applyMineKind();
+  });
+  const n = $('tab-mine-n'); if (n) n.textContent = c.chat + c.image + c.video;
+}
+function _applyMineKind() {
+  const k = _modelsState.kind || 'all';
+  const chat = $('mine-chat'); if (chat) chat.hidden = !(k === 'all' || k === 'chat');
+  const img = $('mine-images'); if (!img) return;
+  img.hidden = k === 'chat';
+  img.querySelectorAll('[data-img-kind]').forEach(r => {
+    r.hidden = !(k === 'all' || r.dataset.imgKind === k || r.dataset.imgKind === 'any');
+  });
+  const none = img.querySelector('[data-img-none]');
+  if (none) {
+    const rows = [...img.querySelectorAll('[data-img-main] [data-img-kind]')];
+    none.hidden = !rows.length || rows.some(r => !r.hidden);
+    const sub = img.querySelector('[data-img-sub]');
+    if (sub) sub.textContent = `${rows.filter(r => !r.hidden).length} ready on this PC${sub.dataset.loading ? ' · loading one…' : ''}`;
+    none.textContent = `No ${k === 'video' ? 'video' : 'image'} model is ready yet. Discover finds one; what each needs is under Image and video setup.`;
+  }
+  // A section whose rows are all filtered out goes too.
+  img.querySelectorAll('.models-section[data-img-sec]').forEach(s => {
+    const rows = s.querySelectorAll('[data-img-kind]');
+    s.hidden = rows.length > 0 && ![...rows].some(r => !r.hidden);
+  });
+}
+
+// The chat list also sees image model files (a .gguf with no tokenizer).
+// When the image list has them, the chat list doesn't repeat them.
+function _mineHideImageDupes() {
+  const o = _modelsState.images || {};
+  const roots = (o.roots || []).map(r => r.toLowerCase().replace(/[\\/]+$/, ''));
+  const names = new Set();
+  for (const r of o.recipes || []) for (const p of Object.values(r.picks || {})) names.add(String(p).split('/').pop().toLowerCase());
+  for (const f of [...(o.unnamed || []), ...(o.unsure || [])]) names.add(String(f.name || '').toLowerCase());
+  document.querySelectorAll('#mine-chat .model-row[data-not-chat]').forEach(row => {
+    const p = (row.dataset.notChat || '').toLowerCase();
+    row.hidden = names.has(p.split(/[\\/]/).pop()) || roots.some(r => p.startsWith(r + '\\') || p.startsWith(r + '/'));
+  });
+  const sec = document.querySelector('#mine-chat .models-section');
+  if (sec) {
+    const n = document.querySelectorAll('#mine-chat .model-row:not([hidden])').length;
+    const sub = sec.querySelector('.sec-head .sub');
+    if (sub) sub.textContent = `${n} file${n === 1 ? '' : 's'} · from Inglen's folder, LM Studio, the HF cache and Downloads`;
+  }
+}
+
+function _paintMineImages() {
+  const box = $('mine-images'); if (!box) return;
+  const o = _modelsState.images;
+  if (!o) {
+    box.innerHTML = `<div class="models-section"><div class="sec-head"><h3>Image and video models</h3><span class="sub">checking the image engine…</span></div></div>`;
+    _paintMineKinds(); _applyMineKind();
+    return;
+  }
   const kind = (r) => `<span class="model-badge badge-src">${r.video ? 'video' : 'image'}</span>`;
+  const files = (r) => esc(Object.values(r.picks || {}).map(p => p.split('/').pop()).join(' · '));
   let html = '';
   if (!o.installed) {
-    html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3><span class="sub">not installed</span></div>
+    html += `<div class="models-section"><div class="sec-head"><h3>Image and video models</h3><span class="sub">the engine isn't installed</span></div>
       <div class="sec-body"><div class="engine-note" style="margin-bottom:10px">Inglen makes pictures and short videos on this PC
       with stable-diffusion.cpp. The engine is a one-time download built for your graphics card (an NVIDIA card's
       is the largest, about 0.9 GB with the runtime it needs); models come after.
       Without it, pictures are made with a cloud provider you have a key for.</div>
-      <button class="model-action" id="img-install">Install the engine</button></div></div>`;
-    pane.innerHTML = html;
+      <div><button class="model-action" id="img-install">Install the engine</button></div></div></div>`;
+    box.innerHTML = html;
     $('img-install').onclick = imagesInstall;
     _imgInstallButton();
+    _mineHideImageDupes(); _paintMineKinds(); _applyMineKind();
     return;
   }
   const st = o.status || {};
@@ -18743,43 +18840,58 @@ async function modelsRenderImages() {
   const rows = o.recipes || [];
   const ready = rows.filter(r => r.ready), started = rows.filter(r => !r.ready && r.has_model),
         more = rows.filter(r => !r.ready && !r.has_model);
-  html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3>
-      <span class="sub">${esc(o.build || '')} &middot; ${esc(o.backend || '')}</span></div>
-    <div class="sec-body"><div class="server-card">
-      <div class="server-card-row"><span class="k">Loaded</span><span class="v">${loaded ? esc((rows.find(r => r.id === loaded) || {}).name || loaded)
-        : (st.state === 'loading' ? 'loading…' : '<span style="color:var(--fg-faint)">nothing yet; the first picture loads one</span>')}</span></div>
-      ${st.error ? `<div class="server-card-row"><span class="k">Last error</span><span class="v" style="color:var(--err)">${esc(st.error)}</span></div>` : ''}
-    </div>${o.error ? `<div class="engine-note" style="margin-top:8px;color:var(--err)">${esc(o.error)}</div>` : ''}</div></div>`;
-  html += `<div class="models-section"><div class="sec-head"><h3>Ready to use</h3><span class="sub">${ready.length} on this PC</span></div><div class="sec-body">`;
-  html += ready.length ? ready.map(r => `<div class="model-row${r.id === loaded ? ' is-loaded' : ''}">
+  html += `<div class="models-section" data-img-main="1"><div class="sec-head"><h3>Image and video models</h3><span class="sub" data-img-sub data-loading="${st.state === 'loading' ? 1 : ''}">${ready.length} ready on this PC</span></div><div class="sec-body">
+    <div class="engine-note" data-img-none hidden></div>`;
+  html += ready.length ? ready.map(r => {
+    const rid = 'img-' + r.id.replace(/[^a-z0-9_-]/gi, '');
+    return `<div class="model-row${r.id === loaded ? ' is-loaded' : ''}" data-row="${rid}" data-img-kind="${r.video ? 'video' : 'image'}">
       <div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}${r.id === loaded ? '<span class="model-badge badge-loaded">loaded</span>' : ''}</div>
-      <div class="model-meta">${esc(Object.values(r.picks || {}).map(p => p.split('/').pop()).join(' · '))}</div></div>
+      <div class="model-meta">${files(r)}</div></div>
+      <div class="cell-size">${r.size_gb ? r.size_gb + ' GB' : ''}</div>
       ${r.id === loaded ? '<button class="model-action is-secondary" data-img-unload="1">Unload</button>'
-        : `<button class="model-action" data-img-load="${esc(r.id)}" data-img-video="${r.video ? 1 : 0}">Load</button>`}</div>`).join('')
-    : `<div class="engine-note">No model here yet. Put a model's files in the folder below, in the subfolder for each kind
-       (checkpoints, diffusion_models, text_encoders, vae), or add a ComfyUI or WebUI models folder you already have.
-       The list under it says what each model needs.</div>`;
+        : `<button class="model-action" data-img-load="${esc(r.id)}" data-img-video="${r.video ? 1 : 0}">Load</button>`}
+      <div class="model-expand" data-expand="${rid}">
+        <div class="ex-head">${r.video ? 'Video' : 'Image'} model</div>
+        ${r.description ? `<div class="ex-desc">${esc(r.description)}</div>` : ''}
+        <div class="ex-desc" style="margin-top:8px">Made of ${Object.keys(r.picks || {}).length} file${Object.keys(r.picks || {}).length === 1 ? '' : 's'}: ${files(r)}.
+          A picture or video request loads it by itself; Load gets it ready ahead of time.</div>
+        ${r.url ? `<div class="ex-desc" style="margin-top:8px"><a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">Model page &#8599;</a></div>` : ''}
+        <div class="ex-actions">
+          <button class="model-action is-secondary" data-cancel="${rid}">Close</button>
+          ${r.own ? `<button class="model-action is-danger" data-img-del="${esc(r.id)}" data-img-name="${esc(r.name)}" data-img-gb="${r.size_gb || ''}">Delete file</button>` : ''}
+        </div>
+      </div></div>`;
+  }).join('')
+    : `<div class="engine-note">No image or video model here yet. Find one in <b>Discover</b>, or put a model's files in
+       a folder under <b>Image and video setup</b> below, in the subfolder for each kind (checkpoints, diffusion_models,
+       text_encoders, vae). A ComfyUI or WebUI models folder you already have works as it is.</div>`;
   html += '</div></div>';
   // A model file is here but the family needs more files beside it.
   if (started.length) {
-    html += `<div class="models-section"><div class="sec-head"><h3>Almost ready</h3><span class="sub">the model is here, a part is missing</span></div><div class="sec-body">` +
-      started.map(r => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}</div>
-        <div class="model-meta">${esc(Object.values(r.picks || {}).map(p => p.split('/').pop()).join(' · '))}</div>
-        <div class="model-meta">still needs ${esc(r.missing.join(', '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">where to get it &#8599;</a>` : ''}</div></div></div>`).join('') +
+    html += `<div class="models-section" data-img-sec="1"><div class="sec-head"><h3>Almost ready</h3><span class="sub">the model is here, a part is missing</span></div><div class="sec-body">` +
+      started.map(r => `<div class="model-row" data-img-kind="${r.video ? 'video' : 'image'}"><div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}</div>
+        <div class="model-meta">${files(r)}</div>
+        <div class="model-meta">still needs ${esc(r.missing.join(', '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">where to get it &#8599;</a>` : ''}</div></div>
+        <div class="cell-size">${r.size_gb ? r.size_gb + ' GB' : ''}</div></div>`).join('') +
       '</div></div>';
   }
   // Files whose names don't say what they are: loading one once tells.
   const unnamed = o.unnamed || [], unsure = o.unsure || [];
   if (unnamed.length || unsure.length) {
-    html += `<div class="models-section"><div class="sec-head"><h3>Not placed yet</h3><span class="sub">${unnamed.length + unsure.length} file${unnamed.length + unsure.length === 1 ? '' : 's'}</span></div><div class="sec-body">` +
-      unnamed.map(f => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(f.name)}</div>
+    html += `<div class="models-section" data-img-sec="1"><div class="sec-head"><h3>Not placed yet</h3><span class="sub">${unnamed.length + unsure.length} file${unnamed.length + unsure.length === 1 ? '' : 's'}</span></div><div class="sec-body">` +
+      unnamed.map(f => `<div class="model-row" data-img-kind="any"><div class="model-info"><div class="model-name">${esc(f.name)}</div>
         <div class="model-meta">Its name doesn't say which kind of model it is. Loading it once tells, and it's remembered.</div></div>
         <button class="model-action" data-img-identify="${esc(f.id)}">Find out</button></div>`).join('') +
-      unsure.map(f => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(f.name)}</div>
+      unsure.map(f => `<div class="model-row" data-img-kind="any"><div class="model-info"><div class="model-name">${esc(f.name)}</div>
         <div class="model-meta">${f.family ? `${esc(f.family)}, which nothing here runs with the files on disk` : esc(f.note || "the engine couldn't read it")}</div></div></div>`).join('') +
       '</div></div>';
   }
-  html += `<div class="models-section"><div class="sec-head"><h3>Model folders</h3></div><div class="sec-body">` +
+  // Setup: the engine, where it reads models from, and what else it can run.
+  html += `<div class="models-section"><div class="sec-head"><h3>Image and video setup</h3>
+      <span class="sub">stable-diffusion.cpp &middot; ${esc(o.build || '')}${o.backend ? ' &middot; ' + esc(o.backend) : ''}</span></div><div class="sec-body">` +
+    (st.error ? `<div class="engine-note" style="margin-bottom:10px;color:var(--err)">Last error: ${esc(st.error)}</div>` : '') +
+    (o.error ? `<div class="engine-note" style="margin-bottom:10px;color:var(--err)">${esc(o.error)}</div>` : '') +
+    `<div style="font-size:12px;font-weight:600;color:var(--fg-dim);margin:2px 0 8px">Model folders</div>` +
     (o.forge ? `<div class="model-row"><div class="model-info"><div class="model-name">Forge is on this PC</div>
       <div class="model-meta">Its checkpoints, VAEs and LoRAs in ${esc(o.forge)} can be used here, read where they are.</div></div>
       <button class="model-action" data-img-forge="${esc(o.forge)}">Use them</button></div>` : '') +
@@ -18787,48 +18899,69 @@ async function modelsRenderImages() {
       <div class="model-meta">${i === 0 ? "Inglen's own" : 'yours, read in place'}</div></div>
       ${i === 0 ? '<button class="model-action is-secondary" data-img-open="1">Open</button>'
         : `<button class="model-action is-secondary" data-img-remove="${esc(d)}">Remove</button>`}</div>`).join('') +
-    `<button class="btn-mini" id="img-add-folder" style="margin-top:8px;width:auto;display:inline-flex">Add a folder</button></div></div>`;
-  if (more.length) {
-    html += `<div class="models-section"><div class="sec-head"><h3>More it can run</h3><span class="sub">${more.length} model families</span></div>
-      <div class="sec-body"><details><summary style="cursor:pointer;color:var(--fg-dim)">Show what each needs</summary>` +
+    `<div style="margin-top:8px"><button class="btn-mini" id="img-add-folder" style="width:auto;display:inline-flex">Add a folder</button></div>` +
+    (more.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--fg-dim)">What else it can run, and what each needs (${more.length})</summary>` +
       more.map(r => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}</div>
         <div class="model-meta">needs ${esc(r.missing.join(', '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">model page &#8599;</a>` : ''}</div></div></div>`).join('') +
-      '</details></div></div>';
-  }
-  pane.innerHTML = html;
-  pane.querySelectorAll('[data-img-load]').forEach(b => b.onclick = async () => {
+      '</details>' : '') +
+    '</div></div>';
+  box.innerHTML = html;
+  box.querySelectorAll('.model-row[data-row]').forEach(row => row.addEventListener('click', (e) => {
+    if (e.target.closest('button') || e.target.closest('.model-expand') || e.target.closest('a')) return;
+    modelsToggleRow(row);
+  }));
+  box.querySelectorAll('[data-cancel]').forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    box.querySelector(`.model-row[data-row="${b.dataset.cancel}"]`)?.classList.remove('is-open');
+  });
+  box.querySelectorAll('[data-img-load]').forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = 'Loading…';
     const r = await api('/api/images/load', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipe: b.dataset.imgLoad, video: b.dataset.imgVideo === '1' }) }).catch(e => ({ ok: false, error: e.message }));
     if (!r.ok) toast("It didn't load", r.error || '', 'err', 9000);
-    modelsRenderImages();
+    modelsRenderImages(true);
   });
-  pane.querySelectorAll('[data-img-identify]').forEach(b => b.onclick = async () => {
+  box.querySelectorAll('[data-img-identify]').forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = 'Loading it…';
     const r = await api('/api/images/identify', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file: b.dataset.imgIdentify }) }).catch(e => ({ ok: false, error: e.message }));
     if (r.ok) toast(`It's ${r.family}`, `Ready as ${r.name || r.recipe}.`, 'ok');
     else toast("Couldn't place it", r.error || '', 'err', 9000);
-    modelsRenderImages();
+    modelsRenderImages(true);
   });
-  pane.querySelectorAll('[data-img-unload]').forEach(b => b.onclick = async () => {
+  box.querySelectorAll('[data-img-unload]').forEach(b => b.onclick = async () => {
     await api('/api/images/load', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
-    modelsRenderImages();
+    modelsRenderImages(true);
   });
-  pane.querySelectorAll('[data-img-remove]').forEach(b => b.onclick = async () => {
+  box.querySelectorAll('[data-img-del]').forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    const { imgDel, imgName, imgGb } = b.dataset;
+    showModal('Delete this model?',
+      `${imgName}\n\n${imgGb ? 'Frees about ' + imgGb + ' GB. ' : ''}The model file is removed from disk and you'd have to download it again. Parts other models can use, like a VAE or text encoder, stay.`,
+      [{ label: 'Keep it' },
+       { label: 'Delete', kind: 'danger', onclick: async () => {
+         const r = await api('/api/images/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ recipe: imgDel }) }).catch(err => ({ ok: false, error: err.message }));
+         if (r.ok) toast('Deleted', (r.freed_gb || 0) + ' GB freed', 'ok');
+         else toast("Couldn't delete it", r.error || '', 'err', 8000);
+         modelsRenderImages(true); modelsResyncFromDisk();
+       } }]);
+  });
+  box.querySelectorAll('[data-img-remove]').forEach(b => b.onclick = async () => {
     await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: b.dataset.imgRemove, remove: true }) }).catch(() => {});
-    modelsRenderImages();
+    modelsRenderImages(true);
   });
-  pane.querySelectorAll('[data-img-forge]').forEach(b => b.onclick = async () => {
+  box.querySelectorAll('[data-img-forge]').forEach(b => b.onclick = async () => {
     const r = await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: b.dataset.imgForge }) }).catch(e => ({ ok: false, error: e.message }));
     if (!r.ok) toast("That folder didn't work", r.error || '', 'err', 8000);
-    modelsRenderImages();
+    modelsRenderImages(true);
   });
-  pane.querySelectorAll('[data-img-open]').forEach(b => b.onclick = () =>
+  box.querySelectorAll('[data-img-open]').forEach(b => b.onclick = () =>
     api('/api/images/open-folder', { method: 'POST' }).catch(e => toast("Couldn't open it", e.message, 'err')));
   const add = $('img-add-folder'); if (add) add.onclick = imagesFolderDialog;
+  _mineHideImageDupes(); _paintMineKinds(); _applyMineKind();
 }
 
 // Engine pane: what's running inference, and every llama.cpp build you can
@@ -19076,7 +19209,7 @@ async function modelsRenderDiscover() {
           <div class="ex-desc">Bigger Q = better quality but slower + more VRAM. Q4_K_M is the usual sweet spot.</div>
           <div class="ex-files" data-hf-files="${rowId}">Loading files…</div>
           <div class="ex-desc" style="margin-top:12px">${media
-            ? `${it.kind === 'video' ? 'A video' : 'An image'} model. It goes with your image models, and <b>Images &amp; video</b> shows it with anything else it needs, like a text encoder or VAE.`
+            ? `${it.kind === 'video' ? 'A video' : 'An image'} model. It goes with your image models in <b>My Models</b>, which shows anything else it needs, like a text encoder or VAE.`
             : 'Pick a quant, download, and it loads with sensible defaults. Tune context and GPU layers in <b>My Models</b>, set once, right where you load it.'}</div>
           <div class="ex-desc" style="margin-top:8px">
             <a href="https://huggingface.co/${esc(it.hf_repo)}" target="_blank" rel="noopener" style="color:var(--accent-2)">View ${esc(it.hf_repo)} on Hugging Face &#8599;</a>
@@ -19479,7 +19612,6 @@ document.querySelectorAll('.models-tab').forEach(t => {
     // must not break which pane renders.
     if (name === 'discover') modelsRenderDiscover();
     if (name === 'engine') modelsRenderEngine();
-    if (name === 'images') modelsRenderImages();
   });
 });
 
@@ -19504,6 +19636,7 @@ document.querySelectorAll('.models-tab').forEach(t => {
     rescanBtn.addEventListener('click', async () => {
       try {
         await api('/api/llmserver/rescan');
+        modelsRenderImages(true);
         toast('Looking for models on this PC', 'Checking LM Studio, Ollama, the Hugging Face cache and Downloads.', 'ok', 3000);
         if (typeof refreshModelsView === 'function') refreshModelsView();
         const watcher = setInterval(async () => {
@@ -19812,8 +19945,8 @@ async function modelsDownloadHF(repo, filename, loadCfg, kind) {
     label.textContent = 'Error'; detail.textContent = e.message; dlUpsert(filename, { status: 'error' }); return;
   }
   if (modelPath && media) {
-    toast(`${kind === 'video' ? 'Video' : 'Image'} model saved`, filename + ' is with your image models; Images & video says if it needs anything else.', 'ok', 6000);
-    if (_modelsState.tab === 'images') modelsRenderImages();
+    toast(`${kind === 'video' ? 'Video' : 'Image'} model saved`, filename + ' is in My Models, which says if it needs anything else.', 'ok', 6000);
+    modelsRenderImages(true);
     return;
   }
   if (modelPath) {
