@@ -1089,7 +1089,10 @@ async def _run_once(
                 elif kind == "assistant_chunk" and fields.get("content"):
                     _chunks.append(str(fields["content"]))
                 emit(kind, **fields)
-            rc = await _cb.run_turn(prompt, emit=_agent_emit, history=history,
+            # An agent keeps its own session, so the voice register it was started with may
+            # be a typed chat's: each spoken turn says it is spoken.
+            _asked = (VOICE_TURN_NOTE + prompt) if voice else prompt
+            rc = await _cb.run_turn(_asked, emit=_agent_emit, history=history,
                                     permission_check=permission_check if supervised else None,
                                     should_cancel=should_cancel, voice=voice, model=model,
                                     drain_steer=drain_steer, context=_lately)
@@ -2683,6 +2686,10 @@ def failure_note(text: str) -> str:
         return ""
     return (f"<previous_turn_failed>Your last turn in this chat didn't complete: {line} "
             f"The person saw this. Don't answer as if that turn had gone through.</previous_turn_failed>")
+
+
+VOICE_TURN_NOTE = ("(Voice mode: this was said out loud and your reply is spoken aloud as you write it. "
+                   "Answer in one or two short spoken sentences, no markdown, lists, paths or code.)\n\n")
 
 
 async def run_once(prompt: str, **kw) -> int:

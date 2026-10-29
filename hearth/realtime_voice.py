@@ -933,6 +933,7 @@ def start_continuous(on_utterance: Callable[[str], None], *,
         if cur is not None:
             cur.stop.set()
             old_rec = cur.recorder
+            _said_why(cur, "replaced by a new one")
         sess = _Session(lease, on_utterance, on_caption, on_barge, on_ready, on_error, on_notice,
                         speaker=speaker, fed=fed)
         # A new session starts unmuted and with no echo on record.
@@ -948,6 +949,18 @@ def start_continuous(on_utterance: Callable[[str], None], *,
     return lease
 
 
+def _said_why(sess, what: str) -> None:
+    """A line in the log naming who ended a voice session: a listener that stops
+    mid-conversation is otherwise only "RealtimeSTT shutting down"."""
+    try:
+        import inspect
+        who = [f"{f.function}" for f in inspect.stack()[2:6]]
+        print(f"[hearth.realtime_voice] session {sess.lease}{' (fed)' if sess.fed else ''} {what} by "
+              + " < ".join(who), flush=True)
+    except Exception:
+        pass
+
+
 def stop_continuous(lease: Optional[int] = None) -> bool:
     """Stop the running session and release its mic and model. With a lease,
     only if that lease still owns it, so a stream that is closing late cannot
@@ -960,6 +973,7 @@ def stop_continuous(lease: Optional[int] = None) -> bool:
         _session = None
         cur.stop.set()
         rec = cur.recorder
+    _said_why(cur, "stopped")
     if rec is not None:
         # Shutting down waits on the recorder's processes; the loop thread
         # also exits once text() returns, and shutdown is idempotent.
