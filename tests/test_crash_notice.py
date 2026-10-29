@@ -90,7 +90,9 @@ port = srv.server_address[1]
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 with sync_playwright() as pw:
-    b = pw.chromium.launch()
+    # Windows has Edge; elsewhere Playwright's own Chromium.
+    b = (pw.chromium.launch(channel="msedge", args=["--disable-gpu"]) if sys.platform == "win32"
+         else pw.chromium.launch())
     ctx = b.new_context(viewport={"width": 1280, "height": 900})
     ctx.route("https://github.com/**", lambda r: r.fulfill(status=200, body="issue form"))
     pg = ctx.new_page()
@@ -106,6 +108,10 @@ with sync_playwright() as pw:
           [x.strip() for x in t.locator("button").all_inner_texts()] == ["Send report", "Dismiss"])
     with ctx.expect_page() as opened:
         t.locator("button[data-a=yes]").click()
+    try:   # a noopener tab starts blank, then goes to the address
+        opened.value.wait_for_url(lambda u: u.startswith(crashlog.ISSUES_URL), timeout=15000)
+    except Exception:
+        pass
     url = opened.value.url
     body = unquote(url)
     check("Send report opens a new GitHub issue, filled in",

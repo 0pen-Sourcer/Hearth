@@ -6240,7 +6240,10 @@ async function checkAgentUpdates() {
   // (its mark, its versions, the sticker's outline) to leave any out.
   const names = () => due.filter((u, i) => t.querySelector(`.mp-row[data-i="${i}"]`).classList.contains('cur'))
                          .map(u => u.label).join(', ');
-  t.querySelector('.body').innerHTML = `<button type="button" class="upd-sum"><span class="upd-names"></span>${_mpChev('')}</button>
+  const tb = document.createElement('div');   // askToast leaves out an empty body
+  tb.className = 'body';
+  t.querySelector('.title').after(tb);
+  tb.innerHTML = `<button type="button" class="upd-sum"><span class="upd-names"></span>${_mpChev('')}</button>
     <div class="upd-list" hidden>${due.map((u, i) => {
       const h = HARNESS[u.id] || {};
       return `<button type="button" class="mp-row cur" data-i="${i}" aria-pressed="true">
