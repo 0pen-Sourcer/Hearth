@@ -57,10 +57,12 @@ Bigger jobs go to helpers. Ask for them in plain words ("have Codex write the te
 Press the mic in the top bar. The window turns into a dot grid that listens and speaks; press Esc to leave.
 
 - Speak, pause, and JARVIS answers out loud. The mic opens again for your reply.
-- **Interrupting.** On headphones, talk over a reply and it stops on your first word, then answers what you said instead. On speakers it ignores what the mic hears while it talks, so it doesn't answer itself, except anything that starts with its name: "Jarvis, stop" cuts the reply.
+- **Interrupting.** Talk over a reply and it stops on your first word, then answers what you said instead. This works on speakers too: the window cancels the echo of its own voice the way a video call does, so it doesn't hear itself. The first few seconds on speakers it is still learning the room.
+- **Approvals.** A step that needs your OK is asked out loud, with Allow and Deny under it. Saying "yes" is enough for what Auto mode would run anyway; deleting, moving, sending and the like take a click on Allow, and it says so.
 - **The desktop HUD.** When Inglen isn't the focused window, a small dot grid floats over your other apps. Clicks pass through it; hold Ctrl to drag it.
 - **Wake word.** Right-click the tray icon and turn on **Wake word**. Saying "Jarvis" opens voice mode.
 - Voices, speed, the mic and the listening model are in Settings, Voice.
+- **In the terminal**, `/listen` uses the PC's own mic and speakers, with no echo cancelling: there, use headphones, or turn on Speakers mode in Settings, Voice, which stops listening while it talks (start with its name, "Jarvis, stop", to cut in).
 
 ---
 
@@ -248,7 +250,7 @@ Reads default to your whole disk; writes, deletes and moves stay in the workspac
 - **The app won't open**: check `~/Jarvis/logs/hearth_tray.log`. If Windows Defender quarantined `Hearth.exe`, restore it from Windows Security, Protection history.
 - **A model won't load**: the error says why (too big for the card, a newer model than the engine, a format the engine can't read). Update the engine in Models, Engine, or pick a smaller file. A model made for another build of llama.cpp (its page says which) loads once you add that build under Models, Engine, Add an engine.
 - **An agent brain goes quiet**: after 90 seconds with no word from it, the chat says it may still be thinking, and Stop ends the turn. When the agent wrote an error to its own log (a used-up free limit, say), the turn ends with those words. Otherwise check it's signed in (`claude auth status`, `codex login status`, `cursor-agent status`), or open `/agents` in the terminal.
-- **Voice talks over itself on speakers**: pick speakers in Settings, Voice; on headphones it can be interrupted.
+- **Voice talks over itself on speakers**: in the window it cancels its own echo; if it still hears itself, headphones fix it. In the terminal's `/listen`, turn on Speakers mode in Settings, Voice.
 - **Something broken**: Settings, About, Repair puts Inglen's own files back without touching your chats or memory.
 - The Logs tab shows every tool call and its result, which usually explains what happened.
 

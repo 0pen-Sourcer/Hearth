@@ -186,6 +186,7 @@ def _focus_window() -> dict:
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _UI_PATH = os.path.join(_HERE, "ui.html")
 _ROOM_JS = os.path.join(_HERE, "room.js")
+_CALL_AUDIO_JS = os.path.join(_HERE, "call_audio.js")
 LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
 LM_STUDIO_V0 = LOCAL_API_BASE.replace("/v1", "/api/v0")
 SETTINGS_PATH = os.path.join(WORKSPACE, "settings.json")
@@ -1965,6 +1966,213 @@ def reminder_ideas(fresh: bool = False) -> List[Dict[str, str]]:
         return ideas[:3]
 
 
+# ---------------------------------------------------------------- voice mode in the window
+# Voice mode in the window is a call (call.Call, the one the phone app makes)
+# over a WebSocket on this server: the page captures the mic with the browser's
+# echo cancelling and plays the voice through it, so it never hears itself on
+# speakers and talking over it works there too. One at a time.
+_WIN_CALL = None
+_WIN_ASK: Dict[str, Any] = {}       # the approval a voice turn in the window is waiting on
+_WIN_LOCK = threading.Lock()
+_WIN_HUD = {"listening": "listening", "thinking": "thinking", "step": "thinking",
+            "speaking": "speaking", "asking": "speaking", "connecting": "idle"}
+
+
+def window_call():
+    """The window's voice call while one is on."""
+    c = _WIN_CALL
+    return c if c is not None and not c.ended else None
+
+
+def _pcm_level(pcm: bytes) -> float:
+    try:
+        import numpy as np
+        a = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype("float32") / 32768.0
+        return float(np.sqrt(np.mean(a * a))) if a.size else 0.0
+    except Exception:
+        return 0.0
+
+
+def _window_hud(obj: Dict[str, Any]) -> None:
+    """The desktop HUD follows the window's call: its state and its voice's loudness."""
+    if not _voice:
+        return
+    kind = obj.get("type")
+    try:
+        if kind == "call.state":
+            _voice.set_voice_state(_WIN_HUD.get(str(obj.get("state")), "idle"))
+        elif kind == "call.down":
+            _voice.note_level(min(1.0, _pcm_level(base64.b64decode(obj.get("data") or "")) * 2.6))
+        elif kind == "call.ended":
+            _voice.set_voice_state("idle")
+    except Exception:
+        pass
+
+
+def _window_said(text: str) -> str:
+    """A sentence heard in the window's call. When an approval is waiting and the
+    sentence is a plain answer, it answers it (a spoken yes only for what Auto
+    would let run anyway); anything else goes to the page to send as a message."""
+    ask = dict(_WIN_ASK)
+    if ask.get("id") and ask["id"] in _permission_queues:
+        from .call import spoken_answer
+        said = spoken_answer(text)
+        if said:
+            if said != "deny" and ask.get("tap"):
+                return "needs_tap"
+            _resolve_permission(ask["id"], said)
+            _WIN_ASK.clear()
+            return "answered"
+    call = window_call()
+    if call is not None:
+        call.send({"type": "call.say", "text": text})
+    return "ran"
+
+
+def _window_turn_event(turn, kind: str, fields: Dict[str, Any]) -> None:
+    """A voice turn in the window, followed by its call: spoken as written, steps, approvals said."""
+    try:
+        turn.event(kind, fields)
+        if kind != "permission_request" or turn.n != turn.call.turn:
+            return
+        name, args = str(fields.get("name") or ""), fields.get("args") or {}
+        from .channel_core import _what
+        from .tools import needs_a_tap
+        if name == "__extend_workspace__":
+            what, tap = f"write outside my folder, in {args.get('parent') or args.get('path') or 'another folder'}", False
+        else:
+            what, tap = _what(name, args), needs_a_tap(name, args)
+        question = f"Before I go on: may I {what}?"
+        if fields.get("why"):
+            question += " " + str(fields["why"])
+        _WIN_ASK.clear()
+        _WIN_ASK.update(id=str(fields.get("id") or ""), tap=bool(tap))
+        turn.call.ask(question, tap=bool(tap), aid=_WIN_ASK["id"])
+    except Exception as e:
+        print(f"[hearth.voice] window call: {type(e).__name__}: {e}", flush=True)
+
+
+def _serve_window_call(ws) -> None:
+    """One window's voice call, until its page closes the socket."""
+    global _WIN_CALL
+    from .call import Call
+    mine: Dict[str, Any] = {"call": None}
+
+    def send(obj: Dict[str, Any]) -> None:
+        if obj.get("type") == "call.state" and obj.get("state") == "listening":
+            mine["ready"] = True
+        _window_hud(obj)
+        ws.send(json.dumps(obj, ensure_ascii=False))
+
+    def save(changed: Dict[str, Any]) -> None:
+        _save_settings(changed)
+
+    def warming(call) -> None:
+        """Until the call first listens: how far a first-run speech model download is,
+        and a word if starting takes long (a missing part, a stalled download)."""
+        t0, last = time.time(), -1
+        try:
+            fetching = not _rt_voice.model_downloaded()
+        except Exception:
+            fetching = False
+        if fetching:
+            send({"type": "call.warming", "detail": "downloading the speech model, first time only (a minute or two)…"})
+        told = False
+        while not call.ended and not mine.get("ready") and time.time() - t0 < 1200:
+            if fetching:
+                pct = _rt_voice.download_progress()
+                if pct is not None and pct != last:
+                    last = pct
+                    send({"type": "call.warming", "pct": pct,
+                          "detail": f"downloading the speech model, first time only · {pct}%"})
+            if not told and time.time() - t0 > 45:
+                told = True
+                send({"type": "call.slow", "message":
+                      "Voice is still starting. First run downloads a small speech model, which can take a "
+                      "minute. If it never starts, a voice component may be missing from this build - check "
+                      "hearth_window.log."})
+            time.sleep(0.5)
+
+    # Which mic the page should open: the one picked in Settings, never system sound.
+    # On macOS the window's web view would ask the person itself (with the local
+    # address in the question), so there the page leaves the mic to the PC.
+    try:
+        from .listen import _SYSTEM_AUDIO_HINTS, selected_input_name
+        hello = {"type": "call.mic", "name": selected_input_name(), "not_mics": list(_SYSTEM_AUDIO_HINTS)}
+    except Exception:
+        hello = {"type": "call.mic", "name": "", "not_mics": []}
+    hello["page_mic"] = sys.platform != "darwin"
+    hello["windows"] = sys.platform == "win32"
+    ws.send(json.dumps(hello, ensure_ascii=False))
+    try:
+        while True:
+            raw = ws.recv()
+            if raw is None:
+                break
+            try:
+                m = json.loads(raw)
+            except ValueError:
+                continue
+            kind, call = m.get("type"), mine["call"]
+            if kind == "call.up":
+                if call is not None:
+                    data = str(m.get("data") or "")
+                    call.up(data, int(m.get("rate") or 16000))
+                    if _voice:
+                        try:
+                            _voice.set_mic_level(min(1.0, _pcm_level(base64.b64decode(data)) * 6.0))
+                        except Exception:
+                            pass
+                continue
+            if kind == "call.start":
+                call = Call(send, _window_said, cid=re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80],
+                            save=save, ref=str(m.get("ref") or "")[:40])
+                with _WIN_LOCK:
+                    old, _WIN_CALL = _WIN_CALL, call
+                for c in (old, mine["call"]):
+                    if c is not None and c is not call:
+                        threading.Thread(target=c.end, daemon=True).start()
+                mine["call"], mine["ready"] = call, False
+                _WIN_ASK.clear()
+                threading.Thread(target=call.start, daemon=True, name="window-call").start()
+                threading.Thread(target=warming, args=(call,), daemon=True, name="window-call-warm").start()
+                try:
+                    from . import voice_overlay as _vo
+                    _vo.start()                 # the HUD shows when the window isn't in front
+                except Exception:
+                    pass
+                continue
+            if call is None:
+                continue
+            if kind == "call.end":
+                break
+            if kind == "call.hush":
+                threading.Thread(target=call.hush, daemon=True).start()
+            elif kind == "call.set":
+                voice, lang = m.get("voice"), m.get("language")
+                threading.Thread(target=call.set, args=(str(voice) if voice else None,
+                                                        str(lang) if lang is not None else None),
+                                 daemon=True).start()
+    finally:
+        call = mine["call"]
+        if call is not None:
+            call.end()
+            with _WIN_LOCK:
+                last = _WIN_CALL is call
+                if last:
+                    _WIN_CALL = None
+            if last:
+                _WIN_ASK.clear()
+                try:
+                    from . import voice_overlay as _vo
+                    _vo.stop()
+                    if _voice:
+                        _voice.set_voice_state("idle")
+                except Exception:
+                    pass
+        ws.close()
+
+
 class HearthHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         # Quiet — only print errors
@@ -2115,6 +2323,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._serve_ui()
         if path == "/room.js":
             return self._serve_room_js()
+        if path == "/call_audio.js":
+            return self._serve_room_js(_CALL_AUDIO_JS)
+        if path == "/api/voice/call":
+            from . import wsock
+            if not wsock.is_upgrade(self.headers):
+                return self._send_json(400, {"error": "voice mode talks over a WebSocket"})
+            return _serve_window_call(wsock.accept(self))
         if path == "/api/undo":
             # The newest file changes that can be put back (hearth/undo.py).
             from . import undo as _undo
@@ -3888,6 +4103,15 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"ok": True})
             except (OSError, ValueError) as e:
                 return self._send_json(500, {"ok": False, "error": str(e)})
+        if path == "/api/voice/mic-privacy":
+            # Windows' own switch for the mic, when it keeps voice mode from listening.
+            if sys.platform != "win32":
+                return self._send_json(400, {"ok": False})
+            try:
+                os.startfile("ms-settings:privacy-microphone")
+                return self._send_json(200, {"ok": True})
+            except OSError as e:
+                return self._send_json(500, {"ok": False, "error": str(e)})
         if path == "/api/voice/realtime/mute":
             # The mic button in voice mode. Kept here, not in the page: the
             # recorder is what has to stop keeping what it hears.
@@ -4038,8 +4262,9 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {"ok": True, "details": details})
         if path == "/api/voice/realtime/stop":
             # The stream that owns the session notices within a second and
-            # closes with "stopped".
-            if _rt_voice:
+            # closes with "stopped". Voice mode's call is ended by its own page.
+            _wc = window_call()
+            if _rt_voice and not (_wc is not None and _rt_voice.owns(_wc.lease)):
                 try:
                     _rt_voice.stop_continuous()
                 except Exception:
@@ -5207,9 +5432,12 @@ class HearthHandler(BaseHTTPRequestHandler):
 
         _live_turn = secrets.token_hex(5)
         live_bus.publish(live_bus.turn_event(chat_id, "window", _live_turn, "start", {"text": prompt}) or {})
+        _spoken: Dict[str, Any] = {"turn": None}     # a voice-mode turn: its reply is said in the window's call
 
         def emit(event_type: str, **fields: Any) -> None:
             _turn_saw(event_type, fields)
+            if _spoken["turn"] is not None:
+                _window_turn_event(_spoken["turn"], event_type, fields)
             try:                                 # the phone and other windows see it as it's written
                 ev = live_bus.turn_event(chat_id, "window", _live_turn, event_type, fields)
                 if ev:
@@ -5265,6 +5493,9 @@ class HearthHandler(BaseHTTPRequestHandler):
                     "few seconds and say it again — or load one in the Models tab."))
                 _TURN_NOW.update(state="idle", waiting="")
                 return
+        if voice and window_call() is not None:
+            from .call import Turn
+            _spoken["turn"] = Turn(window_call())
         try:
             asyncio.run(run_once(
                 prompt, emit=emit, think=think, think_level=think_level, model=model, history=history,
@@ -5276,6 +5507,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             emit("error", message=f"{type(e).__name__}: {e}")
         finally:
             _TURN_NOW.update(state="idle", waiting="", at=time.time())
+            if _spoken["turn"] is not None:
+                _spoken["turn"].end()
             # Tear down the ask_user binding so a later headless / CLI run
             # doesn't unexpectedly route through a dead emit closure.
             try:
@@ -5582,12 +5815,13 @@ class HearthHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def _serve_room_js(self) -> None:
+    def _serve_room_js(self, path: str = "") -> None:
+        path = path or _ROOM_JS
         try:
-            with open(_ROOM_JS, "rb") as f:
+            with open(path, "rb") as f:
                 payload = f.read()
         except OSError:
-            return self.send_error(404, "room.js missing")
+            return self.send_error(404, os.path.basename(path) + " missing")
         self.send_response(200)
         self.send_header("Content-Type", "application/javascript; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))

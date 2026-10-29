@@ -79,6 +79,8 @@ DATAS = [
     (os.path.join(REPO_ROOT, "hearth", "ui.html"), "hearth"),
     # The Team room's renderer, loaded by ui.html and copied into the phone app.
     (os.path.join(REPO_ROOT, "hearth", "room.js"), "hearth"),
+    # Voice mode's sound (mic frames, the echo-cancelled voice), shared with the phone app.
+    (os.path.join(REPO_ROOT, "hearth", "call_audio.js"), "hearth"),
     # Hearth's modules ride as loose .py (see _unfreeze_hearth) so an update can
     # replace ~4 MB of code instead of forcing a ~1 GB reinstall. Only the
     # top-level package has importable modules; hearth/skills/*/scripts are data

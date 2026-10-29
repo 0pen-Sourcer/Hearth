@@ -722,6 +722,13 @@ def voice_state() -> str:
     return _voice_state
 
 
+def note_level(v: float) -> None:
+    """The loudness of the voice playing somewhere else (the window's voice mode), for the HUD."""
+    global _current_level, _current_level_ts
+    _current_level = 0.62 * _current_level + 0.38 * max(0.0, min(1.0, float(v)))
+    _current_level_ts = time.time()
+
+
 def current_level() -> float:
     """Latest real TTS amplitude 0..1, or 0.0 if nothing has played for ~150ms."""
     if time.time() - _current_level_ts > 0.15:
