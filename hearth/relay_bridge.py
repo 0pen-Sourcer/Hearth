@@ -224,6 +224,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                            "count": r["count"], "pinned": bool(r.get("pinned"))} for r in rows], "own": own_chat}
     if what == "chat":
         return chat_action(m)
+    if what == "commands":
+        # The slash commands the phone offers when "/" is typed (remote_commands answers them).
+        from . import remote_commands
+        return {"commands": remote_commands.listing("relay")}
     if what == "media":
         # One part of a file the PC carded: the phone fetches a file when it is opened.
         from . import relay_media

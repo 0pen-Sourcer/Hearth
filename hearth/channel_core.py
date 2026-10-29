@@ -303,7 +303,7 @@ class Hub:
     def receive(self, chat: str, sender: str, text: str = "", name: str = "", reply_to: Any = None,
                 voice: str = "", files: Optional[List[str]] = None, cid: str = "", regen: bool = False,
                 spoken: bool = False) -> str:
-        """What became of the message: 'ran', 'answered', 'joined', 'pairing',
+        """What became of the message: 'ran', 'answered', 'joined', 'command', 'pairing',
         'ignored' or 'empty'. `cid` puts it in a Hearth chat of the sender's
         choosing (an app that lists every chat); otherwise it goes in the
         conversation kept for that person."""
@@ -323,6 +323,21 @@ class Hub:
                     self.a.heard(chat, heard, cid)      # the app shows the words, as the window does
                 except Exception:
                     pass
+        # A slash command (/status, /mode auto) is answered here, not sent to the model,
+        # even while a turn runs.
+        if text and not voice and not files:
+            from . import remote_commands
+            reply = remote_commands.answer(self.a.name, chat, text)
+            if reply is not None:
+                c = re.sub(r"[^A-Za-z0-9_-]", "_", str(cid or ""))[:80] or remote_commands.current_chat(self.a.name, chat)
+                token = _TURN._v.set({"c": c, "t": secrets.token_hex(5)})
+                try:
+                    self.a.send(chat, reply, reply_to)
+                except Exception as e:
+                    print(f"[{self.a.name}] couldn't answer {text.split()[0]}: {type(e).__name__}: {e}")
+                finally:
+                    _TURN._v.reset(token)
+                return "command"
         # What they wrote is what their message shows; the note naming what they
         # attached is for the model only (kept in `content`, as the window keeps it).
         shown = text.strip()
@@ -393,7 +408,9 @@ class Hub:
         from .redact import redact_secrets_only
         from .term_render import tool_words
         chosen = bool(cid)
-        cid = cid or chat_id_for(self.a.name, chat)
+        if not cid:
+            from . import remote_commands
+            cid = remote_commands.current_chat(self.a.name, chat)     # the one kept for them, or their /new one
         settings = follow_saved_brain()
         if run.get("regen"):
             chat_sync.drop_last_turn(cid)             # the answer asked for again replaces the last one
