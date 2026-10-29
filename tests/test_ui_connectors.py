@@ -108,6 +108,29 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(800)
     saved = (configs[-1].get("config") or {}).get("allowed_user_ids") if configs else None
     check(f"a Discord id is saved exactly ({saved})", saved == ["1234567890123456789"])
+    # MCP servers: two plain rows and the live list; a failure is one sentence,
+    # the raw error one click away.
+    raw = "ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)\n'node' is not recognized"
+    pg.route("**/api/mcp/status", lambda r: r.fulfill(json={"bridges": [
+        {"name": "github", "raw_name": "github", "state": "connected", "tools": [{"name": "a"}, {"name": "b"}], "error": ""},
+        {"name": "files", "raw_name": "files", "state": "error", "tools": [],
+         "error": "Couldn't start: node isn't installed", "detail": raw}]}))
+    pg.evaluate("() => document.querySelector('.settings-side-btn[data-st=mcp]').click()")
+    pg.wait_for_timeout(1200)
+    mcp = pg.evaluate("document.querySelector('.settings-pane[data-st=mcp]').innerText")
+    check("MCP servers reads as two plain rows",
+          "Servers Inglen uses" in mcp and "Use Inglen from other apps" in mcp
+          and "Edit mcp.json" in mcp and "Show config" in mcp)
+    check("no protocol essay or CLIENT/SERVER headings",
+          not any(w in mcp for w in ("Model Context Protocol", "as a CLIENT", "as a SERVER", "Active MCP bridges", "Outbound", "Inbound")))
+    check("a connected server shows its tool count", "github" in mcp and "2 tools" in mcp)
+    check("a failed one says why in one plain sentence, without the raw error",
+          "Couldn't start: node isn't installed" in mcp and "ExceptionGroup" not in mcp)
+    pg.click(".settings-pane[data-st=mcp] [data-mcp-row]")
+    pg.wait_for_timeout(300)
+    mcp_open = pg.evaluate("document.querySelector('.settings-pane[data-st=mcp]').innerText")
+    check("clicking it shows the raw detail", "ExceptionGroup" in mcp_open)
+    pg.screenshot(path=os.path.join(work, "mcp.png"))
     check(f"no script errors {errors[:2]}", not errors)
     print("screenshot:", os.path.join(work, "connectors.png"))
     browser.close()

@@ -30,6 +30,7 @@ from . import env as _env
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -109,6 +110,51 @@ def _read_config() -> Dict[str, Dict[str, Any]]:
     return servers if isinstance(servers, dict) else {}
 
 
+def _leaf(exc: BaseException) -> BaseException:
+    """The first real cause inside (nested) exception groups."""
+    while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        inner = [e for e in exc.exceptions if not isinstance(e, asyncio.CancelledError)]
+        exc = (inner or list(exc.exceptions))[0]
+    return exc
+
+
+_NOT_FOUND_RES = (
+    re.compile(r"""['"]?([\w.\-]+)['"]? is not recognized as an internal or external command""", re.I),
+    re.compile(r"""(?:^|[\s/])([\w.\-]+): (?:command )?not found""", re.I),
+    re.compile(r"""env: ['"]?([\w.\-]+)['"]?: No such file or directory""", re.I),
+)
+
+
+def plain_failure(exc: BaseException, stderr: str = "", command: str = "") -> Tuple[str, str]:
+    """(one plain sentence, raw detail) for a server that failed to start."""
+    leaf = _leaf(exc)
+    detail = f"{type(exc).__name__}: {exc}"
+    if leaf is not exc:
+        detail += f"\n{type(leaf).__name__}: {leaf}"
+    if stderr.strip():
+        detail += "\n" + stderr.strip()[-2000:]
+    missing = ""
+    for rx in _NOT_FOUND_RES:
+        m = rx.search(stderr or "")
+        if m:
+            missing = m.group(1)
+            break
+    if not missing and (isinstance(leaf, FileNotFoundError)
+                        or getattr(leaf, "winerror", None) == 2):
+        missing = os.path.basename(command or getattr(leaf, "filename", "") or "") or "its program"
+    if missing:
+        missing = re.sub(r"\.(exe|cmd|bat)$", "", missing, flags=re.I)
+        return f"Couldn't start: {missing} isn't installed", detail
+    if isinstance(leaf, (asyncio.TimeoutError, TimeoutError)):
+        return "Couldn't start: it didn't answer in time", detail
+    if isinstance(leaf, PermissionError):
+        return "Couldn't start: it isn't allowed to run", detail
+    if "connection closed" in str(leaf).lower() or isinstance(leaf, (EOFError, BrokenPipeError)):
+        return "Couldn't start: it stopped right away", detail
+    msg = str(leaf).strip().splitlines()[0][:120] if str(leaf).strip() else ""
+    return (f"Couldn't start: {msg}" if msg else "Couldn't start"), detail
+
+
 def _sanitize(name: str) -> str:
     """MCP server / tool names can have characters that don't fit OpenAI's
     tool-name regex. Strip down to [A-Za-z0-9_-] and prefix-collapse runs."""
@@ -163,8 +209,10 @@ async def _connect_one(name: str, spec: Dict[str, Any]) -> None:
         return
 
     params = StdioServerParameters(command=command, args=args, env=env)
+    # The server's stderr goes to a file, not the terminal; a failure reads it for the reason.
+    errlog = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
     try:
-        async with stdio_client(params) as (read, write):
+        async with stdio_client(params, errlog=errlog) as (read, write):
             async with ClientSession(read, write) as session:
                 await asyncio.wait_for(session.initialize(), timeout=30.0)
                 tool_list = await asyncio.wait_for(
@@ -192,9 +240,20 @@ async def _connect_one(name: str, spec: Dict[str, Any]) -> None:
                 except asyncio.CancelledError:
                     pass
     except Exception as e:
+        stderr = ""
+        try:
+            errlog.seek(0)
+            stderr = errlog.read()
+        except Exception:
+            pass
+        error, detail = plain_failure(e, stderr, command)
         with _BRIDGES_LOCK:
-            _BRIDGES[safe].update(state="error",
-                                  error=f"{type(e).__name__}: {e}")
+            _BRIDGES[safe].update(state="error", error=error, detail=detail)
+    finally:
+        try:
+            errlog.close()
+        except Exception:
+            pass
 
 
 async def _bootstrap_async(servers: Dict[str, Dict[str, Any]]) -> None:
@@ -346,6 +405,7 @@ def list_bridges() -> List[Dict[str, Any]]:
                 "tools": [{"name": t["name"], "description": t["description"]}
                           for t in b.get("tools", [])],
                 "error": b.get("error", ""),
+                "detail": b.get("detail", ""),
                 "uptime_s": round(time.time() - b.get("spawn_started_ts", time.time()), 1),
             })
     return out

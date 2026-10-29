@@ -1999,6 +1999,16 @@
     display: none;
   }
   .model-row.is-open .model-expand { display: block; animation: modalIn 0.2s var(--ease); }
+  /* Settings, MCP servers: one row per server Inglen connects to. */
+  .mcp-list { display: flex; flex-direction: column; gap: 6px; flex: 1 0 100%; }
+  .mcp-list:empty { display: none; }
+  .mcp-list .model-row { cursor: default; }
+  .mcp-list .model-row.is-expandable { cursor: pointer; }
+  .mcp-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--fg-faint); }
+  .mcp-dot.ok { background: var(--ok); }
+  .mcp-dot.err { background: var(--err); }
+  .mcp-why { font-size: 12px; color: var(--fg-dim); margin-top: 3px; }
+  .mcp-list .model-expand pre { margin: 0; font: 11px/1.5 var(--mono); color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; }
   .model-expand .ex-head {
     font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
     color: var(--accent-2); margin-bottom: 8px; font-weight: 600;
@@ -3736,9 +3746,6 @@
      Way friendlier than a single dropdown-stuffed modal - each step has
      a hero icon, headline, body, and a single primary action.
      ============================================================ */
-  .ob-tries { grid-template-columns: 1fr !important; gap: 8px !important; }
-  .ob-tries .ob-choice { padding: 11px 14px; }
-  .ob-tries .ob-choice-title { font-weight: 500; font-size: 13px; }
   .ob-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .ob-seg.ob-seg-3 { grid-template-columns: repeat(3, 1fr); }
   .ob-seg.ob-seg-4 { grid-template-columns: repeat(4, 1fr); }
@@ -3879,18 +3886,10 @@
     color: var(--accent-2); background: var(--accent-bg);
     padding: 3px 8px; border-radius: 999px; border: 1px solid var(--accent-line);
   }
-  /* What is different, on the welcome card: four short lines, each with a line icon. */
-  .ob-points { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 18px; margin: -8px 0 20px; }
-  .ob-points div { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--fg-dim); line-height: 1.45; }
-  .ob-points b { display: block; color: var(--fg); font-weight: 600; font-size: 13px; }
-  .ob-points svg { flex-shrink: 0; margin-top: 2px; color: var(--accent-2); }
   .ob-lang-note { font-size: 11.5px; color: var(--fg-faint); margin-top: 6px; line-height: 1.45; }
-  .ob-tipline {
-    background: var(--bg-2); border: 1px solid var(--border);
-    border-radius: var(--r); padding: 10px 14px;
-    font-size: 12px; color: var(--fg-dim); line-height: 1.5;
-    margin: 16px 0 0 0;
-  }
+  .ob-lang-note:empty { display: none; }
+  .ob-input[aria-invalid="true"] { border-color: var(--err); }
+  .ob-field-err { font-size: 11.5px; color: var(--err); margin-top: 6px; }
   .ob-footer {
     padding: 18px 44px 22px;
     border-top: 1px solid var(--border);
@@ -3948,14 +3947,6 @@
   .ob-disk-row:last-child { border-bottom: none; }
   .ob-disk-row .ob-fn { color: var(--fg); font-weight: 500; }
   .ob-disk-row .ob-meta { color: var(--fg-faint); font-size: 11px; }
-  .ob-try-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
-  .ob-try {
-    background: var(--bg-2); border: 1px solid var(--border);
-    border-radius: var(--r); padding: 12px;
-    color: var(--fg-dim); font-size: 13px; cursor: pointer;
-    transition: all 0.15s var(--ease); text-align: left;
-  }
-  .ob-try:hover { color: var(--accent-2); border-color: var(--accent-line); background: var(--bg-3); }
 
   /* ============================================================
      DROP OVERLAY - only visible when a file is being dragged in
@@ -5244,48 +5235,20 @@
 
         <div class="settings-pane" data-st="mcp" hidden>
         <h3>MCP servers</h3>
-        <p style="color:var(--fg-dim);font-size:13px;line-height:1.55;margin:0 0 18px 0">
-          Inglen speaks the <b>Model Context Protocol</b> - the open standard for letting one
-          AI client talk to many tool servers. <b>Inglen itself is an MCP server</b> (point any
-          MCP-compatible client at <code>hearth/mcp_server.py</code> to use Inglen's tools elsewhere).
-          And below, you can wire <em>other</em> MCP servers <em>into</em> Inglen so their tools
-          show up alongside the built-in ones.
-        </p>
 
         <div class="field">
           <div class="label">
-            <div class="name">Outbound - Inglen as a CLIENT</div>
-            <div class="hint">
-              Paste a standard mcp.json config. Each server runs as a subprocess; its tools join the
-              Inglen tool list and are usable by every chat brain (local / cloud).
-              Saving reconnects the servers right away, no restart needed.
-            </div>
+            <div class="name">Servers Inglen uses</div>
+            <div class="hint">Their tools work alongside the built-in ones.</div>
           </div>
           <button class="btn-mini" id="btn-mcp-edit" style="min-width:140px;">Edit mcp.json</button>
-        </div>
-
-        <div class="field" style="align-items:flex-start;">
-          <div class="label">
-            <div class="name">Active MCP bridges</div>
-            <div class="hint">
-              Live list of MCP servers Inglen has connected to. Each row shows the server name,
-              transport (stdio / sse), and how many tools it contributed. Errors surface here so a
-              broken config is visible instead of silently dropped.
-            </div>
-          </div>
-          <div id="mcp-status-box" style="min-width:260px;flex:1;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:12px;color:var(--fg-dim);">
-            no bridges configured yet
-          </div>
+          <div id="mcp-status-box" class="mcp-list"></div>
         </div>
 
         <div class="field">
           <div class="label">
-            <div class="name">Inbound - Inglen as a SERVER</div>
-            <div class="hint">
-              Other MCP clients (LM Studio chat UI, Claude Desktop, Cursor, your own scripts) can
-              call into Inglen's full tool set. The snippet below goes in their mcp.json.
-            </div>
-            <div id="mcp-inbound-clients" style="margin-top:8px;font-size:12px;color:var(--fg-dim);">no clients connected right now</div>
+            <div class="name">Use Inglen from other apps</div>
+            <div class="hint" id="mcp-inbound-clients">No apps connected.</div>
           </div>
           <button class="btn-mini" id="btn-mcp-snippet" style="min-width:140px;">Show config</button>
         </div>
@@ -5595,7 +5558,6 @@
       <div class="dot"></div>
       <div class="dot"></div>
       <div class="dot"></div>
-      <div class="dot"></div>
     </div>
 
     <div class="ob-body" id="ob-body">
@@ -5603,15 +5565,7 @@
       <div class="ob-step" data-step="1">
         <div class="ob-hero"><span class="ob-h" aria-hidden="true"><svg class="hm-nook" viewBox="-2 -2 64 64" fill="none" aria-hidden="true"><path class="hm-bracket" d="M16 40V22a6 6 0 0 1 6-6h18" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle class="hm-dot" cx="38" cy="38" r="9" fill="currentColor"/></svg><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span></div>
         <h1 class="ob-title">Hey, I'm <span class="ob-agent-name">JARVIS</span>.</h1>
-        <p class="ob-sub">I run on your PC and do real things on it: open apps, find and read your
-          files, browse the web, and talk out loud if you want. What makes me different:</p>
-        <div class="ob-points">
-          <div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/><path d="M9 21h6"/></svg><span><b>The AI you already pay for</b>Think with an agent you use, like Claude Code or Codex, on its own plan. Or a model on this PC, or a cloud key.</span></div>
-          <div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg><span><b>I remember</b>What you tell me and what we worked on, whichever brain you pick. You can read and change all of it.</span></div>
-          <div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg><span><b>Helpers for big jobs</b>I hand parts of a bigger job to helpers and you watch them work.</span></div>
-          <div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg><span><b>From your phone, and I ask first</b>Talk to me from your phone or a chat app. Anything risky waits for your OK.</span></div>
-        </div>
-        <div class="ob-tipline">A few quick choices and we're going. Every one can be changed later in Settings, and my name is yours to pick too.</div>
+        <p class="ob-sub">I run on your PC and do real things on it.</p>
       </div>
 
       <!-- ---- step 2: pick a brain ---- -->
@@ -5623,16 +5577,11 @@
           </svg>
         </div>
         <h1 class="ob-title">Give me a brain.</h1>
-        <p class="ob-sub" id="ob-brain-blurb">Looking for AI models on your machine and running servers…</p>
+        <p class="ob-sub" id="ob-brain-blurb">Pick what I think with.</p>
 
         <div id="ob-brain-status"></div>
 
         <div class="ob-choices" id="ob-brain-choices" style="margin-top:18px"></div>
-
-        <div class="ob-tipline" id="ob-brain-tip">
-          No model yet? Continue, and a later step offers one that fits your graphics card. The
-          <b>Models</b> tab has every other one.
-        </div>
       </div>
 
       <!-- ---- step 3: cloud-too ---- -->
@@ -5643,13 +5592,10 @@
           </svg>
         </div>
         <h1 class="ob-title">Or think with a cloud model.</h1>
-        <p class="ob-sub">This PC stays the default. If it isn't strong enough, or you want a
-          cleverer brain for some jobs, I can think with a cloud model on your own key, from
-          Anthropic, Google, OpenAI, xAI, OpenRouter, Groq or any OpenAI-compatible address.
-          My tools, memory and voice stay the same, and you switch in one click.</p>
+        <p class="ob-sub">Use your own key. You can switch any time.</p>
 
         <div class="ob-section">
-          <div class="ob-label">Pick a path</div>
+          <div class="ob-label">Provider</div>
           <select id="ob-brain-where" class="ob-select">
             <option value="local">Stay on this PC</option>
             <option value="anthropic">Anthropic (Claude)</option>
@@ -5663,18 +5609,16 @@
         </div>
         <div class="ob-section" id="ob-cloud-key-row" hidden>
           <div class="ob-section" id="ob-cloud-url-row" hidden style="margin-bottom:12px">
-            <div class="ob-label">Endpoint URL</div>
-            <input type="text" id="ob-cloud-url" class="ob-input" placeholder="e.g. https://api.groq.com/openai/v1"/>
+            <div class="ob-label">Address</div>
+            <input type="text" id="ob-cloud-url" class="ob-input" placeholder="https://api.example.com/v1"/>
           </div>
-          <div class="ob-label">Your API key</div>
-          <input type="password" id="ob-cloud-key" class="ob-input" placeholder="paste here · stays on this PC in ~/Jarvis/settings.json" autocomplete="off" data-1p-ignore data-lpignore="true"/>
+          <div class="ob-label">API key</div>
+          <input type="password" id="ob-cloud-key" class="ob-input" placeholder="Paste your key" autocomplete="off" data-1p-ignore data-lpignore="true"/>
           <div class="ob-section" style="margin-top:12px">
-            <div class="ob-label">Model id (optional)</div>
-            <input type="text" id="ob-cloud-model" class="ob-input" placeholder="e.g. gemini-3-flash · leave blank for default"/>
+            <div class="ob-label">Model</div>
+            <input type="text" id="ob-cloud-model" class="ob-input" placeholder="Optional"/>
           </div>
         </div>
-
-        <div class="ob-tipline">Settings, Chat brain changes this any time.</div>
       </div>
 
       <!-- ---- step 4: voice ---- -->
@@ -5688,8 +5632,7 @@
           </svg>
         </div>
         <h1 class="ob-title">Want me to talk?</h1>
-        <p class="ob-sub">Talk to me like a person: I hear when you start and stop, and answer out
-          loud. Or just type, and turn voice on whenever you like.</p>
+        <p class="ob-sub">Talk out loud, or just type.</p>
 
         <div class="ob-choices">
           <button class="ob-choice" data-voice="full">
@@ -5699,19 +5642,15 @@
           </button>
           <button class="ob-choice" data-voice="text">
             <div class="ob-choice-title">Text only</div>
-            <div class="ob-choice-sub">I stay quiet. Voice can go on later.</div>
+            <div class="ob-choice-sub">I stay quiet.</div>
           </button>
         </div>
         <div class="ob-status-row" id="ob-voice-status"><span class="ob-dot"></span><span>checking voice…</span></div>
 
-        <!-- Voice picker - revealed only after the user picks "Yes". A small
-             curated set (6 curated picks out of Kokoro's 54); the full
-             list stays in Settings → Voice. Speed starts at 1.0x. The Test button
-             actually speaks the chosen voice/speed combo so the user hears
-             it BEFORE committing - no surprises post-onboarding. -->
+        <!-- Voice picker, shown for "Talk and listen". A curated subset; Settings, Voice has all. -->
         <div id="ob-voice-picker" hidden style="margin-top:18px; padding:14px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r);">
           <div style="margin-bottom:12px;">
-            <label for="ob-lang" style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">What language will you speak to me in?</label>
+            <label for="ob-lang" style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Language</label>
             <select id="ob-lang" class="ob-select" style="width:100%;"></select>
             <div class="ob-lang-note" id="ob-lang-note"></div>
           </div>
@@ -5743,20 +5682,20 @@
             </div>
           </div>
           <div style="margin-top:14px;">
-            <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">What will you hear me on?</label>
+            <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Audio</label>
             <div class="ob-seg" id="ob-audio">
-              <button type="button" data-audio="headphones">Headphones<small>You can talk over me to cut in</small></button>
-              <button type="button" data-audio="speakers">Speakers<small>I stop listening while I talk, so I don't hear myself</small></button>
+              <button type="button" data-audio="headphones">Headphones<small>Talk over me to cut in</small></button>
+              <button type="button" data-audio="speakers">Speakers<small>I pause listening while I talk</small></button>
             </div>
           </div>
           <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
-            <button type="button" id="ob-voice-test" class="ob-choice" style="padding:8px 14px; font-size:12px;">▶ Test voice</button>
-            <span id="ob-voice-test-msg" style="font-size:11px; color:var(--fg-faint);">Hear it before you commit.</span>
+            <button type="button" id="ob-voice-test" class="ob-choice" style="padding:8px 14px; font-size:12px;">Test voice</button>
+            <span id="ob-voice-test-msg" style="font-size:11px; color:var(--fg-faint);"></span>
           </div>
         </div>
       </div>
 
-      <!-- ---- step 5: personalize ---- -->
+      <!-- ---- step 5: what to get ---- -->
       <div class="ob-step" data-step="5" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -5764,10 +5703,11 @@
           </svg>
         </div>
         <h1 class="ob-title">What to get.</h1>
-        <p class="ob-sub">For what you picked, this PC still needs these. They come down in the background while you finish, and Downloads shows each one. Untick anything you'd rather get later.</p>
+        <p class="ob-sub">These download in the background. Untick anything to get later.</p>
         <div class="ob-get" id="ob-get"><div class="ob-status-row"><span class="ob-dot"></span><span>Looking at what this PC has…</span></div></div>
         <div class="ob-get-total" id="ob-get-total"></div>
       </div>
+      <!-- ---- step 6: about you ---- -->
       <div class="ob-step" data-step="6" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -5776,7 +5716,7 @@
           </svg>
         </div>
         <h1 class="ob-title">A bit about you.</h1>
-        <p class="ob-sub">So I know who I'm talking to. Skip anything you like.</p>
+        <p class="ob-sub">Skip anything you like.</p>
 
         <div class="ob-section">
           <div class="ob-label">What should I call you?</div>
@@ -5788,11 +5728,8 @@
         </div>
         <div class="ob-section">
           <div class="ob-label">What should you call me?</div>
-          <input type="text" id="ob-agent-name" class="ob-input" maxlength="20" pattern="[A-Za-z0-9 ]+"
-                 placeholder="JARVIS, or Friday, Athena, anything">
-          <div style="font-size:11px;color:var(--fg-faint);margin-top:4px">
-            Letters, digits and spaces, up to 20.
-          </div>
+          <input type="text" id="ob-agent-name" class="ob-input" maxlength="20" pattern="[A-Za-z0-9 ]+">
+          <div class="ob-field-err" id="ob-agent-name-err" hidden>Letters, digits and spaces only.</div>
         </div>
         <div class="ob-section">
           <div class="ob-label">How should I sound?</div>
@@ -5815,7 +5752,7 @@
         </div>
       </div>
 
-      <!-- ---- step 6: how I work and how I look ---- -->
+      <!-- ---- step 7: how I work and how I look ---- -->
       <div class="ob-step" data-step="7" hidden>
        <div class="ob-split">
         <div class="ob-split-main">
@@ -5825,7 +5762,6 @@
           </svg>
         </div>
         <h1 class="ob-title">How should I work?</h1>
-        <p class="ob-sub">You can change all of this later, from the chat bar and Settings.</p>
         <div class="ob-section">
           <div class="ob-label">Before I change things on your PC</div>
           <div class="ob-seg ob-seg-3" id="ob-approval">
@@ -5850,7 +5786,6 @@
             <button type="button" class="ap-accent" data-accent="violet" style="--sw:#8b6cf0"><span></span>Violet</button>
             <button type="button" class="ap-accent" data-accent="mono" style="--sw:#a3a09a"><span></span>Mono</button>
           </div>
-          <div class="ap-accent-note">Classic always uses violet. Pick Dark, Light or System to choose an accent.</div>
         </div>
         <div class="ob-section">
           <div class="ob-label">How much to show</div>
@@ -5879,7 +5814,7 @@
        </div>
       </div>
 
-      <!-- ---- step 7: migrate ---- -->
+      <!-- ---- step 8: migrate, the last step ---- -->
       <div class="ob-step" data-step="8" hidden>
         <div class="ob-hero">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -5889,14 +5824,13 @@
             <path d="M19 7v10"/>
           </svg>
         </div>
-        <h1 class="ob-title">Bring your old agent's memory along?</h1>
-        <p class="ob-sub" id="ob-migrate-sub">Looking for Hermes or OpenClaw on this PC…</p>
+        <h1 class="ob-title">Bring your memory along?</h1>
+        <p class="ob-sub" id="ob-migrate-sub">Looking on this PC…</p>
         <div class="ob-choices" id="ob-migrate-choices" style="margin-top:18px"></div>
         <details class="ob-import-ai" style="margin-top:16px">
-          <summary style="cursor:pointer;font-size:13px;color:var(--accent-2);font-weight:600">
-            Bring over what ChatGPT or Claude knows about you</summary>
+          <summary style="cursor:pointer;font-size:13px;color:var(--accent-2);font-weight:600">From ChatGPT or Claude</summary>
           <div style="margin-top:10px">
-            <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>1.</b> Copy this and send it to ChatGPT or Claude.</p>
+            <p class="ob-sub" style="font-size:12px;margin-bottom:6px"><b>1.</b> Send this to ChatGPT or Claude.</p>
             <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:12px">
               <div id="ob-import-prompt" style="flex:1;background:var(--bg-0);border:1px solid var(--bg-3);border-radius:8px;padding:9px 11px;font-size:12px;color:var(--fg-dim);font-style:italic;line-height:1.5">List everything you know or remember about me as plain bullet points, one fact per line, with no introduction: my name, work, preferences, projects, important dates and the people in my life.</div>
               <button class="ob-btn" id="ob-import-copy" type="button" style="white-space:nowrap">Copy</button>
@@ -5911,38 +5845,13 @@
               <button class="ob-btn" id="ob-import-btn" type="button">Import facts</button>
               <span id="ob-import-status" style="font-size:12px;color:var(--fg-faint)"></span>
             </div>
-            <p class="ob-sub" style="font-size:11px;margin-top:8px;color:var(--fg-faint)">
-              This is optional. <b>Continue</b> skips it.</p>
           </div>
         </details>
-        <div class="ob-tipline">
-          Keys are never copied. What I learn comes in as my own memories, and skills wait in
-          <code>imported_skills</code> in my folder. Settings, Behavior does this again any time.
-        </div>
-      </div>
-
-      <!-- ---- step 8: all set ---- -->
-      <div class="ob-step" data-step="9" hidden>
-        <div class="ob-hero">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/>
-            <polyline points="22 4 12 14.01 9 11.01"/>
-          </svg>
-        </div>
-        <h1 class="ob-title">You're all set.</h1>
-        <p class="ob-sub">Ask the way you'd ask a friend. I act on this PC, I remember, and I can send helpers. Try one:</p>
-        <div class="ob-choices ob-tries">
-          <button class="ob-choice ob-try" data-try="What's taking up the most space on my C drive?"><div class="ob-choice-title">What's taking up the most space on my C drive?</div></button>
-          <button class="ob-choice ob-try" data-try="Find the biggest files in my Downloads folder"><div class="ob-choice-title">Find the biggest files in my Downloads folder</div></button>
-          <button class="ob-choice ob-try" data-try="Open Notepad and write me a short to-do list for today"><div class="ob-choice-title">Open Notepad and write me a short to-do list for today</div></button>
-          <button class="ob-choice ob-try" data-try="Compare three note-taking apps for me, with helpers if it is worth it, and remember which one I pick"><div class="ob-choice-title">Compare three note-taking apps for me and remember which one I pick</div></button>
-        </div>
-        <div class="ob-tipline">Type <code>/help</code> for commands. Chat apps and email connect from <b>Settings, Connectors</b>; your phone from <b>Settings, Plus</b>.</div>
       </div>
     </div>
 
     <div class="ob-footer">
-      <div class="ob-meta" id="ob-step-meta">Step 1 of 9</div>
+      <div class="ob-meta" id="ob-step-meta">Step 1 of 8</div>
       <div class="ob-buttons">
         <button class="ob-btn ghost" id="ob-skip">Skip setup</button>
         <button class="ob-btn" id="ob-back" hidden>Back</button>
@@ -6495,19 +6404,8 @@ function showRepairPlanModal(plan) {
 async function showMcpJsonModal() {
       try {
         const r = await api('/api/mcp/config');
-        const current = (r && r.json) ? r.json : JSON.stringify({
-          mcpServers: {
-            "example-filesystem": {
-              command: "npx",
-              args: ["-y", "@modelcontextprotocol/server-filesystem", "~/Documents"],
-              env: {}
-            }
-          }
-        }, null, 2);
+        const current = (r && r.json) ? r.json : JSON.stringify({ mcpServers: {} }, null, 2);
         showModal('Edit mcp.json',
-          `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
-          `Standard MCP server config. Each entry runs as a subprocess. ` +
-          `Saving reconnects them right away, no restart.</div>` +
           `<textarea id="mcp-json-input" style="width:100%;min-height:340px;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:12px;resize:vertical;">${esc(current)}</textarea>` +
           `<div id="mcp-json-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>`,
           [
@@ -12294,14 +12192,14 @@ async function handleSlash(raw) {
   const c = activeConvo();
   switch (cmd.toLowerCase()) {
     case '/welcome':
-      // Re-run the full multi-step onboarding (welcome card + brain + voice + try-it).
+      // Re-run the full multi-step onboarding.
       obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
-      _obMigrateProbed = false; _obSkipMigrate = false; _obImportWired = false;
+      _obMigrateProbed = false; _obImportWired = false;
       obShow();
       return true;
     case '/onboard':
       obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
-      _obMigrateProbed = false; _obSkipMigrate = false; _obImportWired = false;
+      _obMigrateProbed = false; _obImportWired = false;
       obShow();
       return true;
     case '/help':
@@ -14173,35 +14071,28 @@ async function refreshMcpStatus() {
   if (!box) return;
   try {
     const r = await api('/api/mcp/status');
-    if (!r || !Array.isArray(r.bridges) || !r.bridges.length) {
-      box.innerHTML = '<span style="opacity:0.7">no bridges configured yet - click <b>Edit mcp.json</b> to wire some</span>';
-      return;
-    }
-    const rows = r.bridges.map(b => {
-      const stateColor = b.state === 'connected' ? 'var(--ok)'
-                       : b.state === 'error' ? 'var(--err)'
-                       : 'var(--fg-faint)';
-      let meta;
+    const bridges = (r && Array.isArray(r.bridges)) ? r.bridges : [];
+    box.innerHTML = bridges.map(b => {
+      const tools = Array.isArray(b.tools) ? b.tools : [];
+      const name = esc(b.raw_name || b.name);
       if (b.state === 'connected') {
-        const tools = Array.isArray(b.tools) ? b.tools : [];
-        const toolList = tools.length ? `<div style="font-size:11px;color:var(--fg-dim);margin-top:3px">${tools.map(t => `<span style="background:var(--bg-1);border:1px solid var(--border);border-radius:4px;padding:1px 5px;margin:1px 3px 1px 0;display:inline-block">${esc(t.name || t)}</span>`).join('')}</div>` : '';
-        meta = `<div style="text-align:right"><span style="color:var(--fg-faint)">${tools.length} tools · ${esc(b.transport || 'stdio')}</span>${toolList}</div>`;
-      } else {
-        // Provide actionable hint for common errors
-        let hint = '';
-        const err = (b.error || '').toLowerCase();
-        if (err.includes('npx') || err.includes('winerror 2') || err.includes('not found')) hint = '<br><span style="font-size:11px;color:var(--fg-dim)">It needs Node.js. Install it from nodejs.org, then restart Inglen</span>';
-        else if (err.includes('command') && err.includes('missing')) hint = '<br><span style="font-size:11px;color:var(--fg-dim)">Hint: check "command" in mcp.json</span>';
-        meta = `<span style="color:${stateColor}">${esc(b.error || b.state)}${hint}</span>`;
+        return `<div class="model-row" title="${esc(tools.map(t => t.name || t).join(', '))}">
+          <span class="mcp-dot ok"></span><div class="model-info"><div class="model-name">${name}</div></div>
+          <span class="cell-size">${tools.length} tool${tools.length === 1 ? '' : 's'}</span></div>`;
       }
-      return `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)">
-        <span style="color:${stateColor};flex-shrink:0">● ${esc(b.name)}</span>
-        ${meta}
-      </div>`;
+      if (b.state === 'error') {
+        const detail = b.detail || b.error || '';
+        return `<div class="model-row is-expandable" data-mcp-row title="${esc(detail)}">
+          <span class="mcp-dot err"></span><div class="model-info"><div class="model-name">${name}</div>
+          <div class="mcp-why">${esc(b.error || "Couldn't start")}</div></div>
+          <div class="model-expand"><pre>${esc(detail)}</pre></div></div>`;
+      }
+      return `<div class="model-row"><span class="mcp-dot"></span><div class="model-info"><div class="model-name">${name}</div>
+        <div class="mcp-why">Starting…</div></div></div>`;
     }).join('');
-    box.innerHTML = rows || '<span style="opacity:0.7">no bridges configured</span>';
-  } catch (e) {
-    box.innerHTML = `<span style="color:var(--err)">status unavailable: ${esc(e.message || 'unknown')}</span>`;
+    box.querySelectorAll('[data-mcp-row]').forEach(row => row.onclick = () => row.classList.toggle('is-open'));
+  } catch {
+    box.innerHTML = '';
   }
 }
 
@@ -14722,11 +14613,10 @@ async function refreshMcpInbound() {
   try {
     const r = await api('/api/mcp/inbound');
     const cs = r.clients || [];
-    if (!cs.length) { el.textContent = 'no clients connected right now'; return; }
-    el.innerHTML = cs.map(c =>
-      `<span style="color:var(--ok)">●</span> <b>${esc(c.client || 'client')}</b> <span style="color:var(--fg-faint)">· since ${esc((c.connected_at || '').replace('T', ' '))}</span>`
-    ).join('<br>');
-  } catch { el.textContent = 'no clients connected right now'; }
+    if (!cs.length) { el.textContent = 'No apps connected.'; return; }
+    const names = [...new Set(cs.map(c => c.client || 'An app'))];
+    el.textContent = names.join(', ') + (names.length === 1 ? ' is connected.' : ' are connected.');
+  } catch { el.textContent = 'No apps connected.'; }
 }
 // Email setup panel. Loads connection status and wires Save/Test/Disconnect on
 // first call (guarded), so an inbox is set up from Settings instead of a hidden
@@ -15391,7 +15281,7 @@ async function refreshSettings() {
     const replayBtn = $('btn-replay-onboard');
     if (replayBtn) replayBtn.onclick = () => {
       obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } };
-      _obMigrateProbed = false; _obSkipMigrate = false; _obImportWired = false;
+      _obMigrateProbed = false; _obImportWired = false;
       obShow();
     };
     // Repair: re-fetch + re-apply this version's patch to restore deleted or
@@ -15564,10 +15454,9 @@ async function refreshSettings() {
           env: { JARVIS_AUTO_APPROVE: '1' },
         } }
       }, null, 2);
-      showModal('Inglen as MCP server',
+      showModal('Use Inglen from other apps',
         `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
-        `Paste this into the OTHER tool's mcp.json (LM Studio, Claude Desktop, Cursor, etc.). ` +
-        `Inglen's full tool set becomes available there.</div>` +
+        `Paste this into the other app's mcp.json.</div>` +
         `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:auto;max-height:360px">${esc(snippet)}</pre>` +
         `<div style="color:var(--fg-dim);font-size:11px;margin-top:8px;line-height:1.5">` +
         `The <b>env</b> line matters: an MCP client can't pop Inglen's approval prompt, ` +
@@ -19552,6 +19441,7 @@ document.querySelectorAll('.settings-side-btn').forEach(b => {
     const name = b.dataset.st;
     document.querySelectorAll('.settings-pane').forEach(p => { p.hidden = (p.dataset.st !== name); });
     if (name === 'plus') renderPlus();
+    if (name === 'mcp') { refreshMcpStatus().catch(() => {}); refreshMcpInbound().catch(() => {}); }
   });
 });
 
@@ -20076,12 +19966,9 @@ send = async function(forced = null, displayAs = null, opts = {}) {
 // ============================================================
 // ONBOARDING - multi-step card overlay on first launch.
 // ============================================================
-const OB_TOTAL_STEPS = 9;
-// Migrate step (7) self-detects whether any source agent is installed.
-// When the probe comes back empty, _obSkipMigrate is set and obNext/Back
-// jump over step 6 so the user doesn't see an empty 'nothing here' card.
+// The last step is the memory import; Finish there starts the tour.
+const OB_TOTAL_STEPS = 8;
 let _obMigrateProbed = false;
-let _obSkipMigrate = false;
 let _obMigrateChoice = null;  // 'hermes' | 'openclaw' | 'skip'
 
 // One choice at a time. Adding 'selected' without clearing the siblings left
@@ -20135,48 +20022,39 @@ function _obPickChoice(box, btn) {
 async function _obProbeMigrate() {
   if (_obMigrateProbed) return;
   _obMigrateProbed = true;
+  const sub = document.getElementById('ob-migrate-sub');
+  const box = document.getElementById('ob-migrate-choices');
+  const choices = [];
   try {
     const r = await api('/api/migrate/probe');
-    const choices = [];
-    if (r?.hermes?.found)   choices.push({src: 'hermes',   path: r.hermes.home});
-    if (r?.openclaw?.found) choices.push({src: 'openclaw', path: r.openclaw.workspace});
-    const sub = document.getElementById('ob-migrate-sub');
-    const box = document.getElementById('ob-migrate-choices');
-    if (!choices.length) {
-      // No Hermes/OpenClaw install - but the ChatGPT/Claude paste import below
-      // is still useful, so stay on this step instead of auto-advancing.
-      _obSkipMigrate = false;
-      if (sub) sub.textContent = "I didn't find Hermes or OpenClaw on this PC. You can still bring over what ChatGPT or Claude knows about you.";
-      return;
-    }
-    if (sub) sub.textContent = 'Found a prior agent install. Want me to pull its memory into Inglen?';
-    if (box) {
-      box.innerHTML = '';
-      for (const c of choices) {
-        const btn = document.createElement('button');
-        btn.className = 'ob-choice';
-        btn.innerHTML = `
-          <div class="ob-choice-title">Import from ${esc(c.src)}</div>
-          <div class="ob-choice-sub">Reading ${esc(c.path)}. API keys stay where they are.</div>
-        `;
-        btn.onclick = () => { _obMigrateChoice = c.src; _obPickChoice(box, btn); };
-        box.appendChild(btn);
-      }
-      const skipBtn = document.createElement('button');
-      skipBtn.className = 'ob-choice';
-      skipBtn.innerHTML = `
-        <div class="ob-choice-title">Skip for now</div>
-        <div class="ob-choice-sub">Settings, Behavior does this again any time.</div>
-      `;
-      skipBtn.onclick = () => { _obMigrateChoice = 'skip'; _obPickChoice(box, skipBtn); };
-      box.appendChild(skipBtn);
-    }
-  } catch {
-    _obSkipMigrate = true;
-    setTimeout(() => {
-      if (obStep === 8 && _obSkipMigrate) { obStep = 9; obRender(); }
-    }, 400);
+    if (r?.hermes?.found)   choices.push({src: 'hermes',   label: 'Hermes',   path: r.hermes.home});
+    if (r?.openclaw?.found) choices.push({src: 'openclaw', label: 'OpenClaw', path: r.openclaw.workspace});
+  } catch {}
+  if (!choices.length) {
+    // Nothing to import from another agent; the ChatGPT or Claude paste stays.
+    if (sub) sub.textContent = 'Bring over what ChatGPT or Claude knows about you.';
+    const imp = document.querySelector('#ob-body .ob-import-ai');
+    if (imp) imp.open = true;
+    return;
   }
+  if (sub) sub.textContent = `Found ${choices.map(c => c.label).join(' and ')} on this PC.`;
+  if (!box) return;
+  box.innerHTML = '';
+  for (const c of choices) {
+    const btn = document.createElement('button');
+    btn.className = 'ob-choice';
+    btn.innerHTML = `
+      <div class="ob-choice-title">Import from ${esc(c.label)}</div>
+      <div class="ob-choice-sub">${esc(c.path)}</div>
+    `;
+    btn.onclick = () => { _obMigrateChoice = c.src; _obPickChoice(box, btn); };
+    box.appendChild(btn);
+  }
+  const skipBtn = document.createElement('button');
+  skipBtn.className = 'ob-choice';
+  skipBtn.innerHTML = '<div class="ob-choice-title">Skip for now</div>';
+  skipBtn.onclick = () => { _obMigrateChoice = 'skip'; _obPickChoice(box, skipBtn); };
+  box.appendChild(skipBtn);
 }
 
 // ============================================================
@@ -20680,7 +20558,7 @@ async function maybeOnboard() {
     // re-opens it manually any time.
     if (!s.onboarded) {
       const draft = _loadOnboardingDraft();
-      if (draft && draft.step > 1 && draft.state) { obStep = draft.step; obState = draft.state; }
+      if (draft && draft.step > 1 && draft.state) { obStep = Math.min(draft.step, OB_TOTAL_STEPS); obState = draft.state; }
       else { obStep = 1; obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model: '' } }; }
       obShow();
     }
@@ -20723,7 +20601,7 @@ function obRender() {
   if (obStep === 3) obWireCloudStep();
   if (obStep === 4) obLoadVoiceStatus();
   if (obStep === 5) obLoadWhatToGet();
-  if (obStep === 6) setTimeout(() => $('ob-name').focus(), 80);
+  if (obStep === 6) { $('ob-agent-name').placeholder = _agentName(); setTimeout(() => $('ob-name').focus(), 80); }
   if (obStep === 8) { _obProbeMigrate(); _obWireImport(); }
   document.querySelector('#onboard .ob-card').classList.toggle('ob-wide', obStep === 7);
   if (obStep !== 7) obDemoStop();
@@ -20815,7 +20693,7 @@ async function obLoadBrains() {
   status.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>Scanning…</span></div>';
   let s;
   try { s = await api('/api/llmserver/status'); }
-  catch { status.innerHTML = '<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>Could not reach Inglen backend</span></div>'; return; }
+  catch { status.innerHTML = '<div class="ob-status-row is-warn"><span class="ob-dot"></span><span>Couldn\'t look just now.</span></div>'; return; }
 
   const disk = s.disk_models || [];
   const builtin = s.builtin_running;
@@ -20840,15 +20718,15 @@ async function obLoadBrains() {
   let banner = '';
   if (s.is_lite) {
     // Lite has no engine of its own, so a model on disk can't be run by it yet.
-    banner = row('is-warn', `You're on <b>Inglen Lite</b>, which has no engine of its own for local models. ${here.length ? 'Pick an agent below' : 'Set up an agent below'}, use LM Studio or Ollama, or add a cloud brain on the next step. The engine can be added later from Settings.`);
+    banner = row('is-warn', `${here.length ? 'Pick' : 'Set up'} an agent below, or a cloud model next.`);
   } else if (builtin) {
-    banner = row('is-good', "Inglen's built-in engine is already running a model. You're set.");
+    banner = row('is-good', 'A model is already running.');
   } else if (external) {
-    banner = row('is-good', 'LM Studio or Ollama is running on this PC. You can use it as it is, or pick something else below.');
+    banner = row('is-good', 'LM Studio or Ollama is running.');
   } else if (found) {
-    banner = row('is-good', `Found ${found} on this PC. Pick one below, or skip and choose later.`);
+    banner = row('is-good', `Found ${found}.`);
   } else {
-    banner = row('is-warn', 'Nothing to think with on this PC yet. Set up an agent below, get a model from the Models tab after setup, or add a cloud brain on the next step.');
+    banner = row('is-warn', 'Nothing to think with yet. A later step offers a model.');
   }
   // Second row: the engine on this PC doesn't suit its graphics card (see
   // llmserver.runtime_advice). Silent everywhere else.
@@ -20858,15 +20736,7 @@ async function obLoadBrains() {
   } catch {}
   status.innerHTML = banner;
 
-  blurb.textContent = (builtin || external)
-    ? 'Looks good - you already have a brain. Pick a different one if you want, or hit Continue.'
-    : here.length ? 'I can think with an agent you already use, or with a model on this PC. Here\'s what I found:'
-    : 'I look in LM Studio, Ollama, HuggingFace cache, and Downloads automatically. Here\'s what I found:';
-  const tip = $('ob-brain-tip');
-  if (tip) {
-    tip.innerHTML = (others.length ? `Also on this PC: <b>${esc(others.join(', '))}</b>. I can hand tasks to ${others.length === 1 ? 'it' : 'them'} from the Team tab.<br>` : '')
-      + `No model yet? The <b>Models</b> tab lets you search and download one. You can skip this step.`;
-  }
+  blurb.textContent = 'Pick what I think with.';
 
   // Onboarding shows ONLY models already on disk — downloads belong in the
   // Models tab (keeps onboarding clean, not overwhelming). The body scrolls,
@@ -20875,7 +20745,7 @@ async function obLoadBrains() {
   for (const b of here) {
     slots.push({
       title: b.label,
-      sub: `Runs on your ${b.plan} plan. Nothing to download, and my tools, memory and voice stay the same.`,
+      sub: `On your ${b.plan} plan.`,
       badge: 'agent',
       data: { kind: 'agent', id: b.id },
     });
@@ -20883,7 +20753,7 @@ async function obLoadBrains() {
   for (const b of brains.filter(x => !x.installed)) {
     slots.push({
       title: b.label,
-      sub: `Not on this PC yet. I can install it and open its sign-in for you. Runs on your ${b.plan} plan.`,
+      sub: `Not installed yet. On your ${b.plan} plan.`,
       badge: 'set up',
       data: { kind: 'setup', id: b.id },
     });
@@ -20891,14 +20761,11 @@ async function obLoadBrains() {
   for (const m of disk) {
     slots.push({
       title: m.filename,
-      sub: `${m.source} · ${m.size_gb} GB - already on your disk, nothing to download`,
+      sub: `${m.source} · ${m.size_gb} GB`,
       data: { kind: 'disk', path: m.path },
     });
   }
-  if (!slots.length) {
-    choices.innerHTML = '<div class="ob-status-row"><span class="ob-dot"></span><span>No model on this PC yet. Continue, and I\'ll offer one that fits it, or add a cloud key on the next page.</span></div>';
-    return;
-  }
+  if (!slots.length) return;
   let html = '';
   for (const c of slots) {
     const dataAttr = JSON.stringify(c.data).replace(/"/g, '&quot;');
@@ -20929,23 +20796,15 @@ async function obLoadVoiceStatus() {
     const v = await api('/api/voice/status');
     const tts = v.tts && v.tts.available;
     const stt = v.stt && (v.stt.ready || v.stt.available);
-    const rt  = v.realtime && v.realtime.available;
     let cls = 'is-good', txt = '';
-    if (tts && stt && rt) txt = 'Voice is ready. I can hear you and talk back.';
-    else if (tts && stt) txt = 'Voice is ready. Press the mic when you want to talk.';
-    else if (tts) { cls = 'is-warn'; txt = 'I can talk, but I can\'t hear you yet. Listening can be added in Settings, Voice.'; }
-    else if (stt) { cls = 'is-warn'; txt = 'I can hear you, but my voice isn\'t downloaded yet.'; }
-    else { cls = 'is-warn'; txt = 'Voice isn\'t set up yet. You can add it any time from Settings, Voice.'; }
-    // GPU vs CPU note: speech-to-text on CPU is the ~10s-latency culprit. Tell
-    // the user which they're on; a GPU machine on CPU mode gets a one-click flip.
+    if (tts && stt) txt = 'Voice is ready.';
+    else if (tts) { cls = 'is-warn'; txt = 'I can talk, but can\'t hear yet.'; }
+    else if (stt) { cls = 'is-warn'; txt = 'My voice isn\'t downloaded yet.'; }
+    else { cls = 'is-warn'; txt = 'Voice isn\'t set up yet.'; }
+    // Listening on the processor is slow; a card that can do it gets a one-click switch.
     let gpuNote = '';
-    if (stt && v.stt) {
-      const onGpu = v.stt.device === 'cuda';
-      const canGpu = !!v.stt.cuda_available;
-      if (onGpu) gpuNote = ' It runs on your graphics card, so it\'s quick.';
-      else if (canGpu) gpuNote = ' Your graphics card can do this faster. <a href="#" id="ob-voice-gpu">Use it</a>.';
-      else gpuNote = ' It runs on the processor, so it may take a few seconds to catch what you said.';
-    }
+    if (stt && v.stt && v.stt.device !== 'cuda' && v.stt.cuda_available)
+      gpuNote = ' <a href="#" id="ob-voice-gpu">Listen on the graphics card</a>';
     row.className = 'ob-status-row ' + cls;
     const needTTS = !tts;   // speakers (kokoro) not installed
     row.innerHTML = `<span class="ob-dot"></span><span>${esc(txt)}${gpuNote}</span>`
@@ -21029,16 +20888,14 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
   const mine = String(navigator.language || 'en').slice(0, 2).toLowerCase();
   sel.value = [...sel.options].some(o => o.value === mine) ? mine : 'en';
   const paint = () => {
-    const lang = sel.value, name = (sel.selectedOptions[0] || {}).textContent || '';
+    const lang = sel.value;
     const group = VOICES_FOR[lang] && [...document.querySelectorAll('#setting-voice-name optgroup')].find(g => g.label === VOICES_FOR[lang]);
     if (group && group.children.length) {
       voiceSel.innerHTML = group.innerHTML;
-      note.textContent = `I'll listen for ${name} and answer in a ${name} voice.`;
+      note.textContent = '';
     } else {
       if (voiceSel.querySelector('optgroup[label="Male"]') == null) voiceSel.innerHTML = english;
-      note.textContent = lang === 'en' ? ''
-        : !lang ? 'I work out the language of each thing you say. A little slower than naming one.'
-        : `I'll listen for ${name}. No voice speaks it yet, so a reply read out loud uses an English voice.`;
+      note.textContent = (lang === 'en' || !lang) ? '' : 'Replies are read in an English voice.';
     }
   };
   sel.addEventListener('change', paint);
@@ -21072,13 +20929,13 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
         _needFiles = !!(vs && vs.tts && vs.tts.can_install_models);
       } catch {}
       if (_needFiles) {
-        if (testMsg) testMsg.textContent = 'first run, getting voice files (about 100MB)…';
+        if (testMsg) testMsg.textContent = 'Getting voice files…';
         const okFiles = await _obFetchVoiceModels(null, pct => {
           if (testMsg) testMsg.textContent = pct != null
             ? `getting voice files… ${pct}%` : 'getting voice files…';
         });
         if (!okFiles) {
-          if (testMsg) testMsg.textContent = 'could not get the voice files. Check your connection and retry.';
+          if (testMsg) testMsg.textContent = "Couldn't get the voice files.";
           return;
         }
       }
@@ -21094,27 +20951,28 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
         body: JSON.stringify({ text: (window._obQuote = await voiceQuote(voice)).text }),
       });
       if (r.ok) {
-        if (testMsg) testMsg.textContent = `✓ ${window._obQuote.by}. Press again for another.`;
+        if (testMsg) testMsg.textContent = window._obQuote.by;
       } else {
-        if (testMsg) testMsg.textContent = 'Playback failed. Settings, Voice says why.';
+        if (testMsg) testMsg.textContent = "Couldn't play it.";
       }
     } catch (e) {
-      if (testMsg) testMsg.textContent = '✗ error: ' + (e.message || 'network');
+      if (testMsg) testMsg.textContent = "Couldn't play it.";
     } finally {
       testBtn.disabled = false;
     }
   };
 })();
 
-// Wire "try these" cards
-document.querySelectorAll('#ob-body .ob-try').forEach(b => {
-  b.addEventListener('click', async () => {
-    const prompt = b.dataset.try;
-    if (!prompt) return;
-    await obFinish(false);
-    setTimeout(() => send(prompt), 250);
-  });
-});
+// The name rule /api/agent/rename enforces, checked as it is typed.
+const OB_NAME_RE = /^[A-Za-z0-9 ]{1,20}$/;
+function _obNameOk() {
+  const el = $('ob-agent-name'), v = (el.value || '').trim();
+  const ok = !v || OB_NAME_RE.test(v);
+  el.setAttribute('aria-invalid', ok ? 'false' : 'true');
+  $('ob-agent-name-err').hidden = ok;
+  return ok;
+}
+$('ob-agent-name').addEventListener('input', _obNameOk);
 
 async function obFinish(skipped) {
   // Persist personalization
@@ -21125,8 +20983,8 @@ async function obFinish(skipped) {
   // so an invalid value is caught here instead of failing the rename
   // silently after onboarding.
   let agentName = ($('ob-agent-name')?.value || '').trim();
-  if (agentName && !/^[A-Za-z0-9 ]{1,20}$/.test(agentName)) {
-    toast('Name skipped', `Names are 1 to 20 letters, digits or spaces. Keeping ${_agentName()}; change it any time in Settings.`, 'warn', 6000);
+  if (agentName && !OB_NAME_RE.test(agentName)) {
+    toast('Name not changed', 'Letters, digits and spaces only.', 'warn', 6000);
     agentName = '';
   }
   const voiceOn = obState.voice === 'full';
@@ -21353,6 +21211,7 @@ function obStartWhatToGet() {
 // a brain doesn't need it; it stays in Settings.
 const _obSkips = () => obStep === 3 && !!obState.brain;
 $('ob-next').addEventListener('click', async () => {
+  if (obStep === 6 && !_obNameOk()) { $('ob-agent-name').focus(); return; }
   if (obStep === 5) obStartWhatToGet();
   _obGetFrom = obStep;
   if (obStep < OB_TOTAL_STEPS) { obStep++; if (_obSkips()) obStep++; obRender(); return; }
