@@ -240,6 +240,17 @@ def post(cid: str, title: str, source: str, messages: List[Dict[str, Any]], unre
     _changed(cid)
 
 
+def seen(cid: str) -> bool:
+    """Mark a chat read, as opening it in the window does. False when there is no such chat."""
+    d = load(cid)
+    if not d:
+        return False
+    if d.pop("unread", None) is not None:
+        atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)
+        _changed(cid)
+    return True
+
+
 def drop_last_turn(cid: str) -> bool:
     """Take a chat's last question and its answer off the end, for the question
     to be asked again (Regenerate from a phone)."""

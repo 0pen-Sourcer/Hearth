@@ -378,6 +378,33 @@ def pause_reminder(rid: str, paused: bool = True) -> Dict:
     return {"ok": False, "error": f"no reminder with id {rid}"}
 
 
+def done_reminder(rid: str) -> Dict:
+    """They've seen it: its chat is marked read and it is kept as done. A
+    repeating one still comes back at its next time."""
+    with _store_lock():
+        items = _load_all()
+        for r in items:
+            if r.get("id") == rid:
+                r["done_at"] = datetime.now().isoformat(timespec="seconds")
+                _save_all(items)
+                break
+        else:
+            return {"ok": False, "error": f"no reminder with id {rid}"}
+    try:
+        from . import chat_sync
+        chat_sync.seen(chat_id_for({"id": rid}))
+    except Exception:
+        pass
+    return {"ok": True, "id": rid}
+
+
+def _done_since(rid: str, since_iso: str) -> bool:
+    for r in _load_all():
+        if r.get("id") == rid:
+            return (r.get("done_at") or "") >= since_iso
+    return False
+
+
 def list_reminders(include_fired: bool = False) -> List[Dict]:
     items = _load_all()
     if not include_fired:
@@ -565,6 +592,115 @@ def _take_down_all() -> None:
 
 import atexit as _atexit  # noqa: E402
 _atexit.register(_take_down_all)
+
+
+# ---------------------------------------------------------------------------
+# A due reminder's notice, with Snooze and Done on it
+# ---------------------------------------------------------------------------
+
+SNOOZE_MINUTES = 10
+SNOOZE_LABEL = f"Snooze {SNOOZE_MINUTES} min"
+DONE_LABEL = "Done"
+_live_toasts: list = []    # Windows drops a toast's buttons once the toast object is collected
+
+
+def on_reminder_action(rid: str, action: str) -> Dict:
+    """What a notice's button does: the same as the window's and the phone's."""
+    if action == "snooze":
+        r = next((x for x in _load_all() if x.get("id") == rid), None)
+        if r and r.get("recurring_seconds"):
+            # A repeating one keeps its times; the snooze is a one-off of its own.
+            return set_reminder(when=f"{SNOOZE_MINUTES}m", what=r.get("what") or "Reminder")
+        return snooze_reminder(rid, SNOOZE_MINUTES)
+    if action == "done":
+        return done_reminder(rid)
+    return {"ok": False, "error": f"unknown action {action}"}
+
+
+def _windows_actions(rid: str, title: str, body: str, icon: Optional[str]) -> bool:
+    """A Windows toast in the reminder scenario (it stays up until answered),
+    with the two buttons answered in this process."""
+    try:
+        from windows_toasts import (InteractableWindowsToaster, Toast, ToastButton,  # type: ignore
+                                    ToastScenario)
+    except Exception:
+        return False
+    try:
+        toaster = InteractableWindowsToaster("Inglen", notifierAUMID=_APP_ID)
+        toast = Toast([title, body], scenario=ToastScenario.Reminder)
+        toast.AddAction(ToastButton(SNOOZE_LABEL, "snooze"))
+        toast.AddAction(ToastButton(DONE_LABEL, "done"))
+        if icon and os.path.isfile(icon):
+            try:
+                from windows_toasts import ToastDisplayImage, ToastImagePosition  # type: ignore
+                img = icon[:-4] + ".png" if icon.lower().endswith(".ico") else icon
+                if os.path.isfile(img):
+                    toast.AddImage(ToastDisplayImage.fromPath(img, position=ToastImagePosition.AppLogo))
+            except Exception:
+                pass
+
+        def _activated(args) -> None:
+            what = str(getattr(args, "arguments", "") or "")
+            if what in ("snooze", "done"):
+                on_reminder_action(rid, what)
+
+        toast.on_activated = _activated
+        _live_toasts.append((toaster, toast))
+        del _live_toasts[:-20]
+        toaster.show_toast(toast)
+        return True
+    except Exception:
+        return False
+
+
+def _linux_actions(rid: str, title: str, body: str, icon: Optional[str]) -> bool:
+    """notify-send with two actions (libnotify 0.7.9 and later): it prints the
+    one pressed. A desktop that shows no buttons still shows the notice."""
+    import shutil
+    import subprocess
+    exe = shutil.which("notify-send")
+    if not exe:
+        return False
+    try:
+        helptext = subprocess.run([exe, "--help"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if "--action" not in helptext:
+        return False
+    cmd = [exe, "--app-name=Inglen", "--urgency=critical", "--wait",
+           f"--action=snooze={SNOOZE_LABEL}", f"--action=done={DONE_LABEL}"]
+    if icon:
+        cmd.append(f"--icon={icon}")
+    cmd += [title, body]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return False
+
+    def _wait() -> None:
+        try:
+            out, _ = proc.communicate(timeout=6 * 3600)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return
+        what = (out or "").strip().splitlines()[-1:] or [""]
+        if what[0] in ("snooze", "done"):
+            on_reminder_action(rid, what[0])
+
+    threading.Thread(target=_wait, daemon=True, name="hearth-reminder-notice").start()
+    return True
+
+
+def notify_reminder(rid: str, title: str, body: str) -> bool:
+    """Show a due reminder with Snooze and Done where this desktop can. False
+    when it can't, and the caller shows the plain notice instead."""
+    title, body = _fit_toast(title, body)
+    icon = _ensure_app_identity()
+    if sys.platform == "win32":
+        return _windows_actions(rid, title, body, icon)
+    if sys.platform.startswith("linux"):
+        return _linux_actions(rid, title, body, icon)
+    return False
 
 
 def desktop_notify(title: str, body: str) -> bool:
@@ -804,6 +940,8 @@ def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
     """JARVIS says a due reminder in that reminder's own chat, never in the chat
     someone has open. Written to the chat file by whichever process fired it, so
     it is there even with the window closed; a repeating one stays in one chat."""
+    fired_iso = datetime.now().isoformat(timespec="seconds")
+
     def _run() -> None:
         from . import chat_sync, headless
         cid = chat_id_for(r)
@@ -837,7 +975,8 @@ def deliver(r: Dict, note: str, wait_s: float = 600) -> threading.Thread:
                 text += f"\n\n(I couldn't say it in my own words: {why[-1].rstrip('.')}.)"
         chat_sync.post(cid, what[:60], "reminder",
                        [{"role": "assistant", "content": text, "via": "reminder",
-                         "at": int(time.time() * 1000)}], unread=True)
+                         "at": int(time.time() * 1000)}],
+                       unread=not _done_since(str(r.get("id") or ""), fired_iso))
     t = threading.Thread(target=_run, daemon=True, name="hearth-reminder-chat")
     t.start()
     return t
@@ -887,11 +1026,19 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
         title = "Inglen - while you were away" if missed else "Inglen reminder"
         toast_body = body
         if needs_confirm:
-            toast_body = f"{body}\n(wants to run {action_tool} — open Inglen to confirm)"
+            toast_body = f"{body}\n(wants to run {action_tool}; open Inglen to confirm)"
+        shown = False
         try:
-            notify(title, toast_body)
+            shown = notify_reminder(str(r.get("id") or ""), title, toast_body)
         except Exception:
-            pass
+            shown = False
+        if shown:
+            _push_phone(title, toast_body)
+        else:
+            try:
+                notify(title, toast_body)
+            except Exception:
+                pass
         # The reminder becomes a turn in its own chat, so JARVIS says it in his
         # own words and knows it fired. The notice above covers an empty desk.
         try:
