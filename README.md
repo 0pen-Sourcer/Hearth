@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/team-room.png" alt="The Team room, with JARVIS by the fire and six helpers at their desks, two on Codex, one on Claude Code and three of Inglen's own, each saying what it is doing" width="900">
+  <img src="docs/media/team-room.gif" alt="Helpers arriving at their desks in the Team room" width="900">
 </p>
 
 ---
@@ -42,12 +42,16 @@ Inglen is the framework (it was called Hearth until v0.7.6, and the files and se
 
 <table>
 <tr>
-<td width="50%" align="center"><strong>It does the thing, on your desktop</strong><br><img src="docs/media/hero.gif" alt="Inglen creating a folder, writing a file, and opening it in Notepad from one request" width="420"></td>
-<td width="50%" align="center"><strong>One menu for every brain</strong><br><img src="docs/media/brains.png" alt="The model menu with Claude Code in use and Codex, Cursor, OpenCode, Copilot CLI and Gemini CLI below it" width="420"></td>
+<td width="50%" align="center"><strong>Approve a command before it runs</strong><br><img src="docs/media/approval.gif" alt="Inglen asking before removing an old installer" width="420"></td>
+<td width="50%" align="center"><strong>Switch brains from one menu</strong><br><img src="docs/media/brains.gif" alt="The model menu with a local model, Claude Code, Codex and Cursor" width="420"></td>
 </tr>
 <tr>
-<td width="50%" align="center"><strong>A memory that tidies itself</strong><br><img src="docs/media/memory.gif" alt="Inglen's memory browser" width="420"></td>
-<td width="50%" align="center"><strong>Find and run a model without leaving the app</strong><br><img src="docs/media/discover.gif" alt="Downloading and running a model inside Inglen" width="420"></td>
+<td width="50%" align="center"><strong>Talk and interrupt a reply</strong><br><img src="docs/media/voice.gif" alt="Voice mode listening, speaking and stopping when interrupted" width="420"></td>
+<td width="50%" align="center"><strong>Watch helpers in the Team room</strong><br><img src="docs/media/team-room.gif" alt="Helpers arriving at their desks in the Team room" width="420"></td>
+</tr>
+<tr>
+<td width="50%" align="center"><strong>Message it from your phone</strong><br><img src="docs/media/phone.gif" alt="Phone messages through Telegram, Discord and WhatsApp" width="420"></td>
+<td width="50%" align="center"><strong>Pick a look</strong><br><img src="docs/media/looks.gif" alt="Appearance changing from Rose to Ocean, Sage and Classic" width="420"></td>
 </tr>
 </table>
 
