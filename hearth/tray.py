@@ -292,6 +292,8 @@ def main(argv: Optional[list] = None) -> int:
                         help="HTTP backend port. 0 = auto-pick (default).")
     parser.add_argument("--open", action="store_true",
                         help="Open the desktop window immediately on launch.")
+    parser.add_argument("--background", action="store_true",
+                        help="Start in the tray only, as at login.")
     parser.add_argument("--wake", action="store_true",
                         help="Start with wake-word listener enabled (say the wake word to open).")
     args = parser.parse_args(argv)
@@ -567,7 +569,7 @@ def main(argv: Optional[list] = None) -> int:
     threading.Thread(target=_follow_look, daemon=True, name="tray-look").start()
     # Auto-open the window if --open OR running as a bundled exe (so users
     # who double-click Hearth.exe get a window, not just a tray icon).
-    if args.open or getattr(sys, "frozen", False):
+    if (args.open or getattr(sys, "frozen", False)) and not args.background:
         threading.Timer(0.5, _open_desktop_window).start()
     if args.wake or _load_wake_pref():
         threading.Timer(1.0, _start_wake).start()
