@@ -31,11 +31,11 @@
       if (cur === 'system') root.dataset.theme = resolve('system');
     });
     // Classic shows its own mark (the i with a flame) as the window and tab
-    // icon; the other themes show the hearth with its flame in the accent.
+    // icon; the other themes show the Nook with its dot in the accent.
     function lookIcon(m, a) {
       try {
         var link = document.querySelector('link[rel="icon"]');
-        if (link) link.href = '/api/look-icon?theme=' + encodeURIComponent(m) + '&accent=' + encodeURIComponent(a);
+        if (link) link.href = '/api/look-icon?v=nook1&theme=' + encodeURIComponent(m) + '&accent=' + encodeURIComponent(a);
       } catch (e) {}
       try { if (window.pywebview && window.pywebview.api && window.pywebview.api.set_icon) window.pywebview.api.set_icon(m, a); } catch (e) {}
     }
@@ -324,10 +324,16 @@
   }
   .brand-mark { width: 22px; height: 22px; display: grid; place-items: center; }
   .brand-mark svg { width: 22px; height: 22px; }
-  .brand-mark .hm-arch { color: var(--fg); }
-  .brand-mark .hm-flame { color: var(--accent); }
+  /* The Nook fills about half its box; drawn larger so it sits level with the name. */
+  .brand-mark svg.hm-nook { width: 30px; height: 30px; margin: -4px; }
+  .hm-bracket { color: var(--fg); }
+  .hm-dot { color: var(--accent); }
   .hm-h { display: none; }
   :root[data-theme="classic"] .brand-mark > svg, :root[data-theme="classic"] .empty-mark > svg { display: none; }
+  .ob-hero .ob-h .hm-nook { width: 44px; height: 44px; display: block; }
+  .ob-hero .ob-h .hm-nook .hm-bracket { color: var(--fg); }
+  :root[data-theme="classic"] .ob-hero .ob-h .hm-nook,
+  :root:not([data-theme="classic"]) .ob-hero .ob-h .hm-i { display: none; }
   .hm-h .hm-i { width: 66%; height: 66%; display: block; }
   .ob-hero .ob-h .hm-i { width: 40px; height: 40px; display: block; }
   :root[data-theme="classic"] .hm-h {
@@ -783,38 +789,40 @@
     animation: emptyFade .5s ease both;
   }
   @keyframes emptyFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  /* The mark is a hearth. No model: the fire is down to an ember. Finding
-     models: it flickers. Loading: it burns up. Ready: one small settle. */
+  /* The mark is the Nook: a bracket with a dot at home in it. No model: the
+     dot breathes, dim. Finding models: it pulses softly. Loading: the pulse
+     quickens and glows. Ready: one small settle. */
   .empty-mark { width: 56px; height: 56px; display: grid; place-items: center; }
   .empty-mark svg { width: 56px; height: 56px; overflow: visible; }
-  .empty-mark .hm-arch { color: var(--fg-faint); transition: color .5s var(--ease); }
-  .empty-mark .hm-flame {
-    color: var(--accent);
-    transform-box: fill-box; transform-origin: 50% 100%;
+  .empty-mark .hm-bracket { color: var(--fg-faint); transition: color .5s var(--ease); }
+  .empty-mark .hm-dot {
+    transform-box: fill-box; transform-origin: 50% 50%;
     transition: opacity .6s var(--ease), transform .6s var(--ease), filter .6s var(--ease);
   }
-  .empty.idle-nomodel .empty-mark .hm-flame { opacity: .35; transform: scale(.62); }
-  .empty.booting .empty-mark .hm-flame { animation: flameFlicker 1.8s ease-in-out infinite; }
-  .empty.booting.loading .empty-mark .hm-flame {
-    animation-duration: 1.1s;
+  .empty.idle-nomodel .empty-mark .hm-dot { animation: dotBreath 5s ease-in-out infinite; }
+  @keyframes dotBreath {
+    0%, 100% { opacity: .35; transform: scale(.8); }
+    50%      { opacity: .6;  transform: scale(.88); }
+  }
+  .empty.booting .empty-mark .hm-dot { animation: dotPulse 2.4s ease-in-out infinite; }
+  .empty.booting.loading .empty-mark .hm-dot {
+    animation-duration: 1.4s;
     filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 45%, transparent));
   }
-  .empty.booting.loading .empty-mark .hm-arch { color: var(--fg-dim); }
-  @keyframes flameFlicker {
-    0%, 100% { transform: scale(1, 1); }
-    25%      { transform: scale(.95, 1.05); }
-    50%      { transform: scale(1.04, .96); }
-    75%      { transform: scale(.98, 1.03); }
+  .empty.booting.loading .empty-mark .hm-bracket { color: var(--fg-dim); }
+  @keyframes dotPulse {
+    0%, 100% { transform: scale(.92); opacity: .8; }
+    50%      { transform: scale(1.06); opacity: 1; }
   }
   .empty:not(.booting):not(.idle-nomodel) .empty-mark { animation: markPop .55s var(--ease) both; }
-  .empty:not(.booting):not(.idle-nomodel) .empty-mark .hm-arch { color: var(--fg-dim); }
+  .empty:not(.booting):not(.idle-nomodel) .empty-mark .hm-bracket { color: var(--fg-dim); }
   @keyframes markPop {
     0%   { transform: scale(.86); opacity: .3; }
     60%  { transform: scale(1.04); }
     100% { transform: scale(1); opacity: 1; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .empty-mark, .empty-mark .hm-flame, .empty-mark .hm-h, .empty-mark .hm-h::before, .empty-mark .hm-h::after { animation: none !important; }
+    .empty-mark, .empty-mark .hm-dot, .empty-mark .hm-h, .empty-mark .hm-h::before, .empty-mark .hm-h::after { animation: none !important; }
   }
   .empty-title { color: var(--fg); font-size: 16px; font-weight: 500; }
   .empty-sub { font-size: 13px; max-width: 480px; text-align: center; color: var(--fg-dim); }
@@ -4070,7 +4078,7 @@
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <div class="brand">
-      <div class="brand-mark" id="brand-mark"><span class="hm-h"><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span><svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path class="hm-arch" d="M15 53V31a17 17 0 0 1 34 0v22M9 53h46" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><path class="hm-flame" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z" fill="currentColor"/></svg></div>
+      <div class="brand-mark" id="brand-mark"><span class="hm-h"><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span><svg class="hm-nook" viewBox="-2 -2 64 64" fill="none" aria-hidden="true"><path class="hm-bracket" d="M16 40V22a6 6 0 0 1 6-6h18" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle class="hm-dot" cx="38" cy="38" r="9" fill="currentColor"/></svg></div>
       <span>Inglen</span>
       <span class="brand-sub" id="brand-sub">· local</span>
     </div>
@@ -5537,7 +5545,7 @@
     <div class="ob-body" id="ob-body">
       <!-- ---- step 1: welcome ---- -->
       <div class="ob-step" data-step="1">
-        <div class="ob-hero"><span class="ob-h" aria-hidden="true"><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span></div>
+        <div class="ob-hero"><span class="ob-h" aria-hidden="true"><svg class="hm-nook" viewBox="-2 -2 64 64" fill="none" aria-hidden="true"><path class="hm-bracket" d="M16 40V22a6 6 0 0 1 6-6h18" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle class="hm-dot" cx="38" cy="38" r="9" fill="currentColor"/></svg><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span></div>
         <h1 class="ob-title">Hey, I'm <span class="ob-agent-name">JARVIS</span>.</h1>
         <p class="ob-sub">I run on your PC and do real things on it: open apps, find and read your
           files, browse the web, and talk out loud if you want. What makes me different:</p>
@@ -7825,7 +7833,7 @@ function emptyState() {
   const st = _computeEmptyState();
   wrap.className = st.cls;
   wrap.innerHTML = `
-    <div class="empty-mark"><span class="hm-h"><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span><svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path class="hm-arch" d="M15 53V31a17 17 0 0 1 34 0v22M9 53h46" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><path class="hm-flame" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z" fill="currentColor"/></svg></div>
+    <div class="empty-mark"><span class="hm-h"><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span><svg class="hm-nook" viewBox="-2 -2 64 64" fill="none" aria-hidden="true"><path class="hm-bracket" d="M16 40V22a6 6 0 0 1 6-6h18" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle class="hm-dot" cx="38" cy="38" r="9" fill="currentColor"/></svg></div>
     <div class="empty-title">${st.title}</div>
     <div class="empty-sub">${st.sub}</div>
   `;

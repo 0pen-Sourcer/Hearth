@@ -10,7 +10,7 @@
 # Notes:
 #  - We bundle the entire `hearth/` package + ui.html as a data file
 #  - voices/ and conversations/ are NOT bundled — they live in %USERPROFILE%\Jarvis
-#  - Tray icon comes from assets/icon.png (falls back to procedurally drawn H)
+#  - Tray, window and notice icons are drawn by hearth/look_icon.py in the saved look
 #  - PyWebView's Edge WebView2 runtime is assumed installed (Windows 10/11 ship it)
 
 import os

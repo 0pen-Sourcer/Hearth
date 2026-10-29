@@ -46,30 +46,17 @@ def _look() -> tuple:
 
 def _icon_for_look(theme: str, accent: str):
     from . import look_icon
-    return look_icon.image(theme, accent, 64) or _icon_image()
+    # Drawn at 64 for sharpness but shown at 16 to 24 in the tray.
+    return look_icon.image(theme, accent, 64, shown=20) or _icon_image()
 
 
 def _icon_image():
-    """Load assets/icon.png if present; fall back to a plain ember tile."""
+    """The Nook in Rose, drawn here; None without Pillow."""
     try:
-        from PIL import Image, ImageDraw, ImageFont  # type: ignore
-    except ImportError:
+        from . import look_icon
+        return look_icon.draw("rose", 64, shown=20)
+    except Exception:
         return None
-    here = os.path.dirname(os.path.abspath(__file__))
-    icon_path = os.path.join(os.path.dirname(here), "assets", "icon.png")
-    if os.path.isfile(icon_path):
-        try:
-            return Image.open(icon_path).convert("RGBA")
-        except Exception:
-            pass
-    # Fallback: a 64x64 ember "I" on a dark ground, three rectangles.
-    img = Image.new("RGBA", (64, 64), (28, 25, 22, 255))
-    draw = ImageDraw.Draw(img)
-    accent = (224, 123, 76, 255)
-    draw.rectangle([(18, 12), (46, 18)], fill=accent)
-    draw.rectangle([(28, 12), (36, 52)], fill=accent)
-    draw.rectangle([(18, 46), (46, 52)], fill=accent)
-    return img
 
 
 _server_url: str = ""
