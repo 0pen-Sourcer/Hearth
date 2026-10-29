@@ -1,7 +1,7 @@
 """Hearth - local-only personal AI CLI.
 
-Runs against any OpenAI-compatible local server (LM Studio, Ollama with the
-OpenAI compat layer, llama.cpp, vLLM, etc.). No paid APIs. No cloud.
+Runs on Inglen's built-in engine, or any OpenAI-compatible server it finds
+(LM Studio, Ollama, llama.cpp, vLLM) or a cloud provider.
 
 Quick start:
     pip install openai
@@ -10,13 +10,14 @@ Quick start:
     python jarvis.py
 
 Env:
-    LOCAL_API_BASE   default http://localhost:1234/v1
+    LOCAL_API_BASE   default Inglen's built-in engine, http://localhost:8790/v1
     LOCAL_MODEL      default 'local-model'
     HEARTH_WORKSPACE default ~/Jarvis  (sandbox for writes)
     HEARTH_LOCKDOWN  set to 1 to also confine reads to the workspace
 """
 
 import os
+from hearth.local_engine import local_base as _local_base
 from hearth import env as _env
 import re
 import sys
@@ -34,13 +35,13 @@ from typing import Any, Dict, List, Optional
 # and sat at a prompt, which is not what either flag is asking for.
 _HELP = """usage: hearth-cli [--help] [--version]
 
-Inglen in the terminal. Runs against the server Inglen manages, or any
-OpenAI-compatible one (LM Studio, Ollama, llama.cpp, vLLM, a cloud provider).
+Inglen in the terminal. Runs on Inglen's built-in engine, or any
+OpenAI-compatible server (LM Studio, Ollama, llama.cpp, vLLM, a cloud provider).
 
 Everything else is set from inside the session. Type /help once it starts.
 
 Environment (optional, each overrides the saved setting):
-  LOCAL_API_BASE     server address         default http://localhost:1234/v1
+  LOCAL_API_BASE     server address         default Inglen's engine, http://localhost:8790/v1
   LOCAL_MODEL        model id               default: whatever is loaded
   LOCAL_API_KEY      key for that server
   HEARTH_CONTEXT     context window in tokens
@@ -378,8 +379,8 @@ _team_panes()
 
 def _brain_choices():
     from hearth.headless import PROVIDERS
-    out = [("local", "whatever serves on localhost:1234"), ("lmstudio", "LM Studio"),
-           ("builtin", "Inglen's own llama.cpp")]
+    out = [("builtin", "Inglen's built-in engine"), ("local", "Inglen's engine, or a server it finds"),
+           ("lmstudio", "LM Studio")]
     out += [(pid, label) for pid, (label, _url) in PROVIDERS.items()]
     out += [("custom", "any OpenAI-compatible address"), ("claude-code", "your Claude plan"),
             ("codex", "your ChatGPT plan"), ("cursor", "your Cursor plan")]
@@ -555,7 +556,7 @@ def _save_setting(key, value) -> bool:
 # Such a session ignores live settings.json brain-sync so the GUI can't yank a
 # deliberately env-pinned CLI off its endpoint mid-run.
 _BRAIN_FROM_ENV = bool(os.getenv("LOCAL_API_BASE"))
-LOCAL_API_BASE = os.getenv("LOCAL_API_BASE") or _S_URL or "http://localhost:1234/v1"
+LOCAL_API_BASE = os.getenv("LOCAL_API_BASE") or _S_URL or _local_base()
 LOCAL_MODEL = os.getenv("LOCAL_MODEL") or _S_MODEL or "local-model"
 # Cloud endpoints need a real key. Resolution order:
 #   1. LOCAL_API_KEY env (explicit override)
@@ -2982,9 +2983,9 @@ class JarvisCLI:
                 if have:
                     print(f"{C_DIM}Saved keys: {', '.join(have)}{C_RESET}")
                 print(f"\n{C_BOT}Switch with:{C_RESET}")
-                print(f"  {C_TOOL}/brain local{C_RESET}                     auto: whatever's at localhost:1234")
-                print(f"  {C_TOOL}/brain lmstudio{C_RESET}                  use LM Studio (download.lmstudio.ai)")
-                print(f"  {C_TOOL}/brain builtin{C_RESET}                   use Inglen's bundled llama.cpp server")
+                print(f"  {C_TOOL}/brain builtin{C_RESET}                   Inglen's built-in engine")
+                print(f"  {C_TOOL}/brain local{C_RESET}                     Inglen's engine, or a local server it finds")
+                print(f"  {C_TOOL}/brain lmstudio{C_RESET}                  LM Studio")
                 print(f"  {C_TOOL}/brain grok [api-key]{C_RESET}            xAI Grok       (key optional if saved)")
                 print(f"  {C_TOOL}/brain gemini [api-key]{C_RESET}          Google Gemini  (key optional if saved)")
                 print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")
@@ -3088,7 +3089,7 @@ class JarvisCLI:
             try:
                 from hearth.llmserver import BUILTIN_PORT as _bport
             except Exception:
-                _bport = 1234
+                from hearth.local_engine import DEFAULT_PORT as _bport
             _LOCAL = ("local", "lmstudio", "builtin")
             # Where each cloud provider answers is written down once, in
             # headless. The model beside it is only a first guess.
@@ -3097,7 +3098,7 @@ class JarvisCLI:
                             "anthropic": "claude-sonnet-5-5", "openrouter": "anthropic/claude-3.5-sonnet",
                             "groq": "openai/gpt-oss-120b"}
             presets_url_model = {
-                "local":      ("http://localhost:1234/v1", ""),
+                "local":      (_local_base(), ""),
                 "lmstudio":   ("http://localhost:1234/v1", ""),
                 "builtin":    (f"http://localhost:{_bport}/v1", ""),
                 **{p: (u, _first_guess.get(p, "")) for p, (_label, u) in _known.items()},
@@ -3264,7 +3265,6 @@ class JarvisCLI:
                 print(f"{C_DIM}    1. /models           → see what's on disk{C_RESET}")
                 print(f"{C_DIM}    2. /models use <n>   → boot Inglen's llama.cpp server with that model{C_RESET}")
                 print(f"{C_DIM}    Notes:{C_RESET}")
-                print(f"{C_DIM}      • If LM Studio is running on port 1234, stop it first.{C_RESET}")
                 print(f"{C_DIM}      • Inglen re-uses any GGUFs you have in LM Studio's cache - no double-download.{C_RESET}")
             elif provider not in _LOCAL and provider != "custom" and given_key:
                 print(f"{C_DIM}(key saved - next time just type /brain {provider}){C_RESET}")

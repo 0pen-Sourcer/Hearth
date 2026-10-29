@@ -50,6 +50,7 @@ import urllib.error
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
+from .local_engine import local_base as _local_base
 
 from . import system_prompt, TOOL_DEFINITIONS, memory, execute_tool
 from .headless import run_once
@@ -187,7 +188,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _UI_PATH = os.path.join(_HERE, "ui.html")
 _ROOM_JS = os.path.join(_HERE, "room.js")
 _CALL_AUDIO_JS = os.path.join(_HERE, "call_audio.js")
-LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
+LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", _local_base())
 LM_STUDIO_V0 = LOCAL_API_BASE.replace("/v1", "/api/v0")
 SETTINGS_PATH = os.path.join(WORKSPACE, "settings.json")
 CONVOS_DIR = os.path.join(WORKSPACE, "conversations")
@@ -934,7 +935,7 @@ def _active_base() -> str:
     Used to decide local-vs-cloud behavior consistently across /chat,
     _load_model, _eject_model, and /api/state so they never disagree."""
     return (LOCAL_API_BASE or os.getenv("LOCAL_API_BASE")
-            or "http://localhost:1234/v1")
+            or _local_base())
 
 
 def _provider_key(provider: str) -> str:
@@ -1054,7 +1055,7 @@ def _models_probe_endpoint() -> str:
       - dropdown / topbar = current brain (cloud or local)
       - Models tab "On your machine" list = local GGUFs (always)
     """
-    return LOCAL_API_BASE or "http://localhost:1234/v1"
+    return LOCAL_API_BASE or _local_base()
 
 
 def _port_reachable(base_url: str, timeout: float = 0.6) -> bool:
@@ -1392,7 +1393,7 @@ def _eject_model() -> Dict:
         from . import headless as _hl
         settings = _load_settings()
         saved_url = (settings.get("llm_url") or "").strip()
-        new_base = saved_url or "http://localhost:1234/v1"
+        new_base = saved_url or _local_base()
         LOCAL_API_BASE = new_base
         _hl.LOCAL_API_BASE = new_base
         os.environ["LOCAL_API_BASE"] = new_base
@@ -1567,7 +1568,7 @@ def _load_settings() -> Dict:
         "toast_compacted":   True,      # "Context compacted, now X%"
         "toast_errors":      True,      # Hard errors (always recommended)
         "server_idle_min": 15,          # auto-unload after N idle minutes (0 = never)
-        "server_port": 1234,            # builtin HTTP port
+        "server_port": 8790,            # builtin HTTP port (its own: LM Studio keeps 1234; see local_engine)
         # Forge / SD-WebUI install path for local image gen. "" = either
         # not installed or use whatever _autodetect_forge_dir picks. Set
         # via Settings → Behavior or the Detect button.
@@ -1590,6 +1591,7 @@ def _load_settings() -> Dict:
     _env.set("TTS_DEVICE", defaults.get("tts_device", "cpu"))
     _env.set("VOICE_SPEED", str(defaults.get("voice_speed", 1.0)))
     _env.set("VOICE", defaults.get("voice_name", "am_michael"))
+    _apply_server_port(defaults.get("server_port"))
     # Selected mic index (-1 = OS default). Drives both STT paths via
     # listen.input_device_index(). The mic picker (Settings → Voice) writes it.
     _env.set("VOICE_INPUT_DEVICE", str(defaults.get("voice_input_device", -1)))
@@ -1601,6 +1603,31 @@ def _load_settings() -> Dict:
     # chat call so the persona is correct from turn 1.
     os.environ["HEARTH_PERSONA_NAME"] = (defaults.get("agent_name") or "JARVIS").strip() or "JARVIS"
     return defaults
+
+
+_PORT_FROM_ENV = bool(_env.get("BUILTIN_PORT", ""))     # set before start: it wins over Settings
+
+
+def _apply_server_port(port) -> None:
+    """Settings, Built-in server, Port: the engine starts there next time (a running one
+    keeps its port). An environment BUILTIN_PORT set before start wins."""
+    from . import local_engine
+    try:
+        port = int(port or 0)
+    except (TypeError, ValueError):
+        return
+    if _PORT_FROM_ENV:
+        return
+    if not (1024 <= port <= 65535) or port == local_engine.LEGACY_PORT:
+        port = local_engine.DEFAULT_PORT
+    _env.set("BUILTIN_PORT", str(port))
+    _env.set("HELPER_PORT", str(port + 1))
+    try:
+        from . import llmserver
+        if llmserver._proc is None:
+            llmserver.BUILTIN_PORT, llmserver.HELPER_PORT = port, port + 1
+    except Exception:
+        pass
 
 
 # The GUI saves several keys at once in places (the reasoning control writes
@@ -1785,6 +1812,7 @@ def _save_settings_locked(d: Dict) -> Dict:
     _env.set("TTS_DEVICE", cur.get("tts_device", "cpu"))
     _env.set("VOICE_SPEED", str(cur.get("voice_speed", 1.0)))
     _env.set("VOICE", cur.get("voice_name", "am_michael"))
+    _apply_server_port(cur.get("server_port"))
     # Mic pick. Every voice session builds its own recorder, so the next one
     # opens the chosen device; a running session keeps its mic until it ends.
     _env.set("VOICE_INPUT_DEVICE", str(cur.get("voice_input_device", -1)))
@@ -4666,7 +4694,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import headless as _hl
             settings = _load_settings()
             saved_url = (settings.get("llm_url") or "").strip()
-            new_base = saved_url or "http://localhost:1234/v1"
+            new_base = saved_url or _local_base()
             LOCAL_API_BASE = new_base
             _hl.LOCAL_API_BASE = new_base
             os.environ["LOCAL_API_BASE"] = new_base

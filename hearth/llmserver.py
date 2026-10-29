@@ -35,6 +35,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from .local_engine import local_base as _local_base
 
 WORKSPACE = Path(_env.get("WORKSPACE", Path.home() / "Jarvis"))
 
@@ -151,7 +152,8 @@ def save_model_config(model_path: str, config: Dict[str, Any]) -> None:
     except Exception:
         pass
 
-BUILTIN_PORT = int(_env.get("BUILTIN_PORT", "1234"))
+from .local_engine import builtin_port as _builtin_port, helper_port as _helper_port
+BUILTIN_PORT = _builtin_port()     # its own port, not LM Studio's (local_engine)
 BUILTIN_HOST = "127.0.0.1"
 # Key the builtin server is spawned with; every local caller must send it.
 BUILTIN_API_KEY = "hearth-builtin"
@@ -514,13 +516,14 @@ KNOWN_LOCAL_SERVERS = [
 ]
 
 
-def detect_running_server(default_api_base: str = "http://localhost:1234/v1") -> Optional[str]:
+def detect_running_server(default_api_base: str = "") -> Optional[str]:
     """Probe the configured endpoint + well-known local LLM ports. Return the
     first one that answers, or None if nothing is running.
 
     Lets Hearth transparently use whatever the user already has up - LM Studio,
     Ollama, llama.cpp server - without forcing them to set LOCAL_API_BASE.
     """
+    default_api_base = default_api_base or _local_base()
     if external_server_running(default_api_base):
         return default_api_base
     for _label, url in KNOWN_LOCAL_SERVERS:
@@ -3948,7 +3951,7 @@ def delete_model(path: str) -> Dict[str, Any]:
     return {"ok": True, "freed_gb": round(freed / (1024 ** 3), 2)}
 
 
-def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
+def status(api_base: str = "") -> Dict[str, Any]:
     """Snapshot of the LLM-server situation, for the GUI Models panel.
 
     `external` = something at api_base that isn't our builtin.
@@ -3964,6 +3967,7 @@ def status(api_base: str = "http://localhost:1234/v1") -> Dict[str, Any]:
     Result is cached for ~3s so a burst of GUI callers shares one probe.
     Forced fresh when builtin state changes (start / stop / swap).
     """
+    api_base = api_base or _local_base()
     builtin = _proc is not None and _proc.poll() is None
     # Cache key includes builtin-running so a load/eject invalidates instantly.
     cache_key = (api_base, builtin)
@@ -4126,7 +4130,7 @@ def force_local_rescan() -> Dict[str, Any]:
 # Two servers rather than one server juggling two models keeps the main
 # model's load path exactly as it is.
 # ---------------------------------------------------------------------------
-HELPER_PORT = int(_env.get("HELPER_PORT", "1235"))
+HELPER_PORT = _helper_port()
 _helper: Dict[str, Any] = {"proc": None, "info": {}}
 
 
