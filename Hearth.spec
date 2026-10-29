@@ -213,6 +213,7 @@ HIDDEN = [
     "psutil", "sounddevice", "numpy",
     "webview", "webview.platforms.edgechromium",
     "plyer", "plyer.platforms.win.notification",
+    "windows_toasts",      # reminders' Snooze and Done buttons
     # v0.6 round-7 modules — must be explicitly listed or PyInstaller's
     # tree-shaker may drop them since nothing imports them at top level.
     "hearth.reminders", "hearth.session_search", "hearth.wake",

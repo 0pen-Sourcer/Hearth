@@ -125,8 +125,8 @@ Write-Step "Upgrading pip"
 & $venvPython -m pip install --quiet --upgrade pip
 if ($LASTEXITCODE -ne 0) { Write-WarnX "pip self-upgrade failed; continuing" }
 
-Write-Step "Installing required deps (openai, prompt_toolkit, psutil, pillow, truststore, plyer)"
-& $venvPython -m pip install --quiet openai prompt_toolkit psutil pillow truststore plyer
+Write-Step "Installing required deps (openai, prompt_toolkit, psutil, pillow, truststore, plyer, windows-toasts)"
+& $venvPython -m pip install --quiet openai prompt_toolkit psutil pillow truststore plyer windows-toasts
 if ($LASTEXITCODE -ne 0) { Write-FailMsg "core deps failed to install"; exit 1 }
 Write-OK "installed"
 

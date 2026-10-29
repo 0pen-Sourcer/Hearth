@@ -20,6 +20,7 @@ psutil
 pillow
 truststore
 plyer
+windows-toasts; sys_platform == "win32"   # reminders' Snooze and Done buttons
 cryptography           # Plus: the relay's end-to-end encryption (also signs broadcasts)
 websockets             # Plus: the PC's connection to the relay
 segno                  # QR codes (pairing a phone, linking WhatsApp)
