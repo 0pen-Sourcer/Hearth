@@ -833,7 +833,8 @@ def quick(prompt: str, timeout: float = 45, any_agent: bool = False) -> str:
         args = exe + ["-p", "--output-format", "text"] + (["--model", model] if model else [])
     elif provider in ACP:
         try:
-            return asyncio.run(asyncio.wait_for(_acp_once(provider, prompt), timeout))
+            from . import acp_brain
+            return asyncio.run(asyncio.wait_for(acp_brain.once(provider, prompt), timeout))[0]
         except Exception:
             return ""
     else:
@@ -851,62 +852,6 @@ def quick(prompt: str, timeout: float = 45, any_agent: bool = False) -> str:
     finally:
         shutil.rmtree(cwd, ignore_errors=True)
     return r.stdout.decode("utf-8", "replace").strip() if r.returncode == 0 else ""
-
-
-async def _acp_once(provider: str, prompt: str) -> str:
-    """One prompt to an ACP agent in an empty folder, with no MCP servers and
-    every request to act refused; its reply text."""
-    import tempfile
-    from . import acp_brain
-    from .codex_brain import _Rpc
-    cwd = tempfile.mkdtemp(prefix="hearth-once-")
-    proc = await acp_brain._start(provider, cwd)
-    if proc is None:
-        return ""
-    rpc = _Rpc(proc, jsonrpc=True)
-    reader = asyncio.ensure_future(rpc.read())
-    parts: List[str] = []
-    try:
-        await acp_brain._hello(rpc)
-        new = await rpc.call("session/new", {"cwd": cwd, "mcpServers": []}, 120)
-        sid = new.get("sessionId")
-        opt = acp_brain._model_option(new.get("configOptions"))
-        model = chosen_model(provider)
-        if model and opt and model != opt.get("currentValue"):
-            try:
-                await rpc.call("session/set_config_option", {"sessionId": sid, "configId": opt["id"], "value": model}, 30)
-            except Exception:
-                pass
-        turn = asyncio.ensure_future(rpc.call("session/prompt", {"sessionId": sid,
-                                                                 "prompt": [{"type": "text", "text": prompt}]}, 86400))
-        while not (turn.done() and rpc.inbox.empty()):
-            try:
-                msg = await asyncio.wait_for(rpc.inbox.get(), timeout=0.4)
-            except asyncio.TimeoutError:
-                continue
-            if msg is None:
-                break
-            if "id" in msg and "method" in msg:
-                opts = (msg.get("params") or {}).get("options") or []
-                pick = next((o for o in opts if o.get("kind") in ("reject_once", "reject_always")), None)
-                rpc.send({"id": msg["id"], "result": {"outcome": {"outcome": "selected", "optionId": pick["optionId"]}}
-                          if pick else {"outcome": {"outcome": "cancelled"}}})
-                await proc.stdin.drain()
-                continue
-            up = (msg.get("params") or {}).get("update") or {}
-            if up.get("sessionUpdate") == "agent_message_chunk":
-                parts.append(str((up.get("content") or {}).get("text") or ""))
-    finally:
-        reader.cancel()
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), 10)
-        except Exception:
-            pass
-    return "".join(parts).strip()
 
 
 # ---------------------------------------------------------------- one turn
