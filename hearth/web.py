@@ -2718,6 +2718,9 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/crash/pending":
             from . import crashlog as _cl
             return self._send_json(200, {"crashed": _cl.pending() is not None})
+        if path == "/api/new-chat/offers":
+            from . import offers as _offers
+            return self._send_json(200, {"rows": _offers.rows()})
         if path == "/api/reminders/ideas":
             try:
                 return self._send_json(200, {"ideas": reminder_ideas(self._query().get("fresh") == "1")})

@@ -612,24 +612,10 @@ def context_item(t: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def ideas() -> Dict[str, Any]:
-    """What a new chat on the phone offers: the chats still going on (each
-    opens its chat) and the reminder ideas Hearth already wrote, from its cache."""
-    out: Dict[str, Any] = {"threads": [], "ideas": []}
-    try:
-        from . import memory_cards
-        out["threads"] = [{"topic": c.get("goal") or "", "chat": c.get("chat") or "", "ago": c.get("ago") or "",
-                           "open": (c.get("left") or [])[:2]} for c in memory_cards.open_cards(limit=3) if c.get("chat")]
-    except Exception:
-        pass
-    try:
-        from .tools import WORKSPACE
-        with open(os.path.join(WORKSPACE, "logs", "reminder_ideas.json"), encoding="utf-8") as f:
-            cached = json.load(f)
-        out["ideas"] = [{"title": i.get("title") or "", "ask": i.get("ask") or ""}
-                        for i in (cached.get("ideas") or [])[:3] if i.get("ask")]
-    except Exception:
-        pass
-    return out
+    """What a new chat on the phone offers: the chats still going on and the
+    reminder ideas, as kept (hearth/offers.py; the phone picks its rows from them)."""
+    from . import offers
+    return offers.sources()
 
 
 # The brain and the settings the phone can change go through the window's own
