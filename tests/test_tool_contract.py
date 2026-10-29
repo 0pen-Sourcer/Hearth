@@ -71,14 +71,25 @@ def check_no_orphaned_methods() -> list:
         except SyntaxError:
             continue
 
+        def installed(body) -> set:
+            """Names a function body puts onto a class (Cls.attr = name): a
+            method written in place to replace one, not one that fell out."""
+            names = set()
+            for st in body:
+                if (isinstance(st, ast.Assign) and isinstance(st.value, ast.Name)
+                        and any(isinstance(t, ast.Attribute) for t in st.targets)):
+                    names.add(st.value.id)
+            return names
+
         def walk(node, inside_class=False, owner="module"):
+            patched = installed(getattr(node, "body", [])) if not inside_class else set()
             for child in getattr(node, "body", []):
                 if isinstance(child, ast.ClassDef):
                     walk(child, True, child.name)
                 elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     args = child.args.args
                     first = args[0].arg if args else ""
-                    if first == "self" and not inside_class:
+                    if first == "self" and not inside_class and child.name not in patched:
                         out.append(
                             f"{os.path.basename(path)}:{child.lineno} "
                             f"{child.name}(self, ...) is defined inside {owner}(), "

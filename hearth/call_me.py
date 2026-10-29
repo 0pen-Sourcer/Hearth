@@ -67,7 +67,7 @@ def agent_name(r: Optional[Dict[str, Any]] = None) -> str:
             name = persona.NAME
         except Exception:
             name = ""
-    return name or "JARVIS"
+    return name or "Inglen"
 
 
 def _minute(hhmm: Any) -> Optional[int]:

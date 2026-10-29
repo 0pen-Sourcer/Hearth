@@ -953,8 +953,12 @@ def _said_why(sess, what: str) -> None:
     """A line in the log naming who ended a voice session: a listener that stops
     mid-conversation is otherwise only "RealtimeSTT shutting down"."""
     try:
-        import inspect
-        who = [f"{f.function}" for f in inspect.stack()[2:6]]
+        import sys as _sys
+        # Frame names only: inspect.stack() reads every caller's source file.
+        who, f = [], _sys._getframe(2)
+        while f is not None and len(who) < 4:
+            who.append(f.f_code.co_name)
+            f = f.f_back
         print(f"[hearth.realtime_voice] session {sess.lease}{' (fed)' if sess.fed else ''} {what} by "
               + " < ".join(who), flush=True)
     except Exception:
