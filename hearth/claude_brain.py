@@ -629,6 +629,8 @@ def _decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
         return {"behavior": "allow", "updatedInput": inp}
     if verdict == "timeout":
         return {"behavior": "deny", "message": "The user didn't answer in time. Ask them again or do something else."}
+    if verdict in ("ask_aloud", "aside") and reason:
+        return {"behavior": "deny", "message": reason}       # a voice turn: not a no (call.ASK_ALOUD)
     return {"behavior": "deny",
             "message": ("The user declined: " + reason) if reason else "The user declined this."}
 

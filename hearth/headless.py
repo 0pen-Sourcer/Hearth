@@ -1207,7 +1207,10 @@ async def _run_once(
     # knows instead of ignoring the passive index. Bounded; adds nothing when
     # nothing matches. Same behavior as the CLI's _prepare_context.
     from . import memory as _mem
-    _sys = system_prompt(voice=voice)
+    # The same system prompt typed or spoken: a voice turn says so on its own message
+    # (VOICE_TURN_NOTE), so going in and out of voice mode doesn't change the cached
+    # prefix and make a local model read the whole prompt and history again.
+    _sys = system_prompt(voice=False)
     # Where the brain lives — weigh resource vs cost for heavy tools.
     if _is_local_endpoint(os.environ.get("LOCAL_API_BASE", "")):
         _sys += ("\n\nRuntime: LOCAL model server — free + private, but it serves ONE "
@@ -1320,6 +1323,8 @@ async def _run_once(
         # templates reject with "System message must be at the beginning"). The
         # GUI shows the clean prompt via emit().
         _user_content = ("\n\n".join(_notif_ctx) + "\n\n---\n\n" + prompt) if _notif_ctx else prompt
+        if voice:
+            _user_content = VOICE_TURN_NOTE + _user_content
         if _lately:
             _user_content = f"<lately>\n{_lately}\n</lately>\n\n{_user_content}"
         # The local time rides the tail so it doesn't bust the cached system+history
@@ -1419,6 +1424,8 @@ async def _run_once(
     # old magic-number "stop after N calls of one tool" counter.
     guard = ToolLoopGuard()
     _force_answer = False
+    _quiet_force = False      # tools held back without the "answer now" note
+    _asked_aloud = 0          # steps sent back in a voice turn to be asked about in words
     # Why the loop guard ended the turn, if it did. Without this the turn just
     # stops and hands control back with no explanation, which reads as Hearth
     # quitting at random mid-task.
@@ -2246,6 +2253,19 @@ async def _run_once(
                     if isinstance(decision, dict):
                         _deny_reason = (decision.get("reason") or "").strip()
                         decision = decision.get("decision") or "deny"
+                    if decision in ("ask_aloud", "aside"):
+                        # A voice turn, and not a no. ask_aloud: the brain says in its own
+                        # words what it is about to do and waits for the answer. aside:
+                        # something else was said while it waited; the words are in the result.
+                        tool_result = _deny_reason or "Not run yet: ask them about it first."
+                        if decision == "ask_aloud":
+                            _asked_aloud += 1
+                            if _asked_aloud > 1:          # it called again instead of asking
+                                _force_answer = _quiet_force = True
+                        emit("tool_result", name=name, content=tool_result, ms=0)
+                        messages.append({"role": "tool", "tool_call_id": tc.id, "name": name,
+                                         "content": tool_result})
+                        continue
                     if decision in ("deny", "never", "timeout"):
                         if decision == "timeout":
                             tool_result = (
@@ -2444,7 +2464,9 @@ async def _run_once(
             # Spiral guard tripped this turn — append a hard "answer now"
             # directive AFTER all tool results (valid ordering), so the next
             # model call (which will have tools withheld) produces text.
-            if _force_answer:
+            if _force_answer and _quiet_force:
+                _quiet_force = False                 # the tool result already says what to say
+            elif _force_answer:
                 emit("nudge", reason="loop guard: no progress / repeated failure — forcing an answer")
                 messages.append({
                     "role": "user",
@@ -2690,7 +2712,12 @@ def failure_note(text: str) -> str:
 
 
 VOICE_TURN_NOTE = ("(Voice mode: this was said out loud and your reply is spoken aloud as you write it. "
-                   "Answer in one or two short spoken sentences, no markdown, lists, paths or code.)\n\n")
+                   "Talk, don't write: one to three short plain sentences. No markdown, tables, lists, "
+                   "headings, code, file paths, links or emoji. Lots of detail? Give the headline and offer "
+                   "the rest. Before a step that changes something on their computer, or one you're unsure "
+                   "of, say in one plain sentence what you'll do and ask if that's okay, then stop and wait; "
+                   "only a clear yes or no answers it. Looking at things needs no asking. Replying in Hindi "
+                   "or another language with its own script? Write in that script.)\n\n")
 
 
 async def run_once(prompt: str, **kw) -> int:

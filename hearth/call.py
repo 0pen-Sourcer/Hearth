@@ -27,13 +27,40 @@ from . import voice as _voice
 
 # Where a reply may be cut to start speaking: a sentence end, or for the first
 # piece a clause once it is long enough to sound whole.
-_SENTENCE = re.compile(r"[.!?]+[\"')\]]*\s|\n\n")
-_CLAUSE = re.compile(r"[,;:]\s")
-_BREAK = re.compile(r"[,;:–-]\s")
+_SENTENCE = re.compile(r"[.!?]+[\"')\]]*\s|\n")
+_CLAUSE = re.compile(r"[,;:]\s|\s[—–-]\s|—")
+_BREAK = re.compile(r"[,;:–-]\s|\s[—–-]\s|—")
 FIRST_CLAUSE = 24
 QUICK_START = 12
+# A first piece with no break in it yet is cut at a space once it is this long. With a
+# local model on the card the voice takes about 25 ms a letter, so a 60-letter opening
+# took 1.5-3 s to make before anything was heard; the rest is made while it plays.
+LONG_FIRST = 40
 
 TAP_LINE = "That one needs a tap on Allow."
+# Speech model sizes voice mode's sheet offers (and their English-only kind).
+STT_MODELS = ("tiny", "base", "small", "tiny.en", "base.en", "small.en")
+
+
+def _brain_label() -> str:
+    """What thought up the reply, for the timing log: an agent program, or the model and where."""
+    try:
+        from . import claude_brain as _cb
+        if _cb.current():
+            return _cb.current()
+    except Exception:
+        pass
+    try:
+        from . import headless as _hl
+        from urllib.parse import urlparse
+        base = _hl.LOCAL_API_BASE or ""
+        host = (urlparse(base).hostname or "").lower()
+        import os
+        model = os.path.basename((os.environ.get("LOCAL_MODEL") or "").strip())
+        where = "local" if host in ("127.0.0.1", "localhost", "::1", "") else host
+        return f"{where} {model}".strip()
+    except Exception:
+        return ""
 
 
 def languages() -> List[Dict[str, str]]:
@@ -87,6 +114,39 @@ class Call:
         # window's voice mode always has).
         self.quick = False
         self._lock = threading.Lock()
+        self.times: Dict[str, float] = {}     # this turn's stages, for the timing log
+
+    # ---------------------------------------------------------------- the timing log
+    def note(self, stage: str) -> None:
+        """The first time a stage of the turn happens (first_token, first_audio, ...)."""
+        if self.times and stage not in self.times:
+            self.times[stage] = time.time()
+
+    def _log_turn(self) -> None:
+        """One line per spoken turn in logs/voice_turns.log: each stage in seconds after the
+        recognizer heard the speech end, so a slow turn says where the time went."""
+        t, self.times = self.times, {}
+        end = t.get("speech_end")
+        if not end or "final" not in t:
+            return
+        row: Dict[str, Any] = {"at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end)),
+                               "stt": t.get("stt", ""), "brain": _brain_label(),
+                               "surface": "window" if self.quick else "phone"}
+        for k in ("final", "posted", "first_token", "first_audio", "done"):
+            if k in t:
+                row[k] = round(t[k] - end, 3)
+        if "barge_start" in t and "barge_stop" in t:
+            row["barge_stop"] = round(t["barge_stop"] - t["barge_start"], 3)
+        try:
+            from .tools import WORKSPACE
+            import json
+            import os
+            folder = os.path.join(str(WORKSPACE), "logs")
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, "voice_turns.log"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------- the voice out
     def _sink(self):
@@ -94,6 +154,7 @@ class Call:
 
         class Sink:
             def __call__(self, samples, sr):
+                call.note("first_audio")
                 call.send({"type": "call.down", "sr": int(sr),
                            "data": base64.b64encode(samples.astype("<i2").tobytes()).decode()})
 
@@ -145,11 +206,17 @@ class Call:
 
     # ---------------------------------------------------------------- settings
     def voice_info(self) -> Dict[str, Any]:
+        sess = _rv.session_for(self.lease)
         return {"type": "call.voice", "voice": _voice.current_voice(), "voices": voices(),
-                "language": (_env.get("STT_LANGUAGE", "") or "").strip().lower(), "languages": languages()}
+                "language": (_env.get("STT_LANGUAGE", "") or "").strip().lower(), "languages": languages(),
+                "stt_device": (_env.get("STT_DEVICE", "") or "cpu").strip().lower(),
+                "stt_model": (_env.get("STT_MODEL", "") or "").strip(),
+                "listening": getattr(sess, "stt", "") if sess is not None else ""}
 
-    def set(self, voice: Optional[str] = None, language: Optional[str] = None) -> None:
-        """The voice it answers in or the language it listens in, changed from the call."""
+    def set(self, voice: Optional[str] = None, language: Optional[str] = None,
+            stt_device: Optional[str] = None, stt_model: Optional[str] = None) -> None:
+        """The voice it answers in, the language it listens in, or where and with which
+        model it listens, changed from the call; listening starts again for the last three."""
         changed: Dict[str, Any] = {}
         if voice and voice in _voice.list_voices() and voice != _voice.current_voice():
             _voice.set_default_voice(voice)
@@ -159,14 +226,20 @@ class Call:
         if language is not None and language in codes and language != (_env.get("STT_LANGUAGE", "") or "").strip().lower():
             _env.set("STT_LANGUAGE", language)
             changed["stt_language"] = language
+        if stt_device in ("cuda", "gpu", "cpu") and stt_device != (_env.get("STT_DEVICE", "") or "cpu").lower():
+            _env.set("STT_DEVICE", stt_device)
+            changed["stt_device"] = stt_device
+        if stt_model in STT_MODELS and stt_model != (_env.get("STT_MODEL", "") or ""):
+            _env.set("STT_MODEL", stt_model)
+            changed["stt_model"] = stt_model
         if changed and self.save is not None:
             try:
                 self.save(changed)
             except Exception:
                 pass
         self.send(self.voice_info())
-        if "stt_language" in changed and self.lease is not None and not self.ended:
-            # The recognizer is built for one language: listen again in the new one.
+        if ({"stt_language", "stt_device", "stt_model"} & set(changed)) and self.lease is not None and not self.ended:
+            # The recognizer is built for one language, model and device: listen again with the new one.
             _rv.stop_continuous(self.lease)
             self.send({"type": "call.state", "state": "connecting"})
             self._listen()
@@ -184,6 +257,7 @@ class Call:
 
     def _ready(self) -> None:
         first, self.ready = not self.ready, True
+        self.send(self.voice_info())            # what listens now, for the settings sheet
         if first and self.opener:
             self._open()
             return
@@ -217,6 +291,12 @@ class Call:
         with self._lock:
             self.turn += 1
         self.send({"type": "call.state", "state": "listening", "barge": True})
+        if self.times:
+            sess = _rv.session_for(self.lease)
+            self.times["barge_start"] = (sess.speech_started_at if sess is not None and sess.speech_started_at
+                                         else time.time())
+            self.times["barge_stop"] = time.time()
+            self._log_turn()
 
     def hush(self) -> None:
         """The orb tapped on the phone: stop talking, keep the turn and the call."""
@@ -233,12 +313,20 @@ class Call:
             self.turn += 1
             n = self.turn
         self.speaker.reset_abort()
+        self.note("posted")
         return n
 
     def _heard(self, text: str) -> None:
         text = (text or "").strip()
         if not text:
             return
+        if self.times:
+            self._log_turn()                    # the last turn, if it never settled
+        sess = _rv.session_for(self.lease)
+        now = time.time()
+        stopped = sess.speech_stopped_at if sess is not None else 0.0
+        self.times = {"speech_end": stopped if stopped and now - stopped < 30 else now, "final": now,
+                      "stt": getattr(sess, "stt", "") if sess is not None else ""}
         with self._lock:
             self.spoken, self.reply = 0, ""
             self.heard_n += 1
@@ -256,10 +344,12 @@ class Call:
             self._settle()
             return
         if got == "answered":
-            from .channel_core import _YES
             # The card on the phone and the question in the chat both show the answer.
-            self.send({"type": "asked", "ask": self.ask_id, "yes": bool(_YES.match(text)),
+            self.send({"type": "asked", "ask": self.ask_id, "yes": spoken_answer(text) in ("allow", "always"),
                        **({"c": self.cid} if self.cid else {})})
+        elif got == "aside":
+            # Said something else while a card waited: the card goes, the words go to the brain.
+            self.send({"type": "asked", "ask": self.ask_id, "aside": True, **({"c": self.cid} if self.cid else {})})
         self.send({"type": "call.state", "state": "thinking"})
 
     # ---------------------------------------------------------------- the reply, as it is written
@@ -273,10 +363,18 @@ class Call:
                 rest = self.reply[self.spoken:]
                 m = _SENTENCE.search(rest)
                 cut = m.end() if m else 0
-                if not cut and self.spoken == 0 and self.quick and len(rest) >= QUICK_START:
-                    ends = [c.end() for c in _BREAK.finditer(rest)]
-                    cut = ends[-1] if ends else 0
-                if not cut and self.spoken == 0 and len(rest) >= FIRST_CLAUSE:
+                first = self.spoken == 0
+                if first and cut > LONG_FIRST:
+                    cut = 0                             # a long opening sentence: start with its first part
+                if not cut and first and self.quick and len(rest) >= QUICK_START:
+                    # The first break past a dozen letters: a reply that arrives in one
+                    # piece starts with its opening clause, not with all of it.
+                    ends = [c.end() for c in _BREAK.finditer(rest) if QUICK_START <= c.end() <= LONG_FIRST]
+                    cut = ends[0] if ends else 0
+                if not cut and first and len(rest) >= LONG_FIRST:
+                    sp = rest.rfind(" ", QUICK_START, LONG_FIRST)
+                    cut = sp + 1 if sp > 0 else (m.end() if m else 0)
+                if not cut and first and len(rest) >= FIRST_CLAUSE:
                     c = None
                     for c in _CLAUSE.finditer(rest):
                         if c.end() >= FIRST_CLAUSE:
@@ -312,6 +410,9 @@ class Call:
             while not self.ended and idle < 2:
                 idle = 0 if self.speaker.busy() else idle + 1
                 time.sleep(0.1)
+            if n == self.heard_n and "posted" in self.times:
+                self.note("done")
+                self._log_turn()
             if self.ended:
                 return
             if self.leaving:
@@ -331,6 +432,12 @@ class Call:
         self.send({"type": "call.state", "state": "asking", "words": question, "tap": bool(tap), "ask": aid})
         self._speak(question + (" " + TAP_LINE if tap else ""))
         self._settle()
+
+    def ask_quietly(self, tap: bool = False, aid: str = "") -> None:
+        """A card the turn waits on, shown and not read out: the brain says what it
+        wants in its own words; a clear spoken yes or no answers the card."""
+        self.ask_id = aid
+        self.send({"type": "call.state", "state": "asking", "tap": bool(tap), "ask": aid})
 
     def _speak(self, text: str) -> None:
         self.send({"type": "call.state", "state": "speaking"})
@@ -355,6 +462,7 @@ class Turn:
         if c.ended or self.n != c.turn:
             return
         if kind == "assistant_chunk" and kw.get("content"):
+            c.note("first_token")
             self.written.append(kw["content"])
             so_far = "".join(self.parts) + "".join(self.written)
             if not self._OPEN_TOOL.search(so_far):      # a call written as text is never read out half-made
@@ -371,16 +479,26 @@ class Turn:
         self.call.done(text, turn=self.n)
 
 
-# What a spoken answer to an approval is, said on its own: the window takes only a
-# clear answer, so "no, do it this way instead" still goes through as a message.
-_ALWAYS = re.compile(r"^(always|always allow|yes always)$")
-_ALLOW = re.compile(r"^(yes|yeah|yep|yup|sure|ok|okay|allow|do it|go ahead|confirm|yes please)$")
-_DENY = re.compile(r"^(no|nope|nah|deny|don'?t|cancel|stop|no thanks)$")
+# What a spoken answer to a question it asked is: the whole sentence is a yes or a no,
+# made of answer words only ("yes", "yeah, go ahead", "no, you may not"). Anything
+# else ("great", "how do I...", "no, do it this way instead") is a message.
+_YES_WORDS = (r"yes|yeah|yea|yep|yup|sure|ok|okay|alright|all right|allow it|allow|confirm|fine|"
+              r"go ahead|go for it|do it|do that|run it|please do|please|sounds good|that's fine|that's okay|"
+              r"you may|you can|of course|absolutely|definitely|thanks|thank you")
+_NO_WORDS = (r"no|nope|nah|deny|don't|do not|dont|cancel|stop|never mind|not now|no thanks|"
+             r"you may not|you can't|you cannot|don't do that|do not do that|leave it|skip it|please|thanks|thank you")
+_ALWAYS = re.compile(r"^(always|always allow|yes always|yes,? always)$")
+_ALLOW = re.compile(rf"^(?:{_YES_WORDS})(?: (?:{_YES_WORDS}))*$")
+_DENY = re.compile(rf"^(?:no|nope|nah|deny|don't|do not|dont|cancel|stop|never mind|not now)(?: (?:{_NO_WORDS}))*$")
 
 
 def spoken_answer(text: str) -> str:
     """'always', 'allow', 'deny', or '' when the words aren't an answer."""
-    t = re.sub(r"[.!?,]+$", "", (text or "").strip().lower()).strip()
+    t = (text or "").strip().lower().replace("’", "'")
+    t = re.sub(r"[.!?,;:]+", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    if not t or len(t.split()) > 8:
+        return ""
     if _ALWAYS.match(t):
         return "always"
     if _ALLOW.match(t):
@@ -388,3 +506,32 @@ def spoken_answer(text: str) -> str:
     if _DENY.match(t):
         return "deny"
     return ""
+
+
+# A risky step in a voice turn: it isn't asked on screen from a template; the brain
+# says what it is about to do in its own words and waits for the answer.
+ASK_ALOUD = ("Not run yet, and nothing changed: you're talking with them by voice. In one short plain "
+             "sentence, say what you're about to do and ask if that's okay (for example \"I'll check "
+             "your CPU and GPU usage with a command, okay?\"), then stop and wait for their answer. "
+             "Run it once they say yes.")
+ASK_TAP = ("Not run yet, and nothing changed: this step can only be allowed with a tap on Allow on "
+           "their screen, never by voice. In one short plain sentence, say what you're about to do "
+           "and that it needs their tap on Allow, then stop.")
+
+
+def aside_note(said: str) -> str:
+    """What the brain hears when something else was said while it waited for an OK."""
+    return (f"Not run yet: while you waited for their OK they said something else: \"{said}\". "
+            f"That is not an answer to the step. Reply to what they said. If the step is still "
+            f"needed, ask about it again in one plain sentence.")
+
+
+def asked_last(history) -> bool:
+    """Whether the brain's last reply in the chat asked them something."""
+    for m in reversed(list(history or [])):
+        if (m or {}).get("role") == "assistant":
+            c = m.get("content")
+            return isinstance(c, str) and "?" in c[-300:]
+        if (m or {}).get("role") == "user":
+            continue
+    return False

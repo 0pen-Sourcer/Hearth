@@ -95,7 +95,7 @@ async def agent_turn(prompt, *, emit, voice=False, **kw):
 
 CB.active = lambda: True
 CB.run_turn = agent_turn
-web._save_settings(dict(web._load_settings(), onboarded=True, voice_mic_hint_dismissed=True))
+web._save_settings(dict(web._load_settings(), onboarded=True, voice_mic_hint_dismissed=True, voice_window_call=True))
 
 s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
 srv = web._QuietHTTPServer(("127.0.0.1", port), web.HearthHandler)

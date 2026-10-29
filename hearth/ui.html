@@ -4136,12 +4136,42 @@
   .voice-ask button:hover { color: var(--fg); border-color: var(--fg-faint); }
   .voice-ask button.yes { color: var(--accent); border-color: var(--accent-line); }
   .voice-ask button.yes:hover { border-color: var(--accent); }
+  .voice-ask.quiet { gap: 6px; }
+  .voice-ask.quiet button { font-size: 11px; padding: 4px 10px; border-radius: 6px; background: transparent; opacity: .85; }
   .voice-bottom-text {
     color: var(--fg-faint);
     font-size: 11px;
     font-family: var(--mono);
     margin-top: -10px;
   }
+  /* Voice mode's settings: the phone call sheet's choices, as a panel under its icon. */
+  .voice-mode .vset-btn { position: absolute; top: 18px; right: 18px; width: 38px; height: 38px;
+    background: var(--bg-2); border: 1px solid var(--border); color: var(--fg-dim); }
+  .voice-mode .vset-btn:hover, .voice-mode .vset-btn.on { color: var(--fg); border-color: var(--border-strong); }
+  .vset { position: absolute; top: 64px; right: 18px; width: 340px; max-height: calc(100vh - 96px); overflow-y: auto;
+    background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: 14px; padding: 6px 10px 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.28); z-index: 2; animation: vsetIn .18s var(--ease); scrollbar-width: thin;
+    font-family: var(--sans); text-align: left; }
+  @keyframes vsetIn { from { opacity: 0; transform: translateY(-4px); } }
+  .vset .sec { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-faint);
+    margin: 14px 4px 6px; }
+  .vset .opt { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 9px 10px;
+    border-radius: 10px; background: none; border: 0; color: var(--fg); font: inherit; font-size: 13.5px; cursor: pointer; }
+  .vset .opt:hover { background: var(--bg-2); }
+  .vset .opt .lbl { flex: 1; min-width: 0; }
+  .vset .opt .lbl small { display: block; font-size: 12px; color: var(--fg-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vset .opt .tick { color: var(--accent); flex: none; }
+  .vset .opt .more { color: var(--fg-faint); flex: none; transition: transform .2s var(--ease); }
+  .vset .opt.open .more { transform: rotate(90deg); }
+  .vset .list { max-height: 34vh; overflow-y: auto; margin: 2px 0 4px; border-radius: 10px; background: var(--bg-2); padding: 2px 4px; }
+  .vset .list .opt:hover { background: var(--bg-3); }
+  .vset .group { font-size: 11.5px; color: var(--fg-faint); padding: 10px 10px 2px; }
+  .vset .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0 4px; }
+  .vset .seg button { padding: 8px 6px; border-radius: 10px; background: var(--bg-2); border: 1px solid var(--border);
+    color: var(--fg-dim); font: inherit; font-size: 12.5px; cursor: pointer; }
+  .vset .seg button:hover { color: var(--fg); }
+  .vset .seg button.on { background: var(--accent-bg); border-color: var(--accent-line); color: var(--fg); }
+  .vset .meta { font: 12.5px/1.4 var(--sans); text-align: left; color: var(--fg-dim); padding: 4px 4px 6px; }
 </style>
 </head>
 <body>
@@ -5949,11 +5979,15 @@
 
 <!-- voice mode -->
 <div class="voice-mode" id="voice-mode">
+  <button class="icon-btn vset-btn" id="voice-set" title="Voice settings" aria-label="Voice settings">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+  </button>
+  <div class="vset" id="voice-set-sheet" hidden><div id="voice-set-body"></div></div>
   <div class="voice-grid" id="voice-grid"></div>
   <div class="voice-status-text" id="voice-status-text">idle</div>
   <div class="voice-transcript" id="voice-transcript"></div>
   <div class="voice-ask" id="voice-fix" hidden><button id="voice-fix-open" class="yes">Open microphone settings</button></div>
-  <div class="voice-ask" id="voice-ask" hidden>
+  <div class="voice-ask quiet" id="voice-ask" hidden>
     <button id="voice-ask-yes" class="yes">Allow</button>
     <button id="voice-ask-no">Deny</button>
   </div>
@@ -6812,6 +6846,10 @@ document.addEventListener('keydown', e => {
 let pendingPermId = null;
 let pendingPermTool = null;
 let pendingPermArgs = null;
+// A voice turn's step the agent is asking about in words: nothing waits on this card;
+// a tap answers by sending the yes or the no as the next thing said.
+let pendingPermAloud = false;
+let pendingPermTap = false;
 // One approval strip, above whichever message box is on screen: the chat's,
 // or the Team room's.
 function placePermStrip() {
@@ -6824,10 +6862,12 @@ function placePermStrip() {
 }
 let pendingFollowup = null;  // text the user typed during a perm prompt; sent after current turn ends
 
-function showInlinePermission(reqId, toolName, args, why) {
+function showInlinePermission(reqId, toolName, args, why, aloud, tap) {
   const whyEl = $('perm-why');
   if (whyEl) { whyEl.textContent = why || ''; whyEl.hidden = !why; }
   pendingPermId = reqId;
+  pendingPermAloud = !!aloud;
+  pendingPermTap = !!tap;
   pendingPermTool = toolName;
   pendingPermArgs = args;
   placePermStrip();
@@ -6880,14 +6920,17 @@ function showInlinePermission(reqId, toolName, args, why) {
   // Voice mode: the inline strip is hidden behind the overlay, so surface the
   // ask as clean text in the overlay itself. No box, on purpose — it stays in
   // the minimal grid+text aesthetic, and a spoken yes/no answers it.
+  // Voice mode: the agent asks in its own words (its reply is spoken), so nothing is
+  // read out here. Allow and Deny stay on screen; a clear spoken yes or no answers.
+  // Voice mode is for talking: no buttons for what a clear spoken yes or no answers.
+  // Only a step that needs a click (a misheard yes could delete or send something)
+  // gets a small, quiet Allow and Deny.
   if (voiceModeOn) {
-    setVoiceStatus('needs permission');
-    setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?  Say "yes", "no", or "always".');
-    $('voice-ask').hidden = false;
-    // And ask out loud: in voice mode nobody is reading the screen. Plain
-    // words only, never a path or a command read character by character.
-    // In a call the PC asks itself, and says when only a click will do.
-    if (!winCall) speakText(_spokenPermQuestion(toolName, args), true);
+    $('voice-ask').hidden = !tap;
+    if (!pendingPermAloud) {
+      setVoiceStatus('needs permission');
+      setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?' + (tap ? '  This one needs a click on Allow.' : ''));
+    }
   }
   setTimeout(() => document.getElementById('input').focus(), 0);
 }
@@ -6917,6 +6960,8 @@ function hideInlinePermission() {
   pendingPermId = null;
   pendingPermTool = null;
   pendingPermArgs = null;
+  pendingPermAloud = false;
+  pendingPermTap = false;
   $('perm-strip').hidden = true;
   $('voice-ask').hidden = true;
   if (voiceModeOn) setVoiceTranscript('');
@@ -6927,7 +6972,21 @@ async function sendPermDecision(decision, reason) {
   if (!pendingPermId) return;
   const id = pendingPermId;
   const tool = pendingPermTool;
+  const aloud = pendingPermAloud;
   hideInlinePermission();
+  if (aloud) {
+    // The agent asked in words and nothing is waiting: the tap lets that step run,
+    // and its answer goes as the next thing said, once the reply has finished.
+    try {
+      await api('/api/permission', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                     body: JSON.stringify({ id, decision }) });
+    } catch (e) { toast("Your answer didn't reach " + _agentName(), e.message, 'err'); return; }
+    const said = (decision === 'allow' || decision === 'always') ? 'Yes.' : 'No.';
+    const t0 = Date.now();
+    const go = () => { if (STATE.streaming && Date.now() - t0 < 60000) return setTimeout(go, 200); send(said); };
+    go();
+    return;
+  }
   if (decision === 'always') {
     maybeHint('first_always', 'Saved across restarts',
       `${tool} is now allow-always. Use /perms to review or /perms forget ${tool} to drop it.`);
@@ -7015,12 +7074,29 @@ $('perm-close').addEventListener('click', () => sendPermDecision('deny'));
 // new chat message). Only fires on a CLEAR yes/no/always, otherwise the user's
 // words go through as a normal instruction (e.g. "no, do X instead").
 function maybeAnswerPermByVoice(text) {
-  if (!pendingPermId || !voiceModeOn) return false;
-  const t = (text || '').trim().toLowerCase().replace(/[.!?,]+$/, '');
-  if (/^(always|always allow|yes always)$/.test(t)) { sendPermDecision('always'); return true; }
-  if (/^(yes|yeah|yep|yup|sure|ok|okay|allow|do it|go ahead|confirm)$/.test(t)) { sendPermDecision('allow'); return true; }
-  if (/^(no|nope|nah|deny|don'?t|cancel|stop)$/.test(t)) { sendPermDecision('deny'); return true; }
-  return false;
+  // A card the agent asked about in words: what was said is the answer, as a message.
+  if (!pendingPermId || !voiceModeOn || pendingPermAloud) return false;
+  const said = spokenAnswer(text);
+  if (!said) return false;
+  if (said !== 'deny' && pendingPermTap) {
+    setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?  This one needs a click on Allow.');
+    return true;
+  }
+  sendPermDecision(said);
+  return true;
+}
+
+// The same reading of a spoken answer as the PC's (hearth/call.py spoken_answer): the
+// whole sentence is a yes or a no, made of answer words only.
+const _YES_W = "yes|yeah|yea|yep|yup|sure|ok|okay|alright|all right|allow it|allow|confirm|fine|go ahead|go for it|do it|do that|run it|please do|please|sounds good|that's fine|that's okay|you may|you can|of course|absolutely|definitely|thanks|thank you";
+const _NO_W = "no|nope|nah|deny|don't|do not|dont|cancel|stop|never mind|not now|no thanks|you may not|you can't|you cannot|don't do that|do not do that|leave it|skip it|please|thanks|thank you";
+function spokenAnswer(text) {
+  let t = String(text || '').trim().toLowerCase().replace(/’/g, "'").replace(/[.!?,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || t.split(' ').length > 8) return '';
+  if (/^(always|always allow|yes always)$/.test(t)) return 'always';
+  if (new RegExp(`^(?:${_YES_W})(?: (?:${_YES_W}))*$`).test(t)) return 'allow';
+  if (new RegExp(`^(?:no|nope|nah|deny|don't|do not|dont|cancel|stop|never mind|not now)(?: (?:${_NO_W}))*$`).test(t)) return 'deny';
+  return '';
 }
 
 // Number-key shortcut on the input while a perm is pending AND the input is empty.
@@ -11153,9 +11229,13 @@ async function send(forced = null, displayAs = null, opts = {}) {
   // ("stop now", "do X instead"). Send it WITH the deny so the model gets it in
   // the tool result THIS turn (connected to the decline), instead of a
   // disconnected follow-up turn that arrives after it has already carried on.
-  if (pendingPermId) {
+  // In voice mode it is never a no: a card the agent asked about in words just goes
+  // (what was said is the next message), and one a turn waits on hears the words aside.
+  if (pendingPermId && pendingPermAloud) {
+    hideInlinePermission();
+  } else if (pendingPermId) {
     input.value = ''; input.style.height = '42px';
-    sendPermDecision('deny', prompt);
+    sendPermDecision(voiceModeOn ? 'aside' : 'deny', prompt);
     return;
   }
   if (STATE.streaming && !forced && prompt.startsWith('/')) {
@@ -12098,7 +12178,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'permission_request') {
       // Inline strip above the input - keyboard-driven, no center modal.
-      showInlinePermission(ev.id, ev.name, ev.args || {}, ev.why || '');
+      showInlinePermission(ev.id, ev.name, ev.args || {}, ev.why || '', !!ev.aloud, !!ev.tap);
       return;
     }
 
@@ -16841,7 +16921,10 @@ async function enterVoiceMode() {
   // before they're set up, and mic stays off if they immediately exit)
 }
 function exitVoiceMode() {
+  if (voiceModeOn && _voiceReady) voiceCue('end');
   voiceModeOn = false;
+  $('voice-set-sheet').hidden = true;
+  $('voice-set').classList.remove('on');
   if (winCall) endWindowCall();
   $('voice-ask').hidden = true;
   $('voice-fix').hidden = true;
@@ -17039,6 +17122,15 @@ function setVoiceTranscript(s) {
     .replace(/\*+/g, '')                          // leftover / unclosed asterisks
     .replace(/(^|\s)[_]{1,3}(\s|$)/g, '$1$2')     // stray _ markers
     .replace(/^#{1,6}\s+/gm, '')                  // # headings
+    // Tables, lists, rules and emoji: what is said, not how it would be laid out.
+    .replace(/^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$/gm, '')
+    .replace(/^[ \t]*\|(.*?)\|?[ \t]*$/gm, (m, row) => row.split('|').map(c => c.trim()).filter(Boolean).join(', ') + '.')
+    .replace(/[ \t]*\|[ \t]*/g, ', ')
+    .replace(/-{3,}/g, ' ')
+    .replace(/^[ \t]*(?:[-+•●▪◦]|\d+\.)[ \t]+/gm, '')
+    .replace(/\p{Extended_Pictographic}|️|‍/gu, '')
+    .replace(/[ \t]*[→⇒➜][ \t]*/g, ', ')
+    .replace(/[ \t]+([.,!?;:])/g, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim();
   $('voice-transcript').textContent = t;
@@ -17046,6 +17138,161 @@ function setVoiceTranscript(s) {
 
 $('btn-voice-mode').addEventListener('click', enterVoiceMode);
 $('voice-exit').addEventListener('click', exitVoiceMode);
+
+// ----- voice mode's settings: the phone call sheet's choices -----
+// The voice and the language it listens in are the PC's settings, so the phone's
+// call sheet and this one show and change the same thing. Tones and the speaker
+// are this window's.
+const _VNOTES = { ready: [[587.33, 0, 0.11], [880, 0.09, 0.16]], end: [[659.25, 0, 0.12], [440, 0.1, 0.22]] };
+function voiceCue(kind, A) {
+  try {
+    if (STATE.settings && STATE.settings.voice_tones === false) return;
+    const ctx = (A && A.ctx && A.ctx.state !== 'closed') ? A.ctx
+      : (_audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)());
+    const dest = (A && A.gain) || ctx.destination;      // through the echo-cancelled loop when there is one
+    const at = ctx.currentTime + 0.02;
+    for (const [f, start, dur] of _VNOTES[kind]) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0, at + start);
+      g.gain.linearRampToValueAtTime(0.05, at + start + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + start + dur);
+      o.connect(g); g.connect(dest);
+      o.start(at + start); o.stop(at + start + dur + 0.03);
+    }
+  } catch {}
+}
+
+let _vsetVoicesOpen = false;
+let _vsetChoices = null;
+const _VTICK = '<svg class="tick" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const _VCHEV = '<svg class="more" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+
+async function _vsetOutputs() {
+  const A = winCall && winCall.A;
+  if (!A || !A.loop || !('setSinkId' in HTMLMediaElement.prototype) || !navigator.mediaDevices.enumerateDevices) return null;
+  try {
+    const all = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput' && d.label);
+    return all.length > 1 ? all : null;
+  } catch { return null; }
+}
+
+async function vsetDraw() {
+  const body = $('voice-set-body');
+  const v = (winCall && winCall.voice) || _vsetChoices;
+  let html = '<div class="sec">Voice</div>';
+  if (!v) html += '<div class="meta">Asking your PC.</div>';
+  else {
+    const cur = (v.voices || []).find(x => x.id === v.voice) || { name: v.voice, about: '' };
+    html += `<button class="opt${_vsetVoicesOpen ? ' open' : ''}" id="vs-voice"><span class="lbl">${esc(cur.name)}<small>${esc(cur.about)}</small></span>${_VCHEV}</button>`;
+    if (_vsetVoicesOpen) {
+      html += '<div class="list">';
+      let group = '';
+      for (const x of v.voices || []) {
+        const g = (x.about || '').split(',')[0];
+        if (g !== group) { group = g; html += `<div class="group">${esc(g)}</div>`; }
+        html += `<button class="opt" data-voice="${esc(x.id)}"><span class="lbl">${esc(x.name)}<small>${esc(x.about)}</small></span>${x.id === v.voice ? _VTICK : ''}</button>`;
+      }
+      html += '</div>';
+    }
+    html += '<div class="sec">Language you speak</div><div class="seg">'
+      + (v.languages || []).map(l => `<button data-lang="${esc(l.code)}" class="${l.code === (v.language || '') ? 'on' : ''}">${esc(l.name)}</button>`).join('')
+      + '</div>';
+  }
+  if (v) {
+    // Where it listens and with which model: changed live, it listens again at once.
+    const dev = v.stt_device || 'cpu', mdl = v.stt_model || '';
+    const en = mdl.endsWith('.en');
+    html += '<div class="sec">Listening runs on</div><div class="seg">'
+      + [['cuda', 'Auto'], ['gpu', 'Graphics card'], ['cpu', 'Processor']].map(([k, n]) =>
+          `<button data-dev="${k}" class="${dev === k ? 'on' : ''}">${n}</button>`).join('') + '</div>';
+    html += `<div class="meta">${dev === 'cuda' ? 'The graphics card when it has room, else the processor with a quicker model.' : dev === 'gpu' ? 'Always the graphics card, even beside a local model.' : 'Always the processor.'}${v.listening ? ' Now: ' + esc(v.listening.replace(' cuda', ' on the graphics card').replace(' cpu', ' on the processor')) + '.' : ''}</div>`;
+    html += '<div class="sec">Speech model</div><div class="seg">'
+      + [['tiny', 'Tiny'], ['base', 'Base'], ['small', 'Small']].map(([k, n]) => {
+          const id = en ? k + '.en' : k;
+          return `<button data-mdl="${id}" class="${mdl === id ? 'on' : ''}">${n}</button>`;
+        }).join('') + '</div>';
+  }
+  html += '<div class="sec">Sound</div>';
+  const outs = await _vsetOutputs();
+  if (outs) {
+    const now = winCall.A.loop.el.sinkId || 'default';
+    html += outs.map(d => `<button class="opt" data-out="${esc(d.deviceId)}"><span class="lbl">${esc(d.label)}</span>${d.deviceId === now ? _VTICK : ''}</button>`).join('');
+  } else {
+    html += `<div class="meta">${esc(_agentName())} speaks through this PC's default speakers or headphones. Change them in Windows sound settings.</div>`;
+  }
+  if (winCall && winCall.A && !winCall.A.aec)
+    html += "<div class=\"meta\">The echo can't be cancelled here, so use headphones: on speakers it may hear itself.</div>";
+  const tones = !(STATE.settings && STATE.settings.voice_tones === false);
+  html += '<div class="sec">Tones</div>'
+    + `<button class="opt" id="vs-tones"><span class="lbl">Ready and hang-up tones<small>Two soft notes as it starts and as it ends</small></span>${tones ? _VTICK : ''}</button>`;
+  body.innerHTML = html;
+  const vb = $('vs-voice');
+  if (vb) vb.onclick = () => { _vsetVoicesOpen = !_vsetVoicesOpen; vsetDraw(); };
+  body.querySelectorAll('[data-voice]').forEach(b => b.onclick = () => vsetPick({ voice: b.dataset.voice }));
+  body.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => vsetPick({ language: b.dataset.lang }));
+  body.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => vsetPick({ stt_device: b.dataset.dev }));
+  body.querySelectorAll('[data-mdl]').forEach(b => b.onclick = () => vsetPick({ stt_model: b.dataset.mdl }));
+  body.querySelectorAll('[data-out]').forEach(b => b.onclick = async () => {
+    try { await winCall.A.loop.el.setSinkId(b.dataset.out); } catch { toast("That speaker can't be used from here", '', 'warn'); }
+    vsetDraw();
+  });
+  $('vs-tones').onclick = async () => { await saveSetting('voice_tones', !tones); vsetDraw(); };
+}
+
+// Something picked here, applied without leaving voice mode: in the window's call the
+// PC changes it and listens again; on the PC's own mic it is saved and listening
+// starts again with it.
+async function vsetPick(change) {
+  const v = (winCall && winCall.voice) || _vsetChoices;
+  if (v) {
+    if (change.voice) { v.voice = change.voice; _vsetVoicesOpen = false; }
+    for (const k of ['language', 'stt_device', 'stt_model']) if (change[k] !== undefined) v[k] = change[k];
+  }
+  vsetDraw();
+  if (change.voice) STATE.settings.voice_name = change.voice;
+  if (change.language !== undefined) STATE.settings.stt_language = change.language;
+  if (change.stt_device) STATE.settings.stt_device = change.stt_device;
+  if (change.stt_model) STATE.settings.stt_model = change.stt_model;
+  if (winCall && winCall.ws && winCall.ws.readyState === 1) { winCallSend({ type: 'call.set', ...change }); return; }
+  try {
+    if (change.voice) await saveSetting('voice_name', change.voice);
+    if (change.language !== undefined) await saveSetting('stt_language', change.language);
+    if (change.stt_device) await saveSetting('stt_device', change.stt_device);
+    if (change.stt_model) await saveSetting('stt_model', change.stt_model);
+    if (voiceModeOn && (change.language !== undefined || change.stt_device || change.stt_model)) {
+      await stopRealtimeVoice().catch(() => {});
+      if (voiceModeOn) startRealtimeVoice().catch(() => {});
+    }
+  } catch (e) { toast('Voice', e.message, 'err'); }
+}
+
+$('voice-set').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  const sheet = $('voice-set-sheet');
+  const open = sheet.hidden;
+  sheet.hidden = !open;
+  $('voice-set').classList.toggle('on', open);
+  if (!open) return;
+  _vsetVoicesOpen = false;
+  vsetDraw();
+  try { _vsetChoices = await api('/api/voice/choices'); } catch {}
+  if (!sheet.hidden) vsetDraw();
+});
+// Esc with the sheet open closes the sheet, not voice mode.
+document.addEventListener('keydown', (e) => {
+  const sheet = $('voice-set-sheet');
+  if (e.key === 'Escape' && !sheet.hidden) {
+    sheet.hidden = true; $('voice-set').classList.remove('on');
+    e.stopImmediatePropagation(); e.preventDefault();
+  }
+}, true);
+document.addEventListener('click', (e) => {
+  const sheet = $('voice-set-sheet');
+  if (!sheet.hidden && !e.composedPath().includes(sheet) && !e.composedPath().includes($('voice-set'))) {
+    sheet.hidden = true; $('voice-set').classList.remove('on');
+  }
+});
 
 // Voice mode loop: listen → transcribe → send → speak reply (mic OFF) → re-listen.
 // Mic is HARD-MUTED during TTS to prevent the speaker→mic feedback loop where
@@ -17413,6 +17660,7 @@ function handleRealtimeEvent(ev) {
     _voiceFillPct = typeof ev.pct === 'number' ? ev.pct : null;
     setVoiceStatus(ev.detail || 'getting the microphone ready…');
   } else if (ev.type === 'ready') {
+    if (!_voiceReady) voiceCue('ready');
     _voiceReady = true;
     _voiceFillPct = null;
     setVoiceStatus('listening');
@@ -17610,6 +17858,7 @@ function winCallFrame(c, m) {
     setVoiceStatus(m.detail || 'getting the microphone ready…');
     return;
   }
+  if (kind === 'call.voice') { c.voice = m; if (!$('voice-set-sheet').hidden) vsetDraw(); return; }
   if (kind === 'call.slow') { if (!c.ready) toast('Voice is taking a while', m.message || '', 'warn', 12000, true); return; }
   if (kind === 'call.state') {
     if (m.barge) {
@@ -17625,7 +17874,7 @@ function winCallFrame(c, m) {
     }
     if (m.state === 'connecting') { if (!c.ready) setVoiceStatus('getting the microphone ready…'); return; }
     if (m.state === 'listening') {
-      if (!c.ready) { c.ready = true; _voiceReady = true; _voiceFillPct = null; setMicUI(); }
+      if (!c.ready) { c.ready = true; _voiceReady = true; _voiceFillPct = null; setMicUI(); voiceCue('ready', c.A); }
       if (!STATE.streaming && !c.A.playing() && !pendingPermId) setVoiceStatus(_voiceMuted ? 'muted' : 'listening');
       return;
     }

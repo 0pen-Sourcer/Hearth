@@ -649,6 +649,81 @@ def _save_perms_to_disk():
 
 _always_allow, _always_deny = _load_perms_from_disk()
 
+# Voice turns: a risky step goes back to the brain to be asked about in its own words.
+# Its card stays on screen meanwhile (id -> the step); a tap on Allow there lets that
+# exact step run when the brain calls it again, as a spoken yes does for the rest.
+_VOICE_ASKS: Dict[str, Dict[str, Any]] = {}
+_VOICE_TAPPED: set = set()
+
+
+def _step_key(name: str, args: Any) -> str:
+    try:
+        return name + ":" + json.dumps(args or {}, sort_keys=True, default=str)
+    except Exception:
+        return name + ":" + str(args)
+
+
+def _brain_says_why() -> bool:
+    """Whether the brain hears the words given with a step it wasn't let do. Codex's
+    own approvals and the ACP agents only hear yes or no."""
+    try:
+        from . import claude_brain as _cb
+        cur = _cb.current()
+    except Exception:
+        return True
+    return cur in (None, "claude-code", "cursor-agent")
+
+
+def _voice_permission_check(check, emit_fn, prompt: str, history) -> Any:
+    """The permission check for a voice turn. Nothing is read out from a template:
+    a step the approval mode lets run, runs (Auto never asks about looking at
+    things); one they just said a clear yes to, after the brain asked, runs unless
+    only a tap may allow it; any other step goes back to the brain to say what it is
+    about to do and ask. A brain that can't hear why waits on the card instead."""
+    from .call import ASK_ALOUD, ASK_TAP, asked_last, spoken_answer
+    from . import tools as _tl
+    yes = spoken_answer(prompt) in ("allow", "always") and asked_last(history)
+
+    def _check(name: str, args: Dict) -> Any:
+        if name in _always_deny:
+            return "deny"
+        try:
+            if _tl.mode_allows(name, args) or name in _always_allow:
+                return "allow"
+            tap = _tl.needs_a_tap(name, args)
+        except Exception:
+            tap = True
+        key = _step_key(name, args)
+        if key in _VOICE_TAPPED:
+            _VOICE_TAPPED.discard(key)
+            return "allow"
+        if yes and not tap:
+            return "allow"
+        if not _brain_says_why():
+            return check(name, args)
+        rid = f"perm_{int(time.time() * 1000)}_{name}"
+        _VOICE_ASKS[rid] = {"name": name, "key": key, "at": time.time()}
+        for old in [k for k, v in _VOICE_ASKS.items() if time.time() - v["at"] > 600]:
+            _VOICE_ASKS.pop(old, None)
+        emit_fn("permission_request", id=rid, name=name, args=args, aloud=True, **({"tap": True} if tap else {}))
+        return {"decision": "ask_aloud", "reason": ASK_TAP if tap else ASK_ALOUD}
+    return _check
+
+
+def _answer_voice_ask(rid: str, decision: str) -> bool:
+    """A tap on a voice turn's card. Allow lets that exact step run when the brain
+    calls it again; the page then sends the yes (or the no) as the answer."""
+    ask = _VOICE_ASKS.pop(rid, None)
+    if ask is None:
+        return False
+    if decision in ("allow", "always"):
+        _VOICE_TAPPED.add(ask["key"])
+        if decision == "always":
+            _always_allow.add(ask["name"]); _always_deny.discard(ask["name"]); _save_perms_to_disk()
+    elif decision == "never":
+        _always_deny.add(ask["name"]); _always_allow.discard(ask["name"]); _save_perms_to_disk()
+    return True
+
 
 def _make_permission_check(emit_fn):
     """Returns a callback the bridge can hand each risky tool call to. Also
@@ -688,6 +763,14 @@ def _make_permission_check(emit_fn):
             decision = decision.get("decision") or "deny"
         if decision == "always": _always_allow.add(name); _save_perms_to_disk(); return "allow"
         if decision == "never":  _always_deny.add(name);  _save_perms_to_disk(); return "deny"
+        if decision == "aside":
+            # Something else was said while this waited (voice): not a no. A brain that
+            # can't hear why still gets the words, as a note in the turn.
+            from .call import aside_note
+            if not _brain_says_why() and _reason:
+                with _STEER_LOCK:
+                    _STEER_Q.append(_reason)
+            return {"decision": "aside", "reason": aside_note(_reason)}
         # A decline WITH the user's reason → hand both back so the model is told why.
         if decision == "deny" and _reason:
             return {"decision": "deny", "reason": _reason}
@@ -1536,8 +1619,9 @@ def _load_settings() -> Dict:
         "voice_stt": False,
         "sounds": True,        # a soft cue when a turn finishes, a low one on an error
         "voice_mic_hint_dismissed": False,  # first-voice mic tip, "don't show again"
-        "voice_window_call": True,   # window voice mode listens and speaks in the page (echo cancelled)
+        "voice_window_call": False,  # True: voice mode listens and speaks in the page (echo cancelled)
         "voice_half_duplex": False,  # hold the mic closed while speaking, for speakers
+        "voice_tones": True,         # two soft notes when voice mode is ready, and when it ends
         "stt_device": "cpu",   # cpu / cuda
         "tts_device": "cpu",   # cpu / cuda / dml
         "voice_speed": 1.0,    # Kokoro playback rate (0.5x-2.5x)
@@ -2119,12 +2203,15 @@ def _window_said(text: str) -> str:
     if ask.get("id") and ask["id"] in _permission_queues:
         from .call import spoken_answer
         said = spoken_answer(text)
+        if said and said != "deny" and ask.get("tap"):
+            return "needs_tap"
+        # A clear yes or no answers it; anything else is what they want to say, and
+        # the step waits for another time (never taken as a no).
+        _resolve_permission(ask["id"], said or "aside", "" if said else text)
+        _WIN_ASK.clear()
         if said:
-            if said != "deny" and ask.get("tap"):
-                return "needs_tap"
-            _resolve_permission(ask["id"], said)
-            _WIN_ASK.clear()
             return "answered"
+        return "aside"
     call = window_call()
     if call is not None:
         call.send({"type": "call.say", "text": text})
@@ -2137,19 +2224,17 @@ def _window_turn_event(turn, kind: str, fields: Dict[str, Any]) -> None:
         turn.event(kind, fields)
         if kind != "permission_request" or turn.n != turn.call.turn:
             return
+        if fields.get("aloud"):
+            return                  # the brain asks in its own words; its reply is spoken
+        # A card the turn waits on (an agent that only hears yes or no, a write outside
+        # the folder): shown, never read out from a template. A clear spoken yes or no
+        # answers it; anything else said is a message, not a no.
         name, args = str(fields.get("name") or ""), fields.get("args") or {}
-        from .channel_core import _what
         from .tools import needs_a_tap
-        if name == "__extend_workspace__":
-            what, tap = f"write outside my folder, in {args.get('parent') or args.get('path') or 'another folder'}", False
-        else:
-            what, tap = _what(name, args), needs_a_tap(name, args)
-        question = f"Before I go on: may I {what}?"
-        if fields.get("why"):
-            question += " " + str(fields["why"])
+        tap = name != "__extend_workspace__" and needs_a_tap(name, args)
         _WIN_ASK.clear()
         _WIN_ASK.update(id=str(fields.get("id") or ""), tap=bool(tap))
-        turn.call.ask(question, tap=bool(tap), aid=_WIN_ASK["id"])
+        turn.call.ask_quietly(tap=bool(tap), aid=_WIN_ASK["id"])
     except Exception as e:
         print(f"[hearth.voice] window call: {type(e).__name__}: {e}", flush=True)
 
@@ -2321,8 +2406,10 @@ def _serve_window_call(ws) -> None:
                 threading.Thread(target=call.hush, daemon=True).start()
             elif kind == "call.set":
                 voice, lang = m.get("voice"), m.get("language")
+                dev, mdl = m.get("stt_device"), m.get("stt_model")
                 threading.Thread(target=call.set, args=(str(voice) if voice else None,
-                                                        str(lang) if lang is not None else None),
+                                                        str(lang) if lang is not None else None,
+                                                        str(dev) if dev else None, str(mdl) if mdl else None),
                                  daemon=True).start()
     finally:
         call, lk = mine["call"], mine["link"]
@@ -3165,6 +3252,19 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {"jobs": _xa.jobs()})
         if path == "/api/team/choices":
             return self._send_json(200, _team_choices())
+        if path == "/api/voice/choices":
+            # Voice mode's settings sheet: the voices, the languages it listens in, and
+            # what is picked, the same list the phone's call sheet shows.
+            from .call import languages, voices
+            from . import voice as _vc
+            st = _load_settings()
+            sess = getattr(_rt_voice, "_session", None) if _rt_voice else None
+            return self._send_json(200, {"voice": st.get("voice_name") or _vc.current_voice(), "voices": voices(),
+                                         "language": (st.get("stt_language") or "").strip().lower(),
+                                         "languages": languages(), "tones": st.get("voice_tones", True) is not False,
+                                         "stt_device": (st.get("stt_device") or "cpu").lower(),
+                                         "stt_model": st.get("stt_model") or "",
+                                         "listening": getattr(sess, "stt", "") if sess is not None else ""})
         if path == "/api/voice/sample":
             # The line a voice reads when it is tried, in its own language.
             from . import voice as _vc
@@ -4552,8 +4652,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             rid = (body.get("id") or "").strip()
             dec = (body.get("decision") or "").strip()
             reason = (body.get("reason") or "").strip()[:500]
-            if dec not in ("allow", "deny", "always", "never"):
+            if dec not in ("allow", "deny", "always", "never", "aside"):
                 return self._send_json(400, {"error": "decision must be allow/deny/always/never"})
+            if _answer_voice_ask(rid, dec):
+                return self._send_json(200, {"ok": True, "voice": True})
             ok = _resolve_permission(rid, dec, reason)
             if not ok:
                 # The live request is gone (it timed out, or a barge-in / new
@@ -5728,10 +5830,13 @@ class HearthHandler(BaseHTTPRequestHandler):
         if voice and window_call() is not None:
             from .call import Turn
             _spoken["turn"] = Turn(window_call())
+        _check = _make_permission_check(emit)
+        if voice:
+            _check = _voice_permission_check(_check, emit, prompt, history)
         try:
             asyncio.run(run_once(
                 prompt, emit=emit, think=think, think_level=think_level, model=model, history=history,
-                permission_check=_waited.timing(_make_permission_check(emit)),
+                permission_check=_waited.timing(_check),
                 should_cancel=_CANCEL.is_set, drain_steer=_drain_steer,
                 voice=voice, chat_id=chat_id, prior_failure=str(body.get("prior_failure") or "")[:600],
             ))
