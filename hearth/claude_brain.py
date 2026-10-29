@@ -1195,7 +1195,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
     want_fast = fast_on(PROVIDER) and not _no_fast().get(alias or "default")
     if want_fast:
         args += ["--settings", json.dumps({"fastMode": True})]
-    cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
+    cwd = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
     os.makedirs(cwd, exist_ok=True)
 
     t0 = time.time()

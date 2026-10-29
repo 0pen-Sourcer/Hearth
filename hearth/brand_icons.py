@@ -58,6 +58,25 @@ def key_for(name: str) -> str:
     return k if k in ICONS else ""
 
 
+def brand_icon_cached(name: str):
+    """What the disk already knows about a brand's mark, without the network: (bytes, mime),
+    False when there is none, None when it hasn't been looked up yet (web._favicon_cached)."""
+    from .web import _FAVICON_DIR, _favicon_cached, _icon_mime
+    key = key_for(name)
+    if not key:
+        return False
+    url, site = ICONS[key]
+    path = os.path.join(_FAVICON_DIR, "brand-" + key)
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            data = f.read()
+        return data, _icon_mime(data)
+    miss = path + ".miss"
+    if url and not (os.path.isfile(miss) and time.time() - os.path.getmtime(miss) < 86400):
+        return None
+    return _favicon_cached(site) if site else False
+
+
 def brand_icon(name: str) -> Optional[Tuple[bytes, str]]:
     """(bytes, mime) of a brand's mark, or None."""
     from .web import _FAVICON_DIR, _ICON_MAX, _favicon, _icon_mime

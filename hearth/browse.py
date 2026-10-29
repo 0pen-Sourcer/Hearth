@@ -160,7 +160,7 @@ class _BrowserWorker(threading.Thread):
             # the proprietary codecs (H.264/AAC) YouTube needs. Override the dir
             # with HEARTH_BROWSE_PROFILE_DIR.
             prof_dir = os.getenv("HEARTH_BROWSE_PROFILE_DIR") or os.path.join(
-                _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis"),
+                _env.get("WORKSPACE") or __import__("hearth").default_workspace(),
                 ".browser_profile")
             self._browser = None
             self._context = None

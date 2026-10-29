@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import glob
 import hashlib
+import contextvars
 import json
 import os
 import re
@@ -76,29 +77,51 @@ def parse_chat(cid: str) -> Optional[Tuple[str, str]]:
 
 # ---------------------------------------------------------------- reading lines
 
+# How far back a transcript reads: the phone's "Show earlier" asks for more.
+_DEPTH: "contextvars.ContextVar[int]" = contextvars.ContextVar("session_depth", default=1)
+# Set when a read stopped before the start of the file, so there is more to show.
+_CUT: "contextvars.ContextVar[Optional[List[bool]]]" = contextvars.ContextVar("session_cut", default=None)
+MAX_TAIL = 96 * 1024 * 1024          # never more than this of one file at a time
+BLOB_LINE = 1024 * 1024              # a line this long is a picture or a file's bytes: not parsed
+ENOUGH_LINES = 400                   # lines that make a screenful of a transcript, at least
+
+
 def _jsonl(path: str, limit: int = 0):
     """The objects in a JSON-lines file: the first `limit` bytes when given;
-    otherwise the whole file, or its last TAIL_BYTES when it is bigger."""
+    otherwise its end, read further back until there are ENOUGH_LINES of
+    conversation (or all of it). Lines holding a picture's or a file's bytes
+    are skipped unread: Codex keeps each picture it views in the file, and
+    a few of them filled a fixed 4 MB window, leaving one message to show."""
     try:
         with open(path, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
             if limit:
-                raw = f.read(limit)
+                raw, cut = f.read(limit), False
             else:
-                size = os.fstat(f.fileno()).st_size
-                if size > TAIL_BYTES:
-                    f.seek(size - TAIL_BYTES)
+                want = min(MAX_TAIL, TAIL_BYTES * max(1, _DEPTH.get()))
+                while True:
+                    start = max(0, size - want)
+                    f.seek(start)
                     raw = f.read()
-                    raw = raw[raw.find(b"\n") + 1:]   # the first line is cut short
-                else:
-                    raw = f.read()
+                    if start:
+                        raw = raw[raw.find(b"\n") + 1:]   # the first line is cut short
+                    small = sum(1 for ln in raw.split(b"\n") if 0 < len(ln) < BLOB_LINE)
+                    if not start or small >= ENOUGH_LINES * max(1, _DEPTH.get()) or want >= MAX_TAIL:
+                        break
+                    want = min(MAX_TAIL, want * 2)
+                cut = bool(start)
     except OSError:
         return
+    if not limit:
+        mark = _CUT.get()
+        if mark is not None and cut:
+            mark.append(True)
     lines = raw.split(b"\n")
     if limit and len(raw) == limit:
         lines = lines[:-1]                      # the last line may be cut short
     for line in lines:
         line = line.strip()
-        if not line:
+        if not line or len(line) >= BLOB_LINE:
             continue
         try:
             obj = json.loads(line.decode("utf-8", "replace"))
@@ -146,8 +169,9 @@ _NOT_TYPED = re.compile(r"^\s*(<(command-|local-command|environment_context|user
 # <recommended_plugins>, <external_codex_apps_open_page> and the like, by their shape.
 _BLOCK = re.compile(r"^\s*<([a-z][a-z0-9_:-]*)\b[^>]*>.*?</\1>\s*", re.S)
 _EMPTY_TAG = re.compile(r"^\s*<[a-z][a-z0-9_:-]*\b[^>]*/>\s*", re.S)
-# Codex's IDE extension sends "# Context from my IDE setup: ... ## My request for Codex: <words>".
-_IDE_ASK = re.compile(r"^\s*# Context from my IDE setup:.*?^## My request for Codex:\s*", re.S | re.M)
+# Codex puts what its app adds (IDE context, "# Files pasted by the user:", ...) before
+# "## My request for Codex:" and shows only what follows the last one, as this does.
+_CODEX_ASK = "## My request for Codex:"
 
 
 def _clean(text: str) -> str:
@@ -155,7 +179,8 @@ def _clean(text: str) -> str:
     t = text or ""
     if _NOT_TYPED.match(t):
         return ""
-    t = _IDE_ASK.sub("", t, count=1)
+    if _CODEX_ASK in t:
+        t = t.rsplit(_CODEX_ASK, 1)[1]
     while True:
         m = _BLOCK.match(t) or _EMPTY_TAG.match(t)
         if not m:
@@ -401,12 +426,15 @@ def _claude_files() -> List[str]:
 
 def _claude_read(path: str, head: bool) -> Dict[str, Any]:
     sid = os.path.basename(path)[:-6]
-    cwd, title, summary, msgs = "", "", "", []
+    cwd, title, summary, msgs, named = "", "", "", [], ""
     by_id: Dict[str, List[Dict[str, Any]]] = {}
     for o in _jsonl(path, HEAD_BYTES if head else 0):
         cwd = cwd or str(o.get("cwd") or "")
         if o.get("type") == "summary" and o.get("summary"):
             summary = summary or str(o["summary"])
+            continue
+        if o.get("type") == "custom-title" and o.get("customTitle"):
+            named = str(o["customTitle"])          # the name they gave it (/rename): the newest wins
             continue
         if o.get("isSidechain") or o.get("isMeta") or o.get("type") not in ("user", "assistant"):
             continue
@@ -441,7 +469,7 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
                     msgs.append(_msg("assistant", "", at, sts, error=failed))
                 elif b.get("type") == "text" and b.get("text"):
                     msgs.append(_msg("assistant", str(b["text"]), at, [], error=failed))
-    return {"id": sid, "cwd": cwd, "title": summary or title, "messages": _fold(msgs)}
+    return {"id": sid, "cwd": cwd, "title": named or summary or title, "messages": _fold(msgs)}
 
 
 # ---------------------------------------------------------------- Codex
@@ -452,6 +480,21 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
 # without the marks are known by the reviewer's own prompt.
 _REVIEW = re.compile(r">>\s*APPROVAL REQUEST START|>>\s*TRANSCRIPT DELTA START|The Codex agent has requested the following"
                      r"|Continue the same review conversation")
+
+
+def _codex_spawn(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """A Codex subagent's thread: {parent, nickname, role}, or {} for any other session
+    (codex-rs protocol SessionSource::SubAgent(ThreadSpawn {parent_thread_id, ...}))."""
+    src = meta.get("source")
+    spawn = {}
+    if isinstance(src, dict):
+        sub = src.get("subagent") or src.get("SubAgent") or {}
+        spawn = (sub.get("thread_spawn") or sub.get("ThreadSpawn") or {}) if isinstance(sub, dict) else {}
+    parent = spawn.get("parent_thread_id") or meta.get("parent_thread_id")
+    if not parent:
+        return {}
+    return {"parent": str(parent), "nickname": str(spawn.get("agent_nickname") or meta.get("agent_nickname") or ""),
+            "role": str(spawn.get("agent_role") or spawn.get("agent_type") or meta.get("agent_role") or "")}
 
 
 def _codex_not_theirs(meta: Dict[str, Any]) -> bool:
@@ -480,7 +523,11 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
         at = _ms(o.get("timestamp"))
         if kind == "session_meta" or (not sid and o.get("id") and "instructions" in o):
             sid, cwd = str(p.get("id") or sid), str(p.get("cwd") or cwd)
-            if _codex_not_theirs(p):
+            spawn = _codex_spawn(p)
+            if spawn and head:
+                # A helper Codex started: not a session of the person's own, but its parent shows it.
+                return {"id": sid, "cwd": cwd, "title": "", "messages": [], "hidden": True, "spawn": spawn}
+            if not spawn and _codex_not_theirs(p):
                 return {"id": sid, "cwd": cwd, "title": "", "messages": [], "hidden": True}
             continue
         if kind == "turn_context" and p.get("cwd"):
@@ -526,7 +573,45 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
         return {"id": sid, "cwd": cwd, "title": "", "messages": [], "hidden": True}
     if not title:
         title = next((_title(m["text"]) for m in msgs if m["role"] == "user"), "")
+    title = _codex_names().get(sid) or title          # the name Codex shows for it, when it has one
     return {"id": sid, "cwd": cwd, "title": title, "messages": _fold(msgs)}
+
+
+_NAMES: Dict[str, Any] = {"at": None, "names": {}}
+
+
+def _codex_names() -> Dict[str, str]:
+    """Codex's own names for its threads: ~/.codex/session_index.jsonl, appended on
+    each rename, the newest entry for an id wins (codex-rs rollout/session_index.rs)."""
+    path = os.path.join(_home(), ".codex", "session_index.jsonl")
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {}
+    if _NAMES["at"] != (st.st_mtime, st.st_size):
+        names: Dict[str, str] = {}
+        for o in _jsonl_all(path):
+            n = str(o.get("thread_name") or "").strip()
+            if o.get("id") and n:
+                names[str(o["id"])] = n
+        _NAMES.update(at=(st.st_mtime, st.st_size), names=names)
+    return _NAMES["names"]
+
+
+def _jsonl_all(path: str):
+    """Every object in a small JSON-lines file, in order."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(32 * 1024 * 1024)
+    except OSError:
+        return
+    for line in raw.split(b"\n"):
+        try:
+            obj = json.loads(line.decode("utf-8", "replace")) if line.strip() else None
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            yield obj
 
 
 # ---------------------------------------------------------------- Gemini CLI
@@ -692,8 +777,34 @@ def _head(agent: str, path: str, mtime: float, size: int) -> Dict[str, Any]:
     if key not in _CACHE:
         if len(_CACHE) > 2000:
             _CACHE.clear()
-        _CACHE[key] = _FILES[agent][1](path, True)
+        h = _FILES[agent][1](path, True)
+        if agent == "claude-code" and h.get("id"):
+            named = _claude_named(path, size)
+            if named:
+                h = dict(h, title=named)
+        _CACHE[key] = h
     return _CACHE[key]
+
+
+def _claude_named(path: str, size: int) -> str:
+    """The name given to a Claude Code session (/rename), written near the file's end."""
+    named = ""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, size - 256 * 1024))
+            tail = f.read()
+    except OSError:
+        return ""
+    for line in tail.split(b"\n"):
+        if b'"custom-title"' not in line:
+            continue
+        try:
+            o = json.loads(line.decode("utf-8", "replace"))
+        except ValueError:
+            continue
+        if isinstance(o, dict) and o.get("type") == "custom-title" and o.get("customTitle"):
+            named = str(o["customTitle"])
+    return named
 
 
 def _known_folders() -> List[str]:
@@ -747,6 +858,107 @@ def _held_open(paths: List[str]) -> set:
         except Exception:
             continue
     return held
+
+
+WORKING_S = 30          # written this recently: its agent is at work
+STEP_S = 15 * 60        # a turn ending on a step (a long command) is still at work for this long
+
+
+def working(msgs: List[Dict[str, Any]], mtime: float) -> bool:
+    """Whether the session's agent is at work on it now: written in the last WORKING_S, or
+    its last message is the person's or ends on a step (a command still running) and the
+    file was written within STEP_S."""
+    age = time.time() - (mtime or 0)
+    if age < WORKING_S:
+        return True
+    last = msgs[-1] if msgs else None
+    if not last or age > STEP_S:
+        return False
+    if last.get("role") == "user":
+        return True
+    parts = last.get("parts") or []
+    return bool(parts) and "text" not in parts[-1] and not last.get("error")
+
+
+SUB_SCAN = 400          # the newest Codex sessions looked through for a session's helpers
+
+
+def subagents(cid: str) -> List[Dict[str, Any]]:
+    """The helpers a session started, as Codex's Subagents panel lists them: newest first,
+    each with its name, whether it is at work, and its own chat id to open it."""
+    got = parse_chat(cid)
+    if not got or got[0] != "codex":
+        return []
+    sid, out = got[1], []
+    names = _codex_names()
+    for p, mt, sz in _newest(_codex_files(), SUB_SCAN):
+        h = _head("codex", p, mt, sz)
+        spawn = h.get("spawn") or {}
+        if spawn.get("parent") != sid or not h.get("id"):
+            continue
+        title = names.get(h["id"]) or " ".join(x for x in (spawn.get("nickname"), spawn.get("role")) if x) or "Helper"
+        out.append({"chat": chat_id("codex", h["id"]), "title": title, "nickname": spawn.get("nickname") or "",
+                    "role": spawn.get("role") or "", "at": int(mt * 1000), "working": time.time() - mt < WORKING_S})
+    return out
+
+
+def search(query: str, rows: List[Dict[str, Any]], budget_s: float = 3.0) -> Dict[str, str]:
+    """Sessions whose conversation mentions `query` (any case), with the words around it:
+    {chat: snippet}. Reads each file's last SEARCH_BYTES, newest first, for at most
+    budget_s seconds, so a search answers quickly on a PC with many long sessions."""
+    q = " ".join(str(query or "").split()).lower()
+    if len(q) < 2:
+        return {}
+    needle, out, t0 = q.encode("utf-8"), {}, time.time()
+    found: Dict[str, List[str]] = {}
+    for r in rows:
+        if time.time() - t0 > budget_s:
+            break
+        path = r.get("path") or ""
+        if not path and r.get("agent") in _FILES:
+            files = found.setdefault(r["agent"], _FILES[r["agent"]][0]())
+            path = next((f for f in files if r["id"] and r["id"] in os.path.basename(f)), "")
+        try:
+            with open(path, "rb") as f:
+                size = os.fstat(f.fileno()).st_size
+                f.seek(max(0, size - SEARCH_BYTES))
+                raw = f.read()
+        except OSError:
+            continue
+        low = raw.lower()
+        at = low.rfind(needle)
+        while at >= 0:
+            start, end = low.rfind(b"\n", 0, at) + 1, low.find(b"\n", at)
+            line = raw[start:end if end >= 0 else len(raw)]
+            if len(line) < BLOB_LINE:
+                try:
+                    o = json.loads(line.decode("utf-8", "replace"))
+                except ValueError:
+                    o = None
+                text = _said_in(o) if isinstance(o, dict) else ""
+                i = text.lower().find(q)
+                if i >= 0:
+                    a, b = max(0, i - 50), min(len(text), i + len(q) + 70)
+                    out[r["chat"]] = ("..." if a else "") + " ".join(text[a:b].split()) + ("..." if b < len(text) else "")
+                    break
+            at = low.rfind(needle, 0, start)
+    return out
+
+
+SEARCH_BYTES = 16 * 1024 * 1024
+
+
+def _said_in(o: Dict[str, Any]) -> str:
+    """The words of one line of a session file, the person's or the agent's, whatever the agent."""
+    p = o.get("payload") if isinstance(o.get("payload"), dict) else {}
+    if p.get("type") in ("user_message", "agent_message") and p.get("message"):
+        return _clean(str(p["message"])) or str(p["message"])
+    m = o.get("message") if isinstance(o.get("message"), dict) else {}
+    if m.get("role") in ("user", "assistant"):
+        return _clean(_text_of(m.get("content"))) or _text_of(m.get("content"))
+    if p.get("type") == "message":
+        return _text_of(p.get("content"))
+    return ""
 
 
 def live_state(agent: str, sid: str, path: str = "") -> str:
@@ -858,17 +1070,31 @@ def read(agent: str, sid: str) -> Dict[str, Any]:
 
 
 def transcript(cid: str, last: int = 60) -> Dict[str, Any]:
-    """A session as the phone's 'open' gives a chat."""
+    """A session as the phone's 'open' gives a chat: its last `last` messages, and
+    how many more there are (`more`), or that the file goes back further than was
+    read (`earlier`), for the phone's Show earlier."""
     got = parse_chat(cid)
     if not got:
         return {"error": "not an agent session"}
     agent, sid = got
-    d = read(agent, sid)
+    tok_d, tok_c = _DEPTH.set(max(1, -(-int(last or 60) // 60))), _CUT.set([])
+    try:
+        d = read(agent, sid)
+        cut = bool(_CUT.get())
+    finally:
+        _DEPTH.reset(tok_d)
+        _CUT.reset(tok_c)
     if not d:
         return {"chat": cid, "error": "that session isn't on this PC any more"}
     msgs = d.get("messages") or []
+    try:
+        mtime = os.path.getmtime(d.get("path") or "") if d.get("path") else 0
+    except OSError:
+        mtime = 0
     return {"chat": cid, "title": d.get("title") or "", "source": agent, "agent": agent, "label": label(agent),
-            "cwd": d.get("cwd") or "", "messages": msgs[-last:], "more": max(0, len(msgs) - last)}
+            "working": working(msgs, mtime),
+            "cwd": d.get("cwd") or "", "messages": msgs[-last:], "more": max(0, len(msgs) - last),
+            **({"earlier": True} if cut else {})}
 
 
 # ---------------------------------------------------------------- carrying on
@@ -908,8 +1134,8 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask) -> int:
         # Codex takes a message for a session open in its own app (codex queue, as Shed
         # does): the app that owns the session runs it, and its reply shows here.
         if await _queue_codex(_exe(agent), sid, cwd, text):
-            emit("text", text=f"Sent to {name} on your PC, which has this session open. Its reply shows here "
-                              f"as it writes it.")
+            # Inglen's own note about what it did, not the agent speaking (shown muted).
+            emit("note", text=f"Sent to {name} on your PC, where this session is open. Its reply will show here.")
             return 0
     if state == "open":
         emit("error", message=f"This session is open in {name} on your PC right now. Send it there, or close it "

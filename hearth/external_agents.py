@@ -1098,7 +1098,7 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
     exe = find(agent)
     if not exe:
         return {"ok": False, "error": f"{spec['label']} is not installed on this machine"}
-    work = _long_path(os.path.abspath(cwd or _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")))
+    work = _long_path(os.path.abspath(cwd or _env.get("WORKSPACE") or __import__("hearth").default_workspace()))
     if not os.path.isdir(work):
         return {"ok": False, "error": f"folder not found: {work}"}
     allow = _allow_level()

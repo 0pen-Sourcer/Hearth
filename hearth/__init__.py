@@ -1,7 +1,7 @@
 """Hearth — local-only tool layer for a personal AI assistant.
 
-Designed for use with LM Studio / Ollama / any OpenAI-compatible local API.
-No paid APIs, no cloud calls (except DuckDuckGo HTML for web search).
+Runs on its own built-in engine first; other local servers (LM Studio, Ollama,
+llama.cpp) and cloud providers work too.
 """
 
 # ---------------------------------------------------------------------------
@@ -95,6 +95,27 @@ if _os.name == "nt":
     except Exception:
         pass
 
+
+# ---------------------------------------------------------------------------
+# Where a new install keeps its workspace, and what the agent is called before
+# the person names it. Inglen is the app's name and the default for both; an
+# install from before (with ~/Jarvis) keeps its folder and its name.
+# ---------------------------------------------------------------------------
+def default_workspace() -> str:
+    """~/Jarvis when an install already uses it, else ~/Inglen."""
+    home = _os.path.expanduser("~")
+    legacy = _os.path.join(home, "Jarvis")
+    return legacy if _os.path.isdir(legacy) else _os.path.join(home, "Inglen")
+
+
+def default_agent_name() -> str:
+    """The agent's name until the person picks one: the app's name, "Inglen"; an
+    install from before that never saved a name keeps the one it had."""
+    from . import env as _envmod
+    ws = (_envmod.get("WORKSPACE") or "").strip()
+    folder = _os.path.basename(_os.path.normpath(ws or default_workspace()))
+    return "JARVIS" if folder.lower() == "jarvis" else "Inglen"
+
 from .tools import (
     TOOL_DEFINITIONS,
     execute_tool,
@@ -144,3 +165,4 @@ __all__ = [
     "memory",
     "voice",
 ]
+

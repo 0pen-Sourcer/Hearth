@@ -1,7 +1,7 @@
 """Hearth - local-only personal AI CLI.
 
-Runs against any OpenAI-compatible local server (LM Studio, Ollama with the
-OpenAI compat layer, llama.cpp, vLLM, etc.). No paid APIs. No cloud.
+Runs on Inglen's built-in engine, or any OpenAI-compatible server it finds
+(LM Studio, Ollama, llama.cpp, vLLM) or a cloud provider.
 
 Quick start:
     pip install openai
@@ -10,13 +10,14 @@ Quick start:
     python jarvis.py
 
 Env:
-    LOCAL_API_BASE   default http://localhost:1234/v1
+    LOCAL_API_BASE   default Inglen's built-in engine, http://localhost:8790/v1
     LOCAL_MODEL      default 'local-model'
     HEARTH_WORKSPACE default ~/Jarvis  (sandbox for writes)
     HEARTH_LOCKDOWN  set to 1 to also confine reads to the workspace
 """
 
 import os
+from hearth.local_engine import local_base as _local_base
 from hearth import env as _env
 import re
 import sys
@@ -24,6 +25,7 @@ import json
 import time
 import shutil
 import asyncio
+import secrets
 import threading
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -34,13 +36,13 @@ from typing import Any, Dict, List, Optional
 # and sat at a prompt, which is not what either flag is asking for.
 _HELP = """usage: hearth-cli [--help] [--version]
 
-Inglen in the terminal. Runs against the server Inglen manages, or any
-OpenAI-compatible one (LM Studio, Ollama, llama.cpp, vLLM, a cloud provider).
+Inglen in the terminal. Runs on Inglen's built-in engine, or any
+OpenAI-compatible server (LM Studio, Ollama, llama.cpp, vLLM, a cloud provider).
 
 Everything else is set from inside the session. Type /help once it starts.
 
 Environment (optional, each overrides the saved setting):
-  LOCAL_API_BASE     server address         default http://localhost:1234/v1
+  LOCAL_API_BASE     server address         default Inglen's engine, http://localhost:8790/v1
   LOCAL_MODEL        model id               default: whatever is loaded
   LOCAL_API_KEY      key for that server
   HEARTH_CONTEXT     context window in tokens
@@ -378,8 +380,8 @@ _team_panes()
 
 def _brain_choices():
     from hearth.headless import PROVIDERS
-    out = [("local", "whatever serves on localhost:1234"), ("lmstudio", "LM Studio"),
-           ("builtin", "Inglen's own llama.cpp")]
+    out = [("builtin", "Inglen's built-in engine"), ("local", "Inglen's engine, or a server it finds"),
+           ("lmstudio", "LM Studio")]
     out += [(pid, label) for pid, (label, _url) in PROVIDERS.items()]
     out += [("custom", "any OpenAI-compatible address"), ("claude-code", "your Claude plan"),
             ("codex", "your ChatGPT plan"), ("cursor", "your Cursor plan")]
@@ -555,7 +557,7 @@ def _save_setting(key, value) -> bool:
 # Such a session ignores live settings.json brain-sync so the GUI can't yank a
 # deliberately env-pinned CLI off its endpoint mid-run.
 _BRAIN_FROM_ENV = bool(os.getenv("LOCAL_API_BASE"))
-LOCAL_API_BASE = os.getenv("LOCAL_API_BASE") or _S_URL or "http://localhost:1234/v1"
+LOCAL_API_BASE = os.getenv("LOCAL_API_BASE") or _S_URL or _local_base()
 LOCAL_MODEL = os.getenv("LOCAL_MODEL") or _S_MODEL or "local-model"
 # Cloud endpoints need a real key. Resolution order:
 #   1. LOCAL_API_KEY env (explicit override)
@@ -1674,7 +1676,8 @@ class JarvisCLI:
         try:
             from hearth.persona import NAME as _AGENT_NAME
         except Exception:
-            _AGENT_NAME = "JARVIS"
+            from hearth import default_agent_name
+            _AGENT_NAME = default_agent_name()
         home = os.path.expanduser("~")
         ws = WORKSPACE.replace(home, "~") if WORKSPACE.lower().startswith(home.lower()) else WORKSPACE
         beside = [
@@ -2982,9 +2985,9 @@ class JarvisCLI:
                 if have:
                     print(f"{C_DIM}Saved keys: {', '.join(have)}{C_RESET}")
                 print(f"\n{C_BOT}Switch with:{C_RESET}")
-                print(f"  {C_TOOL}/brain local{C_RESET}                     auto: whatever's at localhost:1234")
-                print(f"  {C_TOOL}/brain lmstudio{C_RESET}                  use LM Studio (download.lmstudio.ai)")
-                print(f"  {C_TOOL}/brain builtin{C_RESET}                   use Inglen's bundled llama.cpp server")
+                print(f"  {C_TOOL}/brain builtin{C_RESET}                   Inglen's built-in engine")
+                print(f"  {C_TOOL}/brain local{C_RESET}                     Inglen's engine, or a local server it finds")
+                print(f"  {C_TOOL}/brain lmstudio{C_RESET}                  LM Studio")
                 print(f"  {C_TOOL}/brain grok [api-key]{C_RESET}            xAI Grok       (key optional if saved)")
                 print(f"  {C_TOOL}/brain gemini [api-key]{C_RESET}          Google Gemini  (key optional if saved)")
                 print(f"  {C_TOOL}/brain openai [api-key]{C_RESET}          OpenAI         (key optional if saved)")
@@ -3088,7 +3091,7 @@ class JarvisCLI:
             try:
                 from hearth.llmserver import BUILTIN_PORT as _bport
             except Exception:
-                _bport = 1234
+                from hearth.local_engine import DEFAULT_PORT as _bport
             _LOCAL = ("local", "lmstudio", "builtin")
             # Where each cloud provider answers is written down once, in
             # headless. The model beside it is only a first guess.
@@ -3097,7 +3100,7 @@ class JarvisCLI:
                             "anthropic": "claude-sonnet-5-5", "openrouter": "anthropic/claude-3.5-sonnet",
                             "groq": "openai/gpt-oss-120b"}
             presets_url_model = {
-                "local":      ("http://localhost:1234/v1", ""),
+                "local":      (_local_base(), ""),
                 "lmstudio":   ("http://localhost:1234/v1", ""),
                 "builtin":    (f"http://localhost:{_bport}/v1", ""),
                 **{p: (u, _first_guess.get(p, "")) for p, (_label, u) in _known.items()},
@@ -3264,7 +3267,6 @@ class JarvisCLI:
                 print(f"{C_DIM}    1. /models           → see what's on disk{C_RESET}")
                 print(f"{C_DIM}    2. /models use <n>   → boot Inglen's llama.cpp server with that model{C_RESET}")
                 print(f"{C_DIM}    Notes:{C_RESET}")
-                print(f"{C_DIM}      • If LM Studio is running on port 1234, stop it first.{C_RESET}")
                 print(f"{C_DIM}      • Inglen re-uses any GGUFs you have in LM Studio's cache - no double-download.{C_RESET}")
             elif provider not in _LOCAL and provider != "custom" and given_key:
                 print(f"{C_DIM}(key saved - next time just type /brain {provider}){C_RESET}")
@@ -4497,7 +4499,8 @@ class JarvisCLI:
             try:
                 from hearth.persona import NAME as an
             except Exception:
-                an = "JARVIS"
+                from hearth import default_agent_name
+                an = default_agent_name()
             self._agent_name = an
         # Compose status line then prompt symbol on next visual chunk
         return (
@@ -5204,6 +5207,7 @@ class JarvisCLI:
         # judges the user is wrapping up. We finish the current response,
         # then exit on the next loop iteration.
         self._exit_requested = False
+        self._follow_others()              # turns run elsewhere in this chat show here as they go
         # Register the CLI as the interactive surface for ask_user - the tool
         # handler bounces back to this loop via run_coroutine_threadsafe.
         try:
@@ -5881,6 +5885,60 @@ class JarvisCLI:
         self._responding_now = on
         _note_activity("thinking" if on else "idle")
 
+    def _live_out(self, prompt: str):
+        """This turn, as it goes, for the window and the phone (live_bus, from "terminal"):
+        returns the function each of the turn's events goes through."""
+        try:
+            from hearth import chat_sync, live_bus
+            if not live_bus.window_url():
+                return lambda kind, fields: None
+            if not self._chat.get("id"):                 # the chat this turn will be kept in
+                self._chat["id"] = chat_sync.new_id()
+                self._chat_keep()
+            cid, t = self._chat["id"], secrets.token_hex(5)
+            live_bus.publish(live_bus.turn_event(cid, "terminal", t, "start", {"text": prompt}))
+        except Exception:
+            return lambda kind, fields: None
+
+        def out(kind, fields):
+            try:
+                ev = live_bus.turn_event(cid, "terminal", t, kind, fields)
+                if ev:
+                    live_bus.publish(ev)
+            except Exception:
+                pass
+        return out
+
+    def _follow_others(self) -> None:
+        """Turns the window, the phone or a chat app run in this terminal's chat, shown
+        here as they go (live_bus); the next prompt reads them in as history (_chat_pull)."""
+        try:
+            from hearth import live_bus
+            url = live_bus.window_url()
+        except Exception:
+            return
+        if not url or getattr(self, "_following", False):
+            return
+        self._following = True
+        names = {"window": "the window", "relay": "your phone"}
+
+        def on(ev):
+            if ev.get("kind") != "turn" or ev.get("from") == "terminal":
+                return
+            if not ev.get("chat") or ev.get("chat") != (getattr(self, "_chat", None) or {}).get("id"):
+                return
+            kind, who = ev.get("type"), names.get(str(ev.get("from")), str(ev.get("from") or "elsewhere"))
+            if kind == "start":
+                print(f"\n{C_DIM}↳ from {who}:{C_RESET} {str(ev.get('text') or '').strip()[:400]}", flush=True)
+            elif kind == "step":
+                print(f"  {C_DIM}● {ev.get('words') or ''}{C_RESET}", flush=True)
+            elif kind == "said" and ev.get("text"):
+                print(str(ev["text"]).strip(), flush=True)
+            elif kind == "error" and ev.get("text"):
+                print(f"{C_ERR}{ev['text']}{C_RESET}", flush=True)
+
+        threading.Thread(target=live_bus.listen, args=(url, on), daemon=True, name="terminal-follow").start()
+
     async def _respond_claude(self) -> None:
         """One turn with an agent program as the brain: its text streams here, its
         tool calls print like Hearth's own, and anything it needs permission
@@ -5929,7 +5987,14 @@ class JarvisCLI:
 
         reply = []
 
+        live = self._live_out(prompt)
+        from hearth.waited import Waited
+        waited = Waited()                 # the time on their OK isn't part of the turn's duration
+        ask = waited.timing(ask)
+
         def emit(t, **f):
+            f = waited.fix(t, f)
+            live(t, f)
             if t == "assistant_chunk":
                 chunk = f.get("content", "")
                 if not state["open"]:
@@ -6011,16 +6076,22 @@ class JarvisCLI:
         steer_task = asyncio.create_task(self._steer_loop())
         failed: List[str] = []
 
+        live = self._live_out(prompt)
+        from hearth.waited import Waited
+        waited = Waited()                 # the time on their OK isn't part of the turn's duration
+
         def _emit(kind, **fields):
+            fields = waited.fix(kind, fields)
             if kind == "error":
                 failed.append(str(fields.get("message") or ""))
+            live(kind, fields)
             return turn.emit(kind, **fields)
         prior, self._last_failure = getattr(self, "_last_failure", ""), ""
         try:
             await _hl.run_once(
                 prompt, emit=_emit, model=self.current_model, think=self.think_on,
                 think_level=getattr(self, "think_level", "") or "", history=history,
-                permission_check=self._ask_permission, should_cancel=self._respond_cancel.is_set,
+                permission_check=waited.timing(self._ask_permission), should_cancel=self._respond_cancel.is_set,
                 drain_steer=self._drain_steer, voice=bool(self.voice_on),
                 chat_id=(getattr(self, "_chat", None) or {}).get("id"), prior_failure=prior)
             # The next turn hears that this one failed (headless.failure_note).

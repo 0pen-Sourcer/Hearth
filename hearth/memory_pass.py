@@ -14,6 +14,7 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from .local_engine import local_base as _local_base
 
 from . import env as _env
 
@@ -60,8 +61,8 @@ def _local_route() -> Optional[Tuple[str, str, str]]:
             os.environ.get("LOCAL_MODEL") or ""
     try:
         from .subagents import _local_server_has_model
-        if _local_server_has_model("http://localhost:1234/v1"):
-            return "http://localhost:1234/v1", "hearth-builtin", ""
+        if _local_server_has_model(_local_base()):
+            return _local_base(), "hearth-builtin", ""
     except Exception:
         pass
     return None

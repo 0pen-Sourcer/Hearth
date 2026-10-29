@@ -32,6 +32,7 @@ import subprocess
 import urllib.request
 import urllib.parse
 from datetime import datetime
+from .local_engine import local_base as _local_base
 
 from . import shells as _shells
 from html.parser import HTMLParser
@@ -64,7 +65,8 @@ def _resolve_workspace() -> str:
                 return os.path.abspath(p)
     except OSError:
         pass
-    return os.path.join(os.path.expanduser("~"), "Jarvis")
+    from . import default_workspace
+    return default_workspace()
 
 
 def set_workspace_location(path: str) -> str:
@@ -1552,7 +1554,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "list_models",
         "description": (
-            "List the models the connected server or provider offers (LM Studio, Ollama, a cloud provider), "
+            "List the models the current brain offers (Inglen's built-in engine, another local server, a cloud "
+            "provider), "
             "from its API. Use for 'what models do I have', 'which is loaded', 'what can I switch to'. It "
             "answers at once; searching the disk for model files is slow and misses what a server offers."
         ),
@@ -1895,7 +1898,7 @@ def _extract_pdf(path: str, p: Dict) -> str:
         elif extracted == 0:
             chunks.append("\n[no extractable text — PDF is blank or scanned. "
                           "For VLM-OCR auto-fallback, install: pip install pypdfium2. "
-                          "Then load a vision model (Gemma 4 E4B, Qwen 2.5 VL, etc.) in LM Studio.]")
+                          "Then load a vision model (Gemma 4 E4B, Qwen 2.5 VL, etc.).]")
     return "\n".join(chunks)
 
 
@@ -1904,7 +1907,7 @@ def _loaded_model_is_vision(model: Optional[str] = None, base: Optional[str] = N
     llama.cpp's /props (true only with a projector loaded), LM Studio's
     /api/v0, then the model name. The endpoint and model default to the
     environment the tools run in; the terminal passes its own."""
-    base = (base or os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
+    base = (base or os.environ.get("LOCAL_API_BASE", _local_base())).rstrip("/")
     model_hint = (model if model is not None else os.environ.get("LOCAL_MODEL", "")).lower()
     host = base.rsplit("/v1", 1)[0]
     # Cloud catalog (OpenRouter): GET /models is public (no auth) and lists each
@@ -2030,7 +2033,7 @@ def _vlm_ocr_pdf_pages(path: str, page_numbers: List[int], p: Dict) -> str:
     MAX_VLM_PAGES = int(p.get("vlm_max_pages", 6))
     pages = page_numbers[:MAX_VLM_PAGES]
 
-    base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
+    base = os.environ.get("LOCAL_API_BASE", _local_base())
     key  = os.environ.get("LOCAL_API_KEY") or os.environ.get("OPENAI_API_KEY") or "local-vlm"
     model = os.environ.get("LOCAL_MODEL", "")
     if not model:
@@ -6184,7 +6187,7 @@ def _try_release_llm_vram() -> str:
         except Exception:
             pass
 
-    base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
+    base = os.environ.get("LOCAL_API_BASE", _local_base())
     native = base.replace("/v1", "/api/v0")
     candidates = [
         # Newer LM Studio: /api/v0/models with action
@@ -6393,7 +6396,7 @@ def _notify(p: Dict) -> str:
 
 
 def _whoami(p: Dict) -> str:
-    base = _RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
+    base = _RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE", _local_base())
     b = base.lower()
     is_local = any(h in b for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1",
                                     "192.168.", "10.", "host.docker.internal"))
@@ -6408,7 +6411,8 @@ def _whoami(p: Dict) -> str:
     try:
         from .persona import NAME as _persona_name
     except Exception:
-        _persona_name = "JARVIS"
+        from . import default_agent_name
+        _persona_name = default_agent_name()
     info = {
         "agent": _persona_name,
         "framework": "Inglen",
@@ -6495,7 +6499,7 @@ def _load_model(p: Dict) -> str:
 
 def _list_models(p: Dict) -> str:
     import urllib.request
-    base = (_RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
+    base = (_RUNTIME_INFO.get("endpoint") or os.getenv("LOCAL_API_BASE", _local_base())).rstrip("/")
     _key = os.environ.get("LOCAL_API_KEY") or ""
     _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
     try:
@@ -6504,7 +6508,7 @@ def _list_models(p: Dict) -> str:
             data = json.loads(r.read().decode())
         ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
         if not ids:
-            return f"The server at {base} reports no models — is one loaded in LM Studio?"
+            return f"The server at {base} reports no models loaded."
         cur = _RUNTIME_INFO.get("model")
         lines = [f"Models available at {base}:"]
         lines += [f"  - {i}" + ("  (current)" if i == cur else "") for i in ids]
@@ -6547,7 +6551,7 @@ def _list_models(p: Dict) -> str:
                     f"loaded right now." + "\n".join(_disk)
                     + "\nStart one from the Models tab, or /models use <n> in the CLI.")
         return (f"Couldn't reach the local server at {base}: {err_kind}: {e}. "
-                f"Is LM Studio (or your endpoint) running? No .gguf models found on "
+                f"No model server is running there, and no .gguf models were found on "
                 f"disk either - the Models tab can download one.")
 
 
@@ -8571,10 +8575,12 @@ def _agent_sessions(p: Dict) -> str:
         text = str(p.get("message") or "").strip()
         if not text:
             return "Error: give the message to send."
-        said, errors = [], []
+        said, errors, notes = [], [], []
 
         def emit(kind, **f):
-            if kind == "text" and f.get("text"):
+            if kind == "note" and f.get("text"):
+                notes.append(str(f["text"]))
+            elif kind == "text" and f.get("text"):
                 said.append(str(f["text"]))
             elif kind == "error" and f.get("message"):
                 errors.append(str(f["message"]))
@@ -8586,6 +8592,8 @@ def _agent_sessions(p: Dict) -> str:
         name = S.label((S.parse_chat(cid) or ("", ""))[0])
         if errors and not said:
             return f"Error: {errors[-1]}"
+        if notes and not said:
+            return notes[-1]
         reply = "\n\n".join(said).strip() or "(it finished without a reply)"
         return (f"{name} answered (its words, not the person's; it can't approve anything here):\n{reply}"
                 + (f"\n\nIt also said: {errors[-1]}" if errors else "") + ("" if rc == 0 else f"\n(exit {rc})"))

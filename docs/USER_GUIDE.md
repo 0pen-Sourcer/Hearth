@@ -1,6 +1,6 @@
 # Inglen user guide
 
-For when you've just installed Inglen and want to know what it does and where things are. The assistant inside it is called JARVIS unless you give it another name (Settings, Behavior, Agent name); this guide uses the default.
+For when you've just installed Inglen and want to know what it does and where things are. The assistant inside it is called Inglen on a new install (an install from before keeps JARVIS) unless you give it another name in Settings, Behavior, Agent name; this guide uses JARVIS in its examples.
 
 ---
 

@@ -29,6 +29,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
+from .local_engine import local_base as _local_base
 
 from .tools import WORKSPACE
 from .chat_call import chat_create
@@ -197,7 +198,7 @@ def _llm_complete(prompt: str, *, temperature: float = 0.3,
         from .subagents import _route_for_cost_class
         base, key, model = _route_for_cost_class("cheap")
     except Exception:
-        base = os.environ.get("LOCAL_API_BASE", "http://localhost:1234/v1")
+        base = os.environ.get("LOCAL_API_BASE", _local_base())
         key = os.environ.get("LOCAL_API_KEY", "") or "hearth-builtin"
         model = os.environ.get("LOCAL_MODEL", "")
     try:

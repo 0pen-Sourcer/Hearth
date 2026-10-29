@@ -57,6 +57,7 @@ import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from .local_engine import local_base as _local_base
 
 from . import system_prompt, execute_tool, to_openai_tools, TOOL_DEFINITIONS
 from .loop_guard import ToolLoopGuard, MAX_TURNS
@@ -72,7 +73,7 @@ def _brain_from_settings() -> dict:
     localhost:1234 and failing, because it read the environment and nothing
     else."""
     try:
-        base = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
+        base = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
         with open(os.path.join(base, "settings.json"), encoding="utf-8") as f:
             s = json.load(f) or {}
     except Exception:
@@ -98,7 +99,7 @@ _SETTINGS_BRAIN = _brain_from_settings()
 
 LOCAL_API_BASE = (os.getenv("LOCAL_API_BASE")
                   or _SETTINGS_BRAIN.get("base")
-                  or "http://localhost:1234/v1")
+                  or _local_base())
 # Real API key for cloud endpoints (Gemini, OpenRouter, OpenAI, etc.).
 # Local LM Studio ignores it, so the harmless default is fine. To use a
 # cloud model: set LOCAL_API_BASE + LOCAL_API_KEY + LOCAL_MODEL.

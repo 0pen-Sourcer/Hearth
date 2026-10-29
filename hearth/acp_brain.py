@@ -449,7 +449,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     history = history or []
     key = f"{provider}:" + _base._chat_key(history, prompt)
     session = _base.session_for(key, history)
-    cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
+    cwd = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
     os.makedirs(cwd, exist_ok=True)
     effort = _base.chosen_effort()
     # An agent that takes the level only when it starts gets it as a flag.

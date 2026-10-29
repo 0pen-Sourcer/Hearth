@@ -287,7 +287,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
         text_in = (persona + "\n\n---\n\n"
                    + (f"Earlier in this conversation:\n{earlier}\n\nNow the user says:\n" if earlier else "")
                    + prompt)
-    cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
+    cwd = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
     os.makedirs(cwd, exist_ok=True)
     try:
         write_project_config(cwd)

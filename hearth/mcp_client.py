@@ -81,7 +81,7 @@ def _workspace() -> Path:
                 return Path(p)
     except OSError:
         pass
-    return Path.home() / "Jarvis"
+    return Path(__import__("hearth").default_workspace())
 
 
 _WORKSPACE = _workspace()

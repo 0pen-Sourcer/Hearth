@@ -50,6 +50,7 @@ import urllib.error
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
+from .local_engine import local_base as _local_base
 
 from . import system_prompt, TOOL_DEFINITIONS, memory, execute_tool
 from .headless import run_once
@@ -187,7 +188,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _UI_PATH = os.path.join(_HERE, "ui.html")
 _ROOM_JS = os.path.join(_HERE, "room.js")
 _CALL_AUDIO_JS = os.path.join(_HERE, "call_audio.js")
-LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")
+LOCAL_API_BASE = os.getenv("LOCAL_API_BASE", _local_base())
 LM_STUDIO_V0 = LOCAL_API_BASE.replace("/v1", "/api/v0")
 SETTINGS_PATH = os.path.join(WORKSPACE, "settings.json")
 CONVOS_DIR = os.path.join(WORKSPACE, "conversations")
@@ -934,7 +935,7 @@ def _active_base() -> str:
     Used to decide local-vs-cloud behavior consistently across /chat,
     _load_model, _eject_model, and /api/state so they never disagree."""
     return (LOCAL_API_BASE or os.getenv("LOCAL_API_BASE")
-            or "http://localhost:1234/v1")
+            or _local_base())
 
 
 def _provider_key(provider: str) -> str:
@@ -1054,7 +1055,7 @@ def _models_probe_endpoint() -> str:
       - dropdown / topbar = current brain (cloud or local)
       - Models tab "On your machine" list = local GGUFs (always)
     """
-    return LOCAL_API_BASE or "http://localhost:1234/v1"
+    return LOCAL_API_BASE or _local_base()
 
 
 def _port_reachable(base_url: str, timeout: float = 0.6) -> bool:
@@ -1392,7 +1393,7 @@ def _eject_model() -> Dict:
         from . import headless as _hl
         settings = _load_settings()
         saved_url = (settings.get("llm_url") or "").strip()
-        new_base = saved_url or "http://localhost:1234/v1"
+        new_base = saved_url or _local_base()
         LOCAL_API_BASE = new_base
         _hl.LOCAL_API_BASE = new_base
         os.environ["LOCAL_API_BASE"] = new_base
@@ -1541,7 +1542,7 @@ def _load_settings() -> Dict:
         "tts_device": "cpu",   # cpu / cuda / dml
         "voice_speed": 1.0,    # Kokoro playback rate (0.5x-2.5x)
         "voice_name": "am_michael",  # Kokoro voice id (am_/af_/bm_/bf_ + name). am_michael = calm neutral baseline.
-        "agent_name": "JARVIS",      # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
+        "agent_name": __import__("hearth").default_agent_name(),  # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
         "stt_model": "base.en",  # a name ending .en holds English only
         "stt_language": "",      # blank = detect per utterance
         # Memory bookkeeping runs on most turns, so its cards can outnumber
@@ -1568,7 +1569,7 @@ def _load_settings() -> Dict:
         "toast_compacted":   True,      # "Context compacted, now X%"
         "toast_errors":      True,      # Hard errors (always recommended)
         "server_idle_min": 15,          # auto-unload after N idle minutes (0 = never)
-        "server_port": 1234,            # builtin HTTP port
+        "server_port": 8790,            # builtin HTTP port (its own: LM Studio keeps 1234; see local_engine)
         # Forge / SD-WebUI install path for local image gen. "" = either
         # not installed or use whatever _autodetect_forge_dir picks. Set
         # via Settings → Behavior or the Detect button.
@@ -1591,6 +1592,7 @@ def _load_settings() -> Dict:
     _env.set("TTS_DEVICE", defaults.get("tts_device", "cpu"))
     _env.set("VOICE_SPEED", str(defaults.get("voice_speed", 1.0)))
     _env.set("VOICE", defaults.get("voice_name", "am_michael"))
+    _apply_server_port(defaults.get("server_port"))
     # Selected mic index (-1 = OS default). Drives both STT paths via
     # listen.input_device_index(). The mic picker (Settings → Voice) writes it.
     _env.set("VOICE_INPUT_DEVICE", str(defaults.get("voice_input_device", -1)))
@@ -1600,8 +1602,33 @@ def _load_settings() -> Dict:
     # HEARTH_PERSONA_NAME. Setting it here means the very next chat turn
     # picks up the user's renamed agent. On boot, this fires before any
     # chat call so the persona is correct from turn 1.
-    os.environ["HEARTH_PERSONA_NAME"] = (defaults.get("agent_name") or "JARVIS").strip() or "JARVIS"
+    os.environ["HEARTH_PERSONA_NAME"] = (defaults.get("agent_name") or __import__("hearth").default_agent_name()).strip() or __import__("hearth").default_agent_name()
     return defaults
+
+
+_PORT_FROM_ENV = bool(_env.get("BUILTIN_PORT", ""))     # set before start: it wins over Settings
+
+
+def _apply_server_port(port) -> None:
+    """Settings, Built-in server, Port: the engine starts there next time (a running one
+    keeps its port). An environment BUILTIN_PORT set before start wins."""
+    from . import local_engine
+    try:
+        port = int(port or 0)
+    except (TypeError, ValueError):
+        return
+    if _PORT_FROM_ENV:
+        return
+    if not (1024 <= port <= 65535) or port == local_engine.LEGACY_PORT:
+        port = local_engine.DEFAULT_PORT
+    _env.set("BUILTIN_PORT", str(port))
+    _env.set("HELPER_PORT", str(port + 1))
+    try:
+        from . import llmserver
+        if llmserver._proc is None:
+            llmserver.BUILTIN_PORT, llmserver.HELPER_PORT = port, port + 1
+    except Exception:
+        pass
 
 
 # The GUI saves several keys at once in places (the reasoning control writes
@@ -1617,17 +1644,21 @@ _ICON_MAX = 512_000          # bigger than any sane icon; a file this size is cu
 _DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
-def _favicon(domain: str):
-    """A site's own icon, fetched from that site only and cached on disk, for
-    showing which sites a search or a page read touched. (bytes, mime) or None."""
+def _site_of(domain: str) -> str:
     d = (domain or "").strip().lower()
     if d.startswith("www."):
         d = d[4:]
-    if not _DOMAIN_RE.match(d):
-        return None
-    os.makedirs(_FAVICON_DIR, exist_ok=True)
+    return d if _DOMAIN_RE.match(d) else ""
+
+
+def _favicon_cached(domain: str):
+    """What the disk already knows about a site's icon, without the network:
+    (bytes, mime), False when it has none (looked up within a day), None when
+    it hasn't been looked up yet."""
+    d = _site_of(domain)
+    if not d:
+        return False
     path = os.path.join(_FAVICON_DIR, d)
-    miss = path + ".miss"
     # 150,000 bytes was an older read limit: a file exactly that long was cut off.
     if os.path.isfile(path) and os.path.getsize(path) == 150_000:
         os.remove(path)
@@ -1635,8 +1666,24 @@ def _favicon(domain: str):
         with open(path, "rb") as f:
             data = f.read()
         return data, _icon_mime(data)
+    miss = path + ".miss"
     if os.path.isfile(miss) and time.time() - os.path.getmtime(miss) < 86400:
-        return None
+        return False
+    return None
+
+
+def _favicon(domain: str):
+    """A site's own icon, fetched from that site only and cached on disk, for
+    showing which sites a search or a page read touched. (bytes, mime) or None.
+    This waits on the network for a site not looked up yet (up to ~20 s); a
+    request from the window uses _icon_now, which doesn't."""
+    known = _favicon_cached(domain)
+    if known is not None:
+        return known or None
+    d = _site_of(domain)
+    os.makedirs(_FAVICON_DIR, exist_ok=True)
+    path = os.path.join(_FAVICON_DIR, d)
+    miss = path + ".miss"
     for url in (f"https://{d}/favicon.ico", f"https://www.{d}/favicon.ico",
                 f"https://{d}/apple-touch-icon.png"):
         try:
@@ -1675,6 +1722,39 @@ def _favicon(domain: str):
     except Exception:
         pass
     open(miss, "w").close()
+    return None
+
+
+# Icons for the window: answered from disk at once; a site or brand not looked up yet
+# answers "none" now and is fetched in the background, so the next ask finds it. At
+# start the window asks for several at once, and each one waiting on the network held
+# one of the browser's six connections for up to 20 s (C20).
+_ICON_JOBS: Dict[Any, Any] = {}
+_ICON_LOCK = threading.Lock()
+_ICON_POOL = None
+
+
+def _icon_now(cached, fetch, arg):
+    icon = cached(arg)
+    if icon is not None:
+        return icon or None
+    global _ICON_POOL
+    key = (getattr(fetch, "__name__", ""), arg)
+    with _ICON_LOCK:
+        if key not in _ICON_JOBS:
+            if _ICON_POOL is None:
+                from concurrent.futures import ThreadPoolExecutor
+                _ICON_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="icon-fetch")
+
+            def run():
+                try:
+                    fetch(arg)
+                except Exception:
+                    pass
+                finally:
+                    with _ICON_LOCK:
+                        _ICON_JOBS.pop(key, None)
+            _ICON_JOBS[key] = _ICON_POOL.submit(run)
     return None
 
 
@@ -1786,6 +1866,7 @@ def _save_settings_locked(d: Dict) -> Dict:
     _env.set("TTS_DEVICE", cur.get("tts_device", "cpu"))
     _env.set("VOICE_SPEED", str(cur.get("voice_speed", 1.0)))
     _env.set("VOICE", cur.get("voice_name", "am_michael"))
+    _apply_server_port(cur.get("server_port"))
     # Mic pick. Every voice session builds its own recorder, so the next one
     # opens the chosen device; a running session keeps its mic until it ends.
     _env.set("VOICE_INPUT_DEVICE", str(cur.get("voice_input_device", -1)))
@@ -1801,7 +1882,7 @@ def _save_settings_locked(d: Dict) -> Dict:
     # very next chat turn uses the new name in system prompt, signatures,
     # and tone rules — no restart needed. Folder rename happens via a
     # separate /api/agent/rename endpoint (it's slow + interrupts the tray).
-    new_agent_name = (cur.get("agent_name") or "JARVIS").strip() or "JARVIS"
+    new_agent_name = (cur.get("agent_name") or __import__("hearth").default_agent_name()).strip() or __import__("hearth").default_agent_name()
     os.environ["HEARTH_PERSONA_NAME"] = new_agent_name
     try:
         from . import persona as _persona
@@ -2717,6 +2798,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import plus as _plus, relay_bridge as _rb
             return self._send_json(200, {**_plus.status(), "relay": bool(_rb.relay_url()), "phones": _rb.phones(),
                                          "pairing": _rb.pairing_status(), "bridge": _bridge_running("relay")})
+        if path == "/api/install-count":
+            # The opt-in install count: whether it is on, and exactly what it sends.
+            from . import install_count
+            return self._send_json(200, {"on": install_count.on(), "payload": install_count.payload()})
         if path == "/api/cards":
             # Where each chat stands, for the Memory tab's "Going on".
             from . import memory_cards
@@ -2897,7 +2982,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "pending":      list(_permission_queues.keys()),
             })
         if path == "/api/settings":
-            return self._send_json(200, _load_settings())
+            # With the name the agent has until the person picks one, for the window's fallbacks.
+            return self._send_json(200, dict(_load_settings(), agent_name_default=__import__("hearth").default_agent_name()))
         if path == "/api/auto_review":
             from . import auto_review
             return self._send_json(200, auto_review.status())
@@ -3019,12 +3105,18 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path in ("/api/favicon", "/api/brand-icon"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             if path == "/api/brand-icon":
-                from .brand_icons import brand_icon
-                icon = brand_icon(q.get("k", [""])[0])
+                from .brand_icons import brand_icon, brand_icon_cached
+                icon = _icon_now(brand_icon_cached, brand_icon, q.get("k", [""])[0])
             else:
-                icon = _favicon(q.get("d", [""])[0])
+                icon = _icon_now(_favicon_cached, _favicon, q.get("d", [""])[0])
             if not icon:
-                return self.send_error(404, "no icon")
+                # Not known yet (being fetched now) or none: the page shows its own stand-in, and
+                # the browser doesn't keep this answer, so the next draw asks again.
+                self.send_response(404)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             data, mime = icon
             self.send_response(200)
             self.send_header("Content-Type", mime)
@@ -4743,7 +4835,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import headless as _hl
             settings = _load_settings()
             saved_url = (settings.get("llm_url") or "").strip()
-            new_base = saved_url or "http://localhost:1234/v1"
+            new_base = saved_url or _local_base()
             LOCAL_API_BASE = new_base
             _hl.LOCAL_API_BASE = new_base
             os.environ["LOCAL_API_BASE"] = new_base
@@ -5146,7 +5238,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         # leading/trailing whitespace funkiness.
         if not _re.match(r"^[A-Za-z0-9 ]{1,20}$", new_name):
             return self._send_json(400, {"error": "name must be 1-20 chars, letters/digits/spaces only"})
-        current_name = (_load_settings().get("agent_name") or "JARVIS").strip() or "JARVIS"
+        current_name = (_load_settings().get("agent_name") or __import__("hearth").default_agent_name()).strip() or __import__("hearth").default_agent_name()
         if new_name == current_name:
             return self._send_json(200, {"ok": True, "noop": True, "name": new_name})
         # Compute target workspace. Use the PARENT of current WORKSPACE so a
@@ -5516,7 +5608,11 @@ class HearthHandler(BaseHTTPRequestHandler):
         live_bus.publish(live_bus.turn_event(chat_id, "window", _live_turn, "start", {"text": prompt}) or {})
         _spoken: Dict[str, Any] = {"turn": None}     # a voice-mode turn: its reply is said in the window's call
 
+        from .waited import Waited
+        _waited = Waited()          # time spent on the person's OK or answer: not part of the turn's duration
+
         def emit(event_type: str, **fields: Any) -> None:
+            fields = _waited.fix(event_type, fields)
             _turn_saw(event_type, fields)
             if _spoken["turn"] is not None:
                 _window_turn_event(_spoken["turn"], event_type, fields)
@@ -5542,7 +5638,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         # blocking until the user clicks an option in the modal.
         try:
             from .tools import set_ask_user_callback
-            set_ask_user_callback(_make_ask_user_bridge(emit))
+            set_ask_user_callback(_waited.timing(_make_ask_user_bridge(emit)))
         except Exception:
             pass
         # Local endpoint with NOTHING loaded: don't let run_once hit a dead
@@ -5581,7 +5677,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         try:
             asyncio.run(run_once(
                 prompt, emit=emit, think=think, think_level=think_level, model=model, history=history,
-                permission_check=_make_permission_check(emit),
+                permission_check=_waited.timing(_make_permission_check(emit)),
                 should_cancel=_CANCEL.is_set, drain_steer=_drain_steer,
                 voice=voice, chat_id=chat_id, prior_failure=str(body.get("prior_failure") or "")[:600],
             ))
@@ -5998,7 +6094,7 @@ def what_to_get(local: bool, voice: bool) -> Dict[str, Any]:
                     gb += sum(int(x.get("size") or 0) for x in llmserver._repo_siblings(repo)) / (1024 ** 3)
                 except Exception:
                     pass
-            items.append({"id": "voice", "title": f"{(_load_settings().get('agent_name') or 'JARVIS')}'s voice and hearing",
+            items.append({"id": "voice", "title": f"{(_load_settings().get('agent_name') or __import__('hearth').default_agent_name())}'s voice and hearing",
                           "sub": "Speaking, and the speech model that turns what you say into text",
                           "size_gb": round(gb, 2) if gb else None})
     return {"items": items}
@@ -6382,6 +6478,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
         claude_brain.set_bridge_url(f"http://127.0.0.1:{server.server_address[1]}")
     except Exception:
         pass
+    live_bus.announce_window(f"http://127.0.0.1:{server.server_address[1]}")
     # Clear write temporaries a killed save left behind, before anything lists
     # the folder and reports one as a conversation.
     for _d in (CONVOS_DIR, os.path.dirname(SETTINGS_PATH) or "."):
@@ -6398,6 +6495,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     # user doesn't have to flip a Start toggle every session. Backgrounded
     # because each spawn waits ~1.6s to fail-fast on a bad token.
     threading.Thread(target=_autostart_bridges, daemon=True).start()
+    try:                                  # the opt-in install count (off unless they said yes)
+        from . import install_count
+        install_count.start()
+    except Exception:
+        pass
     # MCP client: spawn the servers configured in ~/Jarvis/mcp.json and
     # register their tools. Each server runs in its own subprocess; their
     # tools surface as 'mcp_<server>_<tool>' in to_openai_tools(). Safe

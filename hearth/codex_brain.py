@@ -211,7 +211,7 @@ async def _run_exec(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]
     args = build_args(exe, session=session, persona=persona, model=model,
                       effort=effort if effort in offered else "",
                       tier=fast_tier(model) if _base.fast_on(PROVIDER) else "")
-    cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
+    cwd = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
     os.makedirs(cwd, exist_ok=True)
 
     t0 = time.time()
@@ -461,7 +461,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
     effort = _base.chosen_effort()
     offered = next((m["efforts"] for m in models() if m["id"] == model), [])
     tier = fast_tier(model) if _base.fast_on(PROVIDER) else ""
-    cwd = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
+    cwd = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
     os.makedirs(cwd, exist_ok=True)
 
     try:
