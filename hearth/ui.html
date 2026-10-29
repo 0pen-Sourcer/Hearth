@@ -814,11 +814,12 @@
   }
   /* Ready: the mark and its line in the middle, the suggestions down by the box. */
   .chat-body .empty::before { content: ''; flex: 1; }
+  /* As wide as the composer row under it (the chat pads 40px a side, the row 20px), so the rows line up with it. */
   .chat-body .empty .empty-offers { flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
-    gap: 2px; width: min(560px, 100%); }
+    gap: 2px; align-self: stretch; margin: 0 -20px; }
   .chat-body .empty .empty-sub:empty { display: none; }
   .empty-offer { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0;
-    border-radius: 8px; background: transparent; color: var(--fg-dim); font: inherit; font-size: 13.5px;
+    border-radius: 10px; background: transparent; color: var(--fg-dim); font: inherit; font-size: 13.5px;
     text-align: left; cursor: pointer; }
   .empty-offer:hover { background: var(--bg-2); color: var(--fg); }
   .empty-offer .eo-ico { width: 16px; height: 16px; flex: none; color: var(--fg-faint); display: grid; place-items: center; }
