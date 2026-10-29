@@ -1,12 +1,13 @@
-"""A voice call from the phone app (Hearth Plus).
+"""A voice call from the phone app (Inglen Plus).
 
 The phone streams its mic as 16 kHz 16-bit mono frames over the encrypted
 relay. Here they are fed to the same speech recognizer voice mode uses (no PC
 mic involved); each finished sentence becomes a message in the call's chat,
-and the reply is spoken by JARVIS's own voice into frames sent back to the
-phone, as the reply is written, a clause at a time. Talking over JARVIS cuts
-it off on both ends. Steps and approvals reach the call screen as they happen;
-a spoken "yes" approves only what Auto mode would let run anyway.
+and the reply is spoken by the assistant's own voice into frames sent back to
+the phone, as the reply is written, a clause at a time. Talking over it, or a
+tap on the phone, cuts it off on both ends. Steps and approvals reach the call
+screen as they happen; a spoken "yes" approves only what Auto mode would let
+run anyway, and for the rest the phone's Allow button is asked for out loud.
 """
 from __future__ import annotations
 
@@ -14,8 +15,9 @@ import base64
 import re
 import threading
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
+from . import env as _env
 from . import realtime_voice as _rv
 from . import voice as _voice
 
@@ -25,20 +27,49 @@ _SENTENCE = re.compile(r"[.!?]+[\"')\]]*\s|\n\n")
 _CLAUSE = re.compile(r"[,;:]\s")
 FIRST_CLAUSE = 24
 
+TAP_LINE = "That one needs a tap on Allow."
+
+
+def languages() -> List[Dict[str, str]]:
+    """What the call can listen in: detect, or one of the languages its voices speak."""
+    out, seen = [{"code": "", "name": "Detect it"}], set()
+    for code, name in _voice.VOICE_LANG_NAMES.items():
+        short = "zh" if code == "cmn" else code[:2]
+        if short in seen:
+            continue
+        seen.add(short)
+        out.append({"code": short, "name": re.sub(r"\s*\(.*\)$", "", name)})
+    return out
+
+
+def voices() -> List[Dict[str, str]]:
+    """The voices it can answer in, named the way a person reads them ("Emma", "English (UK), female")."""
+    out = []
+    for v in _voice.list_voices():
+        kind = {"f": "female", "m": "male"}.get(v[1:2], "")
+        lang = _voice.VOICE_LANG_NAMES.get(_voice.voice_language(v), "")
+        out.append({"id": v, "name": v.split("_", 1)[-1].capitalize(), "about": ", ".join(x for x in (lang, kind) if x)})
+    return out
+
 
 class Call:
     """One call: a fed voice session, a speaker of its own, and the chat it talks in."""
 
-    def __init__(self, send: Callable[[Dict[str, Any]], None], say: Callable[[str], Any], cid: str = ""):
+    def __init__(self, send: Callable[[Dict[str, Any]], None], say: Callable[[str], Any], cid: str = "",
+                 save: Optional[Callable[[Dict[str, Any]], Any]] = None, ref: str = ""):
         self.send = send              # a frame to the phone
         self.say = say                # a sentence heard from the phone, into the chat as a message
+        self.save = save              # a setting changed in the call, kept where the window keeps it
         self.cid = cid
+        self.ref = ref                # the phone's name for this call, so a late end never ends the next one
         self.lease: Optional[int] = None
         self.speaker = _voice.Speaker(sink=self._sink(), first_chunk=FIRST_CLAUSE)
         self.spoken = 0               # how much of the reply being written has gone to the voice
         self.reply = ""
         self.started = time.time()
         self.ended = False
+        self.ask_id = ""              # the last approval asked in the call
+        self.heard_n = 0              # sentences heard so far: a later one makes an earlier wait moot
         self._lock = threading.Lock()
 
     # ---------------------------------------------------------------- the voice out
@@ -57,6 +88,10 @@ class Call:
     # ---------------------------------------------------------------- lifecycle
     def start(self) -> bool:
         self.send({"type": "call.state", "state": "connecting"})
+        self.send(self.voice_info())
+        return self._listen()
+
+    def _listen(self) -> bool:
         lease = _rv.start_continuous(self._heard, on_caption=self._caption, on_barge=self._barge,
                                      on_ready=self._ready, on_error=self._error,
                                      speaker=self.speaker, fed=True)
@@ -73,7 +108,35 @@ class Call:
         self.speaker.stop()
         if self.lease is not None:
             _rv.stop_continuous(self.lease)
-        self.send({"type": "call.ended", "seconds": int(time.time() - self.started)})
+        self.send({"type": "call.ended", "seconds": int(time.time() - self.started), **({"ref": self.ref} if self.ref else {})})
+
+    # ---------------------------------------------------------------- settings
+    def voice_info(self) -> Dict[str, Any]:
+        return {"type": "call.voice", "voice": _voice.current_voice(), "voices": voices(),
+                "language": (_env.get("STT_LANGUAGE", "") or "").strip().lower(), "languages": languages()}
+
+    def set(self, voice: Optional[str] = None, language: Optional[str] = None) -> None:
+        """The voice it answers in or the language it listens in, changed from the call."""
+        changed: Dict[str, Any] = {}
+        if voice and voice in _voice.list_voices() and voice != _voice.current_voice():
+            _voice.set_default_voice(voice)
+            _env.set("VOICE", voice)
+            changed["voice_name"] = voice
+        codes = {x["code"] for x in languages()}
+        if language is not None and language in codes and language != (_env.get("STT_LANGUAGE", "") or "").strip().lower():
+            _env.set("STT_LANGUAGE", language)
+            changed["stt_language"] = language
+        if changed and self.save is not None:
+            try:
+                self.save(changed)
+            except Exception:
+                pass
+        self.send(self.voice_info())
+        if "stt_language" in changed and self.lease is not None and not self.ended:
+            # The recognizer is built for one language: listen again in the new one.
+            _rv.stop_continuous(self.lease)
+            self.send({"type": "call.state", "state": "connecting"})
+            self._listen()
 
     # ---------------------------------------------------------------- the voice in
     def up(self, data: str, rate: int = 16000) -> None:
@@ -96,9 +159,20 @@ class Call:
         self.send({"type": "call.partial", "text": text})
 
     def _barge(self) -> None:
-        """They talked over JARVIS: stop speaking here and on the phone."""
+        """They talked over it: stop speaking here and on the phone."""
         self.speaker.stop()
         self.send({"type": "call.state", "state": "listening"})
+
+    def hush(self) -> None:
+        """The orb tapped on the phone: stop talking, keep the turn and the call."""
+        self.speaker.stop()                     # the rest of this reply stays unsaid; its text still shows
+        self.send({"type": "call.state", "state": "listening"})
+
+    def begin(self) -> None:
+        """A turn starts in the call's chat (said, or typed during the call): its reply is spoken."""
+        with self._lock:
+            self.spoken, self.reply = 0, ""
+        self.speaker.reset_abort()
 
     def _heard(self, text: str) -> None:
         text = (text or "").strip()
@@ -106,13 +180,26 @@ class Call:
             return
         with self._lock:
             self.spoken, self.reply = 0, ""
+            self.heard_n += 1
         self.speaker.reset_abort()
         self.send({"type": "call.heard", "text": text})
-        self.send({"type": "call.state", "state": "thinking"})
         try:
-            self.say(text)
+            got = self.say(text)
         except Exception as e:
-            self.send({"type": "call.error", "detail": f"That didn't reach {type(e).__name__}"})
+            self.send({"type": "call.error", "detail": f"That didn't reach the PC ({type(e).__name__})"})
+            return
+        if got == "needs_tap":
+            # Said yes to something only the button may allow: ask for the tap, out loud.
+            self.send({"type": "call.state", "state": "asking", "tap": True, "again": True, "ask": self.ask_id})
+            self._speak(TAP_LINE)
+            self._settle()
+            return
+        if got == "answered":
+            from .channel_core import _YES
+            # The card on the phone and the question in the chat both show the answer.
+            self.send({"type": "asked", "ask": self.ask_id, "yes": bool(_YES.match(text)),
+                       **({"c": self.cid} if self.cid else {})})
+        self.send({"type": "call.state", "state": "thinking"})
 
     # ---------------------------------------------------------------- the reply, as it is written
     def live(self, text: str) -> None:
@@ -137,7 +224,7 @@ class Call:
                     self._speak(piece)
 
     def done(self, text: str) -> None:
-        """The finished reply: speak what is left of it."""
+        """The finished reply: speak what is left of it, then listen again."""
         with self._lock:
             full = text or self.reply
             rest = full[self.spoken:].strip() if full.startswith(self.reply[:self.spoken]) else ""
@@ -145,14 +232,33 @@ class Call:
             self.reply = ""
         if rest:
             self._speak(rest)
+        self._settle()
+
+    def _settle(self) -> None:
+        """Back to listening once everything said has been played on the phone,
+        unless something new was heard meanwhile."""
+        n = self.heard_n
+
+        def wait():
+            idle = 0
+            while not self.ended and idle < 2:
+                idle = 0 if self.speaker.busy() else idle + 1
+                time.sleep(0.1)
+            if not self.ended and n == self.heard_n:
+                self.send({"type": "call.state", "state": "listening"})
+        threading.Thread(target=wait, daemon=True, name="call-settle").start()
 
     def step(self, words: str) -> None:
         self.send({"type": "call.state", "state": "step", "words": words})
 
-    def ask(self, question: str) -> None:
-        """An approval: shown on the call screen and said aloud."""
-        self.send({"type": "call.state", "state": "asking", "words": question})
-        self._speak(question)
+    def ask(self, question: str, tap: bool = False, aid: str = "") -> None:
+        """An approval: shown on the call screen and said aloud. For one only a tap
+        may allow, it says so, so the person isn't left saying yes to nothing."""
+        self.ask_id = aid
+        self.speaker.reset_abort()              # asked even after the reply before it was cut
+        self.send({"type": "call.state", "state": "asking", "words": question, "tap": bool(tap), "ask": aid})
+        self._speak(question + (" " + TAP_LINE if tap else ""))
+        self._settle()
 
     def _speak(self, text: str) -> None:
         self.send({"type": "call.state", "state": "speaking"})

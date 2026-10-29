@@ -157,6 +157,7 @@ def forget_phone(pid: str) -> Dict[str, Any]:
 # minute is 30 billed requests.
 LIVE_EVERY = 0.1
 THINK_EVERY = 0.25
+CALL_AWAY_S = 20                    # how long a call waits for a phone that dropped off
 PART = 150_000
 ICONS_WAIT_S = 8.0              # an icons answer waits this long; the rest go in "later"
 
@@ -847,6 +848,7 @@ class Relay(cc.Adapter):
         self._later: Dict[str, threading.Timer] = {}
         self.asks: Dict[str, str] = {}         # chat -> the id of the question waiting there
         self._told: List[str] = []             # turns whose finish a notification has said
+        self.hub: Optional[cc.Hub] = None      # the hub answering here, for what a question needs
 
     def notify(self, chat: str, obj: Dict[str, Any], urgent: bool = False) -> None:
         """A notification for the phone while the app isn't on screen: sealed for
@@ -908,14 +910,24 @@ class Relay(cc.Adapter):
     def edit(self, chat, msg_id, text):
         return self._push(chat, {"type": "edit", "of": msg_id, "text": text}) is not None
 
+    def _needs_tap(self, chat, c) -> bool:
+        """Whether the question being asked now may only be allowed with a tap (not a spoken yes)."""
+        hub = self.hub
+        if hub is None:
+            return False
+        with hub._lock:
+            run = hub._busy.get(c) or hub._busy.get(str(chat)) or {}
+            return bool(run.get("tap"))
+
     def ask(self, chat, text):
-        call = self._call_for(chat)
-        if call is not None:
-            call.ask(text)
         # The question's own id: an answer from a notification counts only for it.
         aid, c = secrets.token_hex(8), cc.turn_context().get("c", "")
         self.asks[c or str(chat)] = aid
-        mid = self._push(chat, {"type": "ask", "text": text, "ask": aid})
+        tap = self._needs_tap(chat, c)
+        call = self._call_for(chat)
+        if call is not None:
+            call.ask(text, tap=tap, aid=aid)
+        mid = self._push(chat, {"type": "ask", "text": text, "ask": aid, **({"tap": True} if tap else {})})
         from . import persona
         self.notify(chat, {"kind": "ask", "title": f"{persona.NAME} asks", "body": text, "c": c, "ask": aid}, urgent=True)
         return mid
@@ -929,6 +941,9 @@ class Relay(cc.Adapter):
             self._push(chat, {"type": "file", **c})
 
     def typing(self, chat):
+        call = self._call_for(chat)
+        if call is not None:
+            call.begin()                    # a turn in the call's chat, said or typed: its reply is spoken
         self._push(chat, {"type": "typing"})
 
     step_detail = True                  # steps carry what they ran, and their output follows
@@ -1025,6 +1040,7 @@ class Room:
         self.lookups: set = set()
         self.seen_boxes: set = set()          # answers from notifications already taken
         self.call = None                      # a voice call from the phone, while one is on
+        self.call_gone_told = False
 
     @property
     def chat(self) -> str:
@@ -1075,6 +1091,9 @@ class Room:
             self.peer_up = bool(f.get("up"))
             if not self.peer_up:
                 self.chan = None
+                if self.call is not None:
+                    # A phone that drops mid-call has a while to come back before the call ends.
+                    asyncio.get_running_loop().call_later(CALL_AWAY_S, self._call_gone, self.call)
             return
         if t == "pair":                       # a phone that scanned the code
             phone = R.unb64(f.get("phone") or "")
@@ -1128,29 +1147,57 @@ class Room:
 
     def on_call(self, m: Dict[str, Any]) -> None:
         """A call from the phone: its audio frames, its start and its end."""
+        # Runs on the connection's loop: anything that sends (and so waits on this loop) goes to a thread.
         kind = m.get("type")
+        call = self.call
         if kind == "call.up":
-            if self.call is not None:
-                self.call.up(str(m.get("data") or ""), int(m.get("rate") or 16000))
+            if call is not None:
+                call.up(str(m.get("data") or ""), int(m.get("rate") or 16000))
+            elif not self.call_gone_told:
+                # A phone still talking into a call that ended here (it was away too long): say so once.
+                self.call_gone_told = True
+                asyncio.ensure_future(self.deliver({"type": "call.ended", "gone": True, "id": secrets.token_hex(6)}))
             return
         if kind == "call.start":
-            if self.call is not None and not self.call.ended:
-                self.call.end()
+            if call is not None and not call.ended:
+                threading.Thread(target=call.end, daemon=True).start()
             from .call import Call
             adapter, chat = self.bridge.adapter, self.chat
             cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
 
             def send(obj):
-                adapter._push(chat, obj)
+                # Only to a phone that is there: call frames never wait in the mailbox.
+                if self.peer_up and self.chan is not None:
+                    adapter._push(chat, obj)
 
             def say(text):
                 return self.bridge.hub.receive(chat, "phone", text, name="Phone", cid=cid, spoken=True)
 
-            self.call = Call(send, say, cid=cid)
+            def save(changed):
+                return _window("POST", "/api/settings", changed)
+
+            self.call = Call(send, say, cid=cid, save=save, ref=str(m.get("ref") or "")[:40])
+            self.call_gone_told = False
             threading.Thread(target=self.call.start, daemon=True, name="relay-call").start()
             return
-        if kind == "call.end" and self.call is not None:
-            call, self.call = self.call, None
+        if call is None:
+            return
+        if kind == "call.end":
+            self.call = None
+            threading.Thread(target=call.end, daemon=True).start()
+        elif kind == "call.hush":
+            threading.Thread(target=call.hush, daemon=True).start()
+        elif kind == "call.set":
+            voice = m.get("voice")
+            lang = m.get("language")
+            threading.Thread(target=call.set, args=(str(voice) if voice else None,
+                                                    str(lang) if lang is not None else None),
+                             daemon=True).start()
+
+    def _call_gone(self, call) -> None:
+        """The phone left mid-call and hasn't come back: the call ends here."""
+        if self.call is call and not self.peer_up:
+            self.call = None
             threading.Thread(target=call.end, daemon=True).start()
 
     async def tell_paired(self) -> None:
@@ -1168,6 +1215,7 @@ class Bridge:
         self.loop = asyncio.new_event_loop()
         self.adapter = Relay(self.loop)
         self.hub = cc.Hub(self.adapter, configured_senders=["phone"])
+        self.adapter.hub = self.hub
         self.rooms: Dict[str, Room] = {}
         self._mirrored: Dict[str, str] = {}                 # a window turn -> its text so far, for the phones
         self._said: Dict[str, List[str]] = {}
