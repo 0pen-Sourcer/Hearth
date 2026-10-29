@@ -102,8 +102,10 @@ var CallAudio = (function () {
 
     // The microphone, echo cancelled. Throws when it isn't allowed or isn't there.
     A.mic = async (deviceId) => {
-      A.stream = await navigator.mediaDevices.getUserMedia(constraints(deviceId));
-      return A.stream;
+      const s = await navigator.mediaDevices.getUserMedia(constraints(deviceId));
+      if (A.closed) { s.getTracks().forEach(t => t.stop()); throw new Error('ended'); }
+      A.stream = s;
+      return s;
     };
 
     // Where the PC's voice plays: the loop where the browser has it, else straight out.
@@ -118,6 +120,9 @@ var CallAudio = (function () {
         A.gain.connect(dest);
         try { A.loop = await loopback(dest.stream, el); A.aec = true; }
         catch { A.gain.disconnect(dest); A.loop = null; }
+        if (A.closed && A.loop) {                     // the call ended while the loop was connecting
+          try { A.loop.a.close(); A.loop.b.close(); } catch {} A.loop.el.srcObject = null;
+        }
       }
       if (!A.aec) A.gain.connect(ctx.destination);     // no loop: it plays, and headphones keep it out of the mic
     };
@@ -145,6 +150,7 @@ var CallAudio = (function () {
       }
       A.src.connect(node); node.connect(quiet);
       A.node = node;
+      if (A.closed) try { node.disconnect(); } catch {}   // ended while the worklet was loading
     };
 
     // Another microphone (or the same one again, after it stopped), without ending the call.
@@ -190,14 +196,16 @@ var CallAudio = (function () {
     A.ended = () => !!A.stream && A.stream.getAudioTracks().some(t => t.readyState === 'ended');
     A.label = () => { const t = A.stream && A.stream.getAudioTracks()[0]; return t ? t.label : ''; };
 
-    A.close = () => {
+    // The mic, the loop and what is playing go; with keepCtx the context stays for
+    // the caller to play a last sound on (straight out) and close itself.
+    A.close = (keepCtx) => {
       if (A.closed) return;
       A.closed = true;
       A.flush();
       try { A.stream && A.stream.getTracks().forEach(t => t.stop()); } catch {}
       try { A.node && A.node.disconnect(); } catch {}
       if (A.loop) { try { A.loop.a.close(); A.loop.b.close(); } catch {} A.loop.el.srcObject = null; }
-      try { A.ctx.close(); } catch {}
+      if (!keepCtx) try { A.ctx.close(); } catch {}
     };
     return A;
   }

@@ -17322,7 +17322,9 @@ async function startWindowCall(A) {
     const note = await winCallMic(A, mic.name, mic.not_mics);
     if (note) toast('Mic fell back to default', note, 'warn', 8000);
   } catch (e) {
+    const left = winCall !== c || !voiceModeOn;        // voice mode was left while the mic opened
     winCallStop(c);
+    if (left) return false;
     if (e.why) { _rtFailed = true; setVoiceStatus(e.why); toast("Voice didn't start", e.why, 'err', 6000, true); return false; }
     // The window lets its own page use the mic, so a refusal here is the system's own switch.
     if (e && ['NotAllowedError', 'NotReadableError', 'SecurityError'].includes(e.name)) {
