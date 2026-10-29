@@ -198,6 +198,20 @@ class Joiner:
 
 # ---------------------------------------------------------------- what the phone asks for
 
+def _pictures(got: Dict[str, Any]) -> Dict[str, Any]:
+    """A picture a step looked at (Codex's view_image, Claude Code reading a .png) as a
+    card the phone shows and opens; the path alone showed only "Looked at an image"."""
+    from . import relay_media
+    for msg in got.get("messages") or []:
+        for st in list(msg.get("steps") or []) + [x for p in msg.get("parts") or [] for x in p.get("steps") or []]:
+            path = st.pop("img", "") if isinstance(st, dict) else ""
+            if path and "file" not in st:
+                c = relay_media.card(path)
+                if c is not None:
+                    st["file"] = c
+    return got
+
+
 def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     """The phone's question about this PC, answered: the chat list ("chats"), one
     chat's messages ("open"), the helpers ("team"), or the look ("look")."""
@@ -230,7 +244,7 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
         from . import agent_sessions
         if agent_sessions.parse_chat(cid):
-            return agent_sessions.transcript(cid, int(m.get("last") or 60))
+            return _pictures(agent_sessions.transcript(cid, int(m.get("last") or 60)))
         d = chat_sync.load(cid) or {}
         msgs = []
         for x in d.get("messages") or []:

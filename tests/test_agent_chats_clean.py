@@ -87,6 +87,7 @@ write(os.path.join(CX, "rollout-e-55555555-5555-5555-5555-555555555555.jsonl"),
       {"timestamp": T, "type": "response_item", "payload": {"type": "function_call_output", "call_id": "c2",
                                                              "output": json.dumps({"output": "12 passing", "metadata": {}})}},
       call("update_plan", arguments=json.dumps({"plan": []})),
+      call("view_image", arguments=json.dumps({"path": os.path.join(GAME, "menu.png")})),
       call("write_stdin", arguments=json.dumps({"chars": "y"})),
       said("The menu reloads on every focus. Fixing that."),
       call("apply_patch", arguments=json.dumps({"path": "menu.gd"})),
@@ -127,9 +128,19 @@ check(f"a reply keeps its steps and words in the order they came {order}",
       [k for k, _ in order] == ["steps", "text", "steps", "text"])
 first = order[0][1]
 check(f"a code-mode script says what it ran, a PowerShell command is the command, bookkeeping isn't a step {first}",
-      first == ["Ran git status --short", "Ran npm test", "Updated its plan"])
+      first == ["Ran git status --short", "Ran npm test", "Updated its plan", "Looked at an image"])
+pic = next(s for s in reply["steps"] if s["w"] == "Looked at an image")
+check(f"a picture Codex looked at keeps its path, for the phone to show ({pic.get('img')!r})",
+      pic.get("img") == os.path.join(GAME, "menu.png"))
+from PIL import Image as _Img                                        # noqa: E402
+_Img.new("RGB", (40, 30)).save(os.path.join(GAME, "menu.png"))
+from hearth import relay_bridge as _RB                                # noqa: E402
+sent = _RB._pictures(S.transcript("as_codex_55555555-5555-5555-5555-555555555555", 60))
+shown = [st for m in sent["messages"] for st in m.get("steps") or [] if st.get("file")]
+check(f"the phone gets it as a picture it can open ({[st['file'].get('kind') for st in shown]})",
+      shown and shown[0]["file"]["kind"] == "image" and shown[0]["file"]["thumb"] and "img" not in shown[0])
 check("the whole text and steps stay for copying and older phones",
-      reply["text"].startswith("The menu reloads") and len(reply["steps"]) == 4)
+      reply["text"].startswith("The menu reloads") and len(reply["steps"]) == 5)
 err = [m for m in cx if m.get("error")]
 check(f"Codex's error is a message of its own, marked as one {[m['text'] for m in err]}",
       len(err) == 1 and "usage limit" in err[0]["text"])
