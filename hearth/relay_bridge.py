@@ -228,6 +228,9 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         # One part of a file the PC carded: the phone fetches a file when it is opened.
         from . import relay_media
         return relay_media.chunk(str(m.get("media") or ""), int(m.get("offset") or 0), int(m.get("length") or 0))
+    if what == "call_me":
+        from . import call_me
+        return call_me.view()
     if what == "changes":
         # File changes the agent made, newest first, for the phone's Recent changes (hearth/undo.py).
         from . import undo as _undo
@@ -833,6 +836,14 @@ class AgentWatch:
         return {"kind": "done", "title": who, "body": f"{what}: {' '.join(text.split())[:200]}", "c": r["chat"]}
 
 
+CALL_NOTE = ("This is a voice call from their phone: your reply is spoken aloud as you write it, so keep it "
+             "short and conversational, with no lists, tables, links or code. When they say goodbye, say a short "
+             "goodbye and then call end_session, which hangs up the call.")
+
+
+CALL_QUIET_S = 30          # nothing from the phone this long (no mic, no heartbeat): the call ends
+
+
 class Relay(cc.Adapter):
     """Sends go out as encrypted frames on the phone's live connection, or to
     its mailbox on the server when it's away."""
@@ -847,6 +858,7 @@ class Relay(cc.Adapter):
         self._latest: Dict[str, str] = {}      # "live:<turn>" -> the newest text, for a send that is waiting
         self._later: Dict[str, threading.Timer] = {}
         self.asks: Dict[str, str] = {}         # chat -> the id of the question waiting there
+        self.asked: Dict[str, Dict[str, Any]] = {}  # question id -> when, where and what it asked
         self._told: List[str] = []             # turns whose finish a notification has said
         self.hub: Optional[cc.Hub] = None      # the hub answering here, for what a question needs
 
@@ -924,6 +936,10 @@ class Relay(cc.Adapter):
         aid, c = secrets.token_hex(8), cc.turn_context().get("c", "")
         self.asks[c or str(chat)] = aid
         tap = self._needs_tap(chat, c)
+        self.asked[aid] = {"at": time.time(), "key": c or str(chat), "c": c, "chat": str(chat), "text": text, "tap": tap}
+        if len(self.asked) > 100:
+            for k in list(self.asked)[:50]:
+                self.asked.pop(k, None)
         call = self._call_for(chat)
         if call is not None:
             call.ask(text, tap=tap, aid=aid)
@@ -953,8 +969,19 @@ class Relay(cc.Adapter):
         the site it reaches (for that site's icon) and what it ran (for the step's detail)."""
         call = self._call_for(chat)
         if call is not None:
+            if tool == "end_session":
+                call.hang_up()                  # its goodbye is said, then the call ends
+                return
             call.step(words)
         self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site, **({"cmd": cmd} if cmd else {})})
+
+    def call_note(self, chat, cid: str = "") -> str:
+        """What a turn in a call's chat is told: it is talking, not writing."""
+        room = self.rooms.get(str(chat))
+        call = getattr(room, "call", None) if room is not None else None
+        if call is None or call.ended or (cid and call.cid and cid != call.cid):
+            return ""
+        return CALL_NOTE
 
     def step_out(self, chat, out):
         """What the step before it gave back, cut short, for the step's detail on the phone."""
@@ -1041,6 +1068,7 @@ class Room:
         self.seen_boxes: set = set()          # answers from notifications already taken
         self.call = None                      # a voice call from the phone, while one is on
         self.call_gone_told = False
+        self.call_heard = 0.0                 # when the phone last said anything about the call
 
     @property
     def chat(self) -> str:
@@ -1129,6 +1157,8 @@ class Room:
             m = R.open_box(self.box_key(), f, self.seen_boxes)
             if m and m.get("type") == "answer":
                 await asyncio.to_thread(self.bridge.on_answer, self, m)
+            elif m and m.get("type") == "call.decline":
+                await asyncio.to_thread(self.bridge.decline, str(m.get("ring") or ""))
             return
         if t == "msg" and self.chan is not None:
             m = self.chan.open(f)
@@ -1150,20 +1180,26 @@ class Room:
         # Runs on the connection's loop: anything that sends (and so waits on this loop) goes to a thread.
         kind = m.get("type")
         call = self.call
-        if kind == "call.up":
+        self.call_heard = time.time()
+        if kind in ("call.up", "call.alive"):
             if call is not None:
-                call.up(str(m.get("data") or ""), int(m.get("rate") or 16000))
+                if kind == "call.up":
+                    call.up(str(m.get("data") or ""), int(m.get("rate") or 16000))
             elif not self.call_gone_told:
                 # A phone still talking into a call that ended here (it was away too long): say so once.
                 self.call_gone_told = True
                 asyncio.ensure_future(self.deliver({"type": "call.ended", "gone": True, "id": secrets.token_hex(6)}))
             return
+        if kind == "call.decline":
+            threading.Thread(target=self.bridge.decline, args=(str(m.get("ring") or ""),), daemon=True).start()
+            return
         if kind == "call.start":
             if call is not None and not call.ended:
-                threading.Thread(target=call.end, daemon=True).start()
+                threading.Thread(target=call.end, args=("pc",), daemon=True).start()
             from .call import Call
             adapter, chat = self.bridge.adapter, self.chat
             cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
+            ring = self.bridge.answered(str(m.get("ring") or "")) if m.get("ring") else None
 
             def send(obj):
                 # Only to a phone that is there: call frames never wait in the mailbox.
@@ -1176,9 +1212,22 @@ class Room:
             def save(changed):
                 return _window("POST", "/api/settings", changed)
 
-            self.call = Call(send, say, cid=cid, save=save, ref=str(m.get("ref") or "")[:40])
+            def post(text):
+                # What it says first when it called: kept in the chat, so the model knows why it called.
+                from . import chat_sync
+                chat_sync.post(cid, "Call", "relay", [{"role": "assistant", "content": text, "via": "call",
+                                                       "at": int(time.time() * 1000)}])
+                prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), {"c": cid, "t": secrets.token_hex(5)}
+                try:
+                    send({"type": "text", "text": text})
+                finally:
+                    cc._TURN.ctx = prev
+
+            self.call = Call(send, say, cid=cid, save=save, ref=str(m.get("ref") or "")[:40],
+                             opener=ring, post=post if ring and cid else None)
             self.call_gone_told = False
             threading.Thread(target=self.call.start, daemon=True, name="relay-call").start()
+            threading.Thread(target=self._keep_hearing, args=(self.call,), daemon=True, name="relay-call-beat").start()
             return
         if call is None:
             return
@@ -1194,11 +1243,20 @@ class Room:
                                                     str(lang) if lang is not None else None),
                              daemon=True).start()
 
+    def _keep_hearing(self, call) -> None:
+        """A phone that goes quiet (frozen, killed, out of signal without the socket noticing)
+        stops sending its mic and its heartbeat: the call ends here instead of staying half open."""
+        while self.call is call and not call.ended:
+            time.sleep(1.0)
+            if self.call is call and time.time() - self.call_heard > CALL_QUIET_S:
+                self.call = None
+                call.end("pc")
+
     def _call_gone(self, call) -> None:
         """The phone left mid-call and hasn't come back: the call ends here."""
         if self.call is call and not self.peer_up:
             self.call = None
-            threading.Thread(target=call.end, daemon=True).start()
+            threading.Thread(target=call.end, args=("pc",), daemon=True).start()
 
     async def tell_paired(self) -> None:
         if self.ws is not None:
@@ -1220,6 +1278,10 @@ class Bridge:
         self._mirrored: Dict[str, str] = {}                 # a window turn -> its text so far, for the phones
         self._said: Dict[str, List[str]] = {}
         self.agent_runs: Dict[str, Dict[str, Any]] = {}     # session chat -> its run, while an agent answers
+        from . import call_me
+        self.rings = call_me.Rings()                        # the agent calling the phone by itself
+        self._ring_timer: Optional[threading.Timer] = None
+        self._rang: Dict[str, Dict[str, Any]] = {}          # ring id -> the ring, kept a while after it stops
 
     def wanted(self) -> Dict[str, Dict[str, Any]]:
         """room -> {ps, phone}: every paired phone's room, and a pairing in progress."""
@@ -1423,6 +1485,103 @@ class Bridge:
                     self.rooms.pop(room, None)
             await asyncio.sleep(1.0)
 
+    # ---------------------------------------------------------------- calling the phone
+    def _phones(self) -> List["Room"]:
+        return [r for r in list(self.adapter.rooms.values()) if getattr(r, "phone", None)]
+
+    def ring(self, ev: Dict[str, Any]) -> Optional[str]:
+        """Call the paired phones (call_me said this reason may): a notification with Answer and
+        Decline, and the incoming call on the app's own screen where it is open. The ring id, or None."""
+        from . import call_me
+        rooms = self._phones()
+        if not rooms or any(r.call is not None and not r.call.ended for r in rooms):
+            return None
+        rid = secrets.token_hex(6)
+        ev = dict(ev, c=ev.get("c") or "call_" + secrets.token_hex(6))
+        got = self.rings.start(ev, rid)
+        if got is None:
+            return None
+        self._rang[rid] = got
+        if len(self._rang) > 20:
+            self._rang.pop(next(iter(self._rang)), None)
+        name = call_me.agent_name()
+        frame = {"type": "call.ring", "ring": rid, "why": got["why"], "c": got["c"], "name": name,
+                 "for_s": call_me.RING_S}
+        note = {"kind": "ring", "title": f"{name} is calling", "body": got["why"], "c": got["c"], "ring": rid}
+        prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+        try:
+            for r in rooms:
+                if r.peer_up and r.chan is not None:
+                    self.adapter._push(r.chat, frame)      # never kept in the mailbox: a ring is now or never
+                self.adapter.notify(r.chat, note, urgent=True)
+        finally:
+            cc._TURN.ctx = prev
+        t = threading.Timer(call_me.RING_S, self._missed, args=(rid,))
+        t.daemon = True
+        self._ring_timer = t
+        t.start()
+        print(f"[relay] calling the phone: {got['reason']}", flush=True)
+        return rid
+
+    def _stopped(self, ring: Dict[str, Any], missed: bool) -> None:
+        from . import call_me
+        name = call_me.agent_name()
+        prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+        try:
+            for r in self._phones():
+                if r.peer_up and r.chan is not None:
+                    self.adapter._push(r.chat, {"type": "call.unring", "ring": ring["id"], "missed": missed})
+                if missed:
+                    # Takes the ringing notification's place: a plain one that opens the chat.
+                    self.adapter.notify(r.chat, {"kind": "missed", "title": f"Missed call from {name}",
+                                                 "body": ring.get("why") or "", "c": ring.get("c") or "",
+                                                 "ring": ring["id"]})
+        finally:
+            cc._TURN.ctx = prev
+
+    def _missed(self, rid: str) -> None:
+        ring = self.rings.drop(rid)
+        if ring is not None:
+            self._stopped(ring, missed=True)
+
+    def decline(self, rid: str) -> None:
+        ring = self.rings.drop(rid)
+        if ring is not None:
+            if self._ring_timer is not None:
+                self._ring_timer.cancel()
+            self._stopped(ring, missed=False)
+
+    def answered(self, rid: str) -> Optional[Dict[str, Any]]:
+        """The ring a call from the phone answers (also one that just went unanswered), for what it says first."""
+        ring = self.rings.take(rid)
+        if ring is not None and self._ring_timer is not None:
+            self._ring_timer.cancel()
+        return ring or self._rang.get(rid)
+
+    def watch_questions(self) -> None:
+        while not self.stopping:
+            time.sleep(10)
+            try:
+                self.check_questions()
+            except Exception:
+                continue
+
+    def check_questions(self, idle: Optional[float] = None) -> None:
+        """A question that has waited for an answer longer than the set minutes calls the phone."""
+        from . import call_me
+        waiting = [(aid, q) for aid, q in list(self.adapter.asked.items())
+                   if self.adapter.asks.get(q["key"]) == aid and not q.get("rang")]
+        if not waiting:
+            return
+        r = call_me.rules()
+        for aid, q in waiting:
+            if not call_me.question_due(q["at"], r):
+                continue
+            ev = call_me.want("question", q["text"], chat=q["c"] or q["key"], ask=aid, tap=q["tap"],
+                              key="question:" + aid, r=r, idle=idle)
+            if ev is not None and self.ring(ev):
+                q["rang"] = True
+
     def watch_agents(self) -> None:
         """Tell the phone when a coding agent finishes on the PC, as Shed does: Codex
         or Claude Code run in their own window, not through the phone, still reach it."""
@@ -1439,6 +1598,14 @@ class Bridge:
             for n in notes:
                 for chat in list(self.adapter.rooms):     # each paired phone
                     self.adapter.notify(chat, n)
+                try:
+                    from . import call_me
+                    ev = call_me.want("job", f"{n.get('title') or 'An agent'} {'has a question' if n.get('kind') == 'ask' else 'finished'}: "
+                                             f"{n.get('body') or ''}", key="agent:" + str(n.get("c") or "") + str(n.get("body") or "")[:60])
+                    if ev is not None:
+                        self.ring(ev)
+                except Exception:
+                    pass
             # A session open on a phone shows what its agent wrote since, without reopening it.
             for c in watch.moved:
                 if c in self.agent_runs:
@@ -1466,6 +1633,12 @@ class Bridge:
         if not phones:
             return
         kind = ev.get("kind")
+        if kind == "call_me":
+            from . import call_me
+            # Checked again here: the rules may have changed since it was asked for.
+            if call_me.may_call(str(ev.get("reason") or ""))[0]:
+                threading.Thread(target=self.ring, args=(ev,), daemon=True, name="relay-ring").start()
+            return
         out: Optional[Dict[str, Any]] = None
         if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):
             _BRAIN_CACHE.clear()                  # the phone's next look at the brain reads it fresh
@@ -1534,6 +1707,7 @@ class Bridge:
         asyncio.set_event_loop(self.loop)
         threading.Thread(target=self.watch_agents, daemon=True, name="relay-agent-watch").start()
         threading.Thread(target=self.follow_window, daemon=True, name="relay-follow-window").start()
+        threading.Thread(target=self.watch_questions, daemon=True, name="relay-question-watch").start()
         try:
             self.loop.run_until_complete(self.keep_rooms())
         except KeyboardInterrupt:

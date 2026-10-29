@@ -1572,6 +1572,8 @@ def _load_settings() -> Dict:
         # via Settings → Behavior or the Detect button.
         "forge_dir": "",
     }
+    from .call_me import DEFAULTS as _call_me   # whether and why the agent may call the phone
+    defaults.update(_call_me)
     if not os.path.isfile(SETTINGS_PATH):
         return defaults
     try:

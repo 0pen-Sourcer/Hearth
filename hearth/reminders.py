@@ -918,6 +918,14 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
             deliver(r, note)
         except Exception:
             pass
+        # Due now (not one missed while Inglen was closed): a call, when they allowed calls for reminders.
+        if not missed:
+            try:
+                from . import call_me
+                call_me.request("reminder", r.get("what", "") or "Reminder", chat=chat_id_for(r),
+                                key="reminder:" + str(r.get("id") or "") + ":" + str(r.get("due_iso") or ""))
+            except Exception:
+                pass
 
     def _loop():
         # The first pass catches up on what came due while Hearth was off and
