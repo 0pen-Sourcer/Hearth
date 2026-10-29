@@ -75,7 +75,10 @@ seen = {}
 
 
 async def model(prompt, *, emit, permission_check=None, **k):
+    emit("assistant_chunk", content="Taking one now. ")
     emit("tool_call", name="take_screenshot", args={})
+    time.sleep(0.05)
+    emit("tool_result", name="take_screenshot", content=f"Saved the screenshot: {SHOT} (2560x1440).")
     # A tool runs on a thread of its own, as headless runs them.
     seen["tool"] = await asyncio.to_thread(lambda: dict(cc.turn_context()))
     seen["allow"] = await asyncio.to_thread(permission_check, "send_to_phone", {"path": SHOT})
@@ -107,6 +110,12 @@ check("with its message", any(o["kind"] == "text" and o["text"] == "Here it is."
 q = [o["text"] for o in app.out if o["kind"] == "ask"]
 check(f"the question says the step in words, not the tool's name {q}",
       q and q[0].startswith("Before I go on: may I move shot.png to D:/x?") and "move_path" not in q[0])
+from hearth import chat_sync  # noqa: E402
+saved = (chat_sync.load(cc.chat_id_for(app.name, "me")) or {}).get("messages") or []
+ev = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "tool"] if saved else []
+check(f"the window gets each step with what came back, how long and where it was in the reply ({ev[:1]})",
+      ev and ev[0]["name"] == "take_screenshot" and "Saved the screenshot" in ev[0]["result"]
+      and ev[0]["ms"] >= 40 and ev[0]["pos"] == len("Taking one now. ") and not any(k.startswith("_") for k in ev[0]))
 check("send_to_phone in plain words", cc._what("send_to_phone", {"message": "Relay test"}) == 'send this to your phone: "Relay test"')
 
 check("from the window (no app turn), it still asks", tools.mode_allows("send_to_phone", {"message": "x"}) is False)

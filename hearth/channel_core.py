@@ -405,6 +405,11 @@ class Hub:
         primer = bridge_status.channel_primer(self.a.label)
         parts: List[str] = []
         tools_used: List[Any] = []
+        # Each step as the window keeps its own: what came back, how long, and where in
+        # the reply it happened. Kept with only name and args, a phone turn's steps opened
+        # empty in the window and all sat above the reply.
+        steps_kept: List[Dict[str, Any]] = []
+        so_far = {"n": 0}                   # letters of the reply written so far, for a step's place in it
         status = {"id": None, "last": 0.0}
         err = {"cat": None, "msg": None}
         try:
@@ -471,7 +476,24 @@ class Hub:
                     self.a.step_out(chat, out_of(kw.get("content")))
                 except Exception:
                     pass
-            elif kind == "tool_call" and kw.get("name"):
+            if kind == "tool_result" and steps_kept:
+                st = next((x for x in reversed(steps_kept) if not x.get("_done") and x["name"] == kw.get("name")),
+                          next((x for x in reversed(steps_kept) if not x.get("_done")), None))
+                if st is not None:
+                    st["_done"] = True
+                    st["result"] = shown_result(kw.get("content"))
+                    st["ms"] = int((time.time() - st.pop("_t0", time.time())) * 1000)
+            if kind == "assistant_chunk" and kw.get("content"):
+                so_far["n"] += len(kw["content"])
+            elif kind == "assistant":
+                so_far["n"] = len("".join(parts))          # parts already has this one
+            if kind == "auto_review" and kw.get("words"):
+                steps_kept.append({"kind": "auto_review", "tool": kw.get("tool") or "", "verdict": kw.get("verdict") or "",
+                                   "words": kw["words"], "pos": so_far["n"], "_done": True})
+            if kind == "tool_call" and kw.get("name"):
+                steps_kept.append({"kind": "tool", "name": kw["name"], "args": kw.get("args") or {}, "result": "",
+                                   "ms": 0, "pos": so_far["n"], "_t0": time.time()})
+            if kind == "tool_call" and kw.get("name"):
                 tools_used.append((kw["name"], kw.get("args")))
                 if steps:
                     words = tool_words(kw["name"], kw.get("args"))
@@ -538,7 +560,7 @@ class Hub:
         except Exception as e:
             print(f"[{self.a.name}] couldn't send the reply: {type(e).__name__}: {e}")
         now = int(time.time() * 1000)
-        events = [{"kind": "tool", "name": n, "args": a or {}, "result": "", "ms": 0, "pos": 0} for n, a in tools_used]
+        events = [{k: v for k, v in st.items() if not k.startswith("_")} for st in steps_kept]
         if thought:          # the reasoning, kept as the window keeps it, so a phone reopening the chat folds it in
             events.insert(0, {"kind": "think_chunk", "content": "".join(thought)[-20000:]})
         failed = bool(err["cat"]) and not "".join(parts).strip()
@@ -727,6 +749,17 @@ def _persona_name() -> str:
         return NAME
     except Exception:
         return "JARVIS"
+
+
+def shown_result(content: Any, limit: int = 4000) -> str:
+    """A tool's result as a step's detail keeps it: text, cut to a length a card shows."""
+    if isinstance(content, (list, dict)):
+        try:
+            content = json.dumps(content, ensure_ascii=False)
+        except (TypeError, ValueError):
+            content = str(content)
+    t = str(content or "")
+    return t if len(t) <= limit else t[:limit].rstrip() + "\n..."
 
 
 def _what(name: str, args: Dict[str, Any]) -> str:
