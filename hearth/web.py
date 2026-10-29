@@ -2436,6 +2436,15 @@ class HearthHandler(BaseHTTPRequestHandler):
         else's page. No Origin at all is a non-browser client (the CLI, a
         bridge, a script) and is left alone. "null" is a sandboxed frame or a
         file page, and neither has any business with this API."""
+        # A browser marks every request with where it came from. An <img>, a
+        # <script> or a form GET from another site carries no Origin, so it got
+        # past the check below and could set off a GET that does something (or
+        # tell, by whether it loaded, that a file exists). Another site may open
+        # the window's own page by a link, nothing else.
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if site in ("cross-site", "same-site"):
+            nav = (self.headers.get("Sec-Fetch-Mode") or "").strip().lower() == "navigate"
+            return nav and self.command == "GET" and urllib.parse.urlparse(self.path).path == "/"
         origin = (self.headers.get("Origin") or "").strip().lower()
         if not origin:
             return True
