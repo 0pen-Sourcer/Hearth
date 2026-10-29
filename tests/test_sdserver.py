@@ -159,7 +159,7 @@ imagine.generate_image = lambda **k: made.append(("cloud", False)) or {
     "ok": True, "paths": [r["paths"][0]], "provider": "openai", "model": "gpt-image", "prompt": k["prompt"]}
 out = tools._generate_image({"prompt": "a fox"})
 check("with a local image model it's made on this PC, and shown in the chat",
-      made == [("local", False)] and "__JARVIS_IMAGE__" in out and "on this PC" in out)
+      made == [("local", False)] and tools.media_in(out) and "__JARVIS" not in out and "on this PC" in out)
 made.clear()
 tools._generate_image({"prompt": "a fox", "where": "cloud"})
 check("where=cloud goes to the cloud", made == [("cloud", False)])

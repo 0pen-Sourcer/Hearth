@@ -246,7 +246,12 @@ def _language() -> str:
     """
     if _model_size().lower().endswith(".en"):
         return "en"
-    return _named_language()
+    # Only a language named in Settings is forced: a voice picked in Hindi doesn't
+    # mean they speak Hindi, and English forced into Hindi came out as nonsense.
+    for _v in (os.environ.get("HEARTH_REALTIME_LANG"), _env.get("STT_LANGUAGE")):
+        if (_v or "").strip():
+            return _v.strip().lower()
+    return ""
 
 
 def status() -> dict:

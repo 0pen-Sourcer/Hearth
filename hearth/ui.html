@@ -181,6 +181,12 @@
   .steer-note .steer-who { display: block; font: 11.5px var(--sans); color: var(--fg-faint); margin-bottom: 2px; }
   .steer-note .steer-who em { font-style: normal; }
   .steer-note .steer-text { color: var(--fg); font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+  .step-pic { display: block; max-width: min(360px, 100%); max-height: 260px; margin-top: 8px; border-radius: 8px;
+              border: 1px solid var(--border); cursor: zoom-in; object-fit: contain; background: var(--bg-0); }
+  .review-note { display: flex; align-items: flex-start; gap: 7px; margin: 4px 0 8px; font: 12.5px/1.45 var(--sans); color: var(--fg-dim); }
+  .review-note svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; }
+  .review-note.ask { color: var(--warn); }
+  .perm-why { font: 12.5px/1.45 var(--sans); color: var(--fg-dim); margin: 2px 0 4px; }
   .steer-note.waiting { border-left-style: dashed; background: none; outline: 1px dashed var(--border); outline-offset: -1px; }
   .steer-note.waiting .steer-text { color: var(--fg-dim); }
   .tool .t-bg { margin-left: 8px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--fg-dim);
@@ -4191,6 +4197,7 @@
           <span class="perm-args" id="perm-args"></span>
           <span class="perm-close" id="perm-close" title="Cancel">×</span>
         </div>
+        <div class="perm-why" id="perm-why" hidden></div>
         <div class="perm-keys">
           <span class="perm-key" data-decision="allow"><b>1</b> Yes (once)</span>
           <span class="perm-key" data-decision="deny"><b>2</b> No</span>
@@ -4858,6 +4865,24 @@
             <div class="hint">Show the model's thinking before its answer, for models that think. Replies can take much longer.</div>
           </div>
           <div class="switch" data-key="think_default"></div>
+        </div>
+
+        <!-- Auto's reviewer (hearth/auto_review.py): the same check on every brain. -->
+        <div class="field">
+          <div class="label">
+            <div class="name">Auto's reviewer</div>
+            <div class="hint">In Auto, a step that would stop to ask goes ahead when what you said clearly asked for exactly it. Shutting down, disks, accounts, security settings, hidden commands and saved passwords always ask.</div>
+            <div class="voice-status" id="reviewer-status">checking…</div>
+            <button type="button" class="btn-mini" id="btn-reviewer-check" style="margin-top:6px">Check this model</button>
+          </div>
+          <div class="switch" data-key="auto_reviewer"></div>
+        </div>
+        <div class="field" data-adv>
+          <div class="label">
+            <div class="name">Review every command</div>
+            <div class="hint">In Auto, also check the commands that would run without asking. Slower: each one waits for the reviewer.</div>
+          </div>
+          <div class="switch" data-key="auto_review_every_command"></div>
         </div>
 
         <div class="field" data-adv>
@@ -6745,7 +6770,9 @@ function placePermStrip() {
 }
 let pendingFollowup = null;  // text the user typed during a perm prompt; sent after current turn ends
 
-function showInlinePermission(reqId, toolName, args) {
+function showInlinePermission(reqId, toolName, args, why) {
+  const whyEl = $('perm-why');
+  if (whyEl) { whyEl.textContent = why || ''; whyEl.hidden = !why; }
   pendingPermId = reqId;
   pendingPermTool = toolName;
   pendingPermArgs = args;
@@ -7730,7 +7757,7 @@ function replayAssistant(msgDiv, m, body) {
       const t = makeToolCard(ev.name, ev.args || {});
       // Keep the green/red diff for file writes; the terse text result would
       // clobber it. Other tools show their result as before.
-      if (!t.div.classList.contains('has-diff')) t.body.textContent = ev.result || '';
+      if (!t.div.classList.contains('has-diff')) fillToolBody(t.body, ev.name, ev.result || '');
       if (t.div._askFill) { t.div._askFill(ev.result || ''); t.div.classList.remove('open'); }
       if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
       appendPart(t.div, msgDiv);
@@ -7740,6 +7767,8 @@ function replayAssistant(msgDiv, m, body) {
       appendPart(makeSubagentCard(ev), msgDiv);
     } else if (ev.kind === 'steer') {
       appendPart(makeSteerNote(ev.text || '', false), msgDiv);
+    } else if (ev.kind === 'auto_review') {
+      appendPart(makeReviewNote(ev.words, ev.verdict), msgDiv);
     } else if (ev.kind === 'error') {
       appendPart(makeMeta(ev.text || 'error', 'err'), msgDiv);
     }
@@ -7965,6 +7994,19 @@ function renderMessage(m) {
     // show. Naming a file the user can't see, right above a reply where the
     // model clearly CAN see it, reads like the image never arrived.
     let _userText = m.displayContent || m.content || '';
+    // A file sent from the phone or a chat app before attachments were kept on the
+    // message: its note for the model becomes the attachment it stands for.
+    if (!m.displayContent && !(m.attachments && m.attachments.length) && typeof _userText === 'string') {
+      const notes = [..._userText.matchAll(/\n?\[(?:They sent (.+?), saved at (.+?)\. Look at it with view_image[\s\S]*?before answering about it\.|Attached: (.+?), saved at (.+?)\. (?:It's a picture: view_image shows it|read_file reads it)\.)\]/g)];
+      if (notes.length) {
+        m = Object.assign({}, m, { attachments: notes.map(n => {
+          const name = n[1] || n[3], path = n[2] || n[4];
+          return { name, path, isImage: /\.(png|jpe?g|gif|webp|bmp|heic)$/i.test(name) };
+        }) });
+        for (const n of notes) _userText = _userText.replace(n[0], '');
+        _userText = _userText.trim();
+      }
+    }
     if (m.attachments && m.attachments.length) {
       _userText = _userText.replace(/\n?\[attached:[^\]]*\]\s*$/, '').trimEnd();
     }
@@ -8640,6 +8682,28 @@ function makeSubagentCard(notif) {
 const _ICON_MAKER = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 2.1 3.2-.3.9 3.1 2.8 1.6-1.2 3 1.2 3-2.8 1.6-.9 3.1-3.2-.3L12 22l-2.4-2.1-3.2.3-.9-3.1-2.8-1.6 1.2-3-1.2-3 2.8-1.6.9-3.1 3.2.3z"/><path d="m8.5 12 2.4 2.4 4.6-4.8"/></svg>';
 const MEDIA_MAKERS = new Set(['generate_image', 'generate_video', 'check_video_task', 'forge_generate']);
 const _ICON_FOLDER = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+// A picture or video a tool names on a line of its own (tools.media_line):
+// "Image: <path> (305 KB, png)". Older chats have "__JARVIS_IMAGE__ <path> (n bytes, png)".
+function MEDIA_LINE_RE() {
+  return /^(?:__JARVIS_(IMAGE|VIDEO)__|(Image|Video):)[ \t]+([^\n]+?)(?:[ \t]+\(\d[\d.]*[ \t]*(?:bytes|[KMG]?B)\b[^)\n]*\))?[ \t]*$/gm;
+}
+// A step's detail: what came back, and for a picture the model opened, the picture.
+function fillToolBody(body, name, result) {
+  const text = String(result || '');
+  const pics = name === 'view_image' ? [...text.matchAll(MEDIA_LINE_RE())].filter(m => (m[1] || m[2]).toLowerCase() === 'image') : [];
+  // The lines naming pictures or videos aren't text to read: a made one shows in the
+  // chat, one the model opened shows here.
+  const said = text.replace(MEDIA_LINE_RE(), '').replace(/\n{3,}/g, '\n\n').trim();
+  body.textContent = said || (text.match(MEDIA_LINE_RE()) ? '' : text);
+  for (const m of pics) {
+    const path = m[3].trim(), img = document.createElement('img');
+    img.className = 'step-pic';
+    img.alt = img.title = path.split(/[\\/]/).pop();
+    img.src = '/file?path=' + encodeURIComponent(path);
+    img.onclick = (e) => { e.stopPropagation(); openLightbox(img.src, 'image', path); };
+    body.appendChild(img);
+  }
+}
 function makeMediaBlock(kind, path) {
   // Standalone media card - sits in the assistant's message stream (NOT
   // inside the tool card body). Survives re-render because it's keyed off
@@ -10337,6 +10401,17 @@ document.addEventListener('click', (e) => {
 let _steerChips = [];
 // Something said part-way through a reply: shown where it went in, as the
 // person's own words inside the reply, and kept with the chat.
+// Auto's reviewer said go (or ask) for a step: the same words the phone, the
+// terminal and the chat apps show (hearth/auto_review.words).
+const _REVIEW_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
+function makeReviewNote(words, verdict) {
+  const d = document.createElement('div');
+  d.className = 'review-note' + (verdict === 'ask' ? ' ask' : '');
+  d.innerHTML = _REVIEW_ICON;
+  const t = document.createElement('span'); t.textContent = words || '';
+  d.appendChild(t);
+  return d;
+}
 function makeSteerNote(text, waiting) {
   const d = document.createElement('div');
   d.className = 'steer-note' + (waiting ? ' waiting' : '');
@@ -11627,23 +11702,23 @@ async function send(forced = null, displayAs = null, opts = {}) {
             if (!/^\s*(error|traceback)|exit code [1-9]|command failed/i.test(raw.slice(0, 400)))
               pendingTool.div.classList.remove('open');
           } else {
-            pendingTool.body.textContent = raw;
+            fillToolBody(pendingTool.body, pendingTool.div._toolName, raw);
           }
           if (pendingTool.div._askFill) pendingTool.div._askFill(raw);
         }
 
         // Detect media markers and surface them as a SEPARATE message-level
         // event + a live block under the tool card.
-        const mediaRe = /__JARVIS_(IMAGE|VIDEO)__\s+([^\n]+?)(?:\s+\(\d+\s+bytes[^)]*\))?$/gim;
+        const mediaRe = MEDIA_LINE_RE();
         let _firstMedia = true;
         // A picture or video a tool made goes in the chat; one the model only
         // looked at (a screenshot, an image it opened) stays in its step.
         const _made = MEDIA_MAKERS.has(pendingTool.div._toolName);
         for (const m of _made ? [...raw.matchAll(mediaRe)] : []) {
-          const kind = m[1].toLowerCase();
-          const path = m[2].trim();
-          // False positive: the marker appears INSIDE grepped/read source code
-          // (reading Inglen's own files, where "__JARVIS_IMAGE__ {path} (...)" is a
+          const kind = (m[1] || m[2]).toLowerCase();
+          const path = m[3].trim();
+          // False positive: the line appears INSIDE grepped/read source code
+          // (reading Inglen's own files, where "Image: {path} (...)" is a
           // literal code string) — that's not a real image. A real path has a
           // separator and no template braces or a "file.py:12:" grep prefix.
           if (/[{}]/.test(path) || !/[\\/]/.test(path) || /^[^\\/]*\.\w+:\d+:/.test(path)) continue;
@@ -11761,7 +11836,14 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'permission_request') {
       // Inline strip above the input - keyboard-driven, no center modal.
-      showInlinePermission(ev.id, ev.name, ev.args || {});
+      showInlinePermission(ev.id, ev.name, ev.args || {}, ev.why || '');
+      return;
+    }
+
+    if (ev.type === 'auto_review') {
+      assistantMsg.events.push({ kind: 'auto_review', tool: ev.tool, verdict: ev.verdict, words: ev.words,
+                                 pos: assistantMsg.content.length });
+      appendPart(makeReviewNote(ev.words, ev.verdict), live);
       return;
     }
 
@@ -14660,8 +14742,9 @@ async function refreshSettings() {
     $$('.switch').forEach(sw => {
       const k = sw.dataset.key;
       // gen_stats, show_diffs, activity_hud and auto_memory default ON (only off when explicitly disabled); the rest default off.
-      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud' || k === 'auto_memory') ? (s[k] !== false) : !!s[k]);
+      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud' || k === 'auto_memory' || k === 'auto_reviewer') ? (s[k] !== false) : !!s[k]);
     });
+    refreshReviewer();
     refreshEmail();
     // Agent name field - populated from current setting. The Rename button
     // triggers the full workspace rename (slow, restarts tray). Typing in
@@ -15788,7 +15871,31 @@ $$('.switch').forEach(sw => {
       thinkBtn.classList.toggle('on', next);
     }
     if (k === 'user_bubbles') document.body.classList.toggle('chat-bubbles', next);
+    if (k === 'auto_reviewer') setTimeout(() => refreshReviewer(), 300);
   });
+});
+
+// Auto's reviewer: whether it is on for the brain in use, and how its model did
+// on the labelled steps. A check runs in the background; this follows it.
+let _reviewerPoll = null;
+async function refreshReviewer(st) {
+  const el = $('reviewer-status'), btn = $('btn-reviewer-check');
+  if (!el) return;
+  try { st = st || await api('/api/auto_review'); }
+  catch { el.textContent = "Couldn't read the reviewer's state."; return; }
+  el.textContent = st.said || '';
+  if (btn) {
+    btn.disabled = !!st.running || st.setting === 'off';
+    btn.textContent = st.check ? 'Check again' : 'Check this model';
+  }
+  clearTimeout(_reviewerPoll);
+  if (st.running && STATE.view === 'settings') _reviewerPoll = setTimeout(() => refreshReviewer(), 2000);
+}
+$('btn-reviewer-check')?.addEventListener('click', async () => {
+  try {
+    const st = await api('/api/auto_review/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    refreshReviewer(st);
+  } catch (e) { toast("Couldn't start the check", e.message, 'err'); }
 });
 
 // Persona is read-only and lives in hearth/persona.py; we no longer surface

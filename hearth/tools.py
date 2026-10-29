@@ -5196,6 +5196,41 @@ def _open_url(p: Dict) -> str:
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
 
+# ---------------------------------------------------------------- pictures and videos in results
+# A tool that made or opened a picture or a video names it on a line of its own:
+# "Image: C:\\...\\cat.png (305 KB, png)". People read it in the step's detail; the
+# engine attaches the picture for a model that can see, and the window, the
+# terminal and the agent tool gate show it (media_in reads it). Results written
+# before this used "__JARVIS_IMAGE__ <path> (<n> bytes, png)"; media_in still
+# reads those, so old chats show their pictures.
+MEDIA_LINE = re.compile(r"^(?:__JARVIS_(IMAGE|VIDEO)__|(Image|Video):)[ \t]+([^\n]+?)"
+                        r"(?:[ \t]+\((?:\d[\d.]*[ \t]*(?:bytes|[KMG]?B)\b)[^)\n]*\))?[ \t]*$", re.M)
+
+
+def size_text(n: int) -> str:
+    if n < 1024:
+        return f"{n} bytes"
+    for unit in ("KB", "MB", "GB"):
+        n /= 1024.0
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if n >= 10 else f"{n:.1f} {unit}"
+    return f"{n:.0f} GB"
+
+
+def media_line(kind: str, path: str, size: Optional[int] = None, ext: str = "") -> str:
+    """The line naming a picture ("image") or a video a tool made or opened."""
+    detail = ", ".join(x for x in (size_text(size) if size is not None else "", ext.lstrip(".")) if x)
+    return f"{'Video' if kind == 'video' else 'Image'}: {path}" + (f" ({detail})" if detail else "")
+
+
+def media_in(text: Any) -> List[Tuple[str, str]]:
+    """The (kind, path) of each picture or video a result names, in order."""
+    out = []
+    for m in MEDIA_LINE.finditer(str(text or "")):
+        out.append(((m.group(1) or m.group(2)).lower(), m.group(3).strip()))
+    return out
+
+
 def _view_image(p: Dict) -> str:
     """Read an image and return a marker the runtime understands.
 
@@ -5242,7 +5277,7 @@ def _view_image(p: Dict) -> str:
     # Return a structured marker. mcp_server.py detects this prefix and
     # converts the call to a real Image content. The CLI just shows the
     # text — its auto-attach handles vision separately.
-    return f"__JARVIS_IMAGE__ {path} ({size} bytes, {ext[1:]})"
+    return media_line("image", path, size, ext)
 
 
 def _screenshot_posix_cli(out: str) -> Optional[str]:
@@ -5354,12 +5389,9 @@ def _screenshot(p: Dict) -> str:
     delay_note = (f" (waited {delay:.0f}s before capture)" if delay > 0 else "")
     size_note = f" ({img.size[0]}x{img.size[1]})" if img is not None else ""
     return (
-        f"Saved: {out}{size_note}{delay_note}\n"
-        f"NEXT STEP: if the user asked you to DESCRIBE / TELL THEM WHAT'S "
-        f"ON the screen, call view_image with path='{out}' RIGHT NOW in "
-        f"this same turn — don't stop here. If they asked you to SHOW or "
-        f"OPEN the screenshot in their gallery, call open_app with that "
-        f"path instead. Only stop if they only asked you to CAPTURE."
+        f"Saved the screenshot: {out}{size_note}{delay_note}. "
+        f"To see what's on it, look at it with view_image. To send it to them, "
+        f"send_to_phone with this path (or put the path in your reply in a chat app)."
     )
 
 
@@ -6292,7 +6324,7 @@ def _forge_generate(p: Dict) -> str:
         f"Saved: {out_path}" + (f" ({ckpt})" if ckpt else "") + "\n"
         f"prompt: {positive}\n"
         f"(GPU: {vram_msg}. Forge stays up for follow-ups; {_idle_note}.)\n"
-        f"__JARVIS_IMAGE__ {out_path} ({os.path.getsize(out_path)} bytes, png)"
+        + media_line("image", out_path, os.path.getsize(out_path), "png")
     )
 
 
@@ -6542,13 +6574,13 @@ def _media_lines(paths, how: str, prompt: str, video: bool = False) -> str:
     lines = [f"Made {len(paths) if not video else 'a'} {kind} {how}: \"{prompt[:80]}\""]
     for path in paths:
         if video:
-            lines.append(f"__JARVIS_VIDEO__ {path}")
+            lines.append(media_line("video", path))
             continue
         try:
             size = os.path.getsize(path)
         except OSError:
             size = 0
-        lines.append(f"__JARVIS_IMAGE__ {path} ({size} bytes, {os.path.splitext(path)[1][1:] or 'png'})")
+        lines.append(media_line("image", path, size, os.path.splitext(path)[1][1:] or "png"))
     return "\n".join(lines)
 
 
@@ -6587,7 +6619,7 @@ def _generate_image(p: Dict) -> str:
             size = os.path.getsize(path)
         except OSError:
             size = 0
-        lines.append(f"__JARVIS_IMAGE__ {path} ({size} bytes, png)")
+        lines.append(media_line("image", path, size, "png"))
     return "\n".join(lines)
 
 
@@ -6675,7 +6707,7 @@ def _check_video_task(p: Dict) -> str:
     if task_id in _LOCAL_VIDEOS or (not task_id and _LOCAL_VIDEOS):
         t = _LOCAL_VIDEOS.get(task_id) or list(_LOCAL_VIDEOS.values())[-1]
         if t["status"] == "done":
-            return f"Video ready: {t['path']}\n__JARVIS_VIDEO__ {t['path']}"
+            return media_line("video", t["path"])
         if t["status"] == "pending":
             return "The video is still being made on this PC. A report arrives when it is ready."
         return f"The video failed: {t.get('error')}"
@@ -6685,10 +6717,7 @@ def _check_video_task(p: Dict) -> str:
     status = r.get("status", "unknown")
     if status == "done":
         path = r.get("path") or "(no local path)"
-        return (
-            f"Video ready: {path}\n"
-            f"__JARVIS_VIDEO__ {path}"
-        )
+        return media_line("video", path)
     if status == "pending":
         return f"Video still being made (task {task_id}). A report arrives when it is ready."
     return f"Video task {task_id}: status={status}. {r.get('error', '')}".strip()
@@ -7657,17 +7686,42 @@ def _focus_window(p: Dict) -> str:
 
 
 def _send_to_phone(p: Dict) -> str:
-    """Send a message from this PC to the owner on a connected chat app (the
-    outbound side; the apps answer incoming messages by themselves)."""
+    """Send a message or a file from this PC to the owner's phone. In a turn that
+    came from the phone app or a chat app, that is this same conversation; from the
+    window or the terminal, the connected chat app (Telegram first)."""
     from . import channel_core
     channel = (p.get("channel") or "").strip().lower()
     message = (p.get("message") or "").strip()
-    if not message:
-        return "Error: message is required."
+    path = os.path.expanduser(str(p.get("path") or "").strip().strip('"'))
+    if not message and not path:
+        return "Error: give a message, a file path, or both."
+    if path and not os.path.isfile(path):
+        return f"Error: no file at {path}."
+    here = channel_core.here()
+    if here is not None and not channel:
+        adapter, chat = here
+        try:
+            if message:
+                adapter.send(chat, message)
+            if path:
+                if not callable(getattr(adapter, "send_file", None)):
+                    return f"Error: {getattr(adapter, 'label', 'this app')} can't take files; the message was sent."
+                adapter.send_file(chat, path)
+        except Exception as e:
+            return f"Error: it didn't send: {type(e).__name__}: {e}"
+        what = " and ".join(x for x in ("the message" if message else "", os.path.basename(path) if path else "") if x)
+        return f"Sent {what} here, in this conversation: they see it now."
     if not channel:
-        return "Sent." if channel_core.push_any(message) else \
-            "Error: no chat app is connected and paired (Settings > Connectors)."
-    return channel_core.push(channel, message)
+        for ch in ("telegram", "discord"):
+            if channel_core.config_of(ch).get("bot_token") and channel_core.owner_of(ch):
+                channel = ch
+                break
+        else:
+            return "Error: no chat app is connected and paired (Settings > Connectors)."
+    out = channel_core.push(channel, message) if message else ""
+    if path and not out.startswith("Error"):
+        out = channel_core.push_file(channel, path)
+    return out
 
 
 _HANDLERS["send_to_phone"] = _send_to_phone
@@ -7758,17 +7812,18 @@ TOOL_DEFINITIONS.append({
 TOOL_DEFINITIONS.append({
     "name": "send_to_phone",
     "description": (
-        "Send a message FROM this PC TO the user's phone, on a chat app they connected "
-        "(Telegram, or Discord as a DM). Use for 'send this to my Telegram', 'text me "
-        "this', 'ping my phone'. Leave channel out to use whichever is connected. "
-        "Messages they send come in and are answered by themselves; this is only for "
-        "starting one from here."
+        "Send a message or a file (a screenshot, a photo, a PDF) from this PC to the user's "
+        "phone. When they are talking to you from the phone app or a chat app, it goes to that "
+        "same conversation; from the window or terminal, to the chat app they connected "
+        "(Telegram, or Discord as a DM). Use for 'send me a photo', 'text me this', 'ping my "
+        "phone'. Leave channel out unless they named one."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "channel": {"type": "string", "enum": ["telegram", "discord"], "description": "Leave out for whichever is connected."},
             "message": {"type": "string", "description": "The text to send."},
+            "path": {"type": "string", "description": "A file on this PC to send (a screenshot, a photo, a PDF): it arrives as an attachment."},
         },
         "required": ["message"],
     },
@@ -9288,29 +9343,69 @@ def mode_allows(name: str, args=None) -> bool:
         return act == "show" or (m == "auto" and act != "discard")
     if name == "connectors" and str((args or {}).get("action") or "status") == "status":
         return True                     # looking at what's connected changes nothing
+    if name == "send_to_phone" and not (args or {}).get("channel"):
+        try:
+            from .channel_core import here
+            if here() is not None:
+                return True             # into the very conversation they're writing in: nothing to ask
+        except Exception:
+            pass
     if m == "auto":
         # What the app made itself (this week), it may delete or move without asking: each change is
         # copied aside first, so it can be undone (hearth/undo.py).
         if name in ("delete_path", "move_path") and _all_made_by_app(name, args):
             return True
         if name in _ALWAYS_ASK_IN_AUTO:
-            return False
+            return _reviewed(name, args)
         if name == "delegate":
             return True                 # an agent program, under its own rules; Auto doesn't stop it
         if name in _SHELL_TOOLS:
             cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
+            if _on_floor(name, args):
+                return False            # power, disks, accounts, start-up, hidden commands, keys: always ask
             if bool(cmd) and _is_destructive(cmd) is None and _is_outward(cmd) is None:
+                if _review_every_command():
+                    return _reviewed(name, args)
                 return True
             # A plain delete of only what the app made (rm -rf <a folder it created>) goes ahead too.
             if name == "run_command" and cmd and _is_outward(cmd) is None:
                 from .undo import delete_targets
                 paths = delete_targets(cmd, str((args or {}).get("cwd") or ""))
-                return bool(paths) and all(_made(p) for p in paths)
-            return False
+                if bool(paths) and all(_made(p) for p in paths):
+                    return True
+            return _reviewed(name, args)
         return True
     if m == "edits":
         return name in _EDIT_TOOLS
     return False
+
+
+def _reviewed(name: str, args) -> bool:
+    """A step Auto's patterns stop: the reviewer lets it go when the person clearly asked
+    for exactly it; the floor never goes (hearth/auto_review.py)."""
+    try:
+        from .auto_review import allows
+        return allows(name, args)
+    except Exception:
+        return False
+
+
+def _on_floor(name: str, args) -> bool:
+    # The patterns above miss some of these ("sudo rm -rf", "curl ... | bash",
+    # "crontab -e"), and Auto would let them run without asking.
+    try:
+        from .auto_review import floor_reason
+        return bool(floor_reason(name, args))
+    except Exception:
+        return True
+
+
+def _review_every_command() -> bool:
+    try:
+        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
+            return bool((json.load(f) or {}).get("auto_review_every_command"))
+    except (OSError, ValueError):
+        return False
 
 
 def _made(path: str) -> bool:

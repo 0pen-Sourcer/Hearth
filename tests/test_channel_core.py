@@ -165,7 +165,7 @@ posted = []
 real_urlopen = urllib.request.urlopen
 urllib.request.urlopen = lambda req, timeout=0: posted.append(req.full_url) or type("R", (), {"read": lambda s: b"{}"})()
 out = tools._send_to_phone({"message": "your build finished"})
-check(f"send_to_phone goes to the connected app's owner ({out})", out == "Sent." and "bot123:abc/sendMessage" in posted[-1])
+check(f"send_to_phone goes to the connected app's owner ({out})", out == "Sent to your Telegram." and "bot123:abc/sendMessage" in posted[-1])
 check("WhatsApp is said to only answer", cc.push("whatsapp", "x").startswith("Error"))
 with open(os.path.join(WS, "settings.json"), "w", encoding="utf-8") as f:
     json.dump({"onboarded": True, "approval_mode": "ask", "phone_reminders": False}, f)

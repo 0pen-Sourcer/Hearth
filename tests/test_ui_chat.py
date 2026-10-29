@@ -662,15 +662,19 @@ with sync_playwright() as pw:
       const msg = [...document.querySelectorAll('#chat-body .msg.assistant')].pop();
       const shown = [...msg.querySelectorAll('.gen-media-img')].map(i => i.getAttribute('src'));
       const barText = (msg.querySelector('.gen-media-bar') || {}).textContent || '';
+      const inStep = [...msg.querySelectorAll('.step-pic')].map(i => i.getAttribute('src'));
+      const stepText = [...msg.querySelectorAll('.tool-card, [class*="tool"]')].map(x => x.textContent).join(' ');
       openLightbox('/file?path=x', 'image', 'C:/Users/someone/Jarvis/generated/cat.png');
       const lb = document.querySelector('.lightbox');
-      const out = { shown, barText: barText.trim(), closeIcon: !!lb.querySelector('.lightbox-close svg'),
+      const out = { shown, inStep, marker: stepText.includes('__JARVIS'), barText: barText.trim(), closeIcon: !!lb.querySelector('.lightbox-close svg'),
                     caption: lb.querySelector('.lightbox-caption').textContent };
       closeLightbox();
       return out;
     }""")
     check(f"a picture the model only looked at stays out of the chat; what it made shows {media['shown']}",
           len(media["shown"]) == 1 and "cat.png" in media["shown"][0])
+    check(f"it shows in its own step instead, and no step shows the old image marker ({media['inStep']}, marker {media['marker']})",
+          len(media["inStep"]) == 1 and "shot.png" in media["inStep"][0] and not media["marker"])
     check(f"the picture has no toolbar text, the viewer a line-icon close and only the file name {media}",
           media["barText"] == "" and media["closeIcon"] and media["caption"] == "cat.png")
 

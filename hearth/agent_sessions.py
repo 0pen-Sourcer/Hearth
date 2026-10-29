@@ -296,6 +296,9 @@ def _step(name: str, args: Any) -> Optional[Dict[str, Any]]:
         q = _question_of(args)
         if q:
             st["cmd"] = q
+        pic = _picture_of(args)
+        if pic:
+            st["img"] = pic                  # the picture it looked at, for the phone to show
         return st
     args = args if isinstance(args, dict) else {}
     for key in ("command", "cmd"):
@@ -313,7 +316,20 @@ def _step(name: str, args: Any) -> Optional[Dict[str, Any]]:
     cmd = detail_of(args)
     if cmd:
         st["cmd"] = cmd
+    if tool == "read_file" and _picture_of(args):
+        st["img"] = _picture_of(args)        # Claude Code reads a picture with Read
     return st
+
+
+_PICTURE = re.compile(r"\.(png|jpe?g|gif|webp|bmp)$", re.I)
+
+
+def _picture_of(args: Any) -> str:
+    """The path of the picture a step looked at, when it was one."""
+    if not isinstance(args, dict):
+        return ""
+    p = str(args.get("path") or args.get("file_path") or args.get("filePath") or args.get("image_path") or "")
+    return p if _PICTURE.search(p) else ""
 
 
 def _msg(role: str, text: str, at: int, steps: Optional[List[Dict[str, Any]]] = None,

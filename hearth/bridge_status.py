@@ -163,7 +163,7 @@ def channel_primer(app: str) -> dict:
     return {"role": "system", "content": (
         f"You're talking over {app}, not in the Inglen window: they're on their phone "
         f"or another device and can't see this PC's screen. To send them a file or an "
-        f"image (a screenshot, a PDF, a chart you made), put its full local path in your "
-        f"reply and it reaches them as an attachment; opening it on the PC shows them "
-        f"nothing. Keep replies chat-length, with no window buttons in them. Destructive "
+        f"image (a screenshot, a PDF, a chart you made), use send_to_phone with its path, "
+        f"or put its full local path in your reply: either way it reaches them here as an "
+        f"attachment. Opening it on the PC shows them nothing. Keep replies chat-length, with no window buttons in them. Destructive "
         f"commands can't run from here; they run from the Inglen window or terminal.")}

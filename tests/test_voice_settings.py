@@ -122,8 +122,39 @@ for _mdl, _lang, _want in (("base.en", "", "en"), ("base.en", "hi", "hi"),
 os.environ["JARVIS_STT_MODEL"] = "base.en"
 os.environ["JARVIS_STT_LANGUAGE"] = ""
 os.environ["HEARTH_VOICE"] = "hf_alpha"
-check("with no listening language set, a Hindi voice listens for Hindi, on the multilingual model",
-      _listen._transcribe_language() == "hi" and _listen.model_size() == "base" and _rt._language() == "hi")
+check("with no listening language set, a Hindi voice listens for Hindi or English, on the multilingual model",
+      _listen._languages() == ["hi", "en"] and _listen._transcribe_language() is None
+      and _listen.model_size() == "base" and _rt._language() == "")
+
+# English said with a Hindi voice picked came back as Devanagari nonsense: forced
+# into Hindi. Detected as Hindi or English it stays; detected as something it
+# can't be, it is heard again in the likelier of the two.
+class _Info:
+    def __init__(self, lang, probs):
+        self.language, self.all_language_probs = lang, probs
+check("English detected stays English", _listen._pick_language(_Info("en", [("en", .8)]), ["hi", "en"]) is None)
+check("Hindi detected stays Hindi", _listen._pick_language(_Info("hi", [("hi", .8)]), ["hi", "en"]) is None)
+check("a mumble detected as Bengali is heard again as the likelier of Hindi or English",
+      _listen._pick_language(_Info("bn", [("bn", .4), ("en", .3), ("hi", .2)]), ["hi", "en"]) == "en")
+check("with no language to go by, whatever it detects stands", _listen._pick_language(_Info("bn", []), []) is None)
+_asked = []
+
+
+class _Whisper:
+    def transcribe(self, audio, language=None, **k):
+        _asked.append(language)
+        said = {None: "च्णिव रिए लिए", "en": "check if the relay works"}.get(language, "?")
+        return iter([type("S", (), {"text": said})()]), _Info(language or "bn", [("bn", .4), ("en", .35), ("hi", .1)])
+
+
+_real_load = _listen._try_load_model
+_listen._try_load_model = lambda: _Whisper()
+os.environ["HEARTH_VOICE"] = "hf_alpha"
+_heard = _listen.transcribe("note.webm")
+check(f"a voice note detected as a language it can't be is heard again in English ({_heard!r}, asked {_asked})",
+      _heard == "check if the relay works" and _asked == [None, "en"])
+_listen._try_load_model = _real_load
+os.environ.pop("HEARTH_VOICE", None)
 os.environ["HEARTH_VOICE"] = "am_michael"
 check("an English voice keeps English", _listen._transcribe_language() == "en" and _rt._language() == "en")
 os.environ.pop("HEARTH_VOICE", None)

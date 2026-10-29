@@ -158,6 +158,7 @@ def forget_phone(pid: str) -> Dict[str, Any]:
 LIVE_EVERY = 0.1
 THINK_EVERY = 0.25
 PART = 150_000
+ICONS_WAIT_S = 8.0              # an icons answer waits this long; the rest go in "later"
 
 
 def split_message(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -197,6 +198,20 @@ class Joiner:
 
 # ---------------------------------------------------------------- what the phone asks for
 
+def _pictures(got: Dict[str, Any]) -> Dict[str, Any]:
+    """A picture a step looked at (Codex's view_image, Claude Code reading a .png) as a
+    card the phone shows and opens; the path alone showed only "Looked at an image"."""
+    from . import relay_media
+    for msg in got.get("messages") or []:
+        for st in list(msg.get("steps") or []) + [x for p in msg.get("parts") or [] for x in p.get("steps") or []]:
+            path = st.pop("img", "") if isinstance(st, dict) else ""
+            if path and "file" not in st:
+                c = relay_media.card(path)
+                if c is not None:
+                    st["file"] = c
+    return got
+
+
 def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     """The phone's question about this PC, answered: the chat list ("chats"), one
     chat's messages ("open"), the helpers ("team"), or the look ("look")."""
@@ -229,7 +244,7 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
         from . import agent_sessions
         if agent_sessions.parse_chat(cid):
-            return agent_sessions.transcript(cid, int(m.get("last") or 60))
+            return _pictures(agent_sessions.transcript(cid, int(m.get("last") or 60)))
         d = chat_sync.load(cid) or {}
         msgs = []
         for x in d.get("messages") or []:
@@ -266,14 +281,14 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             files = []
             from . import relay_media
             from .bridge_status import files_in
-            sent = re.findall(r"\[They sent .+?, saved at (.+?)\. Look at it", text, flags=re.S)
+            sent = cc.sent_files(dict(x, content=text)) if role == "user" else []
             for p in (sent if role == "user" else files_in(text, relay_media.MAX_FILE)):
                 c = relay_media.card(p)
                 if c:
                     files.append(c)
-            # A file sent from a phone is kept as a note for the model; the person sent the file.
-            text = re.sub(r"\[They sent (.+?), saved at .+?before answering about it\.\]",
-                          lambda g: "Sent " + g.group(1), text, flags=re.S)
+            # What they wrote, without the note telling the model about the files: the files show as cards.
+            if role == "user":
+                text = cc.said_text(dict(x, content=text))
             failed = next((str(e.get("text") or "") for e in events if e.get("kind") == "error"), "")
             if failed and not text.strip():
                 msgs.append({"role": "assistant", "text": failed, "at": x.get("at") or 0, "steps": steps, "error": True})
@@ -305,24 +320,30 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         return memory_cards.act(str(m.get("kind") or ""), str(m.get("item") or ""), str(m.get("action") or ""))
     if what == "icons":
         # Brands' own marks by key and sites' icons by domain, as the window shows them.
+        # Fetched side by side; whatever isn't in within ICONS_WAIT_S is named in "later"
+        # and keeps fetching here (it is kept on disk), so one slow site can't make the
+        # phone's ask time out and lose the whole batch.
+        from concurrent.futures import ThreadPoolExecutor, wait
         from .web import _favicon
         from .brand_icons import brand_icon
-        out = {}
-        for key in [str(x) for x in (m.get("keys") or [])][:40]:
+        jobs = [("brand:" + k, brand_icon, k) for k in [str(x) for x in (m.get("keys") or [])][:40]]
+        jobs += [(d, _favicon, d) for d in [str(x) for x in (m.get("sites") or [])][:24]]
+        pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="icons")
+        futs = {pool.submit(fn, arg): name for name, fn, arg in jobs}
+        done, _ = wait(futs, timeout=ICONS_WAIT_S)
+        pool.shutdown(wait=False)
+        out, later = {}, []
+        for f, name in futs.items():
+            if f not in done:
+                later.append(name)
+                continue
             try:
-                icon = brand_icon(key)
+                icon = f.result()
             except Exception:
                 icon = None
             if icon:
-                out["brand:" + key] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
-        for site in [str(x) for x in (m.get("sites") or [])][:24]:
-            try:
-                icon = _favicon(site)
-            except Exception:
-                icon = None
-            if icon:
-                out[site] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
-        return {"icons": out}
+                out[name] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
+        return {"icons": out, "later": later}
     if what == "provider_models":
         # One saved provider's models, asked with its saved key, as the window's menu lists them.
         out = _window("POST", "/api/providers/models", {"id": str(m.get("id") or "")}, timeout=20)
@@ -392,8 +413,8 @@ def drop_from(cid: str, text: str, back: int = 0) -> bool:
         return False
 
     def said(x):
-        # A message that carried a file has the note about it after the words.
-        return re.sub(r"\s*\[They sent .+$", "", " ".join(chat_sync._text(x.get("content")).split()))
+        # What the person wrote, without the note about files they attached.
+        return " ".join(cc.said_text(dict(x, content=chat_sync._text(x.get("content")))).split())
 
     mine = [i for i, x in enumerate(msgs) if x.get("role") == "user"]
     at = None
@@ -1080,7 +1101,9 @@ class Room:
             self.bridge.adapter.rooms[self.chat] = self
             await self.ws.send(json.dumps({"t": "hello", "eph": R.b64(R.raw_public(eph))}))
             from . import persona
-            await self.deliver({"type": "hi", "name": persona.NAME})
+            # The turns running now: the phone drops any other it still draws as
+            # working (one whose end it missed while it was closed).
+            await self.deliver({"type": "hi", "name": persona.NAME, "running": self.bridge.running()})
             warm_brain()                      # the picker's answers, ready before it's opened
             return
         if t == "box" and self.phone:          # Allow or Deny tapped on a notification
@@ -1157,6 +1180,16 @@ class Bridge:
         p = d.get("pending") or {}
         if p.get("room") and time.time() - float(p.get("at") or 0) < PAIR_LIFE_S:
             out.setdefault(p["room"], {"ps": p["ps"], "phone": ""})
+        return out
+
+    def running(self) -> List[str]:
+        """The turns answering now, here and in coding agents' sessions."""
+        hub = getattr(self, "hub", None)
+        out = []
+        if hub is not None:
+            with hub._lock:
+                out += [str(r.get("t")) for r in hub._busy.values() if r.get("t")]
+        out += [str(r.get("t")) for r in list(self.agent_runs.values()) if r.get("t")]
         return out
 
     def on_message(self, room: Room, m: Dict[str, Any]) -> None:
@@ -1267,7 +1300,7 @@ class Bridge:
             return
         if not text:
             return
-        run = self.agent_runs[cid] = {"q": None, "answer": False}
+        run = self.agent_runs[cid] = {"q": None, "answer": False, "t": turn}
         sent = {"live": 0.0, "think": 0.0}
         thought: List[str] = []
 

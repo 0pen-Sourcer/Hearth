@@ -243,6 +243,11 @@ class Turn:
         self.out(f"  {(ERR + '✗ ') if bad else DIM + '⎿ '}{first}{RESET}")
         self.status = "Working"
 
+    def _on_auto_review(self, verdict: str = "", words: str = "", **_):
+        # Auto's reviewer on a step, in the window's and the phone's words.
+        if words:
+            self.out(f"  {(WARN if verdict == 'ask' else DIM)}↳ {words}{RESET}")
+
     def _on_steered(self, text: str = "", content: str = "", **_):
         self._flush_text()
         self.out(f"{DIM}↳ you steered: {(text or content)[:100]}{RESET}")
