@@ -4739,10 +4739,14 @@ class HearthHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"name": name, "body": body, "path": path})
 
     def _delete_memory(self, name: str) -> None:
+        # memory_forget takes `title`; this sent `name`, the argument check refused it,
+        # and the window said "Deleted" for a memory that stayed. Its answer is read now.
         try:
-            execute_tool("memory_forget", {"name": name})
+            out = str(execute_tool("memory_forget", {"title": name}) or "")
         except Exception as e:
-            return self._send_json(500, {"error": str(e)})
+            return self._send_json(500, {"ok": False, "error": str(e)})
+        if out.lstrip().lower().startswith(("error", "no memory found")):
+            return self._send_json(200, {"ok": False, "error": out.split(":", 1)[-1].strip() if ":" in out else out})
         self._send_json(200, {"ok": True, "name": name})
 
     def _reveal_in_folder(self) -> None:
