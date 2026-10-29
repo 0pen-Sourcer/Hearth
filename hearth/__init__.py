@@ -21,6 +21,27 @@ _warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub
 _warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub.*")
 
 # ---------------------------------------------------------------------------
+# "localhost" first resolves to ::1 on Windows, and LM Studio, llama-server and
+# most local model servers listen on 127.0.0.1 only, so every request to them
+# waited about two seconds for the IPv6 attempt to be refused. Answer the
+# IPv4 address first for localhost; IPv6 is still tried after it.
+# ---------------------------------------------------------------------------
+import socket as _socket
+
+_real_getaddrinfo = _socket.getaddrinfo
+
+
+def _getaddrinfo_v4_first(host, *args, **kwargs):
+    res = _real_getaddrinfo(host, *args, **kwargs)
+    if isinstance(host, str) and host.lower() == "localhost":
+        res = sorted(res, key=lambda r: r[0] != _socket.AF_INET)
+    return res
+
+
+if getattr(_socket.getaddrinfo, "__name__", "") != "_getaddrinfo_v4_first":
+    _socket.getaddrinfo = _getaddrinfo_v4_first
+
+# ---------------------------------------------------------------------------
 # Undo an update that was cut off partway through, before anything else loads.
 # A patch replaces these files one at a time; losing the process in the middle
 # of that leaves two versions mixed together and the app does not come back up.
