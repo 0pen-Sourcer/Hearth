@@ -52,7 +52,7 @@ rc = asyncio.run(S.say("as_codex_11111111-2222-3333-4444-555555555555", "keep it
 ran = json.load(open(RAN))
 check(f"the message goes to the open session through codex queue ({ran})",
       ran == ["queue", "--thread", "11111111-2222-3333-4444-555555555555", "--message", "keep it sealed"] and rc == 0)
-check(f"and the phone is told where it went {said}", said and said[-1][0] == "text" and "Sent to Codex" in said[-1][1]["text"])
+check(f"and the phone is told where it went, as Inglen's note, not as Codex speaking {said}", said and said[-1][0] == "note" and "Sent to Codex" in said[-1][1]["text"])
 
 with open(fake, "w") as f:
     f.write("import sys\nsys.stderr.write(\"error: unrecognized subcommand 'queue'\")\nsys.exit(2)\n")

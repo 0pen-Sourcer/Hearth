@@ -255,7 +255,7 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             events = [e for e in x.get("events") or [] if isinstance(e, dict)]
             steps = []
             for e in events:
-                if e.get("kind") != "tool":
+                if e.get("kind") != "tool" or e.get("name") in cc.QUIET_STEPS:
                     continue
                 args = e.get("args") if isinstance(e.get("args"), dict) else {}
                 if e.get("name") == "web_search" and not args.get("query") and e.get("result"):
@@ -1344,7 +1344,8 @@ class Bridge:
                 self.adapter.asks.pop(cid, None)
                 q.set()
             else:
-                push({"type": "text", "text": "It's still working on your last message; send this once it's done."})
+                push({"type": "text", "note": True,
+                      "text": "It's still working on your last message. Send this once it's done."})
             return
         if not text:
             return
@@ -1367,6 +1368,9 @@ class Bridge:
                 if now - sent["think"] >= THINK_EVERY:
                     sent["think"] = now
                     push({"type": "think", "text": "".join(thought)[-4000:]})
+            elif kind == "note":
+                # Inglen saying what it did ("Sent to Codex on your PC"), not the agent: drawn muted.
+                push({"type": "text", "text": f.get("text") or "", "note": True})
             elif kind == "text":
                 push({"type": "text", "text": f.get("text") or ""})
                 self.adapter.finished(room.chat, name, f.get("text") or "", cid, turn)

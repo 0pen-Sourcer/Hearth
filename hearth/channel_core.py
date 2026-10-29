@@ -365,7 +365,9 @@ class Hub:
         with self._lock:
             run["question"], run["answer"] = ev, None
             run["tap"] = needs_a_tap(name, args)
-        question = f"Before I go on: may I {_what(name, args)}?"
+        # The step itself, as a question: "Run `npm test`?", "Send this to your phone: "..."?"
+        what = _what(name, args)
+        question = what[:1].upper() + what[1:] + "?"
         try:
             from .auto_review import why
             because = why(name, args)            # the reviewer's or the floor's reason, as the window says it
@@ -499,7 +501,7 @@ class Hub:
                                    "ms": 0, "pos": so_far["n"], "_t0": time.time()})
             if kind == "tool_call" and kw.get("name"):
                 tools_used.append((kw["name"], kw.get("args")))
-                if steps:
+                if steps and kw["name"] not in QUIET_STEPS:
                     words = tool_words(kw["name"], kw.get("args"))
                     try:
                         if getattr(self.a, "step_detail", False):
@@ -756,6 +758,9 @@ def _persona_name() -> str:
     except Exception:
         return "JARVIS"
 
+
+# The app's own bookkeeping, not a step of the work: not shown as one in an app.
+QUIET_STEPS = {"load_tools"}
 
 _PICTURE = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic")
 

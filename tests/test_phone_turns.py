@@ -109,7 +109,7 @@ check(f"and sends the file into this same conversation ({seen.get('sent')!r})",
 check("with its message", any(o["kind"] == "text" and o["text"] == "Here it is." for o in app.out))
 q = [o["text"] for o in app.out if o["kind"] == "ask"]
 check(f"the question says the step in words, not the tool's name {q}",
-      q and q[0].startswith("Before I go on: may I move shot.png to D:/x?") and "move_path" not in q[0])
+      q and q[0].startswith("Move shot.png to D:/x?") and "move_path" not in q[0])
 from hearth import chat_sync  # noqa: E402
 saved = (chat_sync.load(cc.chat_id_for(app.name, "me")) or {}).get("messages") or []
 ev = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "tool"] if saved else []
