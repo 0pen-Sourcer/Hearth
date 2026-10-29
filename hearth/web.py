@@ -2640,6 +2640,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import plus as _plus, relay_bridge as _rb
             return self._send_json(200, {**_plus.status(), "relay": bool(_rb.relay_url()), "phones": _rb.phones(),
                                          "pairing": _rb.pairing_status(), "bridge": _bridge_running("relay")})
+        if path == "/api/install-count":
+            # The opt-in install count: whether it is on, and exactly what it sends.
+            from . import install_count
+            return self._send_json(200, {"on": install_count.on(), "payload": install_count.payload()})
         if path == "/api/cards":
             # Where each chat stands, for the Memory tab's "Going on".
             from . import memory_cards
@@ -6321,6 +6325,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     # user doesn't have to flip a Start toggle every session. Backgrounded
     # because each spawn waits ~1.6s to fail-fast on a bad token.
     threading.Thread(target=_autostart_bridges, daemon=True).start()
+    try:                                  # the opt-in install count (off unless they said yes)
+        from . import install_count
+        install_count.start()
+    except Exception:
+        pass
     # MCP client: spawn the servers configured in ~/Jarvis/mcp.json and
     # register their tools. Each server runs in its own subprocess; their
     # tools surface as 'mcp_<server>_<tool>' in to_openai_tools(). Safe

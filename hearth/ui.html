@@ -3862,6 +3862,8 @@
   .ob-title { font-size: 26px; font-weight: 600; color: var(--fg); margin: 0 0 10px 0; letter-spacing: -0.01em; }
   .ob-sub   { font-size: 14px; color: var(--fg-dim); line-height: 1.6; margin: 0 0 24px 0; }
   .ob-section { margin: 14px 0 22px 0; }
+  .ob-count-payload { display: block; margin-top: 8px; font: 11.5px/1.4 var(--mono, ui-monospace, monospace); color: var(--fg-faint);
+    word-break: break-all; }
   .ob-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
     color: var(--accent-2); margin-bottom: 8px; font-weight: 600;
@@ -5058,6 +5060,13 @@
             <button type="button" class="ap-mode" data-wipe="instant"><b>Instant</b><small>Straight to it, no movement.</small></button>
           </div>
         </div>
+<div class="field">
+          <div class="label">
+            <div class="name">Count this install</div>
+            <div class="hint" id="count-payload-hint">Once a day, only an install id, the version, the OS and the kind of brain.</div>
+          </div>
+          <div class="switch" data-key="install_count"></div>
+        </div>
 <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">In the chat</h4>
         <div class="field">
           <div class="label">
@@ -5800,6 +5809,14 @@
             <button type="button" data-uimode="simple">Simple<small>Tidy. My steps fold into one line.</small></button>
             <button type="button" data-uimode="advanced">Full<small>Every step as its own card, every counter.</small></button>
           </div>
+        </div>
+        <div class="ob-section">
+          <div class="ob-label">Count this install</div>
+          <div class="ob-seg" id="ob-count">
+            <button type="button" data-count="no">No</button>
+            <button type="button" data-count="yes">Yes<small>Once a day, only this:</small></button>
+          </div>
+          <code class="ob-count-payload" id="ob-count-payload"></code>
         </div>
         <div class="ob-section">
           <div class="ob-label">In the room</div>
@@ -20355,11 +20372,12 @@ let obState = { brain: '', voice: '', cloud: { provider: 'local', key: '', model
 
 // Segmented choices. Look and how-much-to-show apply the moment they're
 // picked, so the setup itself changes in front of you.
-const _OB_SEGS = { audio: 'ob-audio', approval: 'ob-approval', look: 'ob-look', uimode: 'ob-uimode', roomlook: 'ob-roomlook' };
+const _OB_SEGS = { audio: 'ob-audio', approval: 'ob-approval', look: 'ob-look', uimode: 'ob-uimode', roomlook: 'ob-roomlook', count: 'ob-count' };
 function _obSegValue(key) {
   // The look and how much to show are the app's, not this setup's: always what is in force now.
   if (obState[key] && key !== 'look' && key !== 'uimode' && key !== 'roomlook') return obState[key];
   if (key === 'approval') return 'ask';
+  if (key === 'count') return 'no';                 // the install count is opt-in
   if (key === 'look') { try { return localStorage.getItem('hearth_theme') || 'dark'; } catch { return 'dark'; } }
   if (key === 'uimode') return document.documentElement.dataset.ui === 'advanced' ? 'advanced' : 'simple';
   if (key === 'roomlook') { try { return localStorage.getItem('hearth_room_look') || 'her'; } catch { return 'her'; } }
@@ -20626,6 +20644,9 @@ function obRender() {
   if (obStep === 6) { $('ob-agent-name').placeholder = _agentName(); setTimeout(() => $('ob-name').focus(), 80); }
   if (obStep === 8) { _obProbeMigrate(); _obWireImport(); }
   document.querySelector('#onboard .ob-card').classList.toggle('ob-wide', obStep === 7);
+  if (obStep === 7 && $('ob-count-payload') && !$('ob-count-payload').textContent) {
+    api('/api/install-count').then(r => { $('ob-count-payload').textContent = JSON.stringify(r.payload); }).catch(() => {});
+  }
   if (obStep !== 7) obDemoStop();
   else if (cameFrom !== 7) setTimeout(() => obDemoStart(), 420);
   if (obStep === 1) { document.querySelectorAll('.ob-agent-name').forEach(el => { el.textContent = _agentName(); }); _obNames(); }
@@ -21034,6 +21055,7 @@ async function obFinish(skipped) {
       voice_name: pickedVoice,
       voice_speed: pickedSpeed,
       approval_mode: _obSegValue('approval'),
+      install_count: _obSegValue('count') === 'yes',
       audio: voiceOn ? (obState.audio || undefined) : undefined,
       language: voiceOn && $('ob-lang') ? $('ob-lang').value : undefined,
     };

@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  Free and MIT licensed. Windows, with macOS and Linux from source. No account, no telemetry.
+  Free and MIT licensed. Windows, with macOS and Linux from source. No account, no telemetry unless you opt in to an install count.
 </p>
 
 <p align="center">
@@ -105,7 +105,7 @@ OpenClaw and Hermes are agents that go wide, across many messaging channels. Ope
 
 **Can it replace ChatGPT?** For talking, looking things up and working on your own files and apps, on a good brain, yes. On a small local model it is quicker to set up than it is clever, so pick the brain to match the job.
 
-**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. With Plus on, the phone app's messages pass through the Plus relay sealed with keys only your PC and phone hold, so the relay can't read them, and the licence key is checked with the payment provider ([SECURITY.md](SECURITY.md) has the details). There is no telemetry. Inglen also asks GitHub for its own updates and for the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
+**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. With Plus on, the phone app's messages pass through the Plus relay sealed with keys only your PC and phone hold, so the relay can't read them, and the licence key is checked with the payment provider ([SECURITY.md](SECURITY.md) has the details). There is no telemetry unless you say yes to the install count (below). Inglen also asks GitHub for its own updates and for the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
 
 **Why "Inglen"?** An ingle is the fire in a hearth, the warm center of the house. JARVIS lives there. It was called Hearth before, and an update from Hearth keeps your settings, memory and chats.
 
@@ -246,7 +246,9 @@ Good first pull requests are macOS and Linux versions of the Windows-only tools 
 
 ## Privacy
 
-Inglen runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop, except the Plus relay if you choose Plus, which only carries messages it can't read. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Inglen is fully offline. The [MIT license](LICENSE) is the whole agreement.
+Inglen runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop, except the Plus relay if you choose Plus, which only carries messages it can't read. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Inglen is fully offline.
+
+**Install count (opt-in, off by default).** If you say yes in setup or turn on Settings, Behavior, "Count this install", Inglen sends this once a day to the relay: a random id made for your install, the version, the OS and whether the brain is local, cloud or an agent. Setup shows the exact payload before you choose. No names, no messages, no file paths; the relay keeps one row per install per day and does not store your IP address. Turn it off in Settings any time. The [MIT license](LICENSE) is the whole agreement.
 
 ## Support
 
