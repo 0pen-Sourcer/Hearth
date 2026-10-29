@@ -1,8 +1,9 @@
 """Hearth's icon in the saved look.
 
 Classic shows its own mark, the i with a flame. Every other theme shows the
-hearth with its flame in the accent colour. The tray, the window, the page's tab icon and desktop notices
-all take it from here, so they never disagree.
+Nook: a rounded corner bracket with a dot in the accent colour, on a dark tile.
+The tray, the window, the page's tab icon and desktop notices all take it from
+here, so they never disagree.
 """
 from __future__ import annotations
 
@@ -51,29 +52,74 @@ def _key(theme: str, accent: str) -> str:
     return accent if accent in ACCENTS else "ember"
 
 
-def _tint(img, accent: str):
-    """Recolour the flame. It is the only strongly orange part of the icon,
-    so shifting the hue of those pixels is enough."""
-    import colorsys
-    hexv = ACCENTS[accent]
-    th, _l, ts = colorsys.rgb_to_hls(*(int(hexv[i:i + 2], 16) / 255 for i in (1, 3, 5)))
-    px = img.load()
-    for y in range(img.height):
-        for x in range(img.width):
-            r, g, b, a = px[x, y]
-            if a < 10:
-                continue
-            h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
-            # The flame and its edge where it blends into the dark; the cream
-            # arch is the same hue but far lighter, so it is left alone.
-            if s > 0.3 and (h < 0.13 or h > 0.97) and 0.1 < l < 0.8:
-                nr, ng, nb = colorsys.hls_to_rgb(th, l, 0.05 if accent == "mono" else min(s, ts + 0.15))
-                px[x, y] = (int(nr * 255), int(ng * 255), int(nb * 255), a)
-    return img
+# The Nook in its 64 unit box: the bracket's path (16,40) up to (16,22), a
+# radius 6 corner, across to (40,16), stroke 6; the dot at (38,38), radius 9.
+TILE = (0x1C, 0x19, 0x16)
+FG = (0xEC, 0xEB, 0xE7)
+VERSION = "nook1"
 
 
-def image(theme: str, accent: str, size: int = 64):
+def _rgb(hexv: str) -> tuple:
+    return tuple(int(hexv[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def draw(accent: str, size: int = 256, tile: bool = True, shown: int = 0):
+    """The Nook as a PIL image, size x size. On its dark rounded tile by
+    default; without, on transparency in the foreground colour. `shown` is the
+    size it will be scaled to on screen, when that is smaller (the tray)."""
+    from PIL import Image, ImageDraw  # type: ignore
+    ss = 4 if size >= 64 else 8
+    S = size * ss
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    if tile:
+        d.rounded_rectangle([0, 0, S - 1, S - 1], radius=round(S * 0.22), fill=TILE + (255,))
+    # The mark spans 13..47 of its box; centre it, and on the tile give it
+    # about 60% of the width. Tray and taskbar sizes get a larger mark and a
+    # slightly heavier bracket so it stays two parts at 16 px.
+    at = shown or size
+    grow = 1.12 if at >= 48 else (1.22 if at >= 32 else 1.32)
+    k = S / 64 * (grow if tile else 1.0)
+    off = S / 2 - 30 * k
+
+    def P(x, y):
+        return (off + x * k, off + y * k)
+
+    w = (6 if at >= 32 else 6.6) * k
+    fg = FG + (255,)
+    r = w / 2
+    # Straight legs, then the corner as an arc, then round caps.
+    d.line([P(16, 40), P(16, 22)], fill=fg, width=round(w))
+    d.line([P(22, 16), P(40, 16)], fill=fg, width=round(w))
+    cx, cy = P(22, 22)
+    R = 6 * k
+    d.arc([cx - R - r, cy - R - r, cx + R + r, cy + R + r], 180, 270, fill=fg, width=round(w))
+    for x, y in ((16, 40), (40, 16), (16, 22), (22, 16)):
+        px, py = P(x, y)
+        d.ellipse([px - r, py - r, px + r, py + r], fill=fg)
+    dx, dy = P(38, 38)
+    dr = 9 * k
+    d.ellipse([dx - dr, dy - dr, dx + dr, dy + dr], fill=_rgb(ACCENTS.get(accent, ACCENTS["rose"])) + (255,))
+    return img.resize((size, size), Image.LANCZOS)
+
+
+def save(accent: str, path: str, ext: str) -> None:
+    """Write the tile as a .png (1024 px) or an .ico with each size drawn on
+    its own rather than shrunk from the largest."""
+    if ext == "ico":
+        frames = [draw(accent, s) for s, _ in _ICO_SIZES]
+        frames[-1].save(path, format="ICO", sizes=_ICO_SIZES, append_images=frames[:-1])
+    else:
+        draw(accent, 1024).save(path, format="PNG")
+
+
+def image(theme: str, accent: str, size: int = 64, shown: int = 0):
     """The icon as a PIL image, or None without Pillow or the art."""
+    if _key(theme, accent) != "classic":
+        try:
+            return draw(_key(theme, accent), size, shown=shown)
+        except Exception:
+            pass
     f = file(theme, accent, "png")
     if not f:
         return None
@@ -85,29 +131,23 @@ def image(theme: str, accent: str, size: int = 64):
 
 
 def file(theme: str, accent: str, ext: str = "ico") -> Optional[str]:
-    """A file of the icon (.ico or .png). The shipped art for Classic and
-    Ember; a tinted copy, made once, under ~/.hearth/icons for the others."""
+    """A file of the icon (.ico or .png). The shipped art for Classic; the
+    Nook in the accent, drawn once, under ~/.hearth/icons for the others."""
     d = _assets()
     if not d:
         return None
     k = _key(theme, accent)
-    if k in ("classic", "ember"):
-        f = os.path.join(d, ("icon_classic." if k == "classic" else "icon.") + ext)
+    if k == "classic":
+        f = os.path.join(d, "icon_classic." + ext)
         return f if os.path.isfile(f) else None
     out_dir = os.path.join(os.path.expanduser("~"), ".hearth", "icons")
-    out = os.path.join(out_dir, f"icon-{k}.{ext}")
-    src = os.path.join(d, "icon.png")
+    out = os.path.join(out_dir, f"icon-{VERSION}-{k}.{ext}")
     try:
-        if os.path.isfile(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+        if os.path.isfile(out):
             return out
-        from PIL import Image  # type: ignore
-        img = _tint(Image.open(src).convert("RGBA").resize((256, 256), Image.LANCZOS), k)
         os.makedirs(out_dir, exist_ok=True)
         tmp = out + ".tmp"
-        if ext == "ico":
-            img.save(tmp, format="ICO", sizes=_ICO_SIZES)
-        else:
-            img.save(tmp, format="PNG")
+        save(k, tmp, ext)
         os.replace(tmp, out)
         return out
     except Exception:
