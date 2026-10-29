@@ -973,8 +973,14 @@ class Speaker:
         self.audio_q: "_queue.Queue" = _queue.Queue(maxsize=6)
         self._pipe_lock = threading.Lock()
         self._threads: "list[threading.Thread]" = []
+        self._synthing = False
 
     # ---- state
+    def busy(self) -> bool:
+        """Anything still to be heard: text waiting, being made into audio, or playing."""
+        return (self._synthing or not self.synth_q.empty() or not self.audio_q.empty()
+                or self.is_speaking())
+
     def note_spoken(self, text: str) -> None:
         if not text:
             return
@@ -1082,31 +1088,37 @@ class Speaker:
     def _synth_loop(self) -> None:
         while True:
             text, voice, speed = self.synth_q.get()
-            if self.abort.is_set():
-                continue
-            engine = _load_engine()
-            if engine is None:
-                continue
-            kind, obj = engine
-            if kind not in ("kokoro", "piper"):
-                continue
+            self._synthing = True
             try:
-                # A call starts talking at the first clause; the PC waits for a fuller sentence.
-                for chunk in _chunk_sentences(text, min_chars=self.first_chunk):
-                    if self.abort.is_set():
+                self._synth_one(text, voice, speed)
+            finally:
+                self._synthing = False
+
+    def _synth_one(self, text: str, voice, speed) -> None:
+        if self.abort.is_set():
+            return
+        engine = _load_engine()
+        if engine is None:
+            return
+        kind, obj = engine
+        if kind not in ("kokoro", "piper"):
+            return
+        try:
+            # A call starts talking at the first clause; the PC waits for a fuller sentence.
+            for chunk in _chunk_sentences(text, min_chars=self.first_chunk):
+                if self.abort.is_set():
+                    break
+                with _synth_engine_lock:
+                    arr, sr = _synth_chunk(kind, obj, chunk, voice, speed)
+                # Blocks while the play queue is full: synthesis stays just ahead of playback.
+                while not self.abort.is_set():
+                    try:
+                        self.audio_q.put((arr, sr), timeout=0.2)
                         break
-                    with _synth_engine_lock:
-                        arr, sr = _synth_chunk(kind, obj, chunk, voice, speed)
-                    # Blocks while the play queue is full: synthesis stays just ahead of playback.
-                    while not self.abort.is_set():
-                        try:
-                            self.audio_q.put((arr, sr), timeout=0.2)
-                            break
-                        except _queue.Full:
-                            continue
-            except Exception as e:
-                note_speak_error("synthesis", e)
-                continue
+                    except _queue.Full:
+                        continue
+        except Exception as e:
+            note_speak_error("synthesis", e)
 
     def _play_local(self) -> None:
         try:
