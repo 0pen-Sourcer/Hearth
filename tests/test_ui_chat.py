@@ -1811,6 +1811,52 @@ with sync_playwright() as pw:
     idle = pg.evaluate("(() => { ROOM.intent = null; const m = ROOM.people.get('__main'); m.path = []; m.holdUntil = 0; return roomMainIdleWord(m); })()")
     check(f"with nothing asked of it, JARVIS is said to be free, not reading for you {idle!r}", idle.startswith("Free"))
 
+    # The empty chat's mark in its three states: an empty ring at rest with no
+    # model, a stroke running along the bracket while getting ready (following
+    # the load once it has a percentage), and a filled dot that settles once.
+    mark_js = """() => {
+      const real = _computeEmptyState, out = {};
+      const look = (cls) => {
+        window._computeEmptyState = () => ({ cls, title: '', sub: '' });
+        const el = emptyState(); document.body.prepend(el);
+        const dot = getComputedStyle(el.querySelector('.hm-dot'));
+        const tr = el.querySelector('.hm-trace');
+        const r = { cls: el.className, dot: dot.animationName, fill: dot.fillOpacity,
+                    trace: tr ? getComputedStyle(tr).animationName : 'missing',
+                    shown: tr ? getComputedStyle(tr).opacity : '' };
+        if (tr && cls.includes('loading')) {
+          _markProgress(40);
+          r.pctTrace = getComputedStyle(tr).animationName; r.dash = tr.style.strokeDasharray;
+          _markProgress(null);
+          r.back = getComputedStyle(tr).animationName;
+        }
+        el.remove(); return r;
+      };
+      try {
+        out.idle = look('empty idle-nomodel'); out.loading = look('empty booting loading');
+        out.ready = look('empty');
+      } finally { window._computeEmptyState = real; }
+      return out;
+    }"""
+    mk = pg.evaluate(mark_js)
+    check(f"no model: the dot is an empty ring breathing slowly, nothing runs along the bracket {mk['idle']}",
+          mk["idle"]["cls"] == "empty idle-nomodel" and mk["idle"]["dot"] == "nookRest"
+          and mk["idle"]["fill"] == "0" and mk["idle"]["shown"] == "0")
+    ld = mk["loading"]
+    check(f"getting ready: a stroke runs along the bracket, then follows the load's percentage {ld}",
+          ld["trace"] == "nookTrace" and ld["shown"] == "1" and ld["dot"] == "none"
+          and ld.get("pctTrace") == "none" and str(ld.get("dash", "")).startswith("40")
+          and ld.get("back") == "nookTrace")
+    check(f"ready: the ring fills and the dot settles once {mk['ready']}",
+          mk["ready"]["dot"] == "nookSettle" and mk["ready"]["fill"] == "1" and mk["ready"]["shown"] == "0")
+    pg.emulate_media(reduced_motion="reduce")
+    still = pg.evaluate(mark_js)
+    pg.emulate_media(reduced_motion="no-preference")
+    check(f"with reduced motion every state of the mark holds still {still}",
+          all(still[k]["dot"] == "none" and still[k]["trace"] in ("none", "missing")
+              for k in ("idle", "loading", "ready"))
+          and still["idle"]["fill"] == "0" and still["ready"]["fill"] == "1")
+
     browser.close()
 srv.shutdown()
 
