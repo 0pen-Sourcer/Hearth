@@ -4423,7 +4423,6 @@
           <input type="text" id="skill-install-src" placeholder="Add a skill: a GitHub link or owner/repo">
           <button type="submit" class="send-btn" id="btn-skill-install" title="Look at it first" aria-label="Add"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg></button>
         </form>
-        <p class="sk-note">Skills use the Agent Skills format, the same one Claude and Codex read, so most skills on GitHub work here. You see what one does before it's added, and anything it runs still asks first. Switch one off to keep it out of <span data-agent-name>JARVIS</span>'s way without removing it.</p>
         <div class="rm-list" id="skills-box"><div class="lg-empty">Loading&hellip;</div></div>
       </div>
     </section>
@@ -4673,7 +4672,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Wake word</div>
-            <div class="hint">Say this to start talking to Inglen, even while it sits in the tray. It follows the assistant's name. Separate phrases with commas. It keeps the microphone open while it listens.</div>
+            <div class="hint">Say it to start talking, even from the tray.</div>
             <div class="voice-status" id="wake-status">checking…</div>
           </div>
           <div class="switch" data-key="tray_wake_on"></div>
@@ -4681,28 +4680,28 @@
         <div class="field">
           <div class="label">
             <div class="name">Wake word on a Bluetooth headset</div>
-            <div class="hint">A Bluetooth headset whose mic is held open switches to call mode, and music and video sound flat until it's let go. So the wake word leaves a Bluetooth mic alone unless this is on. Pressing the mic still uses it.</div>
+            <div class="hint">Off keeps music sounding right on the headset.</div>
           </div>
           <div class="switch" data-key="wake_on_bluetooth"></div>
         </div>
         <div class="field">
           <div class="label">
             <div class="name">What it listens for</div>
-            <div class="hint">The exact phrases. A word one letter off still counts, so a small mishearing still wakes it.</div>
+            <div class="hint">Separate phrases with commas.</div>
           </div>
           <input type="text" id="setting-wake-phrases" placeholder="" spellcheck="false" autocomplete="off" style="min-width:300px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;font-family:var(--mono)"/>
         </div>
         <div class="field">
           <div class="label">
             <div class="name">Speakers mode</div>
-            <div class="hint">For voice in the terminal (/listen). Voice mode in the window cancels its own echo and doesn't need it. Turn it on if you use speakers and the terminal hears itself talking: it stops listening while it speaks, and to cut in you start with its name, like "<span data-agent-name>JARVIS</span>, stop".</div>
+            <div class="hint">For /listen in the terminal on speakers. Say "<span data-agent-name>JARVIS</span>, stop" to cut in.</div>
           </div>
           <div class="switch" data-key="voice_half_duplex"></div>
         </div>
         <div class="field">
           <div class="label">
             <div class="name">Voice runs on</div>
-            <div class="hint">The processor is fast enough for speaking. The graphics card matters for listening, further down.</div>
+            <div class="hint">The processor is fast enough.</div>
           </div>
           <select id="setting-tts-device">
             <option value="cpu">CPU (recommended)</option>
@@ -5266,9 +5265,7 @@
         <div class="settings-pane" data-st="connect" hidden>
         <h3>Connectors</h3>
         <p class="settings-sub" style="color:var(--fg-faint);font-size:12px;margin:-4px 0 14px;">
-          Reach Inglen from your phone, or give it your inbox. A phone message runs the
-          full agent on this PC and replies. Set it up once and Inglen keeps it running,
-          starting automatically every launch. Everything below is optional.
+          Reach Inglen from your phone or your inbox.
         </p>
         <div id="conn-people" style="margin:0 0 16px"></div>
 
@@ -5408,9 +5405,9 @@
         <div class="field">
           <div class="label">
             <div class="name">Replay setup</div>
-            <div class="hint">Re-open the first-run guide (pick a brain, voice, name, etc).</div>
+            <div class="hint">Pick a brain, voice and name again.</div>
           </div>
-          <button class="btn-mini" id="btn-replay-onboard">Re-run onboarding</button>
+          <button class="btn-mini" id="btn-replay-onboard">Run setup</button>
         </div>
         <div class="field">
           <div class="label">
@@ -5429,7 +5426,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Repair install</div>
-            <div class="hint">Checks every part of Inglen and puts back whatever is missing or broken: the app, its art, voice, and the model engine. Your chats, memories and files are not touched. <span id="repair-status"></span></div>
+            <div class="hint">Puts back anything missing or broken. Your chats, memory and files stay. <span id="repair-status"></span></div>
           </div>
           <button class="btn-mini" id="btn-repair">Repair</button>
         </div>
@@ -5450,9 +5447,9 @@
         <div class="field">
           <div class="label">
             <div class="name">Start Inglen at login</div>
-            <div class="hint">Auto-launch the tray when you sign in to Windows, so reminders fire even before you open Inglen. <span id="autostart-status"></span></div>
+            <div class="hint">Reminders fire before you open the window.</div>
           </div>
-          <button class="btn-mini" id="btn-autostart-toggle">…</button>
+          <div class="switch" id="btn-autostart-toggle" role="switch" aria-checked="false" aria-label="Start Inglen at login"></div>
         </div>
         <div class="field"><div class="label">
           <div class="name">Currently talking to</div>
@@ -5492,16 +5489,15 @@
             <div class="credit-avatar"></div>
             <div>
               <div class="credit-name">Built by 0pen-sourcer</div>
-              <div class="credit-sub">Local-first AI for Windows · MIT · <a href="https://github.com/0pen-sourcer/hearth" target="_blank">github.com/0pen-sourcer/hearth</a></div>
+              <div class="credit-sub">MIT · <a href="https://github.com/0pen-sourcer/hearth" target="_blank">github.com/0pen-sourcer/hearth</a></div>
             </div>
           </div>
-          <div class="credit-sub" style="margin-top:10px">Found a bug? Open an issue or DM. Want to support? Star the repo or open Support tab.</div>
         </div>
 
         <!-- Keyboard shortcuts cheatsheet - grid table of shortcut chips. -->
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Keyboard shortcuts</h4>
         <div class="kbd-grid">
-          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>8</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
+          <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>1</kbd>–<kbd>9</kbd></div><div class="kbd-desc">switch sidebar tab</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>N</kbd></div><div class="kbd-desc">new chat</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>L</kbd></div><div class="kbd-desc">focus chat input</div></div>
           <div class="kbd-row"><div class="kbd-keys"><kbd>Ctrl</kbd><span class="kbd-plus">+</span><kbd>K</kbd></div><div class="kbd-desc">focus model picker</div></div>
@@ -13884,8 +13880,7 @@ function _rmIdeasDraw() {
   const list = RM_IDEAS.list || [];
   if (RM_FILTER === 'done' || !RM_IDEAS.list) { box.innerHTML = ''; return; }
   if (!list.length) {
-    box.innerHTML = '<h3>For you</h3><div class="rm-learn">Ideas show up here as ' + _agentName() + ' learns how you work: what you ask for, '
-      + 'what you keep coming back to, and what it remembers about you.</div>';
+    box.innerHTML = '';
     return;
   }
   box.innerHTML = '<h3>For you</h3>' + list.map(x =>
@@ -14764,7 +14759,7 @@ async function refreshSettings() {
     refreshCtxBudget();
     // Brand-sub label is owned by refreshState (derived from the LIVE endpoint,
     // so it's honest even when settings.llm_provider is stale/inconsistent).
-    $$('.switch').forEach(sw => {
+    $$('.switch[data-key]').forEach(sw => {
       const k = sw.dataset.key;
       // gen_stats, show_diffs, activity_hud and auto_memory default ON (only off when explicitly disabled); the rest default off.
       sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud' || k === 'auto_memory' || k === 'auto_reviewer') ? (s[k] !== false) : !!s[k]);
@@ -15430,23 +15425,23 @@ async function refreshSettings() {
     const autostartBtn = $('btn-autostart-toggle');
     function paintAutostart(on) {
       if (!autostartBtn) return;
-      autostartBtn.textContent = on ? 'On - turn off' : 'Off - turn on';
-      const s = $('autostart-status');
-      if (s) s.textContent = on ? '(enabled)' : '(disabled)';
+      autostartBtn.classList.toggle('on', on);
+      autostartBtn.setAttribute('aria-checked', on ? 'true' : 'false');
     }
     if (autostartBtn) {
       // initial state
       api('/api/autostart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
         .then(r => { if (r && r.ok) paintAutostart(!!r.enabled); }).catch(()=>{});
       autostartBtn.onclick = async () => {
-        autostartBtn.disabled = true;
-        const want = autostartBtn.textContent.indexOf('turn on') >= 0; // "Off - turn on" => enabling
+        if (autostartBtn.dataset.busy) return;
+        autostartBtn.dataset.busy = '1';
+        const want = !autostartBtn.classList.contains('on');
         try {
           const r = await api('/api/autostart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ enabled: want }) });
-          if (r && r.ok) { paintAutostart(!!r.enabled); toast('Start at login', r.enabled ? 'Inglen will launch when you sign in.' : 'Auto-launch turned off.', 'ok', 5000); }
+          if (r && r.ok) { paintAutostart(!!r.enabled); if (!!r.enabled !== want) toast("Couldn't change start at login", '', 'err', 6000); }
           else { toast("Couldn't change start at login", (r && r.error) || "It didn't say why.", 'err', 6000); }
         } catch (e) { toast('Start at login', e.message || e, 'err', 6000); }
-        finally { autostartBtn.disabled = false; }
+        finally { delete autostartBtn.dataset.busy; }
       };
     }
 
@@ -15883,7 +15878,7 @@ async function saveSetting(key, value) {
     }
   } catch (e) { toast('Save', e.message, 'err'); }
 }
-$$('.switch').forEach(sw => {
+$$('.switch[data-key]').forEach(sw => {
   sw.addEventListener('click', () => {
     const k = sw.dataset.key;
     const next = !sw.classList.contains('on');
