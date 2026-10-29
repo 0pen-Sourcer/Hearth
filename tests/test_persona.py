@@ -64,7 +64,7 @@ claude_brain.current = lambda: "codex"
 check("on an agent program it is told which, and whose plan",
       "runs through Codex on the user's ChatGPT plan" in P.system_prompt())
 claude_brain.current = lambda: None
-check("it is told its name is not the app's", "never call yourself Inglen" in here)
+check("it is told its name is not the app's", "don't call yourself Inglen" in " ".join(here.split()))
 
 # ------------------------------------------------------------------- size
 tokens = len(BASE) // 4
@@ -104,9 +104,9 @@ for must, why in (
         ("search_chats", "how to recall an earlier conversation"),
         ("end_session", "how to end on a goodbye"),
         ("masked", "never print a secret"),
-        ("as\nan AI", "no AI-disclaimer register"),
+        ("as an AI", "no AI-disclaimer register"),
 ):
-    check(f"it still covers: {why}", must in BASE)
+    check(f"it still covers: {why}", " ".join(must.split()) in " ".join(BASE.split()))
 
 print()
 if FAILS:

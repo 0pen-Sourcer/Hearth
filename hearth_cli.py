@@ -1691,7 +1691,8 @@ class JarvisCLI:
         try:
             from hearth.persona import NAME as _AGENT_NAME
         except Exception:
-            _AGENT_NAME = "JARVIS"
+            from hearth import default_agent_name
+            _AGENT_NAME = default_agent_name()
         home = os.path.expanduser("~")
         ws = WORKSPACE.replace(home, "~") if WORKSPACE.lower().startswith(home.lower()) else WORKSPACE
         beside = [
@@ -4520,7 +4521,8 @@ class JarvisCLI:
             try:
                 from hearth.persona import NAME as an
             except Exception:
-                an = "JARVIS"
+                from hearth import default_agent_name
+                an = default_agent_name()
             self._agent_name = an
         # Compose status line then prompt symbol on next visual chunk
         return (

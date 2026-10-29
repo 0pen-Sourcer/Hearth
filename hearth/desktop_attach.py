@@ -84,7 +84,7 @@ def _saved_look(url: str) -> str:
     try:
         import json as _json
         from .env import get as _get
-        ws = _get("WORKSPACE") or os.path.join(os.path.expanduser("~"), "Jarvis")
+        ws = _get("WORKSPACE") or __import__("hearth").default_workspace()
         from .look_icon import default_theme
         with open(os.path.join(ws, "settings.json"), encoding="utf-8") as f:
             s = _json.load(f) or {}

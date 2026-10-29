@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional, Tuple
 #   2. Bundled      hearth/skills/     (ship-with-Hearth defaults)
 # Same-name user skill shadows the bundled one (user wins).
 _USER_SKILLS_DIR = Path(_env.get("WORKSPACE")
-                        or (Path.home() / "Jarvis")) / "skills"
+                        or Path(__import__("hearth").default_workspace())) / "skills"
 _BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 
 

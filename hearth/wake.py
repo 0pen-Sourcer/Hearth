@@ -67,7 +67,8 @@ def _wake_phrases() -> List[str]:
         pass
     # Track the agent's actual name — a renamed agent (FRIDAY) should wake on
     # "hey friday", not still on "jarvis".
-    name = os.environ.get("HEARTH_PERSONA_NAME", "").strip().lower()
+    from . import default_agent_name
+    name = (os.environ.get("HEARTH_PERSONA_NAME", "").strip() or default_agent_name()).lower()
     if name and name != "jarvis":
         return [name, f"hey {name}", f"hi {name}", f"yo {name}",
                 f"wake up {name}", f"{name} wake up"]

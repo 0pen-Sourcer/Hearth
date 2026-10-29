@@ -90,7 +90,7 @@ _DEFAULT_MAX_TURNS = 8
 # can `read_file` them for live progress, and so backgrounded subagents
 # leave an audit trail even after the parent has moved on.
 _TRANSCRIPT_DIR = Path(_env.get("WORKSPACE")
-                       or (Path.home() / "Jarvis")) / "subagents"
+                       or Path(__import__("hearth").default_workspace())) / "subagents"
 
 # Background subagents put their final result-dict here so anyone (the chat
 # bridge, the CLI, or the parent itself via `read_file`) can pick it up.
@@ -1321,7 +1321,8 @@ def _main_name() -> str:
         from .persona import NAME
         return NAME
     except Exception:
-        return "JARVIS"
+        from . import default_agent_name
+        return default_agent_name()
 
 
 def _working_helper(target: str, sender_id: str) -> Optional[Dict[str, Any]]:

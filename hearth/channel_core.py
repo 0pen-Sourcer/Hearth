@@ -756,7 +756,8 @@ def _persona_name() -> str:
         from .persona import NAME
         return NAME
     except Exception:
-        return "JARVIS"
+        from . import default_agent_name
+        return default_agent_name()
 
 
 # The app's own bookkeeping, not a step of the work: not shown as one in an app.
