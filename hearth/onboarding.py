@@ -130,6 +130,8 @@ def apply(answers: Dict[str, str]) -> Dict[str, object]:
         # The language spoken to it: listening uses it (a multilingual model for
         # anything but English); blank means work it out for each utterance.
         settings["stt_language"] = a["language"]
+    if "install_count" in a:
+        settings["install_count"] = a["install_count"] in (True, "yes", "on")   # opt-in: anything else is no
     if "voice" in a:
         on = a["voice"] in (True, "full", "yes", "on")
         settings["voice_tts"] = on
