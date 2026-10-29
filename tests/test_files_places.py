@@ -80,7 +80,7 @@ check("a file outside every place isn't served", st == 403)
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 with sync_playwright() as pw:
-    b = pw.chromium.launch()
+    b = pw.chromium.launch(channel="msedge", args=["--disable-gpu"]) if sys.platform == "win32" else pw.chromium.launch()
     pg = b.new_page(viewport={"width": 1280, "height": 900})
     pg.goto(BASE + "/")
     pg.wait_for_function("typeof showView === 'function'", timeout=60000)

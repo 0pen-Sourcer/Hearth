@@ -43,7 +43,7 @@ port = srv.server_address[1]
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 with sync_playwright() as pw:
-    b = pw.chromium.launch()
+    b = pw.chromium.launch(channel="msedge", args=["--disable-gpu"]) if sys.platform == "win32" else pw.chromium.launch()
     pg = b.new_page(viewport={"width": 1280, "height": 900})
     autostart = {"enabled": False, "asked": []}
     saved = []
@@ -93,6 +93,8 @@ with sync_playwright() as pw:
     sw = pg.locator("#btn-autostart-toggle")
     check("start at login is a switch", "switch" in (sw.get_attribute("class") or "")
           and sw.get_attribute("role") == "switch" and "turn on" not in sw.inner_text())
+    # Settings wires the switch after its earlier awaits, which take longer on Windows.
+    pg.wait_for_function("!!document.getElementById('btn-autostart-toggle').onclick", timeout=60000)
     toasts_before = pg.locator(".toast").count()
     sw.click()
     pg.wait_for_function("document.getElementById('btn-autostart-toggle').classList.contains('on')", timeout=5000)
