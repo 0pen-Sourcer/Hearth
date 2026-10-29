@@ -615,6 +615,47 @@ def voice_for(text: str, voice: str) -> str:
     return voice
 
 
+# A sentence ends at any of these; the voice is chosen again at each one.
+# Latin stops count only before a space, so 3.5 and e.g. stay whole.
+_SPLIT = re.compile(r"(?<=[.!?\u2026])(?=\s)|(?<=[\n\u0964\u0965\u3002\uFF01\uFF1F\u061F])")
+_KANA = _SCRIPTS[1][1]
+
+
+def voice_runs(text: str, voice: str) -> List[Tuple[str, str]]:
+    """[(text, voice)]: each sentence with the voice that reads it, sentences
+    next to each other that share a voice joined. A reply that is English with
+    a Hindi line in it is read in the chosen voice, then a Hindi voice, then
+    the chosen voice again. In Japanese, a sentence of kanji alone is still
+    Japanese when the reply has kana elsewhere."""
+    voice = voice or current_voice()
+    japanese = bool(_KANA.search(text or ""))
+    runs: List[Tuple[str, str]] = []
+    for part in _SPLIT.split(text or ""):
+        if not part.strip():
+            continue
+        v = voice_for(part, voice)
+        if japanese and v[:1] == "z" and voice[:1] != "z":
+            v = voice if voice[:1] == "j" else _same_kind("j", voice)
+        if runs and runs[-1][1] == v:
+            runs[-1] = (runs[-1][0] + part, v)
+        else:
+            runs.append((part, v))
+    return [(t.strip(), v) for t, v in runs]
+
+
+def _kokoro_say(obj, text: str, voice, speed):
+    """(float samples, sample rate) for text that may change language between
+    sentences: each run in its own voice, joined end to end."""
+    import numpy as np  # type: ignore
+    pieces, sr = [], 24000
+    for part, v in voice_runs(text, voice):
+        samples, sr = obj.create(part, voice=v, speed=speed, lang=voice_language(v))  # type: ignore[attr-defined]
+        pieces.append(np.asarray(samples))
+    if not pieces:
+        return np.zeros(0, dtype=np.float32), sr
+    return (pieces[0] if len(pieces) == 1 else np.concatenate(pieces)), sr
+
+
 # What a voice says when it is tried: a line worth hearing, from that
 # language's own writers, in the voice's language so it can say it.
 SAMPLES = {
@@ -941,8 +982,7 @@ def _to_int16(samples):
 def _synth_chunk(kind: str, obj, chunk: str, voice, speed):
     """(int16 samples, sample rate) for one chunk of text."""
     if kind == "kokoro":
-        v = voice_for(chunk, voice)
-        samples, sr = obj.create(chunk, voice=v, speed=speed, lang=voice_language(v))  # type: ignore[attr-defined]
+        samples, sr = _kokoro_say(obj, chunk, voice, speed)
         return _to_int16(samples), sr
     buf = BytesIO()
     with wave.open(buf, "wb") as wav:
@@ -1253,9 +1293,7 @@ def _speak_legacy(text, blocking, voice, speed) -> str:
                         if _abort.is_set():
                             return
                         if kind == "kokoro":
-                            v = voice_for(chunk, voice)
-                            samples, sr = obj.create(  # type: ignore[attr-defined]
-                                chunk, voice=v, speed=speed, lang=voice_language(v))
+                            samples, sr = _kokoro_say(obj, chunk, voice, speed)
                             _play(samples, sr)
                         elif kind == "piper":
                             buf = BytesIO()
