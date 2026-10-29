@@ -44,7 +44,7 @@ def _next_start() -> int:
 
 def _settings() -> dict:
     try:
-        base = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
+        base = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
         with open(os.path.join(base, "settings.json"), encoding="utf-8") as f:
             return json.load(f) or {}
     except Exception:

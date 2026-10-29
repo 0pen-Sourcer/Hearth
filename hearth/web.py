@@ -1540,7 +1540,7 @@ def _load_settings() -> Dict:
         "tts_device": "cpu",   # cpu / cuda / dml
         "voice_speed": 1.0,    # Kokoro playback rate (0.5x-2.5x)
         "voice_name": "am_michael",  # Kokoro voice id (am_/af_/bm_/bf_ + name). am_michael = calm neutral baseline.
-        "agent_name": "JARVIS",      # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
+        "agent_name": __import__("hearth").default_agent_name(),  # User-renameable persona. Settings → Behavior. Drives chat avatar letter (first char), assistant label, persona prompt, AND workspace folder (~/<agent_name>/). Rename rules in /api/agent/rename.
         "stt_model": "base.en",  # a name ending .en holds English only
         "stt_language": "",      # blank = detect per utterance
         # Memory bookkeeping runs on most turns, so its cards can outnumber
@@ -1599,7 +1599,7 @@ def _load_settings() -> Dict:
     # HEARTH_PERSONA_NAME. Setting it here means the very next chat turn
     # picks up the user's renamed agent. On boot, this fires before any
     # chat call so the persona is correct from turn 1.
-    os.environ["HEARTH_PERSONA_NAME"] = (defaults.get("agent_name") or "JARVIS").strip() or "JARVIS"
+    os.environ["HEARTH_PERSONA_NAME"] = (defaults.get("agent_name") or __import__("hearth").default_agent_name()).strip() or __import__("hearth").default_agent_name()
     return defaults
 
 
@@ -1800,7 +1800,7 @@ def _save_settings_locked(d: Dict) -> Dict:
     # very next chat turn uses the new name in system prompt, signatures,
     # and tone rules — no restart needed. Folder rename happens via a
     # separate /api/agent/rename endpoint (it's slow + interrupts the tray).
-    new_agent_name = (cur.get("agent_name") or "JARVIS").strip() or "JARVIS"
+    new_agent_name = (cur.get("agent_name") or __import__("hearth").default_agent_name()).strip() or __import__("hearth").default_agent_name()
     os.environ["HEARTH_PERSONA_NAME"] = new_agent_name
     try:
         from . import persona as _persona
@@ -2820,7 +2820,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "pending":      list(_permission_queues.keys()),
             })
         if path == "/api/settings":
-            return self._send_json(200, _load_settings())
+            # With the name the agent has until the person picks one, for the window's fallbacks.
+            return self._send_json(200, dict(_load_settings(), agent_name_default=__import__("hearth").default_agent_name()))
         if path == "/api/auto_review":
             from . import auto_review
             return self._send_json(200, auto_review.status())
@@ -5069,7 +5070,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         # leading/trailing whitespace funkiness.
         if not _re.match(r"^[A-Za-z0-9 ]{1,20}$", new_name):
             return self._send_json(400, {"error": "name must be 1-20 chars, letters/digits/spaces only"})
-        current_name = (_load_settings().get("agent_name") or "JARVIS").strip() or "JARVIS"
+        current_name = (_load_settings().get("agent_name") or __import__("hearth").default_agent_name()).strip() or __import__("hearth").default_agent_name()
         if new_name == current_name:
             return self._send_json(200, {"ok": True, "noop": True, "name": new_name})
         # Compute target workspace. Use the PARENT of current WORKSPACE so a
@@ -5439,7 +5440,11 @@ class HearthHandler(BaseHTTPRequestHandler):
         live_bus.publish(live_bus.turn_event(chat_id, "window", _live_turn, "start", {"text": prompt}) or {})
         _spoken: Dict[str, Any] = {"turn": None}     # a voice-mode turn: its reply is said in the window's call
 
+        from .waited import Waited
+        _waited = Waited()          # time spent on the person's OK or answer: not part of the turn's duration
+
         def emit(event_type: str, **fields: Any) -> None:
+            fields = _waited.fix(event_type, fields)
             _turn_saw(event_type, fields)
             if _spoken["turn"] is not None:
                 _window_turn_event(_spoken["turn"], event_type, fields)
@@ -5465,7 +5470,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         # blocking until the user clicks an option in the modal.
         try:
             from .tools import set_ask_user_callback
-            set_ask_user_callback(_make_ask_user_bridge(emit))
+            set_ask_user_callback(_waited.timing(_make_ask_user_bridge(emit)))
         except Exception:
             pass
         # Local endpoint with NOTHING loaded: don't let run_once hit a dead
@@ -5504,7 +5509,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         try:
             asyncio.run(run_once(
                 prompt, emit=emit, think=think, think_level=think_level, model=model, history=history,
-                permission_check=_make_permission_check(emit),
+                permission_check=_waited.timing(_make_permission_check(emit)),
                 should_cancel=_CANCEL.is_set, drain_steer=_drain_steer,
                 voice=voice, chat_id=chat_id, prior_failure=str(body.get("prior_failure") or "")[:600],
             ))
@@ -5921,7 +5926,7 @@ def what_to_get(local: bool, voice: bool) -> Dict[str, Any]:
                     gb += sum(int(x.get("size") or 0) for x in llmserver._repo_siblings(repo)) / (1024 ** 3)
                 except Exception:
                     pass
-            items.append({"id": "voice", "title": f"{(_load_settings().get('agent_name') or 'JARVIS')}'s voice and hearing",
+            items.append({"id": "voice", "title": f"{(_load_settings().get('agent_name') or __import__('hearth').default_agent_name())}'s voice and hearing",
                           "sub": "Speaking, and the speech model that turns what you say into text",
                           "size_gb": round(gb, 2) if gb else None})
     return {"items": items}
@@ -6305,6 +6310,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
         claude_brain.set_bridge_url(f"http://127.0.0.1:{server.server_address[1]}")
     except Exception:
         pass
+    live_bus.announce_window(f"http://127.0.0.1:{server.server_address[1]}")
     # Clear write temporaries a killed save left behind, before anything lists
     # the folder and reports one as a conversation.
     for _d in (CONVOS_DIR, os.path.dirname(SETTINGS_PATH) or "."):

@@ -246,7 +246,7 @@ def _title_for(hint: str, text: str) -> str:
 def _copy_skills(roots: List[Path]) -> int:
     """Park skill dirs under ~/Jarvis/imported_skills/<source>/<name>/.
     Hearth has no skill loader yet; this preserves them for later review."""
-    target_root = Path.home() / "Jarvis" / "imported_skills"
+    target_root = Path(__import__("hearth.tools", fromlist=["WORKSPACE"]).WORKSPACE) / "imported_skills"
     count = 0
     for root in roots:
         if not root.is_dir():
@@ -425,7 +425,7 @@ def main() -> int:
     if args.include_config:
         cfg_diff = _maybe_import_config(args.source)
         if args.apply and cfg_diff and not any(k.startswith("_") for k in cfg_diff):
-            settings_path = Path.home() / "Jarvis" / "settings.json"
+            settings_path = Path(__import__("hearth.tools", fromlist=["WORKSPACE"]).WORKSPACE) / "settings.json"
             try:
                 existing = {}
                 if settings_path.is_file():

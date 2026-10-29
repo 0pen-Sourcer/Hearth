@@ -24,6 +24,7 @@ import json
 import time
 import shutil
 import asyncio
+import secrets
 import threading
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -1674,7 +1675,8 @@ class JarvisCLI:
         try:
             from hearth.persona import NAME as _AGENT_NAME
         except Exception:
-            _AGENT_NAME = "JARVIS"
+            from hearth import default_agent_name
+            _AGENT_NAME = default_agent_name()
         home = os.path.expanduser("~")
         ws = WORKSPACE.replace(home, "~") if WORKSPACE.lower().startswith(home.lower()) else WORKSPACE
         beside = [
@@ -4497,7 +4499,8 @@ class JarvisCLI:
             try:
                 from hearth.persona import NAME as an
             except Exception:
-                an = "JARVIS"
+                from hearth import default_agent_name
+                an = default_agent_name()
             self._agent_name = an
         # Compose status line then prompt symbol on next visual chunk
         return (
@@ -5204,6 +5207,7 @@ class JarvisCLI:
         # judges the user is wrapping up. We finish the current response,
         # then exit on the next loop iteration.
         self._exit_requested = False
+        self._follow_others()              # turns run elsewhere in this chat show here as they go
         # Register the CLI as the interactive surface for ask_user - the tool
         # handler bounces back to this loop via run_coroutine_threadsafe.
         try:
@@ -5881,6 +5885,60 @@ class JarvisCLI:
         self._responding_now = on
         _note_activity("thinking" if on else "idle")
 
+    def _live_out(self, prompt: str):
+        """This turn, as it goes, for the window and the phone (live_bus, from "terminal"):
+        returns the function each of the turn's events goes through."""
+        try:
+            from hearth import chat_sync, live_bus
+            if not live_bus.window_url():
+                return lambda kind, fields: None
+            if not self._chat.get("id"):                 # the chat this turn will be kept in
+                self._chat["id"] = chat_sync.new_id()
+                self._chat_keep()
+            cid, t = self._chat["id"], secrets.token_hex(5)
+            live_bus.publish(live_bus.turn_event(cid, "terminal", t, "start", {"text": prompt}))
+        except Exception:
+            return lambda kind, fields: None
+
+        def out(kind, fields):
+            try:
+                ev = live_bus.turn_event(cid, "terminal", t, kind, fields)
+                if ev:
+                    live_bus.publish(ev)
+            except Exception:
+                pass
+        return out
+
+    def _follow_others(self) -> None:
+        """Turns the window, the phone or a chat app run in this terminal's chat, shown
+        here as they go (live_bus); the next prompt reads them in as history (_chat_pull)."""
+        try:
+            from hearth import live_bus
+            url = live_bus.window_url()
+        except Exception:
+            return
+        if not url or getattr(self, "_following", False):
+            return
+        self._following = True
+        names = {"window": "the window", "relay": "your phone"}
+
+        def on(ev):
+            if ev.get("kind") != "turn" or ev.get("from") == "terminal":
+                return
+            if not ev.get("chat") or ev.get("chat") != (getattr(self, "_chat", None) or {}).get("id"):
+                return
+            kind, who = ev.get("type"), names.get(str(ev.get("from")), str(ev.get("from") or "elsewhere"))
+            if kind == "start":
+                print(f"\n{C_DIM}↳ from {who}:{C_RESET} {str(ev.get('text') or '').strip()[:400]}", flush=True)
+            elif kind == "step":
+                print(f"  {C_DIM}● {ev.get('words') or ''}{C_RESET}", flush=True)
+            elif kind == "said" and ev.get("text"):
+                print(str(ev["text"]).strip(), flush=True)
+            elif kind == "error" and ev.get("text"):
+                print(f"{C_ERR}{ev['text']}{C_RESET}", flush=True)
+
+        threading.Thread(target=live_bus.listen, args=(url, on), daemon=True, name="terminal-follow").start()
+
     async def _respond_claude(self) -> None:
         """One turn with an agent program as the brain: its text streams here, its
         tool calls print like Hearth's own, and anything it needs permission
@@ -5929,7 +5987,14 @@ class JarvisCLI:
 
         reply = []
 
+        live = self._live_out(prompt)
+        from hearth.waited import Waited
+        waited = Waited()                 # the time on their OK isn't part of the turn's duration
+        ask = waited.timing(ask)
+
         def emit(t, **f):
+            f = waited.fix(t, f)
+            live(t, f)
             if t == "assistant_chunk":
                 chunk = f.get("content", "")
                 if not state["open"]:
@@ -6011,16 +6076,22 @@ class JarvisCLI:
         steer_task = asyncio.create_task(self._steer_loop())
         failed: List[str] = []
 
+        live = self._live_out(prompt)
+        from hearth.waited import Waited
+        waited = Waited()                 # the time on their OK isn't part of the turn's duration
+
         def _emit(kind, **fields):
+            fields = waited.fix(kind, fields)
             if kind == "error":
                 failed.append(str(fields.get("message") or ""))
+            live(kind, fields)
             return turn.emit(kind, **fields)
         prior, self._last_failure = getattr(self, "_last_failure", ""), ""
         try:
             await _hl.run_once(
                 prompt, emit=_emit, model=self.current_model, think=self.think_on,
                 think_level=getattr(self, "think_level", "") or "", history=history,
-                permission_check=self._ask_permission, should_cancel=self._respond_cancel.is_set,
+                permission_check=waited.timing(self._ask_permission), should_cancel=self._respond_cancel.is_set,
                 drain_steer=self._drain_steer, voice=bool(self.voice_on),
                 chat_id=(getattr(self, "_chat", None) or {}).get("id"), prior_failure=prior)
             # The next turn hears that this one failed (headless.failure_note).

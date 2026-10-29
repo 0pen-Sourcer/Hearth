@@ -365,7 +365,9 @@ class Hub:
         with self._lock:
             run["question"], run["answer"] = ev, None
             run["tap"] = needs_a_tap(name, args)
-        question = f"Before I go on: may I {_what(name, args)}?"
+        # The step itself, as a question: "Run `npm test`?", "Send this to your phone: "..."?"
+        what = _what(name, args)
+        question = what[:1].upper() + what[1:] + "?"
         try:
             from .auto_review import why
             because = why(name, args)            # the reviewer's or the floor's reason, as the window says it
@@ -382,10 +384,20 @@ class Hub:
             wait_s = ask_wait(ASK_TIMEOUT_S)     # long enough to be called about it and answer in the call
         except Exception:
             wait_s = ASK_TIMEOUT_S
-        ev.wait(wait_s)
+        waited = run.get("waited")
+        if waited is not None:
+            with waited.on_person():            # the time on their OK isn't part of the turn's duration
+                ev.wait(wait_s)
+        else:
+            ev.wait(wait_s)
         with self._lock:
             run["question"] = None
             ok = bool(run.get("answer"))
+        # Kept with the turn's steps, so a chat opened again shows what was allowed, where.
+        kept = run.get("kept")
+        if isinstance(kept, list):
+            kept.append({"kind": "ask", "text": question, "answer": ok, "at": int(time.time() * 1000),
+                         "pos": (run.get("so_far") or {}).get("n", 0)})
         return "allow" if ok else "deny"
 
     def _turn(self, chat: str, text: str, reply_to: Any, run: Dict[str, Any], cid: str = "") -> None:
@@ -427,6 +439,9 @@ class Hub:
         # empty in the window and all sat above the reply.
         steps_kept: List[Dict[str, Any]] = []
         so_far = {"n": 0}                   # letters of the reply written so far, for a step's place in it
+        run["kept"], run["so_far"] = steps_kept, so_far
+        from .waited import Waited
+        run["waited"] = Waited()            # the time on their OK isn't part of the turn's duration
         status = {"id": None, "last": 0.0}
         err = {"cat": None, "msg": None}
         try:
@@ -441,6 +456,7 @@ class Hub:
         context: List[Any] = []
 
         def emit(kind, **kw):
+            kw = run["waited"].fix(kind, kw)
             try:                                   # the window shows a phone's reply as it is written
                 from . import live_bus
                 live_bus.publish(live_bus.turn_event(cid, self.a.name, (_TURN.ctx or {}).get("t", ""), kind, kw))
@@ -512,7 +528,7 @@ class Hub:
                                    "ms": 0, "pos": so_far["n"], "_t0": time.time()})
             if kind == "tool_call" and kw.get("name"):
                 tools_used.append((kw["name"], kw.get("args")))
-                if steps:
+                if steps and kw["name"] not in QUIET_STEPS:
                     words = tool_words(kw["name"], kw.get("args"))
                     try:
                         if getattr(self.a, "step_detail", False):
@@ -536,9 +552,13 @@ class Hub:
                     except Exception:
                         pass
 
+        steered: List[Dict[str, Any]] = []      # what they said while it ran, kept as their own messages
+
         def steer() -> List[str]:
             with self._lock:
-                said, run["steer"] = list(run["steer"]), []
+                said, run["steer"] = list(run.get("steer") or []), []
+            at = int(time.time() * 1000)
+            steered.extend({"role": "user", "content": s, "via": self.a.name, "at": at} for s in said)
             return said
 
         try:
@@ -590,6 +610,7 @@ class Hub:
             {"role": "user", "content": text, "via": self.a.name, "at": now,
              **({"displayContent": run.get("shown") or "", "attachments": attachments(run["files"])}
                 if run.get("files") else {})},
+            *steered,
             {"role": "assistant", "content": "" if failed else final, "via": self.a.name, "at": now,
              **({"events": events} if events else {}),
              **({"stats": stats} if stats else {}), **({"context": context} if context else {})}])
@@ -597,7 +618,21 @@ class Hub:
             name_chat(cid, text, final)
         with self._lock:
             self._busy.pop(run.get("key", chat), None)
+            late = list(run.get("steer") or [])   # said after the model last looked: the next turn, not lost
+            run["steer"] = []
         _TURN.ctx = None
+        if late:
+            nxt = {"steer": [], "question": None, "answer": None, "key": run.get("key", chat), "regen": False,
+                   "shown": "", "files": []}
+            with self._lock:
+                if run.get("key", chat) in self._busy:
+                    self._busy[run.get("key", chat)]["steer"].extend(late)
+                    return None
+                self._busy[run.get("key", chat)] = nxt
+            t = threading.Thread(target=self._turn, args=(chat, "\n".join(late), reply_to, nxt, cid), daemon=True,
+                                 name=f"{self.a.name}-turn")
+            self.threads.append(t)
+            t.start()
         return None
 
 
@@ -799,8 +834,12 @@ def _persona_name() -> str:
         from .persona import NAME
         return NAME
     except Exception:
-        return "JARVIS"
+        from . import default_agent_name
+        return default_agent_name()
 
+
+# The app's own bookkeeping, not a step of the work: not shown as one in an app.
+QUIET_STEPS = {"load_tools"}
 
 _PICTURE = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic")
 

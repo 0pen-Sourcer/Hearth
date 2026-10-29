@@ -122,6 +122,45 @@ try:
     from playwright.sync_api import sync_playwright
 except ImportError:
     sync_playwright = None
+# The terminal, started on its own, finds the window through what the window announced.
+saved_env = os.environ.pop("HEARTH_WINDOW_URL", None)
+live_bus.announce_window("http://127.0.0.1:59999/")
+check(f"a process the window didn't start finds it ({live_bus.window_url()})", live_bus.window_url() == "http://127.0.0.1:59999")
+if saved_env is not None:
+    os.environ["HEARTH_WINDOW_URL"] = saved_env
+
+# The phone shows a turn the terminal (or a chat app) runs, not only the window's.
+from hearth import relay_bridge as RB  # noqa: E402
+pushed = []
+
+
+class _Phone:
+    name, rooms = "relay", {"room1": object()}
+
+    def _push(self, chat, obj):
+        pushed.append(obj)
+
+    def live(self, chat, text):
+        pushed.append({"type": "live", "text": text})
+
+    def think(self, chat, text):
+        pushed.append({"type": "think", "text": text})
+
+    def _turn_done(self):
+        pass
+
+
+br = RB.Bridge.__new__(RB.Bridge)
+br.adapter, br._mirrored, br._said = _Phone(), {}, {}
+for ev in ({"type": "start", "text": "run the tests"}, {"type": "chunk", "text": "All 40 pass."},
+           {"type": "said", "text": "All 40 pass."}, {"type": "end"}):
+    br.on_window_event(dict({"kind": "turn", "chat": "term_chat", "from": "terminal", "turn": "k1"}, **ev))
+check(f"a terminal turn reaches the phone as it goes ({[p['type'] for p in pushed]})",
+      [p["type"] for p in pushed] == ["user", "live", "text"] and pushed[0]["via"] == "terminal")
+pushed.clear()
+br.on_window_event({"kind": "turn", "chat": "x", "from": "relay", "turn": "k2", "type": "start", "text": "mine"})
+check("but not the phone's own turns back to it", pushed == [])
+
 if sync_playwright:
     web._save_settings(dict(web._load_settings(), onboarded=True))
     chat_sync.post("relay_live", "From the phone", "relay", [{"role": "user", "content": "earlier", "at": 1},
@@ -166,6 +205,12 @@ if sync_playwright:
         pg.wait_for_timeout(500)
         kept = [m.get("content") for m in (chat_sync.load("relay_live") or {}).get("messages") or []]
         check(f"the window never saves the copy it showed live ({kept})", "what's on my desktop?" not in kept)
+        # A chat just started on the phone, which this window has never seen: shown as it goes.
+        for ev in ({"type": "start", "text": "plan my week"}, {"type": "chunk", "text": "Monday: gym."}):
+            say(**dict(ev, chat="relay_new", turn="p2"))
+        pg.wait_for_function("STATE.conversations.some(c => c.id === 'relay_new' && (c.messages || []).some(m => (m.content || '').includes('Monday: gym.')))", timeout=5000)
+        got = pg.evaluate("STATE.conversations.find(c => c.id === 'relay_new').title")
+        check(f"a turn in a chat started on the phone shows in the window as it goes, the chat listed ({got!r})", got == "plan my week")
         b.close()
 
 stop.append(1)

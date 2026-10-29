@@ -64,7 +64,8 @@ def _resolve_workspace() -> str:
                 return os.path.abspath(p)
     except OSError:
         pass
-    return os.path.join(os.path.expanduser("~"), "Jarvis")
+    from . import default_workspace
+    return default_workspace()
 
 
 def set_workspace_location(path: str) -> str:
@@ -6408,7 +6409,8 @@ def _whoami(p: Dict) -> str:
     try:
         from .persona import NAME as _persona_name
     except Exception:
-        _persona_name = "JARVIS"
+        from . import default_agent_name
+        _persona_name = default_agent_name()
     info = {
         "agent": _persona_name,
         "framework": "Inglen",
@@ -8571,10 +8573,12 @@ def _agent_sessions(p: Dict) -> str:
         text = str(p.get("message") or "").strip()
         if not text:
             return "Error: give the message to send."
-        said, errors = [], []
+        said, errors, notes = [], [], []
 
         def emit(kind, **f):
-            if kind == "text" and f.get("text"):
+            if kind == "note" and f.get("text"):
+                notes.append(str(f["text"]))
+            elif kind == "text" and f.get("text"):
                 said.append(str(f["text"]))
             elif kind == "error" and f.get("message"):
                 errors.append(str(f["message"]))
@@ -8586,6 +8590,8 @@ def _agent_sessions(p: Dict) -> str:
         name = S.label((S.parse_chat(cid) or ("", ""))[0])
         if errors and not said:
             return f"Error: {errors[-1]}"
+        if notes and not said:
+            return notes[-1]
         reply = "\n\n".join(said).strip() or "(it finished without a reply)"
         return (f"{name} answered (its words, not the person's; it can't approve anything here):\n{reply}"
                 + (f"\n\nIt also said: {errors[-1]}" if errors else "") + ("" if rc == 0 else f"\n(exit {rc})"))

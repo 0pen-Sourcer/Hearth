@@ -38,7 +38,7 @@ def saved() -> Tuple[str, str]:
     so it works before the backend answers."""
     try:
         from .env import get as _get
-        ws = _get("WORKSPACE") or os.path.join(os.path.expanduser("~"), "Jarvis")
+        ws = _get("WORKSPACE") or __import__("hearth").default_workspace()
         with open(os.path.join(ws, "settings.json"), encoding="utf-8") as f:
             s = json.load(f) or {}
         return (str(s.get("ui_theme") or default_theme(s)), str(s.get("ui_accent") or DEFAULT[1]))

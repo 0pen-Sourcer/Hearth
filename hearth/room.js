@@ -7,7 +7,7 @@ var ROOM_HOST = window.ROOM_HOST || {};
 const _ROOM_HOST_DEFAULTS = {
   // The art: the manifest, then each picture by its file name.
   assets: null,
-  name: () => 'JARVIS',
+  name: () => 'Inglen',
   // A small badge before a name for the brain someone runs on, as HTML.
   mini: () => '',
   // What JARVIS is doing in this view ('thinking…', 'calling read_file…', 'idle'),
@@ -499,7 +499,7 @@ function roomSync(list) {
     && Date.now() / 1000 - (a.updated || 0) > ROOM_STAY / 1000;
   const want = list.filter(a => ['working', 'done', 'failed', 'stopped'].includes(a.status)
     && !ROOM.gone.has(a.id) && !old(a)).slice(0, ROOM.desks.length * Math.max(1, ROOM.rooms.length));
-  want.push({ id: '__main', role: 'main', persona: 'main', name: ROOM_HOST.name() || 'JARVIS',
+  want.push({ id: '__main', role: 'main', persona: 'main', name: ROOM_HOST.name() || 'Inglen',
               status: 'working', runtime: ROOM_HOST.mainRuntime() });
   const ids = new Set(want.map(a => a.id));
   for (const [id, p] of ROOM.people) if (!ids.has(id) && !p.leaving) { p.leaving = true; p.path = roomRoute(p.pos, ROOM.spots.door); }

@@ -36,7 +36,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-WORKSPACE = Path(_env.get("WORKSPACE", Path.home() / "Jarvis"))
+WORKSPACE = Path(_env.get("WORKSPACE") or __import__("hearth").default_workspace())
 
 # Models can live on a different drive than the workspace, so a user whose C: is
 # full can keep GGUFs on D:/E:/X: without moving their chats + memory too.

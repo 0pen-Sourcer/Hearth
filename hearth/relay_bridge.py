@@ -158,6 +158,7 @@ def forget_phone(pid: str) -> Dict[str, Any]:
 LIVE_EVERY = 0.1
 THINK_EVERY = 0.25
 CALL_AWAY_S = 20                    # how long a call waits for a phone that dropped off
+DONE_SETTLE_S = 1.5                 # a reply's notification waits this long for a newer send in its turn
 PART = 150_000
 ICONS_WAIT_S = 8.0              # an icons answer waits this long; the rest go in "later"
 
@@ -224,6 +225,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                            "count": r["count"], "pinned": bool(r.get("pinned"))} for r in rows], "own": own_chat}
     if what == "chat":
         return chat_action(m)
+    if what == "memory":
+        return memory_view(m)
+    if what == "voice":
+        return voice_view(m)
     if what == "media":
         # One part of a file the PC carded: the phone fetches a file when it is opened.
         from . import relay_media
@@ -238,11 +243,19 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "undo":
         from . import undo as _undo
         return _undo.undo(str(m.get("id") or ""))
+    if what == "agent_subagents":
+        # The helpers a coding agent's session started (Codex's Subagents panel).
+        from . import agent_sessions
+        return {"chat": str(m.get("chat") or ""), "subagents": agent_sessions.subagents(str(m.get("chat") or ""))}
     if what == "agent_sessions":
         # The coding agents' own sessions on this PC, newest first.
         from . import agent_sessions
         from .brand_icons import key_for
-        return {"sessions": [dict(r, brand=key_for(r["agent"])) for r in agent_sessions.listing(int(m.get("limit") or 120))]}
+        rows = agent_sessions.listing(int(m.get("limit") or 120))
+        if m.get("query"):
+            # What they searched for, inside the conversations: the sessions that mention it and where.
+            return {"hits": agent_sessions.search(str(m["query"]), rows)}
+        return {"sessions": [dict(r, brand=key_for(r["agent"])) for r in rows]}
     if what == "open":
         from .term_render import tool_words
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
@@ -258,7 +271,12 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             events = [e for e in x.get("events") or [] if isinstance(e, dict)]
             steps = []
             for e in events:
-                if e.get("kind") != "tool":
+                if e.get("kind") == "ask" and role == "assistant":
+                    # A question the turn asked, answered: the folded line where it was asked.
+                    msgs.append({"role": "assistant", "ask": True, "text": str(e.get("text") or ""),
+                                 "answer": bool(e.get("answer")), "at": e.get("at") or x.get("at") or 0})
+                    continue
+                if e.get("kind") != "tool" or e.get("name") in cc.QUIET_STEPS:
                     continue
                 args = e.get("args") if isinstance(e.get("args"), dict) else {}
                 if e.get("name") == "web_search" and not args.get("query") and e.get("result"):
@@ -614,7 +632,77 @@ def ideas() -> Dict[str, Any]:
 # routes (its address is handed to this bridge when the window starts it), so a
 # switch from the phone is the same switch as one made in the window.
 WINDOW_URL = os.environ.get("HEARTH_WINDOW_URL", "").rstrip("/")
-_SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, False), "think_level": None}
+_SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, False), "think_level": None,
+             "gen_stats": (True, False)}
+
+
+def _front(raw: str) -> tuple:
+    """A memory file's front matter and body."""
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n?", raw or "", re.S)
+    fm: Dict[str, str] = {}
+    if m:
+        for line in m.group(1).splitlines():
+            k, _, v = line.partition(":")
+            if _ and k.strip():
+                fm[k.strip()] = v.strip()
+    return fm, (raw[m.end():] if m else raw or "").strip()
+
+
+def voice_view(m: Dict[str, Any]) -> Dict[str, Any]:
+    """The PC's voice (Settings, Voice, the one calls and Read aloud use), and the ones it has.
+    Picked from the phone, it is saved through the window, which applies it and tells the window."""
+    from . import voice as _voice
+    from .call import voices
+    pick = str(m.get("voice") or "")
+    if pick:
+        if pick not in _voice.list_voices():
+            return {"ok": False, "error": "That voice isn't on the PC"}
+        r = _window("POST", "/api/settings", {"voice_name": pick})
+        if r.get("ok") is False:
+            return r
+    settings = _window("GET", "/api/settings")
+    return {"voice": str(settings.get("voice_name") or _voice.current_voice()), "voices": voices()}
+
+
+def memory_view(m: Dict[str, Any]) -> Dict[str, Any]:
+    """The Memory tab, for the phone: what is saved (who saved it, from which chat) and
+    where chats stand ("Going on"), with forget and done, as the window has them."""
+    from . import chat_sync, memory, memory_cards
+    action = str(m.get("action") or "")
+    if action == "forget":                     # a saved fact
+        from .tools import execute_tool
+        out = str(execute_tool("memory_forget", {"title": str(m.get("name") or "")[:200]}) or "")
+        if out.lstrip().lower().startswith(("error", "no memory found")):
+            return {"ok": False, "error": out.split(":", 1)[-1].strip() if ":" in out else out}
+        return {"ok": True}
+    if action in ("done", "drop"):             # a "Going on" card
+        r = memory_cards.act("card", str(m.get("chat") or ""), "done" if action == "done" else "forget")
+        return {"ok": bool(r.get("ok")), **({"error": r.get("error")} if r.get("error") else {})}
+    facts = []
+    titles: Dict[str, str] = {}
+    mem_dir = memory.MEM_DIR
+    for fn in sorted(os.listdir(mem_dir)) if os.path.isdir(mem_dir) else []:
+        if not fn.endswith(".md") or fn == "MEMORY.md":
+            continue
+        try:
+            with open(os.path.join(mem_dir, fn), encoding="utf-8") as f:
+                fm, body = _front(f.read(20000))
+        except OSError:
+            continue
+        desc = fm.get("description", "")
+        text = body if body and body.rstrip(".") != desc.rstrip(".") else ""
+        src = fm.get("source_chat", "")
+        if src and src not in titles:
+            titles[src] = ((chat_sync.load(src) or {}).get("title") or "") if re.fullmatch(r"[\w-]{1,80}", src) else ""
+        facts.append({"name": fm.get("name") or fn[:-3], "text": desc or text[:300], "more": text[:1500] if desc else "",
+                      "type": fm.get("type", ""), "noticed": "auto-extracted" in fm.get("tags", ""),
+                      "updated": fm.get("updated", ""), "chat": src if titles.get(src) else "",
+                      "chat_title": titles.get(src, "")})
+    facts.sort(key=lambda x: x["updated"], reverse=True)
+    cards = [{"chat": c.get("chat") or "", "goal": c.get("goal") or "", "ago": c.get("ago") or "",
+              "title": c.get("title") or "", "left": (c.get("left") or [])[:3]}
+             for c in memory_cards.everything() if c.get("status") == "open"]
+    return {"facts": facts, "cards": cards}
 
 
 def _window(method: str, path: str, body: Optional[Dict[str, Any]] = None, timeout: float = 30) -> Dict[str, Any]:
@@ -740,7 +828,10 @@ def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
                            "size_gb": d.get("size_gb")} for d in disk if not (d.get("not_chat") or d.get("incomplete"))],
                 "loaded": [x.get("id") for x in models.get("models") or [] if x.get("state") == "loaded"],
                 "approval_mode": settings.get("approval_mode") or "ask",
-                "think_default": bool(settings.get("think_default")), "think_level": settings.get("think_level") or ""}
+                "think_default": bool(settings.get("think_default")), "think_level": settings.get("think_level") or "",
+                # The window's "stats under replies" (on unless turned off there); the phone shows them only when
+                # it was turned on on purpose, so it gets the setting as it is, unset included.
+                "gen_stats": settings.get("gen_stats")}
     if what == "agent_models":
         return _window("GET", "/api/brain/agent/models?id=" + re.sub(r"[^a-z0-9_-]", "", str(m.get("id") or "")))
     if what == "use":
@@ -776,7 +867,7 @@ class AgentWatch:
     last look, quiet for QUIET_S since, and ending on the agent's own words (a turn
     still running ends on a step, or on the person's message). Sessions that were
     already there when it started, and ones the phone is driving, are left alone."""
-    EVERY_S = 10
+    EVERY_S = 4             # a session open on the phone shows new steps within this
     QUIET_S = 20
 
     def __init__(self):
@@ -784,9 +875,10 @@ class AgentWatch:
         self.waiting: Dict[str, Dict[str, Any]] = {}  # written to, not quiet yet
         self.told: Dict[str, int] = {}
         self.moved: List[str] = []                    # sessions written to since the last look
+        self.quiet: List[str] = []                    # sessions that went quiet at this look
 
     def look(self, rows: List[Dict[str, Any]], now_ms: float, busy: set) -> List[Dict[str, Any]]:
-        self.moved = []
+        self.moved, self.quiet = [], []
         if self.seen is None:
             self.seen = {r["chat"]: r["at"] for r in rows}
             return []
@@ -805,6 +897,7 @@ class AgentWatch:
             if now_ms - r["at"] < self.QUIET_S * 1000:
                 continue
             del self.waiting[k]
+            self.quiet.append(k)
             if self.told.get(k) == r["at"]:
                 continue
             self.told[k] = r["at"]
@@ -822,18 +915,20 @@ class AgentWatch:
         if not last or last.get("role") != "assistant":
             return None
         parts = last.get("parts") or []
-        what = r.get("title") or r.get("project") or "a session"
-        # Named for the agent only ("Codex"), with what it said: these apps change how they
-        # stop and ask, and a title like "finished" would be wrong for a turn that asks.
-        who = r.get("label") or "An agent"
+        what = " ".join(str(r.get("title") or r.get("project") or "").split())
+        what = what[:40].rstrip() + ("..." if len(what) > 40 else "")
+        # Named for the agent ("Codex") and its session, with what it said last as the body: a
+        # lock screen shows one line of body, and that line is the news. A title like "finished"
+        # would be wrong for a turn that asks, and these apps change how they stop and ask.
+        who = (r.get("label") or "An agent") + (f" · {what}" if what else "")
         if not last.get("error") and parts and "text" not in parts[-1]:
             st = (parts[-1].get("steps") or [{}])[-1]
             if st.get("tool") in agent_sessions.QUESTION_TOOLS and not st.get("out"):
-                return {"kind": "ask", "title": who, "body": f"{what}: {st.get('cmd') or 'It has a question for you.'}",
+                return {"kind": "ask", "title": who, "body": st.get("cmd") or "It has a question for you.",
                         "c": r["chat"]}
             return None                            # it ended on a step: still at work, or waiting on a tool
         text = (parts[-1].get("text") if parts else "") or last.get("text") or ""
-        return {"kind": "done", "title": who, "body": f"{what}: {' '.join(text.split())[:200]}", "c": r["chat"]}
+        return {"kind": "done", "title": who, "body": " ".join(text.split())[:240], "c": r["chat"]}
 
 
 CALL_NOTE = ("This is a voice call from their phone: your reply is spoken aloud as you write it, so keep it "
@@ -860,6 +955,8 @@ class Relay(cc.Adapter):
         self.asks: Dict[str, str] = {}         # chat -> the id of the question waiting there
         self.asked: Dict[str, Dict[str, Any]] = {}  # question id -> when, where and what it asked
         self._told: List[str] = []             # turns whose finish a notification has said
+        self._done_later: Dict[str, threading.Timer] = {}   # turn -> its notification, waiting on a newer send
+        self._done_lock = threading.Lock()
         self.hub: Optional[cc.Hub] = None      # the hub answering here, for what a question needs
 
     def notify(self, chat: str, obj: Dict[str, Any], urgent: bool = False) -> None:
@@ -878,11 +975,28 @@ class Relay(cc.Adapter):
             pass
 
     def finished(self, chat: str, title: str, text: str, c: str, t: str) -> None:
-        """One notification per finished reply."""
+        """One notification per turn, saying its newest words: a turn that sends more than
+        once (a file's note, then the reply) is told once, a moment after its last send.
+        High priority, so a phone asleep (Android's Doze) shows it now, not when woken."""
         if not t or t in self._told:
             return
-        self._told = (self._told + [t])[-200:]
-        self.notify(chat, {"kind": "done", "title": title, "body": " ".join(text.split())[:240], "c": c})
+        body = " ".join(text.split())[:240]
+        with self._done_lock:
+            old = self._done_later.pop(t, None)
+            if old is not None:
+                old.cancel()
+
+            def go():
+                with self._done_lock:
+                    if self._done_later.get(t) is not timer:
+                        return
+                    self._done_later.pop(t, None)
+                    self._told = (self._told + [t])[-200:]
+                self.notify(chat, {"kind": "done", "title": title, "body": body, "c": c}, urgent=True)
+            timer = threading.Timer(DONE_SETTLE_S, go)
+            timer.daemon = True
+            self._done_later[t] = timer
+        timer.start()
 
     def _push(self, chat: str, obj: Dict[str, Any]) -> Optional[str]:
         room = self.rooms.get(str(chat))
@@ -1067,6 +1181,7 @@ class Room:
         self.lookups: set = set()
         self.seen_boxes: set = set()          # answers from notifications already taken
         self.call = None                      # a voice call from the phone, while one is on
+        self.saying = None                    # a reply read aloud to the phone in the PC's voice
         self.call_gone_told = False
         self.call_heard = 0.0                 # when the phone last said anything about the call
 
@@ -1166,6 +1281,9 @@ class Room:
             if m and str(m.get("type") or "").startswith("call."):
                 self.on_call(m)
                 return
+            if m and str(m.get("type") or "").startswith("say."):
+                self.on_say(m)
+                return
             if m and m.get("type") == "req":
                 # Lookups run side by side, so a slow one (icons from the web)
                 # never holds up a switch the person is waiting on.
@@ -1174,6 +1292,45 @@ class Room:
                 task.add_done_callback(self.lookups.discard)
             elif m:
                 await asyncio.to_thread(self.bridge.on_message, self, m)
+
+    def on_say(self, m: Dict[str, Any]) -> None:
+        """Read aloud on the phone, in the PC's own voice (Settings > Voice, as the call):
+        say.start {text, ref} streams the voice as say.down frames, then say.end;
+        say.stop cuts it. One at a time per phone."""
+        kind, ref = m.get("type"), str(m.get("ref") or "")
+        old, self.saying = self.saying, None
+        if old is not None:
+            old.stop()
+        if kind != "say.start" or not str(m.get("text") or "").strip():
+            return
+        from . import voice as _voice
+        adapter, chat = self.bridge.adapter, self.chat
+
+        def send(obj):
+            prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+            try:
+                adapter._push(chat, dict(obj, ref=ref))
+            finally:
+                cc._TURN.ctx = prev
+
+        class Sink:
+            def __call__(self, samples, sr):
+                send({"type": "say.down", "sr": int(sr), "data": base64.b64encode(samples.astype("<i2").tobytes()).decode()})
+
+            def flush(self):
+                send({"type": "say.flush"})
+
+        speaker = _voice.Speaker(sink=Sink(), first_chunk=40)
+        self.saying = speaker
+
+        def run():
+            said = speaker.speak(str(m["text"]), blocking=True)
+            if said == "no_voice":
+                send({"type": "say.error", "detail": "Voice isn't set up on your PC"})
+            send({"type": "say.end"})
+            if self.saying is speaker:
+                self.saying = None
+        threading.Thread(target=run, daemon=True, name="relay-say").start()
 
     def on_call(self, m: Dict[str, Any]) -> None:
         """A call from the phone: its audio frames, its start and its end."""
@@ -1406,7 +1563,8 @@ class Bridge:
                 self.adapter.asks.pop(cid, None)
                 q.set()
             else:
-                push({"type": "text", "text": "It's still working on your last message; send this once it's done."})
+                push({"type": "text", "note": True,
+                      "text": "It's still working on your last message. Send this once it's done."})
             return
         if not text:
             return
@@ -1429,6 +1587,9 @@ class Bridge:
                 if now - sent["think"] >= THINK_EVERY:
                     sent["think"] = now
                     push({"type": "think", "text": "".join(thought)[-4000:]})
+            elif kind == "note":
+                # Inglen saying what it did ("Sent to Codex on your PC"), not the agent: drawn muted.
+                push({"type": "text", "text": f.get("text") or "", "note": True})
             elif kind == "text":
                 push({"type": "text", "text": f.get("text") or ""})
                 self.adapter.finished(room.chat, name, f.get("text") or "", cid, turn)
@@ -1606,19 +1767,20 @@ class Bridge:
                         self.ring(ev)
                 except Exception:
                     pass
-            # A session open on a phone shows what its agent wrote since, without reopening it.
-            for c in watch.moved:
+            # A session open on a phone shows what its agent wrote since, without reopening it,
+            # and that its agent is at work (the phone shows it working until it goes quiet).
+            for c, busy_now in [(c, True) for c in watch.moved] + [(c, False) for c in watch.quiet]:
                 if c in self.agent_runs:
                     continue
                 prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
                 try:
                     for chat in list(self.adapter.rooms):
-                        self.adapter._push(chat, {"type": "changed", "what": "chat", "c": c})
+                        self.adapter._push(chat, {"type": "changed", "what": "chat", "c": c, "working": busy_now})
                 finally:
                     cc._TURN.ctx = prev
 
     # Settings a phone shows: a change on the PC redraws its brain chip and modes at once.
-    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|preferred_model|ui_theme|ui_accent|theme)")
+    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|gen_stats|preferred_model|ui_theme|ui_accent|theme)")
 
     def follow_window(self) -> None:
         """Pass what changes on the PC (live_bus) to every paired phone as it happens:
@@ -1645,7 +1807,8 @@ class Bridge:
             out = {"type": "changed", "what": "brain"}
         elif kind == "chat" and ev.get("chat"):
             out = {"type": "changed", "what": "chat", "c": ev["chat"], **({"gone": True} if ev.get("gone") else {})}
-        elif kind == "turn" and ev.get("from") == "window" and ev.get("chat"):
+        elif kind == "turn" and ev.get("from") not in (None, "", self.adapter.name) and ev.get("chat"):
+            # A turn the window, the terminal or a chat app is running, shown on the phones as it goes.
             self._mirror(phones, ev)
             return
         if out:
@@ -1665,7 +1828,7 @@ class Bridge:
             if kind == "start":
                 self._mirrored[t] = ""
                 for chat in phones:
-                    self.adapter._push(chat, {"type": "user", "text": ev.get("text") or "", "via": "window"})
+                    self.adapter._push(chat, {"type": "user", "text": ev.get("text") or "", "via": ev.get("from") or "window"})
             elif kind == "chunk":
                 self._mirrored[t] = text + str(ev.get("text") or "")
                 for chat in phones:

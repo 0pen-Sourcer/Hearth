@@ -72,7 +72,7 @@ def _brain_from_settings() -> dict:
     localhost:1234 and failing, because it read the environment and nothing
     else."""
     try:
-        base = _env.get("WORKSPACE") or os.path.expanduser("~/Jarvis")
+        base = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
         with open(os.path.join(base, "settings.json"), encoding="utf-8") as f:
             s = json.load(f) or {}
     except Exception:

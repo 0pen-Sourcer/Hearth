@@ -59,11 +59,41 @@ _OUT: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=1000)
 _SENDER: Optional[threading.Thread] = None
 
 
+def _window_file() -> str:
+    from .tools import WORKSPACE
+    return os.path.join(WORKSPACE, "window.json")
+
+
+def announce_window(url: str) -> None:
+    """The window says where it answers, for a terminal started on its own (which has
+    no HEARTH_WINDOW_URL) to send its turns to and follow the others'."""
+    try:
+        path = _window_file()
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"url": url.rstrip("/"), "pid": os.getpid()}, f)
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
+def window_url() -> str:
+    """Where the window answers: given by the window to the processes it starts, or
+    what it announced in the workspace. '' when there is no window."""
+    url = (os.environ.get("HEARTH_WINDOW_URL") or "").rstrip("/")
+    if url:
+        return url
+    try:
+        with open(_window_file(), encoding="utf-8") as f:
+            return str((json.load(f) or {}).get("url") or "").rstrip("/")
+    except (OSError, ValueError):
+        return ""
+
+
 def _send_loop() -> None:
     import urllib.request
     while True:
         ev = _OUT.get()
-        url = (os.environ.get("HEARTH_WINDOW_URL") or "").rstrip("/")
+        url = window_url()
         if not url:
             continue
         try:
@@ -82,7 +112,7 @@ def publish(ev: Dict[str, Any]) -> None:
         if IN_WINDOW:
             _local(ev)
             return
-        if not os.environ.get("HEARTH_WINDOW_URL"):
+        if not window_url():
             return
         global _SENDER
         if _SENDER is None or not _SENDER.is_alive():

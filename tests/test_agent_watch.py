@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -55,24 +56,50 @@ ends["a"] = done
 w.look([row("a", t0 + 95_000)], t0 + 96_000, set())
 got = w.look([row("a", t0 + 95_000)], t0 + 120_000, set())
 check(f"written, then quiet, ending on its words: Codex finished, opening that session {got}",
-      len(got) == 1 and got[0]["title"] == "Codex" and got[0]["c"] == "agent_codex_a"
-      and got[0]["body"].startswith("Menu flashes: Fixed the menu."))
+      len(got) == 1 and got[0]["title"] == "Codex · Menu flashes" and got[0]["c"] == "agent_codex_a"
+      and got[0]["body"].startswith("Fixed the menu."))
 check("and only once", w.look([row("a", t0 + 95_000)], t0 + 140_000, set()) == [])
 ends["b"] = err
 w.look([row("a", t0 + 95_000), row("b", t0 + 150_000, "Inventory")], t0 + 151_000, set())
 got = w.look([row("a", t0 + 95_000), row("b", t0 + 150_000, "Inventory")], t0 + 175_000, set())
 check(f"a new session that stopped on an error says what it said {got}",
-      len(got) == 1 and got[0]["title"] == "Codex" and "usage limit" in got[0]["body"])
+      len(got) == 1 and got[0]["title"] == "Codex · Inventory" and "usage limit" in got[0]["body"])
 ends["d"] = [{"role": "assistant", "text": "", "parts": [{"steps": [{"w": "Asked you a question", "tool": "request_user_input",
                                                                      "cmd": "Keep the parcel sealed?"}]}]}]
 w.look([row("d", t0 + 300_000, "Courier")], t0 + 301_000, set())
 got = w.look([row("d", t0 + 300_000, "Courier")], t0 + 330_000, set())
 check(f"a question put to the person is said, with its words {got}",
-      len(got) == 1 and got[0]["kind"] == "ask" and got[0]["body"] == "Courier: Keep the parcel sealed?")
+      len(got) == 1 and got[0]["kind"] == "ask" and got[0]["body"] == "Keep the parcel sealed?")
+# Owner, 2026-10-29: notifications "show the chat's FIRST message instead of the newest reply".
+# A lock screen shows one line of body: that line is what the agent said last, the session is in
+# the title, cut short (an untitled session's title is its first message).
+long_first = "please look at why the menu flashes on every page load and also check the footer links"
+ends["e"] = done
+w.look([row("e", t0 + 400_000, long_first)], t0 + 401_000, set())
+got = w.look([row("e", t0 + 400_000, long_first)], t0 + 430_000, set())
+check(f"the newest words are the body; the session's first message never leads it {got}",
+      len(got) == 1 and got[0]["body"].startswith("Fixed the menu.") and long_first not in got[0]["body"]
+      and len(got[0]["title"]) <= 60)
 ends["c"] = done
 w.look([row("c", t0 + 180_000)], t0 + 181_000, {"agent_codex_c"})
 check("one the phone is driving is left to its own notification",
       w.look([row("c", t0 + 180_000)], t0 + 210_000, {"agent_codex_c"}) == [])
+
+# Inglen's own turn on the phone: one notification, with its newest words, sent as high priority
+# (a normal one waits until an Android phone asleep wakes up).
+import asyncio  # noqa: E402
+RB.DONE_SETTLE_S = 0.2
+ad = RB.Relay(asyncio.new_event_loop())
+told = []
+ad.notify = lambda chat, obj, urgent=False: told.append((obj, urgent))
+ad.finished("p1", "Inglen", "Here's the file you asked for.", "c1", "t1")
+ad.finished("p1", "Inglen", "Done: the report is on your desktop.", "c1", "t1")
+time.sleep(0.6)
+check(f"a turn that sent twice is told once, with its newest words, as high priority {told}",
+      len(told) == 1 and told[0][0]["body"].startswith("Done: the report") and told[0][1] is True)
+ad.finished("p1", "Inglen", "late", "c1", "t1")
+time.sleep(0.4)
+check("and not again for the same turn", len(told) == 1)
 
 print("\n" + ("all agent watch checks passed" if not FAILS else f"{len(FAILS)} failed"))
 sys.exit(1 if FAILS else 0)

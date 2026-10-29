@@ -109,13 +109,21 @@ check(f"and sends the file into this same conversation ({seen.get('sent')!r})",
 check("with its message", any(o["kind"] == "text" and o["text"] == "Here it is." for o in app.out))
 q = [o["text"] for o in app.out if o["kind"] == "ask"]
 check(f"the question says the step in words, not the tool's name {q}",
-      q and q[0].startswith("Before I go on: may I move shot.png to D:/x?") and "move_path" not in q[0])
+      q and q[0].startswith("Move shot.png to D:/x?") and "move_path" not in q[0])
 from hearth import chat_sync  # noqa: E402
 saved = (chat_sync.load(cc.chat_id_for(app.name, "me")) or {}).get("messages") or []
 ev = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "tool"] if saved else []
 check(f"the window gets each step with what came back, how long and where it was in the reply ({ev[:1]})",
       ev and ev[0]["name"] == "take_screenshot" and "Saved the screenshot" in ev[0]["result"]
       and ev[0]["ms"] >= 40 and ev[0]["pos"] == len("Taking one now. ") and not any(k.startswith("_") for k in ev[0]))
+asked = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "ask"] if saved else []
+check(f"a question the turn asked is kept with its steps, with its answer ({asked})",
+      len(asked) == 1 and asked[0]["text"].startswith("Move shot.png") and asked[0]["answer"] is False)
+opened = RB.answer({"what": "open", "chat": cc.chat_id_for(app.name, "me")})["messages"]
+folds = [m for m in opened if m.get("ask")]
+check(f"and a chat opened again on the phone shows it answered, where it was asked ({folds})",
+      len(folds) == 1 and folds[0]["answer"] is False and "Move shot.png" in folds[0]["text"]
+      and opened.index(folds[0]) == len(opened) - 2)
 # A file sent from the phone: their message is what they wrote, with the file as an attachment.
 seen.clear()
 hub.receive("me", "me", "See", files=[SHOT])
@@ -145,6 +153,39 @@ src = open(os.path.join(ROOT, "hearth", "tools.py"), encoding="utf-8").read()
 check("a screenshot's result doesn't shout orders", "TELL THEM WHAT'S" not in src and "RIGHT NOW in" not in src)
 hsrc = open(os.path.join(ROOT, "hearth", "headless.py"), encoding="utf-8").read()
 check("and a next-step note is never written as if the person said it", "Don't narrate, don't describe, don't ask. Act." not in hsrc)
+
+# Said while a turn runs (a call, mostly): kept as their own words, and one said too late to
+# be read is the next turn, not lost. Owner, 2026-10-29: "his words don't appear" after a call.
+said_in, gate = [], {"go": False}
+
+
+async def listening(prompt, *, emit, drain_steer=None, **k):
+    said_in.append(prompt)
+    end = time.time() + 5
+    while not gate["go"] and time.time() < end:
+        await asyncio.sleep(0.02)
+    heard = drain_steer() if drain_steer else []
+    emit("assistant", content="Heard: " + ", ".join(heard) if heard else "Okay.")
+    if prompt == "start the call":
+        gate["late"] = hub.receive("talk", "me", "and one more thing")
+    return 0
+
+headless.run_once = listening
+hub.receive("talk", "me", "start the call")
+time.sleep(0.2)
+check("a word said while it runs joins the turn", hub.receive("talk", "me", "also check the logs") == "joined")
+gate["go"] = True
+end = time.time() + 10
+while (hub._busy or len(said_in) < 2) and time.time() < end:
+    time.sleep(0.05)
+for t in list(hub.threads):
+    t.join(3)
+saved = (chat_sync.load(cc.chat_id_for(app.name, "talk")) or {}).get("messages") or []
+words = [m["content"] for m in saved if m.get("role") == "user"]
+check(f"what they said during the turn is kept as their own message ({words})",
+      words[:2] == ["start the call", "also check the logs"])
+check(f"one said too late for the model is the next turn, not lost ({gate.get('late')}, {said_in})",
+      gate.get("late") == "joined" and said_in[-1] == "and one more thing" and "and one more thing" in words)
 
 b = RB.Bridge.__new__(RB.Bridge)
 b.hub, b.agent_runs = hub, {"as_codex_x": {"t": "agent1"}}
